@@ -266,6 +266,40 @@ pub enum ShardConfigError {
         artifact_stem: String,
     },
 
+    /// EC-022 (PR #818 cycle-4 fresh-context review finding F-1): a
+    /// `[[shard]]` entry declares an `artifact_path` that normalizes to ZERO
+    /// non-`CurDir` path components — e.g. `"."`, `"./"`, or an empty
+    /// string. [`path_falls_under_or_equals`]'s own `CurDir`-filtering (the
+    /// B-1/S-2 fix) strips `Component::CurDir` from both the target's and
+    /// the registered path's component vectors before comparing; when the
+    /// REGISTERED side filters down to an EMPTY vector, its suffix-match leg
+    /// (`target[target.len() - 0..] == []`) is vacuously `true` for EVERY
+    /// `target_path`, regardless of directory containment. Combined with
+    /// [`find_matching_entry`]'s stem-equality filter, this reintroduces
+    /// exactly the stem-only, unbounded-blast-radius match B-1's
+    /// path-containment leg was built to prevent — any file anywhere in the
+    /// repository that merely shares this entry's `artifact_stem` would
+    /// silently resolve to this entry. Fail-loud, checked BEFORE any
+    /// cap-formula arithmetic (this is a structural config-shape defect, not
+    /// a numeric one) — an `artifact_path` must resolve to at least one real
+    /// path component; `"."`/`"./"`/empty is a config-authoring mistake, not
+    /// a legal "match everything" wildcard.
+    #[error(
+        "[[shard]] entry for artifact_stem = \"{artifact_stem}\" declares artifact_path = \
+         \"{artifact_path}\", which normalizes to ZERO non-CurDir path components (BC-1.18.005 \
+         EC-022). Fail-loud: an artifact_path of \".\", \"./\", or empty would make \
+         path_falls_under_or_equals's suffix-match leg vacuously true for EVERY target path \
+         sharing this entry's artifact_stem, reintroducing the exact stem-only unbounded-blast- \
+         radius match the B-1 path-containment fix was built to prevent. artifact_path must name \
+         at least one real path component (e.g. \".factory/STATE.md\" or \".factory\")."
+    )]
+    EmptyArtifactPath {
+        /// The offending entry's `artifact_stem`, so the operator can locate it.
+        artifact_stem: String,
+        /// The offending entry's own (degenerate) `artifact_path` value.
+        artifact_path: String,
+    },
+
     /// EC-011: `low_water_mark >= N` (the `== N` boundary included) or negative.
     /// `low_water_mark == N - 1` is explicitly NOT in this error's scope — see
     /// EC-012 / [`validate_low_water_mark`]'s amortization-advisory path.
@@ -518,37 +552,45 @@ impl ShardRegistry {
 /// passed):
 /// 1. `shape` MUST be present (fail-loud [`ShardConfigError::MissingShape`]
 ///    — EC-009).
-/// 2. `worst_case_fuel_per_byte` MUST be finite and strictly positive
+/// 2. `artifact_path` MUST normalize to at least one non-`CurDir` path
+///    component (fail-loud [`ShardConfigError::EmptyArtifactPath`] — EC-022,
+///    PR #818 cycle-4 review finding F-1) — checked BEFORE any cap-formula
+///    arithmetic, since this is a structural config-shape defect
+///    independent of the numeric checks below: an `artifact_path` of `"."`,
+///    `"./"`, or empty would make [`path_falls_under_or_equals`]'s
+///    suffix-match leg vacuously true for every target sharing this entry's
+///    `artifact_stem`.
+/// 3. `worst_case_fuel_per_byte` MUST be finite and strictly positive
 ///    (fail-loud [`ShardConfigError::InvalidWorstCaseFuelPerByte`] —
 ///    EC-015's "divisor-door" closure) — checked BEFORE
 ///    `compute_shard_cap_bytes` is ever called for this entry, since a
 ///    `0.0`/non-finite divisor would otherwise saturate the computed
-///    ceiling toward `u64::MAX`, defeating check 4 below for ANY declared
+///    ceiling toward `u64::MAX`, defeating check 5 below for ANY declared
 ///    `shard_cap_bytes`.
-/// 3. The RAW `practical_fuel_ceiling as f64 / worst_case_fuel_per_byte`
+/// 4. The RAW `practical_fuel_ceiling as f64 / worst_case_fuel_per_byte`
 ///    division result MUST be finite and `< u64::MAX as f64` (fail-loud
 ///    [`ShardConfigError::FormulaCeilingSaturated`] — EC-017's residual
 ///    divisor-door closure) — a legal-but-tiny-positive divisor can still
-///    saturate the computed ceiling even though it passes check 2.
-/// 4. `shard_cap_bytes` MUST NOT exceed
+///    saturate the computed ceiling even though it passes check 3.
+/// 5. `shard_cap_bytes` MUST NOT exceed
 ///    `compute_shard_cap_bytes(entry.cap_formula_inputs())` (fail-loud
 ///    [`ShardConfigError::CapExceedsFormulaCeiling`] — Postcondition 9 /
 ///    EC-013; the `==` boundary is inclusive, mirroring EC-002's precedent
 ///    for the per-write trigger) — applies to EVERY `shape`, not
 ///    `"flat"`-only.
-/// 5. For a `"frontmatter-changelog-array"`-shaped entry ONLY: `n` MUST be
+/// 6. For a `"frontmatter-changelog-array"`-shaped entry ONLY: `n` MUST be
 ///    present (fail-loud [`ShardConfigError::MissingN`] — EC-016), checked
 ///    BEFORE `low_water_mark` is examined, so an entry missing `n` AND
 ///    declaring an out-of-range `low_water_mark` is never silently accepted
 ///    merely because `n` was absent (see EC-016's ordering vector).
-/// 6. For a `"frontmatter-changelog-array"`-shaped entry with a PRESENT `n`
+/// 7. For a `"frontmatter-changelog-array"`-shaped entry with a PRESENT `n`
 ///    ONLY: `n` MUST be `>= 1` (fail-loud
 ///    [`ShardConfigError::ZeroItemCountThreshold`] — PR #818 fix-burst
-///    finding m2), checked immediately after check 5 and BEFORE
+///    finding m2), checked immediately after check 6 and BEFORE
 ///    `low_water_mark` is examined — `n = 0` makes the item-count trigger
 ///    fire unconditionally AND makes any explicit `low_water_mark` value
 ///    unsatisfiable.
-/// 7. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
+/// 8. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
 ///    `low_water_mark` ONLY: `0 <= low_water_mark < N` (fail-loud
 ///    [`ShardConfigError::InvalidLowWaterMark`] — EC-011; `N-1` is a VALID
 ///    boundary value, never routed to this error — see EC-012), and a
@@ -564,6 +606,29 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
     let shape = entry.shape.ok_or_else(|| ShardConfigError::MissingShape {
         artifact_stem: entry.artifact_stem.clone(),
     })?;
+
+    // EC-022 (PR #818 cycle-4 review finding F-1): `artifact_path` MUST
+    // normalize to at least one non-CurDir path component. Checked BEFORE
+    // any cap-formula arithmetic — this is a structural config-shape defect,
+    // not a numeric one. `path_falls_under_or_equals` filters `CurDir` out
+    // of both the target's and the registered path's component vectors
+    // (the B-1/S-2 fix); if the REGISTERED side normalizes to an empty
+    // vector, its suffix-match leg (`target[target.len() - 0..] ==
+    // []`) is vacuously true for every target_path, regardless of
+    // directory containment. Combined with find_matching_entry's
+    // stem-equality filter, this would let this entry silently match ANY
+    // file anywhere that merely shares its artifact_stem, reintroducing the
+    // exact stem-only, unbounded-blast-radius match B-1's path-containment
+    // leg was built to prevent.
+    if !Path::new(&entry.artifact_path)
+        .components()
+        .any(|c| c != std::path::Component::CurDir)
+    {
+        return Err(ShardConfigError::EmptyArtifactPath {
+            artifact_stem: entry.artifact_stem.clone(),
+            artifact_path: entry.artifact_path.clone(),
+        });
+    }
 
     // EC-015 (Postcondition 9's "divisor-door" closure): validate BEFORE
     // compute_shard_cap_bytes is called for this entry — a 0.0 divisor
@@ -2006,6 +2071,149 @@ mod tests {
              artifact_path silently matching nothing would leave the artifact completely \
              unguarded"
         );
+    }
+
+    /// PR #818 cycle-4 review finding F-1: demonstrates the RAW mechanism the
+    /// EC-022 validation guards against, directly at the
+    /// `path_falls_under_or_equals` layer (below `validate_entry`). Once
+    /// `CurDir` is filtered out of a `"."`-registered path, its component
+    /// vector is empty, and the suffix-match leg
+    /// (`target[target.len()-0..] == []`) is vacuously true for ANY
+    /// target — this is exactly why EC-022 must reject such an
+    /// `artifact_path` at entry-match time rather than let it reach this
+    /// function at all.
+    #[test]
+    fn test_BC_1_18_005_F1_path_falls_under_or_equals_dot_artifact_path_is_vacuously_true() {
+        let registered = Path::new(".");
+        let unrelated_target = Path::new("/completely/unrelated/path/some-other-file.md");
+
+        assert!(
+            path_falls_under_or_equals(unrelated_target, registered),
+            "F-1: this assertion documents the vacuous-match MECHANISM itself — an empty \
+             (post-CurDir-filter) registered component vector suffix-matches EVERY target. \
+             This is precisely the raw behavior EC-022's validate_entry check exists to make \
+             unreachable via config (see the sibling F-1 validate_entry/shard_cap_gate_check \
+             tests below), never a claim that this is safe or desired on its own."
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_validate_entry_rejects_dot_artifact_path() {
+        // PR #818 cycle-4 review finding F-1: artifact_path = "." normalizes
+        // to zero non-CurDir components, which would make
+        // path_falls_under_or_equals vacuously match every target sharing
+        // this entry's stem. validate_entry MUST reject this at
+        // entry-match time (EC-022), never let it reach the match logic.
+        let mut entry = flat_entry("decision-log", 40_000);
+        entry.artifact_path = ".".to_string();
+
+        let err = validate_entry(&entry)
+            .expect_err("F-1: an artifact_path of \".\" MUST be rejected (EC-022)");
+        match err {
+            ShardConfigError::EmptyArtifactPath {
+                artifact_stem,
+                artifact_path,
+            } => {
+                assert_eq!(artifact_stem, "decision-log");
+                assert_eq!(artifact_path, ".");
+            }
+            other => panic!("expected EmptyArtifactPath, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_validate_entry_rejects_dot_slash_artifact_path() {
+        // F-1: "./" is the same degenerate case as "." — a single CurDir
+        // component and nothing else.
+        let mut entry = flat_entry("lessons", 40_000);
+        entry.artifact_path = "./".to_string();
+
+        let err = validate_entry(&entry)
+            .expect_err("F-1: an artifact_path of \"./\" MUST be rejected (EC-022)");
+        assert!(
+            matches!(err, ShardConfigError::EmptyArtifactPath { .. }),
+            "expected EmptyArtifactPath, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_validate_entry_rejects_empty_artifact_path() {
+        // F-1: a literally empty string also normalizes to zero components.
+        let mut entry = flat_entry("burst-log", 40_000);
+        entry.artifact_path = String::new();
+
+        let err = validate_entry(&entry)
+            .expect_err("F-1: an empty-string artifact_path MUST be rejected (EC-022)");
+        assert!(
+            matches!(err, ShardConfigError::EmptyArtifactPath { .. }),
+            "expected EmptyArtifactPath, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_validate_entry_accepts_normal_nonempty_artifact_path() {
+        // Non-regression: a normal, non-empty artifact_path (the common
+        // case exercised throughout this test module via flat_entry's own
+        // default `"{stem}.md"`) MUST still validate successfully — EC-022
+        // must not reject legitimate configs.
+        let entry = flat_entry("decision-log", 40_000);
+        validate_entry(&entry)
+            .expect("a normal artifact_path like \"decision-log.md\" MUST pass validate_entry");
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_validate_entry_accepts_curdir_prefixed_artifact_path() {
+        // Non-regression against the B-1/S-2 CurDir-normalization fix: a
+        // "./"-prefixed but otherwise non-empty artifact_path (e.g.
+        // "./.factory/decision-log.md") still has a non-empty component
+        // vector after CurDir filtering, so it MUST still pass — EC-022
+        // only rejects an artifact_path that filters down to NOTHING.
+        let mut entry = flat_entry("decision-log", 40_000);
+        entry.artifact_path = "./.factory/decision-log.md".to_string();
+        validate_entry(&entry).expect(
+            "a \"./\"-prefixed non-empty artifact_path MUST still pass validate_entry \
+             (S-2 CurDir normalization is orthogonal to EC-022's emptiness check)",
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_F1_shard_cap_gate_check_surfaces_empty_artifact_path_as_error() {
+        // Full-stack: a "." artifact_path MUST surface as HookResult::Error
+        // through the public shard_cap_gate_check entry point — exactly
+        // like any other match-time config defect (EC-009/EC-011/etc.) —
+        // never silently applying this entry's cap to an unrelated file
+        // that merely shares its artifact_stem, and never a bare Continue
+        // that would leave the misconfiguration undiagnosed.
+        let mut entry = flat_entry("decision-log", 100);
+        entry.artifact_path = ".".to_string();
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        // An entirely unrelated file that merely shares the registered
+        // artifact_stem — under the pre-fix vacuous-match bug this would
+        // have silently resolved to the "." entry and applied its cap.
+        let target = Path::new("/some/totally/unrelated/fixtures/decision-log.md");
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            target,
+            &serde_json::json!({"content": "x".repeat(10)}),
+        );
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("EC-022") && message.contains("decision-log"),
+                    "F-1: the surfaced HookResult::Error MUST name EC-022 and the offending \
+                     artifact_stem, got: {message}"
+                );
+            }
+            other => panic!(
+                "F-1: expected HookResult::Error for a \".\"-artifact_path entry, got {other:?} \
+                 — a bare Continue would mean the vacuous-match bug is still reachable, and a \
+                 Block would be this module's own scope violation"
+            ),
+        }
     }
 
     #[test]
