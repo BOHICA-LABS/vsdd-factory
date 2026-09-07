@@ -1134,11 +1134,31 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
     };
     let block = &after_open[..end];
 
+    // EC-021 (BC-1.18.005 v1.13, PR #818 fix-burst finding M-1): this
+    // fence-bearing-but-malformed-YAML case MUST remain fail-loud
+    // (io::ErrorKind::InvalidData, never coerced to Ok(0) the way EC-014's
+    // NotFound or EC-020's fenceless cases are) -- see the "Malformed-YAML
+    // case" bullet under Postcondition 8. The message is MANDATORY,
+    // load-bearing content, not cosmetic: it MUST (a) name the underlying
+    // YAML-parse cause (the `{e}` interpolation below, from
+    // serde_norway::from_str's Err) and (b) state that this gate only
+    // intercepts Edit/Write/MultiEdit tool calls, so the operator can
+    // repair the malformed frontmatter block via any OTHER means (e.g. a
+    // Bash-invoked edit) to escape the self-deadlock this fail-loud
+    // behavior would otherwise create (every gated Edit/Write/MultiEdit
+    // against the target -- including a would-be repair edit -- routes
+    // through this same read). An unchanged, generic
+    // "{path}: frontmatter YAML parse failed: {e}"-only message is
+    // NON-COMPLIANT with this Postcondition from v1.13 forward.
     let parsed: ChangelogFrontmatter = serde_norway::from_str(block).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{}: frontmatter YAML parse failed: {e}",
+                "{}: frontmatter YAML parse failed: {e} -- this gate only intercepts Edit, \
+                 Write, and MultiEdit tool calls against this artifact; repair the malformed \
+                 frontmatter block by any OTHER means (e.g. a Bash-invoked edit) so this same \
+                 gate can parse it successfully, after which Edit, Write, and MultiEdit against \
+                 this artifact will proceed normally again",
                 target_path.display()
             ),
         )
@@ -3825,6 +3845,107 @@ mod tests {
             "B1: a Write against an EXISTING, present-but-fenceless target MUST Continue, never \
              hard-block a legitimate write as HookResult::Error — got {result:?}"
         );
+    }
+
+    // ===================================================================
+    // PR #818 fix-burst finding M-1 (BC-1.18.005 v1.13, EC-021) — a
+    // fence-bearing target whose YAML content fails to parse MUST remain
+    // fail-loud (never coerced to Ok(0) the way EC-020's fenceless cases
+    // are), AND the resulting error message MUST contain both (i) the
+    // underlying YAML-parse-cause text and (ii) escape-hatch guidance
+    // naming the gate's Edit/Write/MultiEdit-only scope, so the operator
+    // is not left in a self-deadlock with no discoverable way out.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_EC_021_read_changelog_item_count_malformed_yaml_is_fail_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        // A well-formed `---`/`---` fence pair, but the YAML content
+        // between the fences is malformed (unbalanced quote on the
+        // `title` value) — this is NOT the same shape as B1's fenceless
+        // case: a real frontmatter block exists here, it just fails to
+        // parse.
+        std::fs::write(
+            &path,
+            "---\ntitle: \"unbalanced quote\nchangelog:\n  - version: \"1.0\"\n---\n\n# Body\n",
+        )
+        .expect("write fixture");
+
+        let err = read_changelog_item_count(&path).expect_err(
+            "EC-021: a fence-bearing target whose YAML content fails to parse MUST propagate a \
+             fail-loud io::Error — it MUST NEVER be coerced to Ok(0) the way EC-014's NotFound \
+             or EC-020's fenceless cases are, since Ok(0) here would silently undercount a \
+             changelog: sequence whose true size is unknown and possibly large",
+        );
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::InvalidData,
+            "EC-021: the malformed-YAML fail-loud error MUST be io::ErrorKind::InvalidData"
+        );
+
+        let message = err.to_string();
+        assert!(
+            message.contains("parse"),
+            "EC-021: the error message MUST name the YAML-parse cause specifically (expected a \
+             substring naming the parse failure) — got: {message}"
+        );
+        assert!(
+            message.contains("Edit") && message.contains("Write") && message.contains("MultiEdit"),
+            "EC-021: the error message MUST contain escape-hatch guidance naming this gate's \
+             Edit/Write/MultiEdit-only scope, so the operator can discover that repairing the \
+             frontmatter via any OTHER means (e.g. a Bash-invoked edit) escapes the \
+             self-deadlock a fail-loud result on every gated edit would otherwise create — got: \
+             {message}"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_EC_021_shard_cap_gate_check_malformed_yaml_write_is_hook_error() {
+        // Full-stack: a Write against an EXISTING, fence-bearing-but
+        // -malformed-YAML frontmatter-changelog-array-shaped target MUST
+        // surface HookResult::Error (fail-loud), never Continue.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("BC-INDEX.md");
+        std::fs::write(
+            &target,
+            "---\ntitle: \"unbalanced quote\nchangelog:\n  - version: \"1.0\"\n---\n\n# Body\n",
+        )
+        .expect("write fixture");
+
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(50);
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            &target,
+            &serde_json::json!({"content": "new content"}),
+        );
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("parse"),
+                    "EC-021: the HookResult::Error message MUST name the YAML-parse cause \
+                     specifically — got: {message}"
+                );
+                assert!(
+                    message.contains("Edit")
+                        && message.contains("Write")
+                        && message.contains("MultiEdit"),
+                    "EC-021: the HookResult::Error message MUST contain escape-hatch guidance \
+                     naming this gate's Edit/Write/MultiEdit-only scope — got: {message}"
+                );
+            }
+            other => panic!(
+                "EC-021: a Write against a fence-bearing-but-malformed-YAML target MUST surface \
+                 HookResult::Error (fail-loud), never Continue — got {other:?}"
+            ),
+        }
     }
 
     // ===================================================================
