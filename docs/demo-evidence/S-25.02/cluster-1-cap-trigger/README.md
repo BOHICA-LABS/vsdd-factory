@@ -1,7 +1,11 @@
 # Demo Evidence — S-25.02 Phase F4 BC-cluster 1 "cap+trigger" (BC-1.18.005)
 
-**Branch:** `feature/S-25.02-cap-trigger` at `95f07d9d`
-**Status:** LOCAL-adversary-converged (3-CLEAN)
+**Branch:** `feature/S-25.02-cap-trigger`, as of this PR's final commit (see the PR's commit
+history for the exact tip SHA — a literal SHA pin here goes stale on every subsequent fix-burst
+commit, per n3, PR #818 fix-burst finding; the recordings below were captured against the SHA that
+was current at recording time and remain valid evidence regardless of later commits)
+**Status:** LOCAL-adversary-converged (3-CLEAN) as of the recording pass; additional PR-review
+fix-burst commits may have landed since — see the PR's commit history for current HEAD
 **Story spec:** `.factory/stories/S-25.02-artifact-sharding-layer2.md` (AC-001..AC-005, AC-023)
 **Behavioral contract:** BC-1.18.005 v1.12 — Byte-Size-Denominated Shard-Cap Formula and Native
 Deterministic Size-Trigger (Provisional Constants Pending F4 Harness Calibration)

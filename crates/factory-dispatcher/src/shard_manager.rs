@@ -15,9 +15,34 @@
 //! precedent ([`crate::indeterminate_marker::block_if_marker_check`]),
 //! consulted from `executor.rs` BEFORE the registry-driven WASM plugin loop
 //! (Invariant 1). The config-match check (Postcondition 1 / Invariant 3)
-//! MUST occur before any `stat()` call, so the ~99% of `Edit`/`Write`/
-//! `MultiEdit` calls that do not target a sharded artifact pay zero added
-//! latency.
+//! MUST occur before any `stat()`/content read of the TARGET ARTIFACT
+//! itself, so the ~99% of `Edit`/`Write`/`MultiEdit` calls that do not
+//! target a sharded artifact never pay that cost.
+//!
+//! **Corrected latency framing (PR #818 fix-burst finding B4, superseding an
+//! earlier revision's "pay zero added latency" claim for this ~99% case):**
+//! that claim was true only for the target-artifact-specific reads
+//! (`stat()`/content) this doc originally meant. It is NOT true of the
+//! `[[shard]]` config file itself: `executor.rs::shard_cap_precheck` calls
+//! `ShardRegistry::load()`, which performs a real (bounded, but non-zero)
+//! TOML-parse of the WHOLE config file on EVERY `Edit`/`Write`/`MultiEdit`
+//! dispatch whenever a `[[shard]]` config file exists on disk — including
+//! dispatches that end up matching no entry at all. BC-1.18.005 v1.12 itself
+//! acknowledges this as "the 'some parse per dispatch is unavoidable' cost"
+//! inherent to `Vec<ShardEntry>`'s whole-file TOML grammar (a `Vec` cannot
+//! partially deserialize). Today, with no `[[shard]]` config file committed
+//! anywhere in this repository, EVERY dispatch short-circuits at the
+//! cheaper `Path::exists()` probe in `shard_cap_precheck` and this parse
+//! cost is not yet paid at all; once a config file IS committed, every
+//! matching-tool dispatch pays one bounded TOML parse, not zero cost. No
+//! caching is implemented across dispatcher process invocations: this
+//! dispatcher binary is spawned fresh, once, per hook event (confirmed by
+//! this crate's own `main.rs` entry point — a single dispatch per process
+//! lifetime, not a persistent multi-event loop), so an in-process
+//! mtime-checked cache would never see a second dispatch to serve a cache
+//! hit to and was deliberately not added — it would add real complexity and
+//! genuine staleness-risk surface for zero measurable benefit under this
+//! process model.
 //!
 //! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger")
 //!
@@ -334,6 +359,60 @@ pub enum ShardConfigError {
         /// The entry's configured (legal-but-degenerate) `worst_case_fuel_per_byte`.
         worst_case_fuel_per_byte: f64,
     },
+
+    /// PR #818 fix-burst finding m2: a `"frontmatter-changelog-array"`-shaped
+    /// entry declares `n = 0`. Two compounding problems make this a
+    /// fail-loud condition rather than a merely-unusual-but-legal config:
+    /// (1) [`item_count_trigger_fires`]'s `current_item_count.saturating_add(1)
+    /// > n` is `true` for EVERY `current_item_count >= 0` when `n == 0`
+    /// (`0 + 1 > 0`), so the item-count trigger fires unconditionally on
+    /// literally the first dispatch against the artifact — permanently, not
+    /// just as an edge case; (2) `n = 0` makes ANY EXPLICIT `low_water_mark`
+    /// value unsatisfiable, since [`validate_low_water_mark`]'s `0 <=
+    /// low_water_mark < N` constraint has no legal value when `N = 0`
+    /// (`low_water_mark < 0` is impossible for `low_water_mark: i64 >= 0`,
+    /// and `low_water_mark >= 0` always violates `< 0`). Fail-loud, checked
+    /// immediately after [`MissingN`]'s presence check and before
+    /// `low_water_mark` is examined — mirrors EC-016's own ordering
+    /// rationale (a config that is invalid for `n` itself must not be
+    /// masked by, or reported as, a downstream `low_water_mark` failure).
+    #[error(
+        "[[shard]] entry for artifact_stem = \"{artifact_stem}\" declares shape = \
+         \"frontmatter-changelog-array\" with n = 0, which makes the item-count trigger fire \
+         unconditionally on every dispatch (current_item_count + 1 > 0 is always true for any \
+         non-negative current_item_count) and makes ANY explicit low_water_mark value \
+         unsatisfiable (0 <= low_water_mark < N requires N >= 1) (PR #818 fix-burst finding m2). \
+         Fail-loud: n must be >= 1, never silently accepted at 0."
+    )]
+    ZeroItemCountThreshold {
+        /// The offending entry's `artifact_stem`, so the operator can locate it.
+        artifact_stem: String,
+    },
+
+    /// PR #818 fix-burst finding N-2: two (or more) `[[shard]]` entries
+    /// declare the SAME `artifact_stem`. [`find_matching_entry`] previously
+    /// resolved this silently to whichever entry appeared first in the
+    /// config file, with no diagnostic — an operator adding a second entry
+    /// for an already-registered artifact (e.g. a copy-paste typo, or two
+    /// independent config fragments merged without deduplication) would
+    /// have their SECOND entry's cap-formula inputs / shape / `n` /
+    /// `low_water_mark` silently ignored with no error at all, which is
+    /// exactly the class of silently-swallowed misconfiguration this BC's
+    /// fail-loud posture exists to prevent. Fail-loud, scoped to the single
+    /// `artifact_stem` the current dispatch's target path resolves to
+    /// (consistent with this BC's v1.12 MATCH-FIRST blast-radius scoping —
+    /// an unrelated duplicate elsewhere in the config for a DIFFERENT
+    /// `artifact_stem` this dispatch does not target is never observed).
+    #[error(
+        "[[shard]] config declares MULTIPLE entries for artifact_stem = \"{artifact_stem}\" — \
+         the second and any subsequent entries would be silently ignored by a plain first-match \
+         lookup (PR #818 fix-burst finding N-2). Fail-loud: duplicate artifact_stem entries are \
+         never silently resolved to \"whichever appears first\"."
+    )]
+    DuplicateArtifactStem {
+        /// The `artifact_stem` declared by more than one `[[shard]]` entry.
+        artifact_stem: String,
+    },
 }
 
 /// Fail-loud config-load errors surface to the dispatcher's PreToolUse
@@ -424,7 +503,14 @@ impl ShardRegistry {
 ///    BEFORE `low_water_mark` is examined, so an entry missing `n` AND
 ///    declaring an out-of-range `low_water_mark` is never silently accepted
 ///    merely because `n` was absent (see EC-016's ordering vector).
-/// 6. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
+/// 6. For a `"frontmatter-changelog-array"`-shaped entry with a PRESENT `n`
+///    ONLY: `n` MUST be `>= 1` (fail-loud
+///    [`ShardConfigError::ZeroItemCountThreshold`] — PR #818 fix-burst
+///    finding m2), checked immediately after check 5 and BEFORE
+///    `low_water_mark` is examined — `n = 0` makes the item-count trigger
+///    fire unconditionally AND makes any explicit `low_water_mark` value
+///    unsatisfiable.
+/// 7. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
 ///    `low_water_mark` ONLY: `0 <= low_water_mark < N` (fail-loud
 ///    [`ShardConfigError::InvalidLowWaterMark`] — EC-011; `N-1` is a VALID
 ///    boundary value, never routed to this error — see EC-012), and a
@@ -517,6 +603,17 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
             });
         };
 
+        // PR #818 fix-burst finding m2: n = 0 makes the item-count trigger
+        // fire unconditionally AND makes any explicit low_water_mark value
+        // unsatisfiable (0 <= low_water_mark < 0 has no solution) — checked
+        // immediately after n's presence, before low_water_mark is examined,
+        // mirroring EC-016's own ordering rationale.
+        if n == 0 {
+            return Err(ShardConfigError::ZeroItemCountThreshold {
+                artifact_stem: entry.artifact_stem.clone(),
+            });
+        }
+
         if let Some(low_water_mark) = entry.low_water_mark {
             let fires_advisory = validate_low_water_mark(&entry.artifact_stem, n, low_water_mark)?;
             if fires_advisory {
@@ -545,21 +642,55 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
 
 /// Find the `[[shard]]` config entry (if any) matching `target_path`.
 ///
-/// MUST be called — and return — before any filesystem `stat()` call
-/// (Invariant 3): the ~99% of `Edit`/`Write`/`MultiEdit` calls that do not
-/// target a sharded artifact pay zero cost (Postcondition 1 / EC-001).
+/// MUST be called — and return — before any `stat()` call AGAINST THE
+/// TARGET ARTIFACT ITSELF (Invariant 3; Postcondition 1's target-artifact-
+/// scoped zero-cost bypass). Corrected framing (PR #818 fix-burst finding
+/// B4): this function's own cost (a linear scan of the ALREADY-structurally-
+/// parsed `ShardRegistry`) is genuinely negligible, but callers should not
+/// read this as "the whole dispatch pays zero added latency" —
+/// [`ShardRegistry::load`] itself performs a real, unavoidable-per-dispatch
+/// structural TOML parse of the config file whenever it exists (BC-1.18.005
+/// v1.12's own "some parse per dispatch is unavoidable" acknowledgment),
+/// BEFORE this function ever runs. What IS zero-cost for the ~99% of
+/// `Edit`/`Write`/`MultiEdit` calls that do not target a sharded artifact is
+/// specifically: no `stat()`/content read of the TARGET artifact, and no
+/// `[[shard]]` entry semantic validation ([`validate_entry`]) — never the
+/// TOML config parse itself.
+///
+/// PR #818 fix-burst finding N-2: fail-loud
+/// [`ShardConfigError::DuplicateArtifactStem`] when MORE THAN ONE `[[shard]]`
+/// entry declares the SAME `artifact_stem` as the current dispatch's target
+/// — a silent first-match resolution would let a second, differently-
+/// configured entry for an already-registered artifact go completely
+/// unnoticed. Scoped to the stem the current dispatch actually resolves to,
+/// consistent with this BC's v1.12 MATCH-FIRST blast-radius doctrine: a
+/// duplicate for a DIFFERENT `artifact_stem` this dispatch does not target
+/// is never observed or reported by this call.
 pub fn find_matching_entry<'a>(
     registry: &'a ShardRegistry,
     target_path: &Path,
-) -> Option<&'a ShardEntry> {
+) -> Result<Option<&'a ShardEntry>, ShardConfigError> {
     // `Path::file_stem()` is a pure string operation over the path's own
     // components — it never touches the filesystem, so this comparison is
     // free to run before any stat() call (Invariant 3).
-    let stem = target_path.file_stem()?.to_str()?;
-    registry
+    let Some(stem) = target_path.file_stem().and_then(|s| s.to_str()) else {
+        return Ok(None);
+    };
+    let mut matches = registry
         .shards
         .iter()
-        .find(|entry| entry.artifact_stem == stem)
+        .filter(|entry| entry.artifact_stem == stem);
+    let Some(first) = matches.next() else {
+        return Ok(None);
+    };
+    // N-2: a second entry sharing the same artifact_stem is a fail-loud
+    // config defect, not a silent "first one wins" resolution.
+    if matches.next().is_some() {
+        return Err(ShardConfigError::DuplicateArtifactStem {
+            artifact_stem: stem.to_string(),
+        });
+    }
+    Ok(Some(first))
 }
 
 // ---------------------------------------------------------------------------
@@ -570,12 +701,20 @@ pub fn find_matching_entry<'a>(
 /// (Postcondition 4): `shard_cap_bytes <= (PRACTICAL_FUEL_CEILING /
 /// WORST_CASE_FUEL_PER_BYTE) - MAX_SINGLE_RECORD_BYTES - SAFETY_MARGIN`.
 ///
-/// Byte-denominated only (Invariant 2) — never a line-count proxy. VP-116's
-/// kani-proof exercises this formula's arithmetic over symbolic inputs for
-/// overflow/underflow safety (Postcondition 7 / EC-006/EC-007's superlinear-
-/// rate and ceiling-change re-derivation cases feed `worst_case_fuel_per_byte`
-/// and `practical_fuel_ceiling` respectively — this function itself is
-/// rate-agnostic; the caller supplies the already-corrected inputs).
+/// Byte-denominated only (Invariant 2) — never a line-count proxy. VP-116 is
+/// ALLOCATED (kani-proof method) to exercise this formula's arithmetic over
+/// symbolic inputs for overflow/underflow safety (Postcondition 7 /
+/// EC-006/EC-007's superlinear-rate and ceiling-change re-derivation cases
+/// feed `worst_case_fuel_per_byte` and `practical_fuel_ceiling` respectively
+/// — this function itself is rate-agnostic; the caller supplies the
+/// already-corrected inputs). **Corrected tense (PR #818 fix-burst finding
+/// n1):** per VP-INDEX.md, VP-116 is `status: draft`,
+/// `feasible-pending-harness` — its formal-verification (kani) proof scope
+/// is allocated to the Phase 6 / formal-hardening pipeline stage and has NOT
+/// yet run against this function in this cluster. This paragraph describes
+/// the SCOPED FUTURE obligation, not a completed proof; `cargo test` unit
+/// coverage of this function's boundary/overflow cases in this file's own
+/// `#[cfg(test)] mod tests` is what is actually verified today.
 pub fn compute_shard_cap_bytes(inputs: &CapFormulaInputs) -> u64 {
     let fuel_budget_bytes =
         (inputs.practical_fuel_ceiling as f64 / inputs.worst_case_fuel_per_byte).floor();
@@ -601,6 +740,22 @@ pub fn compute_shard_cap_bytes(inputs: &CapFormulaInputs) -> u64 {
 /// `per_validator_caps` is the set of `cap_for(validator)` values for every
 /// Cohort B validator that reads the target artifact (per ADR-047 §8a's
 /// Cohort B table) — NOT every validator in the system.
+///
+/// **Deliberately has NO live caller in [`shard_cap_gate_check`]** — this is
+/// an authoring-time / F4-calibration-harness helper, not a per-write
+/// runtime re-derivation, per an explicit BC-1.18.005 v1.10 product-owner
+/// adjudication (finding F-C1-P4-003, "Reading (A) CONFIG-TIME/HARNESS-
+/// HELPER adjudicated over Reading (B) RUNTIME"): ADR-051 §Decision 2 places
+/// the Cross-Validator Minimum Rule inside the F4 calibration harness's own
+/// design, `ShardEntry` carries exactly one `shard_cap_bytes` field (no
+/// per-validator breakdown for a live gate to combine against), and the
+/// live gate consumes the already-MIN'd `shard_cap_bytes` directly. This is
+/// NOT dead/unwired code needing a fix (PR #818 fix-burst finding m1 —
+/// re-confirmed against the already-recorded adjudication above): it is a
+/// correctly-scoped, correctly-tested standalone helper. A hypothetical
+/// future RUNTIME re-derivation of the Cross-Validator Minimum is a
+/// separate, out-of-scope obligation requiring a new BC postcondition and
+/// `architect`/ADR-051 involvement, per that same adjudication.
 pub fn effective_shard_cap_bytes(per_validator_caps: &[u64]) -> u64 {
     // A vacuous minimum (no Cohort B validator reads this artifact) imposes
     // no constraint at all — `u64::MAX` rather than `0`, so an
@@ -691,8 +846,12 @@ pub fn projected_size_write(content_len_bytes: u64) -> u64 {
 /// `net_delta_bytes` is signed (EC-005: a net-shrinking `MultiEdit` may be
 /// negative overall). A large negative delta MUST NOT underflow an unsigned
 /// `current_shard_bytes` — this function uses a saturating (floor-at-zero)
-/// computation, the production-grade choice VP-116's kani-proof verifies
-/// for overflow/underflow safety.
+/// computation, the production-grade choice VP-116's kani-proof is
+/// ALLOCATED to verify for overflow/underflow safety once its Phase 6 /
+/// formal-hardening proof scope runs (PR #818 fix-burst finding n1 —
+/// corrected from present-tense "verifies"; no kani harness exists for this
+/// function on this branch today, per VP-INDEX.md's `feasible-pending-
+/// harness` status for VP-116).
 pub fn projected_size_edit(current_shard_bytes: u64, net_delta_bytes: i64) -> u64 {
     if net_delta_bytes >= 0 {
         // Safe: net_delta_bytes >= 0, so the cast is lossless for any value
@@ -733,19 +892,48 @@ pub fn size_trigger_fires(projected_size: u64, shard_cap_bytes: u64) -> bool {
 // Postcondition 8 — item-count trigger ("frontmatter-changelog-array" shape)
 // ---------------------------------------------------------------------------
 
+/// Ceiling on the number of bytes [`read_changelog_item_count`] will read
+/// from a target file before failing loud, rather than performing an
+/// unbounded full-file read (PR #818 fix-burst finding B2). 8 MiB is
+/// comfortably larger than any legitimate `"frontmatter-changelog-array"`-
+/// shaped artifact should reach even in the pre-BC-1.18.012-migration
+/// cold-state (~1,997 items) this BC's own doc comments describe as the
+/// worst case on record; this ceiling exists to fail loud against a
+/// pathological or adversarial target file rather than read an unbounded
+/// amount of data into memory before the frontmatter fence is even located.
+const MAX_CHANGELOG_TARGET_READ_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Read the target file's frontmatter far enough to count the existing
 /// `changelog:` sequence's items (Postcondition 8's read-cost bullet).
 ///
 /// MORE than a `stat()` call — reads and lightly parses frontmatter content
 /// — but remains native, fuel-budget-free dispatcher code, never a WASM
 /// plugin invocation (the "why native, not WASM" rationale, Postcondition 2,
-/// applies identically to this shape).
+/// applies identically to this shape). BOUNDED, not unbounded (PR #818
+/// fix-burst finding B2, corrected from an earlier revision's overclaiming
+/// doc text): the target file's size is `stat()`-checked BEFORE any content
+/// read is attempted; a file exceeding `MAX_CHANGELOG_TARGET_READ_BYTES`
+/// fails loud with an `io::ErrorKind::FileTooLarge` error rather than being
+/// read into memory in full.
 ///
 /// This function's contract is the SAME read regardless of cold-state
 /// (pre-BC-1.18.012 migration, ~1,997-item, not-N-relative-bounded) vs.
 /// steady-state (post-migration, genuinely `<= N`-item-bounded) — the
 /// cold/steady-state split BC-1.18.005 documents is a PERFORMANCE
 /// characterization, not a different code path this function branches on.
+///
+/// A target file that EXISTS but has no well-formed `---` frontmatter fence
+/// (missing opening fence, or missing line-anchored closing fence) is
+/// treated PERMISSIVELY — `Ok(0)` — rather than a fail-loud `io::Error` (PR
+/// #818 fix-burst finding B1, corrected from an earlier revision): a
+/// present-but-fenceless file must not hard-block a legitimate write the
+/// same way a genuinely missing file does not (EC-014's NotFound->Ok(0)
+/// precedent). The closing fence itself is matched LINE-ANCHORED — a line
+/// consisting of EXACTLY `---` (optionally with a trailing `\r`), never a
+/// bare `"\n---"` substring search (PR #818 fix-burst finding n3, corrected
+/// from an earlier revision) — so a line such as `----`, `---foo`, or an
+/// in-block-scalar YAML literal line that happens to start with `---` is
+/// never mistaken for the closing fence.
 pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
     /// Deserialization target isolating just the `changelog:` sequence —
     /// mirrors `last-amended-migrate/src/yaml_guard.rs`'s `MinimalFrontmatter`
@@ -757,8 +945,8 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         changelog: Option<Vec<serde_norway::Value>>,
     }
 
-    let raw = match std::fs::read_to_string(target_path) {
-        Ok(raw) => raw,
+    let metadata = match std::fs::metadata(target_path) {
+        Ok(metadata) => metadata,
         // EC-014 (BC-1.18.005 v1.9): a not-yet-existing
         // "frontmatter-changelog-array"-shaped target file is a legitimate
         // first-ever Write CREATING it, not a fail-loud condition — treated
@@ -768,23 +956,63 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
         Err(e) => return Err(e),
     };
+    // B2: stat() the file BEFORE reading its content — fail loud rather than
+    // perform an unbounded full-file read for a pathologically large target.
+    if metadata.len() > MAX_CHANGELOG_TARGET_READ_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!(
+                "{}: refusing unbounded frontmatter-changelog-array read — file is {} bytes, \
+                 exceeding the {} byte ceiling (BC-1.18.005 fix-burst B2: bounded parse, never a \
+                 whole-file read)",
+                target_path.display(),
+                metadata.len(),
+                MAX_CHANGELOG_TARGET_READ_BYTES
+            ),
+        ));
+    }
+
+    let raw = std::fs::read_to_string(target_path)?;
+
     // Opportunistic hardening (S-25.02 Phase F4 LOCAL adversary pass-1
     // cluster-1 observation): tolerate a `---\r\n` (CRLF) opening fence in
     // addition to `---\n`, so a CRLF-line-ended frontmatter file is not
     // spuriously treated as having no fence at all.
-    let block = raw
+    let Some(after_open) = raw
         .strip_prefix("---\r\n")
         .or_else(|| raw.strip_prefix("---\n"))
-        .and_then(|after_open| after_open.find("\n---").map(|end| &after_open[..end]))
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "{}: no well-formed --- frontmatter fence found (BC-1.18.005 Postcondition 8)",
-                    target_path.display()
-                ),
-            )
-        })?;
+    else {
+        // B1: present-but-fenceless (no opening fence at all) -> permissive
+        // Ok(0), mirroring EC-014's missing-file precedent — never a
+        // fail-loud hard block of a legitimate write.
+        return Ok(0);
+    };
+
+    // n3: line-anchored closing-fence search. A line consisting of EXACTLY
+    // "---" (optionally trailing "\r" for a CRLF-terminated line) closes the
+    // frontmatter block — never a bare "\n---" substring match, which would
+    // also match "----", "---foo", or an in-block-scalar YAML literal line
+    // that happens to start with "---".
+    let mut offset = 0usize;
+    let mut closing_fence_start = None;
+    for line in after_open.split_inclusive('\n') {
+        let without_newline = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = without_newline
+            .strip_suffix('\r')
+            .unwrap_or(without_newline);
+        if trimmed == "---" {
+            closing_fence_start = Some(offset);
+            break;
+        }
+        offset += line.len();
+    }
+    let Some(end) = closing_fence_start else {
+        // B1: present-but-fenceless (opening fence found, but no
+        // line-anchored closing fence) -> permissive Ok(0), same rationale
+        // as the missing-opening-fence case above.
+        return Ok(0);
+    };
+    let block = &after_open[..end];
 
     let parsed: ChangelogFrontmatter = serde_norway::from_str(block).map_err(|e| {
         io::Error::new(
@@ -873,6 +1101,45 @@ pub fn validate_low_water_mark(
 // Invariant 1 / Precondition 1 — the single native gate dispatch entry point
 // ---------------------------------------------------------------------------
 
+/// Extract a REQUIRED string field's byte length from a tool_input payload
+/// (or a single `MultiEdit` edit block), fail-loud when the field is absent
+/// or not a JSON string (PR #818 fix-burst finding m3/M-1).
+///
+/// Before this fix, every field extraction in the `Write`/`Edit`/`MultiEdit`
+/// arms below used `.and_then(|v| v.as_str()).map(|s| s.len() as
+/// u64).unwrap_or(0)` — an absent, non-string, or otherwise malformed
+/// required field (`content`/`old_string`/`new_string`) silently computed a
+/// 0-byte/0-delta size instead of failing loud. That silent 0 meant the cap
+/// trigger could NEVER fire against a malformed payload, directly
+/// contradicting this module's own established "never a silent Continue
+/// that would leave an oversized artifact unguarded" posture (see
+/// [`ShardConfigError::MissingShape`]'s doc text) and CLAUDE.md's forbidden
+/// silent-swallowed-failure pattern. A malformed/absent REQUIRED field now
+/// fails loud exactly like a stat() I/O error a few lines above already
+/// does in these same arms.
+fn required_str_len_bytes(
+    payload: &serde_json::Value,
+    field: &str,
+    tool_name: &str,
+    artifact_stem: &str,
+) -> Result<u64, String> {
+    match payload.get(field) {
+        Some(serde_json::Value::String(s)) => Ok(s.len() as u64),
+        Some(_) => Err(format!(
+            "BC-1.18.005: {tool_name} tool_input field \"{field}\" is present but not a JSON \
+             string, for artifact_stem \"{artifact_stem}\" — refusing to silently treat a \
+             malformed required field as 0 bytes (PR #818 fix-burst finding m3/M-1: a malformed \
+             payload MUST fail loud, never let the cap trigger go silently unguarded)"
+        )),
+        None => Err(format!(
+            "BC-1.18.005: {tool_name} tool_input is missing the required field \"{field}\", for \
+             artifact_stem \"{artifact_stem}\" — refusing to silently treat an absent required \
+             field as 0 bytes (PR #818 fix-burst finding m3/M-1: a malformed payload MUST fail \
+             loud, never let the cap trigger go silently unguarded)"
+        )),
+    }
+}
+
 /// Native (non-WASM) shard-cap gate check for a single `Edit`/`Write`/
 /// `MultiEdit` PreToolUse tool call.
 ///
@@ -920,9 +1187,14 @@ pub fn shard_cap_gate_check(
     // `validate_entry` below is NEVER called for a sibling entry the current
     // dispatch's target does not match (BC-1.18.005 v1.12 MATCH-FIRST
     // restructure, F-C1-P6-001, Postcondition 1's "Blast-radius scoping"
-    // ruling).
-    let Some(entry) = find_matching_entry(shard_registry, target_path) else {
-        return HookResult::Continue;
+    // ruling). N-2 (PR #818 fix-burst): `find_matching_entry` itself fails
+    // loud (`ShardConfigError::DuplicateArtifactStem`) when the target's
+    // stem matches MORE THAN ONE `[[shard]]` entry, rather than silently
+    // resolving to whichever appears first.
+    let entry = match find_matching_entry(shard_registry, target_path) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return HookResult::Continue,
+        Err(e) => return e.into(),
     };
 
     // Entry-match-time semantic validation (EC-009/EC-011/EC-012/EC-013/
@@ -971,11 +1243,15 @@ pub fn shard_cap_gate_check(
             // `Ok(0)`, unchanged.
             let projected_size = match tool_kind {
                 ToolKind::Write => {
-                    let content_len = tool_input
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.len() as u64)
-                        .unwrap_or(0);
+                    let content_len = match required_str_len_bytes(
+                        tool_input,
+                        "content",
+                        "Write",
+                        &entry.artifact_stem,
+                    ) {
+                        Ok(len) => len,
+                        Err(message) => return HookResult::Error { message },
+                    };
                     projected_size_write(content_len)
                 }
                 ToolKind::Edit => {
@@ -992,16 +1268,24 @@ pub fn shard_cap_gate_check(
                             };
                         }
                     };
-                    let old_len = tool_input
-                        .get("old_string")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.len() as u64)
-                        .unwrap_or(0);
-                    let new_len = tool_input
-                        .get("new_string")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.len() as u64)
-                        .unwrap_or(0);
+                    let old_len = match required_str_len_bytes(
+                        tool_input,
+                        "old_string",
+                        "Edit",
+                        &entry.artifact_stem,
+                    ) {
+                        Ok(len) => len,
+                        Err(message) => return HookResult::Error { message },
+                    };
+                    let new_len = match required_str_len_bytes(
+                        tool_input,
+                        "new_string",
+                        "Edit",
+                        &entry.artifact_stem,
+                    ) {
+                        Ok(len) => len,
+                        Err(message) => return HookResult::Error { message },
+                    };
                     let net_delta = net_delta_bytes_for_edit(old_len, new_len);
                     projected_size_edit(current_bytes, net_delta)
                 }
@@ -1019,31 +1303,52 @@ pub fn shard_cap_gate_check(
                             };
                         }
                     };
-                    let edits: Vec<EditDelta> = tool_input
-                        .get("edits")
-                        .and_then(|v| v.as_array())
-                        .map(|edits| {
-                            edits
-                                .iter()
-                                .map(|edit| {
-                                    let old_len = edit
-                                        .get("old_string")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.len() as u64)
-                                        .unwrap_or(0);
-                                    let new_len = edit
-                                        .get("new_string")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.len() as u64)
-                                        .unwrap_or(0);
-                                    EditDelta {
-                                        old_len_bytes: old_len,
-                                        new_len_bytes: new_len,
-                                    }
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    // m3/M-1: the "edits" field itself must be a present JSON
+                    // array — absent or non-array MUST fail loud, never
+                    // silently treated as zero edit blocks. An EMPTY array
+                    // (`"edits": []`) is legitimate (net_delta = 0) and is
+                    // NOT rejected here — only an absent/non-array field is.
+                    let edits_value = match tool_input.get("edits").and_then(|v| v.as_array()) {
+                        Some(arr) => arr,
+                        None => {
+                            return HookResult::Error {
+                                message: format!(
+                                    "BC-1.18.005: MultiEdit tool_input is missing the required \
+                                     \"edits\" array (or it is not a JSON array), for \
+                                     artifact_stem \"{}\" — refusing to silently treat this as \
+                                     zero edit blocks (PR #818 fix-burst finding m3/M-1: a \
+                                     malformed payload MUST fail loud, never let the cap trigger \
+                                     go silently unguarded)",
+                                    entry.artifact_stem
+                                ),
+                            };
+                        }
+                    };
+                    let mut edits: Vec<EditDelta> = Vec::with_capacity(edits_value.len());
+                    for edit in edits_value {
+                        let old_len = match required_str_len_bytes(
+                            edit,
+                            "old_string",
+                            "MultiEdit",
+                            &entry.artifact_stem,
+                        ) {
+                            Ok(len) => len,
+                            Err(message) => return HookResult::Error { message },
+                        };
+                        let new_len = match required_str_len_bytes(
+                            edit,
+                            "new_string",
+                            "MultiEdit",
+                            &entry.artifact_stem,
+                        ) {
+                            Ok(len) => len,
+                            Err(message) => return HookResult::Error { message },
+                        };
+                        edits.push(EditDelta {
+                            old_len_bytes: old_len,
+                            new_len_bytes: new_len,
+                        });
+                    }
                     let net_delta = net_delta_bytes_for_multi_edit(&edits);
                     projected_size_edit(current_bytes, net_delta)
                 }
@@ -1358,8 +1663,10 @@ mod tests {
             shards: vec![flat_entry("decision-log", 49_152)],
         };
         let target = Path::new("/repo/.factory/cycles/pass-1/decision-log.md");
+        let result = find_matching_entry(&registry, target)
+            .expect("fixture has no duplicate artifact_stem entries");
         assert_eq!(
-            find_matching_entry(&registry, target),
+            result,
             Some(&registry.shards[0]),
             "PC1: a target path whose stem matches a [[shard]] entry's artifact_stem MUST resolve to that entry"
         );
@@ -1374,11 +1681,69 @@ mod tests {
             ],
         };
         let target = Path::new("/repo/some/unrelated/file.md");
+        let result = find_matching_entry(&registry, target)
+            .expect("fixture has no duplicate artifact_stem entries");
         assert_eq!(
-            find_matching_entry(&registry, target),
-            None,
+            result, None,
             "EC-001: a target path matching no [[shard]] entry's artifact_stem MUST return None (zero-cost bypass)"
         );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_N2_find_matching_entry_rejects_duplicate_artifact_stem() {
+        // PR #818 fix-burst finding N-2: two [[shard]] entries sharing the
+        // same artifact_stem MUST fail loud, never silently resolve to
+        // "whichever appears first."
+        let registry = ShardRegistry {
+            shards: vec![
+                flat_entry("decision-log", 40_000),
+                flat_entry("decision-log", 49_152),
+            ],
+        };
+        let target = Path::new("/repo/.factory/decision-log.md");
+        let err = find_matching_entry(&registry, target).expect_err(
+            "N-2: a target path whose stem matches TWO [[shard]] entries MUST fail loud, never \
+             silently resolve to the first-declared entry",
+        );
+        match err {
+            ShardConfigError::DuplicateArtifactStem { artifact_stem } => {
+                assert_eq!(artifact_stem, "decision-log");
+            }
+            other => panic!("expected DuplicateArtifactStem, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_N2_shard_cap_gate_check_rejects_duplicate_artifact_stem() {
+        // Full-stack: the duplicate-stem fail-loud surfaces all the way
+        // through shard_cap_gate_check as a HookResult::Error, exactly like
+        // any other match-time config defect (EC-009/EC-011/etc.).
+        let registry = ShardRegistry {
+            shards: vec![
+                flat_entry("decision-log", 40_000),
+                flat_entry("decision-log", 49_152),
+            ],
+        };
+        let target = Path::new("/repo/.factory/decision-log.md");
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            target,
+            &serde_json::json!({"content": "x"}),
+        );
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("MULTIPLE entries"),
+                    "N-2: expected the DuplicateArtifactStem diagnostic naming artifact_stem \
+                     \"decision-log\", got: {message}"
+                );
+            }
+            other => panic!(
+                "N-2: a dispatch whose target matches TWO [[shard]] entries for the same \
+                 artifact_stem MUST be a fail-loud HookResult::Error — got {other:?}"
+            ),
+        }
     }
 
     #[cfg(unix)]
@@ -2838,6 +3203,76 @@ mod tests {
     }
 
     // ===================================================================
+    // PR #818 fix-burst finding m2 — n = 0 fail-loud (item-count trigger
+    // would fire unconditionally; any explicit low_water_mark unsatisfiable)
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_m2_validate_entry_rejects_zero_item_count_threshold() {
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(0);
+        entry.low_water_mark = None;
+
+        let err = validate_entry(&entry).expect_err(
+            "m2: an entry declaring n = 0 MUST fail loud at entry-match time — before this fix, \
+             n = 0 passed validation, making the item-count trigger fire unconditionally on \
+             every dispatch and making any explicit low_water_mark config unsatisfiable",
+        );
+        match err {
+            ShardConfigError::ZeroItemCountThreshold { artifact_stem } => {
+                assert_eq!(artifact_stem, "BC-INDEX");
+            }
+            other => panic!("expected ZeroItemCountThreshold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m2_matched_entry_zero_n_is_fail_loud() {
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(0);
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        let target = std::path::Path::new("BC-INDEX.md");
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Edit",
+            target,
+            &serde_json::json!({"old_string": "a", "new_string": "ab"}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("BC-INDEX") && message.contains("n = 0"),
+                    "m2: expected the ZeroItemCountThreshold diagnostic naming artifact_stem \
+                     \"BC-INDEX\" and citing n = 0, got: {message}"
+                );
+            }
+            other => panic!(
+                "m2: a dispatch whose target MATCHES a \"frontmatter-changelog-array\"-shaped \
+                 entry declaring n = 0 MUST be a fail-loud HookResult::Error — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m2_validate_entry_accepts_n_equals_one() {
+        // Control: n = 1 (the smallest legal positive threshold) MUST still
+        // validate successfully — this fix rejects ONLY n = 0, never any
+        // positive n.
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(1);
+        entry.low_water_mark = None;
+        validate_entry(&entry)
+            .expect("m2 control: n = 1 is a legal positive item-count threshold and MUST validate");
+    }
+
+    // ===================================================================
     // O-C1-P4-001 (LOW, S-25.02 Phase F4 LOCAL adversary cluster-1 pass-4
     // observation) — symmetry between the two `shard_cap_gate_check` shape
     // arms. The `"flat"` arm guards against a non-mutating `tool_name` via
@@ -2885,5 +3320,371 @@ mod tests {
              (the ungated arm proceeded to read_changelog_item_count and surfaced the fixture's \
              deliberately malformed frontmatter as a fail-loud HookResult::Error)"
         );
+    }
+
+    // ===================================================================
+    // PR #818 fix-burst finding m3 / M-1 — malformed/absent REQUIRED
+    // payload fields MUST fail loud, never silently compute a 0-byte/
+    // 0-delta size that lets the cap trigger go unguarded.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_m3_write_missing_content_field_is_fail_loud() {
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+        let target = Path::new("/repo/.factory/decision-log.md");
+
+        // Before the fix: an empty tool_input silently computed content_len
+        // = 0, so this Write would have Continue'd — a malformed payload
+        // silently unguarded. After the fix: fail loud.
+        let result = shard_cap_gate_check(&registry, "Write", target, &serde_json::json!({}));
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("\"content\""),
+                    "m3: expected a diagnostic naming artifact_stem \"decision-log\" and the \
+                     missing \"content\" field, got: {message}"
+                );
+            }
+            other => panic!(
+                "m3: a Write with tool_input missing the required \"content\" field MUST be a \
+                 fail-loud HookResult::Error, never a silent Continue — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m3_write_non_string_content_field_is_fail_loud() {
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+        let target = Path::new("/repo/.factory/decision-log.md");
+
+        // "content" present but a JSON number, not a string.
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            target,
+            &serde_json::json!({"content": 42}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("\"content\""),
+                    "m3: expected a diagnostic naming artifact_stem \"decision-log\" and the \
+                     non-string \"content\" field, got: {message}"
+                );
+            }
+            other => panic!(
+                "m3: a Write with a non-string \"content\" field MUST be a fail-loud \
+                 HookResult::Error, never a silent 0-byte Continue — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m3_edit_missing_fields_is_fail_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("decision-log.md");
+        std::fs::write(&target, "x".repeat(40_000)).expect("write fixture shard");
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        // Before the fix: an empty tool_input silently computed old_len =
+        // new_len = 0, so this Edit would have Continue'd — a malformed
+        // payload silently unguarded. After the fix: fail loud.
+        let result = shard_cap_gate_check(&registry, "Edit", &target, &serde_json::json!({}));
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("old_string"),
+                    "m3: expected a diagnostic naming artifact_stem \"decision-log\" and the \
+                     missing \"old_string\" field, got: {message}"
+                );
+            }
+            other => panic!(
+                "m3: an Edit with tool_input missing the required old_string/new_string fields \
+                 MUST be a fail-loud HookResult::Error, never a silent Continue — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m3_multi_edit_missing_edits_array_is_fail_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("decision-log.md");
+        std::fs::write(&target, "x".repeat(40_000)).expect("write fixture shard");
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        // Before the fix: an empty tool_input silently treated the absent
+        // "edits" array as zero edit blocks (net_delta = 0), so this
+        // MultiEdit would have Continue'd. After the fix: fail loud.
+        let result = shard_cap_gate_check(&registry, "MultiEdit", &target, &serde_json::json!({}));
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("\"edits\""),
+                    "m3: expected a diagnostic naming artifact_stem \"decision-log\" and the \
+                     missing \"edits\" array, got: {message}"
+                );
+            }
+            other => panic!(
+                "m3: a MultiEdit with tool_input missing the required \"edits\" array MUST be a \
+                 fail-loud HookResult::Error, never a silent Continue — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m3_multi_edit_malformed_edit_block_is_fail_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("decision-log.md");
+        std::fs::write(&target, "x".repeat(40_000)).expect("write fixture shard");
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        // "edits" is present and an array, but its single block is missing
+        // "new_string" — this must still fail loud, not silently treat that
+        // block's new_len as 0.
+        let result = shard_cap_gate_check(
+            &registry,
+            "MultiEdit",
+            &target,
+            &serde_json::json!({"edits": [{"old_string": "a"}]}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("decision-log") && message.contains("new_string"),
+                    "m3: expected a diagnostic naming artifact_stem \"decision-log\" and the \
+                     missing \"new_string\" field, got: {message}"
+                );
+            }
+            other => panic!(
+                "m3: a MultiEdit edit block missing \"new_string\" MUST be a fail-loud \
+                 HookResult::Error, never a silent 0-byte Continue — got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_BC_1_18_005_m3_multi_edit_empty_edits_array_is_not_malformed() {
+        // Control: an EMPTY "edits" array is legitimate (net_delta = 0, a
+        // no-op MultiEdit), not malformed — it MUST NOT be rejected the same
+        // way an ABSENT/non-array "edits" field is.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("decision-log.md");
+        std::fs::write(&target, "x".repeat(5_000)).expect("write fixture shard");
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "MultiEdit",
+            &target,
+            &serde_json::json!({"edits": []}),
+        );
+
+        assert_eq!(
+            result,
+            HookResult::Continue,
+            "m3 control: an EMPTY edits array is a legitimate no-op MultiEdit, not a malformed \
+             payload — it MUST Continue, not fail loud"
+        );
+    }
+
+    // ===================================================================
+    // PR #818 fix-burst finding B1 — a present-but-fenceless frontmatter
+    // target file MUST be permissive (Ok(0)), never a fail-loud io::Error.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_B1_read_changelog_item_count_no_fence_at_all_is_ok_zero() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        std::fs::write(&path, "no frontmatter fence at all\n").expect("write fixture");
+
+        let count = read_changelog_item_count(&path).expect(
+            "B1: a present-but-fenceless file MUST be Ok(0), not a fail-loud io::Error — a \
+             malformed/absent fence on an EXISTING file must not hard-block a legitimate write",
+        );
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_read_changelog_item_count_no_closing_fence_is_ok_zero() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        // Opening fence present, but no closing "---" line anywhere.
+        std::fs::write(
+            &path,
+            "---\ntitle: \"BC-INDEX\"\nchangelog: []\n# no closing fence\n",
+        )
+        .expect("write fixture");
+
+        let count = read_changelog_item_count(&path).expect(
+            "B1: an opening fence with no well-formed closing fence MUST be Ok(0), not a \
+             fail-loud io::Error",
+        );
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_shard_cap_gate_check_no_fence_write_continues() {
+        // Full-stack: a Write against an EXISTING, present-but-fenceless
+        // frontmatter-changelog-array-shaped target MUST Continue, never
+        // hard-block as HookResult::Error.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("BC-INDEX.md");
+        std::fs::write(&target, "no frontmatter fence at all\n").expect("write fixture");
+
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(50);
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            &target,
+            &serde_json::json!({"content": "new content"}),
+        );
+        assert_eq!(
+            result,
+            HookResult::Continue,
+            "B1: a Write against an EXISTING, present-but-fenceless target MUST Continue, never \
+             hard-block a legitimate write as HookResult::Error — got {result:?}"
+        );
+    }
+
+    // ===================================================================
+    // PR #818 fix-burst finding B2 — bounded read: a target file exceeding
+    // MAX_CHANGELOG_TARGET_READ_BYTES MUST fail loud WITHOUT reading its
+    // full content.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_B2_read_changelog_item_count_oversized_file_fails_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        // One byte over the ceiling — stat() alone must be enough to reject
+        // this without ever reading the file's content into memory.
+        let oversized_len = MAX_CHANGELOG_TARGET_READ_BYTES + 1;
+        let file = std::fs::File::create(&path).expect("create fixture");
+        file.set_len(oversized_len).expect("set fixture length");
+        drop(file);
+
+        let err = read_changelog_item_count(&path).expect_err(
+            "B2: a target file exceeding MAX_CHANGELOG_TARGET_READ_BYTES MUST fail loud rather \
+             than being read into memory in full",
+        );
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::FileTooLarge,
+            "B2: expected io::ErrorKind::FileTooLarge, got {:?}: {err}",
+            err.kind()
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B2_read_changelog_item_count_at_ceiling_is_not_rejected_by_size_alone() {
+        // Control: a file exactly AT the ceiling (well-formed, empty
+        // changelog) must NOT be rejected by the size guard — only content
+        // strictly GREATER than the ceiling fails loud.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        let body = "---\ntitle: \"BC-INDEX\"\nchangelog: []\n---\n";
+        let padding_len = (MAX_CHANGELOG_TARGET_READ_BYTES as usize).saturating_sub(body.len());
+        let mut content = String::with_capacity(body.len() + padding_len + 1);
+        // Pad INSIDE a YAML comment line appended after the closing fence so
+        // the frontmatter block itself stays well-formed.
+        content.push_str(body);
+        content.push_str("# ");
+        content.push_str(&"x".repeat(padding_len.saturating_sub(2)));
+        // Trim/pad to land exactly at the ceiling.
+        content.truncate(MAX_CHANGELOG_TARGET_READ_BYTES as usize);
+        std::fs::write(&path, &content).expect("write fixture");
+        assert_eq!(
+            std::fs::metadata(&path).expect("stat fixture").len(),
+            MAX_CHANGELOG_TARGET_READ_BYTES,
+            "precondition: fixture must be exactly at the ceiling"
+        );
+
+        let count = read_changelog_item_count(&path)
+            .expect("B2 control: a file exactly AT the ceiling MUST NOT be rejected by size alone");
+        assert_eq!(count, 0);
+    }
+
+    // ===================================================================
+    // PR #818 fix-burst finding n3 — line-anchored closing-fence detection,
+    // not a naive "\n---" substring search.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_n3_block_scalar_line_starting_with_dashes_is_not_mistaken_for_fence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        // A YAML block-scalar value contains a line that STARTS WITH "---"
+        // but is NOT itself a bare "---" line — the naive `"\n---"`
+        // substring search would truncate the frontmatter block here,
+        // silently losing the two real changelog items below it.
+        std::fs::write(
+            &path,
+            "---\n\
+             title: \"BC-INDEX\"\n\
+             notes: |\n\
+             \x20\x20---this line starts with dashes but is not a fence---\n\
+             \x20\x20another line\n\
+             changelog:\n\
+             \x20\x20- version: \"1.0\"\n\
+             \x20\x20- version: \"1.1\"\n\
+             ---\n\n# Body\n",
+        )
+        .expect("write fixture");
+
+        let count = read_changelog_item_count(&path).expect(
+            "n3: a line-anchored closing-fence search must not be fooled by a block-scalar line \
+             that merely starts with \"---\"",
+        );
+        assert_eq!(
+            count, 2,
+            "n3: the real changelog: array (2 items) must be counted correctly, not truncated by \
+             a false-positive \"\\n---\" substring match inside the notes: block scalar"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_n3_four_dash_line_is_not_mistaken_for_fence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("BC-INDEX.md");
+        std::fs::write(
+            &path,
+            "---\n\
+             title: \"BC-INDEX\"\n\
+             separator: \"----\"\n\
+             changelog:\n\
+             \x20\x20- version: \"1.0\"\n\
+             ---\n\n# Body\n",
+        )
+        .expect("write fixture");
+
+        let count = read_changelog_item_count(&path).expect(
+            "n3: a \"----\" (four-dash) line must not be mistaken for the three-dash closing \
+             fence",
+        );
+        assert_eq!(count, 1);
     }
 }

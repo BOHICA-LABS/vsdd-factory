@@ -331,12 +331,20 @@ const SHARD_CONFIG_RELATIVE_PATH: &str = ".factory/shard-config.toml";
 /// compatibility with those fixtures — only an EXPLICIT non-PreToolUse
 /// `event_name` opts a dispatch out.
 fn shard_cap_precheck(inputs: &ExecutorInputs<'_>) -> Option<vsdd_hook_sdk::HookResult> {
+    // PR #818 fix-burst finding m4: named, documented default rather than an
+    // implicit `.unwrap_or(...)` fallback that reads as ad hoc fixture
+    // convenience. See this function's own doc comment above for the full
+    // backward-compatibility rationale (this crate's pre-existing
+    // PreToolUse-only test fixtures predate the `event_name` guard and never
+    // populate this field) — this constant makes that a deliberate,
+    // named choice rather than an accidental one.
+    const DEFAULT_EVENT_TYPE_WHEN_ABSENT: EventType = EventType::PreToolUse;
     let event_type = inputs
         .payload_value
         .get("event_name")
         .and_then(|v| v.as_str())
         .map(EventType::from_event_str)
-        .unwrap_or(EventType::PreToolUse);
+        .unwrap_or(DEFAULT_EVENT_TYPE_WHEN_ABSENT);
     if event_type != EventType::PreToolUse {
         return None;
     }
@@ -413,11 +421,37 @@ fn shard_cap_precheck(inputs: &ExecutorInputs<'_>) -> Option<vsdd_hook_sdk::Hook
 /// failure-kind marker) or a `HookResult::Block`'s `reason` (reserved for a
 /// later cluster's fired-trigger block outcome; `shard_cap_gate_check` does
 /// not construct one today — see `shard_cap_precheck`'s doc comment).
-fn shard_gate_block_outcome(message: String) -> PluginOutcome {
+///
+/// `plugin_version` (PR #818 fix-burst finding m5, corrected from an
+/// earlier revision that hardcoded `String::new()`): callers pass
+/// `inputs.base_host_ctx.plugin_version.clone()` — the same dispatcher-own
+/// version every OTHER `PluginOutcome` in this file populates via
+/// `host_ctx.plugin_version`/`base_host_ctx.plugin_version` (this native
+/// gate is dispatcher code, not a versioned WASM plugin, so there is no
+/// separate "shard-cap-gate plugin version" to report; the dispatcher's own
+/// version is the accurate value, consistent with how this file already
+/// reports `plugin_version` for its OTHER native/sentinel outcomes, e.g. the
+/// `payload serialize`/`plugin load failed` crash paths above).
+///
+/// On `plugins_run` counting (m5's second half): this function's outcome
+/// intentionally DOES count toward `TierExecutionSummary::per_plugin_results
+/// .len()` (and therefore the operator-facing `plugins_run` telemetry field
+/// in `main.rs`) exactly like this file's other native/sentinel outcomes —
+/// the `spawn_blocking` join-error `"<unknown>"` crash outcome, the
+/// `"payload serialize"` crash outcome, and the `"plugin load failed"` crash
+/// outcome all count identically despite none of them representing a
+/// successfully-executed WASM plugin. `plugins_run` has always meant "number
+/// of outcome-producing checks this dispatch ran," not "number of WASM
+/// modules that executed successfully" — this native gate check fits that
+/// established, pre-existing semantics precisely. (Reviewed against a fix
+/// suggestion to exclude this outcome from the count: doing so would
+/// actually be the INCONSISTENT choice, singling out this one native check
+/// while leaving the other three sentinel-outcome sites uncorrected.)
+fn shard_gate_block_outcome(message: String, plugin_version: String) -> PluginOutcome {
     let stdout = serde_json::json!({ "outcome": "block", "reason": message }).to_string();
     PluginOutcome {
         plugin_name: "shard-cap-gate".to_string(),
-        plugin_version: String::new(),
+        plugin_version,
         on_error: OnError::Block,
         result: PluginResult::Ok {
             exit_code: 2,
@@ -471,11 +505,17 @@ pub async fn execute_tiers(
         match shard_gate_result {
             vsdd_hook_sdk::HookResult::Error { message } => {
                 block_intent = true;
-                all_outcomes.push(shard_gate_block_outcome(message));
+                all_outcomes.push(shard_gate_block_outcome(
+                    message,
+                    inputs.base_host_ctx.plugin_version.clone(),
+                ));
             }
             vsdd_hook_sdk::HookResult::Block { reason } => {
                 block_intent = true;
-                all_outcomes.push(shard_gate_block_outcome(reason));
+                all_outcomes.push(shard_gate_block_outcome(
+                    reason,
+                    inputs.base_host_ctx.plugin_version.clone(),
+                ));
             }
             vsdd_hook_sdk::HookResult::Continue => {}
         }

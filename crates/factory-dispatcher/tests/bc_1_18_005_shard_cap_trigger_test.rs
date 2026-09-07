@@ -627,6 +627,59 @@ shape = \"flat\"
 }
 
 // ---------------------------------------------------------------------------
+// PR #818 fix-burst finding m5 — the synthesized shard-cap-gate
+// PluginOutcome MUST carry an accurate, non-empty plugin_version (the
+// dispatcher's own version, same as every other native/sentinel outcome in
+// executor.rs), never a hardcoded empty string.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_005_m5_shard_gate_block_outcome_carries_accurate_plugin_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    std::fs::write(&target, "x".repeat(10)).unwrap();
+
+    // Same EC-013 malformed config as the AC-023 test above — any fail-loud
+    // verdict from shard_cap_precheck exercises shard_gate_block_outcome.
+    let malformed_cap_exceeds_ceiling: &str = "\
+[[shard]]
+artifact_stem = \"decision-log\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 100000
+shape = \"flat\"
+";
+
+    let summary = run_shard_gate_for_config(
+        dir.path(),
+        malformed_cap_exceeds_ceiling,
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(10)}),
+    )
+    .await;
+
+    let shard_gate_outcome = summary
+        .per_plugin_results
+        .iter()
+        .find(|o| o.plugin_name == "shard-cap-gate")
+        .expect("m5: the native shard-cap gate's own fail-loud verdict MUST be present in per_plugin_results");
+
+    // `inputs_for`'s fixture HostContext is constructed with plugin_version
+    // "0.0.1" (see `HostContext::new("", "0.0.1", ...)` above) — before this
+    // fix, `shard_gate_block_outcome` hardcoded `plugin_version:
+    // String::new()` regardless of the dispatcher's actual version.
+    assert_eq!(
+        shard_gate_outcome.plugin_version, "0.0.1",
+        "m5: the synthesized shard-cap-gate PluginOutcome MUST carry the dispatcher's actual \
+         plugin_version (\"0.0.1\" in this fixture), not a hardcoded empty string — got {:?}",
+        shard_gate_outcome.plugin_version
+    );
+}
+
+// ---------------------------------------------------------------------------
 // F-C1-P2-004 (LOW, S-25.02 Phase F4 LOCAL adversary pass-2 cluster-1) —
 // negative control proving the native shard-cap gate is PreToolUse-scoped
 // ONLY (BC-1.18.005 Precondition 1). `shard_cap_precheck` (executor.rs) now
