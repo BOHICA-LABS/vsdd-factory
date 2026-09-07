@@ -780,8 +780,23 @@ pub fn find_matching_entry<'a>(
 ///    (both repo-root-relative, or both absolute against the same root),
 ///    and `target_path` is some file nested inside it.
 fn path_falls_under_or_equals(target_path: &Path, registered_path: &Path) -> bool {
-    let target: Vec<_> = target_path.components().collect();
-    let registered: Vec<_> = registered_path.components().collect();
+    // `Path::components()` retains a leading `CurDir` component (`.`) when the
+    // path was written with an explicit `./` prefix (e.g. `./.factory/x.md`),
+    // but drops it when the path is written without one (`.factory/x.md`).
+    // Both forms name the SAME location, so a raw component-wise comparison
+    // would silently fail to match the `./`-prefixed form against an
+    // otherwise-identical target/registered path pair — exactly the kind of
+    // silently-swallowed misconfiguration this module is designed to fail
+    // loud on everywhere else. Filter `CurDir` out of both vectors first so
+    // the two spellings normalize to the same component sequence.
+    let target: Vec<_> = target_path
+        .components()
+        .filter(|c| *c != std::path::Component::CurDir)
+        .collect();
+    let registered: Vec<_> = registered_path
+        .components()
+        .filter(|c| *c != std::path::Component::CurDir)
+        .collect();
 
     let suffix_match = registered.len() <= target.len()
         && target[target.len() - registered.len()..] == registered[..];
@@ -1959,6 +1974,37 @@ mod tests {
             HookResult::Continue,
             "B-1: a Write against a file sharing a registered entry's STEM but not its PATH \
              MUST Continue, exactly as an entirely-unregistered file would"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_path_falls_under_or_equals_curdir_prefix_matches_same_as_without() {
+        // PR #818 fix-burst finding S-2: `Path::components()` retains a
+        // leading `CurDir` (`.`) component when `artifact_path` is written
+        // with an explicit `./` prefix (the natural, idiomatic way an
+        // operator would write a repo-root-relative path), but drops it
+        // when written without one. Both spellings name the identical
+        // location and MUST match the same targets identically — an
+        // operator who writes the `./`-prefixed form must not get an entry
+        // that silently matches nothing (leaving the artifact unguarded
+        // with no diagnostic).
+        let target = Path::new("/repo/.factory/decision-log.md");
+        let with_curdir_prefix = Path::new("./.factory/decision-log.md");
+        let without_curdir_prefix = Path::new(".factory/decision-log.md");
+
+        assert_eq!(
+            path_falls_under_or_equals(target, with_curdir_prefix),
+            path_falls_under_or_equals(target, without_curdir_prefix),
+            "S-2: a `./`-prefixed artifact_path MUST match exactly the same targets as the same \
+             path written without the `./` prefix — CurDir components must be normalized out of \
+             both operands before component-wise comparison"
+        );
+        assert!(
+            path_falls_under_or_equals(target, with_curdir_prefix),
+            "S-2: the `./`-prefixed form must actually match (not just match-equal to a \
+             not-matching baseline) — this is the operator-facing failure mode: a `./`-prefixed \
+             artifact_path silently matching nothing would leave the artifact completely \
+             unguarded"
         );
     }
 
@@ -3958,8 +4004,11 @@ mod tests {
     fn test_BC_1_18_005_B2_read_changelog_item_count_oversized_file_fails_loud() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("BC-INDEX.md");
-        // One byte over the ceiling — stat() alone must be enough to reject
-        // this without ever reading the file's content into memory.
+        // One byte over the ceiling — the M-2 bounded read (a single capped
+        // `Read::take(MAX_CHANGELOG_TARGET_READ_BYTES + 1)` on an already-open
+        // file handle, not a separate stat()/metadata() call) must be enough
+        // to reject this without ever reading the file's full content into
+        // memory.
         let oversized_len = MAX_CHANGELOG_TARGET_READ_BYTES + 1;
         let file = std::fs::File::create(&path).expect("create fixture");
         file.set_len(oversized_len).expect("set fixture length");
