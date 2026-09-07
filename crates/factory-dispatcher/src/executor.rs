@@ -285,7 +285,13 @@ pub struct ExecutorInputs<'a> {
 /// `shard-config.toml` rather than `hooks-registry.toml` itself, so the
 /// gate's config surface can evolve independently of the WASM plugin
 /// registry schema.
-const SHARD_CONFIG_RELATIVE_PATH: &str = ".factory/shard-config.toml";
+// S-25.02 BC-1.18.006 cluster-2: widened from private to `pub(crate)` so
+// `invoke::detect_replace_all_overcap_candidate` (Postcondition 7 catch
+// point (i)'s qualification filter) can reuse the SAME well-known path
+// rather than duplicating this string literal — visibility-only change, no
+// behavior change to this constant's pre-existing PreToolUse call site
+// below.
+pub(crate) const SHARD_CONFIG_RELATIVE_PATH: &str = ".factory/shard-config.toml";
 
 /// Native (non-WASM) shard-cap gate invocation point (S-25.02 BC-1.18.005
 /// T-2). Called from `execute_tiers` BEFORE the registry-driven tier loop

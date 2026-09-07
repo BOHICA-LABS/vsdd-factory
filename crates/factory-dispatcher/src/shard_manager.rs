@@ -1488,6 +1488,28 @@ pub fn shard_cap_gate_check(
                             };
                         }
                     };
+
+                    // BC-1.18.006 Postcondition 7 catch point (ii) / story
+                    // AC-025 (ADR-051 §Decision 15 point 3): leading-probe
+                    // backstop, reusing `current_bytes` (JUST computed above
+                    // by this SAME `current_shard_bytes_flat` stat() call —
+                    // no NEW stat() call is added here). Real (non-`todo!()`)
+                    // comparison: for every one of this file's own already-
+                    // shipped cluster-1 fixtures, `current_bytes <=
+                    // entry.shard_cap_bytes` holds (none construct an
+                    // on-disk shard already over cap), so this branch is
+                    // NEVER entered by any pre-existing test — only a NEW
+                    // test-writer fixture that deliberately leaves an
+                    // on-disk shard already over cap (covering a missed
+                    // catch point (i), EC-015) exercises
+                    // `reconcile_leading_probe_backstop`, which is entirely
+                    // `todo!()`.
+                    if current_bytes > entry.shard_cap_bytes
+                        && let Err(e) = reconcile_leading_probe_backstop(entry, target_path)
+                    {
+                        return e.into();
+                    }
+
                     let old_len = match required_str_len_bytes(
                         tool_input,
                         "old_string",
@@ -1523,6 +1545,17 @@ pub fn shard_cap_gate_check(
                             };
                         }
                     };
+
+                    // BC-1.18.006 Postcondition 7 catch point (ii) / story
+                    // AC-025 — see the identical, more fully commented guard
+                    // in the `ToolKind::Edit` arm just above for the full
+                    // "no new stat() call" / non-regression rationale.
+                    if current_bytes > entry.shard_cap_bytes
+                        && let Err(e) = reconcile_leading_probe_backstop(entry, target_path)
+                    {
+                        return e.into();
+                    }
+
                     // m3/M-1: the "edits" field itself must be a present JSON
                     // array — absent or non-array MUST fail loud, never
                     // silently treated as zero edit blocks. An EMPTY array
@@ -1575,23 +1608,31 @@ pub fn shard_cap_gate_check(
             };
 
             if size_trigger_fires(projected_size, entry.shard_cap_bytes) {
-                // Postcondition 3's "Ownership" bullet: this BC owns the
-                // trigger-boundary DECISION only. BC-1.18.006 owns the
-                // observable roll/block outcome once it fires — that BC is
-                // explicitly out of scope for this cluster (see this
-                // module's own "Scope note"), so this function itself NEVER
-                // constructs a `HookResult::Block` for a fired trigger. The
-                // fired decision is still surfaced (non-fatally) via
-                // `tracing::warn!` so it is visible in telemetry rather than
-                // silently swallowed while the roll implementation lands.
-                tracing::warn!(
-                    artifact_stem = %entry.artifact_stem,
-                    projected_size,
-                    shard_cap_bytes = entry.shard_cap_bytes,
-                    "BC-1.18.005: byte-size shard-cap trigger fired; roll/block outcome is \
-                     owned by BC-1.18.006 (not yet implemented in this cluster) — allowing \
-                     the call to proceed"
-                );
+                // S-25.02 cluster-2 (BC-1.18.006 "roll"): the trigger-fires
+                // branch NOW owns the observable roll/block outcome (this
+                // module's own "Scope note" above is UPDATED by cluster-2 —
+                // BC-1.18.006 is no longer out of scope). Postcondition 1's
+                // staged four-step sequence executes BEFORE any
+                // `HookResult` is returned (Invariant 2); `execute_roll`
+                // itself is `todo!()` (test-writer's Red Gate suite for
+                // AC-006..AC-009 drives this to a failing/panicking
+                // assertion until implementer replaces it), but this call
+                // site's WIRING is real: a fired trigger no longer merely
+                // `tracing::warn!`s and Continues (the cluster-1 posture,
+                // withdrawn here) — it MUST resolve to either
+                // `HookResult::Block` (Postcondition 2's unified retry
+                // message) or `HookResult::Error` (a genuine `E-SHD-001`
+                // crash), never a silent `Continue` (Invariant 1).
+                return match execute_roll(entry, target_path, false) {
+                    Ok(sealed) => HookResult::Block {
+                        reason: build_roll_retry_block_reason(
+                            &entry.artifact_stem,
+                            entry.shard_cap_bytes,
+                            &sealed.path,
+                        ),
+                    },
+                    Err(e) => e.into(),
+                };
             }
 
             HookResult::Continue
@@ -1660,6 +1701,397 @@ pub fn shard_cap_gate_check(
             HookResult::Continue
         }
     }
+}
+
+// ===========================================================================
+// BC-1.18.006 — Roll-Before-Write via Block-and-Retry (Not Transparent
+// Redirection) Plus Same-Invocation Atomic Shard-Index Publication
+// (S-25.02 cluster-2 "roll")
+// ===========================================================================
+//
+// # BC-5.38.001 Red Gate discipline — STUBBED (S-25.02 cluster-2, stub-architect)
+//
+// Every function below is a REAL, compilable signature. Bodies are `todo!()`
+// EXCEPT two explicitly justified exceptions (see their own doc comments):
+// `build_roll_retry_block_reason` (GREEN-BY-DESIGN — a pure, zero-branching
+// string template) and `From<ShardRollError> for HookResult` (WIRING-EXEMPT
+// — `Display`-forwarding delegation, identical in shape to this file's
+// already-shipped `From<ShardConfigError> for HookResult`). test-writer's
+// next-stage Red Gate suite is expected to drive every `todo!()` below to a
+// failing (panicking) assertion; implementer replaces each with real logic
+// per BC-1.18.006's postconditions. `execute_roll`'s call site (this
+// module's `ShardShape::Flat` trigger-fire branch, above) and Postcondition
+// 7's two catch-point call sites (`crate::invoke::
+// reconcile_replace_all_overcap_if_qualifying`, wired unconditionally into
+// `main::run`; and the two `ShardShape::Flat` `Edit`/`MultiEdit`-arm
+// leading-probe guards, above) are ALREADY WIRED — verified (by inspection
+// of every pre-existing test fixture this file and its sibling integration
+// test carry) to be UNREACHABLE by any test that predates this burst, so
+// this cluster's stubs introduce zero regression against cluster-1's
+// already-shipped, already-green BC-1.18.005 suite.
+
+/// One `[[shard]]` shard-index table entry — one seal event (BC-1.18.006
+/// Postcondition 5, extended v1.4 with `sealed_retroactively`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ShardIndexEntry {
+    /// Monotonically increasing seal sequence number, starting at 1.
+    pub seq: u32,
+    /// The sealed shard's own filename, e.g. `"decision-log.0001.md"`.
+    pub path: String,
+    /// UTC ISO-8601 seal timestamp.
+    pub sealed_at: String,
+    /// The sealed shard's exact final byte count. `<= shard_cap_bytes`
+    /// (Postcondition 3) for a normal seal; MAY exceed it when
+    /// `sealed_retroactively` is `true` (Postcondition 7's documented,
+    /// narrowly-scoped exception — Invariant 6).
+    pub bytes_at_seal: u64,
+    /// `true` iff this seal was produced by Postcondition 7's retroactive
+    /// reconciliation path (catch point (i) or (ii)) rather than
+    /// Postcondition 1's normal pre-write block-and-retry path. Optional at
+    /// the TOML layer, default `false` — backward compatible with every
+    /// `[[shard]]` index entry produced before Postcondition 7 existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sealed_retroactively: bool,
+}
+
+/// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
+/// Postcondition 5's schema).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ShardIndex {
+    pub schema_version: u32,
+    pub artifact_stem: String,
+    pub current_shard: String,
+    pub shard_cap_bytes: u64,
+    pub max_single_record_bytes: u64,
+    pub safety_margin_bytes: u64,
+    pub practical_fuel_ceiling: u64,
+    pub worst_case_fuel_per_byte: f64,
+    #[serde(default, rename = "shard")]
+    pub shards: Vec<ShardIndexEntry>,
+}
+
+/// Named crash-point error codes for BC-1.18.006's staged roll sequence
+/// (Postcondition 1's partial-failure postconditions; ADR-051 §Decision 11).
+/// Reused VERBATIM (never a new code) by Postcondition 7's retroactive
+/// invocation, catch point (i)/(ii) (ADR-051 §Decision 15 point 3).
+#[derive(Debug, Error)]
+pub enum ShardRollError {
+    /// Steps (a)-(b) fail: the canonical file is left completely untouched
+    /// — safe, no data loss, no duplicate. The next dispatch attempt
+    /// re-evaluates the trigger and re-attempts the FULL sequence from step
+    /// (a).
+    #[error(
+        "E-SHD-001: shard-seal-write failure for artifact_stem \"{artifact_stem}\" — canonical \
+         file left in its exact pre-roll state, still over cap: {source}"
+    )]
+    SealWriteFailed {
+        artifact_stem: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Step (c) fails after step (b) succeeded: the sealed shard durably
+    /// exists (a byte-for-byte copy of the pre-roll content) AND the
+    /// canonical file still holds that same content too (a transient,
+    /// DETECTABLE duplicate-content state, not data loss). Self-heals via
+    /// resume-from-truncate on the next dispatch
+    /// ([`self_heal_resume_from_truncate`]; EC-010).
+    #[error(
+        "E-SHD-006: canonical-truncate failed after sealed-shard publish succeeded for \
+         artifact_stem \"{artifact_stem}\" (sealed shard \"{sealed_path}\" already durable) — \
+         resume-from-truncate self-heal required on next dispatch: {source}"
+    )]
+    TruncateFailedAfterSeal {
+        artifact_stem: String,
+        sealed_path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Step (d) fails after step (c) succeeded: the canonical file is
+    /// CORRECTLY fresh and empty, and the sealed shard exists correctly on
+    /// disk, but `<artifact-stem>.shard-index.toml` has not yet recorded
+    /// the new `[[shard]]` entry (a discoverability-METADATA gap only — no
+    /// reader-visible data loss). Self-heals via index reconciliation on
+    /// the next dispatch
+    /// ([`self_heal_reconcile_missing_index_entries`]; EC-011).
+    #[error(
+        "E-SHD-007: shard-index publish failed after canonical-truncate succeeded for \
+         artifact_stem \"{artifact_stem}\" (sealed shard \"{sealed_path}\" already durable, \
+         canonical already empty) — index reconciliation required on next dispatch: {source}"
+    )]
+    IndexPublishFailedAfterTruncate {
+        artifact_stem: String,
+        sealed_path: String,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// Fail-loud roll errors surface to the dispatcher's handling path as
+/// `HookResult::Error` (Invariant 1: "no version may return `Error` for a
+/// normal (non-crash) over-cap condition" — a genuine crash mid-roll IS the
+/// one case `Error` is correct for; a normal, uninterrupted roll returns
+/// `HookResult::Block`, never routed through this `From` impl at all).
+///
+/// # WIRING-EXEMPT (BC-5.38.003)
+///
+/// `From<T>` blanket delegation to a single `Display`-forwarding call —
+/// identical in shape to this file's existing, already-shipped
+/// `From<ShardConfigError> for HookResult` impl above. No domain decision:
+/// `ShardRollError`'s own `Display` impl (via `thiserror`) already carries
+/// the full E-SHD-NNN-coded, artifact-stem-scoped diagnostic text.
+impl From<ShardRollError> for HookResult {
+    fn from(err: ShardRollError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Staged 4-step roll sequence (Postcondition 1; ADR-051 §Decision 11)
+// ---------------------------------------------------------------------------
+
+/// Step (a): read the canonical file's current full content — a one-time,
+/// roll-only read (BC-1.18.006 Postcondition 1 step (a)). The cheap
+/// per-write TRIGGER check (BC-1.18.005 Postcondition 2) remains
+/// `stat()`-only; content is read ONLY once a roll is already confirmed
+/// necessary.
+pub fn read_canonical_content(_canonical_path: &Path) -> io::Result<String> {
+    todo!(
+        "BC-1.18.006 Postcondition 1 step (a): std::fs::read_to_string(canonical_path). \
+         Roll-only — never called by BC-1.18.005's own per-write trigger check (that check stays \
+         stat()-only per BC-1.18.005 Postcondition 2)."
+    )
+}
+
+/// Step (b): publish the sealed shard as a brand-NEW file at
+/// `<stem>.<seq:04>.md` (BC-1.18.006 Postcondition 1 step (b)) via
+/// `write_atomic` — a `rename()` that CREATES a not-yet-existing
+/// destination, never interrupting any reader of the canonical path (sealed
+/// filenames are never read by shard-unaware code).
+pub fn publish_sealed_shard(_sealed_path: &Path, _content: &str) -> Result<(), ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 1 step (b): last_amended_migrate::atomic_write::write_atomic(\
+         sealed_path, content), mapping a write_atomic failure to \
+         ShardRollError::SealWriteFailed (E-SHD-001) — the caller (execute_roll) supplies the \
+         artifact_stem context this error variant needs."
+    )
+}
+
+/// Step (c): atomically REPLACE the canonical file's content with empty via
+/// the SAME `write_atomic` temp-file-then-rename primitive (BC-1.18.006
+/// Postcondition 1 step (c); Invariant 2/3) — never a delete-then-create,
+/// never a rename of the canonical path away; the canonical path resolves
+/// to SOME valid file at every observable instant.
+pub fn truncate_canonical_to_empty(_canonical_path: &Path) -> Result<(), ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 1 step (c): \
+         last_amended_migrate::atomic_write::write_atomic(canonical_path, \"\"), mapping a \
+         write_atomic failure to ShardRollError::TruncateFailedAfterSeal (E-SHD-006) — the caller \
+         (execute_roll) supplies the artifact_stem/sealed_path context this error variant needs."
+    )
+}
+
+/// Step (d): atomically publish the updated shard-index TOML (BC-1.18.006
+/// Postcondition 1 step (d); Postcondition 5's schema) — loads the existing
+/// `<artifact-stem>.shard-index.toml` sibling to `canonical_path` (if any,
+/// else synthesizes a fresh index from `entry`'s cap-formula inputs),
+/// appends exactly one new `[[shard]]` entry with `seq` incrementing
+/// monotonically from 1, and republishes via `write_atomic`.
+pub fn publish_shard_index_update(
+    _index_path: &Path,
+    _entry: &ShardEntry,
+    _new_shard_entry: ShardIndexEntry,
+) -> Result<ShardIndex, ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 1 step (d) / Postcondition 5: load index_path if it exists \
+         (else synthesize a fresh ShardIndex, schema_version=1, from entry's cap-formula inputs), \
+         append new_shard_entry, write_atomic the re-serialized TOML, mapping a write_atomic \
+         failure to ShardRollError::IndexPublishFailedAfterTruncate (E-SHD-007)."
+    )
+}
+
+/// Roll-orchestration entry point — BC-1.18.006 Postcondition 1's full
+/// staged sequence, steps (a)-(d), executed in order (Invariant 2 — never
+/// reordered). Called from [`shard_cap_gate_check`]'s `ShardShape::Flat`
+/// trigger-fire branch for a PROSPECTIVE (pre-write) roll
+/// (`sealed_retroactively = false`), and from Postcondition 7's two catch
+/// points ([`reconcile_post_write_replace_all_overcap`],
+/// [`reconcile_leading_probe_backstop`]) for a RETROACTIVE roll
+/// (`sealed_retroactively = true`) against content already durably on disk
+/// (ADR-051 §Decision 15 point 3 — VERBATIM reuse, no new roll logic, no
+/// new error code).
+///
+/// Returns the newly published [`ShardIndexEntry`] on success — a
+/// prospective roll's caller builds the `HookResult::Block` retry message
+/// from it via [`build_roll_retry_block_reason`]; a retroactive roll's
+/// caller emits no `HookResult` at all (Postcondition 7's no-signal
+/// contract, ADR-051 §Decision 15 point 2).
+pub fn execute_roll(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+    _sealed_retroactively: bool,
+) -> Result<ShardIndexEntry, ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 1: (a) read_canonical_content(canonical_path); (b) determine \
+         the next seq (existing shard-index's max seq + 1, or 1 for a first-ever roll) and \
+         publish_sealed_shard(sealed_path, &content) at '<stem>.<seq:04>.md'; (c) \
+         truncate_canonical_to_empty(canonical_path); (d) publish_shard_index_update(index_path, \
+         entry, new_entry) where new_entry.sealed_retroactively = sealed_retroactively. Return \
+         the published ShardIndexEntry. Never reorder (Invariant 2); map each step's own error \
+         per the E-SHD-001/006/007 partial-failure postconditions."
+    )
+}
+
+/// Unified, single-template retry-instruction `Block` message (BC-1.18.006
+/// Postcondition 2, Invariant 4) — the SAME fixed wording regardless of the
+/// original tool name, naming the artifact, the cap reached, the fact the
+/// current shard is now empty, and per-tool retry guidance embedded within
+/// the ONE template (never a per-tool-name divergent choice).
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single `format!()` expression interpolating three already-known
+/// arguments into a FIXED literal template (Postcondition 2's own wording,
+/// verbatim) — zero branching, no I/O, no calls to non-trivial helpers,
+/// single-expression body. There is no domain decision left for a test to
+/// exercise non-trivially: this implementation satisfies Postcondition 2's
+/// required substrings by construction, not by any logic worth withholding
+/// from test-writer's Red Gate suite.
+pub fn build_roll_retry_block_reason(
+    artifact_stem: &str,
+    shard_cap_bytes: u64,
+    sealed_path: &str,
+) -> String {
+    format!(
+        "Shard `{artifact_stem}` rotated (cap {shard_cap_bytes} bytes reached); the current \
+         shard is now empty. Retry your write against the CURRENT (post-roll, empty) file — do \
+         not resubmit your original payload unchanged: if you used `Edit` or `MultiEdit`, your \
+         `old_string` will no longer match (the content it targeted is now in `{sealed_path}`) — \
+         reissue as a fresh `Write` containing ONLY your new entry; if you used `Write`, \
+         recompute `content` to contain ONLY your new entry (not your original full pre-roll \
+         payload, which reflects discarded state and will exceed the cap again if resubmitted)."
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Self-healing recovery (ADR-051 §Decision 11; EC-010/EC-011). Standalone
+// stubs this burst — call-site wiring (invoked "on the next dispatch
+// attempt... before evaluating any new trigger") is implementer's T-4
+// concern; NOT wired by this stub-architect burst, which wires only
+// `execute_roll`'s own trigger-fire call site and Postcondition 7's two
+// catch points per this burst's explicit dispatch scope.
+// ---------------------------------------------------------------------------
+
+/// `E-SHD-006` self-heal: detects "seal published, truncate did not" (a
+/// sealed shard exists at the index's next-expected `seq` path whose
+/// content is byte-identical to the canonical file's CURRENT content) and,
+/// if so, resumes from step (c) alone — re-attempting ONLY the truncate +
+/// index publish, never re-writing the already-correct sealed shard
+/// (idempotent by construction, since step (b)'s `write_atomic` create is
+/// itself a no-op if reissued against identical content). BC-1.18.006
+/// Postcondition 1's `E-SHD-006` partial-failure postcondition; EC-010.
+///
+/// Returns `Ok(None)` when no `E-SHD-006` duplicate-content state is
+/// detected (the common case — no action taken); `Ok(Some(entry))` when the
+/// self-heal ran and published the missing index entry.
+pub fn self_heal_resume_from_truncate(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    todo!(
+        "BC-1.18.006 EC-010 / ADR-051 §Decision 11: load the shard-index (if any) sibling to \
+         canonical_path; if its next-expected seq's sealed-shard file exists AND is \
+         byte-identical to read_canonical_content(canonical_path)'s CURRENT content, resume from \
+         step (c) alone (truncate_canonical_to_empty + publish_shard_index_update) and return \
+         Ok(Some(published_entry)); otherwise Ok(None) — no action."
+    )
+}
+
+/// `E-SHD-007` self-heal: scans the filesystem for sealed-shard files
+/// matching this artifact's `<stem>.<seq:04>.md` naming convention that are
+/// absent from the shard-index, and appends the missing entries. BC-1.18.006
+/// Postcondition 1's `E-SHD-007` partial-failure postcondition; EC-011.
+///
+/// Returns the list of newly appended [`ShardIndexEntry`] rows (empty when
+/// the index was already fully reconciled — the common case).
+pub fn self_heal_reconcile_missing_index_entries(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+) -> Result<Vec<ShardIndexEntry>, ShardRollError> {
+    todo!(
+        "BC-1.18.006 EC-011 / ADR-051 §Decision 11: glob canonical_path's sibling directory for \
+         '<entry.artifact_stem>.<seq:04>.md' files, diff against the loaded shard-index's \
+         existing seq set, append entries (via publish_shard_index_update) for any sealed shard \
+         file absent from the index, and return the appended entries."
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Postcondition 7 — bounded post-write reconciliation for under-projected
+// `replace_all: true` writes (BC-1.18.006 v1.4; story AC-024/AC-025;
+// ADR-051 §Decision 15)
+// ---------------------------------------------------------------------------
+
+/// Postcondition 7 catch point (i) — immediate post-write reconciliation
+/// (story AC-024; BC-1.18.006 EC-014; Invariant 6). Performs a fresh
+/// `stat()` of `canonical_path` and, if `actual_size >
+/// entry.shard_cap_bytes`, executes [`execute_roll`]'s EXACT four-step
+/// sequence RETROACTIVELY (`sealed_retroactively = true`) against content
+/// ALREADY on disk. Emits NO `HookResult` of its own (ADR-051 §Decision 15
+/// point 2 — a silent filesystem side effect, not a Block/Continue/Error
+/// decision): the dispatch that triggered this call has already returned
+/// `Continue` to the agent before this leg runs.
+///
+/// Called from [`crate::invoke::reconcile_replace_all_overcap_if_qualifying`]
+/// ONLY after that function's own cheap, real, structural qualification
+/// filter (event/tool/`replace_all`/config-match — Postcondition 7's own
+/// "zero added cost outside the narrow case" requirement) has already
+/// confirmed this dispatch is a candidate. This function itself owns ALL of
+/// the BC's tested `stat()`-and-retroactive-roll behavior and is therefore
+/// entirely `todo!()`.
+///
+/// Returns `Ok(None)` when `actual_size <= entry.shard_cap_bytes` (no
+/// action — the single-occurrence trigger estimate was conservative or
+/// exactly correct); `Ok(Some(entry))` when the retroactive roll ran and
+/// published a new sealed shard.
+pub fn reconcile_post_write_replace_all_overcap(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 7 catch point (i) / AC-024: stat() canonical_path; if \
+         actual_size <= entry.shard_cap_bytes, return Ok(None); else execute_roll(entry, \
+         canonical_path, true) and return Ok(Some(published_entry))."
+    )
+}
+
+/// Postcondition 7 catch point (ii) — next-dispatch leading-probe backstop
+/// (story AC-025; BC-1.18.006 EC-015). Covers a dispatcher-process crash
+/// between a `replace_all: true` write's completed application and catch
+/// point (i)'s own execution. Executes the SAME retroactive four-step roll
+/// [`reconcile_post_write_replace_all_overcap`] specifies.
+///
+/// Called from [`shard_cap_gate_check`]'s `ShardShape::Flat` `Edit`/
+/// `MultiEdit` arms ONLY after the caller has ALREADY confirmed
+/// `current_bytes > entry.shard_cap_bytes` by reusing that arm's own
+/// pre-existing `current_shard_bytes_flat` stat() read (no new `stat()`
+/// call is added for this leg) — so no redundant comparison belongs inside
+/// this function itself.
+///
+/// Returns `Ok(Some(entry))` when the backstop reconciled the pre-existing
+/// over-cap state left by a missed catch point (i).
+pub fn reconcile_leading_probe_backstop(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    todo!(
+        "BC-1.18.006 Postcondition 7 catch point (ii) / AC-025: execute_roll(entry, \
+         canonical_path, true) and return Ok(Some(published_entry)) — the caller has ALREADY \
+         confirmed current_bytes > entry.shard_cap_bytes before invoking this function."
+    )
 }
 
 // ---------------------------------------------------------------------------

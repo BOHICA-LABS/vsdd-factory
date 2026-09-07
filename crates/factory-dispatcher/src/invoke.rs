@@ -2319,6 +2319,117 @@ pub fn inject_git_context_if_qualifying(
 }
 
 // ---------------------------------------------------------------------------
+// S-25.02 BC-1.18.006 Postcondition 7 catch point (i) qualifying wrapper
+// (story AC-024; ADR-051 §Decision 15)
+// ---------------------------------------------------------------------------
+//
+// `true` iff `tool_input` is an `Edit` call with `replace_all: true`, or a
+// `MultiEdit` call whose `edits` array contains at least one block with
+// `replace_all: true` (BC-1.18.006 Postcondition 7's scope predicate,
+// mirrored from Precondition 4). Real, cheap, structural — see
+// `detect_replace_all_overcap_candidate`'s own doc comment for why this
+// stays outside this burst's `todo!()` boundary.
+fn tool_input_has_replace_all_true(tool_input: &serde_json::Value) -> bool {
+    if tool_input.get("replace_all").and_then(|v| v.as_bool()) == Some(true) {
+        return true;
+    }
+    tool_input
+        .get("edits")
+        .and_then(|v| v.as_array())
+        .is_some_and(|edits| {
+            edits
+                .iter()
+                .any(|e| e.get("replace_all").and_then(|v| v.as_bool()) == Some(true))
+        })
+}
+
+/// Structural (real, non-`todo!()`) pre-filter for BC-1.18.006 Postcondition
+/// 7 catch point (i). Mirrors [`detect_git_commit_event`]'s own cheap-
+/// detect-then-act shape (used by [`inject_git_context_if_qualifying`]
+/// above) and `executor.rs::shard_cap_precheck`'s zero-cost-bypass
+/// precedent — both already-shipped, non-stub native checks reached
+/// unconditionally from `main::run`.
+///
+/// Every check here is cheap and structural (event/tool/`replace_all`/
+/// config-match) — this is BC-1.18.006 Postcondition 7's OWN "zero added
+/// cost outside the narrow case" requirement, not implementer business
+/// logic invented for this stub burst. It is DELIBERATELY real (not
+/// `todo!()`): if this filter itself were `todo!()`, EVERY PostToolUse
+/// dispatch of ANY kind would panic against ADR-051 §Decision 15 point 4's
+/// mandatory unconditional call site in `main::run` (see that call site's
+/// own doc comment) — a catastrophic regression of the ENTIRE cluster-1
+/// BC-1.18.005 suite plus every other integration/bats test that drives the
+/// dispatcher at all. The BC's own tested `stat()`-and-retroactive-roll
+/// behavior lives entirely inside
+/// `shard_manager::reconcile_post_write_replace_all_overcap` (fully
+/// `todo!()`) — this function never touches that behavior, only decides
+/// whether to call into it.
+fn detect_replace_all_overcap_candidate(
+    original_payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Option<(crate::shard_manager::ShardEntry, std::path::PathBuf)> {
+    if original_payload.event_name != "PostToolUse" {
+        return None;
+    }
+    if !matches!(original_payload.tool_name.as_str(), "Edit" | "MultiEdit") {
+        return None;
+    }
+    if !tool_input_has_replace_all_true(&original_payload.tool_input) {
+        return None;
+    }
+    let shard_config_path = cwd.join(crate::executor::SHARD_CONFIG_RELATIVE_PATH);
+    if !shard_config_path.exists() {
+        return None;
+    }
+    let registry = crate::shard_manager::ShardRegistry::load(&shard_config_path).ok()?;
+    let target_path = original_payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)?;
+    let entry = crate::shard_manager::find_matching_entry(&registry, &target_path)
+        .ok()
+        .flatten()?
+        .clone();
+    Some((entry, target_path))
+}
+
+/// BC-1.18.006 Postcondition 7 catch point (i) qualifying wrapper (story
+/// AC-024; ADR-051 §Decision 15). Called unconditionally from `main::run`
+/// BEFORE its `sync_tiers.is_empty() && partition.async_group.is_empty()`
+/// early-return guard (Decision 15 point 4's load-bearing placement
+/// caveat) — mirrors [`inject_git_context_if_qualifying`]'s own
+/// detect-then-act call shape. Silent filesystem side effect: emits NO
+/// `HookResult` of its own (Decision 15 point 2 — this leg is a janitor,
+/// not a gate) and never influences the caller's own dispatch outcome.
+///
+/// The qualification filter ([`detect_replace_all_overcap_candidate`]) is
+/// real; the actual reconciliation behavior it delegates into
+/// ([`crate::shard_manager::reconcile_post_write_replace_all_overcap`]) is
+/// entirely `todo!()` — see that function's own doc comment. A failure
+/// there is logged (fail-open, matching this leg's own "no `HookResult`
+/// signaling" contract — this leg never blocks or errors the calling
+/// dispatch), not propagated.
+pub fn reconcile_replace_all_overcap_if_qualifying(
+    original_payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) {
+    let Some((entry, target_path)) = detect_replace_all_overcap_candidate(original_payload, cwd)
+    else {
+        return;
+    };
+    if let Err(e) =
+        crate::shard_manager::reconcile_post_write_replace_all_overcap(&entry, &target_path)
+    {
+        tracing::warn!(
+            artifact_stem = %entry.artifact_stem,
+            error = %e,
+            "BC-1.18.006 Postcondition 7 catch point (i): retroactive reconciliation failed"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ADR-032-AC021-prereq: dispatcher git_context extension tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]

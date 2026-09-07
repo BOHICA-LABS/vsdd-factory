@@ -56,6 +56,16 @@ tracing.workspace = true
 # three-variant contract (Continue/Block/Error) rather than inventing a
 # parallel result type for the native shard-cap gate check.
 vsdd-hook-sdk = { path = "../hook-sdk" }
+# S-25.02 BC-1.18.006 (cluster-2, roll-before-write): the staged roll
+# sequence's steps (b)-(d) (publish sealed shard, atomic-truncate canonical,
+# publish shard-index) all reuse `write_atomic`'s existing temp-file-then-
+# rename primitive verbatim (BC-1.18.006 Architecture Anchors; no new
+# atomic-write primitive is introduced). `factory-dispatcher` -> `last-amended-
+# migrate` is the ONLY allowed direction of this workspace-internal edge
+# (ADR-051 §8 dependency-acyclicity check; story S-25.02 Architecture
+# Compliance Rules "Forbidden dependency" row) — `last-amended-migrate` MUST
+# NOT gain a reverse dependency on `factory-dispatcher`.
+last-amended-migrate = { path = "../last-amended-migrate", version = "0.0.1" }
 factory-lock-parse = { path = "../factory-lock-parse", version = "0.0.1" }
 sink-core = { path = "../sink-core", version = "0.0.1" }
 sink-datadog = { path = "../sink-datadog", version = "0.0.1" }

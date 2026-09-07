@@ -283,6 +283,42 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
         partition.async_group.len(),
     );
 
+    // Resolved ONCE, here — see `resolve_project_cwd`'s own doc comment for
+    // why this must happen before the early-return guard immediately below,
+    // rather than at `base_host_ctx.cwd`'s own (later) assignment site.
+    let project_cwd = resolve_project_cwd();
+
+    // BC-1.18.006 Postcondition 7 catch point (i) / story AC-024 (ADR-051
+    // §Decision 15 point 4 — LOAD-BEARING placement caveat): an
+    // UNCONDITIONAL native call, independent of the registry's
+    // matched-plugin count, placed BEFORE the
+    // `sync_tiers.is_empty() && partition.async_group.is_empty()`
+    // early-return guard immediately below — mirroring Decision 1's own
+    // "before the registry-driven plugin loop" placement rule. If this call
+    // were placed AFTER that guard (e.g. as "one more thing the
+    // registry-driven loop does"), it would silently stop firing altogether
+    // on any configuration where the registered PostToolUse
+    // `Edit`/`Write`/`MultiEdit` plugin set becomes empty — the exact
+    // "silently stop firing if the plugin set changes" failure mode
+    // Decision 1's placement rule already exists to prevent for the
+    // PreToolUse leg. Precedent for a native call sitting unconditionally in
+    // this exact slot: `write_indeterminate_marker`'s `executor.rs` call
+    // sites and `inject_git_context_if_qualifying` (further below, ADR-029
+    // §Decision 1-3) — both native, non-WASM, non-registry-gated dispatcher-
+    // internal calls reached from this same `run` function.
+    //
+    // Silent filesystem side effect, no `HookResult` signaling (Decision 15
+    // point 2 — a janitor, not a gate): this call never influences
+    // `sync_tiers`/`partition.async_group` or this function's own return
+    // value. Real (non-`todo!()`) qualification filtering happens inside
+    // `reconcile_replace_all_overcap_if_qualifying` itself (event/tool/
+    // `replace_all`/config-match — BC-1.18.006 Postcondition 7's own
+    // "zero added cost outside the narrow case" requirement); the actual
+    // `stat()`-and-retroactive-roll behavior it may delegate into is
+    // entirely `todo!()` (see `shard_manager::reconcile_post_write_replace_all_overcap`'s
+    // own doc comment) — this call site is wiring, not the tested behavior.
+    factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying(&payload, &project_cwd);
+
     if sync_tiers.is_empty() && partition.async_group.is_empty() {
         return Ok(0);
     }
@@ -320,27 +356,13 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // every hook that calls bin/emit-event) walk `.factory/logs/`
     // relative to cwd. Falling back to the dispatcher's cwd produces
     // log writes in surprising places.
-    base_host_ctx.cwd = std::env::var(ENV_PROJECT_DIR)
-        .map(PathBuf::from)
-        .ok()
-        .filter(|p| !p.as_os_str().is_empty())
-        // Canonicalize the project directory to resolve OS-level symlinks
-        // (e.g., macOS /var → /private/var). This ensures host::cwd() returns
-        // the same physical path that `git worktree list --porcelain` reports,
-        // preventing false-positive DURABILITY DEGRADED from Tier 2 path-mismatch
-        // checks in precompact-flush and similar plugins. Canonicalize failure is
-        // non-fatal: fall back to the raw path (better than no cwd at all).
-        //
-        // SEC-004 TOCTOU ACCEPTED: the canonicalize call here resolves symlinks at
-        // dispatcher startup, but the resolved path is used as a label (host::cwd()
-        // for path-comparison in plugins), not for filesystem access. Any TOCTOU
-        // window between canonicalize and plugin use is therefore inconsequential:
-        // the worst outcome is a false-positive DURABILITY DEGRADED advisory (fail-open).
-        // This is explicitly accepted under the same-user local trust model; the
-        // `unwrap_or(p)` fallback is fail-safe (raw path beats no path at all).
-        .map(|p| p.canonicalize().unwrap_or(p))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // S-25.02 BC-1.18.006 cluster-2: reuses the SAME `project_cwd` this
+    // function already resolved above (before the early-return guard, for
+    // Postcondition 7 catch point (i)'s sake) rather than re-deriving it —
+    // see `resolve_project_cwd`'s own doc comment. Behavior-preserving: this
+    // is the exact same env-var-read + canonicalize + fallback sequence that
+    // was previously inlined here, only moved earlier and named.
+    base_host_ctx.cwd = project_cwd;
     // ADR-024 Decision 2: CLAUDE_PLUGIN_ROOT already checked above (Tier-1 vs Tier-2).
     // plugin_root_val is set from ENV_PLUGIN_ROOT at the start of run(); use it here
     // directly so HostContext carries the same value as the registry resolution path.
@@ -959,6 +981,48 @@ fn resolve_log_dir() -> PathBuf {
     let project_dir = std::env::var(ENV_PROJECT_DIR).ok();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     factory_dispatcher::log_dir::resolve_log_dir_from(project_dir.as_deref(), &cwd)
+}
+
+/// Resolve the project working directory the dispatcher treats as `cwd` for
+/// path-scoped native checks. Extracted, BEHAVIOR-PRESERVING, from the
+/// `base_host_ctx.cwd` derivation `run()` previously computed inline at its
+/// (single, pre-extraction) call site — see this function's own inline
+/// comments for the full canonicalize/TOCTOU rationale (SEC-004 ACCEPTED),
+/// reproduced verbatim, not altered.
+///
+/// This extraction exists so `run()` can resolve `cwd` ONCE, BEFORE its own
+/// `sync_tiers.is_empty() && partition.async_group.is_empty()` early-return
+/// guard, and reuse the SAME value for both (a) BC-1.18.006 Postcondition 7
+/// catch point (i)'s unconditional native call (ADR-051 §Decision 15 point 4
+/// — the placement caveat requires this call to precede that guard, which
+/// in turn requires `cwd` to be available before `base_host_ctx` itself is
+/// constructed) and (b) `base_host_ctx.cwd`'s own later assignment — never
+/// two independent env-var reads that could, in principle, observe a
+/// changed `CLAUDE_PROJECT_DIR` between them (this process never mutates its
+/// own env after start, so this is a determinism/duplication cleanup, not a
+/// correctness fix for an observed bug).
+fn resolve_project_cwd() -> PathBuf {
+    std::env::var(ENV_PROJECT_DIR)
+        .map(PathBuf::from)
+        .ok()
+        .filter(|p| !p.as_os_str().is_empty())
+        // Canonicalize the project directory to resolve OS-level symlinks
+        // (e.g., macOS /var → /private/var). This ensures host::cwd() returns
+        // the same physical path that `git worktree list --porcelain` reports,
+        // preventing false-positive DURABILITY DEGRADED from Tier 2 path-mismatch
+        // checks in precompact-flush and similar plugins. Canonicalize failure is
+        // non-fatal: fall back to the raw path (better than no cwd at all).
+        //
+        // SEC-004 TOCTOU ACCEPTED: the canonicalize call here resolves symlinks at
+        // dispatcher startup, but the resolved path is used as a label (host::cwd()
+        // for path-comparison in plugins), not for filesystem access. Any TOCTOU
+        // window between canonicalize and plugin use is therefore inconsequential:
+        // the worst outcome is a false-positive DURABILITY DEGRADED advisory (fail-open).
+        // This is explicitly accepted under the same-user local trust model; the
+        // `unwrap_or(p)` fallback is fail-safe (raw path beats no path at all).
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 // flush_sink_file is now in factory_dispatcher::vsdd_sink (S-19.05 AC-004).
