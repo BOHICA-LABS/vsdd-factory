@@ -8,6 +8,11 @@
 #
 # NOTE: fixed Sleep durations used instead of Wait+Line — see
 # AC-002a-under-cap-write-continue.tape's header note for why.
+#
+# TD-VSDD-091 (anti-volatile-pin): source snippet is extracted by an awk
+# range anchored on the enclosing (nested, 4-space-indented) test function's
+# signature (`test_BC_1_18_005_EC_014_shard_cap_gate_check_create_path_missing_file_continues`)
+# through its own closing brace, NOT by pinned `file.rs:NNN` line numbers.
 
 # Output paths are relative to THIS file's own directory — run vhs from
 # inside docs/demo-evidence/S-25.02/cluster-1-cap-trigger/ (see README.md's
@@ -37,13 +42,13 @@ Enter
 Sleep 1.5s
 Show
 
-Type "echo 'BC-1.18.005 EC-014: BC-INDEX.md does not exist yet -- first-ever Write CREATES it'"
+Type "echo 'BC-1.18.005 EC-014: fn test_BC_1_18_005_EC_014_shard_cap_gate_check_create_path_missing_file_continues'"
 Enter
 Sleep 1.5s
 
-Type "sed -n '1597,1610p' crates/factory-dispatcher/src/shard_manager.rs"
+Type "awk '/^    fn test_BC_1_18_005_EC_014_shard_cap_gate_check_create_path_missing_file_continues/,/^    }$/' crates/factory-dispatcher/src/shard_manager.rs"
 Enter
-Sleep 2.5s
+Sleep 3.5s
 
 Type "cargo test -p factory-dispatcher --lib shard_manager::tests::test_BC_1_18_005_EC_014_shard_cap_gate_check_create_path_missing_file_continues -- --exact --nocapture"
 Enter

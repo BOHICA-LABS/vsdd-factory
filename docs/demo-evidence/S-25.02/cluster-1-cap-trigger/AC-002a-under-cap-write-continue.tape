@@ -14,6 +14,12 @@
 # real output on screen). Sleep durations below are generously sized above
 # each command's measured real run time (every command here completes in
 # well under 1s on a warm target dir).
+#
+# TD-VSDD-091 (anti-volatile-pin): source snippet is extracted by an awk
+# range anchored on the enclosing test function's signature
+# (`test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate`)
+# through its own closing brace, NOT by pinned `file.rs:NNN` line numbers —
+# the extraction survives unrelated line-number drift elsewhere in the file.
 
 # Output paths are relative to THIS file's own directory — run vhs from
 # inside docs/demo-evidence/S-25.02/cluster-1-cap-trigger/ (see README.md's
@@ -43,13 +49,13 @@ Enter
 Sleep 1.5s
 Show
 
-Type "echo 'BC-1.18.005 AC-002 (under-cap leg): Write content=5,000B, cap=49,152B'"
+Type "echo 'BC-1.18.005 AC-002 (under-cap leg): fn test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate'"
 Enter
 Sleep 1.5s
 
-Type "sed -n '143,153p' crates/factory-dispatcher/tests/bc_1_18_005_shard_cap_trigger_test.rs"
+Type "awk '/^async fn test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate/,/^}/' crates/factory-dispatcher/tests/bc_1_18_005_shard_cap_trigger_test.rs"
 Enter
-Sleep 2.5s
+Sleep 3s
 
 Type "cargo test -p factory-dispatcher --test bc_1_18_005_shard_cap_trigger_test test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate -- --exact --nocapture"
 Enter
