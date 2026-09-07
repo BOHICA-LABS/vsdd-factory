@@ -4048,11 +4048,23 @@ mod tests {
     fn test_BC_1_18_005_n3_four_dash_line_is_not_mistaken_for_fence() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("BC-INDEX.md");
+        // A frontmatter line that STARTS WITH FOUR DASHES, unindented,
+        // immediately after a newline -- here a plain YAML mapping key
+        // composed of four dashes -- but is NOT itself the three-dash
+        // closing fence. The naive `"\n---"` substring search this
+        // line-anchored check replaces would match the newline immediately
+        // preceding this line (its first three characters are also
+        // "-", "-", "-") and truncate the frontmatter block right there,
+        // silently dropping the `changelog:` section (and the item within
+        // it) entirely. A correct line-anchored check compares the WHOLE
+        // line to "---" and correctly treats this four-dash line as
+        // ordinary content, finding the real closing fence below and
+        // preserving `changelog:`.
         std::fs::write(
             &path,
             "---\n\
              title: \"BC-INDEX\"\n\
-             separator: \"----\"\n\
+             ----: \"a four-dash mapping key, not the closing fence\"\n\
              changelog:\n\
              \x20\x20- version: \"1.0\"\n\
              ---\n\n# Body\n",
@@ -4063,6 +4075,12 @@ mod tests {
             "n3: a \"----\" (four-dash) line must not be mistaken for the three-dash closing \
              fence",
         );
-        assert_eq!(count, 1);
+        assert_eq!(
+            count, 1,
+            "n3: the real changelog: array (1 item) must be counted correctly -- a naive \
+             \"\\n---\" substring search would truncate the frontmatter block at the \
+             four-dash line above, losing the changelog: section entirely and yielding 0 \
+             instead of 1"
+        );
     }
 }
