@@ -372,18 +372,33 @@ fn shard_cap_precheck(inputs: &ExecutorInputs<'_>) -> Option<vsdd_hook_sdk::Hook
         Ok(reg) => reg,
         Err(e) => return Some(e.into()),
     };
-    let target_path = inputs
-        .payload_value
-        .get("tool_input")
-        .and_then(|v| v.get("file_path"))
-        .and_then(|v| v.as_str())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
     let tool_input = inputs
         .payload_value
         .get("tool_input")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    // PR #818 cycle-2 review finding B-2: an absent or non-string
+    // `tool_input.file_path` MUST fail loud, never silently resolve to an
+    // empty `PathBuf` — an empty path has no `file_stem()`, so
+    // `find_matching_entry` would resolve `None` and this whole gate would
+    // silently `Continue` for a malformed payload exactly as if the
+    // dispatch matched no `[[shard]]` entry at all. `file_path` is MORE
+    // load-bearing than `content`/`old_string`/`new_string` (the m3/M-1
+    // `required_str_len_bytes` precedent this mirrors): those three govern
+    // the computed SIZE once a match is already known; this one governs
+    // whether the gate applies AT ALL.
+    let Some(target_path) = tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+    else {
+        return Some(vsdd_hook_sdk::HookResult::Error {
+            message: format!(
+                "BC-1.18.005: {tool_name} tool_input is missing a valid string \"file_path\" — \
+                 refusing to silently skip the shard-cap gate for a malformed payload."
+            ),
+        });
+    };
     Some(crate::shard_manager::shard_cap_gate_check(
         &registry,
         tool_name,

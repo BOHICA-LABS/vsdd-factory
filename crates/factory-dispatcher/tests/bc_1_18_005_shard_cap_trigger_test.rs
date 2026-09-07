@@ -41,6 +41,7 @@ use factory_dispatcher::resolver::ResolverRegistry;
 const FLAT_SHARD_CONFIG: &str = "\
 [[shard]]
 artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -367,6 +368,7 @@ async fn test_BC_1_18_005_F001_malformed_config_missing_shape_ec009_blocks_dispa
     let malformed_missing_shape: &str = "\
 [[shard]]
 artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -408,6 +410,7 @@ async fn test_BC_1_18_005_F001_malformed_config_low_water_mark_ge_n_ec011_blocks
     let malformed_low_water_mark: &str = "\
 [[shard]]
 artifact_stem = \"BC-INDEX\"
+artifact_path = \"BC-INDEX.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -483,6 +486,7 @@ async fn test_BC_1_18_005_P2001_missing_shape_block_reason_names_artifact_stem_a
     let malformed_missing_shape: &str = "\
 [[shard]]
 artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -534,6 +538,7 @@ async fn test_BC_1_18_005_P2001_low_water_mark_block_reason_names_artifact_stem_
     let malformed_low_water_mark: &str = "\
 [[shard]]
 artifact_stem = \"BC-INDEX\"
+artifact_path = \"BC-INDEX.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -587,6 +592,7 @@ async fn test_BC_1_18_005_P2001_cap_exceeds_ceiling_block_reason_names_artifact_
     let malformed_cap_exceeds_ceiling: &str = "\
 [[shard]]
 artifact_stem = \"over-cap-log\"
+artifact_path = \"over-cap-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -627,6 +633,72 @@ shape = \"flat\"
 }
 
 // ---------------------------------------------------------------------------
+// PR #818 cycle-2 review finding B-2 — an absent/non-string
+// tool_input.file_path MUST fail loud AT THE shard_cap_precheck LEVEL
+// (executor.rs), never silently default to an empty PathBuf that lets
+// find_matching_entry resolve None (no stem) and Continue as if the
+// dispatch matched no [[shard]] entry at all. The pre-existing malformed-
+// payload tests (m3, above and in shard_manager.rs's own unit tests) all
+// exercise this ONE layer down, inside shard_cap_gate_check itself (which
+// already has a valid target_path by the time it runs) — this test drives
+// the FULL execute_tiers -> shard_cap_precheck path with a payload that
+// omits "file_path" entirely, pinning the bug at the layer it actually
+// lives in.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_005_B2_shard_cap_precheck_missing_file_path_fails_loud() {
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), FLAT_SHARD_CONFIG);
+
+    let engine = build_engine().unwrap();
+    let cache = PluginCache::new(engine.clone());
+    let registry = empty_registry();
+    let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
+
+    let mut base = HostContext::new("", "0.0.1", "sess-bc-1-18-005-b2", "trace-bc-1-18-005-b2");
+    base.cwd = dir.path().to_path_buf();
+    base.internal_log = Some(internal_log.clone());
+
+    // Deliberately malformed payload: tool_input carries NO "file_path" key
+    // at all — the exact shape shard_cap_precheck's pre-B-2
+    // `.unwrap_or_default()` silently coerced into an empty PathBuf, which
+    // has no file_stem(), so find_matching_entry resolved None and the
+    // whole gate Continued as if this dispatch matched no [[shard]] entry.
+    let inputs = ExecutorInputs {
+        engine: &engine,
+        cache: &cache,
+        registry: &registry,
+        payload_value: serde_json::json!({
+            "tool_name": "Write",
+            "tool_input": {"content": "x".repeat(5_000)},
+        }),
+        base_host_ctx: base,
+        internal_log: internal_log.clone(),
+        resolver_registry: Arc::new(ResolverRegistry::new()),
+    };
+
+    let summary = execute_tiers(inputs, vec![]).await;
+
+    assert_ne!(
+        summary.exit_code, 0,
+        "B-2: a Write dispatch whose tool_input is missing \"file_path\" entirely MUST fail loud \
+         (non-zero exit_code), never silently Continue as if the dispatch matched no [[shard]] \
+         entry — a malformed payload must never let the shard-cap gate go silently unguarded."
+    );
+    assert!(
+        summary.block_intent,
+        "B-2: block_intent MUST be set for a Write dispatch with a missing file_path"
+    );
+    let per_plugin_debug = format!("{:?}", summary.per_plugin_results);
+    assert!(
+        per_plugin_debug.contains("file_path"),
+        "B-2: the block_reason surfacing path MUST name the missing \"file_path\" field so an \
+         operator can diagnose the malformed payload. Got: {per_plugin_debug}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PR #818 fix-burst finding m5 — the synthesized shard-cap-gate
 // PluginOutcome MUST carry an accurate, non-empty plugin_version (the
 // dispatcher's own version, same as every other native/sentinel outcome in
@@ -644,6 +716,7 @@ async fn test_BC_1_18_005_m5_shard_gate_block_outcome_carries_accurate_plugin_ve
     let malformed_cap_exceeds_ceiling: &str = "\
 [[shard]]
 artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -757,6 +830,7 @@ async fn test_BC_1_18_005_PC1_post_tool_use_event_does_not_run_shard_gate_negati
     let malformed_missing_shape: &str = "\
 [[shard]]
 artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384
@@ -859,6 +933,7 @@ shard_cap_bytes = 49152
 const MALFORMED_LESSONS_SIBLING_ENTRY: &str = "\
 [[shard]]
 artifact_stem = \"lessons\"
+artifact_path = \"lessons.md\"
 practical_fuel_ceiling = 8000000
 worst_case_fuel_per_byte = 106.36
 max_single_record_bytes = 16384

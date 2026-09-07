@@ -67,6 +67,7 @@
 //! `Continue`, an honest hand-off rather than a fabricated block.
 
 use std::io;
+use std::io::Read as _;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -120,6 +121,36 @@ pub struct ShardEntry {
     /// Artifact stem this entry matches against a tool call's target path
     /// (Precondition 3; Postcondition 1's config-match predicate).
     pub artifact_stem: String,
+
+    /// Path anchor this entry matches against a tool call's target path,
+    /// alongside [`ShardEntry::artifact_stem`] (PR #818 cycle-2 review
+    /// finding B-1). Required — never `#[serde(default)]` — because a
+    /// stem-only match has no directory containment at all: this repository
+    /// alone has 426 files sharing the `STATE` stem, 99 sharing `lessons`,
+    /// 98 sharing `burst-log`, 79 sharing `BC-INDEX`, and 32 sharing
+    /// `decision-log` (finding B-1's own repo-measured collision counts,
+    /// mostly under `plugins/vsdd-factory/tests/fixtures/`), so a
+    /// stem-only entry would route every one of those unrelated files
+    /// through THIS entry's [`validate_entry`]/cap gate as if each were the
+    /// one registered artifact — reintroducing, on the path axis, exactly
+    /// the blast-radius-scoping defect class the v1.12 MATCH-FIRST
+    /// restructure closed on the sibling-entry axis (see
+    /// [`find_matching_entry`]'s "Blast-radius scoping" doc reference).
+    ///
+    /// Repo-root-relative (the idiomatic, clone-portable form config authors
+    /// should write) or absolute — [`find_matching_entry`] compares this
+    /// field's own path components against the dispatch's target path's
+    /// trailing components (a target that ENDS WITH this path, component-
+    /// wise, matches — see [`find_matching_entry`]'s own doc comment), so a
+    /// relative `artifact_path` naturally matches an absolute target path
+    /// arriving from a real tool call without this module ever needing to
+    /// join it against a `cwd` (this module performs no I/O and knows no
+    /// `cwd` — that stays `executor.rs::shard_cap_precheck`'s concern, which
+    /// never needs to resolve one either, precisely because the comparison
+    /// is suffix-based). Naming the artifact's own containing directory
+    /// (rather than its full path) is also legal — any target nested under
+    /// that directory then falls "under" this entry per the same check.
+    pub artifact_path: String,
 
     /// `PRACTICAL_FUEL_CEILING` cap-formula input (Postcondition 4/6).
     pub practical_fuel_ceiling: u64,
@@ -390,19 +421,25 @@ pub enum ShardConfigError {
     },
 
     /// PR #818 fix-burst finding N-2: two (or more) `[[shard]]` entries
-    /// declare the SAME `artifact_stem`. [`find_matching_entry`] previously
-    /// resolved this silently to whichever entry appeared first in the
+    /// declare the SAME `artifact_stem` AND both match the current
+    /// dispatch's target path per [`path_falls_under_or_equals`] (PR #818
+    /// cycle-2 review finding B-1 added the path leg — two entries sharing a
+    /// stem but naming DIFFERENT `artifact_path`s that this dispatch's
+    /// target does not simultaneously satisfy are legitimate, not a
+    /// misconfiguration; only two entries that would BOTH resolve for the
+    /// SAME dispatch are). [`find_matching_entry`] previously resolved a
+    /// stem-only collision silently to whichever entry appeared first in the
     /// config file, with no diagnostic — an operator adding a second entry
     /// for an already-registered artifact (e.g. a copy-paste typo, or two
     /// independent config fragments merged without deduplication) would
     /// have their SECOND entry's cap-formula inputs / shape / `n` /
     /// `low_water_mark` silently ignored with no error at all, which is
     /// exactly the class of silently-swallowed misconfiguration this BC's
-    /// fail-loud posture exists to prevent. Fail-loud, scoped to the single
-    /// `artifact_stem` the current dispatch's target path resolves to
-    /// (consistent with this BC's v1.12 MATCH-FIRST blast-radius scoping —
-    /// an unrelated duplicate elsewhere in the config for a DIFFERENT
-    /// `artifact_stem` this dispatch does not target is never observed).
+    /// fail-loud posture exists to prevent. Fail-loud, scoped to the current
+    /// dispatch's own target (consistent with this BC's v1.12 MATCH-FIRST
+    /// blast-radius scoping — an unrelated duplicate elsewhere in the config
+    /// for a DIFFERENT artifact this dispatch does not target is never
+    /// observed).
     #[error(
         "[[shard]] config declares MULTIPLE entries for artifact_stem = \"{artifact_stem}\" — \
          the second and any subsequent entries would be silently ignored by a plain first-match \
@@ -442,8 +479,9 @@ impl ShardRegistry {
     /// ONLY when the file cannot be read, or `toml::from_str` cannot
     /// deserialize the whole `Vec<ShardEntry>` at all — invalid TOML syntax,
     /// or any entry omitting a non-`Option`-typed field required for
-    /// `toml::from_str` to succeed (`artifact_stem`, `shard_cap_bytes`, or
-    /// any of the four `cap_formula_inputs` fields). This is the ONE
+    /// `toml::from_str` to succeed (`artifact_stem`, `artifact_path`,
+    /// `shard_cap_bytes`, or any of the four `cap_formula_inputs` fields).
+    /// This is the ONE
     /// residual, unavoidable whole-file blast-radius case (EC-019) — it is
     /// inherent to TOML's whole-file grammar (a `Vec<ShardEntry>` cannot
     /// partially deserialize), not a validation-eagerness design choice.
@@ -642,6 +680,16 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
 
 /// Find the `[[shard]]` config entry (if any) matching `target_path`.
 ///
+/// **Fallible, not a plain lookup** (PR #818 cycle-2 review finding N-2):
+/// the outer `Result` is a NORMAL, non-exceptional return path callers MUST
+/// handle — an `Err(ShardConfigError::DuplicateArtifactStem)` fires when
+/// more than one `[[shard]]` entry would resolve for this dispatch's target
+/// (see that variant's own doc comment); this is NOT a `panic!`-only-on-bug
+/// escape hatch the way a function named `resolve_matching_entry` or similar
+/// might read. Callers pattern-match all three shapes: `Ok(Some(entry))`
+/// (matched), `Ok(None)` (no match — the zero-cost-bypass case), and
+/// `Err(_)` (ambiguous match, fail loud).
+///
 /// MUST be called — and return — before any `stat()` call AGAINST THE
 /// TARGET ARTIFACT ITSELF (Invariant 3; Postcondition 1's target-artifact-
 /// scoped zero-cost bypass). Corrected framing (PR #818 fix-burst finding
@@ -659,13 +707,18 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
 ///
 /// PR #818 fix-burst finding N-2: fail-loud
 /// [`ShardConfigError::DuplicateArtifactStem`] when MORE THAN ONE `[[shard]]`
-/// entry declares the SAME `artifact_stem` as the current dispatch's target
-/// — a silent first-match resolution would let a second, differently-
-/// configured entry for an already-registered artifact go completely
-/// unnoticed. Scoped to the stem the current dispatch actually resolves to,
-/// consistent with this BC's v1.12 MATCH-FIRST blast-radius doctrine: a
-/// duplicate for a DIFFERENT `artifact_stem` this dispatch does not target
-/// is never observed or reported by this call.
+/// entry declares the SAME `artifact_stem` AND matches `target_path` on
+/// [`path_falls_under_or_equals`] (see that function's doc comment; PR #818
+/// cycle-2 review finding B-1 added the path leg to this predicate, so two
+/// entries sharing a stem but governing genuinely different artifacts —
+/// e.g. two different `STATE.md` files in two different directories — are
+/// no longer misreported as a duplicate; only two entries that would BOTH
+/// resolve for the SAME dispatch are) — a silent first-match resolution
+/// would let a second, differently-configured entry for an
+/// already-registered artifact go completely unnoticed. Scoped to the
+/// dispatch's own target, consistent with this BC's v1.12 MATCH-FIRST
+/// blast-radius doctrine: a duplicate for a DIFFERENT artifact this
+/// dispatch does not target is never observed or reported by this call.
 pub fn find_matching_entry<'a>(
     registry: &'a ShardRegistry,
     target_path: &Path,
@@ -676,21 +729,66 @@ pub fn find_matching_entry<'a>(
     let Some(stem) = target_path.file_stem().and_then(|s| s.to_str()) else {
         return Ok(None);
     };
-    let mut matches = registry
-        .shards
-        .iter()
-        .filter(|entry| entry.artifact_stem == stem);
+    // B-1: stem alone is NOT sufficient — see path_falls_under_or_equals's
+    // doc comment for the repo-measured collision counts this additional
+    // path-containment leg exists to close.
+    let mut matches = registry.shards.iter().filter(|entry| {
+        entry.artifact_stem == stem
+            && path_falls_under_or_equals(target_path, Path::new(&entry.artifact_path))
+    });
     let Some(first) = matches.next() else {
         return Ok(None);
     };
-    // N-2: a second entry sharing the same artifact_stem is a fail-loud
-    // config defect, not a silent "first one wins" resolution.
+    // N-2: a second entry sharing the same artifact_stem AND matching this
+    // dispatch's target path is a fail-loud config defect, not a silent
+    // "first one wins" resolution.
     if matches.next().is_some() {
         return Err(ShardConfigError::DuplicateArtifactStem {
             artifact_stem: stem.to_string(),
         });
     }
     Ok(Some(first))
+}
+
+/// `true` iff `target_path` IS the artifact `registered_path` denotes, or is
+/// lexically nested under it as a directory (PR #818 cycle-2 review finding
+/// B-1's path-containment requirement — closes the stem-only collision
+/// surface [`find_matching_entry`] previously exposed: this repository alone
+/// has 426 files sharing the `STATE` stem, 99 sharing `lessons`, 98 sharing
+/// `burst-log`, 79 sharing `BC-INDEX`, and 32 sharing `decision-log`, mostly
+/// under `plugins/vsdd-factory/tests/fixtures/`).
+///
+/// Purely lexical, component-wise comparison — performs NO filesystem I/O
+/// (never `canonicalize()`, which requires the path to exist, and would
+/// violate Invariant 3's "no stat() before config-match" ordering anyway).
+/// Two comparisons, either of which is sufficient:
+///
+/// 1. **Suffix match** — `registered_path`'s components form a TRAILING run
+///    of `target_path`'s own components. This is what makes a
+///    repo-root-relative `artifact_path` (the idiomatic, clone-portable form
+///    — e.g. `.factory/STATE.md`) match an ABSOLUTE `target_path` arriving
+///    from a real tool call (e.g. `/Users/.../repo/.factory/STATE.md`)
+///    without this function — or any caller — ever needing to join it
+///    against a `cwd`. When `registered_path` names the exact artifact
+///    (the common case), this is the ONLY leg that can fire, and at full
+///    length it degenerates to an exact-path match.
+/// 2. **Prefix match** — `registered_path`'s components form a LEADING run
+///    of `target_path`'s own components, with at least one further nested
+///    component (a bare prefix-equal-length case is already covered by leg
+///    1 above). This is the "falls under" case: `registered_path` names a
+///    containing directory, in the SAME coordinate space as `target_path`
+///    (both repo-root-relative, or both absolute against the same root),
+///    and `target_path` is some file nested inside it.
+fn path_falls_under_or_equals(target_path: &Path, registered_path: &Path) -> bool {
+    let target: Vec<_> = target_path.components().collect();
+    let registered: Vec<_> = registered_path.components().collect();
+
+    let suffix_match = registered.len() <= target.len()
+        && target[target.len() - registered.len()..] == registered[..];
+    let prefix_match =
+        registered.len() < target.len() && target[..registered.len()] == registered[..];
+
+    suffix_match || prefix_match
 }
 
 // ---------------------------------------------------------------------------
@@ -911,10 +1009,28 @@ const MAX_CHANGELOG_TARGET_READ_BYTES: u64 = 8 * 1024 * 1024;
 /// plugin invocation (the "why native, not WASM" rationale, Postcondition 2,
 /// applies identically to this shape). BOUNDED, not unbounded (PR #818
 /// fix-burst finding B2, corrected from an earlier revision's overclaiming
-/// doc text): the target file's size is `stat()`-checked BEFORE any content
-/// read is attempted; a file exceeding `MAX_CHANGELOG_TARGET_READ_BYTES`
-/// fails loud with an `io::ErrorKind::FileTooLarge` error rather than being
-/// read into memory in full.
+/// doc text): a file exceeding `MAX_CHANGELOG_TARGET_READ_BYTES` fails loud
+/// with an `io::ErrorKind::FileTooLarge` error rather than being read into
+/// memory in full.
+///
+/// **PR #818 cycle-2 review finding M-2:** the bound is enforced via a
+/// single capped `Read::take(MAX_CHANGELOG_TARGET_READ_BYTES + 1)` read on
+/// an already-open file handle, NOT via a separate `metadata()`/`stat()`
+/// call followed by an independent, unbounded `read_to_string` (the
+/// pre-cycle-2 shape). That two-step shape had two gaps this module's own
+/// "pathological or adversarial target file" threat model (see
+/// [`MAX_CHANGELOG_TARGET_READ_BYTES`]'s doc comment) makes in-scope: (a) a
+/// TOCTOU window — the file could grow past the ceiling between the
+/// `stat()` and the later `read_to_string` — and (b) an unbounded read for
+/// a non-regular file (e.g. a FIFO) whose `metadata().len()` reports `0`,
+/// where `read_to_string` could then block indefinitely or admit unbounded
+/// data despite passing the size check trivially. Reading through a single
+/// `take()`-limited handle closes both gaps in one mechanism: at most
+/// `MAX_CHANGELOG_TARGET_READ_BYTES + 1` bytes are EVER pulled off the
+/// handle, regardless of how large the file grows afterward or what kind of
+/// file it is, and the `+ 1` lets this function distinguish "exactly at the
+/// ceiling" (legal) from "over the ceiling" (rejected) without a separate
+/// stat.
 ///
 /// This function's contract is the SAME read regardless of cold-state
 /// (pre-BC-1.18.012 migration, ~1,997-item, not-N-relative-bounded) vs.
@@ -945,8 +1061,8 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         changelog: Option<Vec<serde_norway::Value>>,
     }
 
-    let metadata = match std::fs::metadata(target_path) {
-        Ok(metadata) => metadata,
+    let file = match std::fs::File::open(target_path) {
+        Ok(file) => file,
         // EC-014 (BC-1.18.005 v1.9): a not-yet-existing
         // "frontmatter-changelog-array"-shaped target file is a legitimate
         // first-ever Write CREATING it, not a fail-loud condition — treated
@@ -956,23 +1072,27 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
         Err(e) => return Err(e),
     };
-    // B2: stat() the file BEFORE reading its content — fail loud rather than
-    // perform an unbounded full-file read for a pathologically large target.
-    if metadata.len() > MAX_CHANGELOG_TARGET_READ_BYTES {
+    // M-2: a single capped read replaces the former separate
+    // metadata()-then-read_to_string two-step (see this function's own doc
+    // comment for the TOCTOU/non-regular-file gaps that shape had). Reading
+    // one byte PAST the ceiling lets the length check below distinguish
+    // "exactly at the ceiling" (legal) from "over the ceiling" (rejected)
+    // without ever needing a separate stat() call.
+    let mut raw = String::new();
+    file.take(MAX_CHANGELOG_TARGET_READ_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_CHANGELOG_TARGET_READ_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::FileTooLarge,
             format!(
-                "{}: refusing unbounded frontmatter-changelog-array read — file is {} bytes, \
-                 exceeding the {} byte ceiling (BC-1.18.005 fix-burst B2: bounded parse, never a \
-                 whole-file read)",
+                "{}: refusing unbounded frontmatter-changelog-array read — file exceeds the {} \
+                 byte ceiling (BC-1.18.005 fix-burst B2 / cycle-2 review finding M-2: bounded \
+                 parse via a capped Read::take, never a separate stat()-then-unbounded-read)",
                 target_path.display(),
-                metadata.len(),
                 MAX_CHANGELOG_TARGET_READ_BYTES
             ),
         ));
     }
-
-    let raw = std::fs::read_to_string(target_path)?;
 
     // Opportunistic hardening (S-25.02 Phase F4 LOCAL adversary pass-1
     // cluster-1 observation): tolerate a `---\r\n` (CRLF) opening fence in
@@ -1476,9 +1596,22 @@ mod tests {
     /// A well-formed `"flat"`-shaped entry using the BC's own provisional
     /// calibration constants (Postcondition 6), parameterized only on
     /// `artifact_stem` and `shard_cap_bytes` for per-test readability.
+    ///
+    /// `artifact_path` defaults to `"{stem}.md"` (PR #818 cycle-2 review
+    /// finding B-1) — every existing call site in this module pairs a given
+    /// stem with a target path whose final component is exactly
+    /// `"{stem}.md"` (a bare filename, a `dir.path().join("{stem}.md")`
+    /// tempdir path, or a `"/repo/.../{stem}.md"` literal), so this single-
+    /// component default suffix-matches every one of them unchanged (see
+    /// [`path_falls_under_or_equals`]) without requiring a signature change
+    /// across this file's dozens of call sites. A test that specifically
+    /// exercises path-containment (as opposed to merely needing SOME valid
+    /// entry) overrides `.artifact_path` explicitly, the same way other
+    /// tests already override `.worst_case_fuel_per_byte` etc. post-construction.
     fn flat_entry(stem: &str, shard_cap_bytes: u64) -> ShardEntry {
         ShardEntry {
             artifact_stem: stem.to_string(),
+            artifact_path: format!("{stem}.md"),
             practical_fuel_ceiling: 8_000_000,
             worst_case_fuel_per_byte: 106.36,
             max_single_record_bytes: 16_384,
@@ -1493,7 +1626,11 @@ mod tests {
     /// Renders a single `[[shard]]` TOML entry for the
     /// `"frontmatter-changelog-array"` shape, with an optional
     /// `low_water_mark` line (omitted entirely when `None`, exercising
-    /// EC-010's config-load-time default path).
+    /// EC-010's config-load-time default path). `artifact_path` defaults to
+    /// `"{stem}.md"` — see [`flat_entry`]'s doc comment for the same
+    /// rationale (both call sites of this helper only exercise
+    /// `ShardRegistry::load`'s structural parse, never path-containment
+    /// matching, so the default is never overridden here).
     fn shard_toml_frontmatter_entry(stem: &str, n: u64, low_water_mark: Option<i64>) -> String {
         let lwm_line = match low_water_mark {
             Some(v) => format!("low_water_mark = {v}\n"),
@@ -1502,6 +1639,7 @@ mod tests {
         format!(
             "[[shard]]\n\
              artifact_stem = \"{stem}\"\n\
+             artifact_path = \"{stem}.md\"\n\
              practical_fuel_ceiling = 8000000\n\
              worst_case_fuel_per_byte = 106.36\n\
              max_single_record_bytes = 16384\n\
@@ -1686,6 +1824,121 @@ mod tests {
         assert_eq!(
             result, None,
             "EC-001: a target path matching no [[shard]] entry's artifact_stem MUST return None (zero-cost bypass)"
+        );
+    }
+
+    // ===================================================================
+    // PR #818 cycle-2 review finding B-1 — stem-only matching has no path
+    // containment. A [[shard]] entry MUST match on artifact_stem AND
+    // artifact_path (path_falls_under_or_equals), never stem alone — this
+    // repository alone measured 426 files sharing the STATE stem, 99
+    // sharing lessons, 98 sharing burst-log, 79 sharing BC-INDEX, and 32
+    // sharing decision-log, mostly under
+    // plugins/vsdd-factory/tests/fixtures/.
+    // ===================================================================
+
+    #[test]
+    fn test_BC_1_18_005_B1_find_matching_entry_same_stem_different_directory_does_not_match() {
+        // Entry registered for "/registered/dir/decision-log.md"; the
+        // dispatch's target shares the SAME stem ("decision-log") but lives
+        // under a COMPLETELY DIFFERENT directory — e.g. one of this repo's
+        // own 32 unrelated "decision-log" stem-collision fixtures. Stem-only
+        // matching (pre-B-1) would have routed this unrelated file through
+        // the registered entry's cap gate; path-containment MUST reject it.
+        let mut entry = flat_entry("decision-log", 49_152);
+        entry.artifact_path = "/registered/dir/decision-log.md".to_string();
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        let target = Path::new("/some/unrelated/fixtures/decision-log.md");
+
+        let result = find_matching_entry(&registry, target)
+            .expect("fixture has no duplicate artifact_stem+artifact_path entries");
+        assert_eq!(
+            result, None,
+            "B-1: a target whose STEM matches a [[shard]] entry but whose PATH does not fall \
+             under or equal the entry's own artifact_path MUST NOT match — stem alone is not a \
+             sufficient config-match predicate (this repository alone has 32 unrelated files \
+             sharing the \"decision-log\" stem)"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_find_matching_entry_same_stem_and_correct_path_matches() {
+        // Same entry as above, but this time the target's FULL path (not
+        // just its stem) matches the registered artifact_path exactly — the
+        // positive control proving the path leg does not merely reject
+        // everything.
+        let mut entry = flat_entry("decision-log", 49_152);
+        entry.artifact_path = "/registered/dir/decision-log.md".to_string();
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        let target = Path::new("/registered/dir/decision-log.md");
+
+        let result = find_matching_entry(&registry, target)
+            .expect("fixture has no duplicate artifact_stem+artifact_path entries");
+        assert_eq!(
+            result,
+            Some(&registry.shards[0]),
+            "B-1: a target whose stem AND path both match the registered entry MUST resolve to \
+             that entry"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_find_matching_entry_target_nested_under_registered_directory_matches() {
+        // `artifact_path` naming a CONTAINING DIRECTORY (rather than the
+        // full file path) is also legal per path_falls_under_or_equals's
+        // "falls under" leg — any target nested under that directory
+        // matches.
+        let mut entry = flat_entry("decision-log", 49_152);
+        entry.artifact_path = "/registered/dir".to_string();
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        let target = Path::new("/registered/dir/decision-log.md");
+
+        let result = find_matching_entry(&registry, target)
+            .expect("fixture has no duplicate artifact_stem+artifact_path entries");
+        assert_eq!(
+            result,
+            Some(&registry.shards[0]),
+            "B-1: a target nested under the entry's registered containing directory MUST match \
+             (the \"falls under\" leg of path_falls_under_or_equals)"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_005_B1_shard_cap_gate_check_same_stem_different_directory_continues() {
+        // Full-stack control: the same collision scenario, but driven
+        // through the public shard_cap_gate_check gate — an unrelated,
+        // differently-directoried file sharing a registered artifact's stem
+        // MUST Continue, never be routed through that entry's cap check.
+        let mut entry = flat_entry("decision-log", 100);
+        entry.artifact_path = "/registered/dir/decision-log.md".to_string();
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+        let target = Path::new("/some/unrelated/fixtures/decision-log.md");
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            target,
+            // Deliberately oversized relative to the registered entry's
+            // shard_cap_bytes=100 — if this fixture's cap gate incorrectly
+            // applied, it would still Continue (this cluster never
+            // constructs Block), so pair this with EC-018-style asserted
+            // Continue plus the find_matching_entry-level test above, which
+            // pins the STRUCTURAL non-match directly.
+            &serde_json::json!({"content": "x".repeat(1_000)}),
+        );
+        assert_eq!(
+            result,
+            HookResult::Continue,
+            "B-1: a Write against a file sharing a registered entry's STEM but not its PATH \
+             MUST Continue, exactly as an entirely-unregistered file would"
         );
     }
 
@@ -2412,6 +2665,7 @@ mod tests {
             &cfg_path,
             "[[shard]]\n\
              artifact_stem = \"decision-log\"\n\
+             artifact_path = \"decision-log.md\"\n\
              practical_fuel_ceiling = 8000000\n\
              worst_case_fuel_per_byte = 106.36\n\
              max_single_record_bytes = 16384\n\
@@ -2457,6 +2711,7 @@ mod tests {
     fn test_BC_1_18_005_EC_009_matched_entry_missing_shape_field_is_fail_loud() {
         let entry = ShardEntry {
             artifact_stem: "decision-log".to_string(),
+            artifact_path: "decision-log.md".to_string(),
             practical_fuel_ceiling: 8_000_000,
             worst_case_fuel_per_byte: 106.36,
             max_single_record_bytes: 16_384,
@@ -2767,6 +3022,7 @@ mod tests {
             &cfg_path,
             "[[shard]]\n\
              artifact_stem = \"decision-log\"\n\
+             artifact_path = \"decision-log.md\"\n\
              practical_fuel_ceiling = 8000000\n\
              worst_case_fuel_per_byte = 106.36\n\
              max_single_record_bytes = 16384\n\
@@ -2954,6 +3210,7 @@ mod tests {
             &cfg_path,
             "[[shard]]\n\
              artifact_stem = \"decision-log\"\n\
+             artifact_path = \"decision-log.md\"\n\
              practical_fuel_ceiling = 8000000\n\
              worst_case_fuel_per_byte = 106.36\n\
              max_single_record_bytes = 16384\n\
