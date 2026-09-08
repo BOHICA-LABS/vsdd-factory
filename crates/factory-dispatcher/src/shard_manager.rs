@@ -309,6 +309,38 @@ pub enum ShardConfigError {
         artifact_path: String,
     },
 
+    /// SEC-002 (security review, MEDIUM, CWE-22): a `[[shard]]` entry
+    /// declares an `artifact_stem` containing a `/`, `\`, a `..`
+    /// path-traversal component, or a NUL byte. Unlike `artifact_path`
+    /// (which is only ever used for lexical containment COMPARISON via
+    /// [`path_falls_under_or_equals`], never interpolated into a path this
+    /// process itself writes), `artifact_stem` IS interpolated unsanitized
+    /// into filesystem paths this process constructs and WRITES to — e.g.
+    /// the sealed-shard filename (`format!("{artifact_stem}.{seq:04}.md")`)
+    /// and the shard-index sibling path
+    /// (`format!("{artifact_stem}.shard-index.toml")`, via
+    /// [`shard_index_path_for`]). A config-supplied `artifact_stem` of
+    /// e.g. `"../../etc/cron.d/evil"` would let a malicious or malformed
+    /// `[[shard]]` config steer a sealed-shard write OUTSIDE the canonical
+    /// file's own parent directory (`shard_sibling_path`'s `dir.join(...)`
+    /// join has no traversal guard of its own — it trusts its `filename`
+    /// argument is a single path component, which every OTHER call site
+    /// satisfies by construction, but a `[[shard]]` config controls
+    /// `artifact_stem` directly). Fail-loud, checked at entry-match time
+    /// (mirroring `EmptyArtifactPath`/EC-022's own ordering and posture) —
+    /// never silently stripped, escaped, or truncated to "make it safe".
+    #[error(
+        "[[shard]] entry for artifact_stem = \"{artifact_stem}\" contains a `/`, `\\`, `..` \
+         path-traversal component, or a NUL byte (security review SEC-002, CWE-22). Fail-loud: \
+         artifact_stem is interpolated unsanitized into filesystem paths this process writes \
+         (sealed-shard filenames, the shard-index sibling path), so it must never contain a \
+         path separator or traversal component."
+    )]
+    InvalidArtifactStem {
+        /// The offending entry's own (unsafe) `artifact_stem` value.
+        artifact_stem: String,
+    },
+
     /// EC-011: `low_water_mark >= N` (the `== N` boundary included) or negative.
     /// `low_water_mark == N - 1` is explicitly NOT in this error's scope — see
     /// EC-012 / [`validate_low_water_mark`]'s amortization-advisory path.
@@ -569,37 +601,45 @@ impl ShardRegistry {
 ///    `"./"`, or empty would make [`path_falls_under_or_equals`]'s
 ///    suffix-match leg vacuously true for every target sharing this entry's
 ///    `artifact_stem`.
-/// 3. `worst_case_fuel_per_byte` MUST be finite and strictly positive
+/// 3. `artifact_stem` MUST NOT contain a `/`, `\`, a `..` path-traversal
+///    component, or a NUL byte (fail-loud
+///    [`ShardConfigError::InvalidArtifactStem`] — security review SEC-002,
+///    CWE-22) — checked alongside check 2 above, since `artifact_stem` is
+///    interpolated unsanitized into filesystem paths this process itself
+///    WRITES to (sealed-shard filenames, the shard-index sibling path),
+///    unlike `artifact_path` which is only ever used for lexical
+///    containment comparison.
+/// 4. `worst_case_fuel_per_byte` MUST be finite and strictly positive
 ///    (fail-loud [`ShardConfigError::InvalidWorstCaseFuelPerByte`] —
 ///    EC-015's "divisor-door" closure) — checked BEFORE
 ///    `compute_shard_cap_bytes` is ever called for this entry, since a
 ///    `0.0`/non-finite divisor would otherwise saturate the computed
-///    ceiling toward `u64::MAX`, defeating check 5 below for ANY declared
+///    ceiling toward `u64::MAX`, defeating check 6 below for ANY declared
 ///    `shard_cap_bytes`.
-/// 4. The RAW `practical_fuel_ceiling as f64 / worst_case_fuel_per_byte`
+/// 5. The RAW `practical_fuel_ceiling as f64 / worst_case_fuel_per_byte`
 ///    division result MUST be finite and `< u64::MAX as f64` (fail-loud
 ///    [`ShardConfigError::FormulaCeilingSaturated`] — EC-017's residual
 ///    divisor-door closure) — a legal-but-tiny-positive divisor can still
-///    saturate the computed ceiling even though it passes check 3.
-/// 5. `shard_cap_bytes` MUST NOT exceed
+///    saturate the computed ceiling even though it passes check 4.
+/// 6. `shard_cap_bytes` MUST NOT exceed
 ///    `compute_shard_cap_bytes(entry.cap_formula_inputs())` (fail-loud
 ///    [`ShardConfigError::CapExceedsFormulaCeiling`] — Postcondition 9 /
 ///    EC-013; the `==` boundary is inclusive, mirroring EC-002's precedent
 ///    for the per-write trigger) — applies to EVERY `shape`, not
 ///    `"flat"`-only.
-/// 6. For a `"frontmatter-changelog-array"`-shaped entry ONLY: `n` MUST be
+/// 7. For a `"frontmatter-changelog-array"`-shaped entry ONLY: `n` MUST be
 ///    present (fail-loud [`ShardConfigError::MissingN`] — EC-016), checked
 ///    BEFORE `low_water_mark` is examined, so an entry missing `n` AND
 ///    declaring an out-of-range `low_water_mark` is never silently accepted
 ///    merely because `n` was absent (see EC-016's ordering vector).
-/// 7. For a `"frontmatter-changelog-array"`-shaped entry with a PRESENT `n`
+/// 8. For a `"frontmatter-changelog-array"`-shaped entry with a PRESENT `n`
 ///    ONLY: `n` MUST be `>= 1` (fail-loud
 ///    [`ShardConfigError::ZeroItemCountThreshold`] — PR #818 fix-burst
-///    finding m2), checked immediately after check 6 and BEFORE
+///    finding m2), checked immediately after check 7 and BEFORE
 ///    `low_water_mark` is examined — `n = 0` makes the item-count trigger
 ///    fire unconditionally AND makes any explicit `low_water_mark` value
 ///    unsatisfiable.
-/// 8. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
+/// 9. For a `"frontmatter-changelog-array"`-shaped entry with an EXPLICIT
 ///    `low_water_mark` ONLY: `0 <= low_water_mark < N` (fail-loud
 ///    [`ShardConfigError::InvalidLowWaterMark`] — EC-011; `N-1` is a VALID
 ///    boundary value, never routed to this error — see EC-012), and a
@@ -636,6 +676,33 @@ pub fn validate_entry(entry: &ShardEntry) -> Result<(), ShardConfigError> {
         return Err(ShardConfigError::EmptyArtifactPath {
             artifact_stem: entry.artifact_stem.clone(),
             artifact_path: entry.artifact_path.clone(),
+        });
+    }
+
+    // SEC-002 (security review, MEDIUM, CWE-22): `artifact_stem` MUST NOT
+    // contain a `/`, `\`, a `..` path-traversal component, or a NUL byte.
+    // Unlike `artifact_path` (validated above but only ever used for
+    // lexical containment COMPARISON via `path_falls_under_or_equals`),
+    // `artifact_stem` IS interpolated unsanitized into filesystem paths
+    // this process itself constructs and WRITES to — the sealed-shard
+    // filename (`format!("{artifact_stem}.{seq:04}.md")`) and the
+    // shard-index sibling path (`shard_index_path_for`,
+    // `format!("{artifact_stem}.shard-index.toml")`). A config-supplied
+    // `artifact_stem` of e.g. `"../../etc/cron.d/evil"` would let a
+    // malicious or malformed `[[shard]]` config steer a sealed-shard write
+    // outside the canonical file's own parent directory — `shard_sibling_path`'s
+    // `dir.join(filename)` has no traversal guard of its own; it trusts its
+    // `filename` argument is a single path component, which every OTHER
+    // call site satisfies by construction but a `[[shard]]` config controls
+    // directly for `artifact_stem`. Fail-loud: never silently stripped,
+    // escaped, or truncated to "make it safe".
+    if entry.artifact_stem.contains('/')
+        || entry.artifact_stem.contains('\\')
+        || entry.artifact_stem.contains("..")
+        || entry.artifact_stem.contains('\0')
+    {
+        return Err(ShardConfigError::InvalidArtifactStem {
+            artifact_stem: entry.artifact_stem.clone(),
         });
     }
 
@@ -3631,6 +3698,52 @@ mod tests {
             "a \"./\"-prefixed non-empty artifact_path MUST still pass validate_entry \
              (S-2 CurDir normalization is orthogonal to EC-022's emptiness check)",
         );
+    }
+
+    /// SEC-002 (security review, MEDIUM, CWE-22): `validate_entry` MUST
+    /// reject an `artifact_stem` containing a `/`, `\`, or a `..`
+    /// path-traversal component — table-driven over the three forbidden
+    /// forms the security review names explicitly.
+    #[test]
+    fn test_SEC002_validate_entry_rejects_path_traversal_artifact_stem() {
+        let cases: &[(&str, &str)] = &[
+            ("forward slash", "../.factory/decision-log"),
+            ("embedded forward slash", "sub/decision-log"),
+            ("backslash", "sub\\decision-log"),
+            ("bare parent-dir traversal", ".."),
+        ];
+
+        for (label, unsafe_stem) in cases {
+            let mut entry = flat_entry("decision-log", 40_000);
+            entry.artifact_stem = unsafe_stem.to_string();
+
+            let err = validate_entry(&entry).expect_err(&format!(
+                "SEC-002 [{label}]: artifact_stem = {unsafe_stem:?} MUST be rejected by \
+                 validate_entry"
+            ));
+            match err {
+                ShardConfigError::InvalidArtifactStem { artifact_stem } => {
+                    assert_eq!(
+                        &artifact_stem, unsafe_stem,
+                        "SEC-002 [{label}]: InvalidArtifactStem must echo back the offending \
+                         artifact_stem verbatim"
+                    );
+                }
+                other => panic!(
+                    "SEC-002 [{label}]: expected ShardConfigError::InvalidArtifactStem — got \
+                     {other:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn test_SEC002_validate_entry_accepts_normal_artifact_stem() {
+        // Non-regression: a normal artifact_stem (no separators, no `..`)
+        // MUST still pass validate_entry.
+        let entry = flat_entry("decision-log", 40_000);
+        validate_entry(&entry)
+            .expect("a normal artifact_stem like \"decision-log\" MUST pass validate_entry");
     }
 
     #[test]
