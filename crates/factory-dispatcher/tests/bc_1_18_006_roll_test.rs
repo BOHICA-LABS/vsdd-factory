@@ -1912,3 +1912,197 @@ fn test_BC_1_18_006_FC2P4_004_execute_roll_seals_non_utf8_content_byte_for_byte(
          even for non-UTF-8 content"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Red Gate: cluster-2 LOCAL adversary PASS 8 finding F-C2-P8-004 (MINOR,
+// BC-1.18.006 v1.9 Postcondition 2's "Double-fire exception" / Invariant 4's
+// Case B1/B2 split, EC-026).
+//
+// "Double-fire" sequence: Postcondition 7 catch point (ii)'s leading
+// backstop probe retroactively seals+truncates a PRE-EXISTING orphaned
+// over-cap canonical BEFORE this dispatch's own trigger is evaluated (the
+// SAME fixture shape `test_BC_1_18_006_PC7_F_C2_P2_006_write_backstop_then_
+// trigger_must_not_seal_empty_shard` above already drives, which asserts
+// only the index/no-empty-seal side of this sequence); this SAME dispatch's
+// own payload then ALSO exceeds the cap against the now-freshly-emptied
+// canonical, so Postcondition 1's `Ok(None)` empty-canonical short-circuit
+// fires a SECOND time within the SAME dispatch. Per BC v1.9, the gate MUST
+// select the distinct Case B2 template (`build_empty_roll_retry_block_reason`
+// parameterized with `preceded_by_backstop_roll: true`), which OMITS the "no
+// roll was performed"/"remains exactly as it was before this call" clauses
+// (FALSE on this path — a roll DID occur) while keeping the identical
+// split-payload guidance — never Case B1's wording, never the unified Case A
+// template.
+//
+// RED GATE: `build_empty_roll_retry_block_reason` currently takes no
+// `preceded_by_backstop_roll` parameter at all (`shard_manager.rs`, private
+// fn, 3 params: artifact_stem, shard_cap_bytes, payload_len_bytes) and
+// `shard_cap_gate_check`'s `Ok(None)` arm unconditionally emits Case B1's
+// wording regardless of whether catch point (ii) fired earlier in the same
+// dispatch — so this test currently FAILS at RUNTIME (wrong Block reason
+// text), never at compile time: this integration test only asserts against
+// the dispatch's OBSERVABLE `reason` string via `exact_block_reason`, never
+// calls the private `build_empty_roll_retry_block_reason` fn directly (which
+// is unreachable from this file regardless, being private to
+// `shard_manager.rs`). **Production signature the implementer must add**
+// (per BC-1.18.006 v1.9 Postcondition 2's own "CODE CHANGE ROUTED"
+// text): `build_empty_roll_retry_block_reason` gains a fourth parameter,
+// `preceded_by_backstop_roll: bool`, and `shard_cap_gate_check`'s `Ok(None)`
+// call site must thread through whether `reconcile_leading_probe_backstop`
+// fired earlier in the SAME dispatch (a fact already available in
+// dispatch-local control flow — no new tracking state required).
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.006 v1.9 Postcondition 2's Case B2 ("Double-fire exception")
+/// template, pinned VERBATIM (byte-exact modulo the three named
+/// substitutions) — mirrors this file's own
+/// `expected_empty_canonical_block_reason` (Case B1) helper above, which
+/// this template deliberately DROPS the "no roll was performed... the shard
+/// remains exactly as it was before this call" clauses from, while keeping
+/// the identical split-payload guidance.
+fn expected_case_b2_double_fire_block_reason(
+    artifact_stem: &str,
+    payload_len_bytes: u64,
+    shard_cap_bytes: u64,
+) -> String {
+    format!(
+        "Shard `{artifact_stem}` is now empty (a prior over-cap shard was retroactively rotated \
+         by this same call before your payload was evaluated); your own payload alone \
+         ({payload_len_bytes} bytes) exceeds the cap ({shard_cap_bytes} bytes). Recompute or \
+         split your payload into multiple smaller calls."
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_EC026_FC2P8_004_double_fire_emits_case_b2_not_case_b1() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+
+    // EC-017/EC-015 crash-orphan signature: canonical is already over cap,
+    // un-sealed, with no roll ever having started — catch point (i) never
+    // ran (or crashed before running) for this pre-existing content.
+    let orphaned_content = "z".repeat(60_000);
+    std::fs::write(&target, &orphaned_content).unwrap();
+
+    // This dispatch's own Write `content` is ALSO over cap on its own
+    // (55,000 > 49,152, matching BC-1.18.006 v1.9's own EC-026 Canonical
+    // Test Vector numbers exactly) — once the Write-arm backstop (catch
+    // point (ii)) retroactively seals+truncates the pre-existing orphaned
+    // content (leaving the canonical at 0 bytes), BC-1.18.005's own trigger,
+    // evaluated against THIS Write's 55,000-byte content, fires a SECOND
+    // time in the SAME dispatch, hitting Postcondition 1's Ok(None)
+    // empty-canonical short-circuit a second time.
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(55_000)}),
+    )
+    .await;
+
+    assert_ne!(
+        summary.exit_code, 0,
+        "precondition: this Write's own 55,000-byte content is over the 49,152 cap and must \
+         still resolve to Block"
+    );
+
+    // Precondition (already covered by the sibling F-C2-P2-006 test above,
+    // re-asserted here so this test is self-contained): the backstop's own
+    // legitimate retroactive seal of the real 60,000-byte orphaned content
+    // must have landed at seq=1 before this dispatch's own trigger re-fired.
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path)
+        .expect("the backstop's own legitimate retroactive seal must have published an index");
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert!(
+        index
+            .shards
+            .iter()
+            .any(|e| e.bytes_at_seal == 60_000 && e.sealed_retroactively),
+        "precondition: the Write-arm backstop must have retroactively sealed the real, \
+         pre-existing 60,000-byte orphaned content BEFORE this dispatch's own trigger re-fired. \
+         Got shards: {:?}",
+        index.shards
+    );
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "precondition: the SECOND (double-fire) Ok(None) short-circuit must NOT have appended \
+         its own [[shard]] entry — only the backstop's one legitimate retroactive seal. Got: \
+         {:?}",
+        index.shards
+    );
+
+    let reason = exact_block_reason(&summary);
+
+    let case_b1_forbidden_fragment = "no roll was performed";
+    assert!(
+        !reason.contains(case_b1_forbidden_fragment),
+        "BC-1.18.006 v1.9 Invariant 4 Case B1/B2 split (EC-026, F-C2-P8-004, MINOR): a \
+         double-fire dispatch (catch point (ii)'s backstop retroactively rolled a pre-existing \
+         orphan earlier in THIS SAME dispatch) must NEVER emit Case B1's \"no roll was \
+         performed... the shard remains exactly as it was before this call\" wording — that \
+         claim is FALSE on this path (a roll DID occur). Got reason:\n  {reason}"
+    );
+    assert!(
+        !reason.contains("the shard remains exactly as it was before this call"),
+        "BC-1.18.006 v1.9 Invariant 4 Case B1/B2 split (EC-026, F-C2-P8-004, MINOR): the \
+         double-fire path must not claim the shard \"remains exactly as it was before this \
+         call\" — a roll (the backstop's own retroactive roll) DID occur earlier in this same \
+         dispatch. Got reason:\n  {reason}"
+    );
+
+    let expected = expected_case_b2_double_fire_block_reason("decision-log", 55_000, 49_152);
+    assert_eq!(
+        reason, expected,
+        "BC-1.18.006 v1.9 Postcondition 2's \"Double-fire exception\" (EC-026, F-C2-P8-004, \
+         MINOR): a double-fire dispatch must emit Case B2's VERBATIM template — \
+         build_empty_roll_retry_block_reason parameterized with preceded_by_backstop_roll: true \
+         — dropping the \"no roll was performed\"/\"remains exactly as it was before this call\" \
+         clauses while keeping the identical split-payload guidance. Got reason:\n  {reason}\n\
+         Expected:\n  {expected}"
+    );
+}
+
+/// Companion regression guard (F-C2-P8-004): the PURE empty-canonical Case
+/// B1 path — no roll of any kind occurred during this dispatch, the
+/// canonical was ALREADY 0 bytes when the dispatch began — must remain
+/// UNCHANGED by the Case B2 addition above. This duplicates
+/// `test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_matches_verbatim_template`'s
+/// own assertion deliberately (same verbatim template, same helper), as the
+/// pass-8-scoped regression pin: the fix for EC-026 must thread
+/// `preceded_by_backstop_roll: false` for this case, never flip it to `true`
+/// merely because SOME dispatch-local backstop code path exists in the
+/// binary.
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P8_004_pure_empty_canonical_case_b1_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    // Canonical is ALREADY empty BEFORE this dispatch begins — no backstop,
+    // no retroactive roll of any kind occurs during this dispatch.
+    std::fs::write(&target, "").unwrap();
+
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(60_000)}),
+    )
+    .await;
+
+    assert_ne!(
+        summary.exit_code, 0,
+        "precondition: over-cap payload must still Block"
+    );
+
+    let reason = exact_block_reason(&summary);
+    let expected = expected_empty_canonical_block_reason("decision-log", 60_000, 49_152);
+    assert_eq!(
+        reason, expected,
+        "F-C2-P8-004 regression guard: the PURE empty-canonical Case B1 path (no roll occurred \
+         this dispatch) must be UNCHANGED by the Case B2 addition — still Case B1's \"no roll \
+         was performed... the shard remains exactly as it was before this call\" wording. Got \
+         reason:\n  {reason}\nExpected:\n  {expected}"
+    );
+}

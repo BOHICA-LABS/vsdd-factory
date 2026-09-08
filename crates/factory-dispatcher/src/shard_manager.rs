@@ -5969,6 +5969,180 @@ mod bc_1_18_006_roll_tests {
     }
 
     // -----------------------------------------------------------------
+    // BC-1.18.006 v1.9 Postcondition 8's 0-byte-destination exception
+    // (cluster-2 LOCAL adversary pass-8, F-C2-P8-002, MEDIUM; EC-024/EC-025)
+    // — RED GATE (pass-8 fix-burst): `publish_sealed_shard` is currently
+    // UNCONDITIONALLY write-once (any pre-existing destination, 0 bytes or
+    // not, refuses via `E-SHD-009`/`ShardRollError::SealedShardAlreadyExists`
+    // — see `write_exclusive`/`publish_sealed_shard` above, which has NO
+    // 0-byte-reclaim branch yet). Per BC v1.9, a 0-byte pre-existing
+    // destination MUST instead be reclaimed (`stat()` once, unlink if
+    // exactly 0 bytes, retry `write_exclusive` exactly ONCE — never a loop)
+    // rather than refused, while a NON-EMPTY pre-existing destination MUST
+    // continue to refuse loudly (write-once immutability is unweakened for
+    // real, non-empty sealed history). These two tests currently FAIL
+    // against HEAD (both collide and both surface `E-SHD-009` today) for the
+    // 0-byte case specifically — the non-empty case is the regression guard
+    // that must stay green once the 0-byte branch is added.
+    // -----------------------------------------------------------------
+
+    /// EC-025 (F-C2-P8-002) reclaim-success test — drives the FULL
+    /// `execute_roll` staged sequence (not just `publish_sealed_shard` in
+    /// isolation) so this test is load-bearing on the entire roll outcome
+    /// BC-1.18.006's own TEST ROUTED text asks for: the roll must SUCCEED
+    /// (`Ok(Some(_))`), the sealed shard must durably hold the exact
+    /// pre-roll canonical bytes (not left empty, not partially written), and
+    /// the shard-index must have advanced — never `E-SHD-009`.
+    #[test]
+    fn test_BC_1_18_006_EC025_FC2P8_002_execute_roll_reclaims_zero_byte_destination_and_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let entry = flat_entry("decision-log", 49_152);
+        let canonical_path = dir.path().join("decision-log.md");
+        let pre_roll_content = "a".repeat(50_000);
+        std::fs::write(&canonical_path, &pre_roll_content).expect("seed over-cap canonical");
+
+        // A 0-byte file already occupies the next-expected seq path
+        // (seq=1) — e.g. an external anomaly, or a `next_seal_seq` that
+        // self-heal's Invariant 9 skip-and-warn guard left permanently
+        // un-indexed (BC-1.18.006 v1.9 Postcondition 8's 0-byte-destination
+        // exception).
+        let sealed_seq1 = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_seq1, "").expect("seed 0-byte collision at seq=1");
+        assert_eq!(
+            std::fs::metadata(&sealed_seq1)
+                .expect("stat seeded file")
+                .len(),
+            0,
+            "precondition: the seeded seq=1 file must be exactly 0 bytes"
+        );
+
+        let result = execute_roll(&entry, &canonical_path, false);
+
+        let new_entry = match result {
+            Ok(Some(new_entry)) => new_entry,
+            other => panic!(
+                "BC-1.18.006 v1.9 Postcondition 8 0-byte-destination exception (EC-025, \
+                 F-C2-P8-002, MEDIUM): a 0-byte pre-existing file at the next-expected seq path \
+                 MUST be reclaimed (unlink + a SINGLE write_exclusive retry) rather than \
+                 refused — execute_roll must succeed (Ok(Some(_))), NEVER \
+                 ShardRollError::SealedShardAlreadyExists (E-SHD-009). Got: {other:?}"
+            ),
+        };
+
+        assert_eq!(
+            new_entry.seq, 1,
+            "EC-025: the reclaimed 0-byte file's own seq (1) must be reused, never skipped past"
+        );
+
+        let sealed_content = std::fs::read_to_string(&sealed_seq1).expect(
+            "EC-025: the reclaimed seq=1 path must now hold the durable sealed content on disk",
+        );
+        assert_eq!(
+            sealed_content, pre_roll_content,
+            "EC-025: after reclaiming the 0-byte collision, the sealed shard must contain the \
+             EXACT pre-roll canonical bytes — never left empty, never partially written"
+        );
+        assert_eq!(
+            new_entry.bytes_at_seal,
+            pre_roll_content.len() as u64,
+            "EC-025: the recovered index entry's bytes_at_seal must reflect the real sealed \
+             content length"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let index_toml = std::fs::read_to_string(&index_path)
+            .expect("EC-025: the shard-index must be published after a successful reclaim+roll");
+        let index: ShardIndex = toml::from_str(&index_toml).expect("index must be valid TOML");
+        assert_eq!(
+            index.shards.len(),
+            1,
+            "EC-025: exactly one [[shard]] entry — the reclaimed seq=1 seal — the index must \
+             have ADVANCED, not been left stale or duplicated. Got: {:?}",
+            index.shards
+        );
+        assert_eq!(index.shards[0].seq, 1);
+        assert_eq!(index.shards[0].bytes_at_seal, pre_roll_content.len() as u64);
+
+        assert_eq!(
+            std::fs::metadata(&canonical_path)
+                .expect("canonical must still exist")
+                .len(),
+            0,
+            "Invariant 6: canonical must be exactly 0 bytes after a successful roll"
+        );
+    }
+
+    /// EC-024/EC-025 boundary regression guard (F-C2-P8-002): the 0-byte
+    /// reclaim exception must NOT weaken the write-once guarantee for a
+    /// NON-EMPTY pre-existing destination — that case must continue to fail
+    /// loud with `E-SHD-009`/`ShardRollError::SealedShardAlreadyExists`,
+    /// leaving the pre-existing (non-empty) sealed content byte-identical
+    /// and untouched, and performing NEITHER a truncate NOR an index
+    /// publish for the refused attempt. This currently already PASSES
+    /// against HEAD (the sibling
+    /// `test_BC_1_18_006_FC2P4_002_publish_sealed_shard_refuses_to_overwrite_existing_seq`
+    /// test in `bc_1_18_006_roll_test.rs` already exercises the same
+    /// invariant at the `publish_sealed_shard` unit level) — pinned again
+    /// here, driven through the FULL `execute_roll` sequence, as the
+    /// pass-8-scoped regression guard that must stay green once the 0-byte
+    /// reclaim branch above is implemented (i.e. the fix must not
+    /// accidentally widen the reclaim to non-empty destinations too).
+    #[test]
+    fn test_BC_1_18_006_EC024_FC2P8_002_execute_roll_non_empty_destination_still_fails_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let entry = flat_entry("decision-log", 49_152);
+        let canonical_path = dir.path().join("decision-log.md");
+        let pre_roll_content = "b".repeat(50_000);
+        std::fs::write(&canonical_path, &pre_roll_content).expect("seed over-cap canonical");
+
+        // A NON-EMPTY file already occupies the next-expected seq path
+        // (seq=1) — genuinely durable sealed history (or an external
+        // actor's real content), which write-once immutability must
+        // protect.
+        let sealed_seq1 = sealed_path_for(dir.path(), "decision-log", 1);
+        let preexisting_content = "PRESEED".repeat(200);
+        std::fs::write(&sealed_seq1, &preexisting_content)
+            .expect("seed non-empty collision at seq=1");
+
+        let err = execute_roll(&entry, &canonical_path, false).expect_err(
+            "EC-024 (F-C2-P8-002 boundary regression guard): a NON-EMPTY pre-existing \
+             destination at the next-expected seq path MUST continue to refuse — the 0-byte \
+             reclaim exception (EC-025) must NEVER widen to a non-empty collision",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealedShardAlreadyExists { .. }),
+            "EC-024: the failure MUST be ShardRollError::SealedShardAlreadyExists (E-SHD-009) \
+             specifically — got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-009"),
+            "EC-024: the error's Display text must name the E-SHD-009 code — got: {err}"
+        );
+
+        let on_disk = std::fs::read_to_string(&sealed_seq1)
+            .expect("EC-024: the pre-existing sealed shard must remain on disk");
+        assert_eq!(
+            on_disk, preexisting_content,
+            "EC-024: the pre-existing NON-EMPTY sealed shard must be left byte-for-byte \
+             UNCHANGED — publish_sealed_shard must never overwrite real sealed history"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&canonical_path).expect("canonical must still exist"),
+            pre_roll_content,
+            "EC-024: a refused seal-publish attempt must apply NEITHER the truncate NOR any \
+             other roll step — the canonical file must be left in its exact pre-roll state"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        assert!(
+            !index_path.exists(),
+            "EC-024: a refused seal-publish attempt must perform NO index publish — no \
+             shard-index file may be created as a side effect of a failed roll attempt"
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Step (c) — truncate_canonical_to_empty (Postcondition 1 step (c);
     // Invariant 2/3)
     // -----------------------------------------------------------------
