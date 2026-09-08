@@ -2456,6 +2456,19 @@ pub fn build_roll_retry_block_reason(
 /// `current_shard_bytes + net_delta_bytes` for `Edit`/`MultiEdit`) — naming
 /// it explicitly tells the caller exactly how far over cap their own
 /// payload is, rather than leaving them to recompute it themselves.
+///
+/// # VERBATIM template (BC-1.18.006 v1.8 Postcondition 2, F-C2-P5-002)
+///
+/// Emits Postcondition 2's "Empty-canonical retry template" byte-for-byte
+/// (modulo the three named substitutions) — a prior revision paraphrased
+/// this wording (a spurious "reached" after the cap-bytes parenthetical;
+/// a second sentence that never mentioned "no roll was performed" or "the
+/// shard remains exactly as it was before this call") and a single-substring
+/// test (`.contains("(N bytes)")`) stayed green through that divergence.
+/// Backticks around `{artifact_stem}` are literal output characters (the
+/// same convention [`build_roll_retry_block_reason`]'s own unified template
+/// already establishes); backticks around the numeric placeholders in the
+/// spec's own blockquote are doc-only markup — bare numbers are emitted.
 fn build_empty_roll_retry_block_reason(
     artifact_stem: &str,
     shard_cap_bytes: u64,
@@ -2463,9 +2476,9 @@ fn build_empty_roll_retry_block_reason(
 ) -> String {
     format!(
         "Shard `{artifact_stem}` is already empty; your own payload alone ({payload_len_bytes} \
-         bytes) exceeds the cap ({shard_cap_bytes} bytes reached), so no new shard was sealed \
-         (there was no existing content to preserve). Recompute your payload to fit within the \
-         cap before retrying — split it across multiple smaller writes if needed."
+         bytes) exceeds the cap ({shard_cap_bytes} bytes). Recompute or split your payload into \
+         multiple smaller calls — no roll was performed, because there is no existing content \
+         to rotate away; the shard remains exactly as it was before this call."
     )
 }
 
