@@ -4149,34 +4149,61 @@ mod tests {
 
     // ===================================================================
     // F-002 (MED, S-25.02 Phase F4 LOCAL adversary pass-1 cluster-1) — a
-    // Write against a [[shard]]-matched path whose current shard cannot be
-    // stat()-ed for a reason OTHER than NotFound (e.g. EC-004's already-
-    // covered missing-file case) MUST NOT be blocked when the Write's own
-    // content length is under cap. Postcondition 3's CORRECTED Write leg
-    // computes projected_size = len(content) ALONE — current_shard_bytes
-    // (and, by extension, any failure reading it) is irrelevant to Write.
+    // Write against a [[shard]]-matched path MUST NOT be blocked by the
+    // VALUE of current_shard_bytes when the Write's own content length is
+    // under cap. Postcondition 3's CORRECTED Write leg computes
+    // projected_size = len(content) ALONE — current_shard_bytes is never
+    // summed into it, regardless of what value that read produces.
+    //
+    // RETARGETED (S-25.02 Phase F4 cluster-2 pass-2 finding F-C2-P2-003,
+    // product-owner-approved refined Option A): this test ORIGINALLY used
+    // a self-referential-symlink ELOOP fixture to prove a *stat() FAILURE*
+    // was irrelevant to the Write formula, and its old assertion message
+    // claimed "shard_cap_gate_check's ToolKind::Write arm never calls
+    // current_shard_bytes_flat() at all" — TRUE when this test was
+    // authored (pre-v1.5), but made FALSE by BC-1.18.006 v1.5's own
+    // dedicated Write-arm crash-orphan backstop probe (see the
+    // `ToolKind::Write` arm's own doc comment above, "a NEW, DEDICATED,
+    // bounded stat() specifically for the backstop probe"), which DOES
+    // call `current_shard_bytes_flat` for that unrelated purpose. Once
+    // BC-1.18.006 v1.6 Invariant 8 / EC-019 / E-SHD-008 (product-owner
+    // adjudication, F-C2-P2-003) makes that SAME backstop probe's
+    // non-NotFound stat() failures fail LOUD (see
+    // `test_BC_1_18_006_F003_write_backstop_stat_failure_fails_loud_e_shd_008`,
+    // `bc_1_18_006_roll_tests` below), the ELOOP fixture's expected
+    // outcome flips from `Continue` to `Error` — a stat()-FAILURE
+    // disposition question BC-1.18.005 Postcondition 3 never governed in
+    // the first place (confirmed: only BC-1.18.006 v1.5+ added any Write-
+    // arm stat() call at all; BC-1.18.005 itself never required or
+    // forbade one). No BC-1.18.005 amendment is needed — only this test's
+    // own stale, over-broad fixture.
+    //
+    // F-002's REAL, still-binding invariant was never about stat()
+    // failure — it is Postcondition 3's content-alone formula ignoring
+    // current_shard_bytes's *value*. This retargeted fixture proves
+    // exactly that with a REAL, successfully-stat()-able on-disk
+    // canonical file (45,000 bytes — BC-1.18.006 v1.4's own original,
+    // since-corrected Canonical Test Vectors row) and a 5,000-byte Write
+    // content: the WITHDRAWN uniform formula would have summed
+    // 45,000 + 5,000 = 50,000 > 49,152 and wrongly rolled; the CORRECTED
+    // formula (content alone) does not. Because current_shard_bytes here
+    // (45,000) is itself UNDER shard_cap_bytes (49,152), this fixture's
+    // stat() call succeeds and never reaches the backstop's over-cap
+    // reconciliation branch OR its Err(e) leg — it passes identically
+    // against BOTH the current fail-open backstop code and the
+    // about-to-land E-SHD-008 fail-loud code, so it will not be disturbed
+    // by the F-003 flip landing immediately after this commit.
     // ===================================================================
 
-    #[cfg(unix)]
     #[test]
-    fn test_BC_1_18_005_F002_write_under_cap_continues_despite_irrelevant_stat_failure() {
-        // Same portable technique as the existing unmatched-path zero-cost
-        // canary test above (a self-referential symlink makes ANY
-        // stat()/metadata() call on this path fail with ELOOP) — but here the
-        // path's STEM MATCHES a [[shard]] entry, so the gate does NOT
-        // short-circuit before stat(); it must instead recognize that a
-        // Write's formula never needs current_shard_bytes at all.
-        //
-        // Portability caveat: ELOOP via a self-referential symlink is a
-        // Unix-only technique (`std::os::unix::fs::symlink`), hence
-        // `#[cfg(unix)]` — mirroring this file's own existing precedent for
-        // the same landmine (`test_BC_1_18_005_INV3_EC_001_...`). No portable
-        // cross-platform non-NotFound stat() failure was substituted because
-        // this exact technique is already the codebase's established pattern
-        // for this class of test.
+    fn test_BC_1_18_005_F002_write_under_cap_continues_regardless_of_current_shard_bytes_value() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let looped = dir.path().join("decision-log.md");
-        std::os::unix::fs::symlink(&looped, &looped).expect("create self-referential symlink");
+        let canonical = dir.path().join("decision-log.md");
+        // Real on-disk canonical (NOT a symlink) — the Write-arm backstop's
+        // stat() succeeds here (Ok(45_000)), and 45_000 < shard_cap_bytes
+        // (49_152), so neither the backstop's over-cap reconciliation
+        // branch nor its Err(e) leg is ever reached by this fixture.
+        std::fs::write(&canonical, "y".repeat(45_000)).expect("seed canonical shard file");
 
         let registry = ShardRegistry {
             shards: vec![flat_entry("decision-log", 49_152)],
@@ -4184,18 +4211,17 @@ mod tests {
         let result = shard_cap_gate_check(
             &registry,
             "Write",
-            &looped,
+            &canonical,
             &serde_json::json!({"content": "x".repeat(5_000)}),
         );
         assert_eq!(
             result,
             HookResult::Continue,
             "F-002: a Write's projected_size = len(content) alone (Postcondition 3 CORRECTED) — \
-             current_shard_bytes, and any stat() failure reading it (here ELOOP on a \
-             self-referential symlink), is irrelevant to the Write formula and MUST NOT block it. \
-             shard_cap_gate_check's ToolKind::Write arm never calls current_shard_bytes_flat() at \
-             all — that stat() call is pushed down into ONLY the Edit/MultiEdit arms (F-002 fix), \
-             so this non-NotFound stat error on a Write's own target path is never observed."
+             the VALUE of current_shard_bytes (45,000 here, successfully read via a real, \
+             non-failing stat()) is irrelevant to the Write formula and MUST NOT be summed into \
+             it. The withdrawn uniform formula would have computed 45,000 + 5,000 = 50,000 > \
+             49,152 and wrongly rolled; the corrected formula (5,000 alone) must Continue."
         );
     }
 
