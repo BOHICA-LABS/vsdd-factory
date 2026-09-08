@@ -2336,6 +2336,26 @@ pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
 /// removed afterward regardless of outcome: on success its content also
 /// durably lives at `path` via the hard link; on failure it was never
 /// linked to `path` at all.
+///
+/// FIX-HIGH-1 (S-25.02 PR #824 second-security-review, HIGH, CWE-59/
+/// CWE-367/CWE-377): the temp path is fully deterministic
+/// (`.{basename}.tmp-{pid}`), and `pid` is observable via `ps`/`/proc` — a
+/// co-resident local process could pre-plant a symlink at that exact path
+/// before this function ever runs. The temp file is therefore created via
+/// `OpenOptions::new().write(true).create_new(true)` (`O_EXCL`, Unix /
+/// `CREATE_NEW`, Windows) rather than a plain `File::create`
+/// (`O_CREAT|O_WRONLY|O_TRUNC`, no `O_EXCL`): per POSIX, `create_new` fails
+/// with `ErrorKind::AlreadyExists` if the last path component is a symlink
+/// — dangling or not, regardless of its target — WITHOUT ever
+/// dereferencing it. Without this, a plain `File::create` would follow a
+/// pre-planted symlink and write the sealed content THROUGH it into an
+/// arbitrary attacker-chosen file, and the subsequent `hard_link` below
+/// (which does NOT dereference a symlink `src` by default) would then
+/// hard-link the SYMLINK ITSELF onto `path` — turning the "sealed shard"
+/// into a symlink and defeating write-once immutability. The resulting
+/// `AlreadyExists` is handled by [`publish_sealed_shard`]'s EXISTING
+/// collision-handling path exactly like any other exclusive-create
+/// collision — no new fail-loud branch is needed here.
 fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
@@ -2345,7 +2365,10 @@ fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
     let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
 
     {
-        let mut file = std::fs::File::create(&tmp_path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)?;
         file.write_all(content)?;
         file.sync_all()?;
     }
@@ -7585,5 +7608,73 @@ mod bc_1_18_006_roll_tests {
                  under cap. Got: {other:?}"
             ),
         }
+    }
+
+    /// FIX-HIGH-1 (S-25.02 PR #824 second-security-review, HIGH, CWE-59/
+    /// CWE-367/CWE-377): `write_exclusive`'s temp-file path is fully
+    /// deterministic (`.{basename}.tmp-{pid}`), and `pid` is observable via
+    /// `ps`/`/proc` — a co-resident local process could pre-plant a
+    /// symlink there before `write_exclusive` ever runs. This regression
+    /// guard confirms `write_exclusive` refuses loud (`create_new`'s
+    /// `O_EXCL` semantics) rather than writing the sealed content THROUGH
+    /// the symlink into an arbitrary attacker-chosen file, or later
+    /// hard-linking the symlink itself onto the destination.
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXHIGH1_write_exclusive_refuses_to_follow_preplanted_symlink_at_temp_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        let basename = sealed_path
+            .file_name()
+            .expect("sealed_path has a filename")
+            .to_string_lossy()
+            .into_owned();
+        // The EXACT deterministic temp-file path `write_exclusive` itself
+        // computes — `pid` observable via `ps`/`/proc` in a real attack.
+        let tmp_path = dir
+            .path()
+            .join(format!(".{basename}.tmp-{}", std::process::id()));
+
+        let attacker_target = dir.path().join("attacker-target.txt");
+        std::fs::write(&attacker_target, "pre-existing attacker-owned content")
+            .expect("seed the attacker's target file");
+        std::os::unix::fs::symlink(&attacker_target, &tmp_path)
+            .expect("pre-plant a symlink at the exact deterministic temp-file path");
+
+        let err = write_exclusive(&sealed_path, b"real sealed content").expect_err(
+            "FIX-HIGH-1: write_exclusive MUST refuse loud when a symlink occupies its \
+             deterministic temp-file path — never follow it to write through, never hard-link \
+             the symlink itself onto the destination",
+        );
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::AlreadyExists,
+            "FIX-HIGH-1: create_new's O_EXCL semantics must surface as AlreadyExists for a \
+             pre-existing symlink at the temp path (dangling or not) — got: {err:?}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&attacker_target)
+                .expect("attacker target must still be readable"),
+            "pre-existing attacker-owned content",
+            "FIX-HIGH-1: the attacker's target file must be completely untouched — \
+             write_exclusive must never have written the sealed content THROUGH the pre-planted \
+             symlink"
+        );
+        assert!(
+            !sealed_path.exists(),
+            "FIX-HIGH-1: the sealed destination must never come into existence — \
+             write_exclusive must never hard-link the attacker's symlink itself onto the \
+             destination path"
+        );
+        assert!(
+            std::fs::symlink_metadata(&tmp_path)
+                .expect("lstat the temp path after refusal")
+                .file_type()
+                .is_symlink(),
+            "FIX-HIGH-1: the pre-planted symlink at the temp path must be left untouched — \
+             write_exclusive's best-effort cleanup only ever removes a temp file IT created, \
+             never a pre-existing symlink it refused to write through"
+        );
     }
 }
