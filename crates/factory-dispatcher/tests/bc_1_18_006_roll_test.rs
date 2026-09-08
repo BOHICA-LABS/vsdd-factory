@@ -1483,22 +1483,67 @@ fn test_BC_1_18_006_FC2P4_002_publish_sealed_shard_refuses_to_overwrite_existing
 
 // ---------------------------------------------------------------------------
 // F-C2-P4-003 (MINOR, BC-1.18.006 v1.8): the F-C2-P2-006 empty-canonical
-// Block message must name the incoming payload's OWN byte count N (e.g.
-// "your own payload alone (60000 bytes) exceeds the cap (49152 bytes)") —
-// `build_empty_roll_retry_block_reason` currently takes no payload-length
-// argument at all, so it structurally cannot emit N.
+// Block message must match Postcondition 2's "Empty-canonical retry
+// template" VERBATIM — not merely contain the `(<N> bytes)` fragment.
+//
+// STRENGTHENED (cluster-2 LOCAL adversary PASS 5, F-C2-P5-002, weak-test
+// finding): the original version of this test asserted only
+// `.contains("(60000 bytes)")` — a single substring so weak it stayed GREEN
+// through a real emitter-vs-spec divergence: the shipped
+// `build_empty_roll_retry_block_reason` never emits the spec's own "no roll
+// was performed... rotate away... the shard remains exactly as it was
+// before this call" framing at all, and additionally appends a spurious
+// "reached" after the cap-bytes parenthetical that Postcondition 2's own
+// text does not contain. A single-substring assertion is structurally blind
+// to both defects. This version pins the FULL literal template text (BC
+// v1.8 Postcondition 2's "Empty-canonical retry template" blockquote,
+// cross-checked against EC-021's abbreviated Canonical Test Vector row,
+// which — like the sibling unified-template CTV row immediately above it —
+// elides the literal backticks/period-vs-ellipsis punctuation for table
+// brevity only; Postcondition 2's own quoted blockquote is the byte-exact
+// source, and the ALREADY-SHIPPED, ALREADY-GREEN `build_roll_retry_block_
+// reason` unified template establishes the precedent that backticks around
+// the artifact-name placeholder ARE literal output characters while
+// backticks around bare numeric placeholders are doc-only markup — this
+// test follows that same convention for the empty-canonical template's
+// `<artifact>` placeholder).
 // ---------------------------------------------------------------------------
 
+/// BC-1.18.006 v1.8 Postcondition 2 "Empty-canonical retry template",
+/// pinned VERBATIM (byte-exact modulo the three named substitutions). Any
+/// wording drift in the shipped `build_empty_roll_retry_block_reason` —
+/// missing phrases, reordered clauses, or spurious additions — must fail
+/// this exact-text assertion, not merely a fragment-substring check.
+fn expected_empty_canonical_block_reason(
+    artifact_stem: &str,
+    payload_len_bytes: u64,
+    shard_cap_bytes: u64,
+) -> String {
+    format!(
+        "Shard `{artifact_stem}` is already empty; your own payload alone ({payload_len_bytes} \
+         bytes) exceeds the cap ({shard_cap_bytes} bytes). Recompute or split your payload into \
+         multiple smaller calls — no roll was performed, because there is no existing content \
+         to rotate away; the shard remains exactly as it was before this call."
+    )
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_includes_payload_byte_count() {
+async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_matches_verbatim_template() {
     struct Case {
         tool_name: &'static str,
         tool_input: serde_json::Value,
+        // The trigger-fire payload length N BC-1.18.005's own formula
+        // computes for this call (Write: `len(content)`; Edit{replace_all}:
+        // `current_shard_bytes(0) + net_delta_bytes(len(new) - len(old))`) —
+        // both cases are constructed so N works out to 60,000, matching the
+        // BC's own EC-021 Canonical Test Vector numbers exactly.
+        expected_payload_len_bytes: u64,
     }
     let cases = [
         Case {
             tool_name: "Write",
             tool_input: serde_json::json!({"content": "x".repeat(60_000)}),
+            expected_payload_len_bytes: 60_000,
         },
         Case {
             tool_name: "Edit",
@@ -1507,6 +1552,7 @@ async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_includes_paylo
                 "new_string": "z".repeat(60_000),
                 "replace_all": true,
             }),
+            expected_payload_len_bytes: 60_000,
         },
     ];
 
@@ -1528,14 +1574,20 @@ async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_includes_paylo
         );
 
         let per_plugin_debug = format!("{:?}", summary.per_plugin_results);
+        let expected = expected_empty_canonical_block_reason(
+            "decision-log",
+            case.expected_payload_len_bytes,
+            49_152,
+        );
         assert!(
-            per_plugin_debug.contains("(60000 bytes)"),
-            "F-C2-P4-003 (MINOR, BC-1.18.006 v1.8) tool=\"{}\": the empty-canonical Block \
-             message must name the incoming payload's own byte count N as \"(60000 bytes)\" \
-             (e.g. \"your own payload alone (60000 bytes) exceeds the cap (49152 bytes)\") — \
-             build_empty_roll_retry_block_reason currently receives no payload-length argument \
-             at all. Got: {per_plugin_debug}",
-            case.tool_name
+            per_plugin_debug.contains(&expected),
+            "F-C2-P5-002 (strengthened from F-C2-P4-003, BC-1.18.006 v1.8 Postcondition 2's \
+             \"Empty-canonical retry template\") tool=\"{}\": the empty-canonical Block message \
+             must match the spec's VERBATIM template text exactly, not merely contain the \
+             \"({} bytes)\" fragment. Expected the message to contain:\n  {expected}\nGot \
+             per_plugin_results debug:\n  {per_plugin_debug}",
+            case.tool_name,
+            case.expected_payload_len_bytes,
         );
     }
 }
