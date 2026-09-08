@@ -45,6 +45,7 @@ use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::plugin_loader::PluginCache;
 use factory_dispatcher::registry::Registry;
 use factory_dispatcher::resolver::ResolverRegistry;
+use factory_dispatcher::shard_manager::{ShardEntry, ShardShape, execute_roll};
 
 /// A well-formed `"flat"`-shaped `[[shard]]` config entry — identical
 /// calibration constants to `bc_1_18_005_shard_cap_trigger_test.rs`'s own
@@ -1274,4 +1275,300 @@ async fn test_BC_1_18_006_PC7_F_C2_P2_006_write_backstop_then_trigger_must_not_s
             shard.path
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Red Gate: cluster-2 LOCAL adversary PASS 4 findings (BC-1.18.006 v1.8).
+// Every test below is written to FAIL against the CURRENT implementation —
+// test-writer per BC-5.38.001; implementer follows to make these green.
+// ---------------------------------------------------------------------------
+
+/// A well-formed `"flat"`-shaped [`ShardEntry`], mirroring
+/// `shard_manager.rs`'s own private `flat_entry` test fixture (identical
+/// calibration constants — cap 49,152, formula ceiling 50,640) so this
+/// file's directly-constructed fixtures stay self-consistent with the rest
+/// of this cluster's already-validated formula ceiling.
+fn flat_entry(stem: &str, shard_cap_bytes: u64) -> ShardEntry {
+    ShardEntry {
+        artifact_stem: stem.to_string(),
+        artifact_path: format!("{stem}.md"),
+        practical_fuel_ceiling: 8_000_000,
+        worst_case_fuel_per_byte: 106.36,
+        max_single_record_bytes: 16_384,
+        safety_margin: 8_192,
+        shard_cap_bytes,
+        shape: Some(ShardShape::Flat),
+        n: None,
+        low_water_mark: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P4-001 (MAJOR, data-loss): catch point (i) must self-heal a
+// pre-existing E-SHD-006 orphan BEFORE calling `execute_roll` for a NEW
+// over-cap payload — otherwise `execute_roll`'s own `next_seal_seq`
+// computation (driven off an index that has not yet recorded the orphan)
+// collides with the orphan's own seq, and `publish_sealed_shard`'s
+// unconditional `write_atomic` SILENTLY OVERWRITES the durable orphan with
+// the new payload's content, permanently destroying the orphaned history
+// catch point (i) exists to preserve.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_006_FC2P4_001_catch_point_i_self_heals_orphan_before_execute_roll() {
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), FLAT_SHARD_CONFIG);
+    let target = dir.path().join("decision-log.md");
+
+    // E-SHD-006 crash state: the sealed shard is ALREADY durably published
+    // (step (b) succeeded) holding content X (<= cap, the legitimate
+    // non-retroactive-seal shape), the canonical file STILL holds that same
+    // content X (step (c)/truncate never ran), and NO shard-index file
+    // exists at all yet (step (d) never ran either).
+    let orphan_content = "o".repeat(3_000);
+    let sealed_seq1_path = sealed_path_for(dir.path(), "decision-log", 1);
+    std::fs::write(&sealed_seq1_path, &orphan_content).unwrap();
+    std::fs::write(&target, &orphan_content).unwrap();
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    assert!(
+        !index_path.exists(),
+        "precondition: no shard-index file exists yet (step (d) never ran)"
+    );
+
+    // Simulate a DIFFERENT, already-applied `replace_all: true` Edit
+    // ballooning the canonical to X' — over cap, and content-changing (X'
+    // != X) — by the time this PostToolUse event fires.
+    let new_content = "n".repeat(50_000);
+    std::fs::write(&target, &new_content).unwrap();
+
+    let payload = replace_all_post_tool_use_payload(&target);
+
+    // Drive this through the REAL catch-point-(i) wiring end-to-end.
+    reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
+
+    // The durable E-SHD-006 orphan at seq=1 must be left byte-for-byte
+    // UNCHANGED — never overwritten with X'.
+    let sealed_seq1_after = std::fs::read_to_string(&sealed_seq1_path)
+        .expect("F-C2-P4-001: the durable orphan sealed shard at seq=1 must still exist on disk");
+    assert_eq!(
+        sealed_seq1_after, orphan_content,
+        "F-C2-P4-001 (MAJOR, data-loss): catch point (i) must self-heal the pre-existing \
+         E-SHD-006 orphan BEFORE running execute_roll for the new over-cap payload — the \
+         orphan's durable content must never be silently overwritten by execute_roll's own \
+         next_seal_seq collision"
+    );
+
+    // The shard-index must now record BOTH the self-healed orphan (seq=1)
+    // AND the new payload's own retroactive seal (seq=2) — never a single
+    // entry that clobbers the orphan's slot.
+    let index_toml = std::fs::read_to_string(&index_path)
+        .expect("F-C2-P4-001: the shard-index must exist after self-heal + roll");
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        2,
+        "F-C2-P4-001: exactly two [[shard]] entries — the self-healed orphan (seq=1) and the \
+         new payload's own retroactive seal (seq=2). Got: {:?}",
+        index.shards
+    );
+
+    let orphan_entry = &index.shards[0];
+    assert_eq!(orphan_entry.seq, 1);
+    assert_eq!(orphan_entry.path, "decision-log.0001.md");
+    assert_eq!(
+        orphan_entry.bytes_at_seal, 3_000,
+        "F-C2-P4-001: the self-healed orphan's index entry must record its ACTUAL on-disk byte \
+         count (3,000), never the new payload's byte count"
+    );
+
+    let new_entry = &index.shards[1];
+    assert_eq!(
+        new_entry.seq, 2,
+        "F-C2-P4-001: the new payload must seal to seq=2 (the orphan having already claimed \
+         seq=1 via self-heal), never seq=1 again"
+    );
+    assert_eq!(new_entry.path, "decision-log.0002.md");
+    assert_eq!(new_entry.bytes_at_seal, 50_000);
+    assert!(
+        new_entry.sealed_retroactively,
+        "F-C2-P4-001: the new payload's own seal is catch-point-(i)'s retroactive roll"
+    );
+
+    // X' must be sealed to a NEW file at seq=2 — never overwriting seq=1.
+    let sealed_seq2_path = sealed_path_for(dir.path(), "decision-log", 2);
+    let sealed_seq2_content = std::fs::read_to_string(&sealed_seq2_path).expect(
+        "F-C2-P4-001: the new payload's content must be sealed to a NEW file (seq=2), not \
+         overwrite decision-log.0001.md",
+    );
+    assert_eq!(sealed_seq2_content, new_content);
+
+    // Canonical is exactly 0 bytes after the retroactive roll completes.
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        0,
+        "F-C2-P4-001/Invariant 6: canonical must be exactly 0 bytes after catch point (i)'s \
+         retroactive roll reconciles the new over-cap content"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P4-002 (MINOR, E-SHD-009): `publish_sealed_shard` must be write-once
+// — a sealed shard, once durably published at a given seq, is IMMUTABLE.
+// `write_atomic`'s underlying `rename()` overwrites an existing destination
+// unconditionally (POSIX `rename(2)` semantics), so without an explicit
+// pre-existence check, a roll whose `next_seal_seq` computation collides
+// with an already-sealed file (e.g. a stray/pre-existing file, or an
+// index/filesystem desync) silently destroys previously-sealed, supposedly
+// permanent history.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P4_002_publish_sealed_shard_refuses_to_overwrite_existing_seq() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    let pre_roll_content = "y".repeat(3_000);
+    std::fs::write(&target, &pre_roll_content).unwrap();
+
+    // Pre-create a sealed-shard file at the EXACT destination seq (seq=1,
+    // since no index exists yet) a normal prospective roll would target —
+    // simulating a pre-existing, already-sealed shard occupying that path.
+    let preexisting_content = "PRESEED".repeat(200);
+    let seq1_path = sealed_path_for(dir.path(), "decision-log", 1);
+    std::fs::write(&seq1_path, &preexisting_content).unwrap();
+
+    // Drive a normal over-cap Write dispatch — the SAME trigger AC-006's
+    // own first test uses — which will attempt to seal at seq=1.
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(50_000)}),
+    )
+    .await;
+
+    let per_plugin_debug = format!("{:?}", summary.per_plugin_results);
+    assert!(
+        per_plugin_debug.contains("E-SHD-009"),
+        "F-C2-P4-002 (MINOR): publish_sealed_shard must refuse to overwrite a pre-existing \
+         sealed shard at the destination seq — a write-once immutability violation must \
+         surface as the E-SHD-009 error. Got: {per_plugin_debug}"
+    );
+
+    let seq1_after = std::fs::read_to_string(&seq1_path)
+        .expect("F-C2-P4-002: the pre-existing sealed shard must remain on disk");
+    assert_eq!(
+        seq1_after, preexisting_content,
+        "F-C2-P4-002: the pre-existing sealed shard must be left byte-for-byte UNCHANGED — \
+         publish_sealed_shard must never silently overwrite an already-sealed shard file"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P4-003 (MINOR, BC-1.18.006 v1.8): the F-C2-P2-006 empty-canonical
+// Block message must name the incoming payload's OWN byte count N (e.g.
+// "your own payload alone (60000 bytes) exceeds the cap (49152 bytes)") —
+// `build_empty_roll_retry_block_reason` currently takes no payload-length
+// argument at all, so it structurally cannot emit N.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_includes_payload_byte_count() {
+    struct Case {
+        tool_name: &'static str,
+        tool_input: serde_json::Value,
+    }
+    let cases = [
+        Case {
+            tool_name: "Write",
+            tool_input: serde_json::json!({"content": "x".repeat(60_000)}),
+        },
+        Case {
+            tool_name: "Edit",
+            tool_input: serde_json::json!({
+                "old_string": "",
+                "new_string": "z".repeat(60_000),
+                "replace_all": true,
+            }),
+        },
+    ];
+
+    for case in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("decision-log.md");
+        // Canonical is ALREADY empty (F-C2-P2-006's own empty-canonical
+        // trigger case) — the trigger fires purely because of the incoming
+        // payload's own size (60,000 bytes > 49,152 cap).
+        std::fs::write(&target, "").unwrap();
+
+        let summary = run_roll_gate(dir.path(), &target, case.tool_name, case.tool_input).await;
+
+        assert_ne!(
+            summary.exit_code, 0,
+            "precondition ({}): an over-cap payload against an already-empty canonical must \
+             still resolve to Block (F-C2-P2-006)",
+            case.tool_name
+        );
+
+        let per_plugin_debug = format!("{:?}", summary.per_plugin_results);
+        assert!(
+            per_plugin_debug.contains("(60000 bytes)"),
+            "F-C2-P4-003 (MINOR, BC-1.18.006 v1.8) tool=\"{}\": the empty-canonical Block \
+             message must name the incoming payload's own byte count N as \"(60000 bytes)\" \
+             (e.g. \"your own payload alone (60000 bytes) exceeds the cap (49152 bytes)\") — \
+             build_empty_roll_retry_block_reason currently receives no payload-length argument \
+             at all. Got: {per_plugin_debug}",
+            case.tool_name
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P4-004 (ADVISORY): `execute_roll` must seal byte-for-byte — including
+// non-UTF-8 canonical content. Step (a) currently reads the canonical via
+// `std::fs::read_to_string`, which fails with `InvalidData` (mapped to
+// `ShardRollError::SealWriteFailed`/E-SHD-001) on ANY non-UTF-8 byte
+// sequence, even though nothing about sealing requires UTF-8 validity — a
+// roll must succeed and preserve arbitrary bytes exactly.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_006_FC2P4_004_execute_roll_seals_non_utf8_content_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    let entry = flat_entry("decision-log", 49_152);
+
+    // Over-cap content containing a non-UTF-8 byte (0xFF is never a valid
+    // UTF-8 lead or continuation byte).
+    let mut raw_bytes = vec![b'a'; 50_000];
+    raw_bytes[12_345] = 0xFF;
+    std::fs::write(&canonical_path, &raw_bytes).unwrap();
+
+    let result = execute_roll(&entry, &canonical_path, false);
+
+    let new_entry = match result {
+        Ok(Some(entry)) => entry,
+        other => panic!(
+            "F-C2-P4-004 (ADVISORY): execute_roll must succeed and seal non-UTF-8 canonical \
+             content byte-for-byte — it must NOT fail with E-SHD-001 (SealWriteFailed) merely \
+             because the content is not valid UTF-8. Got: {other:?}"
+        ),
+    };
+
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", new_entry.seq);
+    let sealed_bytes = std::fs::read(&sealed_path)
+        .expect("F-C2-P4-004: the sealed shard must exist on disk after a successful roll");
+    assert_eq!(
+        sealed_bytes, raw_bytes,
+        "F-C2-P4-004: the sealed shard must be a byte-for-byte copy of the non-UTF-8 canonical \
+         content — no lossy/failable UTF-8 decoding step may sit between the canonical file and \
+         the sealed shard"
+    );
+
+    assert_eq!(
+        std::fs::metadata(&canonical_path).unwrap().len(),
+        0,
+        "F-C2-P4-004/Invariant 6: canonical must be exactly 0 bytes after a successful roll, \
+         even for non-UTF-8 content"
+    );
 }
