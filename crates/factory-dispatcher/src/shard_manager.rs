@@ -2764,9 +2764,11 @@ fn run_self_heal_if_plausible(
 /// content is byte-identical to the canonical file's CURRENT content) and,
 /// if so, resumes from step (c) alone — re-attempting ONLY the truncate +
 /// index publish, never re-writing the already-correct sealed shard
-/// (idempotent by construction, since step (b)'s `write_atomic` create is
-/// itself a no-op if reissued against identical content). BC-1.18.006
-/// Postcondition 1's `E-SHD-006` partial-failure postcondition; EC-010.
+/// (idempotent because step (b) is never re-issued during recovery —
+/// self-heal resumes from step (c) [`truncate_canonical_to_empty`] onward;
+/// the sealed shard, once written by `write_exclusive`, is immutable and
+/// never rewritten). BC-1.18.006 Postcondition 1's `E-SHD-006`
+/// partial-failure postcondition; EC-010.
 ///
 /// Returns `Ok(None)` when no `E-SHD-006` duplicate-content state is
 /// detected (the common case — no action taken); `Ok(Some(entry))` when the
