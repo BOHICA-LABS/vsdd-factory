@@ -2327,8 +2327,9 @@ pub fn inject_git_context_if_qualifying(
 // `MultiEdit` call whose `edits` array contains at least one block with
 // `replace_all: true` (BC-1.18.006 Postcondition 7's scope predicate,
 // mirrored from Precondition 4). Real, cheap, structural — see
-// `detect_replace_all_overcap_candidate`'s own doc comment for why this
-// stays outside this burst's `todo!()` boundary.
+// `detect_replace_all_overcap_candidate`'s own doc comment for why this was
+// always real, non-`todo!()` code, even while `shard_manager`'s roll bodies
+// were still stubbed.
 fn tool_input_has_replace_all_true(tool_input: &serde_json::Value) -> bool {
     if tool_input.get("replace_all").and_then(|v| v.as_bool()) == Some(true) {
         return true;
@@ -2353,16 +2354,17 @@ fn tool_input_has_replace_all_true(tool_input: &serde_json::Value) -> bool {
 /// Every check here is cheap and structural (event/tool/`replace_all`/
 /// config-match) — this is BC-1.18.006 Postcondition 7's OWN "zero added
 /// cost outside the narrow case" requirement, not implementer business
-/// logic invented for this stub burst. It is DELIBERATELY real (not
-/// `todo!()`): if this filter itself were `todo!()`, EVERY PostToolUse
-/// dispatch of ANY kind would panic against ADR-051 §Decision 15 point 4's
-/// mandatory unconditional call site in `main::run` (see that call site's
-/// own doc comment) — a catastrophic regression of the ENTIRE cluster-1
-/// BC-1.18.005 suite plus every other integration/bats test that drives the
-/// dispatcher at all. The BC's own tested `stat()`-and-retroactive-roll
-/// behavior lives entirely inside
-/// `shard_manager::reconcile_post_write_replace_all_overcap` (fully
-/// `todo!()`) — this function never touches that behavior, only decides
+/// logic. It was DELIBERATELY kept real (never `todo!()`), even while
+/// `shard_manager`'s roll bodies were still stubbed during the original
+/// stub-architect burst: had this filter itself been `todo!()`, EVERY
+/// PostToolUse dispatch of ANY kind would have panicked against ADR-051
+/// §Decision 15 point 4's mandatory unconditional call site in `main::run`
+/// (see that call site's own doc comment) — a catastrophic regression of the
+/// ENTIRE cluster-1 BC-1.18.005 suite plus every other integration/bats test
+/// that drives the dispatcher at all. The BC's own tested
+/// `stat()`-and-retroactive-roll behavior lives entirely inside
+/// `shard_manager::reconcile_post_write_replace_all_overcap` (now fully
+/// implemented) — this function never touches that behavior, only decides
 /// whether to call into it.
 fn detect_replace_all_overcap_candidate(
     original_payload: &crate::payload::HookPayload,
@@ -2424,13 +2426,12 @@ fn detect_replace_all_overcap_candidate(
 /// `HookResult` of its own (Decision 15 point 2 — this leg is a janitor,
 /// not a gate) and never influences the caller's own dispatch outcome.
 ///
-/// The qualification filter ([`detect_replace_all_overcap_candidate`]) is
-/// real; the actual reconciliation behavior it delegates into
-/// ([`crate::shard_manager::reconcile_post_write_replace_all_overcap`]) is
-/// entirely `todo!()` — see that function's own doc comment. A failure
-/// there is logged (fail-open, matching this leg's own "no `HookResult`
-/// signaling" contract — this leg never blocks or errors the calling
-/// dispatch), not propagated.
+/// The qualification filter ([`detect_replace_all_overcap_candidate`]) and
+/// the reconciliation behavior it delegates into
+/// ([`crate::shard_manager::reconcile_post_write_replace_all_overcap`]) are
+/// both fully implemented. A failure there is logged (fail-open, matching
+/// this leg's own "no `HookResult` signaling" contract — this leg never
+/// blocks or errors the calling dispatch), not propagated.
 pub fn reconcile_replace_all_overcap_if_qualifying(
     original_payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,

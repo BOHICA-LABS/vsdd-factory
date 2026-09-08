@@ -44,27 +44,35 @@
 //! genuine staleness-risk surface for zero measurable benefit under this
 //! process model.
 //!
-//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger")
+//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger"; UPDATED by cluster-2)
 //!
-//! This module implements BC-1.18.005 ONLY (tasks T-1/T-2/T-3; AC-001..AC-005)
-//! — fully, not as a stub; see the "BC-5.38.001 Red Gate discipline" section
-//! below. BC-1.18.006 (the observable roll/block outcome once the `"flat"` trigger
-//! fires), BC-1.18.009 (the observable rotate/block-and-retry outcome once
-//! the item-count trigger fires), and BC-1.18.012 (the one-time changelog
-//! backfill migration) are LATER clusters and are explicitly OUT OF SCOPE
-//! here — this module owns the trigger-boundary decision and the hand-off
-//! point only, per Postcondition 3's and Postcondition 8's "Ownership"
-//! bullets.
+//! This module originally implemented BC-1.18.005 ONLY (tasks T-1/T-2/T-3;
+//! AC-001..AC-005) — fully, not as a stub; see the "BC-5.38.001 Red Gate
+//! discipline" section below. **UPDATE (S-25.02 cluster-2, "roll"):**
+//! BC-1.18.006 (the observable roll/block outcome once the `"flat"` shape's
+//! trigger fires) is now ALSO implemented in this module — it is no longer
+//! out of scope; see the "BC-1.18.006 — Roll-Before-Write..." section
+//! further below for its full implementation. BC-1.18.009 (the observable
+//! rotate/block-and-retry outcome once the item-count trigger fires) and
+//! BC-1.18.012 (the one-time changelog backfill migration) remain LATER
+//! clusters and are still explicitly OUT OF SCOPE here — the
+//! `"frontmatter-changelog-array"` shape's trigger-fired branch still only
+//! owns the trigger-boundary decision and hand-off point for THOSE two BCs,
+//! per Postcondition 8's "Ownership" bullet.
 //!
-//! # BC-5.38.001 Red Gate discipline — implemented (S-25.02 F4 BC-cluster 1)
+//! # BC-5.38.001 Red Gate discipline — implemented (S-25.02 F4 BC-cluster 1;
+//! EXTENDED by cluster-2)
 //!
-//! Every function below now carries a real implementation driving the
-//! test-writer's Red Gate suite green. A fired trigger (either shape) never
-//! constructs `HookResult::Block` from this module — that observable
-//! roll/rotate-and-retry outcome is owned by the later BC-1.18.006 /
-//! BC-1.18.009 clusters (see the "Scope note" above); this module surfaces a
-//! fired trigger as a non-fatal `tracing::warn!` advisory and returns
-//! `Continue`, an honest hand-off rather than a fabricated block.
+//! Every function in this module now carries a real implementation driving
+//! the test-writer's Red Gate suites green (both BC-1.18.005's cluster-1
+//! suite and BC-1.18.006's cluster-2 suite). A fired `"flat"`-shape trigger
+//! now DOES construct an observable `HookResult::Block`/`HookResult::Error`
+//! outcome via `execute_roll` (BC-1.18.006's roll-before-write mechanism,
+//! implemented below) — the withdrawn cluster-1 posture (a non-fatal
+//! `tracing::warn!` advisory followed by `Continue`) applies ONLY to the
+//! `"frontmatter-changelog-array"` shape's item-count trigger now, whose
+//! observable rotate-and-retry outcome remains owned by the still-pending
+//! BC-1.18.009 cluster.
 
 use std::io;
 use std::io::Read as _;
@@ -1061,7 +1069,8 @@ pub fn net_delta_bytes_for_multi_edit(edits: &[EditDelta]) -> i64 {
 ///
 /// This function owns the TRIGGER decision only. BC-1.18.006 owns the
 /// observable roll/block outcome once it fires (Postcondition 3's
-/// "Ownership" bullet) — out of scope for this cluster.
+/// "Ownership" bullet) — implemented separately, by [`execute_roll`] and its
+/// [`shard_cap_gate_check`] call site below, not by this function.
 pub fn size_trigger_fires(projected_size: u64, shard_cap_bytes: u64) -> bool {
     projected_size > shard_cap_bytes
 }
@@ -1689,21 +1698,21 @@ pub fn shard_cap_gate_check(
             };
 
             if size_trigger_fires(projected_size, entry.shard_cap_bytes) {
-                // S-25.02 cluster-2 (BC-1.18.006 "roll"): the trigger-fires
-                // branch NOW owns the observable roll/block outcome (this
-                // module's own "Scope note" above is UPDATED by cluster-2 —
-                // BC-1.18.006 is no longer out of scope). Postcondition 1's
-                // staged four-step sequence executes BEFORE any
-                // `HookResult` is returned (Invariant 2); `execute_roll`
-                // itself is `todo!()` (test-writer's Red Gate suite for
-                // AC-006..AC-009 drives this to a failing/panicking
-                // assertion until implementer replaces it), but this call
-                // site's WIRING is real: a fired trigger no longer merely
-                // `tracing::warn!`s and Continues (the cluster-1 posture,
-                // withdrawn here) — it MUST resolve to either
-                // `HookResult::Block` (Postcondition 2's unified retry
-                // message) or `HookResult::Error` (a genuine `E-SHD-001`
-                // crash), never a silent `Continue` (Invariant 1).
+                // S-25.02 cluster-2 (BC-1.18.006 "roll", IMPLEMENTED): the
+                // trigger-fires branch owns the observable roll/block
+                // outcome (this module's own "Scope note" above is UPDATED
+                // by cluster-2 — BC-1.18.006 is no longer out of scope).
+                // Postcondition 1's staged four-step sequence executes
+                // BEFORE any `HookResult` is returned (Invariant 2);
+                // `execute_roll` is a real, fully implemented, unit-tested
+                // function (`test_BC_1_18_006_AC006_execute_roll_*` et al.,
+                // `shard_manager.rs`'s own `bc_1_18_006_roll_tests` module).
+                // A fired trigger no longer merely `tracing::warn!`s and
+                // Continues (the withdrawn cluster-1 posture) — it MUST
+                // resolve to either `HookResult::Block` (Postcondition 2's
+                // unified retry message) or `HookResult::Error` (a genuine
+                // `E-SHD-001` crash), never a silent `Continue` (Invariant
+                // 1).
                 return match execute_roll(entry, target_path, false) {
                     Ok(sealed) => HookResult::Block {
                         reason: build_roll_retry_block_reason(
@@ -1765,10 +1774,14 @@ pub fn shard_cap_gate_check(
             if item_count_trigger_fires(current_item_count, n) {
                 // Ownership bullet (Postcondition 8): BC-1.18.009 owns the
                 // observable rotate-then-block-and-retry outcome once this
-                // trigger fires — out of scope for this cluster (see this
-                // module's own "Scope note"). Same non-Block, honest
-                // hand-off posture as the "flat" shape's trigger-fired
-                // branch above.
+                // trigger fires — still out of scope for this cluster (see
+                // this module's own "Scope note" — UPDATED by cluster-2:
+                // BC-1.18.006's "flat"-shape roll IS now implemented above,
+                // but BC-1.18.009's item-count rotate remains pending). This
+                // arm keeps the non-Block, honest hand-off posture
+                // (`tracing::warn!` + `Continue`) the "flat" shape's
+                // trigger-fired branch above has since WITHDRAWN in favor of
+                // a real `execute_roll`-backed outcome.
                 tracing::warn!(
                     artifact_stem = %entry.artifact_stem,
                     current_item_count,
@@ -1790,26 +1803,28 @@ pub fn shard_cap_gate_check(
 // (S-25.02 cluster-2 "roll")
 // ===========================================================================
 //
-// # BC-5.38.001 Red Gate discipline — STUBBED (S-25.02 cluster-2, stub-architect)
+// # BC-5.38.001 Red Gate discipline — IMPLEMENTED (S-25.02 cluster-2)
 //
-// Every function below is a REAL, compilable signature. Bodies are `todo!()`
-// EXCEPT two explicitly justified exceptions (see their own doc comments):
-// `build_roll_retry_block_reason` (GREEN-BY-DESIGN — a pure, zero-branching
-// string template) and `From<ShardRollError> for HookResult` (WIRING-EXEMPT
-// — `Display`-forwarding delegation, identical in shape to this file's
-// already-shipped `From<ShardConfigError> for HookResult`). test-writer's
-// next-stage Red Gate suite is expected to drive every `todo!()` below to a
-// failing (panicking) assertion; implementer replaces each with real logic
-// per BC-1.18.006's postconditions. `execute_roll`'s call site (this
-// module's `ShardShape::Flat` trigger-fire branch, above) and Postcondition
-// 7's two catch-point call sites (`crate::invoke::
-// reconcile_replace_all_overcap_if_qualifying`, wired unconditionally into
-// `main::run`; and the two `ShardShape::Flat` `Edit`/`MultiEdit`-arm
-// leading-probe guards, above) are ALREADY WIRED — verified (by inspection
-// of every pre-existing test fixture this file and its sibling integration
-// test carry) to be UNREACHABLE by any test that predates this burst, so
-// this cluster's stubs introduce zero regression against cluster-1's
-// already-shipped, already-green BC-1.18.005 suite.
+// Every function below is now a REAL, fully implemented body — the
+// stub-architect's original `todo!()` placeholders (commit `e04ab76f`) have
+// all been replaced by implementer per BC-1.18.006's postconditions, driving
+// test-writer's Red Gate suite (`bc_1_18_006_roll_test.rs`'s integration
+// tests plus this file's own `bc_1_18_006_roll_tests` unit-test module) to
+// green. `build_roll_retry_block_reason` (GREEN-BY-DESIGN — a pure,
+// zero-branching string template) and `From<ShardRollError> for HookResult`
+// (WIRING-EXEMPT — `Display`-forwarding delegation, identical in shape to
+// this file's already-shipped `From<ShardConfigError> for HookResult`) were
+// real from the stub-architect's own initial burst, per their own doc
+// comments. `execute_roll`'s call site (this module's `ShardShape::Flat`
+// trigger-fire branch, above), Postcondition 7's two catch-point call sites
+// (`crate::invoke::reconcile_replace_all_overcap_if_qualifying`, wired
+// unconditionally into `main::run`; and the `ShardShape::Flat`
+// `Write`/`Edit`/`MultiEdit`-arm leading-probe guards, above), and
+// Postcondition 1/ADR-051 §Decision 11's self-heal recovery wiring
+// (`run_self_heal_if_plausible`, also called from the `ShardShape::Flat`
+// arm above) are all real, wired, and covered by dedicated tests — zero
+// regression against cluster-1's already-shipped, already-green
+// BC-1.18.005 suite.
 
 /// One `[[shard]]` shard-index table entry — one seal event (BC-1.18.006
 /// Postcondition 5, extended v1.4 with `sealed_retroactively`).
@@ -2487,8 +2502,7 @@ pub fn self_heal_reconcile_missing_index_entries(
 /// filter (event/tool/`replace_all`/config-match — Postcondition 7's own
 /// "zero added cost outside the narrow case" requirement) has already
 /// confirmed this dispatch is a candidate. This function itself owns ALL of
-/// the BC's tested `stat()`-and-retroactive-roll behavior and is therefore
-/// entirely `todo!()`.
+/// the BC's tested `stat()`-and-retroactive-roll behavior.
 ///
 /// Returns `Ok(None)` when `actual_size <= entry.shard_cap_bytes` (no
 /// action — the single-occurrence trigger estimate was conservative or
@@ -5216,23 +5230,23 @@ mod tests {
 
 // ===========================================================================
 // BC-1.18.006 — Roll-Before-Write via Block-and-Retry (S-25.02 cluster-2
-// "roll") — test-writer's Red Gate suite.
+// "roll") — implementer's unit-test coverage for the Red Gate suite
+// test-writer authored.
 //
-// # BC-5.38.001 Red Gate discipline — every test below MUST currently FAIL
+// # BC-5.38.001 Red Gate discipline — GREEN (all functions implemented)
 //
 // Every function this module exercises (`execute_roll`,
 // `read_canonical_content`, `publish_sealed_shard`,
 // `truncate_canonical_to_empty`, `publish_shard_index_update`,
 // `self_heal_resume_from_truncate`, `self_heal_reconcile_missing_index_entries`,
 // `reconcile_post_write_replace_all_overcap`, `reconcile_leading_probe_backstop`)
-// is `todo!()` as of the stub-architect's cluster-2 burst (commit `e04ab76f`
-// — see the "BC-5.38.001 Red Gate discipline — STUBBED" section comment
-// above `ShardIndexEntry`). Every test below therefore panics today. Each
-// test asserts the REAL, post-implementation expected outcome (never
-// `#[should_panic]`) — the same methodology this file's own `mod tests`
-// (cluster-1) already establishes: a test written this way is RED today and
-// turns GREEN, unmodified, once implementer replaces the `todo!()` with real
-// logic.
+// is now fully implemented — the stub-architect's original `todo!()`
+// placeholders (commit `e04ab76f`) have all been replaced with real logic
+// per BC-1.18.006's postconditions (see the "BC-5.38.001 Red Gate
+// discipline — IMPLEMENTED" section comment above `ShardIndexEntry`). Every
+// test below passes. Each test asserts the REAL, post-implementation
+// expected outcome (never `#[should_panic]`) — the same methodology this
+// file's own `mod tests` (cluster-1) already establishes.
 //
 // `build_roll_retry_block_reason` (GREEN-BY-DESIGN) and
 // `From<ShardRollError> for HookResult` (WIRING-EXEMPT) are intentionally
@@ -5242,9 +5256,8 @@ mod tests {
 // cluster's tested trigger/roll logic) — AC-007's message-content coverage
 // instead lives in the integration test file
 // (`tests/bc_1_18_006_roll_test.rs`), which drives the FULL dispatch path
-// (trigger fires -> execute_roll -> Block) so it still currently fails at
-// execute_roll's own `todo!()`, not vacuously passing against
-// build_roll_retry_block_reason alone.
+// (trigger fires -> execute_roll -> Block) end-to-end, rather than
+// exercising build_roll_retry_block_reason in isolation.
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod bc_1_18_006_roll_tests {

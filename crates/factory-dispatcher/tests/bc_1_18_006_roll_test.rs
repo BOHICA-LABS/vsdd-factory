@@ -4,41 +4,35 @@
 //! `executor.rs` -> `shard_manager.rs` roll wiring AND the `invoke.rs`
 //! Postcondition 7 catch-point (i) qualifying wrapper -> `main::run` wiring.
 //!
-//! # BC-5.38.001 Red Gate discipline — every test below MUST currently FAIL
+//! # BC-5.38.001 Red Gate discipline — GREEN (all tests pass)
 //!
 //! `shard_manager.rs`'s BC-1.18.006 functions (`execute_roll`,
 //! `read_canonical_content`, `publish_sealed_shard`,
 //! `truncate_canonical_to_empty`, `publish_shard_index_update`,
 //! `reconcile_post_write_replace_all_overcap`,
-//! `reconcile_leading_probe_backstop`, and the two self-heal functions) are
-//! ALL `todo!()` as of the stub-architect's cluster-2 burst (commit
-//! `e04ab76f`). Every test below drives a REAL call path into one of these
-//! stubs and therefore panics today. Each test asserts the REAL,
-//! post-implementation expected outcome (never `#[should_panic]`) — the same
-//! methodology `bc_1_18_005_shard_cap_trigger_test.rs`'s own header comment
-//! already establishes for this crate: a test written this way is RED today
-//! (fails via panic) and turns GREEN, unmodified, once implementer replaces
-//! the stub with real logic.
+//! `reconcile_leading_probe_backstop`, and the two self-heal functions) were
+//! ALL `todo!()` as of the stub-architect's original cluster-2 burst (commit
+//! `e04ab76f`); implementer has since replaced every one of them with real
+//! logic, and every test below drives a real call path into that logic and
+//! passes. Each test asserts the REAL, post-implementation expected outcome
+//! (never `#[should_panic]`) — the same methodology
+//! `bc_1_18_005_shard_cap_trigger_test.rs`'s own header comment already
+//! establishes for this crate.
 //!
-//! # BC ambiguity flagged for product-owner (not resolved by this burst)
+//! # BC ambiguity flagged for product-owner — RESOLVED (BC-1.18.006 v1.5, F-C2-P1-004)
 //!
 //! BC-1.18.006 v1.4's own "Canonical Test Vectors" table's first row ("Write
 //! to decision-log.md, current shard 45,000 bytes, content length 5,000
-//! bytes, cap 49,152") is internally inconsistent with Postcondition 3's
+//! bytes, cap 49,152") was internally inconsistent with Postcondition 3's
 //! CORRECTED `Write` formula (`projected_size = len(content)` ALONE —
-//! `current_shard_bytes` is NEVER added for `Write`, per the BC's own
-//! Postcondition 3 text and this story's already-implemented, already-tested
-//! AC-002). Under that formula, `len(content) = 5,000 <= 49,152`, so the
-//! vector's own inputs would NOT trigger a roll at all — it appears to be a
-//! stale carry-over from the WITHDRAWN pre-F-P2-002 uniform
-//! `current_shard_bytes + payload_bytes` formula, never updated to a
-//! self-consistent example after that fix-burst corrected the `Write`
-//! formula. Tests below use independently self-consistent worked numbers
-//! (content length ALONE exceeding cap for `Write`) rather than copying that
-//! vector's contradictory raw numbers verbatim. Routing: product-owner
-//! (BC-1.18.006 owner) should amend the vector's numeric example in a future
-//! burst; this is a documentation-only inconsistency, not a code defect, and
-//! does not block this cluster's TDD.
+//! `current_shard_bytes` is NEVER added for `Write`) — a stale carry-over
+//! from the WITHDRAWN pre-F-P2-002 uniform `current_shard_bytes +
+//! payload_bytes` formula. Product-owner corrected this in v1.5
+//! (cluster-2 LOCAL adversary pass-1 finding F-C2-P1-004): the row now reads
+//! `content` length 50,000 bytes, cap 49,152 — a self-consistent example
+//! that actually triggers the roll under the current formula, and matches
+//! the worked numbers this file's own tests below already used
+//! independently before that fix landed.
 
 use std::sync::Arc;
 

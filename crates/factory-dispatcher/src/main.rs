@@ -310,13 +310,14 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // Silent filesystem side effect, no `HookResult` signaling (Decision 15
     // point 2 — a janitor, not a gate): this call never influences
     // `sync_tiers`/`partition.async_group` or this function's own return
-    // value. Real (non-`todo!()`) qualification filtering happens inside
+    // value. Real, cheap, structural qualification filtering happens inside
     // `reconcile_replace_all_overcap_if_qualifying` itself (event/tool/
     // `replace_all`/config-match — BC-1.18.006 Postcondition 7's own
     // "zero added cost outside the narrow case" requirement); the actual
-    // `stat()`-and-retroactive-roll behavior it may delegate into is
-    // entirely `todo!()` (see `shard_manager::reconcile_post_write_replace_all_overcap`'s
-    // own doc comment) — this call site is wiring, not the tested behavior.
+    // `stat()`-and-retroactive-roll behavior it delegates into
+    // (`shard_manager::reconcile_post_write_replace_all_overcap`) is fully
+    // implemented and unit-tested — this call site is wiring, exercised
+    // end-to-end by `bc_1_18_006_roll_test.rs`'s AC-024 integration test.
     factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying(&payload, &project_cwd);
 
     if sync_tiers.is_empty() && partition.async_group.is_empty() {
