@@ -463,7 +463,7 @@ fn replace_all_post_tool_use_payload(target: &std::path::Path) -> HookPayload {
 }
 
 #[test]
-fn test_BC_1_18_006_AC024_EC014_real_invoke_wiring_reaches_todo_core_on_qualifying_replace_all_write()
+fn test_BC_1_18_006_AC024_EC014_real_invoke_wiring_retroactively_seals_qualifying_replace_all_overcap_write()
  {
     let dir = tempfile::tempdir().unwrap();
     write_shard_config(dir.path(), FLAT_SHARD_CONFIG);
@@ -471,41 +471,83 @@ fn test_BC_1_18_006_AC024_EC014_real_invoke_wiring_reaches_todo_core_on_qualifyi
     // Simulates the under-projected replace_all write already having been
     // APPLIED (EC-014): the canonical file is genuinely over cap on disk by
     // the time this PostToolUse event fires.
-    std::fs::write(&target, "z".repeat(49_500)).unwrap();
+    let over_cap_content = "z".repeat(49_500);
+    std::fs::write(&target, &over_cap_content).unwrap();
 
     let payload = replace_all_post_tool_use_payload(&target);
 
-    // AC-024: this call routes through the REAL `detect_replace_all_overcap_candidate`
-    // qualification filter (event=="PostToolUse", tool in {Edit,MultiEdit},
-    // replace_all:true, config-match — all real, non-stub code per the
-    // stub-architect's WIRING-EXEMPT judgment) and MUST reach
-    // `shard_manager::reconcile_post_write_replace_all_overcap`, which is
-    // entirely `todo!()` — so this call panics today. Red Gate: this test
-    // MUST fail (via panic) until that core is implemented; a PASS here
-    // would mean the qualification wiring never actually reaches the stub,
-    // which would mean the stub-architect's WIRING-EXEMPT judgment call for
-    // this qualifying wrapper was wrong.
+    // AC-024/Postcondition 7 catch point (i): this call routes through the
+    // REAL `detect_replace_all_overcap_candidate` qualification filter
+    // (event=="PostToolUse", tool in {Edit,MultiEdit}, replace_all:true,
+    // config-match) into the now-implemented
+    // `shard_manager::reconcile_post_write_replace_all_overcap`, which
+    // executes `execute_roll`'s full four-step sequence RETROACTIVELY
+    // (`sealed_retroactively = true`) against the content already durably on
+    // disk. Assert the REAL side effects (never weakened to a mere
+    // "didn't panic" check):
     reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
 
-    panic!(
-        "AC-024: reconcile_replace_all_overcap_if_qualifying returned without panicking — this \
-         means it did NOT reach shard_manager::reconcile_post_write_replace_all_overcap's \
-         todo!() core for a genuinely qualifying (PostToolUse, Edit, replace_all:true, \
-         config-matched, over-cap) dispatch. Either the qualification filter is broken, or the \
-         stub was implemented without this test being updated — investigate before proceeding."
+    // Step (b): the sealed shard is a byte-for-byte copy of the already-
+    // applied over-cap content, published as the first sealed shard.
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    let sealed_content = std::fs::read_to_string(&sealed_path).expect(
+        "AC-024: catch point (i) must publish a sealed shard for the already-applied over-cap \
+         content",
+    );
+    assert_eq!(
+        sealed_content, over_cap_content,
+        "AC-024: the sealed shard must be a byte-for-byte copy of the over-cap content already \
+         on disk at the time the PostToolUse event fired"
+    );
+
+    // Step (c) / Invariant 6: canonical is exactly 0 bytes.
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        0,
+        "AC-024/Invariant 6: the canonical file must be exactly 0 bytes after catch point (i)'s \
+         retroactive roll reconciles the over-cap state"
+    );
+
+    // Step (d) / Postcondition 5 + Postcondition 7: the shard-index entry
+    // records this seal with `sealed_retroactively = true` (Postcondition
+    // 7's documented, narrowly-scoped exception to Postcondition 3's
+    // `bytes_at_seal <= shard_cap_bytes` bound).
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml =
+        std::fs::read_to_string(&index_path).expect("AC-024: the shard-index file must exist");
+    let index: factory_dispatcher::shard_manager::ShardIndex = toml::from_str(&index_toml)
+        .expect("AC-024: the shard-index must be valid TOML matching the ShardIndex schema");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "AC-024: exactly one [[shard]] entry after one retroactive roll"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 1);
+    assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 49_500,
+        "AC-024/Postcondition 7: bytes_at_seal exceeds shard_cap_bytes (49,152) for a \
+         retroactive seal — the documented exception to the normal <= cap bound"
+    );
+    assert!(
+        entry.sealed_retroactively,
+        "AC-024/Postcondition 7: a catch-point-(i) seal must record sealed_retroactively = true"
     );
 }
 
-// EC-016 (no agent-facing signal change for catch point (i)) is NOT given a
-// standalone test here: `reconcile_replace_all_overcap_if_qualifying`'s own
+// EC-016 (no agent-facing signal change for catch point (i)):
+// `reconcile_replace_all_overcap_if_qualifying`'s own
 // `fn(&HookPayload, &std::path::Path)` return type is `()`, not `HookResult`
 // (see the `use` import above) — it is structurally incapable of surfacing a
-// Block/Error, by construction, regardless of what the stub eventually does.
-// A standalone test asserting only that type-level fact would trivially PASS
-// today with no todo!() in its call path, which this cluster's Red Gate
-// discipline (every new test must currently FAIL) excludes — see this file's
-// header comment. The EC-014 test above already documents this contract
-// inline and is the one that actually exercises the call path.
+// Block/Error to the agent, by construction, regardless of what its
+// implementation does. The AC-024 test above calls this exact function and
+// observes only its filesystem side effects (sealed shard, truncated
+// canonical, updated index) — never a `HookResult` of any kind — which is
+// the load-bearing evidence for EC-016: the PostToolUse dispatch that
+// triggered this reconciliation already returned `Continue` to the agent
+// before this leg ever runs, and this leg has no channel through which to
+// retroactively surface a Block or Error even if it wanted to.
 
 // ---------------------------------------------------------------------------
 // AC-025 — Postcondition 7 catch point (ii): next-dispatch leading-probe
@@ -577,4 +619,193 @@ async fn test_BC_1_18_006_AC025_EC015_leading_probe_backstop_reached_on_next_edi
         "AC-025/Invariant 6: the canonical file must be exactly 0 bytes after the backstop \
          reconciles — the over-cap window is closed before this dispatch's own trigger runs"
     );
+}
+
+// ---------------------------------------------------------------------------
+// BC-1.18.006 Postcondition 1 / ADR-051 §Decision 11 — self-heal recovery
+// (E-SHD-006, E-SHD-007) MUST run automatically on the artifact's next
+// matched dispatch, BEFORE evaluating any new size trigger. `shard_manager::
+// self_heal_resume_from_truncate` and `self_heal_reconcile_missing_index_
+// entries` are both fully implemented and unit-tested in isolation
+// (`shard_manager.rs`'s own `test_BC_1_18_006_ESHD006_*` / `test_BC_1_18_006_
+// ESHD007_*` tests), but NEITHER is invoked from `shard_cap_gate_check`
+// (verified by inspection: the `ShardShape::Flat` arm only ever calls
+// `reconcile_leading_probe_backstop`, gated on `current_bytes >
+// entry.shard_cap_bytes` — an on-disk-over-cap condition, which is NOT what
+// either self-heal crash signature requires). Crash recovery is therefore
+// currently DORMANT: a crashed roll leaves the artifact stuck until some
+// out-of-band remediation runs the self-heal functions directly, which no
+// dispatch path does today.
+//
+// Red Gate: both tests below drive a REAL, ordinary matched dispatch (a
+// net-zero-delta Edit, well under cap on its own) through the SAME
+// `execute_tiers` -> `shard_cap_gate_check` wiring AC-006/AC-025 use, against
+// a canonical file left in one of the two crash-state signatures. Today,
+// with no self-heal call site wired in, the dispatch's own trigger
+// evaluation is the ONLY thing that runs — the crash state is left
+// completely unremediated — so every assertion below that expects the
+// self-heal's side effects FAILS. Each test's implementer fix is to wire a
+// call to the corresponding `self_heal_*` function into `shard_cap_gate_check`
+// (BEFORE the `ShardShape::Flat` trigger-evaluation logic, per Postcondition
+// 1 / ADR-051 §Decision 11's ordering requirement), not to change these
+// assertions.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_PC1_ADR051_D11_ESHD006_self_heal_resumes_truncate_on_next_matched_dispatch()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    let stuck_content = "d".repeat(2_500);
+
+    // E-SHD-006 crash signature: step (b) (publish sealed shard) succeeded,
+    // step (c) (truncate canonical) never ran — the canonical file is STILL
+    // byte-identical to the already-durable sealed shard. Note this is
+    // DELIBERATELY under `shard_cap_bytes` (49,152): the leading-probe
+    // backstop (AC-025), which only fires when `current_bytes >
+    // entry.shard_cap_bytes`, must NOT be the mechanism that reconciles this
+    // — only a genuine self-heal call site can, since a stuck-but-under-cap
+    // artifact is exactly the case the leading-probe backstop ignores.
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    std::fs::write(&sealed_path, &stuck_content).expect("seed sealed shard (step (b) done)");
+    std::fs::write(&target, &stuck_content).expect("seed duplicate (un-truncated) canonical");
+    // No shard-index file exists yet (step (d) never ran either, since it
+    // follows step (c) in the sequence).
+
+    // An ordinary, unrelated, net-zero-delta Edit dispatch against this
+    // artifact — nothing about this dispatch's OWN payload should trigger a
+    // roll (2,500 + 0 well under the 49,152 cap either before or after a
+    // correct self-heal).
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "a", "new_string": "a"}),
+    )
+    .await;
+
+    // Postcondition 1 / ADR-051 §Decision 11: self-heal runs BEFORE the new
+    // trigger is evaluated, and this dispatch's own delta is net-zero, so the
+    // outcome must be Continue regardless of whether self-heal ran — this
+    // assertion alone would pass even under today's dormant wiring; the
+    // assertions below are the ones that actually distinguish "self-heal ran"
+    // from "self-heal never ran".
+    assert_eq!(
+        summary.exit_code, 0,
+        "precondition: a net-zero-delta Edit against a well-under-cap artifact must Continue"
+    );
+
+    // The load-bearing assertion: the self-heal must have completed step (c)
+    // as part of THIS dispatch, leaving the canonical file empty — never
+    // still holding the stuck duplicate content.
+    let canonical_len = std::fs::metadata(&target)
+        .expect("canonical file must still exist")
+        .len();
+    assert_eq!(
+        canonical_len, 0,
+        "BC-1.18.006 Postcondition 1 / ADR-051 §Decision 11 / E-SHD-006: the self-heal must \
+         AUTOMATICALLY resume from step (c) (truncate) on the artifact's next matched dispatch, \
+         BEFORE evaluating this dispatch's own trigger — the canonical file must be empty, not \
+         still holding the stuck pre-crash content, once this dispatch returns"
+    );
+
+    // The already-durable sealed shard must never be rewritten by the
+    // self-heal (it resumes from step (c) ALONE).
+    let sealed_after =
+        std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
+    assert_eq!(
+        sealed_after, stuck_content,
+        "E-SHD-006: the self-heal must never re-publish the already-correct sealed shard"
+    );
+
+    // Step (d): the self-heal must also publish the missing index entry for
+    // the seal it just resumed from — a consistent recovered state, not a
+    // truncate with no corresponding index record.
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).expect(
+        "BC-1.18.006 Postcondition 1 / E-SHD-006: the self-heal must publish the shard-index \
+         entry for the resumed seal as part of leaving a CONSISTENT recovered state",
+    );
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "exactly one reconciled [[shard]] entry"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 1);
+    assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 2_500,
+        "bytes_at_seal must reflect the resumed seal's actual sealed content length"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_PC1_ADR051_D11_ESHD007_self_heal_reconciles_missing_index_on_next_matched_dispatch()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+
+    // E-SHD-007 crash signature: steps (b) and (c) both succeeded — the
+    // sealed shard is durably published AND the canonical file is correctly
+    // truncated to empty — but step (d) (publish the shard-index entry)
+    // never ran, so the sealed shard is orphaned: present on disk, absent
+    // from the index.
+    std::fs::write(&target, "").expect("seed already-truncated (post-step-(c)) canonical");
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    std::fs::write(&sealed_path, "f".repeat(1_200)).expect("seed orphaned sealed shard");
+    // No shard-index file exists at all yet (step (d) never ran).
+
+    // An ordinary, unrelated, net-zero-delta Edit dispatch against the
+    // (correctly empty) canonical — this dispatch's own trigger must never
+    // fire on its own (0 + 0 well under cap).
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "a", "new_string": "a"}),
+    )
+    .await;
+
+    assert_eq!(
+        summary.exit_code, 0,
+        "precondition: a net-zero-delta Edit against an empty, well-under-cap canonical must \
+         Continue"
+    );
+
+    // The load-bearing assertion: the self-heal must have discovered the
+    // orphaned sealed shard and appended its missing index entry as part of
+    // THIS dispatch — a consistent recovered state, never a permanently
+    // orphaned shard file.
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).expect(
+        "BC-1.18.006 Postcondition 1 / ADR-051 §Decision 11 / E-SHD-007: the self-heal must \
+         AUTOMATICALLY reconcile a missing index entry for an orphaned sealed shard on the \
+         artifact's next matched dispatch, BEFORE evaluating this dispatch's own trigger — the \
+         shard-index file must exist once this dispatch returns",
+    );
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "E-SHD-007: exactly one reconciled [[shard]] entry for the previously-orphaned sealed \
+         shard"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 1);
+    assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 1_200,
+        "bytes_at_seal must reflect the orphaned sealed shard's actual on-disk byte count"
+    );
+
+    // The orphaned sealed shard content itself must never be touched by the
+    // reconciliation (it only appends an index record, never rewrites shard
+    // content).
+    let sealed_after =
+        std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
+    assert_eq!(sealed_after, "f".repeat(1_200));
 }
