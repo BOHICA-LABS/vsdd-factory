@@ -1743,6 +1743,7 @@ pub fn shard_cap_gate_check(
                         reason: build_empty_roll_retry_block_reason(
                             &entry.artifact_stem,
                             entry.shard_cap_bytes,
+                            projected_size,
                         ),
                     },
                     Err(e) => e.into(),
@@ -2350,13 +2351,22 @@ pub fn build_roll_retry_block_reason(
 /// empty when the trigger fired, so there is no sealed shard to name (unlike
 /// [`build_roll_retry_block_reason`]'s normal case). The current shard is
 /// STILL empty (it always was, in this case) — the caller's own payload is
-/// what needs to shrink.
-fn build_empty_roll_retry_block_reason(artifact_stem: &str, shard_cap_bytes: u64) -> String {
+/// what needs to shrink. `payload_len_bytes` (BC-1.18.006 v1.8, F-C2-P4-003,
+/// MINOR) is the incoming payload's own projected size (`projected_size` at
+/// the trigger-fire call site — `len(content)` for `Write`, or
+/// `current_shard_bytes + net_delta_bytes` for `Edit`/`MultiEdit`) — naming
+/// it explicitly tells the caller exactly how far over cap their own
+/// payload is, rather than leaving them to recompute it themselves.
+fn build_empty_roll_retry_block_reason(
+    artifact_stem: &str,
+    shard_cap_bytes: u64,
+    payload_len_bytes: u64,
+) -> String {
     format!(
-        "Shard `{artifact_stem}` is already empty; your own payload alone exceeds the cap \
-         ({shard_cap_bytes} bytes reached), so no new shard was sealed (there was no existing \
-         content to preserve). Recompute your payload to fit within the cap before retrying — \
-         split it across multiple smaller writes if needed."
+        "Shard `{artifact_stem}` is already empty; your own payload alone ({payload_len_bytes} \
+         bytes) exceeds the cap ({shard_cap_bytes} bytes reached), so no new shard was sealed \
+         (there was no existing content to preserve). Recompute your payload to fit within the \
+         cap before retrying — split it across multiple smaller writes if needed."
     )
 }
 
