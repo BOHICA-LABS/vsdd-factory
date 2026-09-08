@@ -5973,4 +5973,101 @@ mod bc_1_18_006_roll_tests {
              file must be exactly 0 bytes — the over-cap window is closed"
         );
     }
+
+    // ===================================================================
+    // F-C2-P2-003 (S-25.02 Phase F4 LOCAL adversary pass-2 cluster-2
+    // finding, product-owner-adjudicated BC-1.18.006 v1.6, Invariant 8 /
+    // EC-019 / E-SHD-008) — the `ToolKind::Write` arm's OWN dedicated
+    // backstop `stat()` (the SAME `current_shard_bytes_flat(target_path)`
+    // call that arm performs for its crash-orphan probe, entirely distinct
+    // from that arm's stat-free Postcondition 3 trigger formula) MUST fail
+    // LOUD — return `HookResult::Error` naming the `E-SHD-008` error code —
+    // on ANY non-`NotFound` `stat()` error, matching the existing
+    // fail-loud posture the `Edit`/`MultiEdit` arms already apply to their
+    // OWN `current_shard_bytes_flat` calls just below in this same match.
+    //
+    // Rationale (product-owner v1.6 adjudication): `stat()` follows
+    // symlinks and fails on `ELOOP`, but `write_atomic`'s `rename` need
+    // not dereference the final symlink component and CAN succeed — so
+    // fail-OPEN here would let this probe silently skip while the Write
+    // itself proceeds underneath a symlink the probe could not see
+    // through, destroying a crash-orphaned, un-sealed, over-cap canonical
+    // this dispatch never confirmed was safe to overwrite. `NotFound`
+    // remains completely unaffected (EC-004, legitimate first-write) —
+    // this Invariant 8 gate is scoped to every OTHER `io::ErrorKind`.
+    //
+    // RED GATE (BC-5.38.001): this test MUST FAIL against the code as of
+    // this writing. The `ToolKind::Write` arm's backstop `Err(e)` leg
+    // (see the doc comment on that arm's `match current_shard_bytes_flat`
+    // above, "F-002 ... still binding: a non-NotFound stat() failure here
+    // is fail-OPEN, never fail-loud") only `tracing::warn!`s and falls
+    // through to this dispatch's own (stat-free) trigger formula,
+    // returning `HookResult::Continue` for an under-cap payload — never
+    // `HookResult::Error`. Implementer must flip that specific `Err(e)`
+    // arm to return `HookResult::Error` naming `E-SHD-008` for every
+    // non-`NotFound` `io::ErrorKind`, leaving `current_shard_bytes_flat`'s
+    // own `NotFound` -> `Ok(0)` mapping (EC-004) completely untouched —
+    // this fixture never exercises that leg.
+    //
+    // STATIC CONFLICT WITH CLUSTER-1's F-002 (flagged, NOT resolved here):
+    // this fixture deliberately reuses cluster-1's own
+    // `test_BC_1_18_005_F002_write_under_cap_continues_despite_irrelevant_stat_failure`
+    // (`mod tests`, this same file) technique verbatim — same
+    // self-referential-symlink ELOOP construction, same matched
+    // "decision-log" stem, same under-cap `content` payload — because it
+    // is the EXACT SAME underlying `current_shard_bytes_flat(target_path)`
+    // call inside the SAME `ToolKind::Write` arm that F-002 already pins
+    // to `HookResult::Continue`. Flipping that arm's `Err(e)` leg to
+    // fail-loud per BC-1.18.006 v1.6 Invariant 8 (this test) necessarily
+    // flips F-002 (BC-1.18.005) to RED — a genuine BC-1.18.005 vs
+    // BC-1.18.006 v1.6 spec-vs-spec conflict on the identical code path,
+    // NOT a test-authoring error. Per the Dark Factory Companion
+    // Principle, this is routed back to product-owner for adjudication
+    // (F-002's own invariant vs. v1.6 Invariant 8) rather than silently
+    // edited away here — test-writer does not resolve BC conflicts.
+    // ===================================================================
+
+    #[cfg(unix)]
+    #[test]
+    fn test_BC_1_18_006_F003_write_backstop_stat_failure_fails_loud_e_shd_008() {
+        // Portable technique (Unix-only, hence `#[cfg(unix)]`, mirroring
+        // this crate's own established precedent): a self-referential
+        // symlink makes ANY `stat()`/`metadata()` call on this exact path
+        // fail with `ELOOP` — never `NotFound` — so this fixture lands
+        // squarely inside Invariant 8's non-`NotFound` scope.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let looped = dir.path().join("decision-log.md");
+        std::os::unix::fs::symlink(&looped, &looped).expect("create self-referential symlink");
+
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            &looped,
+            &serde_json::json!({"content": "under-cap content, far below the 49,152-byte cap"}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("E-SHD-008"),
+                    "BC-1.18.006 v1.6 Invariant 8 / EC-019: the Write-arm backstop's \
+                     non-NotFound stat() failure MUST fail loud naming the E-SHD-008 error \
+                     code specifically — got a different HookResult::Error message: {message:?}"
+                );
+            }
+            other => panic!(
+                "BC-1.18.006 v1.6 Invariant 8 / EC-019 / F-C2-P2-003: a non-NotFound stat() \
+                 failure (ELOOP via self-referential symlink) at the Write-arm's OWN dedicated \
+                 backstop probe MUST fail LOUD as HookResult::Error naming E-SHD-008 — NOT \
+                 silently fail-open into Continue (or resolve to Block). A probe that cannot \
+                 confirm-or-deny a crash-orphaned, over-cap canonical MUST NOT let this Write \
+                 proceed to destroy that content merely because its OWN `content` payload is \
+                 under cap. Got: {other:?}"
+            ),
+        }
+    }
 }
