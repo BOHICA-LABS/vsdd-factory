@@ -2361,12 +2361,20 @@ pub fn self_heal_resume_from_truncate(
     truncate_canonical_to_empty(canonical_path)
         .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
 
+    let bytes_at_seal = sealed_content.len() as u64;
     let new_entry = ShardIndexEntry {
         seq: next_seq,
         path: sealed_filename.clone(),
         sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        bytes_at_seal: sealed_content.len() as u64,
-        sealed_retroactively: false,
+        bytes_at_seal,
+        // BC-1.18.006 v1.5 Invariant 7 (F-C2-P1-001, MAJOR): no in-flight
+        // roll context survives to this self-heal path, so
+        // `sealed_retroactively` is deterministically INFERRED from
+        // `bytes_at_seal` rather than hardcoded — a prospective roll can
+        // never seal over-cap content (Postcondition 3's unconditional
+        // guarantee), so `bytes_at_seal > shard_cap_bytes` is
+        // proof-by-construction that this seal was retroactive.
+        sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
     };
 
     publish_shard_index_update(&index_path, entry, new_entry.clone())
@@ -2439,7 +2447,16 @@ pub fn self_heal_reconcile_missing_index_entries(
             path: path.clone(),
             sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             bytes_at_seal,
-            sealed_retroactively: false,
+            // BC-1.18.006 v1.5 Invariant 7 (F-C2-P1-001, MAJOR): this
+            // reconciliation scan has no surviving record of which roll
+            // (prospective or retroactive) produced an orphaned sealed
+            // shard, so `sealed_retroactively` MUST be deterministically
+            // INFERRED from `bytes_at_seal` rather than hardcoded — a
+            // prospective roll can never seal over-cap content
+            // (Postcondition 3's unconditional guarantee), so
+            // `bytes_at_seal > shard_cap_bytes` is proof-by-construction of
+            // retroactivity (EC-018).
+            sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
         };
         publish_shard_index_update(&index_path, entry, new_entry.clone())
             .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &path))?;
