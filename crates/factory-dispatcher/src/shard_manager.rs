@@ -2702,6 +2702,30 @@ pub fn reconcile_post_write_replace_all_overcap(
         return Ok(None);
     }
 
+    // BC-1.18.006 v1.8 corrected Invariant 10 (F-C2-P4-001, MAJOR,
+    // data-loss, cluster-2 LOCAL adversary pass-4): self-heal a
+    // pre-existing E-SHD-006/E-SHD-007 orphan BEFORE calling `execute_roll`
+    // for THIS dispatch's own over-cap content. Unlike `shard_cap_gate_check`
+    // (whose `ShardShape::Flat` arm already runs `run_self_heal_if_plausible`
+    // unconditionally, before ANY trigger evaluation, for every PreToolUse
+    // dispatch — which is also why catch point (ii)
+    // [`reconcile_leading_probe_backstop`] needs no separate call of its
+    // own here), catch point (i) is invoked directly from `invoke.rs`'s
+    // PostToolUse qualifying wrapper and never passes through that
+    // Pre-ToolUse wiring at all — so without this call, a pre-existing
+    // unindexed orphan's own seq would never get reconciled before
+    // `execute_roll`'s `next_seal_seq` computation runs. Left unfixed, an
+    // un-indexed orphan sealed shard sitting at seq N (index unaware of it)
+    // would make `next_seal_seq` ALSO compute N (the index's own max+1,
+    // which is still N since the orphan was never recorded), and
+    // `execute_roll`'s `publish_sealed_shard` would then collide with —
+    // and, prior to F-C2-P4-002's write-once guard, silently overwrite —
+    // that durable orphan with THIS dispatch's own new content, permanently
+    // destroying the orphan's history. Running self-heal first indexes the
+    // orphan at its own seq N, so `next_seal_seq` correctly advances to
+    // N+1 for this dispatch's own retroactive seal.
+    run_self_heal_if_plausible(entry, canonical_path)?;
+
     execute_roll(entry, canonical_path, true)
 }
 
