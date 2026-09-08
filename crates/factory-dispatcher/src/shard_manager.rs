@@ -5736,17 +5736,147 @@ mod bc_1_18_006_roll_tests {
         );
     }
 
+    // F-C2-P7-001 (MAJOR, cluster-2 LOCAL adversary pass-7) — REPLACES the
+    // withdrawn `test_BC_1_18_006_P1a_read_canonical_content_missing_file_is_io_error`,
+    // which MISREAD BC-1.18.006 Precondition 2. Precondition 2 states the
+    // current shard "exists (or is treated as a zero-byte current shard per
+    // BC-1.18.005 EC-004 if this is the artifact's first-ever write)" — a
+    // MISSING canonical at roll time is the artifact's legitimate
+    // first-ever-write case, NOT a genuine I/O error. The withdrawn test's
+    // own rationale ("a roll can only be triggered against an EXISTING
+    // over-cap shard") is exactly the misreading this replacement closes:
+    // Postcondition 1's `Ok(None)` empty-canonical short-circuit (F-C2-P3-001)
+    // already exists for a 0-byte EXISTING canonical: a MISSING canonical
+    // must resolve identically, via `read_canonical_content` treating
+    // `NotFound` as `Ok(vec![])`, never propagating it as an `Err` that
+    // `execute_roll` would otherwise map to `ShardRollError::SealWriteFailed`
+    // (E-SHD-001).
     #[test]
-    fn test_BC_1_18_006_P1a_read_canonical_content_missing_file_is_io_error() {
+    fn test_BC_1_18_006_P1a_FC2P7_001_read_canonical_content_missing_file_is_treated_as_zero_byte()
+    {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("does-not-exist.md");
 
-        let result = read_canonical_content(&path);
+        let content = read_canonical_content(&path).expect(
+            "BC-1.18.006 Precondition 2 (F-C2-P7-001, MAJOR): a MISSING canonical file at roll \
+             time — the artifact's first-ever write (BC-1.18.005 EC-004) — MUST be treated as a \
+             zero-byte current shard, per Precondition 2's explicit '...or is treated as a \
+             zero-byte current shard... if this is the artifact's first-ever write' clause. This \
+             is NOT a genuine I/O error condition: read_canonical_content must return Ok(vec![]) \
+             for a NotFound canonical, never propagate it as an Err (which execute_roll would \
+             otherwise map to ShardRollError::SealWriteFailed / E-SHD-001).",
+        );
         assert!(
-            result.is_err(),
-            "a roll can only be triggered against an EXISTING over-cap shard (BC-1.18.005 \
-             Precondition 2) — a missing canonical file at roll time is a genuine I/O error \
-             condition (part of the E-SHD-001 steps (a)-(b) failure leg), never silently Ok(\"\")"
+            content.is_empty(),
+            "a missing canonical must read back as exactly zero bytes — never any fabricated \
+             content"
+        );
+    }
+
+    /// Companion to the test above (F-C2-P7-001): Precondition 2's
+    /// "treated as a zero-byte current shard" relief is scoped ONLY to a
+    /// missing (`NotFound`) canonical — a genuine OTHER I/O failure (e.g. a
+    /// path component that is a plain file, not a directory, which fails
+    /// with `NotADirectory`, never `NotFound`) must still propagate as a
+    /// real `Err`, never be silently swallowed into `Ok(vec![])`.
+    #[test]
+    fn test_BC_1_18_006_P1a_read_canonical_content_genuine_non_notfound_io_error_still_propagates()
+    {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("this-is-a-plain-file");
+        std::fs::write(&not_a_dir, "i am a file, not a directory").expect("seed a plain file");
+        // Reading THROUGH a path component that is a plain file (not a
+        // directory) fails with NotADirectory/ENOTDIR on Unix and Windows
+        // alike — never NotFound.
+        let path = not_a_dir.join("decision-log.md");
+
+        let result = read_canonical_content(&path);
+        let err = result.expect_err(
+            "a genuine non-NotFound I/O error (reading through a path component that is a plain \
+             file, not a directory) must still propagate as Err — Precondition 2's \
+             zero-byte-current-shard treatment is scoped ONLY to a missing canonical, never to \
+             every I/O failure",
+        );
+        assert_ne!(
+            err.kind(),
+            io::ErrorKind::NotFound,
+            "sanity: this fixture's I/O failure mode must NOT be NotFound (that case is already \
+             covered by the sibling test above) — it must be a genuine other-kind failure"
+        );
+    }
+
+    /// F-C2-P7-001: the E-SHD-001 mapping itself (`execute_roll`'s own step
+    /// (a) error-wrapping) must still fire for a genuine non-NotFound read
+    /// failure — only a MISSING (NotFound) canonical gets the zero-byte
+    /// short-circuit relief; this is the "Keep a distinct test that a
+    /// genuine non-NotFound io error still surfaces E-SHD-001" half of the
+    /// Red Gate.
+    #[test]
+    fn test_BC_1_18_006_ESHD001_FC2P7_001_execute_roll_genuine_non_notfound_read_error_maps_to_seal_write_failed()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("this-is-a-plain-file");
+        std::fs::write(&not_a_dir, "i am a file, not a directory").expect("seed a plain file");
+        let canonical_path = not_a_dir.join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+
+        let err = execute_roll(&entry, &canonical_path, false).expect_err(
+            "a genuine non-NotFound I/O failure at step (a)'s read must still fail loud, never \
+             silently resolve to Ok(None) the way a genuinely-missing (NotFound) canonical does",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "F-C2-P7-001: a genuine non-NotFound step (a) read failure MUST still map to \
+             ShardRollError::SealWriteFailed (E-SHD-001) — Precondition 2's 'treated as a \
+             zero-byte current shard' relief is scoped ONLY to a missing (NotFound) canonical, \
+             never to every I/O failure. Got: {err:?}"
+        );
+    }
+
+    /// F-C2-P7-001 (MAJOR): the observable `execute_roll` outcome for a
+    /// MISSING canonical (the artifact's first-ever write) must be
+    /// Postcondition 1's `Ok(None)` empty-canonical short-circuit — the SAME
+    /// outcome an EXISTING 0-byte canonical already produces (F-C2-P3-001) —
+    /// performing ZERO writes (no sealed shard, no canonical file
+    /// fabricated, no index entry).
+    #[test]
+    fn test_BC_1_18_006_P1_FC2P7_001_execute_roll_missing_canonical_short_circuits_to_ok_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        assert!(
+            !canonical_path.exists(),
+            "test setup: the canonical file must NOT exist — this is the artifact's first-ever \
+             write"
+        );
+        let entry = flat_entry("decision-log", 49_152);
+
+        let result = execute_roll(&entry, &canonical_path, false);
+        assert!(
+            matches!(result, Ok(None)),
+            "BC-1.18.006 Precondition 2 / F-C2-P7-001 (MAJOR): a MISSING canonical file (the \
+             artifact's first-ever write, BC-1.18.005 EC-004) must be treated as a zero-byte \
+             current shard, resolving to Postcondition 1's empty-canonical Ok(None) \
+             short-circuit — NEVER a ShardRollError::SealWriteFailed (E-SHD-001) Error. Got: \
+             {result:?}"
+        );
+
+        assert!(
+            !canonical_path.exists(),
+            "F-C2-P7-001: the empty-canonical short-circuit performs ZERO writes (Postcondition \
+             1's 'skips ALL FOUR steps') — no canonical file may be fabricated as a side effect \
+             of a missing-canonical roll attempt"
+        );
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        assert!(
+            !sealed_path.exists(),
+            "F-C2-P7-001: no sealed shard may be published for the missing-canonical \
+             short-circuit — there is no pre-existing content to preserve"
+        );
+        let index_path = index_path_for(dir.path(), "decision-log");
+        assert!(
+            !index_path.exists(),
+            "F-C2-P7-001: no shard-index entry may be published for the missing-canonical \
+             short-circuit"
         );
     }
 
@@ -6434,6 +6564,55 @@ mod bc_1_18_006_roll_tests {
                 .expect("sealed candidate must remain on disk")
                 .len(),
             0
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // F-C2-P7-004 (ADVISORY, cluster-2 LOCAL adversary pass-7) —
+    // `self_heal_recovery_plausible`'s cheap probe must apply the SAME
+    // 0-byte guard Invariant 9 (F-C2-P3-002) already requires of the two
+    // downstream self-heal functions. Today the probe matches candidates on
+    // filename shape ALONE (`<stem>.<seq>.md`, seq >= 4 digits), ignoring
+    // size entirely — so a PERSISTENT external 0-byte orphan (which both
+    // downstream self-heal functions will forever refuse to index, per
+    // Invariant 9) keeps the probe reporting "plausible" on EVERY future
+    // dispatch for this artifact, forcing needless payment for both
+    // self-heal functions' more expensive checks (byte-for-byte content
+    // comparison; a directory-wide orphan scan) for zero possible benefit.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_FC2P7_004_self_heal_recovery_plausible_ignores_persistent_zero_byte_orphan()
+    {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        std::fs::write(&canonical_path, "k".repeat(500)).expect("seed healthy canonical");
+        let entry = flat_entry("decision-log", 49_152);
+
+        // A PERSISTENT 0-byte orphan matching the sealed-shard naming
+        // convention (>=4-digit seq), unindexed (no shard-index.toml at all
+        // exists). Per Invariant 9 (F-C2-P3-002), `execute_roll` can NEVER
+        // itself produce a 0-byte seal, and both
+        // `self_heal_resume_from_truncate` and
+        // `self_heal_reconcile_missing_index_entries` already refuse to
+        // index a 0-byte candidate — they will SKIP this exact file
+        // forever, since nothing about it ever changes across dispatches.
+        let orphan_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&orphan_path, "").expect("seed persistent 0-byte orphan");
+
+        let plausible = self_heal_recovery_plausible(&entry, &canonical_path).expect(
+            "F-C2-P7-004: the plausibility probe must not error merely because a 0-byte \
+             filename-shaped candidate exists on disk",
+        );
+        assert!(
+            !plausible,
+            "F-C2-P7-004 (ADVISORY): a 0-byte orphan candidate must NEVER register as a \
+             plausible self-heal target — consistent with Invariant 9's 0-byte guard, which \
+             both downstream self-heal functions already apply and will forever skip this SAME \
+             candidate. The plausibility probe currently matches candidates on filename shape \
+             ALONE, ignoring size, so it wrongly (and permanently) reports `true` for this \
+             artifact on every future dispatch, paying for both self-heal functions' more \
+             expensive checks for zero possible benefit."
         );
     }
 

@@ -1796,6 +1796,74 @@ async fn test_BC_1_18_006_FC2P4_003_empty_canonical_block_message_matches_verbat
 }
 
 // ---------------------------------------------------------------------------
+// F-C2-P7-001 (MAJOR, cluster-2 LOCAL adversary pass-7): a first-ever
+// over-cap Write against a MISSING canonical (BC-1.18.006 Precondition 2 /
+// BC-1.18.005 EC-004 — "treated as a zero-byte current shard") must resolve
+// to the SAME empty-canonical Block outcome Postcondition 1's Ok(None)
+// short-circuit already produces for an EXISTING 0-byte canonical — NEVER
+// `ShardRollError::SealWriteFailed` (E-SHD-001)'s `HookResult::Error`. The
+// shipped `execute_roll` step (a) currently maps ANY `read_canonical_content`
+// I/O error — including `NotFound` — uniformly to E-SHD-001, misreading
+// Precondition 2's explicit "or is treated as a zero-byte current shard...
+// if this is the artifact's first-ever write" clause as applying only to
+// BC-1.18.005's own trigger formula, not to BC-1.18.006's own roll-execution
+// read.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P7_001_missing_canonical_first_ever_write_blocks_via_empty_template() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    // Deliberately NEVER created — this is the artifact's first-ever write
+    // (BC-1.18.005 EC-004), the exact scenario BC-1.18.006 Precondition 2
+    // names: "the current shard file... exists (or is treated as a
+    // zero-byte current shard... if this is the artifact's first-ever
+    // write)".
+    assert!(
+        !target.exists(),
+        "test setup: the canonical file must NOT exist before this dispatch"
+    );
+
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(60_000)}),
+    )
+    .await;
+
+    assert_ne!(
+        summary.exit_code, 0,
+        "Invariant 1: a fired over-cap trigger against a missing (first-ever-write) canonical \
+         must resolve to HookResult::Block — never a silent Continue"
+    );
+
+    let reason = exact_block_reason(&summary);
+    let expected = expected_empty_canonical_block_reason("decision-log", 60_000, 49_152);
+    assert_eq!(
+        reason, expected,
+        "F-C2-P7-001 (MAJOR): a first-ever over-cap Write against a MISSING canonical must \
+         resolve to Postcondition 1's empty-canonical Ok(None) short-circuit — the SAME \
+         `build_empty_roll_retry_block_reason` template an EXISTING 0-byte canonical produces \
+         (BC-1.18.006 Precondition 2's explicit 'treated as a zero-byte current shard' clause) \
+         — NOT ShardRollError::SealWriteFailed's (E-SHD-001) generic error message. Got: \
+         {reason:?}"
+    );
+
+    assert!(
+        !target.exists(),
+        "F-C2-P7-001: the empty-canonical short-circuit performs ZERO writes — no canonical \
+         file may be fabricated as a side effect of a missing-canonical roll attempt"
+    );
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    assert!(
+        !sealed_path.exists(),
+        "F-C2-P7-001: no sealed shard may be published for the missing-canonical short-circuit \
+         — there is no pre-existing content to preserve"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // F-C2-P4-004 (ADVISORY): `execute_roll` must seal byte-for-byte — including
 // non-UTF-8 canonical content. Step (a) currently reads the canonical via
 // `std::fs::read_to_string`, which fails with `InvalidData` (mapped to
