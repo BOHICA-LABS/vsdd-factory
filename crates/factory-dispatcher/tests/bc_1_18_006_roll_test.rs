@@ -1415,52 +1415,69 @@ fn test_BC_1_18_006_FC2P4_001_catch_point_i_self_heals_orphan_before_execute_rol
 // ---------------------------------------------------------------------------
 // F-C2-P4-002 (MINOR, E-SHD-009): `publish_sealed_shard` must be write-once
 // — a sealed shard, once durably published at a given seq, is IMMUTABLE.
-// `write_atomic`'s underlying `rename()` overwrites an existing destination
-// unconditionally (POSIX `rename(2)` semantics), so without an explicit
-// pre-existence check, a roll whose `next_seal_seq` computation collides
-// with an already-sealed file (e.g. a stray/pre-existing file, or an
-// index/filesystem desync) silently destroys previously-sealed, supposedly
-// permanent history.
+//
+// This is a DIRECT unit-level test of `publish_sealed_shard` itself, NOT a
+// full-pipeline dispatch test (mirroring `shard_manager.rs`'s own
+// `test_BC_1_18_006_ESHD001_publish_sealed_shard_failure_maps_to_seal_write_failed`
+// ELOOP/missing-parent-dir-style direct calls) — deliberately, per the
+// F-C2-P4-001 fix landed this same burst (catch point (i) now self-heals a
+// pre-existing E-SHD-006 orphan BEFORE calling `execute_roll`), the
+// collision this guard defends against is NO LONGER REACHABLE through the
+// real dispatch pipeline: `run_self_heal_if_plausible`/catch-point-(i)'s own
+// self-heal absorbs any stray sealed-shard file into the index FIRST, so
+// `next_seal_seq` always advances past it before `execute_roll` ever runs,
+// and the pipeline-level collision this test originally drove through
+// `run_roll_gate` can never occur. That is correct-by-design — the
+// self-heal-first root-cause fix (F-C2-P4-001) closes the only path that
+// used to produce a same-seq collision. `publish_sealed_shard`'s own
+// write-once guard (E-SHD-009) is the RESIDUAL defense-in-depth layer for
+// every other way a destination could already be occupied (a stray file
+// dropped outside this dispatcher's own roll sequence, a corrupted/
+// hand-edited index, concurrent-process races, etc.) — it can only be
+// exercised by calling the primitive directly.
 // ---------------------------------------------------------------------------
 
-#[tokio::test(flavor = "current_thread")]
-async fn test_BC_1_18_006_FC2P4_002_publish_sealed_shard_refuses_to_overwrite_existing_seq() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("decision-log.md");
-    let pre_roll_content = "y".repeat(3_000);
-    std::fs::write(&target, &pre_roll_content).unwrap();
+#[test]
+fn test_BC_1_18_006_FC2P4_002_publish_sealed_shard_refuses_to_overwrite_existing_seq() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sealed_path = dir.path().join("decision-log.0001.md");
 
-    // Pre-create a sealed-shard file at the EXACT destination seq (seq=1,
-    // since no index exists yet) a normal prospective roll would target —
-    // simulating a pre-existing, already-sealed shard occupying that path.
-    let preexisting_content = "PRESEED".repeat(200);
-    let seq1_path = sealed_path_for(dir.path(), "decision-log", 1);
-    std::fs::write(&seq1_path, &preexisting_content).unwrap();
+    // Pre-create a sealed-shard file holding content Y — simulating an
+    // already-durable seal occupying this exact path.
+    let preexisting_content = b"PRESEED".repeat(200);
+    std::fs::write(&sealed_path, &preexisting_content).expect("seed pre-existing sealed shard");
 
-    // Drive a normal over-cap Write dispatch — the SAME trigger AC-006's
-    // own first test uses — which will attempt to seal at seq=1.
-    let summary = run_roll_gate(
-        dir.path(),
-        &target,
-        "Write",
-        serde_json::json!({"content": "x".repeat(50_000)}),
-    )
-    .await;
-
-    let per_plugin_debug = format!("{:?}", summary.per_plugin_results);
+    // Attempt to publish a DIFFERENT payload (content Z) at the SAME
+    // destination path.
+    let new_content = b"z".repeat(3_000);
+    let err = factory_dispatcher::shard_manager::publish_sealed_shard(&sealed_path, &new_content)
+        .expect_err(
+            "F-C2-P4-002 (MINOR): publish_sealed_shard must refuse to overwrite an \
+             already-sealed shard — a write-once immutability violation must fail loud, never \
+             silently succeed",
+        );
     assert!(
-        per_plugin_debug.contains("E-SHD-009"),
-        "F-C2-P4-002 (MINOR): publish_sealed_shard must refuse to overwrite a pre-existing \
-         sealed shard at the destination seq — a write-once immutability violation must \
-         surface as the E-SHD-009 error. Got: {per_plugin_debug}"
+        matches!(
+            err,
+            factory_dispatcher::shard_manager::ShardRollError::SealedShardAlreadyExists { .. }
+        ),
+        "F-C2-P4-002: the failure MUST be ShardRollError::SealedShardAlreadyExists (E-SHD-009) \
+         specifically, not a generic error or a different named variant — got: {err:?}"
+    );
+    assert!(
+        err.to_string().contains("E-SHD-009"),
+        "F-C2-P4-002: the error's Display text must name the E-SHD-009 code — got: {err}"
     );
 
-    let seq1_after = std::fs::read_to_string(&seq1_path)
-        .expect("F-C2-P4-002: the pre-existing sealed shard must remain on disk");
+    // The pre-existing sealed shard must be left byte-for-byte UNCHANGED —
+    // Z (the new content) must never have been written.
+    let on_disk =
+        std::fs::read(&sealed_path).expect("F-C2-P4-002: the sealed shard must remain on disk");
     assert_eq!(
-        seq1_after, preexisting_content,
-        "F-C2-P4-002: the pre-existing sealed shard must be left byte-for-byte UNCHANGED — \
-         publish_sealed_shard must never silently overwrite an already-sealed shard file"
+        on_disk, preexisting_content,
+        "F-C2-P4-002: the pre-existing sealed shard must be left byte-for-byte UNCHANGED (still \
+         holding Y) — publish_sealed_shard must never silently overwrite an already-sealed \
+         shard file with the new content Z"
     );
 }
 
