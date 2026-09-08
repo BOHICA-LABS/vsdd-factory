@@ -2511,12 +2511,70 @@ fn build_empty_roll_retry_block_reason(
 /// listing. Only when this probe finds a candidate do the two functions
 /// below pay for their own, more expensive checks (byte-for-byte content
 /// comparison; a directory-wide orphan scan).
+// BC-1.18.006 v1.9 (F-C2-P6-003 sibling-site fix, MAJOR, cluster-2 LOCAL
+// adversary pass-6 hardening): this probe previously checked ONLY for a
+// sealed-shard file at the single "index max seq + 1" guessed path — but
+// that guess is correct ONLY for the `E-SHD-006` resume-from-truncate
+// signature (a seal published one seq past the index's current tip). Any
+// OTHER unindexed orphan — e.g. a seal at a seq the index doesn't yet
+// know about because the index file itself is missing or stale, or an
+// orphan sitting at a seq other than exactly "next" — is invisible to a
+// single guessed-path `exists()` check, so `run_self_heal_if_plausible`
+// short-circuited to `Ok(())` and NEVER invoked
+// `self_heal_reconcile_missing_index_entries`'s directory-wide scan at
+// all, no matter how many genuine orphans were sitting on disk. Widened
+// to a directory scan matching the SAME `<stem>.<seq>.md` naming
+// predicate `self_heal_reconcile_missing_index_entries` uses (kept
+// consistent with that function's own F-C2-P6-003 digit-width widening:
+// "at least 4 digits, and ALL digits" — never a fixed 4, since `{seq:04}`
+// is MIN-width, not fixed-width) — cheap relative to either self-heal
+// path's own work, since it reads only directory entry names (no file
+// content), the same cost class `self_heal_reconcile_missing_index_entries`
+// already pays when it actually runs.
 fn self_heal_recovery_plausible(entry: &ShardEntry, canonical_path: &Path) -> io::Result<bool> {
     let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
-    let next_seq = next_seal_seq(&index_path)?;
-    let sealed_filename = format!("{}.{next_seq:04}.md", entry.artifact_stem);
-    let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
-    Ok(sealed_path.exists())
+    let indexed_seqs: std::collections::BTreeSet<u32> = load_shard_index(&index_path)?
+        .map(|index| index.shards.iter().map(|s| s.seq).collect())
+        .unwrap_or_default();
+
+    let dir = canonical_path.parent().unwrap_or_else(|| Path::new("."));
+    let prefix = format!("{}.", entry.artifact_stem);
+
+    // A missing directory has no candidates by construction — the same
+    // "absent means implausible, never an error" semantics the old
+    // single-path `sealed_path.exists()` check gave for free (`exists()`
+    // returns `false`, never errors, when an ancestor is missing).
+    // Preserved here explicitly since `read_dir` itself surfaces `NotFound`
+    // as an `Err`, unlike `Path::exists()`.
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+
+    for item in entries {
+        let item = item?;
+        let file_name = item.file_name();
+        let file_name = file_name.to_string_lossy();
+
+        let Some(rest) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(seq_str) = rest.strip_suffix(".md") else {
+            continue;
+        };
+        if seq_str.len() < 4 || !seq_str.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(seq) = seq_str.parse::<u32>() else {
+            continue;
+        };
+        if !indexed_seqs.contains(&seq) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// Runs self-heal recovery for `entry`/`canonical_path` if — and only if —
@@ -2703,17 +2761,28 @@ pub fn self_heal_reconcile_missing_index_entries(
         let file_name = item.file_name();
         let file_name = file_name.to_string_lossy();
 
-        // Match this artifact's exact `<stem>.<seq:04>.md` sealed-shard
-        // naming convention (Postcondition 5) — anything else (the
-        // canonical file itself, the shard-index TOML, an unrelated
-        // sibling, or a differently-shaped stem) is skipped.
+        // Match this artifact's `<stem>.<seq:04>.md` sealed-shard naming
+        // convention (Postcondition 5) — anything else (the canonical file
+        // itself, the shard-index TOML, an unrelated sibling, or a
+        // differently-shaped stem) is skipped.
         let Some(rest) = file_name.strip_prefix(&prefix) else {
             continue;
         };
         let Some(seq_str) = rest.strip_suffix(".md") else {
             continue;
         };
-        if seq_str.len() != 4 {
+        // BC-1.18.006 v1.9 (F-C2-P6-003, ADVISORY, cluster-2 LOCAL adversary
+        // pass-6): `{seq:04}` is Rust's MIN-width formatting spec, NOT a
+        // FIXED width — `seq >= 10_000` legitimately produces a 5+ digit
+        // filename (e.g. `decision-log.10000.md`), not a truncated or
+        // malformed one. A strict `seq_str.len() != 4` guard silently
+        // skipped every such orphan forever, indistinguishable (to that
+        // guard) from a genuinely unrelated file. Widened to "at least 4
+        // digits, and ALL digits" — still rejects anything shorter (which
+        // can never be a real `{seq:04}` output) and anything non-numeric
+        // (a malformed/unrelated candidate), while accepting any legitimate
+        // seq width `{seq:04}` can actually produce.
+        if seq_str.len() < 4 || !seq_str.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
         let Ok(seq) = seq_str.parse::<u32>() else {
