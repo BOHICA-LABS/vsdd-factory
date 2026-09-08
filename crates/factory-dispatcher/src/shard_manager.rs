@@ -4773,3 +4773,666 @@ mod tests {
         );
     }
 }
+
+// ===========================================================================
+// BC-1.18.006 — Roll-Before-Write via Block-and-Retry (S-25.02 cluster-2
+// "roll") — test-writer's Red Gate suite.
+//
+// # BC-5.38.001 Red Gate discipline — every test below MUST currently FAIL
+//
+// Every function this module exercises (`execute_roll`,
+// `read_canonical_content`, `publish_sealed_shard`,
+// `truncate_canonical_to_empty`, `publish_shard_index_update`,
+// `self_heal_resume_from_truncate`, `self_heal_reconcile_missing_index_entries`,
+// `reconcile_post_write_replace_all_overcap`, `reconcile_leading_probe_backstop`)
+// is `todo!()` as of the stub-architect's cluster-2 burst (commit `e04ab76f`
+// — see the "BC-5.38.001 Red Gate discipline — STUBBED" section comment
+// above `ShardIndexEntry`). Every test below therefore panics today. Each
+// test asserts the REAL, post-implementation expected outcome (never
+// `#[should_panic]`) — the same methodology this file's own `mod tests`
+// (cluster-1) already establishes: a test written this way is RED today and
+// turns GREEN, unmodified, once implementer replaces the `todo!()` with real
+// logic.
+//
+// `build_roll_retry_block_reason` (GREEN-BY-DESIGN) and
+// `From<ShardRollError> for HookResult` (WIRING-EXEMPT) are intentionally
+// NOT given standalone unit tests here, mirroring cluster-1's own exclusion
+// of `ShardEntry::cap_formula_inputs`/`From<ShardConfigError> for HookResult`
+// for the identical reason (trivial, already-real code, outside this
+// cluster's tested trigger/roll logic) — AC-007's message-content coverage
+// instead lives in the integration test file
+// (`tests/bc_1_18_006_roll_test.rs`), which drives the FULL dispatch path
+// (trigger fires -> execute_roll -> Block) so it still currently fails at
+// execute_roll's own `todo!()`, not vacuously passing against
+// build_roll_retry_block_reason alone.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+mod bc_1_18_006_roll_tests {
+    use super::*;
+
+    /// Same shape as the sibling `mod tests`'s own `flat_entry` helper
+    /// (private to that module) — duplicated here rather than shared across
+    /// modules, to keep this cluster's test module independent of
+    /// cluster-1's internal test-only surface.
+    fn flat_entry(stem: &str, shard_cap_bytes: u64) -> ShardEntry {
+        ShardEntry {
+            artifact_stem: stem.to_string(),
+            artifact_path: format!("{stem}.md"),
+            practical_fuel_ceiling: 8_000_000,
+            worst_case_fuel_per_byte: 106.36,
+            max_single_record_bytes: 16_384,
+            safety_margin: 8_192,
+            shard_cap_bytes,
+            shape: Some(ShardShape::Flat),
+            n: None,
+            low_water_mark: None,
+        }
+    }
+
+    fn sealed_path_for(dir: &std::path::Path, stem: &str, seq: u32) -> std::path::PathBuf {
+        dir.join(format!("{stem}.{seq:04}.md"))
+    }
+
+    fn index_path_for(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+        dir.join(format!("{stem}.shard-index.toml"))
+    }
+
+    // -----------------------------------------------------------------
+    // Step (a) — read_canonical_content (Postcondition 1 step (a))
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_P1a_read_canonical_content_returns_full_existing_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("decision-log.md");
+        std::fs::write(&path, "pre-roll content, 30 bytes ---").expect("seed canonical");
+
+        let content = read_canonical_content(&path).expect(
+            "BC-1.18.006 Postcondition 1 step (a): must read the canonical file's full current \
+             content",
+        );
+        assert_eq!(
+            content, "pre-roll content, 30 bytes ---",
+            "read_canonical_content must return the EXACT pre-roll bytes, not a truncated or \
+             re-encoded copy"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_P1a_read_canonical_content_missing_file_is_io_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("does-not-exist.md");
+
+        let result = read_canonical_content(&path);
+        assert!(
+            result.is_err(),
+            "a roll can only be triggered against an EXISTING over-cap shard (BC-1.18.005 \
+             Precondition 2) — a missing canonical file at roll time is a genuine I/O error \
+             condition (part of the E-SHD-001 steps (a)-(b) failure leg), never silently Ok(\"\")"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Step (b) — publish_sealed_shard (Postcondition 1 step (b))
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_P1b_publish_sealed_shard_creates_new_file_with_exact_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+
+        publish_sealed_shard(&sealed_path, "sealed content, byte-for-byte copy").expect(
+            "BC-1.18.006 Postcondition 1 step (b): publish_sealed_shard must succeed when the \
+             destination does not yet exist",
+        );
+
+        let on_disk = std::fs::read_to_string(&sealed_path).expect("read sealed shard back");
+        assert_eq!(
+            on_disk, "sealed content, byte-for-byte copy",
+            "the sealed shard's on-disk content must be an exact byte-for-byte copy of the \
+             content passed to publish_sealed_shard"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD001_publish_sealed_shard_failure_maps_to_seal_write_failed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // A sealed_path whose PARENT directory does not exist: write_atomic's
+        // temp-file-then-rename primitive cannot create either the temp file
+        // or the destination — a genuine, unrecoverable-without-retry I/O
+        // failure that must map to E-SHD-001 (steps (a)-(b) failure leg),
+        // never silently swallowed or misreported as E-SHD-006/E-SHD-007.
+        let sealed_path = dir
+            .path()
+            .join("no-such-subdir")
+            .join("decision-log.0001.md");
+
+        let err = publish_sealed_shard(&sealed_path, "content").expect_err(
+            "a write into a non-existent parent directory must fail, not silently succeed",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "BC-1.18.006 Postcondition 1 steps (a)-(b) failure MUST map to \
+             ShardRollError::SealWriteFailed (E-SHD-001) specifically, not a generic error or a \
+             different named variant — got: {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Step (c) — truncate_canonical_to_empty (Postcondition 1 step (c);
+    // Invariant 2/3)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_P1c_truncate_canonical_to_empty_zeroes_existing_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("decision-log.md");
+        std::fs::write(&path, "this content must be gone after truncate").expect("seed");
+
+        truncate_canonical_to_empty(&path).expect(
+            "BC-1.18.006 Postcondition 1 step (c): truncate must succeed against an existing \
+             canonical file",
+        );
+
+        let meta = std::fs::metadata(&path).expect(
+            "canonical path must still resolve to a real file (Invariant 3) — stat() must \
+             succeed, never ENOENT",
+        );
+        assert_eq!(
+            meta.len(),
+            0,
+            "Invariant 6 / Postcondition 1 step (c): the canonical file MUST be exactly 0 bytes \
+             immediately after truncate — no version of the roll may leave residual pre-roll \
+             content behind"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD006_truncate_canonical_to_empty_failure_maps_to_truncate_failed_after_seal()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("no-such-subdir").join("decision-log.md");
+
+        let err = truncate_canonical_to_empty(&path).expect_err(
+            "a truncate against a canonical path whose parent directory does not exist must \
+             fail, not silently succeed",
+        );
+        assert!(
+            matches!(err, ShardRollError::TruncateFailedAfterSeal { .. }),
+            "BC-1.18.006 Postcondition 1 step (c) failure MUST map to \
+             ShardRollError::TruncateFailedAfterSeal (E-SHD-006) specifically — got: {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Step (d) — publish_shard_index_update (Postcondition 1 step (d);
+    // Postcondition 5's schema)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_P1d_publish_shard_index_update_synthesizes_fresh_index_when_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let entry = flat_entry("decision-log", 49_152);
+        let new_entry = ShardIndexEntry {
+            seq: 1,
+            path: "decision-log.0001.md".to_string(),
+            sealed_at: "2026-09-07T00:00:00Z".to_string(),
+            bytes_at_seal: 3_000,
+            sealed_retroactively: false,
+        };
+
+        let index = publish_shard_index_update(&index_path, &entry, new_entry.clone()).expect(
+            "BC-1.18.006 Postcondition 1 step (d): must synthesize a fresh index when none \
+             exists yet",
+        );
+
+        assert_eq!(
+            index.schema_version, 1,
+            "Postcondition 5: schema_version must be 1"
+        );
+        assert_eq!(index.artifact_stem, "decision-log");
+        assert_eq!(index.shard_cap_bytes, 49_152);
+        assert_eq!(index.shards, vec![new_entry.clone()]);
+
+        // Postcondition 1 step (d) also names an ATOMIC PUBLISH — the file
+        // must actually be durably on disk, re-loadable via TOML.
+        let on_disk = std::fs::read_to_string(&index_path).expect("index file must exist on disk");
+        let reparsed: ShardIndex = toml::from_str(&on_disk).expect("index must be valid TOML");
+        assert_eq!(reparsed.shards, vec![new_entry]);
+    }
+
+    #[test]
+    fn test_BC_1_18_006_P1d_AC009_publish_shard_index_update_appends_second_entry_seq_increments() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let entry = flat_entry("decision-log", 49_152);
+
+        let first = ShardIndexEntry {
+            seq: 1,
+            path: "decision-log.0001.md".to_string(),
+            sealed_at: "2026-09-07T00:00:00Z".to_string(),
+            bytes_at_seal: 40_000,
+            sealed_retroactively: false,
+        };
+        publish_shard_index_update(&index_path, &entry, first.clone())
+            .expect("first publish must succeed");
+
+        let second = ShardIndexEntry {
+            seq: 2,
+            path: "decision-log.0002.md".to_string(),
+            sealed_at: "2026-09-08T00:00:00Z".to_string(),
+            bytes_at_seal: 41_000,
+            sealed_retroactively: false,
+        };
+        let index = publish_shard_index_update(&index_path, &entry, second.clone())
+            .expect("second publish must succeed");
+
+        assert_eq!(
+            index.shards,
+            vec![first, second],
+            "AC-009: a second roll on the same artifact must APPEND a second [[shard]] entry — \
+             the first entry (seq=1) must be left completely untouched, never overwritten or \
+             reordered"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD007_publish_shard_index_update_failure_maps_to_index_publish_failed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_path = dir
+            .path()
+            .join("no-such-subdir")
+            .join("decision-log.shard-index.toml");
+        let entry = flat_entry("decision-log", 49_152);
+        let new_entry = ShardIndexEntry {
+            seq: 1,
+            path: "decision-log.0001.md".to_string(),
+            sealed_at: "2026-09-07T00:00:00Z".to_string(),
+            bytes_at_seal: 3_000,
+            sealed_retroactively: false,
+        };
+
+        let err = publish_shard_index_update(&index_path, &entry, new_entry)
+            .expect_err("a publish into a non-existent parent directory must fail");
+        assert!(
+            matches!(err, ShardRollError::IndexPublishFailedAfterTruncate { .. }),
+            "BC-1.18.006 Postcondition 1 step (d) failure MUST map to \
+             ShardRollError::IndexPublishFailedAfterTruncate (E-SHD-007) specifically — got: \
+             {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // execute_roll — the full staged 4-step sequence (AC-006/007/008/009)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_AC006_execute_roll_stages_read_publish_truncate_publish_in_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let pre_roll_content = "y".repeat(3_000);
+        std::fs::write(&canonical_path, &pre_roll_content).expect("seed pre-roll canonical");
+        let entry = flat_entry("decision-log", 49_152);
+
+        let published = execute_roll(&entry, &canonical_path, false).expect(
+            "AC-006: a normal (prospective) roll over an existing, readable canonical file must \
+             succeed",
+        );
+
+        // Step (b): sealed shard is a byte-for-byte copy of the PRE-ROLL
+        // content, published as a NEW file.
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", published.seq);
+        let sealed_content = std::fs::read_to_string(&sealed_path)
+            .expect("AC-006: the sealed shard file must exist on disk after execute_roll");
+        assert_eq!(
+            sealed_content, pre_roll_content,
+            "AC-006: the sealed shard must be an exact byte-for-byte copy of the canonical \
+             file's PRE-ROLL content — never the (nonexistent, in this test) new payload"
+        );
+
+        // Step (c): canonical file is truncated to exactly 0 bytes.
+        let canonical_len = std::fs::metadata(&canonical_path)
+            .expect("canonical path must still resolve to a real file (Invariant 3)")
+            .len();
+        assert_eq!(
+            canonical_len, 0,
+            "AC-006 / Invariant 6: the canonical file must be exactly 0 bytes immediately after \
+             execute_roll completes"
+        );
+
+        // Step (d): the published ShardIndexEntry reflects the seal.
+        assert_eq!(
+            published.bytes_at_seal, 3_000,
+            "AC-009: bytes_at_seal must record the sealed shard's exact final byte count"
+        );
+        assert!(
+            !published.sealed_retroactively,
+            "AC-008: a normal (prospective) roll must NOT set sealed_retroactively — the field \
+             defaults false"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_AC006_execute_roll_sealed_filename_matches_stem_seq_pattern() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("burst-log.md");
+        std::fs::write(&canonical_path, "z".repeat(1_000)).expect("seed");
+        let entry = flat_entry("burst-log", 49_152);
+
+        let published = execute_roll(&entry, &canonical_path, false)
+            .expect("roll over an existing canonical file must succeed");
+
+        assert_eq!(
+            published.path, "burst-log.0001.md",
+            "AC-006: the sealed shard's filename MUST follow the exact `<stem>.<seq:04>.md` \
+             pattern (e.g. \"burst-log.0001.md\" for the first-ever roll, seq=1 zero-padded to \
+             4 digits)"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_AC009_execute_roll_second_roll_increments_seq_first_entry_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+
+        std::fs::write(&canonical_path, "a".repeat(2_000)).expect("seed roll #1");
+        let first = execute_roll(&entry, &canonical_path, false).expect("first roll must succeed");
+        assert_eq!(
+            first.seq, 1,
+            "AC-009: the first-ever roll must publish seq=1"
+        );
+
+        // Canonical is now empty (post roll #1) — write fresh content to
+        // simulate a second cycle-artifact append that itself later exceeds
+        // cap again.
+        std::fs::write(&canonical_path, "b".repeat(4_000)).expect("seed roll #2");
+        let second =
+            execute_roll(&entry, &canonical_path, false).expect("second roll must succeed");
+        assert_eq!(
+            second.seq, 2,
+            "AC-009: a SECOND roll on the same artifact must publish seq=2, incrementing \
+             monotonically from the first"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let on_disk = std::fs::read_to_string(&index_path).expect("index must exist");
+        let index: ShardIndex = toml::from_str(&on_disk).expect("index must parse");
+        assert_eq!(
+            index.shards,
+            vec![first, second],
+            "AC-009: the index must contain BOTH entries, in order, with seq=1's entry left \
+             completely untouched by the second roll (append-only)"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_AC024_execute_roll_retroactive_sets_sealed_retroactively_true() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        // An over-cap on-disk content, as a `replace_all: true` write would
+        // have already produced (EC-014) — the retroactive roll seals
+        // content that has ALREADY been written, so bytes_at_seal MAY
+        // legitimately exceed shard_cap_bytes (Postcondition 7's documented
+        // exception).
+        let over_cap_content = "c".repeat(49_500);
+        std::fs::write(&canonical_path, &over_cap_content).expect("seed over-cap canonical");
+        let entry = flat_entry("decision-log", 49_152);
+
+        let published = execute_roll(&entry, &canonical_path, true)
+            .expect("a retroactive roll must succeed identically to a prospective one");
+
+        assert!(
+            published.sealed_retroactively,
+            "AC-024 / Postcondition 5: a retroactive roll's [[shard]] entry MUST set \
+             sealed_retroactively = true — the sole audit trail distinguishing this shard-cap \
+             guarantee exception"
+        );
+        assert_eq!(
+            published.bytes_at_seal, 49_500,
+            "Postcondition 7's documented exception: a retroactively-sealed shard's \
+             bytes_at_seal MAY exceed shard_cap_bytes (49,500 > 49,152 here) — this is legal \
+             ONLY because sealed_retroactively is true"
+        );
+
+        let canonical_len = std::fs::metadata(&canonical_path)
+            .expect("canonical must still exist")
+            .len();
+        assert_eq!(
+            canonical_len, 0,
+            "Invariant 6: the canonical file's zero-bytes-after-roll guarantee holds \
+             UNCONDITIONALLY even for a retroactive roll — only the SEALED shard's cap \
+             guarantee is relaxed, never the canonical file's"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Self-healing recovery — E-SHD-006 (EC-010) / E-SHD-007 (EC-011)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_ESHD006_self_heal_resume_from_truncate_detects_duplicate_and_resumes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        let stuck_content = "d".repeat(2_500);
+
+        // Simulate the E-SHD-006 crash point: the sealed shard is ALREADY
+        // durably published (step (b) succeeded) but the canonical file
+        // STILL holds that same content (step (c) never ran).
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_path, &stuck_content).expect("seed sealed shard (step b done)");
+        std::fs::write(&canonical_path, &stuck_content).expect("seed duplicate canonical");
+
+        let result = self_heal_resume_from_truncate(&entry, &canonical_path).expect(
+            "EC-010: the resume-from-truncate self-heal must succeed against a genuine \
+             duplicate-content state",
+        );
+        assert!(
+            result.is_some(),
+            "EC-010: a detected duplicate-content state (sealed shard byte-identical to the \
+             CURRENT canonical content) must resume from step (c) alone and publish the missing \
+             index entry — never Ok(None)"
+        );
+
+        let canonical_len = std::fs::metadata(&canonical_path)
+            .expect("canonical must still exist")
+            .len();
+        assert_eq!(
+            canonical_len, 0,
+            "EC-010: resume-from-truncate must complete step (c) — the canonical file must be \
+             empty after the self-heal runs"
+        );
+
+        // The already-durable sealed shard must NEVER be rewritten (the
+        // self-heal resumes from step (c) ALONE).
+        let sealed_after =
+            std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
+        assert_eq!(
+            sealed_after, stuck_content,
+            "EC-010: the already-correct sealed shard must be left byte-for-byte untouched — \
+             the self-heal never re-publishes step (b)"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD006_self_heal_resume_from_truncate_no_action_when_not_duplicated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        // Normal, healthy state: canonical holds fresh content, no sealed
+        // shard exists at the next-expected seq at all.
+        std::fs::write(&canonical_path, "e".repeat(500)).expect("seed healthy canonical");
+
+        let result = self_heal_resume_from_truncate(&entry, &canonical_path).expect(
+            "self_heal_resume_from_truncate must not error against a healthy (non-crashed) \
+             state",
+        );
+        assert!(
+            result.is_none(),
+            "EC-010: when no sealed-shard/canonical duplicate-content state exists, the \
+             self-heal must take NO action (Ok(None)) — it must never fabricate a roll"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&canonical_path).expect("canonical must be unchanged"),
+            "e".repeat(500),
+            "no-op self-heal must leave the canonical file completely untouched"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD007_self_heal_reconcile_missing_index_entries_appends_unindexed_shard()
+    {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        // Simulate the E-SHD-007 crash point: canonical is correctly empty
+        // and the sealed shard exists correctly on disk, but NO index file
+        // exists at all yet (step (d) never ran).
+        std::fs::write(&canonical_path, "").expect("seed empty (post-truncate) canonical");
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_path, "f".repeat(1_200)).expect("seed sealed shard (step c done)");
+
+        let appended = self_heal_reconcile_missing_index_entries(&entry, &canonical_path).expect(
+            "EC-011: reconciliation must succeed when an un-indexed sealed shard is discovered \
+             on disk",
+        );
+        assert_eq!(
+            appended.len(),
+            1,
+            "EC-011: exactly one missing [[shard]] entry (seq=1, the un-indexed sealed shard) \
+             must be appended"
+        );
+        assert_eq!(appended[0].seq, 1);
+        assert_eq!(appended[0].path, "decision-log.0001.md");
+        assert_eq!(
+            appended[0].bytes_at_seal, 1_200,
+            "the reconciled entry's bytes_at_seal must reflect the sealed shard's ACTUAL \
+             on-disk byte count"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let on_disk = std::fs::read_to_string(&index_path)
+            .expect("EC-011: the reconciliation must durably publish the index file");
+        let index: ShardIndex = toml::from_str(&on_disk).expect("index must parse");
+        assert_eq!(
+            index.shards, appended,
+            "the published index must contain exactly the reconciled entry"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_ESHD007_self_heal_reconcile_missing_index_entries_no_action_when_fully_indexed()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        std::fs::write(&canonical_path, "").expect("seed empty canonical");
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_path, "g".repeat(800)).expect("seed sealed shard");
+
+        // Pre-publish the index entry so the sealed shard is ALREADY fully
+        // reconciled — the self-heal must be idempotent and take no action.
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let already_indexed = ShardIndexEntry {
+            seq: 1,
+            path: "decision-log.0001.md".to_string(),
+            sealed_at: "2026-09-07T00:00:00Z".to_string(),
+            bytes_at_seal: 800,
+            sealed_retroactively: false,
+        };
+        publish_shard_index_update(&index_path, &entry, already_indexed)
+            .expect("pre-seed the index with the already-correct entry");
+
+        let appended = self_heal_reconcile_missing_index_entries(&entry, &canonical_path)
+            .expect("reconciliation over an already-fully-indexed state must not error");
+        assert!(
+            appended.is_empty(),
+            "EC-011: when every on-disk sealed shard is already present in the index, the \
+             self-heal must append NOTHING (idempotent on repeat)"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Postcondition 7 catch points — AC-024 / AC-025 (reused via execute_roll)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_AC024_reconcile_post_write_replace_all_overcap_no_action_under_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        std::fs::write(&canonical_path, "h".repeat(1_000)).expect("well under cap");
+
+        let result = reconcile_post_write_replace_all_overcap(&entry, &canonical_path)
+            .expect("catch point (i) must not error when the actual on-disk size is within cap");
+        assert!(
+            result.is_none(),
+            "AC-024: when actual_size <= shard_cap_bytes, catch point (i) must take NO action \
+             (Ok(None)) — the single-occurrence trigger estimate was conservative or exactly \
+             correct"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_AC024_EC014_reconcile_post_write_replace_all_overcap_triggers_retroactive_roll()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        // EC-014's worked example: an under-projected replace_all write has
+        // ALREADY been applied, leaving the canonical file genuinely over
+        // cap on disk.
+        std::fs::write(&canonical_path, "i".repeat(49_500)).expect("seed over-cap canonical");
+
+        let result = reconcile_post_write_replace_all_overcap(&entry, &canonical_path)
+            .expect("AC-024: catch point (i) must succeed when it detects an over-cap state");
+        let published = result.expect(
+            "AC-024 / EC-014: actual_size > shard_cap_bytes MUST trigger the retroactive \
+             four-step roll (Ok(Some(entry))), never Ok(None)",
+        );
+        assert!(
+            published.sealed_retroactively,
+            "AC-024: the resulting seal MUST set sealed_retroactively = true"
+        );
+        assert_eq!(
+            std::fs::metadata(&canonical_path)
+                .expect("canonical must exist")
+                .len(),
+            0,
+            "Invariant 6: canonical must be exactly 0 bytes after catch point (i) reconciles"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_AC025_EC015_reconcile_leading_probe_backstop_triggers_retroactive_roll() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        // EC-015: catch point (i) crashed/never ran — the canonical file is
+        // STILL over cap on disk when the artifact's NEXT dispatch arrives.
+        std::fs::write(&canonical_path, "j".repeat(50_000)).expect("seed still-over-cap canonical");
+
+        let published = reconcile_leading_probe_backstop(&entry, &canonical_path)
+            .expect("AC-025: the backstop must succeed given an already-confirmed over-cap state")
+            .expect(
+                "AC-025 / EC-015: the leading-probe backstop must ALWAYS reconcile when called \
+                 (the caller has already confirmed current_bytes > shard_cap_bytes) — never \
+                 Ok(None)",
+            );
+        assert!(
+            published.sealed_retroactively,
+            "AC-025: the backstop's seal MUST also set sealed_retroactively = true — it reuses \
+             the SAME retroactive roll sequence AC-024's catch point (i) specifies"
+        );
+        assert_eq!(
+            std::fs::metadata(&canonical_path)
+                .expect("canonical must exist")
+                .len(),
+            0,
+            "Postcondition 7's bounded-window guarantee: after the backstop fires, the canonical \
+             file must be exactly 0 bytes — the over-cap window is closed"
+        );
+    }
+}
