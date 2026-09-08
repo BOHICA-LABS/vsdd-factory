@@ -2477,6 +2477,31 @@ pub fn self_heal_resume_from_truncate(
         }
     };
 
+    // BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002, cluster-2 LOCAL adversary
+    // pass-3): `execute_roll` can never itself publish a 0-byte seal
+    // (F-C2-P2-006's own empty-canonical short-circuit) — so a 0-byte
+    // candidate found sitting at the index's next-expected seq path is, by
+    // construction, an EXTERNAL anomaly, never a genuine artifact of this
+    // dispatcher's own roll sequence. Without this guard, a 0-byte sealed
+    // candidate is byte-identical to an ALSO-0-byte canonical (the vacuous
+    // 0-bytes == 0-bytes case), which the comparison below would otherwise
+    // misread as a genuine E-SHD-006 duplicate-content match and resume
+    // from — fabricating a `bytes_at_seal = 0` index row for a seal that
+    // never legitimately happened. Skip it: no truncate, no index publish,
+    // never fail the dispatch over it, just a diagnostic.
+    if sealed_bytes.is_empty() {
+        tracing::warn!(
+            artifact_stem = %entry.artifact_stem,
+            sealed_path = %sealed_path.display(),
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): self_heal_resume_from_truncate found a \
+             0-byte sealed-shard candidate at the index's next-expected seq — execute_roll can \
+             never itself produce a 0-byte seal, so this is an external anomaly, not a \
+             resumable E-SHD-006 duplicate-content state. Skipping (no truncate, no index \
+             entry published)."
+        );
+        return Ok(None);
+    }
+
     let current_bytes = match std::fs::read(canonical_path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -2577,6 +2602,31 @@ pub fn self_heal_reconcile_missing_index_entries(
         }
 
         let bytes = item.metadata().map_err(to_error)?.len();
+
+        // BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002, cluster-2 LOCAL
+        // adversary pass-3): `execute_roll` can never itself publish a
+        // 0-byte seal (F-C2-P2-006's own empty-canonical short-circuit),
+        // so a 0-byte file sitting at this artifact's exact
+        // `<stem>.<seq:04>.md` sealed-shard naming convention is, by
+        // construction, an EXTERNAL anomaly — never a genuine orphaned
+        // seal this dispatcher's own roll sequence produced. Indexing it
+        // would fabricate a false audit-trail `[[shard]]` row (a seal
+        // event that never legitimately happened). Skip it (never fail
+        // the dispatch over it), leaving the file itself untouched on
+        // disk — only emit a diagnostic.
+        if bytes == 0 {
+            tracing::warn!(
+                artifact_stem = %entry.artifact_stem,
+                path = %file_name,
+                seq,
+                "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): self_heal_reconcile_missing_index_entries \
+                 found a 0-byte candidate at the sealed-shard naming convention — execute_roll can \
+                 never itself produce a 0-byte seal, so this is an external anomaly. Skipping (no \
+                 [[shard]] index row appended)."
+            );
+            continue;
+        }
+
         unindexed.push((seq, file_name.into_owned(), bytes));
     }
     unindexed.sort_by_key(|(seq, ..)| *seq);
