@@ -2381,7 +2381,28 @@ fn detect_replace_all_overcap_candidate(
     if !shard_config_path.exists() {
         return None;
     }
-    let registry = crate::shard_manager::ShardRegistry::load(&shard_config_path).ok()?;
+    let registry = match crate::shard_manager::ShardRegistry::load(&shard_config_path) {
+        Ok(registry) => registry,
+        Err(e) => {
+            // F-C2-P1-005 (MINOR, S-25.02 cluster-2 LOCAL adversary pass-1):
+            // a malformed `[[shard]]` config is a genuine, actionable
+            // condition (config authors would want to know) — silently
+            // discarding it here (falling through to `None`, this leg's own
+            // "no candidate" outcome) would leave no telemetry at all,
+            // asymmetric with `build_git_context`'s own fail-open-but-logged
+            // sibling paths above. This leg's own "no HookResult signaling"
+            // contract (Decision 15 point 2) is preserved — fail-open, never
+            // propagated as an error to the caller — but never silent.
+            tracing::warn!(
+                shard_config_path = %shard_config_path.display(),
+                error = %e,
+                "BC-1.18.006 Postcondition 7 catch point (i): failed to load [[shard]] config \
+                 while checking for a qualifying replace_all overcap candidate; skipping \
+                 reconciliation for this dispatch"
+            );
+            return None;
+        }
+    };
     let target_path = original_payload
         .tool_input
         .get("file_path")
