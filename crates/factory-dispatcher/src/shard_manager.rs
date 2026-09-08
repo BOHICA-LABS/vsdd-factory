@@ -939,6 +939,29 @@ fn path_falls_under_or_equals(target_path: &Path, registered_path: &Path) -> boo
         .filter(|c| *c != std::path::Component::CurDir)
         .collect();
 
+    // SEC-003 (security review, LOW, CWE-22): this comparison is purely
+    // lexical (never `canonicalize()`, per Invariant 3's "no stat() before
+    // config-match" ordering) — a `Component::ParentDir` (`..`) component
+    // in EITHER operand is therefore never normalized away the way a real
+    // filesystem traversal would resolve it, and a naive component-wise
+    // suffix/prefix comparison could be fooled by one into a match that
+    // does not correspond to any real containment relationship (e.g.
+    // `target = "a/b/../c"` lexically "suffix-matches" `registered = "c"`
+    // without actually being nested under whatever `registered_path` names
+    // on disk). Currently inert in practice — this dispatcher hook only
+    // ever sees a `target_path` already authorized by Claude Code's own
+    // tool-approval layer — but this is a latent normalization gap in a
+    // security-relevant path-containment primitive, so reject any operand
+    // containing a `ParentDir` component outright rather than let it
+    // participate in the lexical comparison at all.
+    if target
+        .iter()
+        .chain(registered.iter())
+        .any(|c| *c == std::path::Component::ParentDir)
+    {
+        return false;
+    }
+
     let suffix_match = registered.len() <= target.len()
         && target[target.len() - registered.len()..] == registered[..];
     let prefix_match =
@@ -3594,6 +3617,45 @@ mod tests {
              not-matching baseline) — this is the operator-facing failure mode: a `./`-prefixed \
              artifact_path silently matching nothing would leave the artifact completely \
              unguarded"
+        );
+    }
+
+    /// SEC-003 (security review, LOW, CWE-22): a `target_path` containing a
+    /// literal `..` (`ParentDir`) component must NOT match against a
+    /// `registered_path` it would otherwise lexically appear to fall
+    /// under — `path_falls_under_or_equals` never canonicalizes, so a
+    /// naive component-wise comparison could otherwise be fooled by an
+    /// unnormalized `..` segment into a false-positive containment match.
+    #[test]
+    fn test_SEC003_path_falls_under_or_equals_rejects_parent_dir_component_in_target() {
+        // Lexically, stripping CurDir (none present here) leaves
+        // ["a", "b", "..", "c"] for the target and ["c"] for the
+        // registered path — a naive suffix-match would see the target's
+        // trailing component ("c") equal the registered path's sole
+        // component and report a match, even though "a/b/../c" does not
+        // actually fall under "c" in any real filesystem sense.
+        let target = Path::new("a/b/../c");
+        let registered = Path::new("c");
+
+        assert!(
+            !path_falls_under_or_equals(target, registered),
+            "SEC-003: a target_path containing a literal `..` segment MUST NOT match against a \
+             registered path it would otherwise lexically appear to fall under"
+        );
+    }
+
+    #[test]
+    fn test_SEC003_path_falls_under_or_equals_rejects_parent_dir_component_in_registered() {
+        // Symmetric case: a `..` component in the REGISTERED side must
+        // also be rejected outright, never participate in the lexical
+        // comparison.
+        let target = Path::new("/repo/.factory/decision-log.md");
+        let registered = Path::new("../.factory/decision-log.md");
+
+        assert!(
+            !path_falls_under_or_equals(target, registered),
+            "SEC-003: a registered_path containing a literal `..` segment MUST NOT be allowed to \
+             match any target via the lexical comparison"
         );
     }
 
