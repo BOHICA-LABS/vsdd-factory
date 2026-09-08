@@ -1637,6 +1637,14 @@ pub fn shard_cap_gate_check(
                     // `NotFound` to `Ok(0)` (EC-004, legitimate
                     // first-write) — Invariant 8 is scoped to every OTHER
                     // `io::ErrorKind`.
+                    //
+                    // FIX-MED-2 (S-25.02 PR #824 second-security-review,
+                    // MEDIUM, CWE-59/CWE-200): refuse loud rather than
+                    // statting through a symlinked canonical path — see
+                    // `reject_canonical_symlink`'s own doc comment.
+                    if let Err(e) = reject_canonical_symlink(&entry.artifact_stem, target_path) {
+                        return e.into();
+                    }
                     match current_shard_bytes_flat(target_path) {
                         Ok(current_bytes) if current_bytes > entry.shard_cap_bytes => {
                             if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
@@ -2117,6 +2125,31 @@ pub enum ShardRollError {
         artifact_stem: String,
         sealed_path: String,
     },
+
+    /// FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+    /// CWE-200, defense-in-depth): a governed artifact's canonical path was
+    /// found to be a symlink at one of this module's canonical-path
+    /// read/stat sites (`read_canonical_content`'s roll-time read, the
+    /// Write-arm's `current_shard_bytes_flat` backstop probe,
+    /// `self_heal_resume_from_truncate`'s duplicate-content comparison
+    /// read, and `reconcile_post_write_replace_all_overcap`'s size probe).
+    /// If a governed artifact path is replaced with a symlink to a
+    /// sensitive file elsewhere on the filesystem, silently reading/
+    /// statting through it would let the symlink TARGET's bytes be
+    /// durably sealed into a brand-new regular file — a real exfiltration
+    /// channel (the sealed shard becomes ordinary repo content that can be
+    /// committed/pushed). Detected via `symlink_metadata` (lstat — never
+    /// dereferenced), mirroring `publish_sealed_shard`'s own SEC-001
+    /// no-follow discipline. No `#[source]` `io::Error`, mirroring
+    /// `SealedShardAlreadyExists` (E-SHD-009): this is a detected
+    /// INVARIANT violation (the path IS a symlink), not an underlying I/O
+    /// failure.
+    #[error(
+        "E-SHD-010: refusing to read or stat '{path}' for artifact_stem \"{artifact_stem}\" — \
+         the canonical path is a symlink, not a regular file; refusing to dereference it \
+         (symlink-exfiltration hardening, BC-1.18.006 FIX-MED-2)"
+    )]
+    CanonicalPathIsSymlink { artifact_stem: String, path: String },
 }
 
 /// Fail-loud roll errors surface to the dispatcher's handling path as
@@ -2235,6 +2268,15 @@ fn reattribute_roll_error(
                 sealed_path: sealed_filename.to_string(),
             }
         }
+        // FIX-MED-2 `CanonicalPathIsSymlink` (E-SHD-010) is, like
+        // `BackstopProbeFailed` above, constructed directly at each of its
+        // own guard call sites (already fully attributed with the correct
+        // `artifact_stem`/`path` at construction time) and returned BEFORE
+        // any of the staged step functions this re-attribution wraps ever
+        // run — never passing through this function in practice. Handled
+        // explicitly (never a wildcard) so the match stays exhaustive-safe
+        // against future `ShardRollError` variants.
+        other @ ShardRollError::CanonicalPathIsSymlink { .. } => other,
     }
 }
 
@@ -2280,6 +2322,40 @@ fn next_seal_seq(index_path: &Path) -> io::Result<u32> {
     match load_shard_index(index_path)? {
         Some(index) => Ok(index.shards.iter().map(|s| s.seq).max().unwrap_or(0) + 1),
         None => Ok(1),
+    }
+}
+
+/// FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+/// CWE-200): refuses to let ANY of this module's canonical-path read/stat
+/// sites operate on `canonical_path` if it is a symlink, rather than
+/// silently dereferencing it. Extends `publish_sealed_shard`'s own
+/// SEC-001 no-follow discipline (there applied to the sealed-shard
+/// DESTINATION) to every read/stat site that instead operates on the
+/// SOURCE canonical path during a roll — a governed artifact path
+/// replaced with a symlink to a sensitive file elsewhere on the
+/// filesystem must never have its target's bytes read and durably sealed
+/// into a brand-new regular file (a real exfiltration channel: the sealed
+/// shard becomes ordinary repo content that can be committed/pushed).
+///
+/// Uses `symlink_metadata` (lstat — never follows the final path
+/// component), mirroring SEC-001's own no-follow discipline exactly. A
+/// MISSING canonical (`NotFound`) is not this guard's concern — every one
+/// of its call sites already has its own legitimate `NotFound` handling
+/// (EC-004's first-write zero-case) — so `Ok(())` is returned for
+/// `NotFound`, and for any OTHER `symlink_metadata` I/O error (e.g.
+/// permission denied), letting the caller's own subsequent read/stat
+/// surface that failure through its EXISTING error path, unchanged. Only
+/// a CONFIRMED symlink fails loud here.
+fn reject_canonical_symlink(
+    artifact_stem: &str,
+    canonical_path: &Path,
+) -> Result<(), ShardRollError> {
+    match std::fs::symlink_metadata(canonical_path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(ShardRollError::CanonicalPathIsSymlink {
+            artifact_stem: artifact_stem.to_string(),
+            path: canonical_path.display().to_string(),
+        }),
+        Ok(_) | Err(_) => Ok(()),
     }
 }
 
@@ -2648,6 +2724,12 @@ pub fn execute_roll(
     canonical_path: &Path,
     sealed_retroactively: bool,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    // FIX-MED-2: refuse loud rather than reading (and later durably
+    // sealing) through a symlinked canonical path. Checked immediately
+    // before step (a)'s own read, the earliest point this function could
+    // apply the guard.
+    reject_canonical_symlink(&entry.artifact_stem, canonical_path)?;
+
     // Step (a).
     let content = read_canonical_content(canonical_path).map_err(|source| {
         ShardRollError::SealWriteFailed {
@@ -2970,6 +3052,14 @@ pub fn self_heal_resume_from_truncate(
     entry: &ShardEntry,
     canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    // FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+    // CWE-200): refuse loud rather than reading (for the byte-identity
+    // comparison below) through a symlinked canonical path — see
+    // `reject_canonical_symlink`'s own doc comment. Checked before this
+    // function's own `std::fs::read(canonical_path)` call, the earliest
+    // point it could apply.
+    reject_canonical_symlink(&entry.artifact_stem, canonical_path)?;
+
     let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
     let next_seq =
         next_seal_seq(&index_path).map_err(|source| ShardRollError::SealWriteFailed {
@@ -3226,6 +3316,14 @@ pub fn reconcile_post_write_replace_all_overcap(
     entry: &ShardEntry,
     canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
+    // FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+    // CWE-200): refuse loud rather than statting (and, via the retroactive
+    // `execute_roll` this function may go on to call, reading) through a
+    // symlinked canonical path — see `reject_canonical_symlink`'s own doc
+    // comment. Checked before this function's own `std::fs::metadata`
+    // call, the earliest point it could apply.
+    reject_canonical_symlink(&entry.artifact_stem, canonical_path)?;
+
     let actual_size = std::fs::metadata(canonical_path)
         .map_err(|source| ShardRollError::SealWriteFailed {
             artifact_stem: entry.artifact_stem.clone(),
@@ -7624,26 +7722,90 @@ mod bc_1_18_006_roll_tests {
     // edited away here — test-writer does not resolve BC conflicts.
     // ===================================================================
 
-    #[cfg(unix)]
+    // RETARGETED (S-25.02 PR #824 second-security-review, FIX-MED-2): this
+    // test ORIGINALLY used a self-referential-symlink ELOOP fixture to
+    // force a *generic* non-NotFound stat() failure — the SAME "portable
+    // technique... mirroring this crate's own established precedent" the
+    // sibling F-002 retargeting note above (S-25.02 Phase F4 cluster-2
+    // pass-2 finding F-C2-P2-003) describes. FIX-MED-2 now installs
+    // `reject_canonical_symlink`'s own `symlink_metadata`-based guard
+    // BEFORE this arm's `current_shard_bytes_flat` call, so ANY symlink
+    // (self-referential/looped or not) is caught EARLIER and fails loud
+    // with the MORE SPECIFIC `E-SHD-010` (`CanonicalPathIsSymlink`) —
+    // never reaching E-SHD-008's own `stat()` call at all. Mirroring the
+    // exact same precedent (a stale, over-broad symlink fixture retargeted
+    // onto a REAL, non-symlink mechanism once a newer guard intercepts it
+    // earlier), this fixture is retargeted onto a canonical path whose OWN
+    // final filename component exceeds every common filesystem's
+    // `NAME_MAX` (255 bytes) — `stat()`/`metadata()` (and `lstat()`/
+    // `symlink_metadata()`) on such a path fails with `ENAMETOOLONG`,
+    // never `NotFound`, and never touching a symlink at all (empirically
+    // confirmed: `reject_canonical_symlink`'s own `symlink_metadata` call
+    // ALSO fails with `ENAMETOOLONG` here, which its `Ok(_) | Err(_) =>
+    // Ok(())` fall-through correctly treats as "cannot determine, defer to
+    // the caller's own read/stat" — exactly as designed, never
+    // misclassified as a confirmed symlink).
+    //
+    // Why the `artifact_stem` stays SHORT ("decision-log") while only the
+    // FILENAME'S EXTENSION is overlong: this arm is NOT the first thing
+    // `shard_cap_gate_check`'s `ShardShape::Flat` branch runs against
+    // `canonical_path` — `run_self_heal_if_plausible`'s own
+    // `self_heal_recovery_plausible` probe runs FIRST, and its `index_path
+    // = shard_index_path_for(canonical_path, &entry.artifact_stem)` derives
+    // the SIBLING `.shard-index.toml` filename from `artifact_stem` alone
+    // (never from `canonical_path`'s own filename). An EARLIER version of
+    // this fixture made `artifact_stem` itself the 300-byte overlong string
+    // (required for `find_matching_entry`'s `file_stem()` equality check
+    // when the WHOLE filename, stem included, is overlong) — but that also
+    // makes the sibling index filename overlong, so
+    // `self_heal_recovery_plausible`'s OWN `load_shard_index` call fails
+    // FIRST with the SAME `ENAMETOOLONG`, surfacing `E-SHD-001` instead
+    // (confirmed empirically) and never reaching this arm's dedicated probe
+    // at all. Keeping `artifact_stem` short and ONLY appending a 300-byte
+    // extension after `canonical_path`'s `"decision-log."` stem keeps the
+    // sibling index filename short (`self_heal_recovery_plausible` resolves
+    // it fine, finds nothing plausible, `Ok(false)` — confirmed
+    // empirically) while `canonical_path`'s OWN full filename (stem +
+    // extension) still exceeds `NAME_MAX`, isolating the failure to THIS
+    // arm's own `current_shard_bytes_flat(target_path)` call exactly as
+    // this test requires — the same per-final-component isolation property
+    // the original ELOOP-via-symlink fixture relied on, without touching a
+    // symlink at all. See
+    // `test_FIXMED2_write_backstop_symlink_canonical_fails_loud_e_shd_010`
+    // (this same file, just below) for the NEW, explicit symlink-specific
+    // `E-SHD-010` coverage this retargeting displaces.
     #[test]
     fn test_BC_1_18_006_F003_write_backstop_stat_failure_fails_loud_e_shd_008() {
-        // Portable technique (Unix-only, hence `#[cfg(unix)]`, mirroring
-        // this crate's own established precedent): a self-referential
-        // symlink makes ANY `stat()`/`metadata()` call on this exact path
-        // fail with `ELOOP` — never `NotFound` — so this fixture lands
-        // squarely inside Invariant 8's non-`NotFound` scope.
         let dir = tempfile::tempdir().expect("tempdir");
-        let looped = dir.path().join("decision-log.md");
-        std::os::unix::fs::symlink(&looped, &looped).expect("create self-referential symlink");
+        // Full final path component = "decision-log." (13 bytes) + 300
+        // bytes = 313 bytes, exceeding NAME_MAX (255 bytes) on every common
+        // POSIX filesystem (ext4, APFS, tmpfs, ...) — but `file_stem()`
+        // still splits at the LAST '.', so `entry.artifact_stem` stays the
+        // short, normal "decision-log" (see the doc comment above for why
+        // that matters).
+        let filename = format!("decision-log.{}", "a".repeat(300));
+        let canonical = dir.path().join(&filename);
 
+        let entry = ShardEntry {
+            artifact_stem: "decision-log".to_string(),
+            artifact_path: filename,
+            practical_fuel_ceiling: 8_000_000,
+            worst_case_fuel_per_byte: 106.36,
+            max_single_record_bytes: 16_384,
+            safety_margin: 8_192,
+            shard_cap_bytes: 49_152,
+            shape: Some(ShardShape::Flat),
+            n: None,
+            low_water_mark: None,
+        };
         let registry = ShardRegistry {
-            shards: vec![flat_entry("decision-log", 49_152)],
+            shards: vec![entry],
         };
 
         let result = shard_cap_gate_check(
             &registry,
             "Write",
-            &looped,
+            &canonical,
             &serde_json::json!({"content": "under-cap content, far below the 49,152-byte cap"}),
         );
 
@@ -7658,14 +7820,79 @@ mod bc_1_18_006_roll_tests {
             }
             other => panic!(
                 "BC-1.18.006 v1.6 Invariant 8 / EC-019 / F-C2-P2-003: a non-NotFound stat() \
-                 failure (ELOOP via self-referential symlink) at the Write-arm's OWN dedicated \
-                 backstop probe MUST fail LOUD as HookResult::Error naming E-SHD-008 — NOT \
-                 silently fail-open into Continue (or resolve to Block). A probe that cannot \
-                 confirm-or-deny a crash-orphaned, over-cap canonical MUST NOT let this Write \
-                 proceed to destroy that content merely because its OWN `content` payload is \
-                 under cap. Got: {other:?}"
+                 failure (ENAMETOOLONG via an overlong final path component) at the Write-arm's \
+                 OWN dedicated backstop probe MUST fail LOUD as HookResult::Error naming \
+                 E-SHD-008 — NOT silently fail-open into Continue (or resolve to Block). A \
+                 probe that cannot confirm-or-deny a crash-orphaned, over-cap canonical MUST \
+                 NOT let this Write proceed to destroy that content merely because its OWN \
+                 `content` payload is under cap. Got: {other:?}"
             ),
         }
+    }
+
+    /// FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+    /// CWE-200): the Write-arm's own dedicated backstop probe site
+    /// (`current_shard_bytes_flat(target_path)`, the SAME call site
+    /// `E-SHD-008`/Invariant 8 above governs for GENERIC stat() failures)
+    /// must refuse loud with `E-SHD-010` (`CanonicalPathIsSymlink`) when
+    /// the canonical path IS a symlink — never silently `stat()` through
+    /// it (which would leak the size of an arbitrary file the dispatcher
+    /// process can stat, a CWE-200 info-exposure side channel) nor let a
+    /// retroactive roll ever read and durably seal a symlink target's
+    /// bytes. Regression guard for the guard installed BEFORE this arm's
+    /// `current_shard_bytes_flat` call.
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXMED2_write_backstop_symlink_canonical_fails_loud_e_shd_010() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = dir.path().join("decision-log.md");
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "attacker wants THIS content exfiltrated/sealed",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical)
+            .expect("plant a symlink at the governed canonical path");
+
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Write",
+            &canonical,
+            &serde_json::json!({"content": "under-cap content, far below the 49,152-byte cap"}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("E-SHD-010"),
+                    "FIX-MED-2: a symlinked canonical path at the Write-arm's own backstop probe \
+                     site MUST fail loud naming the E-SHD-010 error code specifically — got a \
+                     different HookResult::Error message: {message:?}"
+                );
+            }
+            other => panic!(
+                "FIX-MED-2: a symlinked canonical path MUST fail LOUD as HookResult::Error \
+                 naming E-SHD-010 — NOT silently stat() through the symlink (info-exposure side \
+                 channel) nor Continue/Block as if it were an ordinary file. Got: {other:?}"
+            ),
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&sensitive_target).expect("sensitive target must still exist"),
+            "attacker wants THIS content exfiltrated/sealed",
+            "FIX-MED-2: the symlink target's content must be completely untouched — never read, \
+             never sealed into a new file"
+        );
+        assert!(
+            !dir.path().join("decision-log.0001.md").exists(),
+            "FIX-MED-2: no sealed shard may ever be published from a refused symlinked \
+             canonical — the symlink target's bytes must never end up durably sealed anywhere"
+        );
     }
 
     /// FIX-HIGH-1 (S-25.02 PR #824 second-security-review, HIGH, CWE-59/
@@ -7785,6 +8012,122 @@ mod bc_1_18_006_roll_tests {
             !reclaim_identity_still_safe(&path),
             "FIX-MED-1: a path that vanished (or never existed) must never be treated as \
              reclaim-safe — File::open failing is not evidence of safety"
+        );
+    }
+
+    /// FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
+    /// CWE-200): `execute_roll` — the main roll path, step (a) — must
+    /// refuse loud with `E-SHD-010` (`CanonicalPathIsSymlink`) when
+    /// `canonical_path` is a symlink, rather than reading the symlink
+    /// TARGET's bytes via `read_canonical_content` and durably sealing
+    /// them into a brand-new regular file (a real exfiltration channel).
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXMED2_execute_roll_refuses_symlinked_canonical_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "attacker wants THIS content exfiltrated/sealed",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical_path)
+            .expect("plant a symlink at the governed canonical path");
+
+        let err = execute_roll(&entry, &canonical_path, false).expect_err(
+            "FIX-MED-2: execute_roll MUST refuse loud against a symlinked canonical path, never \
+             read through it and seal the target's content",
+        );
+        assert!(
+            matches!(err, ShardRollError::CanonicalPathIsSymlink { .. }),
+            "FIX-MED-2: expected ShardRollError::CanonicalPathIsSymlink (E-SHD-010) — got: \
+             {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-010"),
+            "FIX-MED-2: the error's Display text must name the E-SHD-010 code — got: {err}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&sensitive_target).expect("sensitive target must still exist"),
+            "attacker wants THIS content exfiltrated/sealed",
+            "FIX-MED-2: the symlink target's content must be completely untouched"
+        );
+        assert!(
+            !dir.path().join("decision-log.0001.md").exists(),
+            "FIX-MED-2: no sealed shard may ever be published from a refused symlinked \
+             canonical — the symlink target's bytes must never end up durably sealed anywhere"
+        );
+    }
+
+    /// FIX-MED-2: `self_heal_resume_from_truncate` must refuse loud with
+    /// `E-SHD-010` when `canonical_path` is a symlink, rather than reading
+    /// the symlink target's bytes for its byte-identity comparison.
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXMED2_self_heal_resume_from_truncate_refuses_symlinked_canonical() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "attacker wants THIS content exfiltrated/sealed",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical_path)
+            .expect("plant a symlink at the governed canonical path");
+
+        let err = self_heal_resume_from_truncate(&entry, &canonical_path).expect_err(
+            "FIX-MED-2: self_heal_resume_from_truncate MUST refuse loud against a symlinked \
+             canonical path, never read through it",
+        );
+        assert!(
+            matches!(err, ShardRollError::CanonicalPathIsSymlink { .. }),
+            "FIX-MED-2: expected ShardRollError::CanonicalPathIsSymlink (E-SHD-010) — got: \
+             {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-010"),
+            "FIX-MED-2: the error's Display text must name the E-SHD-010 code — got: {err}"
+        );
+    }
+
+    /// FIX-MED-2: `reconcile_post_write_replace_all_overcap` must refuse
+    /// loud with `E-SHD-010` when `canonical_path` is a symlink, rather
+    /// than statting through it (and, via the retroactive roll it would
+    /// otherwise trigger, reading and sealing the symlink target's bytes).
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXMED2_reconcile_post_write_replace_all_overcap_refuses_symlinked_canonical() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(&sensitive_target, "y".repeat(49_500))
+            .expect("seed an over-cap-sized symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical_path)
+            .expect("plant a symlink at the governed canonical path");
+
+        let err = reconcile_post_write_replace_all_overcap(&entry, &canonical_path).expect_err(
+            "FIX-MED-2: reconcile_post_write_replace_all_overcap MUST refuse loud against a \
+             symlinked canonical path, never stat/read through it",
+        );
+        assert!(
+            matches!(err, ShardRollError::CanonicalPathIsSymlink { .. }),
+            "FIX-MED-2: expected ShardRollError::CanonicalPathIsSymlink (E-SHD-010) — got: \
+             {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-010"),
+            "FIX-MED-2: the error's Display text must name the E-SHD-010 code — got: {err}"
+        );
+        assert!(
+            !dir.path().join("decision-log.0001.md").exists(),
+            "FIX-MED-2: no sealed shard may ever be published from a refused symlinked \
+             canonical"
         );
     }
 }
