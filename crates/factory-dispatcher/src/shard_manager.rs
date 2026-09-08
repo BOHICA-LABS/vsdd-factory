@@ -6256,6 +6256,224 @@ mod bc_1_18_006_roll_tests {
     }
 
     // -----------------------------------------------------------------
+    // cluster-2 LOCAL adversary pass-9, F-C2-P9-002 (TD-VSDD-059
+    // weak-substring-assertion finding): the EC-024/F-C2-P4-002 test above
+    // (and its sibling in `tests/bc_1_18_006_roll_test.rs`) only assert
+    // `err.to_string().contains("E-SHD-009")` — a check so weak it would
+    // stay green through wording drift in the surrounding sentence (the
+    // exact failure class F-C2-P8-003/P5-002 already flagged once for a
+    // DIFFERENT template in this same BC). These two tests pin the FULL
+    // `Display` text of `SealedShardAlreadyExists` (E-SHD-009) and
+    // `BackstopProbeFailed` (E-SHD-008) VERBATIM, byte-for-byte against the
+    // canonical `#[error("...")]` format strings above (confirmed by
+    // product-owner), by constructing each variant directly with known
+    // field values — never a `.contains(...)` fragment check again for
+    // these two formats. The existing `.contains("E-SHD-009")` assertions
+    // are left in place (they still serve their own tests, which assert
+    // additional real-outcome facts — no truncate, no index publish, etc.
+    // — that these two isolated `Display`-only tests deliberately do NOT
+    // duplicate).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_BC_1_18_006_FC2P9_002_seshd009_display_matches_verbatim_format() {
+        let err = ShardRollError::SealedShardAlreadyExists {
+            artifact_stem: "decision-log".to_string(),
+            sealed_path: "/repo/.factory/decision-log.0001.md".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "E-SHD-009: refusing to overwrite an already-sealed shard at \
+             '/repo/.factory/decision-log.0001.md' for artifact_stem \"decision-log\" — sealed \
+             shards are write-once/immutable; this seq already has durable content on disk",
+            "F-C2-P9-002 (TD-VSDD-059): SealedShardAlreadyExists's Display text must match the \
+             canonical E-SHD-009 format VERBATIM — a substring-only `.contains(\"E-SHD-009\")` \
+             check would stay green through wording drift in the surrounding sentence; this \
+             pins the exact byte-for-byte text so drift can no longer happen silently"
+        );
+    }
+
+    #[test]
+    fn test_BC_1_18_006_FC2P9_002_seshd008_display_matches_verbatim_format() {
+        let source = io::Error::other("simulated non-NotFound stat() failure");
+        let err = ShardRollError::BackstopProbeFailed {
+            artifact_stem: "decision-log".to_string(),
+            path: "/repo/.factory/decision-log.md".to_string(),
+            source,
+        };
+        assert_eq!(
+            err.to_string(),
+            "E-SHD-008: Write-arm backstop stat() failed for artifact_stem \"decision-log\" at \
+             '/repo/.factory/decision-log.md' — cannot confirm whether the canonical file is a \
+             crash-orphaned, over-cap shard; refusing to let this Write proceed until the \
+             underlying I/O condition is resolved: simulated non-NotFound stat() failure",
+            "F-C2-P9-002 (TD-VSDD-059): BackstopProbeFailed's Display text (including the \
+             forwarded `{{source}}` io::Error text) must match the canonical E-SHD-008 format \
+             VERBATIM — the existing `test_BC_1_18_006_F003_...` integration-style test only \
+             checks `.contains(\"E-SHD-008\")`; this pins the exact byte-for-byte text"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // cluster-2 LOCAL adversary pass-9, F-C2-P9-003 (TD-VSDD-059 coverage
+    // gap): BC-1.18.006 Postcondition 8 routes TWO fail-loud dispositions
+    // out of the 0-byte reclaim path (`publish_sealed_shard`'s
+    // `stat -> unlink -> retry` sequence, ~lines 2303-2369 above) that had
+    // NO test before this pass:
+    //
+    //   1. The unlink-failure arm — `std::fs::remove_file(sealed_path)`
+    //      itself fails (line ~2342's `if
+    //      std::fs::remove_file(sealed_path).is_err()`). Covered below by
+    //      `test_BC_1_18_006_EC025_FC2P9_003_unlink_failure_fails_loud_e_shd_009`
+    //      — deterministic, macOS-only (see that test's own doc comment for
+    //      why, including the two fixtures that were tried and rejected
+    //      after reading the production code).
+    //
+    //   2. The concurrent-race retry-collision arm — the SINGLE bounded
+    //      `write_exclusive` retry (after a successful unlink) itself
+    //      collides again with `AlreadyExists` (line ~2361's `Err(retry_err)
+    //      if retry_err.kind() == io::ErrorKind::AlreadyExists`). This
+    //      requires a SECOND writer to durably recreate real content at
+    //      `sealed_path` in the narrow window between this function's own
+    //      `remove_file` succeeding and its own retry `write_exclusive`
+    //      call — two statements apart, with no callback/injection seam in
+    //      `publish_sealed_shard`'s signature or body for a test to
+    //      interpose there deterministically. Fabricating this with a
+    //      background thread racing the two calls would be either flaky
+    //      (the thread might lose the race on a fast machine) or would
+    //      itself require sleeping/synchronizing INSIDE
+    //      `publish_sealed_shard`'s two-line gap — not achievable without
+    //      modifying the production function to add a test-only seam, which
+    //      is out of scope for a coverage-strengthening pass (and would be
+    //      a real behavior change to already-shipped, already-reviewed
+    //      code). Per this task's own explicit instruction, this arm is
+    //      NOT faked with a non-deterministic fixture: it is left as this
+    //      documented, structurally-not-deterministically-testable-without-
+    //      an-injection-seam gap. The `Err(retry_err) if
+    //      retry_err.kind() == io::ErrorKind::AlreadyExists =>
+    //      Err(already_exists_err())` arm's routed E-SHD-009 obligation is
+    //      NOT silently absent from this record — it is named here so a
+    //      future pass that adds a test-only injection seam (e.g. an
+    //      `#[cfg(test)]` hook invoked between the unlink and the retry)
+    //      can close it for real, rather than the gap being rediscovered
+    //      from scratch.
+    // -----------------------------------------------------------------
+
+    /// EC-025's routed unlink-failure arm (F-C2-P9-003). Deterministic
+    /// fixture: a pre-existing 0-byte file at the seq path is marked BSD
+    /// user-immutable (`chflags uchg <path>` — settable by the file's own
+    /// OWNER without root, unlike `schg`/Linux's `chattr +i`, which both
+    /// require a privileged capability even for the owner). This makes
+    /// `std::fs::remove_file` fail with `EPERM` while leaving `stat()` (used
+    /// for the `is_zero_byte` check) and `hard_link`-into-a-colliding-path
+    /// (used by `write_exclusive`'s first attempt) completely unaffected —
+    /// it isolates EXACTLY the `remove_file(sealed_path).is_err()` branch,
+    /// nothing upstream or downstream of it.
+    ///
+    /// Two other fixtures were tried and REJECTED after reading
+    /// `publish_sealed_shard` (shard_manager.rs ~lines 2303-2369):
+    ///
+    /// - A directory (empty OR non-empty) at the seq path: verified
+    ///   empirically that a directory's `stat()`-reported size is NEVER
+    ///   exactly 0 on either filesystem this workspace's CI runs on (macOS
+    ///   APFS reports 64 bytes for an empty directory; Linux ext4 reports
+    ///   the block size, e.g. 4096, for any directory) — so this fixture
+    ///   trips the EARLIER `if !is_zero_byte` check and returns E-SHD-009
+    ///   via the ALREADY-COVERED EC-024 arm (see the sibling test above),
+    ///   never reaching `remove_file` at all.
+    /// - A read-only PARENT directory: `write_exclusive`'s FIRST attempt
+    ///   creates its own `.tmp-<pid>` file in that SAME parent directory
+    ///   BEFORE ever touching the destination path — a read-only parent
+    ///   makes THAT `File::create` fail with `PermissionDenied` (verified
+    ///   empirically), so `first_err.kind() != AlreadyExists` and the call
+    ///   fails via the UNRELATED `SealWriteFailed` (E-SHD-001) path instead,
+    ///   never reaching the 0-byte-reclaim logic at all.
+    ///
+    /// Platform scope: standard POSIX directory permissions provide NO
+    /// mechanism to allow creating/hard-linking a NEW directory entry while
+    /// denying removal of a DIFFERENT, pre-existing entry in the SAME
+    /// directory — deletion is gated purely by the parent directory's write
+    /// bit (or the sticky-bit same-owner rule, which needs a second UID
+    /// this test cannot fabricate unprivileged). This narrows the existing
+    /// `#[cfg(unix)]`-only precedent already established in this file
+    /// (`test_BC_1_18_005_INV3_EC_001_...`,
+    /// `test_BC_1_18_006_F003_write_backstop_stat_failure_fails_loud_e_shd_008`)
+    /// one step further, to the one OS this specific mechanism exists on
+    /// unprivileged. `cargo-host` (`macos-latest`) and `build-dispatcher`
+    /// (`darwin-arm64`/`darwin-x64`) both run `cargo test --workspace` on
+    /// every PR, so this test executes for real in CI on every push, not
+    /// only on a developer's local macOS machine.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_BC_1_18_006_EC025_FC2P9_003_unlink_failure_fails_loud_e_shd_009() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        std::fs::write(&sealed_path, "").expect("seed 0-byte collision at seq=1");
+
+        let status = std::process::Command::new("chflags")
+            .arg("uchg")
+            .arg(&sealed_path)
+            .status()
+            .expect("invoke chflags(1) to mark the seeded file user-immutable");
+        assert!(
+            status.success(),
+            "precondition: `chflags uchg` must succeed against a file this test process owns"
+        );
+
+        // Always clear the immutable flag before this function returns
+        // (success, assertion failure, or panic) so the tempdir's own Drop
+        // cleanup can actually remove the file, and so a panic mid-test
+        // never leaks an immutable file into a subsequent run.
+        struct ClearImmutableOnDrop(std::path::PathBuf);
+        impl Drop for ClearImmutableOnDrop {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("chflags")
+                    .arg("nouchg")
+                    .arg(&self.0)
+                    .status();
+            }
+        }
+        let _clear_immutable_guard = ClearImmutableOnDrop(sealed_path.clone());
+
+        assert_eq!(
+            std::fs::metadata(&sealed_path)
+                .expect("stat seeded file")
+                .len(),
+            0,
+            "precondition: the seeded file must be exactly 0 bytes"
+        );
+
+        let new_content = b"z".repeat(3_000);
+        let err = publish_sealed_shard(&sealed_path, &new_content).expect_err(
+            "F-C2-P9-003: when the 0-byte reclaim's remove_file(sealed_path) call fails (here: \
+             EPERM against a user-immutable file), publish_sealed_shard MUST fail loud with \
+             E-SHD-009 — never panic, never silently proceed as if the reclaim had succeeded",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealedShardAlreadyExists { .. }),
+            "F-C2-P9-003: an unlink failure during the 0-byte reclaim MUST route to \
+             ShardRollError::SealedShardAlreadyExists (E-SHD-009) specifically — the same \
+             fail-loud disposition as a genuinely non-empty collision — got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-009"),
+            "F-C2-P9-003: the error's Display text must name the E-SHD-009 code — got: {err}"
+        );
+
+        // The immutable 0-byte file must still be on disk, untouched — a
+        // failed unlink must not have left anything half-reclaimed or
+        // corrupted.
+        assert_eq!(
+            std::fs::metadata(&sealed_path)
+                .expect("the seeded 0-byte file must still exist after the failed unlink")
+                .len(),
+            0,
+            "F-C2-P9-003: the pre-existing 0-byte file must be left exactly as it was — a \
+             failed unlink must not have partially modified or truncated it further"
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Step (c) — truncate_canonical_to_empty (Postcondition 1 step (c);
     // Invariant 2/3)
     // -----------------------------------------------------------------
