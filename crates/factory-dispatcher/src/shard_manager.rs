@@ -5978,6 +5978,196 @@ mod bc_1_18_006_roll_tests {
     }
 
     // -----------------------------------------------------------------
+    // BC-1.18.006 v1.7 Invariant 9 (cluster-2 LOCAL adversary pass-3 finding
+    // F-C2-P3-002) — `execute_roll` already refuses to publish a 0-byte seal
+    // (F-C2-P2-006). Invariant 9 extends the SAME guarantee to BOTH self-heal
+    // index-publishing paths: `self_heal_reconcile_missing_index_entries`
+    // (which today indexes ANY on-disk `<stem>.<seq:04>.md` sibling via
+    // `metadata()?.len()`, with no byte-count floor at all) and
+    // `self_heal_resume_from_truncate` (whose byte-identity comparison
+    // between the sealed candidate and the CURRENT canonical content is
+    // vacuously satisfied when BOTH happen to be 0 bytes — an empty sealed
+    // candidate looks identical to an empty, correctly-already-truncated
+    // canonical). `execute_roll` can never itself produce a 0-byte seal
+    // (Postcondition 3 / F-C2-P2-006's own empty-canonical short-circuit), so
+    // ANY 0-byte candidate either self-heal path encounters is by
+    // construction an EXTERNAL anomaly (never a genuine artifact of this
+    // dispatcher's own roll sequence) — indexing it would fabricate a false
+    // audit-trail entry (a `[[shard]]` row claiming a seal event that never
+    // legitimately happened). Both paths below must SKIP such a candidate
+    // (never append a row with `bytes_at_seal == 0`), emit a `tracing::warn!`
+    // diagnostic rather than silently doing nothing, and never fail the
+    // dispatch over it.
+    //
+    // Local duplicate of the sibling `mod tests`'s (cluster-1's) own
+    // `WarnCapture`/`count_warns` capture harness — kept independent per this
+    // module's own established convention (see `flat_entry`'s doc comment
+    // above), rather than reaching into cluster-1's private test-only
+    // surface.
+    // -----------------------------------------------------------------
+
+    struct InvariantNineWarnCapture {
+        warn_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl tracing::Subscriber for InvariantNineWarnCapture {
+        fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.warn_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _span: &tracing::span::Id) {}
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+
+    static INVARIANT_NINE_CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn count_invariant_nine_warns<T>(f: impl FnOnce() -> T) -> (usize, T) {
+        let _guard = INVARIANT_NINE_CAPTURE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let warn_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let subscriber = InvariantNineWarnCapture {
+            warn_count: warn_count.clone(),
+        };
+        let result = tracing::subscriber::with_default(subscriber, || {
+            tracing::callsite::rebuild_interest_cache();
+            f()
+        });
+        (warn_count.load(std::sync::atomic::Ordering::SeqCst), result)
+    }
+
+    #[test]
+    fn test_BC_1_18_006_INV9_F_C2_P3_002_self_heal_reconcile_missing_index_entries_skips_zero_byte_orphan()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        std::fs::write(&canonical_path, "").expect("seed empty (post-truncate) canonical");
+
+        // External anomaly: a 0-byte file sitting at the artifact's exact
+        // `<stem>.<seq:04>.md` sealed-shard naming convention. `execute_roll`
+        // can never itself have produced this (F-C2-P2-006 short-circuits
+        // before ever sealing empty content), so this can only be an
+        // externally-created (or externally-corrupted) file — never a
+        // legitimate orphaned seal.
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_path, "").expect("seed 0-byte orphan sealed-shard candidate");
+
+        let (warn_count, result) = count_invariant_nine_warns(|| {
+            self_heal_reconcile_missing_index_entries(&entry, &canonical_path)
+        });
+        let appended = result.expect(
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): encountering a 0-byte orphan candidate \
+             must NEVER fail the dispatch — it must be skipped, not propagated as an error",
+        );
+
+        assert!(
+            appended.is_empty(),
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002, cluster-2 LOCAL adversary pass-3): a \
+             0-byte candidate at the artifact's sealed-shard naming convention must NEVER be \
+             indexed — execute_roll can never itself produce a 0-byte seal, so this is an \
+             external anomaly and indexing it would fabricate a false audit-trail entry. Got: \
+             {appended:?}"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        assert!(
+            !index_path.exists(),
+            "Invariant 9: with nothing legitimate left to reconcile (the ONLY on-disk candidate \
+             is the skipped 0-byte orphan), no shard-index file should be published at all"
+        );
+
+        assert!(
+            warn_count >= 1,
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): skipping a 0-byte orphan candidate must \
+             emit a tracing diagnostic (tracing::warn!) rather than silently doing nothing — got \
+             {warn_count} warn-level events"
+        );
+
+        // The anomalous 0-byte file itself must be left untouched on disk —
+        // the self-heal only ever appends index rows, never mutates or
+        // deletes candidate files.
+        let sealed_len = std::fs::metadata(&sealed_path)
+            .expect("the 0-byte candidate file must remain on disk")
+            .len();
+        assert_eq!(sealed_len, 0);
+    }
+
+    #[test]
+    fn test_BC_1_18_006_INV9_F_C2_P3_002_self_heal_resume_from_truncate_skips_zero_byte_sealed_and_canonical()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+        // Both the canonical AND the sealed candidate are 0 bytes — under
+        // today's byte-identity comparison alone, this is INDISTINGUISHABLE
+        // from a genuine E-SHD-006 "seal published, truncate did not" match
+        // (0 bytes == 0 bytes), so the self-heal would treat it as a
+        // legitimate duplicate and resume from step (c), publishing a
+        // `bytes_at_seal = 0` index row. Invariant 9 requires this exact
+        // sibling case to ALSO be recognized as the 0-byte anomaly and
+        // skipped, never indexed.
+        std::fs::write(&canonical_path, "").expect("seed empty canonical");
+        let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+        std::fs::write(&sealed_path, "").expect("seed 0-byte sealed candidate");
+
+        let (warn_count, result) =
+            count_invariant_nine_warns(|| self_heal_resume_from_truncate(&entry, &canonical_path));
+        let outcome = result.expect(
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): encountering a 0-byte sealed+canonical \
+             anomaly must NEVER fail the dispatch",
+        );
+
+        assert!(
+            outcome.is_none(),
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002, cluster-2 LOCAL adversary pass-3): a \
+             0-byte sealed candidate byte-identical to an also-0-byte canonical must NOT be \
+             treated as a genuine E-SHD-006 duplicate-content match — execute_roll can never \
+             itself produce a 0-byte seal, so this vacuous 0-byte==0-byte match is an external \
+             anomaly, not a resumable crash state. Got Some({outcome:?}) instead of None"
+        );
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        assert!(
+            !index_path.exists(),
+            "Invariant 9: skipping the 0-byte anomaly must never publish a shard-index entry \
+             (bytes_at_seal = 0 would fabricate a false audit-trail row)"
+        );
+
+        assert!(
+            warn_count >= 1,
+            "BC-1.18.006 v1.7 Invariant 9 (F-C2-P3-002): skipping the 0-byte sealed+canonical \
+             anomaly must emit a tracing diagnostic (tracing::warn!) rather than silently doing \
+             nothing — got {warn_count} warn-level events"
+        );
+
+        // Neither file's content may be mutated by the skip.
+        assert_eq!(
+            std::fs::metadata(&canonical_path)
+                .expect("canonical must remain on disk")
+                .len(),
+            0
+        );
+        assert_eq!(
+            std::fs::metadata(&sealed_path)
+                .expect("sealed candidate must remain on disk")
+                .len(),
+            0
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Postcondition 7 catch points — AC-024 / AC-025 (reused via execute_roll)
     // -----------------------------------------------------------------
 
