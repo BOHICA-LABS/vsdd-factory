@@ -1460,22 +1460,77 @@ pub fn shard_cap_gate_check(
             }
 
             // F-002 fix (S-25.02 Phase F4 LOCAL adversary pass-1 cluster-1,
-            // MEDIUM): `current_shard_bytes_flat` (a stat()/metadata() call)
-            // is ONLY needed by the Edit/MultiEdit legs of Postcondition 3's
-            // CORRECTED formula — `Write`'s `projected_size = len(content)`
-            // alone never consults `current_shard_bytes` at all. Calling it
-            // unconditionally here (i.e. before this match) would fail a
-            // `Write` on a stat() error the Write formula doesn't even need
-            // (e.g. a non-`NotFound` I/O error such as `ELOOP`), which is
-            // never sound: `Write` must never be blocked by a read it
-            // doesn't perform. So the stat() call is pushed down into ONLY
-            // the Edit/MultiEdit arms below, each of which does need
-            // `current_shard_bytes` for the current+delta formula.
-            // EC-004 (a missing shard file treated as size 0) is preserved:
-            // `current_shard_bytes_flat` itself still maps `NotFound` to
-            // `Ok(0)`, unchanged.
+            // MEDIUM), UPDATED by BC-1.18.006 v1.5 (F-C2-P1-002): BC-1.18.005
+            // Postcondition 3's CORRECTED `Write` TRIGGER FORMULA
+            // (`projected_size = len(content)` alone) never consults
+            // `current_shard_bytes` — that half of F-002's original ruling is
+            // UNCHANGED. What changed in v1.5: BC-1.18.006 Postcondition 7
+            // catch point (ii) now ALSO requires a dedicated, bounded
+            // `stat()` inside the `Write` arm itself (a crash-orphan backstop
+            // probe, entirely separate from the trigger formula) — see that
+            // arm's own doc comment below. So the stat() call is pushed down
+            // into EACH arm individually (never called unconditionally
+            // before this match, which would fail a `Write` on a stat()
+            // error its OWN trigger formula doesn't need), but as of v1.5 it
+            // is no longer true that ONLY Edit/MultiEdit perform one — Write
+            // now does too, for a different reason (the backstop, not the
+            // trigger). EC-004 (a missing shard file treated as size 0) is
+            // preserved throughout: `current_shard_bytes_flat` itself still
+            // maps `NotFound` to `Ok(0)`, unchanged.
             let projected_size = match tool_kind {
                 ToolKind::Write => {
+                    // BC-1.18.006 v1.5 Postcondition 7 catch point (ii)
+                    // (F-C2-P1-002, MAJOR): `Write`'s own Postcondition 3
+                    // trigger formula (`projected_size = len(content)`
+                    // alone) performs no `stat()` of the canonical file at
+                    // all — F-002's rationale above, UNCHANGED — so, unlike
+                    // Edit/MultiEdit (which reuse an existing stat() their
+                    // own trigger formula already pays for), `Write` has no
+                    // existing stat()-read for the crash-orphan backstop to
+                    // reuse. This is therefore a NEW, DEDICATED, bounded
+                    // `stat()` specifically for the backstop probe — never
+                    // for the trigger formula itself, which stays entirely
+                    // stat-free. Without it, a `Write` whose OWN `content`
+                    // is under cap would apply directly against a
+                    // crash-orphaned, un-sealed, over-cap canonical file
+                    // left behind by a missed catch point (i) (EC-015/
+                    // EC-017), silently destroying that history — the
+                    // exact data-loss gap F-C2-P1-002 identifies.
+                    //
+                    // F-002 (BC-1.18.005, cluster-1, still binding): a
+                    // non-`NotFound` stat() failure here is fail-OPEN, never
+                    // fail-loud — this backstop probe's own inability to
+                    // read the canonical file's current size must NEVER
+                    // block a `Write` whose OWN `content` never depended on
+                    // that read (the trigger formula is, and remains,
+                    // entirely stat-free per F-002). A failed probe simply
+                    // means this dispatch cannot confirm-or-deny a crash-
+                    // orphan state; the backstop is defense-in-depth, not
+                    // this Write's own correctness gate, so it is skipped
+                    // (logged, not swallowed silently) rather than blocking.
+                    // `current_shard_bytes_flat` itself still maps
+                    // `NotFound` to `Ok(0)` (EC-004), so a first-ever write
+                    // never even reaches this fallback.
+                    match current_shard_bytes_flat(target_path) {
+                        Ok(current_bytes) if current_bytes > entry.shard_cap_bytes => {
+                            if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
+                                return e.into();
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                artifact_stem = %entry.artifact_stem,
+                                path = %target_path.display(),
+                                error = %e,
+                                "BC-1.18.006 Postcondition 7 catch point (ii): Write-arm backstop \
+                                 stat() failed — skipping the crash-orphan probe for this \
+                                 dispatch (F-002: never blocking a Write for a failure its own \
+                                 trigger formula does not depend on)"
+                            );
+                        }
+                    }
+
                     let content_len = match required_str_len_bytes(
                         tool_input,
                         "content",
