@@ -507,15 +507,22 @@ pub async fn execute_tiers(
     // EC-011 `low_water_mark >= N`) is BC-1.18.005's OWN postcondition and
     // MUST become a BLOCKING dispatch outcome here — the
     // same way `plugin_fail_closed`/`plugin_requests_block` translate a
-    // WASM plugin's fail-closed verdict into `block_intent` below. A
-    // `HookResult::Block` is likewise translated identically, though
-    // `shard_cap_gate_check` does not construct one today: a fired
-    // size/item-count trigger is BC-1.18.006's/BC-1.18.009's own observable
-    // roll/rotate-and-retry outcome (out of scope for this cluster), so the
-    // gate itself still returns `Continue` + a non-fatal `tracing::warn!`
-    // advisory for a fired trigger (see `shard_manager.rs`) — this match
-    // arm is wired now so that hand-off requires no further executor.rs
-    // change when those later clusters land.
+    // WASM plugin's fail-closed verdict into `block_intent` below.
+    // `HookResult::Block` is translated identically. **CORRECTED (F-C2-P7-003,
+    // MINOR, cluster-2 LOCAL adversary pass-7):** this comment previously
+    // claimed `shard_cap_gate_check` "does not construct [a Block] today" and
+    // that the gate "still returns Continue + warn for a fired trigger" for
+    // every shape — stale as of cluster-2 (BC-1.18.006). The `ShardShape::Flat`
+    // arm's fired size-trigger branch now returns a REAL `HookResult::Block`
+    // (the roll-before-write block-and-retry outcome, via `execute_roll`) or
+    // `HookResult::Error` (a genuine `E-SHD-NNN` roll failure), both handled by
+    // this same match — no further executor.rs change was needed for that
+    // shape. The "gate returns `Continue` + non-fatal `tracing::warn!`
+    // advisory for a fired trigger, out of scope for this cluster" description
+    // now applies ONLY to the item-count shape (`ShardShape::FrontmatterChangelogArray`
+    // / BC-1.18.009's rotate-and-retry contract), which remains unimplemented;
+    // this match arm was wired ahead of that shape landing so that hand-off
+    // requires no further executor.rs change when it does.
     // F-C1-P2-001 fix (S-25.02 Phase F4 LOCAL adversary pass-2 cluster-1,
     // MEDIUM): a fail-loud verdict here MUST also be appended to
     // `all_outcomes` (via `shard_gate_block_outcome`) — not just flip

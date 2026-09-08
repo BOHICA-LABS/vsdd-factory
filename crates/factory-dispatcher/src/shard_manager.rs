@@ -2190,8 +2190,27 @@ fn next_seal_seq(index_path: &Path) -> io::Result<u32> {
 /// never fail with a spurious `E-SHD-001` merely because the content isn't
 /// valid UTF-8. Consistent with the self-heal paths' own byte-level reads
 /// (`self_heal_resume_from_truncate`, F-C2-P1-001).
+///
+/// F-C2-P7-001 (MAJOR, cluster-2 LOCAL adversary pass-7): a MISSING
+/// canonical file (`io::ErrorKind::NotFound`) is the artifact's first-ever
+/// write (BC-1.18.005 EC-004) and MUST be treated as a zero-byte current
+/// shard per this BC's own Precondition 2 ("...or is treated as a
+/// zero-byte current shard... if this is the artifact's first-ever
+/// write") — mirroring the identical `NotFound -> Ok(0)` precedent already
+/// established by [`current_shard_bytes_flat`] and
+/// [`read_changelog_item_count`]. Any OTHER `io::Error` kind (permission
+/// denied, a path component that is not a directory, etc.) still
+/// propagates as a genuine `Err`, which `execute_roll` maps to
+/// `ShardRollError::SealWriteFailed` (E-SHD-001) — this relief is scoped
+/// ONLY to a missing canonical, never to every I/O failure.
 pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
-    std::fs::read(canonical_path)
+    match std::fs::read(canonical_path) {
+        Ok(content) => Ok(content),
+        // F-C2-P7-001: first-ever write -> treated as zero-byte content,
+        // not an io::Error.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e),
+    }
 }
 
 /// Atomically create a BRAND-NEW file at `path` containing exactly
@@ -2494,23 +2513,28 @@ fn build_empty_roll_retry_block_reason(
 /// Cheap crash-state PLAUSIBILITY probe gating both self-heal functions
 /// below (ADR-051 §Decision 11's "next dispatch attempt" recovery check).
 ///
-/// A genuine `E-SHD-006`/`E-SHD-007` crash state can ONLY exist at exactly
-/// the shard-index's next-expected `seq` — both crash points occur mid-roll,
-/// and this dispatcher process is spawned fresh per hook event (this file's
-/// own module doc references the single-dispatch-per-process model), so at
-/// most one roll can ever be "in flight" at a time for a given artifact; the
-/// very next seal this artifact would ever produce is the only seq a stray,
-/// not-yet-indexed sealed-shard file could occupy. So: does a sealed shard
-/// already exist at that ONE specific path? This is a SINGLE stat()/
-/// existence check (plus the already-small, bounded `next_seal_seq` index
-/// read needed to name that one path — the same read `execute_roll` itself
-/// always performs for any real roll, not a new cost category) — in the
-/// overwhelmingly common healthy case this file does not exist, so this
-/// probe is the ONLY overhead self-heal adds to a normal dispatch: no
-/// sealed-shard content read, no canonical-content read, no directory
-/// listing. Only when this probe finds a candidate do the two functions
+/// **CORRECTED (F-C2-P7-002, MINOR, cluster-2 LOCAL adversary pass-7) —
+/// this doc block previously claimed a "SINGLE stat()/existence check...
+/// no directory listing," which described the pre-F-C2-P6-003 mechanism,
+/// not the mechanism actually shipped below.** As of v1.9 (F-C2-P6-003,
+/// see the adjacent `//` note below), this probe performs a `read_dir`
+/// SCAN of the canonical file's directory, matching every entry's NAME
+/// against the `<stem>.<seq>.md` sealed-shard naming convention (seq at
+/// least 4 digits, all digits) and comparing each match's `seq` against
+/// the shard-index's already-recorded entries — not a single guessed-path
+/// `exists()` check. The scan reads directory NAMES and, since F-C2-P7-004,
+/// each unindexed candidate's METADATA (`DirEntry::metadata()`, to apply
+/// the same 0-byte-orphan guard Invariant 9 requires of the downstream
+/// self-heal functions) — it still never reads any file's CONTENT and
+/// never touches the canonical file's own content, so it remains
+/// materially cheaper than either self-heal function's own work (a
+/// byte-for-byte content comparison; an index-reconciliation pass), but it
+/// is a directory-wide scan, not a single stat(). In the overwhelmingly
+/// common healthy case (no unindexed, non-empty candidate present) this
+/// probe is still the ONLY overhead self-heal adds to a normal dispatch.
+/// Only when this probe finds a genuine candidate do the two functions
 /// below pay for their own, more expensive checks (byte-for-byte content
-/// comparison; a directory-wide orphan scan).
+/// comparison; a directory-wide orphan-reconciliation scan of their own).
 // BC-1.18.006 v1.9 (F-C2-P6-003 sibling-site fix, MAJOR, cluster-2 LOCAL
 // adversary pass-6 hardening): this probe previously checked ONLY for a
 // sealed-shard file at the single "index max seq + 1" guessed path — but
@@ -2569,9 +2593,23 @@ fn self_heal_recovery_plausible(entry: &ShardEntry, canonical_path: &Path) -> io
         let Ok(seq) = seq_str.parse::<u32>() else {
             continue;
         };
-        if !indexed_seqs.contains(&seq) {
-            return Ok(true);
+        if indexed_seqs.contains(&seq) {
+            continue;
         }
+        // F-C2-P7-004 (ADVISORY, cluster-2 LOCAL adversary pass-7): a
+        // candidate whose on-disk size is exactly 0 bytes can NEVER be a
+        // genuine E-SHD-006/E-SHD-007 crash orphan (Invariant 9,
+        // F-C2-P3-002 — `execute_roll` never seals empty content, and both
+        // downstream self-heal functions already refuse to index a 0-byte
+        // candidate). Skip it here too, so a PERSISTENT external 0-byte
+        // orphan does not keep this cheap probe permanently "plausible"
+        // and force needless payment for either self-heal function's more
+        // expensive checks on every future dispatch for this artifact.
+        let is_zero_byte = item.metadata().map(|m| m.len() == 0).unwrap_or(false);
+        if is_zero_byte {
+            continue;
+        }
+        return Ok(true);
     }
 
     Ok(false)
