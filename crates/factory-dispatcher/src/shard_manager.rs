@@ -2346,13 +2346,29 @@ pub fn self_heal_resume_from_truncate(
     let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
 
     // No sealed shard at the next-expected seq at all — nothing to resume
-    // from (the common, healthy case).
-    let Ok(sealed_content) = std::fs::read_to_string(&sealed_path) else {
-        return Ok(None);
+    // from (the common, healthy case). A read error OTHER than `NotFound`
+    // (e.g. a permission error, or — the point of this bytes-level read —
+    // content that happens not to be valid UTF-8) must NEVER be silently
+    // treated as "absent": the plausibility probe that gated this call
+    // already confirmed `sealed_path` exists on disk (F-C2-P1-001, MAJOR).
+    // `std::fs::read` (not `read_to_string`) so the byte-identity comparison
+    // below is immune to UTF-8 validity entirely — the sealed shard's actual
+    // bytes are what must match the canonical's actual bytes, never a
+    // lossy/failable `String` decoding of either.
+    let sealed_bytes = match std::fs::read(&sealed_path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ShardRollError::TruncateFailedAfterSeal {
+                artifact_stem: entry.artifact_stem.clone(),
+                sealed_path: sealed_filename,
+                source,
+            });
+        }
     };
 
-    let current_content = match std::fs::read_to_string(canonical_path) {
-        Ok(content) => content,
+    let current_bytes = match std::fs::read(canonical_path) {
+        Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
             return Err(ShardRollError::TruncateFailedAfterSeal {
@@ -2367,7 +2383,7 @@ pub fn self_heal_resume_from_truncate(
     // file's CURRENT content — not the `E-SHD-006` duplicate-content
     // signature (which requires byte-identity); take no action rather than
     // fabricate a roll.
-    if sealed_content != current_content {
+    if sealed_bytes != current_bytes {
         return Ok(None);
     }
 
@@ -2376,7 +2392,7 @@ pub fn self_heal_resume_from_truncate(
     truncate_canonical_to_empty(canonical_path)
         .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
 
-    let bytes_at_seal = sealed_content.len() as u64;
+    let bytes_at_seal = sealed_bytes.len() as u64;
     let new_entry = ShardIndexEntry {
         seq: next_seq,
         path: sealed_filename.clone(),
