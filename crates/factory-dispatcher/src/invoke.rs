@@ -2414,6 +2414,21 @@ fn detect_replace_all_overcap_candidate(
         .ok()
         .flatten()?
         .clone();
+    // F-C2-P2-002 (MAJOR, S-25.02 cluster-2 LOCAL adversary pass-2):
+    // Postcondition 7 catch point (i) is scoped to the `"flat"` byte-size
+    // roll mechanism ONLY — the `replace_all` occurrence-multiplicity
+    // under-projection gap it exists to catch is a defect of
+    // BC-1.18.005's byte-size formula alone, never the
+    // `"frontmatter-changelog-array"` item-count mechanism (a wholly
+    // different trigger/rotation scheme owned by BC-1.18.009). Without this
+    // shape check, a byte-over-cap `replace_all` call against a matched
+    // `"frontmatter-changelog-array"`-shaped entry (e.g. a real index-style
+    // artifact like `BC-INDEX.md`, whose rotation is item-count-driven and
+    // has nothing to do with byte size) would incorrectly byte-roll and
+    // empty it — cross-mechanism data corruption.
+    if entry.shape != Some(crate::shard_manager::ShardShape::Flat) {
+        return None;
+    }
     Some((entry, target_path))
 }
 
