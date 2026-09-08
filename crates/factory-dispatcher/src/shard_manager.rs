@@ -1487,6 +1487,16 @@ pub fn shard_cap_gate_check(
             // trigger). EC-004 (a missing shard file treated as size 0) is
             // preserved throughout: `current_shard_bytes_flat` itself still
             // maps `NotFound` to `Ok(0)`, unchanged.
+            //
+            // BC-1.18.006 v1.9 Postcondition 2's "Double-fire exception"
+            // (Invariant 4 Case B1/B2 split, F-C2-P8-004, MINOR; EC-026):
+            // dispatch-local tracking of whether
+            // `reconcile_leading_probe_backstop` fired (and succeeded)
+            // EARLIER in this SAME dispatch — set `true` by whichever tool
+            // arm below actually invokes it. Threaded through to the
+            // `Ok(None)` short-circuit's `build_empty_roll_retry_block_reason`
+            // call further down so it can select Case B1 vs. Case B2.
+            let mut preceded_by_backstop_roll = false;
             let projected_size = match tool_kind {
                 ToolKind::Write => {
                     // BC-1.18.006 v1.5 Postcondition 7 catch point (ii)
@@ -1542,6 +1552,7 @@ pub fn shard_cap_gate_check(
                             if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
                                 return e.into();
                             }
+                            preceded_by_backstop_roll = true;
                         }
                         Ok(_) => {}
                         Err(source) => {
@@ -1611,6 +1622,7 @@ pub fn shard_cap_gate_check(
                             return e.into();
                         }
                         current_bytes = 0;
+                        preceded_by_backstop_roll = true;
                     }
 
                     let old_len = match required_str_len_bytes(
@@ -1658,6 +1670,7 @@ pub fn shard_cap_gate_check(
                             return e.into();
                         }
                         current_bytes = 0;
+                        preceded_by_backstop_roll = true;
                     }
 
                     // m3/M-1: the "edits" field itself must be a present JSON
@@ -1745,6 +1758,7 @@ pub fn shard_cap_gate_check(
                             &entry.artifact_stem,
                             entry.shard_cap_bytes,
                             projected_size,
+                            preceded_by_backstop_roll,
                         ),
                     },
                     Err(e) => e.into(),
@@ -2269,20 +2283,89 @@ fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
 /// (`E-SHD-009`, F-C2-P4-002) rather than silently overwriting if the
 /// destination already exists, never interrupting any reader of the
 /// canonical path (sealed filenames are never read by shard-unaware code).
+///
+/// # 0-byte-destination exception (BC-1.18.006 v1.9 Postcondition 8,
+/// F-C2-P8-002, MEDIUM; EC-024/EC-025)
+///
+/// A 0-byte file at the destination `seq` path can never be genuine sealed
+/// history — this BC's own write paths only ever seal non-empty content
+/// (Postcondition 1's empty-canonical short-circuit and Postcondition 3's
+/// cap guarantee together ensure this) — so it is structurally always an
+/// external anomaly with nothing durable to protect. On an `AlreadyExists`
+/// collision, this `stat()`s the destination EXACTLY ONCE; if it is exactly
+/// 0 bytes, it `unlink`s it and retries [`write_exclusive`] EXACTLY ONCE
+/// (never a loop, bounding a racing concurrent writer to a single extra
+/// attempt). A successful reclaim emits a `tracing::warn!` diagnostic and
+/// does NOT fail the dispatch. If the destination is non-empty to begin
+/// with, or the single retry ALSO collides (a genuine race), this fails
+/// loud with `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`]
+/// exactly as the write-once guarantee requires for real sealed content.
 pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), ShardRollError> {
-    write_exclusive(sealed_path, content).map_err(|e| {
-        if e.kind() == io::ErrorKind::AlreadyExists {
-            ShardRollError::SealedShardAlreadyExists {
-                artifact_stem: stem_from_sealed_path(sealed_path),
-                sealed_path: sealed_path.display().to_string(),
-            }
-        } else {
-            ShardRollError::SealWriteFailed {
-                artifact_stem: stem_from_sealed_path(sealed_path),
-                source: e,
-            }
+    let Err(first_err) = write_exclusive(sealed_path, content) else {
+        return Ok(());
+    };
+
+    if first_err.kind() != io::ErrorKind::AlreadyExists {
+        return Err(ShardRollError::SealWriteFailed {
+            artifact_stem: stem_from_sealed_path(sealed_path),
+            source: first_err,
+        });
+    }
+
+    let already_exists_err = || ShardRollError::SealedShardAlreadyExists {
+        artifact_stem: stem_from_sealed_path(sealed_path),
+        sealed_path: sealed_path.display().to_string(),
+    };
+
+    // EC-025: the collision is only reclaimable if the pre-existing
+    // destination is exactly 0 bytes. A failed/inconclusive `stat()` (e.g.
+    // the file vanished between the collision and this check) is treated
+    // as "not reclaimable" — never assumed 0 bytes — falling through to the
+    // loud E-SHD-009 refusal below rather than risking an unlink of
+    // content this call never confirmed was empty.
+    let is_zero_byte = std::fs::metadata(sealed_path)
+        .map(|meta| meta.len() == 0)
+        .unwrap_or(false);
+
+    if !is_zero_byte {
+        // EC-024: a non-empty pre-existing destination is real sealed
+        // history — write-once immutability is unweakened; refuse loud,
+        // leave it byte-identical and untouched.
+        return Err(already_exists_err());
+    }
+
+    // A failed unlink here (e.g. permission denied) leaves the 0-byte file
+    // in place with nothing reclaimed — fail loud rather than silently
+    // treating an unconfirmed reclaim as success (Invariant 1's "no version
+    // may silently proceed past a condition it cannot verify safe",
+    // extended to the reclaim step itself).
+    if std::fs::remove_file(sealed_path).is_err() {
+        return Err(already_exists_err());
+    }
+
+    match write_exclusive(sealed_path, content) {
+        Ok(()) => {
+            tracing::warn!(
+                sealed_path = %sealed_path.display(),
+                "BC-1.18.006 v1.9 Postcondition 8: reclaimed a 0-byte pre-existing file at the \
+                 sealed-shard destination path (no durable sealed history to protect — a \
+                 structural anomaly, never output of this BC's own write paths) and published \
+                 the real seal content there"
+            );
+            Ok(())
         }
-    })
+        // Genuine race: a concurrent writer placed real content at the
+        // path between the stat() and this single bounded retry — never
+        // retried again (no loop), fail loud exactly as the non-empty case
+        // does.
+        Err(retry_err) if retry_err.kind() == io::ErrorKind::AlreadyExists => {
+            Err(already_exists_err())
+        }
+        Err(retry_err) => Err(ShardRollError::SealWriteFailed {
+            artifact_stem: stem_from_sealed_path(sealed_path),
+            source: retry_err,
+        }),
+    }
 }
 
 /// Step (c): atomically REPLACE the canonical file's content with empty via
@@ -2488,17 +2571,45 @@ pub fn build_roll_retry_block_reason(
 /// same convention [`build_roll_retry_block_reason`]'s own unified template
 /// already establishes); backticks around the numeric placeholders in the
 /// spec's own blockquote are doc-only markup — bare numbers are emitted.
+///
+/// # Case B1/B2 split (BC-1.18.006 v1.9 Postcondition 2's "Double-fire
+/// exception", Invariant 4, F-C2-P8-004, MINOR; EC-026)
+///
+/// `preceded_by_backstop_roll` selects between the two sanctioned Case B
+/// sub-templates — a pure function of whether Postcondition 7 catch point
+/// (ii)'s leading-probe backstop (`reconcile_leading_probe_backstop`)
+/// retroactively rolled a pre-existing orphaned over-cap canonical EARLIER
+/// in this SAME dispatch, before this call's own trigger re-evaluated and
+/// hit this `Ok(None)` short-circuit a second time:
+/// - `false` — Case B1, the "pure" empty-canonical case: no roll of any
+///   kind occurred this dispatch, so "no roll was performed... the shard
+///   remains exactly as it was before this call" is TRUE.
+/// - `true` — Case B2, the "double-fire" case: a roll (the backstop's own
+///   retroactive roll) DID occur earlier in this dispatch, so Case B1's
+///   wording would be FALSE — this variant drops the "no roll was
+///   performed"/"remains exactly as it was" clauses while keeping the
+///   identical, actionable split-payload guidance.
 fn build_empty_roll_retry_block_reason(
     artifact_stem: &str,
     shard_cap_bytes: u64,
     payload_len_bytes: u64,
+    preceded_by_backstop_roll: bool,
 ) -> String {
-    format!(
-        "Shard `{artifact_stem}` is already empty; your own payload alone ({payload_len_bytes} \
-         bytes) exceeds the cap ({shard_cap_bytes} bytes). Recompute or split your payload into \
-         multiple smaller calls — no roll was performed, because there is no existing content \
-         to rotate away; the shard remains exactly as it was before this call."
-    )
+    if preceded_by_backstop_roll {
+        format!(
+            "Shard `{artifact_stem}` is now empty (a prior over-cap shard was retroactively \
+             rotated by this same call before your payload was evaluated); your own payload \
+             alone ({payload_len_bytes} bytes) exceeds the cap ({shard_cap_bytes} bytes). \
+             Recompute or split your payload into multiple smaller calls."
+        )
+    } else {
+        format!(
+            "Shard `{artifact_stem}` is already empty; your own payload alone ({payload_len_bytes} \
+             bytes) exceeds the cap ({shard_cap_bytes} bytes). Recompute or split your payload into \
+             multiple smaller calls — no roll was performed, because there is no existing content \
+             to rotate away; the shard remains exactly as it was before this call."
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
