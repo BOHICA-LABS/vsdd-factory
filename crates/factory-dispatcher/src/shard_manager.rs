@@ -68,7 +68,7 @@
 
 use std::io;
 use std::io::Read as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1853,17 +1853,137 @@ impl From<ShardRollError> for HookResult {
 // Staged 4-step roll sequence (Postcondition 1; ADR-051 §Decision 11)
 // ---------------------------------------------------------------------------
 
+/// Map a [`last_amended_migrate::MigrateError`] (the only error type
+/// `write_atomic` returns) down to the `std::io::Error` every
+/// [`ShardRollError`] variant's `source` field carries. `write_atomic`
+/// itself only ever constructs `MigrateError::Io { source, .. }` (see its
+/// own doc comment — every one of its fallible steps wraps a genuine
+/// filesystem operation), so the `Io` arm is the expected, common case; the
+/// other `MigrateError` variants (none of which `write_atomic` can produce)
+/// are handled defensively via `io::Error::other` rather than assumed
+/// unreachable, so this mapping stays exhaustive-safe against a future
+/// `write_atomic` change without ever panicking here.
+fn migrate_err_to_io(err: last_amended_migrate::MigrateError) -> io::Error {
+    match err {
+        last_amended_migrate::MigrateError::Io { source, .. } => source,
+        other => io::Error::other(other.to_string()),
+    }
+}
+
+/// Best-effort `artifact_stem` derivation from a canonical path (e.g.
+/// `"decision-log.md"` -> `"decision-log"`), used ONLY by a low-level step
+/// function invoked directly (outside [`execute_roll`]'s own orchestration,
+/// which always supplies the caller's authoritative `entry.artifact_stem`
+/// instead via [`reattribute_roll_error`]) — this keeps every step function
+/// independently unit-testable without requiring a full `ShardEntry` just to
+/// report a crash-point error.
+fn stem_from_canonical_path(canonical_path: &Path) -> String {
+    canonical_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Best-effort `artifact_stem` derivation from a sealed-shard filename (e.g.
+/// `"decision-log.0001.md"` -> `"decision-log"`, stripping both the `.md`
+/// extension and the `.<seq:04>` segment) — see
+/// [`stem_from_canonical_path`]'s doc comment for why this fallback exists.
+fn stem_from_sealed_path(sealed_path: &Path) -> String {
+    let file_name = sealed_path.file_name().unwrap_or_default();
+    let without_md = Path::new(file_name).file_stem().unwrap_or(file_name);
+    Path::new(without_md)
+        .file_stem()
+        .unwrap_or(without_md)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Re-point a [`ShardRollError`] returned by one of the staged step
+/// functions at [`execute_roll`]'s own authoritative `artifact_stem`/
+/// `sealed_path` context — the step functions themselves only see the
+/// narrow slice of context their own signature carries (see
+/// [`stem_from_canonical_path`]'s doc comment), so `execute_roll`, which
+/// knows the full picture, corrects the diagnostic fields in place while
+/// preserving the original `io::Error` source untouched.
+fn reattribute_roll_error(
+    err: ShardRollError,
+    artifact_stem: &str,
+    sealed_filename: &str,
+) -> ShardRollError {
+    match err {
+        ShardRollError::SealWriteFailed { source, .. } => ShardRollError::SealWriteFailed {
+            artifact_stem: artifact_stem.to_string(),
+            source,
+        },
+        ShardRollError::TruncateFailedAfterSeal { source, .. } => {
+            ShardRollError::TruncateFailedAfterSeal {
+                artifact_stem: artifact_stem.to_string(),
+                sealed_path: sealed_filename.to_string(),
+                source,
+            }
+        }
+        ShardRollError::IndexPublishFailedAfterTruncate { source, .. } => {
+            ShardRollError::IndexPublishFailedAfterTruncate {
+                artifact_stem: artifact_stem.to_string(),
+                sealed_path: sealed_filename.to_string(),
+                source,
+            }
+        }
+    }
+}
+
+/// This artifact's `<artifact-stem>.shard-index.toml` path, a sibling of
+/// `canonical_path` (Postcondition 5's "one file per sharded mechanism-A
+/// artifact" schema).
+fn shard_index_path_for(canonical_path: &Path, artifact_stem: &str) -> PathBuf {
+    shard_sibling_path(canonical_path, &format!("{artifact_stem}.shard-index.toml"))
+}
+
+/// Join `filename` onto `canonical_path`'s own parent directory — every
+/// sealed shard and the shard-index TOML are siblings of the canonical file
+/// (Postcondition 6's "stable-current-filename addressing" — all of a
+/// sharded artifact's files live in the same directory).
+fn shard_sibling_path(canonical_path: &Path, filename: &str) -> PathBuf {
+    canonical_path
+        .parent()
+        .map(|dir| dir.join(filename))
+        .unwrap_or_else(|| PathBuf::from(filename))
+}
+
+/// Load `<artifact-stem>.shard-index.toml` at `index_path`, if it exists.
+/// `Ok(None)` (never an error) when the file is simply absent — the caller
+/// treats that as "no roll has ever occurred yet for this artifact" and
+/// synthesizes a fresh index. A genuine read failure (permission denied,
+/// `ELOOP`, etc.) or a malformed-TOML parse failure both surface as `Err`.
+fn load_shard_index(index_path: &Path) -> io::Result<Option<ShardIndex>> {
+    match std::fs::read_to_string(index_path) {
+        Ok(text) => {
+            let index: ShardIndex = toml::from_str(&text).map_err(io::Error::other)?;
+            Ok(Some(index))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The next monotonically-increasing seal `seq` for this artifact
+/// (Postcondition 5: "`seq` incrementing monotonically from 1") — the
+/// existing index's highest recorded `seq` plus one, or `1` when no index
+/// exists yet (first-ever roll).
+fn next_seal_seq(index_path: &Path) -> io::Result<u32> {
+    match load_shard_index(index_path)? {
+        Some(index) => Ok(index.shards.iter().map(|s| s.seq).max().unwrap_or(0) + 1),
+        None => Ok(1),
+    }
+}
+
 /// Step (a): read the canonical file's current full content — a one-time,
 /// roll-only read (BC-1.18.006 Postcondition 1 step (a)). The cheap
 /// per-write TRIGGER check (BC-1.18.005 Postcondition 2) remains
 /// `stat()`-only; content is read ONLY once a roll is already confirmed
 /// necessary.
-pub fn read_canonical_content(_canonical_path: &Path) -> io::Result<String> {
-    todo!(
-        "BC-1.18.006 Postcondition 1 step (a): std::fs::read_to_string(canonical_path). \
-         Roll-only — never called by BC-1.18.005's own per-write trigger check (that check stays \
-         stat()-only per BC-1.18.005 Postcondition 2)."
-    )
+pub fn read_canonical_content(canonical_path: &Path) -> io::Result<String> {
+    std::fs::read_to_string(canonical_path)
 }
 
 /// Step (b): publish the sealed shard as a brand-NEW file at
@@ -1871,13 +1991,13 @@ pub fn read_canonical_content(_canonical_path: &Path) -> io::Result<String> {
 /// `write_atomic` — a `rename()` that CREATES a not-yet-existing
 /// destination, never interrupting any reader of the canonical path (sealed
 /// filenames are never read by shard-unaware code).
-pub fn publish_sealed_shard(_sealed_path: &Path, _content: &str) -> Result<(), ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 1 step (b): last_amended_migrate::atomic_write::write_atomic(\
-         sealed_path, content), mapping a write_atomic failure to \
-         ShardRollError::SealWriteFailed (E-SHD-001) — the caller (execute_roll) supplies the \
-         artifact_stem context this error variant needs."
-    )
+pub fn publish_sealed_shard(sealed_path: &Path, content: &str) -> Result<(), ShardRollError> {
+    last_amended_migrate::atomic_write::write_atomic(sealed_path, content).map_err(|e| {
+        ShardRollError::SealWriteFailed {
+            artifact_stem: stem_from_sealed_path(sealed_path),
+            source: migrate_err_to_io(e),
+        }
+    })
 }
 
 /// Step (c): atomically REPLACE the canonical file's content with empty via
@@ -1885,13 +2005,18 @@ pub fn publish_sealed_shard(_sealed_path: &Path, _content: &str) -> Result<(), S
 /// Postcondition 1 step (c); Invariant 2/3) — never a delete-then-create,
 /// never a rename of the canonical path away; the canonical path resolves
 /// to SOME valid file at every observable instant.
-pub fn truncate_canonical_to_empty(_canonical_path: &Path) -> Result<(), ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 1 step (c): \
-         last_amended_migrate::atomic_write::write_atomic(canonical_path, \"\"), mapping a \
-         write_atomic failure to ShardRollError::TruncateFailedAfterSeal (E-SHD-006) — the caller \
-         (execute_roll) supplies the artifact_stem/sealed_path context this error variant needs."
-    )
+pub fn truncate_canonical_to_empty(canonical_path: &Path) -> Result<(), ShardRollError> {
+    last_amended_migrate::atomic_write::write_atomic(canonical_path, "").map_err(|e| {
+        ShardRollError::TruncateFailedAfterSeal {
+            artifact_stem: stem_from_canonical_path(canonical_path),
+            // Unknown at this narrow call level (this function receives no
+            // sealed_path parameter) — execute_roll's own orchestration
+            // corrects this field to the real sealed filename via
+            // reattribute_roll_error immediately after this call returns.
+            sealed_path: String::new(),
+            source: migrate_err_to_io(e),
+        }
+    })
 }
 
 /// Step (d): atomically publish the updated shard-index TOML (BC-1.18.006
@@ -1901,16 +2026,40 @@ pub fn truncate_canonical_to_empty(_canonical_path: &Path) -> Result<(), ShardRo
 /// appends exactly one new `[[shard]]` entry with `seq` incrementing
 /// monotonically from 1, and republishes via `write_atomic`.
 pub fn publish_shard_index_update(
-    _index_path: &Path,
-    _entry: &ShardEntry,
-    _new_shard_entry: ShardIndexEntry,
+    index_path: &Path,
+    entry: &ShardEntry,
+    new_shard_entry: ShardIndexEntry,
 ) -> Result<ShardIndex, ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 1 step (d) / Postcondition 5: load index_path if it exists \
-         (else synthesize a fresh ShardIndex, schema_version=1, from entry's cap-formula inputs), \
-         append new_shard_entry, write_atomic the re-serialized TOML, mapping a write_atomic \
-         failure to ShardRollError::IndexPublishFailedAfterTruncate (E-SHD-007)."
-    )
+    let sealed_path = new_shard_entry.path.clone();
+    let to_error = |source: io::Error| ShardRollError::IndexPublishFailedAfterTruncate {
+        artifact_stem: entry.artifact_stem.clone(),
+        sealed_path: sealed_path.clone(),
+        source,
+    };
+
+    let mut index = load_shard_index(index_path)
+        .map_err(to_error)?
+        .unwrap_or_else(|| ShardIndex {
+            schema_version: 1,
+            artifact_stem: entry.artifact_stem.clone(),
+            current_shard: entry.artifact_path.clone(),
+            shard_cap_bytes: entry.shard_cap_bytes,
+            max_single_record_bytes: entry.max_single_record_bytes,
+            safety_margin_bytes: entry.safety_margin,
+            practical_fuel_ceiling: entry.practical_fuel_ceiling,
+            worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            shards: Vec::new(),
+        });
+
+    index.shards.push(new_shard_entry);
+
+    let serialized =
+        toml::to_string(&index).map_err(|e| to_error(io::Error::other(e.to_string())))?;
+
+    last_amended_migrate::atomic_write::write_atomic(index_path, &serialized)
+        .map_err(|e| to_error(migrate_err_to_io(e)))?;
+
+    Ok(index)
 }
 
 /// Roll-orchestration entry point — BC-1.18.006 Postcondition 1's full
@@ -1930,19 +2079,48 @@ pub fn publish_shard_index_update(
 /// caller emits no `HookResult` at all (Postcondition 7's no-signal
 /// contract, ADR-051 §Decision 15 point 2).
 pub fn execute_roll(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
-    _sealed_retroactively: bool,
+    entry: &ShardEntry,
+    canonical_path: &Path,
+    sealed_retroactively: bool,
 ) -> Result<ShardIndexEntry, ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 1: (a) read_canonical_content(canonical_path); (b) determine \
-         the next seq (existing shard-index's max seq + 1, or 1 for a first-ever roll) and \
-         publish_sealed_shard(sealed_path, &content) at '<stem>.<seq:04>.md'; (c) \
-         truncate_canonical_to_empty(canonical_path); (d) publish_shard_index_update(index_path, \
-         entry, new_entry) where new_entry.sealed_retroactively = sealed_retroactively. Return \
-         the published ShardIndexEntry. Never reorder (Invariant 2); map each step's own error \
-         per the E-SHD-001/006/007 partial-failure postconditions."
-    )
+    // Step (a).
+    let content = read_canonical_content(canonical_path).map_err(|source| {
+        ShardRollError::SealWriteFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        }
+    })?;
+
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+    let next_seq =
+        next_seal_seq(&index_path).map_err(|source| ShardRollError::SealWriteFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?;
+    let sealed_filename = format!("{}.{next_seq:04}.md", entry.artifact_stem);
+    let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
+
+    // Step (b).
+    publish_sealed_shard(&sealed_path, &content)
+        .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
+
+    // Step (c).
+    truncate_canonical_to_empty(canonical_path)
+        .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
+
+    let new_entry = ShardIndexEntry {
+        seq: next_seq,
+        path: sealed_filename.clone(),
+        sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        bytes_at_seal: content.len() as u64,
+        sealed_retroactively,
+    };
+
+    // Step (d).
+    publish_shard_index_update(&index_path, entry, new_entry.clone())
+        .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
+
+    Ok(new_entry)
 }
 
 /// Unified, single-template retry-instruction `Block` message (BC-1.18.006
@@ -1998,16 +2176,61 @@ pub fn build_roll_retry_block_reason(
 /// detected (the common case — no action taken); `Ok(Some(entry))` when the
 /// self-heal ran and published the missing index entry.
 pub fn self_heal_resume_from_truncate(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
+    entry: &ShardEntry,
+    canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
-    todo!(
-        "BC-1.18.006 EC-010 / ADR-051 §Decision 11: load the shard-index (if any) sibling to \
-         canonical_path; if its next-expected seq's sealed-shard file exists AND is \
-         byte-identical to read_canonical_content(canonical_path)'s CURRENT content, resume from \
-         step (c) alone (truncate_canonical_to_empty + publish_shard_index_update) and return \
-         Ok(Some(published_entry)); otherwise Ok(None) — no action."
-    )
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+    let next_seq =
+        next_seal_seq(&index_path).map_err(|source| ShardRollError::SealWriteFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?;
+    let sealed_filename = format!("{}.{next_seq:04}.md", entry.artifact_stem);
+    let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
+
+    // No sealed shard at the next-expected seq at all — nothing to resume
+    // from (the common, healthy case).
+    let Ok(sealed_content) = std::fs::read_to_string(&sealed_path) else {
+        return Ok(None);
+    };
+
+    let current_content = match std::fs::read_to_string(canonical_path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(ShardRollError::TruncateFailedAfterSeal {
+                artifact_stem: entry.artifact_stem.clone(),
+                sealed_path: sealed_filename,
+                source,
+            });
+        }
+    };
+
+    // The sealed shard exists but its content diverges from the canonical
+    // file's CURRENT content — not the `E-SHD-006` duplicate-content
+    // signature (which requires byte-identity); take no action rather than
+    // fabricate a roll.
+    if sealed_content != current_content {
+        return Ok(None);
+    }
+
+    // Detected "seal published, truncate did not" — resume from step (c)
+    // alone. The already-durable sealed shard is never rewritten.
+    truncate_canonical_to_empty(canonical_path)
+        .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
+
+    let new_entry = ShardIndexEntry {
+        seq: next_seq,
+        path: sealed_filename.clone(),
+        sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        bytes_at_seal: sealed_content.len() as u64,
+        sealed_retroactively: false,
+    };
+
+    publish_shard_index_update(&index_path, entry, new_entry.clone())
+        .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
+
+    Ok(Some(new_entry))
 }
 
 /// `E-SHD-007` self-heal: scans the filesystem for sealed-shard files
@@ -2018,15 +2241,70 @@ pub fn self_heal_resume_from_truncate(
 /// Returns the list of newly appended [`ShardIndexEntry`] rows (empty when
 /// the index was already fully reconciled — the common case).
 pub fn self_heal_reconcile_missing_index_entries(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
+    entry: &ShardEntry,
+    canonical_path: &Path,
 ) -> Result<Vec<ShardIndexEntry>, ShardRollError> {
-    todo!(
-        "BC-1.18.006 EC-011 / ADR-051 §Decision 11: glob canonical_path's sibling directory for \
-         '<entry.artifact_stem>.<seq:04>.md' files, diff against the loaded shard-index's \
-         existing seq set, append entries (via publish_shard_index_update) for any sealed shard \
-         file absent from the index, and return the appended entries."
-    )
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+    let to_error = |source: io::Error| ShardRollError::IndexPublishFailedAfterTruncate {
+        artifact_stem: entry.artifact_stem.clone(),
+        sealed_path: String::new(),
+        source,
+    };
+
+    let indexed_seqs: std::collections::BTreeSet<u32> = load_shard_index(&index_path)
+        .map_err(to_error)?
+        .map(|index| index.shards.iter().map(|s| s.seq).collect())
+        .unwrap_or_default();
+
+    let dir = canonical_path.parent().unwrap_or_else(|| Path::new("."));
+    let prefix = format!("{}.", entry.artifact_stem);
+
+    let mut unindexed: Vec<(u32, String, u64)> = Vec::new();
+    for item in std::fs::read_dir(dir).map_err(to_error)? {
+        let item = item.map_err(to_error)?;
+        let file_name = item.file_name();
+        let file_name = file_name.to_string_lossy();
+
+        // Match this artifact's exact `<stem>.<seq:04>.md` sealed-shard
+        // naming convention (Postcondition 5) — anything else (the
+        // canonical file itself, the shard-index TOML, an unrelated
+        // sibling, or a differently-shaped stem) is skipped.
+        let Some(rest) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(seq_str) = rest.strip_suffix(".md") else {
+            continue;
+        };
+        if seq_str.len() != 4 {
+            continue;
+        }
+        let Ok(seq) = seq_str.parse::<u32>() else {
+            continue;
+        };
+        if indexed_seqs.contains(&seq) {
+            continue;
+        }
+
+        let bytes = item.metadata().map_err(to_error)?.len();
+        unindexed.push((seq, file_name.into_owned(), bytes));
+    }
+    unindexed.sort_by_key(|(seq, ..)| *seq);
+
+    let mut appended = Vec::with_capacity(unindexed.len());
+    for (seq, path, bytes_at_seal) in unindexed {
+        let new_entry = ShardIndexEntry {
+            seq,
+            path: path.clone(),
+            sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            bytes_at_seal,
+            sealed_retroactively: false,
+        };
+        publish_shard_index_update(&index_path, entry, new_entry.clone())
+            .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &path))?;
+        appended.push(new_entry);
+    }
+
+    Ok(appended)
 }
 
 // ---------------------------------------------------------------------------
@@ -2058,14 +2336,21 @@ pub fn self_heal_reconcile_missing_index_entries(
 /// exactly correct); `Ok(Some(entry))` when the retroactive roll ran and
 /// published a new sealed shard.
 pub fn reconcile_post_write_replace_all_overcap(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
+    entry: &ShardEntry,
+    canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 7 catch point (i) / AC-024: stat() canonical_path; if \
-         actual_size <= entry.shard_cap_bytes, return Ok(None); else execute_roll(entry, \
-         canonical_path, true) and return Ok(Some(published_entry))."
-    )
+    let actual_size = std::fs::metadata(canonical_path)
+        .map_err(|source| ShardRollError::SealWriteFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?
+        .len();
+
+    if actual_size <= entry.shard_cap_bytes {
+        return Ok(None);
+    }
+
+    execute_roll(entry, canonical_path, true).map(Some)
 }
 
 /// Postcondition 7 catch point (ii) — next-dispatch leading-probe backstop
@@ -2084,14 +2369,10 @@ pub fn reconcile_post_write_replace_all_overcap(
 /// Returns `Ok(Some(entry))` when the backstop reconciled the pre-existing
 /// over-cap state left by a missed catch point (i).
 pub fn reconcile_leading_probe_backstop(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
+    entry: &ShardEntry,
+    canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
-    todo!(
-        "BC-1.18.006 Postcondition 7 catch point (ii) / AC-025: execute_roll(entry, \
-         canonical_path, true) and return Ok(Some(published_entry)) — the caller has ALREADY \
-         confirmed current_bytes > entry.shard_cap_bytes before invoking this function."
-    )
+    execute_roll(entry, canonical_path, true).map(Some)
 }
 
 // ---------------------------------------------------------------------------
