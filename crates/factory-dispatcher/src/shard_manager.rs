@@ -1714,11 +1714,22 @@ pub fn shard_cap_gate_check(
                 // `E-SHD-001` crash), never a silent `Continue` (Invariant
                 // 1).
                 return match execute_roll(entry, target_path, false) {
-                    Ok(sealed) => HookResult::Block {
+                    Ok(Some(sealed)) => HookResult::Block {
                         reason: build_roll_retry_block_reason(
                             &entry.artifact_stem,
                             entry.shard_cap_bytes,
                             &sealed.path,
+                        ),
+                    },
+                    // F-C2-P2-006: the canonical was already empty (nothing
+                    // to seal) — the trigger fired purely because of this
+                    // dispatch's OWN oversized payload. Still a Block
+                    // (Invariant 1 — never a silent Continue), but with a
+                    // dedicated message: there is no sealed shard to name.
+                    Ok(None) => HookResult::Block {
+                        reason: build_empty_roll_retry_block_reason(
+                            &entry.artifact_stem,
+                            entry.shard_cap_bytes,
                         ),
                     },
                     Err(e) => e.into(),
@@ -2169,16 +2180,20 @@ pub fn publish_shard_index_update(
 /// (ADR-051 §Decision 15 point 3 — VERBATIM reuse, no new roll logic, no
 /// new error code).
 ///
-/// Returns the newly published [`ShardIndexEntry`] on success — a
-/// prospective roll's caller builds the `HookResult::Block` retry message
-/// from it via [`build_roll_retry_block_reason`]; a retroactive roll's
-/// caller emits no `HookResult` at all (Postcondition 7's no-signal
-/// contract, ADR-051 §Decision 15 point 2).
+/// Returns `Ok(Some(entry))` — the newly published [`ShardIndexEntry`] — on
+/// a normal seal; a prospective roll's caller builds the `HookResult::Block`
+/// retry message from it via [`build_roll_retry_block_reason`]; a
+/// retroactive roll's caller emits no `HookResult` at all (Postcondition 7's
+/// no-signal contract, ADR-051 §Decision 15 point 2). Returns `Ok(None)`
+/// when the canonical content to seal is EMPTY (F-C2-P2-006, ADVISORY,
+/// cluster-2 LOCAL adversary pass-2) — see the empty-content check below for
+/// why this is a legitimate, non-error outcome, never a fabricated seal of
+/// nothing.
 pub fn execute_roll(
     entry: &ShardEntry,
     canonical_path: &Path,
     sealed_retroactively: bool,
-) -> Result<ShardIndexEntry, ShardRollError> {
+) -> Result<Option<ShardIndexEntry>, ShardRollError> {
     // Step (a).
     let content = read_canonical_content(canonical_path).map_err(|source| {
         ShardRollError::SealWriteFailed {
@@ -2186,6 +2201,27 @@ pub fn execute_roll(
             source,
         }
     })?;
+
+    // F-C2-P2-006 (ADVISORY, cluster-2 LOCAL adversary pass-2): an EMPTY
+    // canonical has nothing to preserve — skip sealing entirely (no sealed
+    // shard file published, no `[[shard]]` index row appended) rather than
+    // accumulate a useless, permanent 0-byte seal. This is reachable
+    // legitimately: `Write`'s trigger formula (`projected_size =
+    // len(content)` alone) never depends on the CURRENT canonical size, so
+    // the trigger can fire purely because of an oversized incoming payload
+    // against a canonical that is ALREADY empty — e.g. immediately after a
+    // prior roll, or (the exact sequence this finding was raised against)
+    // after THIS SAME dispatch's own Postcondition 7 catch point (ii)
+    // Write-arm backstop already retroactively sealed a crash-orphaned
+    // canonical and truncated it to 0 bytes moments earlier, only for this
+    // dispatch's own trigger to then fire a second time against that
+    // now-empty canonical. `truncate_canonical_to_empty` would be a pure
+    // no-op write against already-empty content in this case, so this
+    // returns before steps (b)-(d) ever run — canonical stays exactly 0
+    // bytes either way (Invariant 6 holds trivially).
+    if content.is_empty() {
+        return Ok(None);
+    }
 
     let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
     let next_seq =
@@ -2216,7 +2252,7 @@ pub fn execute_roll(
     publish_shard_index_update(&index_path, entry, new_entry.clone())
         .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &sealed_filename))?;
 
-    Ok(new_entry)
+    Ok(Some(new_entry))
 }
 
 /// Unified, single-template retry-instruction `Block` message (BC-1.18.006
@@ -2247,6 +2283,21 @@ pub fn build_roll_retry_block_reason(
          reissue as a fresh `Write` containing ONLY your new entry; if you used `Write`, \
          recompute `content` to contain ONLY your new entry (not your original full pre-roll \
          payload, which reflects discarded state and will exceed the cap again if resubmitted)."
+    )
+}
+
+/// Retry-instruction `Block` message for the F-C2-P2-006 "empty roll" case
+/// — [`execute_roll`] returned `Ok(None)` because the canonical was already
+/// empty when the trigger fired, so there is no sealed shard to name (unlike
+/// [`build_roll_retry_block_reason`]'s normal case). The current shard is
+/// STILL empty (it always was, in this case) — the caller's own payload is
+/// what needs to shrink.
+fn build_empty_roll_retry_block_reason(artifact_stem: &str, shard_cap_bytes: u64) -> String {
+    format!(
+        "Shard `{artifact_stem}` is already empty; your own payload alone exceeds the cap \
+         ({shard_cap_bytes} bytes reached), so no new shard was sealed (there was no existing \
+         content to preserve). Recompute your payload to fit within the cap before retrying — \
+         split it across multiple smaller writes if needed."
     )
 }
 
@@ -2522,7 +2573,10 @@ pub fn self_heal_reconcile_missing_index_entries(
 ///
 /// Returns `Ok(None)` when `actual_size <= entry.shard_cap_bytes` (no
 /// action — the single-occurrence trigger estimate was conservative or
-/// exactly correct); `Ok(Some(entry))` when the retroactive roll ran and
+/// exactly correct) OR when [`execute_roll`] itself finds nothing to seal
+/// (F-C2-P2-006 — practically unreachable here, since `actual_size` was
+/// just confirmed `> 0`, but the `Option` is threaded through rather than
+/// assumed away); `Ok(Some(entry))` when the retroactive roll ran and
 /// published a new sealed shard.
 pub fn reconcile_post_write_replace_all_overcap(
     entry: &ShardEntry,
@@ -2539,7 +2593,7 @@ pub fn reconcile_post_write_replace_all_overcap(
         return Ok(None);
     }
 
-    execute_roll(entry, canonical_path, true).map(Some)
+    execute_roll(entry, canonical_path, true)
 }
 
 /// Postcondition 7 catch point (ii) — next-dispatch leading-probe backstop
@@ -2556,12 +2610,16 @@ pub fn reconcile_post_write_replace_all_overcap(
 /// this function itself.
 ///
 /// Returns `Ok(Some(entry))` when the backstop reconciled the pre-existing
-/// over-cap state left by a missed catch point (i).
+/// over-cap state left by a missed catch point (i). `Ok(None)` is
+/// practically unreachable here (the caller already confirmed
+/// `current_bytes > entry.shard_cap_bytes`, so content can never be empty),
+/// but [`execute_roll`]'s `Option` (F-C2-P2-006) is threaded through rather
+/// than assumed away.
 pub fn reconcile_leading_probe_backstop(
     entry: &ShardEntry,
     canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
-    execute_roll(entry, canonical_path, true).map(Some)
+    execute_roll(entry, canonical_path, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -5544,10 +5602,14 @@ mod bc_1_18_006_roll_tests {
         std::fs::write(&canonical_path, &pre_roll_content).expect("seed pre-roll canonical");
         let entry = flat_entry("decision-log", 49_152);
 
-        let published = execute_roll(&entry, &canonical_path, false).expect(
-            "AC-006: a normal (prospective) roll over an existing, readable canonical file must \
-             succeed",
-        );
+        let published = execute_roll(&entry, &canonical_path, false)
+            .expect(
+                "AC-006: a normal (prospective) roll over an existing, readable canonical file \
+                 must succeed",
+            )
+            .expect(
+                "AC-006: the pre-roll content is non-empty (3,000 bytes), so a seal is expected",
+            );
 
         // Step (b): sealed shard is a byte-for-byte copy of the PRE-ROLL
         // content, published as a NEW file.
@@ -5590,7 +5652,8 @@ mod bc_1_18_006_roll_tests {
         let entry = flat_entry("burst-log", 49_152);
 
         let published = execute_roll(&entry, &canonical_path, false)
-            .expect("roll over an existing canonical file must succeed");
+            .expect("roll over an existing canonical file must succeed")
+            .expect("the pre-roll content is non-empty (1,000 bytes), so a seal is expected");
 
         assert_eq!(
             published.path, "burst-log.0001.md",
@@ -5607,7 +5670,9 @@ mod bc_1_18_006_roll_tests {
         let entry = flat_entry("decision-log", 49_152);
 
         std::fs::write(&canonical_path, "a".repeat(2_000)).expect("seed roll #1");
-        let first = execute_roll(&entry, &canonical_path, false).expect("first roll must succeed");
+        let first = execute_roll(&entry, &canonical_path, false)
+            .expect("first roll must succeed")
+            .expect("the pre-roll content is non-empty (2,000 bytes), so a seal is expected");
         assert_eq!(
             first.seq, 1,
             "AC-009: the first-ever roll must publish seq=1"
@@ -5617,8 +5682,9 @@ mod bc_1_18_006_roll_tests {
         // simulate a second cycle-artifact append that itself later exceeds
         // cap again.
         std::fs::write(&canonical_path, "b".repeat(4_000)).expect("seed roll #2");
-        let second =
-            execute_roll(&entry, &canonical_path, false).expect("second roll must succeed");
+        let second = execute_roll(&entry, &canonical_path, false)
+            .expect("second roll must succeed")
+            .expect("the pre-roll content is non-empty (4,000 bytes), so a seal is expected");
         assert_eq!(
             second.seq, 2,
             "AC-009: a SECOND roll on the same artifact must publish seq=2, incrementing \
@@ -5650,7 +5716,10 @@ mod bc_1_18_006_roll_tests {
         let entry = flat_entry("decision-log", 49_152);
 
         let published = execute_roll(&entry, &canonical_path, true)
-            .expect("a retroactive roll must succeed identically to a prospective one");
+            .expect("a retroactive roll must succeed identically to a prospective one")
+            .expect(
+                "the over-cap pre-roll content is non-empty (49,500 bytes), so a seal is expected",
+            );
 
         assert!(
             published.sealed_retroactively,
