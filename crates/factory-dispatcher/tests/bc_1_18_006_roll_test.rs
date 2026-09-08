@@ -40,7 +40,7 @@ use factory_dispatcher::engine::build_engine;
 use factory_dispatcher::executor::{ExecutorInputs, execute_tiers};
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::internal_log::InternalLog;
-use factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying;
+use factory_dispatcher::invoke::{PluginResult, reconcile_replace_all_overcap_if_qualifying};
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::plugin_loader::PluginCache;
 use factory_dispatcher::registry::Registry;
@@ -148,6 +148,36 @@ async fn run_roll_gate(
 
 fn sealed_path_for(dir: &std::path::Path, stem: &str, seq: u32) -> std::path::PathBuf {
     dir.join(format!("{stem}.{seq:04}.md"))
+}
+
+/// Parses the `reason` field out of a `{"outcome":"block","reason":"..."}`
+/// stdout JSON payload in `summary.per_plugin_results` and returns the
+/// EXACT (un-truncated, un-`Debug`-escaped) string — the same extraction
+/// `main.rs`'s own `extract_reason_from_outcome` (TD #71 surfacing path)
+/// performs, reimplemented here because that function is private to the
+/// `factory-dispatcher` BINARY crate and unreachable from this integration
+/// test file (which links only the LIBRARY crate). Existing AC-007 tests in
+/// this file assert against `format!("{:?}", summary.per_plugin_results)`
+/// substrings, which cannot catch wording drift outside the asserted
+/// fragments (F-C2-P6-002) — this helper exists so a verbatim, whole-string
+/// comparison is possible instead. Panics if no blocking outcome carries a
+/// JSON `reason` field; callers only invoke this after asserting the
+/// dispatch actually blocked.
+fn exact_block_reason(summary: &factory_dispatcher::executor::TierExecutionSummary) -> String {
+    for outcome in &summary.per_plugin_results {
+        if let PluginResult::Ok { stdout, .. } = &outcome.result
+            && stdout.contains(r#""outcome":"block""#)
+            && let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout)
+            && let Some(reason) = value.get("reason").and_then(|r| r.as_str())
+        {
+            return reason.to_string();
+        }
+    }
+    panic!(
+        "exact_block_reason: no per_plugin_results outcome carried a \
+         {{\"outcome\":\"block\",\"reason\":...}} stdout payload. Got: {:?}",
+        summary.per_plugin_results
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +359,96 @@ async fn test_BC_1_18_006_AC007_edit_block_reason_uses_same_unified_template_as_
             "AC-007/Invariant 4: the Edit-triggered Block message must use the SAME unified \
              template as the Write case — never a per-tool-name-divergent wording. Missing \
              \"{expected_substring}\". Got: {per_plugin_debug}"
+        );
+    }
+}
+
+/// F-C2-P6-002 (MINOR, cluster-2 LOCAL adversary pass-6) — companion to the
+/// two substring-only tests above. `test_BC_1_18_006_AC007_write_block_reason_contains_unified_retry_template`
+/// and `..._edit_block_reason_uses_same_unified_template_as_write` only ever
+/// assert `.contains(substring)` against `format!("{:?}", per_plugin_results)`
+/// — the SAME weak-guard shape the pass-5 fix-burst (F-C2-P5-002) already
+/// found and closed for the SIBLING `build_empty_roll_retry_block_reason`
+/// template (a prior revision paraphrased that template's wording and a
+/// single-substring test stayed green through the divergence). This test
+/// pins `build_roll_retry_block_reason`'s UNIFIED template — the one
+/// actually used here — to BC-1.18.006 v1.8 Postcondition 2's verbatim
+/// blockquote, table-driven over the SAME two tool shapes the substring
+/// tests above cover (`Write`, and `Edit` with `replace_all: true` — the
+/// prospective PreToolUse trigger formula does not branch on `replace_all`
+/// for `Edit`, per `shard_manager.rs`'s `ToolKind::Edit` arm, so this only
+/// exercises whether an incidental `replace_all` field on the payload could
+/// somehow perturb the emitted template; it does not).
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P6_002_unified_retry_block_reason_pinned_verbatim() {
+    struct Case {
+        name: &'static str,
+        tool_name: &'static str,
+        tool_input: serde_json::Value,
+        pre_roll_content: String,
+    }
+
+    let cases = vec![
+        Case {
+            name: "Write",
+            tool_name: "Write",
+            tool_input: serde_json::json!({"content": "x".repeat(50_000)}),
+            pre_roll_content: "y".repeat(3_000),
+        },
+        Case {
+            name: "Edit{replace_all:true}",
+            tool_name: "Edit",
+            tool_input: serde_json::json!({
+                "old_string": "x".repeat(10),
+                "new_string": "x".repeat(2_000),
+                "replace_all": true,
+            }),
+            pre_roll_content: "y".repeat(48_000),
+        },
+    ];
+
+    for case in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("decision-log.md");
+        std::fs::write(&target, &case.pre_roll_content).unwrap();
+
+        let summary = run_roll_gate(dir.path(), &target, case.tool_name, case.tool_input).await;
+        assert_ne!(
+            summary.exit_code, 0,
+            "{}: precondition: this call must block (see AC-006)",
+            case.name
+        );
+
+        let actual_reason = exact_block_reason(&summary);
+
+        // BC-1.18.006 v1.8 Postcondition 2's unified rotate-and-retry
+        // template, read VERBATIM from the spec's own blockquote.
+        // `<artifact>` and `<sealed-path>` carry LITERAL backticks in the
+        // emitted text (the established convention `build_empty_roll_retry_block_reason`'s
+        // own doc comment cites THIS template as precedent for); the `<N>`
+        // numeric placeholder's backticks are doc-only spec markup — a bare
+        // number is emitted. `<artifact>` = "decision-log", `<N>` = 49152
+        // (`FLAT_SHARD_CONFIG`'s `shard_cap_bytes`), `<sealed-path>` =
+        // "decision-log.0001.md" (each case rolls a FRESH tempdir, so
+        // `next_seal_seq` = 1 both times).
+        let expected_reason = "Shard `decision-log` rotated (cap 49152 bytes reached); the \
+             current shard is now empty. Retry your write against the CURRENT (post-roll, \
+             empty) file — do not resubmit your original payload unchanged: if you used \
+             `Edit` or `MultiEdit`, your `old_string` will no longer match (the content it \
+             targeted is now in `decision-log.0001.md`) — reissue as a fresh `Write` \
+             containing ONLY your new entry; if you used `Write`, recompute `content` to \
+             contain ONLY your new entry (not your original full pre-roll payload, which \
+             reflects discarded state and will exceed the cap again if resubmitted).";
+
+        assert_eq!(
+            actual_reason, expected_reason,
+            "{}: F-C2-P6-002: build_roll_retry_block_reason's UNIFIED rotate-and-retry \
+             template must match BC-1.18.006 v1.8 Postcondition 2's verbatim blockquote \
+             byte-for-byte — a sibling template (build_empty_roll_retry_block_reason) was \
+             previously found to have diverged from its own spec text (F-C2-P5-002) while a \
+             substring-only test stayed green through that divergence; this pins the UNIFIED \
+             template's exact text so the same class of drift cannot hide here undetected.",
+            case.name
         );
     }
 }
@@ -1007,6 +1127,89 @@ async fn test_BC_1_18_006_PC1_ADR051_D11_ESHD007_self_heal_reconciles_missing_in
     let entry = &index.shards[0];
     assert_eq!(entry.seq, 1);
     assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 1_200,
+        "bytes_at_seal must reflect the orphaned sealed shard's actual on-disk byte count"
+    );
+
+    // The orphaned sealed shard content itself must never be touched by the
+    // reconciliation (it only appends an index record, never rewrites shard
+    // content).
+    let sealed_after =
+        std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
+    assert_eq!(sealed_after, "f".repeat(1_200));
+}
+
+/// F-C2-P6-003 (ADVISORY, cluster-2 LOCAL adversary pass-6) — sealed-shard
+/// filenames use `{seq:04}` (Rust's MIN-width, not FIXED-width, formatting
+/// spec), so `seq >= 10,000` produces a 5-digit filename
+/// (`decision-log.10000.md`) exactly like this test's sibling
+/// `..._ESHD007_...` test above produces a 4-digit one
+/// (`decision-log.0001.md`) for `seq == 1`. But
+/// `self_heal_reconcile_missing_index_entries` hard-rejects any candidate
+/// whose `seq_str.len() != 4` (`shard_manager.rs`) — a 5-digit orphan is
+/// silently skipped forever, identically to (and indistinguishable from,
+/// by that guard) an unrelated file that merely happens to share this
+/// artifact's prefix. This reproduces that orphan directly (mirroring the
+/// sibling ESHD-007 test's own fixture shape) and asserts it IS reconciled
+/// — this assertion currently FAILS: the guard skips the 5-digit candidate,
+/// so no `[[shard]]` index entry (and, since this is the artifact's ONLY
+/// orphan, no shard-index file at all) is ever produced.
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_FC2P6_003_self_heal_reconciles_5_digit_seq_orphan() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    std::fs::write(&target, "").expect("seed already-truncated (post-step-(c)) canonical");
+
+    // Same orphan shape as the E-SHD-007 test above (a durably-published,
+    // non-empty sealed shard absent from the index — no shard-index file
+    // exists at all yet), but at `seq = 10,000`, whose `{seq:04}` filename
+    // is 5 digits wide (`10000`, not `0001`).
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 10_000);
+    std::fs::write(&sealed_path, "f".repeat(1_200))
+        .expect("seed 5-digit-seq orphaned sealed shard");
+
+    // An ordinary, unrelated, net-zero-delta Edit dispatch against the
+    // (correctly empty) canonical — this dispatch's own trigger must never
+    // fire on its own (0 + 0 well under cap); it exists only to drive
+    // self-heal reconciliation for the pre-seeded orphan above.
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "a", "new_string": "a"}),
+    )
+    .await;
+
+    assert_eq!(
+        summary.exit_code, 0,
+        "precondition: a net-zero-delta Edit against an empty, well-under-cap canonical must \
+         Continue"
+    );
+
+    // The load-bearing assertion: the self-heal must have discovered the
+    // 5-digit-seq orphaned sealed shard and appended its missing index
+    // entry as part of THIS dispatch, identically to a 4-digit orphan — a
+    // consistent recovered state, never a permanently orphaned shard file
+    // merely because its `seq` happened to overflow 4 digits.
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).expect(
+        "F-C2-P6-003: self_heal_reconcile_missing_index_entries's `seq_str.len() != 4` guard \
+         must not silently skip a 5-digit seq (>= 10,000, produced by the `{seq:04}` MIN-width \
+         formatting convention) as though it were an unrelated file — the shard-index file \
+         must exist once this dispatch returns",
+    );
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "F-C2-P6-003: exactly one reconciled [[shard]] entry for the previously-orphaned \
+         5-digit-seq sealed shard"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 10_000);
+    assert_eq!(entry.path, "decision-log.10000.md");
     assert_eq!(
         entry.bytes_at_seal, 1_200,
         "bytes_at_seal must reflect the orphaned sealed shard's actual on-disk byte count"
