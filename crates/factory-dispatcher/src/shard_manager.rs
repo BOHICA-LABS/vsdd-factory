@@ -2469,6 +2469,26 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
         return Err(already_exists_err());
     }
 
+    // FIX-MED-1 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-367):
+    // re-verify identity IMMEDIATELY BEFORE unlinking — the `is_zero_byte`
+    // probe above and the `remove_file` below are two SEPARATE syscalls,
+    // leaving a TOCTOU window in between. If a second, legitimate
+    // concurrent writer replaces this 0-byte placeholder with real sealed
+    // content in that window, nothing before this point would notice —
+    // `remove_file` would silently discard genuine sealed history.
+    // `reclaim_identity_still_safe` re-checks via an ALREADY-OPEN file
+    // handle's own metadata, which is immune to a subsequent rename/
+    // replace of the PATH (it inspects the inode this call has open, not
+    // whatever inode currently occupies the path name) — closing the
+    // window as tightly as `std::fs` allows without a new dependency. If
+    // the re-check fails (content changed, no longer 0 bytes, vanished,
+    // etc.), abort the reclaim and fail loud via the SAME E-SHD-009
+    // collision error SEC-001's fix already uses, rather than silently
+    // proceeding as if the reclaim were still safe.
+    if !reclaim_identity_still_safe(sealed_path) {
+        return Err(already_exists_err());
+    }
+
     // A failed unlink here (e.g. permission denied) leaves the 0-byte file
     // in place with nothing reclaimed — fail loud rather than silently
     // treating an unconfirmed reclaim as success (Invariant 1's "no version
@@ -2501,6 +2521,44 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
             source: retry_err,
         }),
     }
+}
+
+/// FIX-MED-1 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-367):
+/// re-verifies, via an ALREADY-OPEN file handle's own metadata, that
+/// `path` is STILL a 0-byte regular file — called by
+/// [`publish_sealed_shard`]'s 0-byte reclaim path immediately before the
+/// unlink, to close the TOCTOU window between the earlier
+/// `symlink_metadata` probe and the `remove_file` call as tightly as
+/// `std::fs` allows without a new dependency.
+///
+/// `File::open` (unlike `symlink_metadata`/`lstat`) DOES dereference a
+/// symlink, so if the path was replaced by a symlink in the race window
+/// this check cannot itself detect that substitution — no `O_NOFOLLOW`
+/// primitive is available from `std::fs` alone, and adding one would
+/// require a new dependency (`libc`/`nix`), out of scope for this
+/// defense-in-depth hardening. This residual case is still safe in
+/// practice: the caller's subsequent `remove_file`/`unlink()` never
+/// dereferences a symlink either (SEC-001's own no-follow discipline), so
+/// a symlink substituted in that narrower window is itself unlinked —
+/// never its target — and [`write_exclusive`]'s `O_EXCL` retry
+/// (FIX-HIGH-1) still refuses to write through any symlink that manages
+/// to reappear at the destination on the retry. What this check DOES
+/// close is the window this fix targets: a second, legitimate concurrent
+/// writer replacing the 0-byte placeholder with real (non-empty) sealed
+/// content, which `remove_file` would otherwise silently discard.
+///
+/// Returns `false` — never reclaimable — for a symlink whose target is
+/// non-empty, for a file whose size changed since the first probe, and
+/// for a path that vanished or became inaccessible between the two
+/// checks (a failed/inconclusive open is treated as "not confirmed safe",
+/// never assumed safe). The caller treats every `false` identically:
+/// abort the reclaim, fail loud with the existing E-SHD-009 collision
+/// error.
+fn reclaim_identity_still_safe(path: &Path) -> bool {
+    std::fs::File::open(path)
+        .and_then(|f| f.metadata())
+        .map(|meta| meta.file_type().is_file() && meta.len() == 0)
+        .unwrap_or(false)
 }
 
 /// Step (c): atomically REPLACE the canonical file's content with empty via
@@ -7675,6 +7733,58 @@ mod bc_1_18_006_roll_tests {
             "FIX-HIGH-1: the pre-planted symlink at the temp path must be left untouched — \
              write_exclusive's best-effort cleanup only ever removes a temp file IT created, \
              never a pre-existing symlink it refused to write through"
+        );
+    }
+
+    /// FIX-MED-1 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-367):
+    /// `reclaim_identity_still_safe`'s open-handle re-check must reject a
+    /// path whose content changed since a hypothetical earlier probe —
+    /// simulating the TOCTOU race window a genuinely concurrent legitimate
+    /// writer could otherwise land in between `publish_sealed_shard`'s
+    /// `is_zero_byte` probe and its `remove_file` unlink.
+    #[test]
+    fn test_FIXMED1_reclaim_identity_still_safe_rejects_content_changed_since_first_probe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("decision-log.0001.md");
+
+        // What an earlier `is_zero_byte` probe would have observed: a
+        // genuinely 0-byte file at the destination.
+        std::fs::write(&path, []).expect("seed 0-byte placeholder");
+        assert!(
+            reclaim_identity_still_safe(&path),
+            "FIX-MED-1 precondition: a genuinely 0-byte regular file must be judged \
+             reclaim-safe by the re-check"
+        );
+
+        // SIMULATE the race window: a second, legitimate concurrent writer
+        // replaces the 0-byte placeholder with real sealed content between
+        // the first probe and the unlink.
+        std::fs::write(
+            &path,
+            b"real sealed content a concurrent writer just published",
+        )
+        .expect("simulate a concurrent writer replacing the 0-byte placeholder");
+
+        assert!(
+            !reclaim_identity_still_safe(&path),
+            "FIX-MED-1: the re-check MUST reject reclaiming once the file's content has changed \
+             since the first probe — a concurrent writer's genuine sealed content must never be \
+             silently unlinked and discarded"
+        );
+    }
+
+    /// FIX-MED-1 companion coverage: a path that vanished (or never
+    /// existed) between the two checks must never be treated as
+    /// reclaim-safe — a failed/inconclusive open is "not confirmed safe",
+    /// never assumed safe.
+    #[test]
+    fn test_FIXMED1_reclaim_identity_still_safe_rejects_missing_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("decision-log.0001.md");
+        assert!(
+            !reclaim_identity_still_safe(&path),
+            "FIX-MED-1: a path that vanished (or never existed) must never be treated as \
+             reclaim-safe — File::open failing is not evidence of safety"
         );
     }
 }
