@@ -1446,6 +1446,19 @@ pub fn shard_cap_gate_check(
                 return HookResult::Continue;
             };
 
+            // BC-1.18.006 Postcondition 1 / ADR-051 §Decision 11: self-heal
+            // recovery (E-SHD-006/E-SHD-007) runs on the artifact's NEXT
+            // matched dispatch — of ANY tool kind, not just Edit/MultiEdit,
+            // since a crash can strand ANY roll regardless of which tool
+            // triggered it — BEFORE evaluating this dispatch's own trigger.
+            // See `run_self_heal_if_plausible`'s own doc comment for the
+            // cheap-detection gate that keeps this a single stat()/small-
+            // TOML-read cost on every healthy (non-crashed) dispatch, never
+            // a directory-wide scan.
+            if let Err(e) = run_self_heal_if_plausible(entry, target_path) {
+                return e.into();
+            }
+
             // F-002 fix (S-25.02 Phase F4 LOCAL adversary pass-1 cluster-1,
             // MEDIUM): `current_shard_bytes_flat` (a stat()/metadata() call)
             // is ONLY needed by the Edit/MultiEdit legs of Postcondition 3's
@@ -2168,13 +2181,74 @@ pub fn build_roll_retry_block_reason(
 }
 
 // ---------------------------------------------------------------------------
-// Self-healing recovery (ADR-051 §Decision 11; EC-010/EC-011). Standalone
-// stubs this burst — call-site wiring (invoked "on the next dispatch
-// attempt... before evaluating any new trigger") is implementer's T-4
-// concern; NOT wired by this stub-architect burst, which wires only
-// `execute_roll`'s own trigger-fire call site and Postcondition 7's two
-// catch points per this burst's explicit dispatch scope.
+// Self-healing recovery (ADR-051 §Decision 11; EC-010/EC-011). Wired into
+// `shard_cap_gate_check`'s `ShardShape::Flat` arm (called unconditionally,
+// for every matched tool kind, immediately after the config-match/shape
+// dispatch and BEFORE this dispatch's own size-trigger formula is
+// evaluated — Postcondition 1's "next dispatch attempt... before evaluating
+// any new trigger" ordering requirement).
 // ---------------------------------------------------------------------------
+
+/// Cheap crash-state PLAUSIBILITY probe gating both self-heal functions
+/// below (ADR-051 §Decision 11's "next dispatch attempt" recovery check).
+///
+/// A genuine `E-SHD-006`/`E-SHD-007` crash state can ONLY exist at exactly
+/// the shard-index's next-expected `seq` — both crash points occur mid-roll,
+/// and this dispatcher process is spawned fresh per hook event (this file's
+/// own module doc references the single-dispatch-per-process model), so at
+/// most one roll can ever be "in flight" at a time for a given artifact; the
+/// very next seal this artifact would ever produce is the only seq a stray,
+/// not-yet-indexed sealed-shard file could occupy. So: does a sealed shard
+/// already exist at that ONE specific path? This is a SINGLE stat()/
+/// existence check (plus the already-small, bounded `next_seal_seq` index
+/// read needed to name that one path — the same read `execute_roll` itself
+/// always performs for any real roll, not a new cost category) — in the
+/// overwhelmingly common healthy case this file does not exist, so this
+/// probe is the ONLY overhead self-heal adds to a normal dispatch: no
+/// sealed-shard content read, no canonical-content read, no directory
+/// listing. Only when this probe finds a candidate do the two functions
+/// below pay for their own, more expensive checks (byte-for-byte content
+/// comparison; a directory-wide orphan scan).
+fn self_heal_recovery_plausible(entry: &ShardEntry, canonical_path: &Path) -> io::Result<bool> {
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+    let next_seq = next_seal_seq(&index_path)?;
+    let sealed_filename = format!("{}.{next_seq:04}.md", entry.artifact_stem);
+    let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
+    Ok(sealed_path.exists())
+}
+
+/// Runs self-heal recovery for `entry`/`canonical_path` if — and only if —
+/// [`self_heal_recovery_plausible`]'s cheap probe finds a candidate. Tries
+/// [`self_heal_resume_from_truncate`] (`E-SHD-006`) first; if it fully
+/// reconciles the crash state (`Ok(Some(_))`), that resume ALSO already
+/// published the missing index entry (its own step (d)), so there is
+/// nothing left for [`self_heal_reconcile_missing_index_entries`]'s more
+/// expensive directory-wide scan to find — it is skipped in that case,
+/// rather than paid for unconditionally. Otherwise (the byte-identity check
+/// found no `E-SHD-006` duplicate — e.g. the canonical was already correctly
+/// truncated, the `E-SHD-007` signature), falls through to the index
+/// reconciliation scan.
+fn run_self_heal_if_plausible(
+    entry: &ShardEntry,
+    canonical_path: &Path,
+) -> Result<(), ShardRollError> {
+    let plausible = self_heal_recovery_plausible(entry, canonical_path).map_err(|source| {
+        ShardRollError::SealWriteFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        }
+    })?;
+    if !plausible {
+        return Ok(());
+    }
+
+    if self_heal_resume_from_truncate(entry, canonical_path)?.is_some() {
+        return Ok(());
+    }
+
+    self_heal_reconcile_missing_index_entries(entry, canonical_path)?;
+    Ok(())
+}
 
 /// `E-SHD-006` self-heal: detects "seal published, truncate did not" (a
 /// sealed shard exists at the index's next-expected `seq` path whose
