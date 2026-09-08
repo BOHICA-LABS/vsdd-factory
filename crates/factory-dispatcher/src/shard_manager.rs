@@ -1506,20 +1506,36 @@ pub fn shard_cap_gate_check(
                     // EC-017), silently destroying that history — the
                     // exact data-loss gap F-C2-P1-002 identifies.
                     //
-                    // F-002 (BC-1.18.005, cluster-1, still binding): a
-                    // non-`NotFound` stat() failure here is fail-OPEN, never
-                    // fail-loud — this backstop probe's own inability to
-                    // read the canonical file's current size must NEVER
-                    // block a `Write` whose OWN `content` never depended on
-                    // that read (the trigger formula is, and remains,
-                    // entirely stat-free per F-002). A failed probe simply
-                    // means this dispatch cannot confirm-or-deny a crash-
-                    // orphan state; the backstop is defense-in-depth, not
-                    // this Write's own correctness gate, so it is skipped
-                    // (logged, not swallowed silently) rather than blocking.
+                    // BC-1.18.006 v1.6 Invariant 8 / EC-019 (F-C2-P2-003,
+                    // MAJOR, cluster-2 LOCAL adversary pass-2 — supersedes
+                    // this arm's prior fail-open posture): a non-`NotFound`
+                    // failure of THIS backstop probe's OWN `stat()` call now
+                    // fails LOUD as `HookResult::Error` naming `E-SHD-008`.
+                    // F-002 (BC-1.18.005) is UNCHANGED and still governs a
+                    // DIFFERENT question — it scopes ONLY the stat-free
+                    // Postcondition 3 TRIGGER FORMULA (`projected_size =
+                    // len(content)` alone), which never reads
+                    // `current_shard_bytes` and is therefore never affected
+                    // by any stat() outcome, success or failure. F-002 never
+                    // governed this probe's OWN failure disposition — this
+                    // probe (and the Write-arm's very own `stat()` call
+                    // altogether) did not exist until BC-1.18.006 v1.5 added
+                    // it; see `test_BC_1_18_005_F002_write_under_cap_continues_regardless_of_current_shard_bytes_value`,
+                    // retargeted off a stat()-failure fixture onto a
+                    // successfully-stat()-able one for exactly this reason.
+                    // Rationale (product-owner v1.6 adjudication): `stat()`
+                    // follows symlinks and fails on `ELOOP`, but
+                    // `write_atomic`'s `rename` need not dereference the
+                    // final symlink component and CAN succeed — so
+                    // fail-OPEN here would let this probe silently skip
+                    // while the `Write` itself proceeds underneath a
+                    // symlink the probe could not see through, destroying a
+                    // crash-orphaned, un-sealed, over-cap canonical this
+                    // dispatch never confirmed was safe to overwrite.
                     // `current_shard_bytes_flat` itself still maps
-                    // `NotFound` to `Ok(0)` (EC-004), so a first-ever write
-                    // never even reaches this fallback.
+                    // `NotFound` to `Ok(0)` (EC-004, legitimate
+                    // first-write) — Invariant 8 is scoped to every OTHER
+                    // `io::ErrorKind`.
                     match current_shard_bytes_flat(target_path) {
                         Ok(current_bytes) if current_bytes > entry.shard_cap_bytes => {
                             if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
@@ -1527,16 +1543,13 @@ pub fn shard_cap_gate_check(
                             }
                         }
                         Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!(
-                                artifact_stem = %entry.artifact_stem,
-                                path = %target_path.display(),
-                                error = %e,
-                                "BC-1.18.006 Postcondition 7 catch point (ii): Write-arm backstop \
-                                 stat() failed — skipping the crash-orphan probe for this \
-                                 dispatch (F-002: never blocking a Write for a failure its own \
-                                 trigger formula does not depend on)"
-                            );
+                        Err(source) => {
+                            return ShardRollError::BackstopProbeFailed {
+                                artifact_stem: entry.artifact_stem.clone(),
+                                path: target_path.display().to_string(),
+                                source,
+                            }
+                            .into();
                         }
                     }
 
@@ -1879,8 +1892,14 @@ pub struct ShardIndex {
 
 /// Named crash-point error codes for BC-1.18.006's staged roll sequence
 /// (Postcondition 1's partial-failure postconditions; ADR-051 §Decision 11).
-/// Reused VERBATIM (never a new code) by Postcondition 7's retroactive
-/// invocation, catch point (i)/(ii) (ADR-051 §Decision 15 point 3).
+/// `SealWriteFailed`/`TruncateFailedAfterSeal`/`IndexPublishFailedAfterTruncate`
+/// (E-SHD-001/006/007) are reused VERBATIM (never a new code) by
+/// Postcondition 7's retroactive invocation, catch point (i)/(ii) (ADR-051
+/// §Decision 15 point 3). `BackstopProbeFailed` (E-SHD-008, BC-1.18.006 v1.6
+/// Invariant 8 / EC-019, F-C2-P2-003) is a DISTINCT addition — it names the
+/// `Write` arm's OWN dedicated crash-orphan backstop `stat()` probe failing
+/// for a non-`NotFound` reason, which is not a staged-roll-sequence
+/// partial-failure at all (no roll has started when this fires).
 #[derive(Debug, Error)]
 pub enum ShardRollError {
     /// Steps (a)-(b) fail: the canonical file is left completely untouched
@@ -1930,6 +1949,37 @@ pub enum ShardRollError {
     IndexPublishFailedAfterTruncate {
         artifact_stem: String,
         sealed_path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// BC-1.18.006 v1.6 Invariant 8 / EC-019 (F-C2-P2-003, MAJOR): the
+    /// `Write`-arm's own dedicated Postcondition 7 catch point (ii)
+    /// crash-orphan backstop `stat()` probe (`current_shard_bytes_flat`)
+    /// failed for a reason OTHER than `NotFound` (`NotFound` itself remains
+    /// EC-004's legitimate first-write case, mapped to `Ok(0)` and never
+    /// reaching this variant at all). `stat()` follows symlinks and can fail
+    /// (e.g. `ELOOP`) in cases where `write_atomic`'s own `rename` need not
+    /// dereference the final symlink component and could still succeed — so
+    /// fail-OPEN here would let this probe silently skip while the `Write`
+    /// itself proceeds underneath a symlink the probe could not see
+    /// through, potentially destroying a crash-orphaned, un-sealed,
+    /// over-cap canonical this dispatch never actually confirmed was safe
+    /// to overwrite. No roll has started when this fires (unlike
+    /// `SealWriteFailed`/`TruncateFailedAfterSeal`/
+    /// `IndexPublishFailedAfterTruncate`, all genuine mid-roll partial-
+    /// failure states) — the canonical file is left completely untouched,
+    /// and no self-heal applies; the caller simply retries once the
+    /// underlying I/O condition is resolved.
+    #[error(
+        "E-SHD-008: Write-arm backstop stat() failed for artifact_stem \"{artifact_stem}\" at \
+         '{path}' — cannot confirm whether the canonical file is a crash-orphaned, over-cap \
+         shard; refusing to let this Write proceed until the underlying I/O condition is \
+         resolved: {source}"
+    )]
+    BackstopProbeFailed {
+        artifact_stem: String,
+        path: String,
         #[source]
         source: io::Error,
     },
@@ -2036,6 +2086,15 @@ fn reattribute_roll_error(
                 source,
             }
         }
+        // `BackstopProbeFailed` (E-SHD-008) is constructed directly at the
+        // `Write` arm's own backstop `stat()` call site and converted to a
+        // `HookResult` immediately — it never passes through any of the
+        // staged step functions this re-attribution exists for, so this
+        // arm is unreachable in practice. Handled explicitly (never a
+        // wildcard) so the match stays exhaustive-safe against future
+        // `ShardRollError` variants: pass it through unchanged rather than
+        // guessing at context this function was never given.
+        other @ ShardRollError::BackstopProbeFailed { .. } => other,
     }
 }
 
