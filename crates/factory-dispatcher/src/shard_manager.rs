@@ -2292,14 +2292,17 @@ fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
 /// (Postcondition 1's empty-canonical short-circuit and Postcondition 3's
 /// cap guarantee together ensure this) — so it is structurally always an
 /// external anomaly with nothing durable to protect. On an `AlreadyExists`
-/// collision, this `stat()`s the destination EXACTLY ONCE; if it is exactly
-/// 0 bytes, it `unlink`s it and retries [`write_exclusive`] EXACTLY ONCE
-/// (never a loop, bounding a racing concurrent writer to a single extra
-/// attempt). A successful reclaim emits a `tracing::warn!` diagnostic and
-/// does NOT fail the dispatch. If the destination is non-empty to begin
-/// with, or the single retry ALSO collides (a genuine race), this fails
-/// loud with `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`]
-/// exactly as the write-once guarantee requires for real sealed content.
+/// collision, this `lstat()`s (`symlink_metadata` — never follows a symlink
+/// at the destination, SEC-001) the destination EXACTLY ONCE; if it is a
+/// REGULAR FILE (not a symlink) and exactly 0 bytes, it `unlink`s it and
+/// retries [`write_exclusive`] EXACTLY ONCE (never a loop, bounding a
+/// racing concurrent writer to a single extra attempt). A successful
+/// reclaim emits a `tracing::warn!` diagnostic and does NOT fail the
+/// dispatch. If the destination is non-empty, IS a symlink (SEC-001 —
+/// never dereferenced/reclaimed through), or the single retry ALSO
+/// collides (a genuine race), this fails loud with
+/// `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`] exactly as the
+/// write-once guarantee requires for real sealed content.
 pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), ShardRollError> {
     let Err(first_err) = write_exclusive(sealed_path, content) else {
         return Ok(());
@@ -2323,8 +2326,27 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
     // as "not reclaimable" — never assumed 0 bytes — falling through to the
     // loud E-SHD-009 refusal below rather than risking an unlink of
     // content this call never confirmed was empty.
-    let is_zero_byte = std::fs::metadata(sealed_path)
-        .map(|meta| meta.len() == 0)
+    //
+    // SEC-001 (security review, MEDIUM, CWE-61/CWE-367): this probe MUST
+    // use `symlink_metadata` (lstat — never follows the final path
+    // component) rather than `std::fs::metadata` (stat — dereferences
+    // symlinks). An attacker with write access to the shard directory
+    // could otherwise plant a symlink at the exact seal destination
+    // pointing at some unrelated 0-byte-reporting path (e.g. `/dev/null`),
+    // and a following `stat()` would judge the destination "reclaimable"
+    // by reading THROUGH the symlink rather than the symlink itself. The
+    // subsequent `std::fs::remove_file`/`unlink()` call does not dereference
+    // symlinks either, so no arbitrary file is ever deleted by that step —
+    // but the dereferencing `stat()` read is itself a symlink-follow this
+    // write-once guard must never perform, mirroring the no-follow
+    // discipline the Write-arm's own crash-orphan backstop probe already
+    // applies (`current_shard_bytes_flat`, which fails loud on `ELOOP`
+    // rather than silently reading through a symlink). A destination that
+    // IS a symlink is therefore never eligible for reclaim — treated
+    // exactly like a non-empty pre-existing destination and routed to the
+    // same loud E-SHD-009 refusal, never dereferenced or unlinked.
+    let is_zero_byte = std::fs::symlink_metadata(sealed_path)
+        .map(|meta| !meta.file_type().is_symlink() && meta.len() == 0)
         .unwrap_or(false);
 
     if !is_zero_byte {
@@ -6252,6 +6274,58 @@ mod bc_1_18_006_roll_tests {
             !index_path.exists(),
             "EC-024: a refused seal-publish attempt must perform NO index publish — no \
              shard-index file may be created as a side effect of a failed roll attempt"
+        );
+    }
+
+    /// SEC-001 (security review, MEDIUM, CWE-61/CWE-367): a symlink planted
+    /// at the exact seal destination — pointing at some OTHER 0-byte-
+    /// reporting target (`/dev/null`) — must NEVER be treated as a
+    /// reclaimable 0-byte destination. `publish_sealed_shard` must refuse
+    /// loud (`E-SHD-009`/`ShardRollError::SealedShardAlreadyExists`) rather
+    /// than dereferencing the symlink via a following `stat()` and
+    /// reclaiming through it. Regression guard against a `std::fs::metadata`
+    /// (follows symlinks) probe where `std::fs::symlink_metadata` (does
+    /// not) is required.
+    #[cfg(unix)]
+    #[test]
+    fn test_SEC001_publish_sealed_shard_refuses_to_reclaim_through_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+
+        // Plant a symlink AT the exact seal destination, pointing at
+        // `/dev/null` — a real path that reports 0 bytes under a
+        // follow-symlinks `stat()`, but which is NOT the destination
+        // itself and must never be reclaimed through.
+        std::os::unix::fs::symlink("/dev/null", &sealed_path)
+            .expect("create symlink at seal destination pointing at /dev/null");
+        assert!(
+            std::fs::symlink_metadata(&sealed_path)
+                .expect("lstat seeded symlink")
+                .file_type()
+                .is_symlink(),
+            "precondition: the seeded destination must itself be a symlink"
+        );
+
+        let err = publish_sealed_shard(&sealed_path, "real sealed content".as_bytes()).expect_err(
+            "SEC-001: a symlink occupying the seal destination MUST refuse loud, never be \
+             dereferenced and reclaimed through",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealedShardAlreadyExists { .. }),
+            "SEC-001: expected ShardRollError::SealedShardAlreadyExists (E-SHD-009) — got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-009"),
+            "SEC-001: the error's Display text must name the E-SHD-009 code — got: {err}"
+        );
+
+        assert!(
+            std::fs::symlink_metadata(&sealed_path)
+                .expect("lstat destination after refusal")
+                .file_type()
+                .is_symlink(),
+            "SEC-001: the symlink at the destination must be left completely untouched — never \
+             unlinked, never dereferenced-and-overwritten"
         );
     }
 
