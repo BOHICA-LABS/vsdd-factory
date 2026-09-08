@@ -1475,7 +1475,7 @@ pub fn shard_cap_gate_check(
                     projected_size_write(content_len)
                 }
                 ToolKind::Edit => {
-                    let current_bytes = match current_shard_bytes_flat(target_path) {
+                    let mut current_bytes = match current_shard_bytes_flat(target_path) {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             return HookResult::Error {
@@ -1502,12 +1502,24 @@ pub fn shard_cap_gate_check(
                     // test-writer fixture that deliberately leaves an
                     // on-disk shard already over cap (covering a missed
                     // catch point (i), EC-015) exercises
-                    // `reconcile_leading_probe_backstop`, which is entirely
-                    // `todo!()`.
-                    if current_bytes > entry.shard_cap_bytes
-                        && let Err(e) = reconcile_leading_probe_backstop(entry, target_path)
-                    {
-                        return e.into();
+                    // `reconcile_leading_probe_backstop`.
+                    //
+                    // Postcondition 7's bounded-window guarantee (AC-025):
+                    // once the backstop reconciles, the canonical file is
+                    // UNCONDITIONALLY 0 bytes (Invariant 6) — `current_bytes`
+                    // is updated in place to reflect that fact so THIS same
+                    // dispatch's own BC-1.18.005 trigger, evaluated just
+                    // below, is judged against the post-backstop state, never
+                    // the stale pre-backstop stat() this arm already paid
+                    // for. Without this update, a net-zero-delta Edit against
+                    // an already-reconciled (now-empty) canonical would
+                    // incorrectly re-fire the trigger a second time for the
+                    // SAME already-closed over-cap condition.
+                    if current_bytes > entry.shard_cap_bytes {
+                        if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
+                            return e.into();
+                        }
+                        current_bytes = 0;
                     }
 
                     let old_len = match required_str_len_bytes(
@@ -1532,7 +1544,7 @@ pub fn shard_cap_gate_check(
                     projected_size_edit(current_bytes, net_delta)
                 }
                 ToolKind::MultiEdit => {
-                    let current_bytes = match current_shard_bytes_flat(target_path) {
+                    let mut current_bytes = match current_shard_bytes_flat(target_path) {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             return HookResult::Error {
@@ -1548,12 +1560,13 @@ pub fn shard_cap_gate_check(
 
                     // BC-1.18.006 Postcondition 7 catch point (ii) / story
                     // AC-025 — see the identical, more fully commented guard
-                    // in the `ToolKind::Edit` arm just above for the full
-                    // "no new stat() call" / non-regression rationale.
-                    if current_bytes > entry.shard_cap_bytes
-                        && let Err(e) = reconcile_leading_probe_backstop(entry, target_path)
-                    {
-                        return e.into();
+                    // (including the post-backstop `current_bytes` reset to
+                    // 0, Invariant 6) in the `ToolKind::Edit` arm just above.
+                    if current_bytes > entry.shard_cap_bytes {
+                        if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
+                            return e.into();
+                        }
+                        current_bytes = 0;
                     }
 
                     // m3/M-1: the "edits" field itself must be a present JSON
