@@ -1018,3 +1018,260 @@ async fn test_BC_1_18_006_PC1_ADR051_D11_ESHD007_self_heal_reconciles_missing_in
         std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
     assert_eq!(sealed_after, "f".repeat(1_200));
 }
+
+// ---------------------------------------------------------------------------
+// S-25.02 cluster-2 LOCAL adversary pass-2 — three findings (F-C2-P2-001
+// MAJOR, F-C2-P2-002 MAJOR, F-C2-P2-006 ADVISORY). Red Gate tests below pin
+// the CORRECT behavior and currently FAIL against the pre-fix code.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// F-C2-P2-001 (MAJOR): `shard_manager::self_heal_resume_from_truncate` uses
+// `let Ok(sealed_content) = std::fs::read_to_string(&sealed_path) else {
+// return Ok(None) };`. When a sealed shard genuinely EXISTS at the index's
+// next-expected seq (the plausibility probe already confirmed this) but its
+// bytes cannot be read as a `String` (e.g. the sealed content is not valid
+// UTF-8), the `else` branch returns `Ok(None)` — INDISTINGUISHABLE from "no
+// sealed shard exists at all". `run_self_heal_if_plausible` then falls
+// through to `self_heal_reconcile_missing_index_entries`, which appends a
+// "sealed" index entry for the orphaned file WITHOUT EVER truncating the
+// canonical — a permanent inconsistent state (canonical still holds the
+// duplicate, un-truncated pre-roll content; the index falsely records the
+// artifact as sealed), violating Invariant 6.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_ESHD006_F_C2_P2_001_self_heal_must_not_silently_mis_recover_on_unreadable_sealed_shard()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+
+    // Genuine E-SHD-006 crash signature: step (b) (publish sealed shard)
+    // succeeded and step (c) (truncate canonical) never ran — the canonical
+    // file is STILL byte-identical to the already-durable sealed shard —
+    // EXCEPT the shared bytes are deliberately NOT valid UTF-8 (a leading
+    // 0xFF/0xFE/0xFD sequence), so `std::fs::read_to_string` fails on both
+    // files even though the sealed shard genuinely exists on disk at the
+    // index's next-expected seq path (the plausibility probe's own `.exists()`
+    // check does not care about UTF-8 validity).
+    let stuck_bytes: Vec<u8> = vec![0xFF, 0xFE, 0xFD, b'x', b'x', b'x', b'x', b'x'];
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    std::fs::write(&sealed_path, &stuck_bytes)
+        .expect("seed non-UTF-8 sealed shard (step (b) done)");
+    std::fs::write(&target, &stuck_bytes)
+        .expect("seed byte-identical non-UTF-8 canonical (step (c) never ran)");
+    // No shard-index file exists yet (step (d) never ran either).
+
+    // An ordinary, unrelated, net-zero-delta Edit dispatch against this
+    // artifact — nothing about this dispatch's OWN payload should trigger a
+    // roll on its own.
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "a", "new_string": "a"}),
+    )
+    .await;
+
+    // The self-heal probe's own I/O failures must never surface as an
+    // uncaught panic in this dispatch; whatever HookResult comes back, the
+    // filesystem state is what this test actually pins.
+    let _ = summary;
+
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_claims_sealed = match std::fs::read_to_string(&index_path) {
+        Ok(toml_str) => {
+            match toml::from_str::<factory_dispatcher::shard_manager::ShardIndex>(&toml_str) {
+                Ok(index) => !index.shards.is_empty(),
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    };
+    let canonical_bytes = std::fs::read(&target).expect("canonical file must still exist on disk");
+    let canonical_still_untruncated = !canonical_bytes.is_empty();
+
+    // F-C2-P2-001: the self-heal must NEVER land in the state where the
+    // index claims the artifact is sealed (an index entry exists) WHILE the
+    // canonical file remains un-truncated (still holding the duplicate
+    // pre-roll content) — that combination is the exact permanent
+    // inconsistency this finding identifies. The correct behavior is EITHER
+    // a full, correct resume (canonical truncated to 0 bytes via a
+    // bytes-level read, with a matching index entry) OR a loud failure (no
+    // index entry at all, canonical left untouched) — never both "index says
+    // sealed" and "canonical still has the duplicate content" at once.
+    assert!(
+        !(index_claims_sealed && canonical_still_untruncated),
+        "F-C2-P2-001 (MAJOR): E-SHD-006 self-heal must not silently mis-recover on a read \
+         error of an EXISTING sealed shard. `self_heal_resume_from_truncate`'s `let Ok(sealed_\
+         content) = std::fs::read_to_string(&sealed_path) else {{ return Ok(None) }}` treats a \
+         read failure (e.g. invalid UTF-8) identically to \"no sealed shard exists\", falling \
+         through to `self_heal_reconcile_missing_index_entries`, which appends a \"sealed\" \
+         index entry for the orphaned file WITHOUT ever truncating the canonical — a permanent \
+         inconsistent state (canonical still holds the duplicate un-truncated pre-roll content; \
+         index falsely claims the artifact is sealed), violating Invariant 6. Got: index_claims_\
+         sealed={index_claims_sealed}, canonical_len={}",
+        canonical_bytes.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P2-002 (MAJOR): `invoke.rs::detect_replace_all_overcap_candidate`
+// filters on event/tool/replace_all/config-match but NOT `entry.shape`.
+// BC-1.18.006 Postcondition 7 catch point (i) is scoped to the FLAT
+// byte-size roll mechanism ONLY — the `replace_all` occurrence-multiplicity
+// under-projection gap it exists to catch is a defect of the byte-size
+// formula alone, never the `"frontmatter-changelog-array"` item-count
+// mechanism. Without a shape check, a `replace_all` Edit against a matched
+// `"frontmatter-changelog-array"`-shaped entry that happens to be byte-
+// over-cap incorrectly calls `execute_roll`, byte-truncating the canonical
+// to empty — cross-mechanism data corruption (e.g. silently emptying a real
+// index-style artifact like BC-INDEX.md, whose rotation is item-count-driven
+// and has nothing to do with byte size).
+// ---------------------------------------------------------------------------
+
+const FRONTMATTER_SHARD_CONFIG: &str = "\
+[[shard]]
+artifact_stem = \"BC-INDEX\"
+artifact_path = \"BC-INDEX.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 49152
+shape = \"frontmatter-changelog-array\"
+n = 500
+";
+
+#[test]
+fn test_BC_1_18_006_PC7_F_C2_P2_002_catch_point_i_must_be_shape_aware_and_no_op_for_frontmatter_changelog_array()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), FRONTMATTER_SHARD_CONFIG);
+    let target = dir.path().join("BC-INDEX.md");
+    // Byte-over-cap on disk (> 49,152 shard_cap_bytes), but this entry's
+    // shape is "frontmatter-changelog-array" — an item-count trigger, which
+    // this catch point never governs. Catch point (i) must be SHAPE-AWARE
+    // and simply no-op for this artifact, never byte-roll it.
+    let over_cap_content = "z".repeat(49_500);
+    std::fs::write(&target, &over_cap_content).unwrap();
+
+    let payload = replace_all_post_tool_use_payload(&target);
+
+    reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
+
+    let canonical_after = std::fs::read_to_string(&target)
+        .expect("F-C2-P2-002: the canonical file must still exist on disk");
+    assert_eq!(
+        canonical_after, over_cap_content,
+        "F-C2-P2-002 (MAJOR): catch point (i) must be SHAPE-AWARE (flat-only per BC-1.18.006 \
+         Postcondition 7) — it must NOT byte-roll a \"frontmatter-changelog-array\"-shaped \
+         artifact just because it happens to be byte-over-cap. The canonical must be left \
+         completely untouched"
+    );
+
+    let sealed_path = sealed_path_for(dir.path(), "BC-INDEX", 1);
+    assert!(
+        !sealed_path.exists(),
+        "F-C2-P2-002: no byte-shard must ever be published for a \
+         \"frontmatter-changelog-array\"-shaped artifact via catch point (i) — the byte-size \
+         roll mechanism does not apply to this shape at all"
+    );
+
+    let index_path = dir.path().join("BC-INDEX.shard-index.toml");
+    assert!(
+        !index_path.exists(),
+        "F-C2-P2-002: no shard-index file should be created either — catch point (i) must \
+         fully no-op (zero side effects) for a non-flat-shaped entry"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C2-P2-006 (ADVISORY, being fixed in-scope per CLAUDE.md's production-
+// grade default): after the `Write`-arm's own Postcondition 7 catch point
+// (ii) backstop truncates a crash-orphaned over-cap canonical to 0 bytes, if
+// the SAME dispatch's own `Write` `content` alone ALSO exceeds cap,
+// BC-1.18.005's own trigger fires a SECOND time for the SAME dispatch — and
+// `execute_roll` unconditionally seals whatever the canonical currently
+// holds, which is now 0 bytes (the backstop just truncated it). This
+// accumulates a useless, permanent EMPTY (0-byte) sealed shard file plus a
+// matching shard-index row, purely as an artifact of the backstop-then-
+// trigger double-fire sequence — never a real seal of real content.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_PC7_F_C2_P2_006_write_backstop_then_trigger_must_not_seal_empty_shard() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+
+    // EC-017 crash-orphan signature: canonical is already over cap,
+    // un-sealed, with no roll ever having started.
+    let orphaned_content = "z".repeat(50_000);
+    std::fs::write(&target, &orphaned_content).unwrap();
+
+    // This dispatch's own Write `content` is ALSO over cap on its own —
+    // once the Write-arm backstop truncates the orphaned content away
+    // (leaving the canonical at 0 bytes), BC-1.18.005's own trigger,
+    // evaluated against THIS Write's 60,000-byte content, fires a SECOND
+    // time in the SAME dispatch.
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(60_000)}),
+    )
+    .await;
+
+    // Precondition: an over-cap Write must still resolve to a blocking
+    // outcome — F-C2-P2-006 is about NOT accumulating a useless empty seal,
+    // never about suppressing the legitimate block for this Write's own
+    // genuinely over-cap content.
+    assert_ne!(
+        summary.exit_code, 0,
+        "precondition: this Write's own 60,000-byte content is over the 49,152 cap and must \
+         still resolve to Block"
+    );
+
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path)
+        .expect("the backstop's own legitimate retroactive seal must have published an index");
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+
+    // The backstop's own retroactive seal of the real 50,000-byte orphaned
+    // content is legitimate and expected — this assertion is NOT what
+    // F-C2-P2-006 is about.
+    assert!(
+        index.shards.iter().any(|e| e.bytes_at_seal == 50_000),
+        "precondition: the Write-arm backstop must have sealed the real, pre-existing 50,000- \
+         byte orphaned content. Got shards: {:?}",
+        index.shards
+    );
+
+    // F-C2-P2-006: no EMPTY (0-byte) sealed shard must ever be recorded in
+    // the index — sealing must be skipped once the canonical content is
+    // already 0 bytes (i.e. immediately after the backstop's own truncate).
+    assert!(
+        !index.shards.iter().any(|e| e.bytes_at_seal == 0),
+        "F-C2-P2-006 (ADVISORY): an over-cap Write, whose own trigger fires a second time \
+         against a canonical the Write-arm backstop JUST truncated to 0 bytes, must NOT \
+         accumulate a useless EMPTY (0-byte) sealed shard + index row before blocking — \
+         sealing must be skipped when the canonical content is already 0 bytes. Got shards: \
+         {:?}",
+        index.shards
+    );
+
+    // Cross-check directly against the filesystem too — no sealed shard
+    // FILE on disk (referenced by the index or not) may be 0 bytes.
+    for shard in &index.shards {
+        let shard_path = dir.path().join(&shard.path);
+        let len = std::fs::metadata(&shard_path)
+            .unwrap_or_else(|_| panic!("indexed shard file {} must exist on disk", shard.path))
+            .len();
+        assert_ne!(
+            len, 0,
+            "F-C2-P2-006: sealed shard file {} must never be 0 bytes on disk",
+            shard.path
+        );
+    }
+}
