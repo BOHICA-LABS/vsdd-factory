@@ -76,6 +76,7 @@
 
 use std::io;
 use std::io::Read as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -1901,6 +1902,11 @@ pub struct ShardIndex {
 /// `Write` arm's OWN dedicated crash-orphan backstop `stat()` probe failing
 /// for a non-`NotFound` reason, which is not a staged-roll-sequence
 /// partial-failure at all (no roll has started when this fires).
+/// `SealedShardAlreadyExists` (E-SHD-009, BC-1.18.006 v1.8 Postcondition 8,
+/// F-C2-P4-002) is ALSO a distinct addition — a write-once/immutability
+/// violation detected by `publish_sealed_shard`'s own exclusive-create
+/// primitive, refusing to overwrite an already-sealed shard at the
+/// destination seq.
 #[derive(Debug, Error)]
 pub enum ShardRollError {
     /// Steps (a)-(b) fail: the canonical file is left completely untouched
@@ -1983,6 +1989,29 @@ pub enum ShardRollError {
         path: String,
         #[source]
         source: io::Error,
+    },
+
+    /// BC-1.18.006 v1.8 Postcondition 8 (F-C2-P4-002, MINOR, defense-in-
+    /// depth): `publish_sealed_shard` is write-once — a sealed shard, once
+    /// durably published at a given `<stem>.<seq:04>.md` path, is
+    /// IMMUTABLE. This variant reports a detected attempt to publish a NEW
+    /// seal at a destination that already exists on disk (e.g. a
+    /// `next_seal_seq` collision with an already-sealed file — a
+    /// filesystem/index desync, or a self-heal-ordering gap like
+    /// F-C2-P4-001) — refused BEFORE any bytes are durably placed at that
+    /// path, via an atomic exclusive-create primitive (never a plain
+    /// stat()-then-write race, which would leave a TOCTOU window open). No
+    /// `#[source]` `io::Error`: this is a detected INVARIANT violation, not
+    /// an underlying I/O failure — the exclusive-create call itself
+    /// succeeded in determining the destination already exists.
+    #[error(
+        "E-SHD-009: refusing to overwrite an already-sealed shard at '{sealed_path}' for \
+         artifact_stem \"{artifact_stem}\" — sealed shards are write-once/immutable; this seq \
+         already has durable content on disk"
+    )]
+    SealedShardAlreadyExists {
+        artifact_stem: String,
+        sealed_path: String,
     },
 }
 
@@ -2096,6 +2125,12 @@ fn reattribute_roll_error(
         // `ShardRollError` variants: pass it through unchanged rather than
         // guessing at context this function was never given.
         other @ ShardRollError::BackstopProbeFailed { .. } => other,
+        ShardRollError::SealedShardAlreadyExists { .. } => {
+            ShardRollError::SealedShardAlreadyExists {
+                artifact_stem: artifact_stem.to_string(),
+                sealed_path: sealed_filename.to_string(),
+            }
+        }
     }
 }
 
@@ -2148,21 +2183,85 @@ fn next_seal_seq(index_path: &Path) -> io::Result<u32> {
 /// roll-only read (BC-1.18.006 Postcondition 1 step (a)). The cheap
 /// per-write TRIGGER check (BC-1.18.005 Postcondition 2) remains
 /// `stat()`-only; content is read ONLY once a roll is already confirmed
-/// necessary.
-pub fn read_canonical_content(canonical_path: &Path) -> io::Result<String> {
-    std::fs::read_to_string(canonical_path)
+/// necessary. `std::fs::read` (bytes), not `read_to_string` (F-C2-P4-004,
+/// ADVISORY, BC-1.18.006 v1.8, cluster-2 LOCAL adversary pass-4): sealing is
+/// a byte-for-byte preservation operation with no UTF-8 requirement at all
+/// — a canonical file containing non-UTF-8 bytes must still be sealable,
+/// never fail with a spurious `E-SHD-001` merely because the content isn't
+/// valid UTF-8. Consistent with the self-heal paths' own byte-level reads
+/// (`self_heal_resume_from_truncate`, F-C2-P1-001).
+pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
+    std::fs::read(canonical_path)
+}
+
+/// Atomically create a BRAND-NEW file at `path` containing exactly
+/// `content`'s bytes — write-once, no-clobber (BC-1.18.006 v1.8
+/// Postcondition 8 / F-C2-P4-002, MINOR, defense-in-depth). Fails with
+/// `io::ErrorKind::AlreadyExists` if `path` already exists, via an atomic
+/// EXCLUSIVE-CREATE primitive rather than a separate stat()-then-write
+/// check — closing the TOCTOU race window a plain "does it exist?" probe
+/// followed by a possibly-overwriting write would leave open.
+///
+/// Mechanism: write `content` to a sibling temp file (`fsync`'d for
+/// durability, mirroring `last_amended_migrate::atomic_write::write_atomic`'s
+/// own durability discipline), then [`std::fs::hard_link`] the temp file
+/// ONTO `path`. `link(2)` (Unix) / `CreateHardLinkW` (Windows) atomically
+/// fails with `EEXIST` (`ErrorKind::AlreadyExists`) if `path` already
+/// exists — unlike `rename(2)`, which unconditionally OVERWRITES an
+/// existing destination — so there is no window between "check if `path`
+/// exists" and "create it" for a racing writer to land in. The temp file is
+/// removed afterward regardless of outcome: on success its content also
+/// durably lives at `path` via the hard link; on failure it was never
+/// linked to `path` at all.
+fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let basename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "shard".to_string());
+    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+
+    {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+    }
+
+    let link_result = std::fs::hard_link(&tmp_path, path);
+    // Best-effort cleanup regardless of outcome — a leftover `.tmp-<pid>`
+    // here is a secondary symptom, never the primary error being reported.
+    let _ = std::fs::remove_file(&tmp_path);
+    link_result?;
+
+    // Best-effort directory fsync (Unix-only, mirroring `write_atomic`'s own
+    // precedent) so the hard-link's directory-entry update is itself
+    // durable across a crash, not just the file's bytes.
+    #[cfg(unix)]
+    if let Ok(dir) = std::fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
 }
 
 /// Step (b): publish the sealed shard as a brand-NEW file at
 /// `<stem>.<seq:04>.md` (BC-1.18.006 Postcondition 1 step (b)) via
-/// `write_atomic` — a `rename()` that CREATES a not-yet-existing
-/// destination, never interrupting any reader of the canonical path (sealed
-/// filenames are never read by shard-unaware code).
-pub fn publish_sealed_shard(sealed_path: &Path, content: &str) -> Result<(), ShardRollError> {
-    last_amended_migrate::atomic_write::write_atomic(sealed_path, content).map_err(|e| {
-        ShardRollError::SealWriteFailed {
-            artifact_stem: stem_from_sealed_path(sealed_path),
-            source: migrate_err_to_io(e),
+/// [`write_exclusive`] — an exclusive-create that fails loud
+/// (`E-SHD-009`, F-C2-P4-002) rather than silently overwriting if the
+/// destination already exists, never interrupting any reader of the
+/// canonical path (sealed filenames are never read by shard-unaware code).
+pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), ShardRollError> {
+    write_exclusive(sealed_path, content).map_err(|e| {
+        if e.kind() == io::ErrorKind::AlreadyExists {
+            ShardRollError::SealedShardAlreadyExists {
+                artifact_stem: stem_from_sealed_path(sealed_path),
+                sealed_path: sealed_path.display().to_string(),
+            }
+        } else {
+            ShardRollError::SealWriteFailed {
+                artifact_stem: stem_from_sealed_path(sealed_path),
+                source: e,
+            }
         }
     })
 }
@@ -5548,7 +5647,8 @@ mod bc_1_18_006_roll_tests {
              content",
         );
         assert_eq!(
-            content, "pre-roll content, 30 bytes ---",
+            content,
+            "pre-roll content, 30 bytes ---".as_bytes(),
             "read_canonical_content must return the EXACT pre-roll bytes, not a truncated or \
              re-encoded copy"
         );
@@ -5577,7 +5677,11 @@ mod bc_1_18_006_roll_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let sealed_path = dir.path().join("decision-log.0001.md");
 
-        publish_sealed_shard(&sealed_path, "sealed content, byte-for-byte copy").expect(
+        publish_sealed_shard(
+            &sealed_path,
+            "sealed content, byte-for-byte copy".as_bytes(),
+        )
+        .expect(
             "BC-1.18.006 Postcondition 1 step (b): publish_sealed_shard must succeed when the \
              destination does not yet exist",
         );
@@ -5603,7 +5707,7 @@ mod bc_1_18_006_roll_tests {
             .join("no-such-subdir")
             .join("decision-log.0001.md");
 
-        let err = publish_sealed_shard(&sealed_path, "content").expect_err(
+        let err = publish_sealed_shard(&sealed_path, "content".as_bytes()).expect_err(
             "a write into a non-existent parent directory must fail, not silently succeed",
         );
         assert!(
