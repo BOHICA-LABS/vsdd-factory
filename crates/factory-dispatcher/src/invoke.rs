@@ -2430,6 +2430,85 @@ pub fn reconcile_replace_all_overcap_if_qualifying(
 }
 
 // ---------------------------------------------------------------------------
+// S-25.02 cluster-2 LOCAL adversary pass-1 finding F-C2-P1-006 — coverage
+// unit tests for `tool_input_has_replace_all_true`'s `MultiEdit` `edits[]`-
+// array branch (BC-1.18.006 Precondition 4 / Postcondition 7 scope
+// predicate: "a `MultiEdit` call containing at least one edit block whose
+// `replace_all` field is `true`"). `tool_input_has_replace_all_true` is a
+// real (non-`todo!()`), already-shipped structural pre-filter — this is a
+// COVERAGE test asserting the branch behaves correctly, not a Red Gate test
+// for unimplemented behavior. If either assertion below fails, that is a
+// latent bug in the already-shipped `MultiEdit` `edits[]` branch, not an
+// expected-red TDD state.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod f_c2_p1_006_replace_all_multi_edit_tests {
+    use super::*;
+
+    /// A `MultiEdit` call whose `edits[]` array contains a per-block
+    /// `replace_all: true` in one of its entries (here, the SECOND block,
+    /// so the branch's `.any(...)` scan must not stop at the first,
+    /// non-qualifying block) qualifies — `tool_input_has_replace_all_true`
+    /// must return `true`.
+    #[test]
+    fn test_F_C2_P1_006_multi_edit_edits_array_per_block_replace_all_true_qualifies() {
+        let tool_input = serde_json::json!({
+            "file_path": "decision-log.md",
+            "edits": [
+                {
+                    "old_string": "first old",
+                    "new_string": "first new",
+                    "replace_all": false
+                },
+                {
+                    "old_string": "second old",
+                    "new_string": "second new",
+                    "replace_all": true
+                }
+            ]
+        });
+
+        assert!(
+            tool_input_has_replace_all_true(&tool_input),
+            "F-C2-P1-006: a MultiEdit whose edits[] array contains a per-block \
+             `replace_all: true` in ANY block must qualify (BC-1.18.006 Precondition 4's \
+             MultiEdit scope: \"a MultiEdit call containing at least one edit block whose \
+             replace_all field is true\")"
+        );
+    }
+
+    /// A negative case: a `MultiEdit` whose `edits[]` array has NO block with
+    /// `replace_all: true` (either omitted entirely, or explicitly `false`)
+    /// must NOT qualify — `tool_input_has_replace_all_true` must return
+    /// `false`.
+    #[test]
+    fn test_F_C2_P1_006_multi_edit_edits_array_without_replace_all_does_not_qualify() {
+        let tool_input = serde_json::json!({
+            "file_path": "decision-log.md",
+            "edits": [
+                {
+                    "old_string": "first old",
+                    "new_string": "first new"
+                },
+                {
+                    "old_string": "second old",
+                    "new_string": "second new",
+                    "replace_all": false
+                }
+            ]
+        });
+
+        assert!(
+            !tool_input_has_replace_all_true(&tool_input),
+            "F-C2-P1-006: a MultiEdit whose edits[] array contains NO block with \
+             `replace_all: true` must NOT qualify — a plain MultiEdit without replace_all is \
+             unaffected by BC-1.18.006 Precondition 4/Postcondition 7 (per Precondition 4's own \
+             closure-scope statement)"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ADR-032-AC021-prereq: dispatcher git_context extension tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]

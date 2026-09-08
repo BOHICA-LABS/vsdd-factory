@@ -622,6 +622,221 @@ async fn test_BC_1_18_006_AC025_EC015_leading_probe_backstop_reached_on_next_edi
 }
 
 // ---------------------------------------------------------------------------
+// AC-025 / EC-017 — BC-1.18.006 v1.5 (F-C2-P1-002, MAJOR): catch point
+// (ii)'s Write-arm DEDICATED backstop `stat()`. Prior to v1.5, the
+// `ShardShape::Flat` `Write` arm performed NO stat() of the canonical file
+// at all (its Postcondition-3 formula, `projected_size = len(content)`,
+// never reads current_shard_bytes) — so a crash-orphaned, un-sealed,
+// over-cap canonical file left behind by a missed catch point (i) (EC-015)
+// would be silently destroyed by the NEXT Write whose own content happens
+// to be under cap, with no roll ever having started for self-heal to catch.
+//
+// Red Gate: this test seeds exactly that crash-orphaned state (canonical
+// file over cap, un-sealed, no roll ever attempted) and drives a `Write`
+// dispatch whose own `content` is under cap. It currently FAILS because the
+// `Write` arm has no backstop at all: `projected_size_write(3_000) = 3_000
+// <= 49_152` returns `Continue` immediately, with no sealed shard ever
+// published and the canonical file left untouched at 50,000 bytes — the
+// exact data-loss gap F-C2-P1-002 identifies. Once implementer adds the
+// Write arm's own dedicated, bounded `stat()` backstop (reusing
+// `reconcile_leading_probe_backstop`, mirroring the already-wired Edit/
+// MultiEdit arms), this test turns GREEN unmodified.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_AC025_EC017_write_arm_backstop_seals_orphaned_overcap_before_applying_undercap_write()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+    // EC-017: catch point (i) crashed without running (as EC-015); the
+    // canonical file is left over cap, un-sealed, with NO roll ever having
+    // started. The artifact's NEXT matched dispatch is specifically a
+    // `Write` (not an `Edit`/`MultiEdit`) whose own `content` is under cap
+    // on its own.
+    let orphaned_content = "z".repeat(50_000);
+    std::fs::write(&target, &orphaned_content).unwrap();
+
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Write",
+        serde_json::json!({"content": "x".repeat(3_000)}),
+    )
+    .await;
+
+    // F-C2-P1-002 / Postcondition 7 catch point (ii): the Write arm's own
+    // DEDICATED stat() must detect the pre-existing over-cap canonical
+    // BEFORE the Write is applied, and reconcile it via the retroactive
+    // roll — so THIS dispatch's own outcome (evaluated against the
+    // post-backstop, now-empty canonical) is Continue: 0 (post-backstop) +
+    // 3,000 (this Write's own content) <= 49,152.
+    assert_eq!(
+        summary.exit_code, 0,
+        "AC-025/EC-017: once the Write-arm backstop reconciles the pre-existing over-cap state, \
+         THIS dispatch's own under-cap Write must Continue — never a stale Block for an \
+         already-closed condition, and never a silent pass-through that skips reconciliation"
+    );
+
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    let sealed_content = std::fs::read_to_string(&sealed_path).expect(
+        "AC-025/EC-017/F-C2-P1-002: the Write arm's dedicated stat()-based backstop must \
+         publish a sealed shard for the crash-orphaned, un-sealed, over-cap canonical content \
+         BEFORE the Write is ever applied — otherwise this un-sealed history is silently \
+         destroyed by the under-cap Write, which is exactly the data-loss gap F-C2-P1-002 \
+         identifies",
+    );
+    assert_eq!(
+        sealed_content, orphaned_content,
+        "AC-025/EC-017: the sealed shard must be a byte-for-byte copy of the orphaned over-cap \
+         content that existed BEFORE this Write dispatch — never the Write's own (not-yet-\
+         applied) under-cap content"
+    );
+
+    // Invariant 6: the canonical file's zero-bytes-after-roll guarantee
+    // holds unconditionally, even under this retroactive backstop path —
+    // the Write's own content is applied AFTER, by the caller, against this
+    // now-empty canonical, never against the orphaned over-cap content.
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        0,
+        "AC-025/EC-017/Invariant 6: the canonical file must be exactly 0 bytes after the \
+         Write-arm backstop reconciles the pre-existing over-cap state"
+    );
+
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).expect(
+        "AC-025/EC-017: the shard-index TOML must be published for the Write-arm backstop's \
+         seal, in the SAME native-gate invocation",
+    );
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "AC-025/EC-017: exactly one [[shard]] entry after the Write-arm backstop's retroactive \
+         roll"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 1);
+    assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 50_000,
+        "AC-025/EC-017: bytes_at_seal must record the FULL pre-existing orphaned over-cap \
+         content's exact size — the sealed-shard cap exception applies since this seal is \
+         retroactive"
+    );
+    assert!(
+        entry.sealed_retroactively,
+        "F-C2-P1-002: a seal produced by the Write-arm backstop's retroactive roll must record \
+         sealed_retroactively = true, identically to the Edit/MultiEdit-arm backstop path"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC-024 / EC-018 — BC-1.18.006 v1.5 Invariant 7 (F-C2-P1-001, MAJOR):
+// `sealed_retroactively` recovery-by-inference on a crashed RETROACTIVE
+// roll's own `E-SHD-007` self-heal.
+//
+// A retroactive roll (Postcondition 7 catch point (i) or (ii)) that crashes
+// AFTER its own step (c) (canonical truncated) but BEFORE its own step (d)
+// (index publish) leaves the exact same filesystem signature as a crashed
+// PROSPECTIVE roll — an orphaned sealed shard, present on disk, absent from
+// the index — with no in-flight roll context surviving to record that THIS
+// particular seal was retroactive. Invariant 7 requires the index
+// reconciliation to INFER `sealed_retroactively` from the recovered entry's
+// own `bytes_at_seal` vs. `shard_cap_bytes` (`bytes_at_seal >
+// shard_cap_bytes ⇒ sealed_retroactively = true`, since a prospective roll
+// can never seal over-cap content per Postcondition 3), never a hardcoded
+// `false`.
+//
+// Red Gate: `self_heal_reconcile_missing_index_entries` (shard_manager.rs)
+// currently hardcodes every recovered entry's `sealed_retroactively` to
+// `false` unconditionally. This test seeds an orphaned sealed shard whose
+// content is OVER shard_cap_bytes (the retroactive-roll signature) and
+// currently FAILS on the `sealed_retroactively` assertion. Once implementer
+// applies Invariant 7's inference rule, this test turns GREEN unmodified.
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_006_AC024_EC018_self_heal_infers_sealed_retroactively_true_for_overcap_orphaned_shard()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("decision-log.md");
+
+    // E-SHD-007 crash signature for a RETROACTIVE roll: steps (b) and (c)
+    // both succeeded — the sealed shard is durably published, OVER CAP
+    // (consistent ONLY with a retroactive seal; Postcondition 3 makes an
+    // over-cap PROSPECTIVE seal structurally impossible), and the canonical
+    // file is correctly truncated to empty — but step (d) never ran, so the
+    // sealed shard is orphaned: present on disk, absent from the index, with
+    // no surviving record of which roll produced it.
+    std::fs::write(&target, "").expect("seed already-truncated (post-step-(c)) canonical");
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    let over_cap_sealed_content = "q".repeat(49_500);
+    std::fs::write(&sealed_path, &over_cap_sealed_content)
+        .expect("seed orphaned OVER-CAP sealed shard (retroactive-roll signature)");
+    // No shard-index file exists at all yet (step (d) never ran).
+
+    // An ordinary, unrelated, net-zero-delta Edit dispatch against the
+    // (correctly empty) canonical — this dispatch's own trigger must never
+    // fire on its own (0 + 0 well under cap).
+    let summary = run_roll_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "a", "new_string": "a"}),
+    )
+    .await;
+
+    assert_eq!(
+        summary.exit_code, 0,
+        "precondition: a net-zero-delta Edit against an empty, well-under-cap canonical must \
+         Continue"
+    );
+
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).expect(
+        "BC-1.18.006 Postcondition 1 / E-SHD-007: self-heal must reconcile the orphaned sealed \
+         shard's missing index entry on this next matched dispatch",
+    );
+    let index: factory_dispatcher::shard_manager::ShardIndex =
+        toml::from_str(&index_toml).expect("the shard-index must be valid TOML");
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "E-SHD-007: exactly one reconciled [[shard]] entry for the previously-orphaned sealed \
+         shard"
+    );
+    let entry = &index.shards[0];
+    assert_eq!(entry.seq, 1);
+    assert_eq!(entry.path, "decision-log.0001.md");
+    assert_eq!(
+        entry.bytes_at_seal, 49_500,
+        "bytes_at_seal must reflect the orphaned sealed shard's actual on-disk byte count"
+    );
+
+    // BC-1.18.006 v1.5 Invariant 7 / F-C2-P1-001: bytes_at_seal (49,500) >
+    // shard_cap_bytes (49,152) is proof-by-construction that this seal was
+    // produced by a RETROACTIVE roll — self-heal MUST infer
+    // sealed_retroactively = true, never hardcode false regardless of size.
+    assert!(
+        entry.sealed_retroactively,
+        "BC-1.18.006 v1.5 Invariant 7 (F-C2-P1-001, MAJOR): E-SHD-007 self-heal reconciliation \
+         of an orphaned sealed shard whose bytes_at_seal (49,500) exceeds shard_cap_bytes \
+         (49,152) MUST infer sealed_retroactively = true — a hardcoded `false` mislabels a \
+         genuinely over-cap shard as cap-guaranteed, the exact ambiguity Postcondition 5's \
+         sealed_retroactively field exists to prevent"
+    );
+
+    // The orphaned sealed shard's content itself must never be touched by
+    // the reconciliation (it only appends an index record, never rewrites
+    // shard content).
+    let sealed_after =
+        std::fs::read_to_string(&sealed_path).expect("sealed shard must remain on disk");
+    assert_eq!(sealed_after, over_cap_sealed_content);
+}
+
+// ---------------------------------------------------------------------------
 // BC-1.18.006 Postcondition 1 / ADR-051 §Decision 11 — self-heal recovery
 // (E-SHD-006, E-SHD-007) MUST run automatically on the artifact's next
 // matched dispatch, BEFORE evaluating any new size trigger. `shard_manager::
