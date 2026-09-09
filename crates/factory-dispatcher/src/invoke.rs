@@ -2351,10 +2351,21 @@ fn tool_input_has_replace_all_true(tool_input: &serde_json::Value) -> bool {
 /// precedent — both already-shipped, non-stub native checks reached
 /// unconditionally from `main::run`.
 ///
-/// Every check here is cheap and structural (event/tool/`replace_all`/
-/// config-match) — this is BC-1.18.006 Postcondition 7's OWN "zero added
-/// cost outside the narrow case" requirement, not implementer business
-/// logic. It was DELIBERATELY kept real (never `todo!()`), even while
+/// **Corrected cost framing (NIT-4, S-25.02 cluster-2 PR #824 pr-review
+/// cycle 3; supersedes an earlier revision's "every check here is cheap and
+/// structural" claim, retracted for the identical PreToolUse-leg claim by
+/// [`find_matching_entry`]'s own doc comment, PR #818 fix-burst finding
+/// B4):** the `event_name`/`tool_name`/`replace_all` checks ARE cheap and
+/// structural — pure `serde_json::Value` field lookups, no I/O. `[[shard]]`
+/// config-match is NOT: `ShardRegistry::load` performs a real (bounded, but
+/// non-zero) TOML parse of the whole config file whenever one exists on
+/// disk, exactly as `executor.rs::shard_cap_precheck`'s sibling PreToolUse
+/// gate does. This is still BC-1.18.006 Postcondition 7's OWN "zero added
+/// cost outside the narrow case" requirement — the ~99% of dispatches that
+/// are not a qualifying `PostToolUse` `Edit`/`MultiEdit` `replace_all` call
+/// never reach the config-match step at all (the cheap checks above return
+/// `None` first) — not a claim that the config-match step itself is free.
+/// It was DELIBERATELY kept real (never `todo!()`), even while
 /// `shard_manager`'s roll bodies were still stubbed during the original
 /// stub-architect burst: had this filter itself been `todo!()`, EVERY
 /// PostToolUse dispatch of ANY kind would have panicked against ADR-051
@@ -2379,6 +2390,33 @@ fn detect_replace_all_overcap_candidate(
     if !tool_input_has_replace_all_true(&original_payload.tool_input) {
         return None;
     }
+    // NIT-4 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `file_path`
+    // extraction is free (a `serde_json::Value` field lookup) and must run
+    // BEFORE the `shard_config_path.exists()` probe / `ShardRegistry::load`
+    // parse below — ordering the free check first skips the parse entirely
+    // on a malformed payload, rather than paying for a parse whose result
+    // would be discarded once `file_path` turns out to be missing/non-string.
+    let Some(target_path) = original_payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+    else {
+        // MINOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): the sibling
+        // PreToolUse path (`executor.rs::shard_cap_precheck`) treats a
+        // missing or non-string `tool_input.file_path` as fail-loud ("MUST
+        // fail loud, never silently resolve to an empty PathBuf"). This leg
+        // has no `HookResult` to return (Decision 15 point 2 — a janitor,
+        // not a gate), but the same "never silent" argument applies here:
+        // warn rather than silently returning `None` with zero telemetry.
+        tracing::warn!(
+            tool_name = %original_payload.tool_name,
+            "BC-1.18.006 Postcondition 7 catch point (i): tool_input is missing a valid string \
+             \"file_path\" while checking for a qualifying replace_all overcap candidate; \
+             skipping reconciliation for this dispatch"
+        );
+        return None;
+    };
     let shard_config_path = cwd.join(crate::executor::SHARD_CONFIG_RELATIVE_PATH);
     if !shard_config_path.exists() {
         return None;
@@ -2405,15 +2443,32 @@ fn detect_replace_all_overcap_candidate(
             return None;
         }
     };
-    let target_path = original_payload
-        .tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str())
-        .map(std::path::PathBuf::from)?;
-    let entry = crate::shard_manager::find_matching_entry(&registry, &target_path)
-        .ok()
-        .flatten()?
-        .clone();
+    let entry = match crate::shard_manager::find_matching_entry(&registry, &target_path) {
+        Ok(Some(entry)) => entry.clone(),
+        Ok(None) => return None,
+        Err(e) => {
+            // MINOR-1 (S-25.02 cluster-2 PR #824 pr-review cycle 3):
+            // `find_matching_entry`'s `Err(ShardConfigError::DuplicateArtifactStem)`
+            // is documented as a normal, fail-loud condition callers MUST
+            // handle — the PreToolUse leg (`shard_cap_gate_check`) converts it
+            // to `HookResult::Error`. This leg has no `HookResult` to return
+            // (Decision 15 point 2 — a janitor, not a gate), but silently
+            // discarding it via `.ok()` (this leg's PRIOR behavior) left zero
+            // telemetry for a genuinely ambiguous `[[shard]]` config —
+            // asymmetric with the F-C2-P1-005 registry-load-failure arm
+            // immediately above, whose own rationale ("fail-open, never
+            // propagated as an error to the caller — but never silent")
+            // applies identically here.
+            tracing::warn!(
+                target_path = %target_path.display(),
+                error = %e,
+                "BC-1.18.006 Postcondition 7 catch point (i): ambiguous [[shard]] config \
+                 (duplicate artifact_stem match) while checking for a qualifying replace_all \
+                 overcap candidate; skipping reconciliation for this dispatch"
+            );
+            return None;
+        }
+    };
     // MAJOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `find_matching_entry`
     // only compares `artifact_stem` against `file_stem()` and calls
     // `path_falls_under_or_equals` — it validates nothing about the entry
