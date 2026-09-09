@@ -2901,15 +2901,23 @@ fn write_exclusive(path: &Path, content: &[u8]) -> Result<(), WriteExclusiveErro
 /// external anomaly with nothing durable to protect. On an `AlreadyExists`
 /// collision, this `lstat()`s (`symlink_metadata` — never follows a symlink
 /// at the destination, SEC-001) the destination EXACTLY ONCE; if it is a
-/// REGULAR FILE (not a symlink) and exactly 0 bytes, it `unlink`s it and
-/// retries [`write_exclusive`] EXACTLY ONCE (never a loop, bounding a
-/// racing concurrent writer to a single extra attempt). A successful
-/// reclaim emits a `tracing::warn!` diagnostic and does NOT fail the
-/// dispatch. If the destination is non-empty, IS a symlink (SEC-001 —
-/// never dereferenced/reclaimed through), or the single retry ALSO
-/// collides (a genuine race), this fails loud with
-/// `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`] exactly as the
-/// write-once guarantee requires for real sealed content.
+/// REGULAR FILE (not a symlink) and exactly 0 bytes, it STAGES the retry's
+/// content via [`stage_temp_file`] FIRST, THEN `unlink`s the 0-byte
+/// destination, THEN publishes the already-staged temp file via
+/// [`publish_staged_temp_file`] — never re-invoking [`write_exclusive`]
+/// itself for the retry, and never a loop (bounding a racing concurrent
+/// writer to a single extra attempt). N-3 (PR #824 pr-review cycle 2):
+/// staging BEFORE unlinking, not after, is the whole point of `ef6ca3b4`'s
+/// fix (see the "Finding #2" paragraph immediately below) — a staging
+/// failure on the retry therefore leaves the reclaimable 0-byte
+/// destination COMPLETELY UNTOUCHED, rather than an unlink-then-stage
+/// ordering that would delete it before ever discovering the retry's own
+/// staging failure. A successful reclaim emits a `tracing::warn!`
+/// diagnostic and does NOT fail the dispatch. If the destination is
+/// non-empty, IS a symlink (SEC-001 — never dereferenced/reclaimed
+/// through), or the single retry ALSO collides (a genuine race), this
+/// fails loud with `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`]
+/// exactly as the write-once guarantee requires for real sealed content.
 ///
 /// PR #824 pr-review Finding #2 (MAJOR): `write_exclusive`'s
 /// [`WriteExclusiveError`] distinguishes a TEMP-path collision from a
