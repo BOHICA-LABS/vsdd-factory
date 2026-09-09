@@ -2414,6 +2414,35 @@ fn detect_replace_all_overcap_candidate(
         .ok()
         .flatten()?
         .clone();
+    // MAJOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `find_matching_entry`
+    // only compares `artifact_stem` against `file_stem()` and calls
+    // `path_falls_under_or_equals` — it validates nothing about the entry
+    // itself. `execute_roll` (reached via `reconcile_post_write_replace_all_overcap`
+    // below) is DESTRUCTIVE: it seals and then truncates the canonical to 0
+    // bytes. `shard_cap_gate_check` (the PreToolUse leg) never reaches
+    // `execute_roll` without first calling `validate_entry` — an entry that
+    // fails EC-022 (e.g. `artifact_path = "."` or `"./"`, which normalizes to
+    // an empty registered-component vector whose suffix test then matches ANY
+    // path sharing `artifact_stem`) is refused loud there. Without this same
+    // gate on THIS leg, a config entry the PreToolUse gate would reject could
+    // silently seal-and-empty a file the config never legitimately governed —
+    // the exact raw behavior EC-022's `validate_entry` check exists to make
+    // unreachable via config (the same bypass also covers the EC-010/011/
+    // 013/015/017 cap-sanity checks `reconcile_post_write_replace_all_overcap`
+    // relies on downstream). Fail-open-but-never-silent, matching this leg's
+    // documented contract (Decision 15 point 2) and the F-C2-P1-005 registry-
+    // load-failure arm immediately above: on `Err`, warn and return `None`
+    // rather than propagating an error to the caller or silently proceeding.
+    if let Err(e) = crate::shard_manager::validate_entry(&entry) {
+        tracing::warn!(
+            artifact_stem = %entry.artifact_stem,
+            error = %e,
+            "BC-1.18.006 Postcondition 7 catch point (i): matched [[shard]] config entry failed \
+             validate_entry; skipping reconciliation for this dispatch rather than reaching the \
+             destructive execute_roll path with an entry the PreToolUse gate would have refused"
+        );
+        return None;
+    }
     // F-C2-P2-002 (MAJOR, S-25.02 cluster-2 LOCAL adversary pass-2):
     // Postcondition 7 catch point (i) is scoped to the `"flat"` byte-size
     // roll mechanism ONLY — the `replace_all` occurrence-multiplicity

@@ -45,7 +45,9 @@ use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::plugin_loader::PluginCache;
 use factory_dispatcher::registry::Registry;
 use factory_dispatcher::resolver::ResolverRegistry;
-use factory_dispatcher::shard_manager::{ShardEntry, ShardShape, execute_roll};
+use factory_dispatcher::shard_manager::{
+    ShardEntry, ShardRegistry, ShardShape, execute_roll, find_matching_entry, validate_entry,
+};
 
 /// A well-formed `"flat"`-shaped `[[shard]]` config entry — identical
 /// calibration constants to `bc_1_18_005_shard_cap_trigger_test.rs`'s own
@@ -648,6 +650,89 @@ fn test_BC_1_18_006_AC024_EC014_real_invoke_wiring_retroactively_seals_qualifyin
     assert!(
         entry.sealed_retroactively,
         "AC-024/Postcondition 7: a catch-point-(i) seal must record sealed_retroactively = true"
+    );
+}
+
+/// MAJOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): a `[[shard]]`
+/// entry with `artifact_path = "."` normalizes to an EMPTY registered
+/// component vector — `path_falls_under_or_equals`'s suffix-match leg is
+/// then vacuously true for ANY target sharing `artifact_stem`, so
+/// `find_matching_entry` matches this entry against a target path it never
+/// legitimately governed. `validate_entry` refuses this shape loud
+/// (EC-022), and `shard_cap_gate_check` (the PreToolUse leg) never reaches
+/// its own `execute_roll` without calling `validate_entry` first — but
+/// PRIOR to MAJOR-2's fix, `detect_replace_all_overcap_candidate` (this
+/// leg) called `find_matching_entry` alone and routed straight into the
+/// destructive `reconcile_post_write_replace_all_overcap` ->
+/// `execute_roll`, which seals and truncates the canonical to 0 bytes.
+const EC022_ARTIFACT_PATH_ALL_CURDIR_SHARD_CONFIG: &str = "\
+[[shard]]
+artifact_stem = \"decision-log\"
+artifact_path = \".\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 49152
+shape = \"flat\"
+";
+
+#[test]
+fn test_MAJOR2_reconcile_replace_all_overcap_never_reaches_execute_roll_for_entry_failing_validate_entry()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), EC022_ARTIFACT_PATH_ALL_CURDIR_SHARD_CONFIG);
+    let target = dir.path().join("decision-log.md");
+    let over_cap_content = "z".repeat(49_500);
+    std::fs::write(&target, &over_cap_content).unwrap();
+
+    // Precondition: confirm this fixture actually reproduces MAJOR-2's
+    // exact bypass shape — find_matching_entry MUST match this entry (the
+    // vacuously-true suffix match an all-CurDir artifact_path produces),
+    // while validate_entry MUST independently refuse it (EC-022). If either
+    // precondition fails, this test would pass for the wrong reason (no
+    // bypass to catch at all).
+    let registry_path = dir.path().join(".factory").join("shard-config.toml");
+    let registry = ShardRegistry::load(&registry_path)
+        .expect("precondition: the fixture shard-config.toml must parse as a valid ShardRegistry");
+    let matched = find_matching_entry(&registry, &target)
+        .expect("precondition: find_matching_entry must not itself error for this fixture")
+        .expect(
+            "precondition: find_matching_entry MUST match this EC-022-invalid entry against the \
+             target — MAJOR-2's bypass is exercised only when the matcher itself succeeds \
+             despite the entry being invalid",
+        );
+    assert!(
+        validate_entry(matched).is_err(),
+        "precondition: this entry MUST fail validate_entry (EC-022 empty/CurDir-only \
+         artifact_path) — otherwise this fixture does not reproduce MAJOR-2's bypass shape at \
+         all"
+    );
+
+    let payload = replace_all_post_tool_use_payload(&target);
+    reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
+
+    // MAJOR-2: the destructive execute_roll path must NEVER be reached for
+    // an entry that fails validate_entry, even though find_matching_entry
+    // matched it. Assert the REAL absence of every destructive side effect
+    // execute_roll would have produced (never a mere "didn't panic" check):
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("MAJOR-2: the canonical file must still exist"),
+        over_cap_content,
+        "MAJOR-2: an entry failing validate_entry must never reach execute_roll — the canonical \
+         must be left COMPLETELY UNTOUCHED, never sealed-and-truncated, for a config entry the \
+         PreToolUse gate would have refused"
+    );
+    let sealed_path = sealed_path_for(dir.path(), "decision-log", 1);
+    assert!(
+        !sealed_path.exists(),
+        "MAJOR-2: no sealed shard must be published for an entry failing validate_entry"
+    );
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    assert!(
+        !index_path.exists(),
+        "MAJOR-2: no shard-index must be created for an entry failing validate_entry — \
+         reconciliation must never have been attempted at all"
     );
 }
 
