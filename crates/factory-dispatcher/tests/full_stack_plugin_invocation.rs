@@ -336,7 +336,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_blocks_unauthorized_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     // The real validate-artifact-path WASM must have run (not a stub)
     assert_eq!(
@@ -460,7 +460,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_continues_authorized_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     assert_eq!(summary.per_plugin_results.len(), 1);
     let outcome = &summary.per_plugin_results[0];
@@ -556,7 +556,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_continues_non_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     // Plugin may not match (tool filter "Write|Edit") — that's fine, no block either way
     assert_eq!(
@@ -907,7 +907,7 @@ async fn test_e2e_BC_1_14_001_async_block_verdict_discarded() {
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
-    let sync_summary = execute_tiers(inputs, empty_tiers).await;
+    let sync_summary = execute_tiers(inputs, empty_tiers, None).await;
     assert_eq!(
         sync_summary.exit_code, 0,
         "TC-6 FAIL: sync_group exit_code must be 0 when sync_group is empty \
@@ -1043,7 +1043,7 @@ async fn test_e2e_BC_1_14_001_mixed_sync_async_partition_timing() {
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
     let sync_elapsed = sync_start.elapsed();
 
     // Sync must complete and return 0 (authorized path)
@@ -1172,7 +1172,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_crash_fail_closed_on_error_block() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -1492,7 +1492,7 @@ async fn test_e2e_BC_3_08_001_sync_hook_internal_log_events() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(summary.per_plugin_results.len(), 1);
 
@@ -1613,7 +1613,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_timeout_fail_closed_on_error_block() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),

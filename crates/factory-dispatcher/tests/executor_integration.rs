@@ -115,7 +115,12 @@ async fn parallel_happy_path_five_plugins_one_tier() {
     let tiers = group_by_priority(&registry, matched);
 
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
-    let summary = execute_tiers(inputs(&engine, &cache, &registry, &internal_log), tiers).await;
+    let summary = execute_tiers(
+        inputs(&engine, &cache, &registry, &internal_log),
+        tiers,
+        None,
+    )
+    .await;
 
     assert_eq!(summary.per_plugin_results.len(), 5);
     assert_eq!(summary.exit_code, 0);
@@ -146,7 +151,12 @@ async fn crash_does_not_affect_siblings() {
     let tiers = group_by_priority(&registry, matched);
 
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
-    let summary = execute_tiers(inputs(&engine, &cache, &registry, &internal_log), tiers).await;
+    let summary = execute_tiers(
+        inputs(&engine, &cache, &registry, &internal_log),
+        tiers,
+        None,
+    )
+    .await;
 
     assert_eq!(summary.per_plugin_results.len(), 3);
     let by_name: std::collections::HashMap<String, _> = summary
@@ -193,7 +203,12 @@ async fn parallel_timeout_does_not_cascade() {
 
     let started = Instant::now();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
-    let summary = execute_tiers(inputs(&engine, &cache, &registry, &internal_log), tiers).await;
+    let summary = execute_tiers(
+        inputs(&engine, &cache, &registry, &internal_log),
+        tiers,
+        None,
+    )
+    .await;
     let wall_ms = started.elapsed().as_millis() as u64;
 
     // Four plugins; one hangs for ~120ms. Sequential execution would
@@ -245,7 +260,12 @@ async fn multi_tier_runs_in_priority_order() {
     let tiers = group_by_priority(&registry, matched);
 
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
-    let summary = execute_tiers(inputs(&engine, &cache, &registry, &internal_log), tiers).await;
+    let summary = execute_tiers(
+        inputs(&engine, &cache, &registry, &internal_log),
+        tiers,
+        None,
+    )
+    .await;
 
     assert_eq!(summary.per_plugin_results[0].plugin_name, "early");
     // Tier 2 has both late plugins; order within tier is unspecified.
@@ -268,7 +288,12 @@ async fn empty_tier_set_returns_zero_exit_code() {
     let tiers: Vec<Vec<&RegistryEntry>> = vec![];
 
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
-    let summary = execute_tiers(inputs(&engine, &cache, &registry, &internal_log), tiers).await;
+    let summary = execute_tiers(
+        inputs(&engine, &cache, &registry, &internal_log),
+        tiers,
+        None,
+    )
+    .await;
 
     assert!(summary.per_plugin_results.is_empty());
     assert_eq!(summary.exit_code, 0);

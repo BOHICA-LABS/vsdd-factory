@@ -169,7 +169,7 @@ async fn ac002_execute_tiers_zero_overhead_when_needs_context_empty() {
     let resolver_registry = Arc::new(resolver_registry);
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     // Plugin must have run without error
     assert_eq!(
@@ -225,7 +225,7 @@ async fn ac003_execute_tiers_invokes_resolver_when_needs_context_non_empty() {
     let resolver_registry = Arc::new(resolver_registry);
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -362,7 +362,7 @@ async fn ac005_resolver_not_found_event_appears_in_internal_log() {
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
     // execute_tiers must NOT panic — dispatch continues even with missing resolver.
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -457,7 +457,7 @@ async fn f_p2_007_erroring_resolver_causes_resolver_error_event_in_internal_log(
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
     // execute_tiers must NOT panic — dispatch continues even with erroring resolver.
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -675,7 +675,7 @@ async fn f_p4_001b_merge_collision_event_carries_resolver_name() {
     let resolver_registry = Arc::new(resolver_registry);
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -821,7 +821,7 @@ async fn f_p5_005_resolver_receives_correct_resolverinput_shape() {
         internal_log: internal_log.clone(),
         resolver_registry,
     };
-    execute_tiers(inputs, tiers).await;
+    execute_tiers(inputs, tiers, None).await;
 
     let captured_input = captured.lock().unwrap().clone();
     let input = captured_input.expect("SpyResolver must have been invoked");
@@ -925,7 +925,7 @@ async fn f_p5_006_payload_field_extraction_falls_back_to_hook_event_name() {
         internal_log: internal_log.clone(),
         resolver_registry,
     };
-    execute_tiers(inputs, tiers).await;
+    execute_tiers(inputs, tiers, None).await;
 
     let captured_input = captured.lock().unwrap().clone();
     let input = captured_input.expect("SpyResolver2 must have been invoked");

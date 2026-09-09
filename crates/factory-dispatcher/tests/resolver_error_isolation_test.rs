@@ -211,7 +211,7 @@ async fn test_BC_4_12_004_trapping_resolver_does_not_abort_dispatch() {
 
     // execute_tiers must NOT panic — BC-4.12.004 crash isolation contract.
     // The real wasmtime trap from unreachable must be caught, not propagated.
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -262,7 +262,7 @@ async fn test_BC_4_12_004_trapping_resolver_emits_resolver_error_event() {
     let tiers = group_by_priority(&registry, matched);
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
-    let _summary = execute_tiers(inputs, tiers).await;
+    let _summary = execute_tiers(inputs, tiers, None).await;
 
     // Flush the InternalLog to disk.
     drop(internal_log);
@@ -441,7 +441,7 @@ context_key = "trap-output"
     let resolver_registry = Arc::new(resolver_registry);
 
     let inputs = make_executor_inputs(&engine, &cache, &registry, &internal_log, resolver_registry);
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),

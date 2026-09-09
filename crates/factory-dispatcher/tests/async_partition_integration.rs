@@ -447,6 +447,7 @@ async fn test_e2e_BC_1_14_001_execute_tiers_ignores_async_flag_field() {
     let summary = execute_tiers(
         make_executor_inputs(&engine, &cache, &registry, &internal_log),
         tiers,
+        None,
     )
     .await;
 
@@ -498,6 +499,7 @@ async fn test_e2e_BC_1_14_001_execute_tiers_awaits_all_sync_results() {
     let summary = execute_tiers(
         make_executor_inputs(&engine, &cache, &registry, &internal_log),
         tiers,
+        None,
     )
     .await;
 
@@ -531,6 +533,7 @@ async fn test_e2e_BC_1_14_001_sync_only_entries_produce_zero_exit() {
     let summary = execute_tiers(
         make_executor_inputs(&engine, &cache, &registry, &internal_log),
         tiers,
+        None,
     )
     .await;
 

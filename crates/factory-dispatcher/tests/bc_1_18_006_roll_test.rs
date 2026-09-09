@@ -80,6 +80,16 @@ fn write_shard_config(cwd: &std::path::Path, body: &str) {
     std::fs::write(factory_dir.join("shard-config.toml"), body).expect("write shard-config.toml");
 }
 
+/// MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051 §Decision
+/// 17): `shard_cap_precheck` is no longer computed INSIDE `execute_tiers` —
+/// `main::run` now computes it once, before `execute_tiers` runs, and
+/// threads the result in as a parameter. This helper mirrors that: it
+/// builds the SAME `ExecutorInputs` this file's tests always used, plus the
+/// `Option<HookResult>` a caller must now separately compute (via the
+/// decoupled `shard_cap_precheck(&HookPayload, &Path)`) and pass alongside
+/// it. `event_name` defaults to `"PreToolUse"` — this file's own tests all
+/// target the PreToolUse-scoped native gate and never populated an explicit
+/// `event_name` under the pre-MAJOR-3 signature either.
 #[allow(clippy::too_many_arguments)]
 fn inputs_for<'a>(
     engine: &'a wasmtime::Engine,
@@ -90,7 +100,7 @@ fn inputs_for<'a>(
     tool_name: &str,
     target_path: &std::path::Path,
     tool_input_extra: serde_json::Value,
-) -> ExecutorInputs<'a> {
+) -> (ExecutorInputs<'a>, Option<vsdd_hook_sdk::HookResult>) {
     let mut base = HostContext::new("", "0.0.1", "sess-bc-1-18-006", "trace-bc-1-18-006");
     base.cwd = cwd.to_path_buf();
     base.internal_log = Some(internal_log.clone());
@@ -103,7 +113,17 @@ fn inputs_for<'a>(
         );
     }
 
-    ExecutorInputs {
+    let payload = HookPayload {
+        event_name: "PreToolUse".to_string(),
+        tool_name: tool_name.to_string(),
+        session_id: "sess-bc-1-18-006".to_string(),
+        tool_input: tool_input.clone(),
+        tool_response: None,
+        extra: Default::default(),
+    };
+    let precheck_result = factory_dispatcher::executor::shard_cap_precheck(&payload, cwd);
+
+    let inputs = ExecutorInputs {
         engine,
         cache,
         registry,
@@ -114,13 +134,17 @@ fn inputs_for<'a>(
         base_host_ctx: base,
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
-    }
+    };
+    (inputs, precheck_result)
 }
 
 /// Drives a single Edit/Write/MultiEdit PreToolUse dispatch through
 /// `execute_tiers` with an empty tier list — the same "reaches the native
 /// gate, nothing else runs" shape `bc_1_18_005_shard_cap_trigger_test.rs`'s
-/// own `run_shard_gate_for_config` helper uses.
+/// own `run_shard_gate_for_config` helper uses. MAJOR-3: the precheck
+/// result is now computed by `inputs_for` (mirroring `main::run`'s own
+/// call site) and threaded through to `execute_tiers` rather than
+/// recomputed internally.
 async fn run_roll_gate(
     dir: &std::path::Path,
     target: &std::path::Path,
@@ -134,7 +158,7 @@ async fn run_roll_gate(
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -145,7 +169,7 @@ async fn run_roll_gate(
         tool_input_extra,
     );
 
-    execute_tiers(inputs, vec![]).await
+    execute_tiers(inputs, vec![], precheck).await
 }
 
 fn sealed_path_for(dir: &std::path::Path, stem: &str, seq: u32) -> std::path::PathBuf {

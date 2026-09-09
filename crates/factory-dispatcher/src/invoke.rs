@@ -2470,6 +2470,20 @@ fn detect_replace_all_overcap_candidate(
 /// `HookResult` of its own (Decision 15 point 2 — this leg is a janitor,
 /// not a gate) and never influences the caller's own dispatch outcome.
 ///
+/// MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051 §Decision
+/// 17): a prior revision of this doc comment claimed this placement already
+/// prevented "the exact 'silently stop firing if the plugin set changes'
+/// failure mode" **for the PreToolUse leg** — false at the time: the
+/// PreToolUse-scoped native shard-cap gate (`executor::shard_cap_precheck`,
+/// BC-1.18.005) ran only INSIDE `execute_tiers`, called from `main::run`
+/// AFTER the very early-return guard this leg's placement precedes, so an
+/// empty matched-plugin set silently defeated it — the asymmetric twin of
+/// the failure mode this leg's OWN placement (correctly) prevents. MAJOR-3
+/// hoists `shard_cap_precheck` to the SAME call site as this leg (computed
+/// once, threaded into `execute_tiers` as a parameter, never recomputed —
+/// see `executor::shard_cap_precheck` and `executor::execute_tiers`'s own
+/// doc comments) so the guarantee now genuinely holds for BOTH legs.
+///
 /// The qualification filter ([`detect_replace_all_overcap_candidate`]) and
 /// the reconciliation behavior it delegates into
 /// ([`crate::shard_manager::reconcile_post_write_replace_all_overcap`]) are

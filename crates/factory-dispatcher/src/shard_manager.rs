@@ -9163,8 +9163,7 @@ mod bc_1_18_006_roll_tests {
     /// assertion is written to catch.
     #[cfg(unix)]
     #[test]
-    fn test_MAJOR1_reclaim_identity_recheck_runs_immediately_before_unlink_not_before_staging()
-     {
+    fn test_MAJOR1_reclaim_identity_recheck_runs_immediately_before_unlink_not_before_staging() {
         use std::os::unix::fs::FileTypeExt;
 
         let dir = tempfile::tempdir().expect("tempdir");

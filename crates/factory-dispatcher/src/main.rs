@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, execute_tiers, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, execute_tiers, shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -289,23 +289,24 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     let project_cwd = resolve_project_cwd();
 
     // BC-1.18.006 Postcondition 7 catch point (i) / story AC-024 (ADR-051
-    // §Decision 15 point 4 — LOAD-BEARING placement caveat): an
+    // §Decision 15 point 4 — LOAD-BEARING placement caveat; §Decision 17
+    // MAJOR-3, S-25.02 cluster-2 PR #824 pr-review cycle 3): an
     // UNCONDITIONAL native call, independent of the registry's
-    // matched-plugin count, placed BEFORE the
+    // matched-plugin count, placed BEFORE the (now widened, see below)
     // `sync_tiers.is_empty() && partition.async_group.is_empty()`
-    // early-return guard immediately below — mirroring Decision 1's own
-    // "before the registry-driven plugin loop" placement rule. If this call
-    // were placed AFTER that guard (e.g. as "one more thing the
-    // registry-driven loop does"), it would silently stop firing altogether
-    // on any configuration where the registered PostToolUse
-    // `Edit`/`Write`/`MultiEdit` plugin set becomes empty — the exact
-    // "silently stop firing if the plugin set changes" failure mode
-    // Decision 1's placement rule already exists to prevent for the
-    // PreToolUse leg. Precedent for a native call sitting unconditionally in
-    // this exact slot: `write_indeterminate_marker`'s `executor.rs` call
-    // sites and `inject_git_context_if_qualifying` (further below, ADR-029
-    // §Decision 1-3) — both native, non-WASM, non-registry-gated dispatcher-
-    // internal calls reached from this same `run` function.
+    // early-return guard — mirroring Decision 1's own "before the
+    // registry-driven plugin loop" placement rule. If this call were placed
+    // AFTER that guard (e.g. as "one more thing the registry-driven loop
+    // does"), it would silently stop firing altogether on any configuration
+    // where the registered PostToolUse `Edit`/`Write`/`MultiEdit` plugin set
+    // becomes empty — the exact "silently stop firing if the plugin set
+    // changes" failure mode Decision 1's placement rule already exists to
+    // prevent for the PreToolUse leg. Precedent for a native call sitting
+    // unconditionally in this exact slot: `write_indeterminate_marker`'s
+    // `executor.rs` call sites and `inject_git_context_if_qualifying`
+    // (further below, ADR-029 §Decision 1-3) — both native, non-WASM,
+    // non-registry-gated dispatcher-internal calls reached from this same
+    // `run` function.
     //
     // Silent filesystem side effect, no `HookResult` signaling (Decision 15
     // point 2 — a janitor, not a gate): this call never influences
@@ -320,7 +321,45 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // end-to-end by `bc_1_18_006_roll_test.rs`'s AC-024 integration test.
     factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying(&payload, &project_cwd);
 
-    if sync_tiers.is_empty() && partition.async_group.is_empty() {
+    // BC-1.18.005 T-2 / MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle
+    // 3; ADR-051 §Decision 17): the PreToolUse shard-cap gate, computed ONCE
+    // here — at the same call site as the catch-point-(i) leg immediately
+    // above, and for the SAME reason (ADR-051 §Decision 1's placement rule:
+    // a native, non-registry-gated check must run BEFORE the
+    // `sync_tiers.is_empty() && partition.async_group.is_empty()` guard, not
+    // as something the registry-driven `execute_tiers` loop does on the
+    // side). Before MAJOR-3, `shard_cap_precheck` ran only INSIDE
+    // `execute_tiers`, which this function skips entirely whenever no
+    // plugin matched — silently defeating the PreToolUse gate for exactly
+    // that configuration (an empty matched-plugin set), the asymmetric twin
+    // of the failure mode this same Decision 1 placement rule already
+    // prevents on the PostToolUse leg above. The gate's own guards
+    // (event/tool/config-presence — see `shard_cap_precheck`'s doc comment)
+    // make this a zero-cost no-op (`None`) for every dispatch that isn't a
+    // genuine PreToolUse Edit/Write/MultiEdit candidate with a `[[shard]]`
+    // config present.
+    //
+    // Computed EXACTLY ONCE: threaded into `execute_tiers` below as a
+    // parameter, which CONSUMES it rather than recomputing it. The gate's
+    // fired branch reaches `shard_manager::execute_roll` — a destructive
+    // seal-and-truncate-to-0 operation — so evaluating this twice would
+    // corrupt on-disk state (the second evaluation would see the
+    // already-rolled canonical), not merely waste cycles.
+    let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
+
+    // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
+    // a fired shard-cap-gate verdict (`Some(_)`) must still reach
+    // `execute_tiers`'s verdict->`all_outcomes`/`block_intent` translation
+    // and this function's own `final_exit_code` aggregation even when BOTH
+    // the sync and async matched-plugin groups are empty — the exact
+    // configuration that previously made this gate unreachable. An empty
+    // `tiers` vec with a fired precheck verdict is already handled
+    // correctly by `execute_tiers` (empty `tiers` loop body, precheck
+    // consumed unconditionally before it).
+    if shard_gate_precheck_result.is_none()
+        && sync_tiers.is_empty()
+        && partition.async_group.is_empty()
+    {
         return Ok(0);
     }
 
@@ -498,7 +537,7 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
         resolver_registry: resolver_registry.clone(),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, shard_gate_precheck_result).await;
 
     // S-15.01 F5-T-A: async_group dispatch via tokio::spawn per-plugin + tokio::select! drain.
     //

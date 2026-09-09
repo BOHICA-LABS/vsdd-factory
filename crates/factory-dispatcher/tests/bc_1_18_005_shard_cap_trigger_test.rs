@@ -29,9 +29,10 @@
 use std::sync::Arc;
 
 use factory_dispatcher::engine::build_engine;
-use factory_dispatcher::executor::{ExecutorInputs, execute_tiers};
+use factory_dispatcher::executor::{ExecutorInputs, execute_tiers, shard_cap_precheck};
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::internal_log::InternalLog;
+use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::plugin_loader::PluginCache;
 use factory_dispatcher::registry::Registry;
 use factory_dispatcher::resolver::ResolverRegistry;
@@ -68,6 +69,18 @@ fn write_shard_config(cwd: &std::path::Path, body: &str) {
     std::fs::write(factory_dir.join("shard-config.toml"), body).expect("write shard-config.toml");
 }
 
+/// MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051 §Decision
+/// 17): `shard_cap_precheck` is no longer computed INSIDE `execute_tiers` —
+/// `main::run` now computes it once, before `execute_tiers` runs, and
+/// threads the result in as a parameter. This helper mirrors that: it
+/// builds the SAME `ExecutorInputs` this file's tests always used, plus the
+/// `Option<HookResult>` a caller must now separately compute (via the
+/// decoupled `shard_cap_precheck(&HookPayload, &Path)`) and pass alongside
+/// it. `event_name` defaults to `"PreToolUse"` — this file's own tests all
+/// target the PreToolUse-scoped native gate and never populated an explicit
+/// `event_name` under the pre-MAJOR-3 signature either (backward
+/// compatibility for exactly these fixtures was that signature's own
+/// documented default).
 #[allow(clippy::too_many_arguments)]
 fn inputs_for<'a>(
     engine: &'a wasmtime::Engine,
@@ -78,7 +91,7 @@ fn inputs_for<'a>(
     tool_name: &str,
     target_path: &std::path::Path,
     tool_input_extra: serde_json::Value,
-) -> ExecutorInputs<'a> {
+) -> (ExecutorInputs<'a>, Option<vsdd_hook_sdk::HookResult>) {
     let mut base = HostContext::new("", "0.0.1", "sess-bc-1-18-005", "trace-bc-1-18-005");
     base.cwd = cwd.to_path_buf();
     base.internal_log = Some(internal_log.clone());
@@ -91,7 +104,17 @@ fn inputs_for<'a>(
         );
     }
 
-    ExecutorInputs {
+    let payload = HookPayload {
+        event_name: "PreToolUse".to_string(),
+        tool_name: tool_name.to_string(),
+        session_id: "sess-bc-1-18-005".to_string(),
+        tool_input: tool_input.clone(),
+        tool_response: None,
+        extra: Default::default(),
+    };
+    let precheck_result = shard_cap_precheck(&payload, cwd);
+
+    let inputs = ExecutorInputs {
         engine,
         cache,
         registry,
@@ -102,7 +125,8 @@ fn inputs_for<'a>(
         base_host_ctx: base,
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
-    }
+    };
+    (inputs, precheck_result)
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +154,7 @@ async fn test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate(
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -146,7 +170,7 @@ async fn test_BC_1_18_005_INV1_write_with_real_shard_config_reaches_native_gate(
     // native shard-cap gate check MUST be invoked BEFORE the (here, empty)
     // registry-driven tier loop, and a within-cap Write (5,000 <= 49,152)
     // MUST Continue — zero block intent, zero exit code.
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
     assert_eq!(
         summary.exit_code, 0,
         "a within-cap Write against a matched [[shard]] entry MUST Continue (exit_code 0)"
@@ -166,7 +190,7 @@ async fn test_BC_1_18_005_INV1_edit_with_real_shard_config_reaches_native_gate()
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -179,7 +203,7 @@ async fn test_BC_1_18_005_INV1_edit_with_real_shard_config_reaches_native_gate()
 
     // Precondition 1's tool-name filter includes Edit, not just Write.
     // current shard 45,000 + net_delta (+4) = 45,004 <= 49,152 -> Continue.
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
     assert_eq!(
         summary.exit_code, 0,
         "a within-cap Edit against a matched [[shard]] entry MUST Continue (exit_code 0)"
@@ -199,7 +223,7 @@ async fn test_BC_1_18_005_INV1_multi_edit_with_real_shard_config_reaches_native_
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -217,7 +241,7 @@ async fn test_BC_1_18_005_INV1_multi_edit_with_real_shard_config_reaches_native_
 
     // Precondition 1's tool-name filter includes MultiEdit too. net delta =
     // (+1) + (-1) = 0; projected = 48,000 + 0 = 48,000 <= 49,152 -> Continue.
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
     assert_eq!(
         summary.exit_code, 0,
         "a within-cap MultiEdit against a matched [[shard]] entry MUST Continue (exit_code 0)"
@@ -246,7 +270,7 @@ async fn test_BC_1_18_005_PC1_no_shard_config_present_bypasses_native_gate_no_pa
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -257,7 +281,7 @@ async fn test_BC_1_18_005_PC1_no_shard_config_present_bypasses_native_gate_no_pa
         serde_json::json!({"content": "x".repeat(5_000)}),
     );
 
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
     assert_eq!(
         summary.exit_code, 0,
         "no [[shard]] config file present MUST be a complete no-op — never reaches the live gate"
@@ -279,7 +303,7 @@ async fn test_BC_1_18_005_PC1_non_mutating_tool_name_bypasses_native_gate_no_pan
 
     // "Read" is not in {Edit, Write, MultiEdit} — Precondition 1's tool-name
     // filter MUST reject it even though a real [[shard]] config is present.
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -290,7 +314,7 @@ async fn test_BC_1_18_005_PC1_non_mutating_tool_name_bypasses_native_gate_no_pan
         serde_json::json!({}),
     );
 
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
     assert_eq!(
         summary.exit_code, 0,
         "a non-Edit/Write/MultiEdit tool call MUST bypass the native gate entirely, even with a matching config present"
@@ -343,7 +367,7 @@ async fn run_shard_gate_for_config(
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.join("logs")));
 
-    let inputs = inputs_for(
+    let (inputs, precheck) = inputs_for(
         &engine,
         &cache,
         &registry,
@@ -354,7 +378,7 @@ async fn run_shard_gate_for_config(
         tool_input_extra,
     );
 
-    execute_tiers(inputs, vec![]).await
+    execute_tiers(inputs, vec![], precheck).await
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -678,7 +702,22 @@ async fn test_BC_1_18_005_B2_shard_cap_precheck_missing_file_path_fails_loud() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, vec![]).await;
+    // MAJOR-3: `shard_cap_precheck` is computed by the caller (mirroring
+    // `main::run`'s own call site) and threaded into `execute_tiers` — the
+    // SAME malformed (missing "file_path") payload the ExecutorInputs above
+    // carries, built as a real HookPayload this time so the decoupled
+    // function can read it.
+    let payload = HookPayload {
+        event_name: "PreToolUse".to_string(),
+        tool_name: "Write".to_string(),
+        session_id: "sess-bc-1-18-005-b2".to_string(),
+        tool_input: serde_json::json!({"content": "x".repeat(5_000)}),
+        tool_response: None,
+        extra: Default::default(),
+    };
+    let precheck = shard_cap_precheck(&payload, dir.path());
+
+    let summary = execute_tiers(inputs, vec![], precheck).await;
 
     assert_ne!(
         summary.exit_code, 0,
@@ -788,7 +827,7 @@ fn inputs_for_event<'a>(
     tool_name: &str,
     target_path: &std::path::Path,
     tool_input_extra: serde_json::Value,
-) -> ExecutorInputs<'a> {
+) -> (ExecutorInputs<'a>, Option<vsdd_hook_sdk::HookResult>) {
     let mut base = HostContext::new("", "0.0.1", "sess-bc-1-18-005", "trace-bc-1-18-005");
     base.cwd = cwd.to_path_buf();
     base.internal_log = Some(internal_log.clone());
@@ -801,7 +840,21 @@ fn inputs_for_event<'a>(
         );
     }
 
-    ExecutorInputs {
+    // MAJOR-3: computed via the decoupled `shard_cap_precheck`, using the
+    // SAME explicit `event_name` this fixture carries — this is the exact
+    // point of this test (a non-PreToolUse event must short-circuit to
+    // `None` here, before `execute_tiers` ever sees it).
+    let payload = HookPayload {
+        event_name: event_name.to_string(),
+        tool_name: tool_name.to_string(),
+        session_id: "sess-bc-1-18-005".to_string(),
+        tool_input: tool_input.clone(),
+        tool_response: None,
+        extra: Default::default(),
+    };
+    let precheck_result = shard_cap_precheck(&payload, cwd);
+
+    let inputs = ExecutorInputs {
         engine,
         cache,
         registry,
@@ -813,7 +866,8 @@ fn inputs_for_event<'a>(
         base_host_ctx: base,
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
-    }
+    };
+    (inputs, precheck_result)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -844,7 +898,7 @@ shard_cap_bytes = 49152
     let registry = empty_registry();
     let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
 
-    let inputs = inputs_for_event(
+    let (inputs, precheck) = inputs_for_event(
         &engine,
         &cache,
         &registry,
@@ -856,7 +910,7 @@ shard_cap_bytes = 49152
         serde_json::json!({"old_string": "a", "new_string": "ab"}),
     );
 
-    let summary = execute_tiers(inputs, vec![]).await;
+    let summary = execute_tiers(inputs, vec![], precheck).await;
 
     assert_eq!(
         summary.exit_code, 0,
@@ -1127,5 +1181,114 @@ shape = \"flat\"
         summary.block_intent,
         "EC-019: block_intent MUST be set for a [[shard]] config file missing a required \
          non-Option field"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051 §Decision
+// 17) — real-binary regression: the PreToolUse shard-cap gate MUST still
+// fire when NEITHER the sync NOR async matched-plugin group has any
+// entries at all. Before MAJOR-3, `shard_cap_precheck` ran only INSIDE
+// `execute_tiers`, which `main::run` skips ENTIRELY via its
+// `sync_tiers.is_empty() && partition.async_group.is_empty()` early-return
+// guard — so an empty matched-plugin set silently defeated the gate. Every
+// test above drives `execute_tiers` (or a helper wrapping it) directly, so
+// none of them can exercise `main::run`'s own guard — this is the ONE test
+// in this suite that spawns the REAL compiled binary end-to-end, the
+// concrete falsifier the pre-MAJOR-3 architecture made impossible to
+// exercise (MINOR-4, PR #824 pr-review cycle 3).
+// ---------------------------------------------------------------------------
+
+/// Path to the compiled `factory-dispatcher` binary — `CARGO_BIN_EXE_factory-dispatcher`
+/// is set by Cargo for integration tests (see `bc_3_08_001_s19_05.rs`'s own
+/// identical helper).
+fn binary_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_factory-dispatcher"))
+}
+
+/// MAJOR-3 concrete falsifier: a PreToolUse Edit against a matched, EC-009-malformed
+/// `[[shard]]` entry (omits `shape`) MUST still surface `HookResult::Error`/`Block`
+/// and `final_exit_code == 2` even when `CLAUDE_PLUGIN_ROOT` points at a registry
+/// with ZERO `[[hooks]]` entries — the exact "both sync_tiers and
+/// partition.async_group empty" configuration that previously made the native
+/// shard-cap gate unreachable from `main::run`.
+#[test]
+fn test_MAJOR3_shard_cap_gate_fires_via_real_binary_when_no_plugin_matched() {
+    use std::io::Write as _;
+
+    let plugin_root = tempfile::tempdir().expect("tempdir for plugin_root");
+    // schema_version=2, ZERO [[hooks]] entries — match_plugins resolves an
+    // empty matched set for every dispatch, so both partition.sync_group
+    // and partition.async_group are empty and main::run's early-return
+    // guard would (pre-MAJOR-3) have skipped execute_tiers — and with it,
+    // shard_cap_precheck — entirely.
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .expect("write empty hooks-registry.toml");
+
+    let project_dir = tempfile::tempdir().expect("tempdir for project cwd");
+    let target = project_dir.path().join("decision-log.md");
+    std::fs::write(&target, "x".repeat(100)).expect("write target fixture");
+
+    // Same EC-009 malformed body (omits `shape`) the library-level F-001
+    // test above (`test_BC_1_18_005_F001_malformed_config_missing_shape_ec009_blocks_dispatch_outcome`)
+    // proves fails loud when driven directly through `execute_tiers`.
+    let malformed_missing_shape = "\
+[[shard]]
+artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 49152
+";
+    write_shard_config(project_dir.path(), malformed_missing_shape);
+
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "session_id": "sess-major3-real-binary",
+        "tool_input": {
+            "file_path": target.to_string_lossy(),
+            "old_string": "a",
+            "new_string": "ab",
+        },
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new(binary_path())
+        .env("CLAUDE_PLUGIN_ROOT", plugin_root.path())
+        .env("CLAUDE_PROJECT_DIR", project_dir.path())
+        .env("VSDD_LOG_DIR", project_dir.path().join("logs"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn factory-dispatcher binary");
+
+    child
+        .stdin
+        .take()
+        .expect("child stdin must be available")
+        .write_all(payload.as_bytes())
+        .expect("failed to write payload to binary stdin");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for factory-dispatcher output");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "MAJOR-3: a PreToolUse Edit against a matched, EC-009-malformed [[shard]] entry MUST \
+         still exit 2 even when NO plugin matched at all (empty hooks-registry.toml) — if this \
+         is 0, the native shard-cap gate was silently skipped because main::run's early-return \
+         guard fired before shard_cap_precheck ever ran, reproducing the exact bug MAJOR-3 \
+         fixed.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
     );
 }

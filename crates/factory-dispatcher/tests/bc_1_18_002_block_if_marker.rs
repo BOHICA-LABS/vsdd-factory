@@ -147,6 +147,7 @@ async fn test_BC_1_18_002_execute_tiers_block_if_marker_crash_with_marker_blocks
             dir.path().to_path_buf(),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -194,6 +195,7 @@ async fn test_BC_1_18_002_execute_tiers_block_if_marker_crash_no_marker_allows()
             dir.path().to_path_buf(),
         ),
         tiers,
+        None,
     )
     .await;
 

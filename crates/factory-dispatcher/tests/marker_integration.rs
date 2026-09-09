@@ -207,6 +207,7 @@ async fn test_BC_1_18_003_named_plugin_pass_clears_marker_via_execute_tiers() {
             serde_json::json!({}),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -324,6 +325,7 @@ async fn test_BC_1_18_003_pretooluse_pass_does_not_clear_marker() {
             serde_json::json!({}),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -383,6 +385,7 @@ async fn test_BC_1_18_003_different_plugin_pass_does_not_clear_named_plugin_mark
             serde_json::json!({}),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -446,6 +449,7 @@ async fn test_BC_1_18_001_pretooluse_indeterminate_does_not_write_marker() {
             serde_json::json!({}),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -498,6 +502,7 @@ async fn test_BC_1_18_001_posttooluse_indeterminate_writes_marker_for_fail_close
             serde_json::json!({}),
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -561,6 +566,7 @@ async fn test_BC_1_18_001_artifact_path_threaded_from_tool_input_file_path() {
             payload,
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -644,6 +650,7 @@ async fn test_BC_1_18_003_EC_008_artifact_mismatch_preserves_marker_via_execute_
             payload_b,
         ),
         tiers1,
+        None,
     )
     .await;
     assert_eq!(
@@ -676,6 +683,7 @@ async fn test_BC_1_18_003_EC_008_artifact_mismatch_preserves_marker_via_execute_
             payload_a,
         ),
         tiers2,
+        None,
     )
     .await;
     assert_eq!(
@@ -737,6 +745,7 @@ async fn test_BC_1_18_003_EC_009_empty_marker_artifact_path_clears_via_execute_t
             payload,
         ),
         tiers,
+        None,
     )
     .await;
     assert_eq!(
@@ -865,6 +874,7 @@ async fn test_F_P9_001_cross_pair_write_failure_suppresses_superseded_and_marker
             payload,
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -938,6 +948,7 @@ async fn test_F_P9_001_cross_pair_write_success_emits_superseded_then_marker_wri
             payload,
         ),
         tiers,
+        None,
     )
     .await;
 
@@ -1044,6 +1055,7 @@ async fn test_F_P9_001_same_pair_overwrite_no_superseded_via_execute_tiers() {
             payload,
         ),
         tiers,
+        None,
     )
     .await;
 
