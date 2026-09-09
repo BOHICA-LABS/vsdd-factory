@@ -2985,26 +2985,6 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
         return Err(already_exists_err());
     }
 
-    // FIX-MED-1 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-367):
-    // re-verify identity IMMEDIATELY BEFORE unlinking — the `is_zero_byte`
-    // probe above and the `remove_file` below are two SEPARATE syscalls,
-    // leaving a TOCTOU window in between. If a second, legitimate
-    // concurrent writer replaces this 0-byte placeholder with real sealed
-    // content in that window, nothing before this point would notice —
-    // `remove_file` would silently discard genuine sealed history.
-    // `reclaim_identity_still_safe` re-checks via an ALREADY-OPEN file
-    // handle's own metadata, which is immune to a subsequent rename/
-    // replace of the PATH (it inspects the inode this call has open, not
-    // whatever inode currently occupies the path name) — closing the
-    // window as tightly as `std::fs` allows without a new dependency. If
-    // the re-check fails (content changed, no longer 0 bytes, vanished,
-    // etc.), abort the reclaim and fail loud via the SAME E-SHD-009
-    // collision error SEC-001's fix already uses, rather than silently
-    // proceeding as if the reclaim were still safe.
-    if !reclaim_identity_still_safe(sealed_path) {
-        return Err(already_exists_err());
-    }
-
     // PR #824 pr-review Finding #2 (MAJOR): STAGE the retry's content
     // BEFORE unlinking the reclaimable 0-byte destination, never after.
     // The prior revision unlinked first and only then attempted
@@ -3023,6 +3003,41 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
             });
         }
     };
+
+    // FIX-MED-1 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-367;
+    // MAJOR-1, PR #824 pr-review cycle 3): re-verify identity IMMEDIATELY
+    // BEFORE unlinking — the `is_zero_byte` probe above and the
+    // `remove_file` below are two SEPARATE syscalls, leaving a TOCTOU
+    // window in between. If a second, legitimate concurrent writer
+    // replaces this 0-byte placeholder with real sealed content in that
+    // window, nothing before this point would notice — `remove_file` would
+    // silently discard genuine sealed history. `reclaim_identity_still_safe`
+    // re-checks via an ALREADY-OPEN file handle's own metadata, which is
+    // immune to a subsequent rename/replace of the PATH (it inspects the
+    // inode this call has open, not whatever inode currently occupies the
+    // path name) — closing the window as tightly as `std::fs` allows
+    // without a new dependency. MAJOR-1 (PR #824 pr-review cycle 3): this
+    // re-check MUST run AFTER `stage_temp_file` above, not before it —
+    // Finding #2's fix inserted a full staged write (including an
+    // `fsync`/`sync_all`) between the re-check and the unlink, which
+    // silently re-widened the very window this re-check exists to close
+    // (a durable write is a far larger TOCTOU window than "two adjacent
+    // syscalls"). Running the re-check here, immediately before
+    // `remove_file`, restores adjacency while still preserving Finding #2's
+    // own guarantee that a staging failure leaves the destination
+    // untouched — the ordering probe pinned by
+    // `test_MAJOR1_reclaim_identity_recheck_runs_immediately_before_unlink_not_before_staging`
+    // below fails if a future change moves this call back above
+    // `stage_temp_file`. If the re-check fails (content changed, no longer
+    // 0 bytes, vanished, etc.), abort the reclaim and fail loud via the
+    // SAME E-SHD-009 collision error SEC-001's fix already uses, rather
+    // than silently proceeding as if the reclaim were still safe — cleaning
+    // up the now-orphaned staged temp file first (the same leak class
+    // `stage_temp_file` already guards internally).
+    if !reclaim_identity_still_safe(sealed_path) {
+        let _ = std::fs::remove_file(&staged_tmp_path);
+        return Err(already_exists_err());
+    }
 
     // A failed unlink here (e.g. permission denied) leaves the 0-byte file
     // in place with nothing reclaimed — fail loud rather than silently
@@ -3065,7 +3080,14 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
 /// [`publish_sealed_shard`]'s 0-byte reclaim path immediately before the
 /// unlink, to close the TOCTOU window between the earlier
 /// `symlink_metadata` probe and the `remove_file` call as tightly as
-/// `std::fs` allows without a new dependency.
+/// `std::fs` allows without a new dependency. MAJOR-1 (PR #824 pr-review
+/// cycle 3): "immediately before the unlink" is a load-bearing placement
+/// claim, not decorative — Finding #2's fix once inserted a full staged
+/// write (`stage_temp_file`, including an `fsync`/`sync_all`) between this
+/// call and the unlink, silently re-widening the window this call exists
+/// to close. `publish_sealed_shard` now calls [`stage_temp_file`] FIRST
+/// and this re-check LAST, immediately before `remove_file`, so the claim
+/// in this paragraph is (again) literally true of the call site.
 ///
 /// `File::open` (unlike `symlink_metadata`/`lstat`) DOES dereference a
 /// symlink, so if the path was replaced by a symlink in the race window a
@@ -8992,11 +9014,16 @@ mod bc_1_18_006_roll_tests {
     /// but neither drives the re-verify-before-unlink guarantee through the
     /// REAL call site — `publish_sealed_shard`'s 0-byte-reclaim branch
     /// (which calls `reclaim_identity_still_safe` immediately before its
-    /// `remove_file` unlink). A regression in how the CALLER wires this
-    /// check in (dropping the `if !reclaim_identity_still_safe(...)` guard
-    /// entirely, inverting it, or ignoring its return value) would not be
-    /// caught by either helper-level test above — both call the helper
-    /// directly and never touch `publish_sealed_shard`.
+    /// `remove_file` unlink — restored by MAJOR-1's reorder, PR #824
+    /// pr-review cycle 3, after Finding #2's staged-write insertion had
+    /// briefly widened that adjacency; see
+    /// `test_MAJOR1_reclaim_identity_recheck_runs_immediately_before_unlink_not_before_staging`
+    /// below for the ordering-pinning regression coverage). A regression in
+    /// how the CALLER wires this check in (dropping the
+    /// `if !reclaim_identity_still_safe(...)` guard entirely, inverting it,
+    /// or ignoring its return value) would not be caught by either
+    /// helper-level test above — both call the helper directly and never
+    /// touch `publish_sealed_shard`.
     ///
     /// This test deterministically (no thread races, no flakiness)
     /// reproduces the SHAPE of the TOCTOU window `publish_sealed_shard`'s
@@ -9090,6 +9117,96 @@ mod bc_1_18_006_roll_tests {
              be left COMPLETELY UNTOUCHED when the reclaim aborts — it must never be unlinked, \
              regardless of what publish_sealed_shard's internal staging did with the new \
              content"
+        );
+    }
+
+    /// MAJOR-1 (PR #824 pr-review cycle 3): pins `publish_sealed_shard`'s
+    /// STAGE-then-RECHECK ordering at the real call site — the property the
+    /// FIX-MED-1 FIFO test immediately above does NOT pin. Per the
+    /// reviewer's own words: "The Finding #8 FIFO test gates on the
+    /// re-check existing, not on where it sits, so it passes under either
+    /// ordering." Finding #2's `ef6ca3b4` fix had inserted a full staged
+    /// write (including an `fsync`/`sync_all`) BETWEEN FIX-MED-1's re-check
+    /// and the unlink, silently re-widening the CWE-367 TOCTOU window
+    /// FIX-MED-1 exists to close — a regression neither test above would
+    /// catch, since both only observe the FINAL error variant/on-disk
+    /// state, which is identical either way in THEIR fixtures.
+    ///
+    /// Combines a FIFO destination (deterministically disagrees with the
+    /// earlier coarse `is_zero_byte` probe, exactly as the FIX-MED-1 test
+    /// above establishes) with [`force_stage_temp_file_failure`] armed for
+    /// call #1 (the reclaim retry's OWN `stage_temp_file` call — never the
+    /// initial `write_exclusive` attempt, call #0, which succeeds normally
+    /// here and merely collides at the `hard_link` step). This produces two
+    /// OBSERVATIONALLY DISTINCT outcomes depending on ordering:
+    ///
+    /// - **Correct (current) ordering** — `stage_temp_file` called BEFORE
+    ///   `reclaim_identity_still_safe`: call #1 is reached, is forced to
+    ///   fail, and `publish_sealed_shard` returns
+    ///   `Err(ShardRollError::SealWriteFailed)` (E-SHD-001) WITHOUT ever
+    ///   reaching the re-check — the FIFO's identity mismatch is never
+    ///   consulted at all.
+    /// - **Regressed ordering** — `reclaim_identity_still_safe` called
+    ///   BEFORE `stage_temp_file` (the shape MAJOR-1 fixed): the re-check
+    ///   runs FIRST, sees the FIFO's identity mismatch immediately, and
+    ///   aborts with `Err(ShardRollError::SealedShardAlreadyExists)`
+    ///   (E-SHD-009) WITHOUT ever reaching the staging call — the forced
+    ///   failure is armed but never consumed.
+    ///
+    /// Asserting `SealWriteFailed` therefore fails immediately (observing
+    /// `SealedShardAlreadyExists` instead) if a future change moves the
+    /// re-check back above the staging call. Manually verified
+    /// red-without-fix: temporarily swapping the `stage_temp_file` and
+    /// `reclaim_identity_still_safe` calls back to the pre-MAJOR-1 order in
+    /// `publish_sealed_shard` and re-running this test in isolation
+    /// reproduces exactly the `SealedShardAlreadyExists` mismatch this
+    /// assertion is written to catch.
+    #[cfg(unix)]
+    #[test]
+    fn test_MAJOR1_reclaim_identity_recheck_runs_immediately_before_unlink_not_before_staging()
+     {
+        use std::os::unix::fs::FileTypeExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&sealed_path)
+            .status()
+            .expect("mkfifo must be available on this platform to run this test");
+        assert!(
+            status.success(),
+            "mkfifo must succeed in creating the FIFO fixture at the seal destination"
+        );
+
+        // Force ONLY the reclaim retry's OWN staging call (call #1) to
+        // fail — never the initial write_exclusive attempt (call #0).
+        let _guard = force_stage_temp_file_failure(1, ForcedStageFailureKind::Io);
+
+        let new_content = b"MAJOR1-ORDERING-PROBE-CONTENT-MUST-NEVER-BE-PUBLISHED";
+        let err = publish_sealed_shard(&sealed_path, new_content).expect_err(
+            "MAJOR-1 ordering regression: publish_sealed_shard must attempt to STAGE the \
+             retry's content BEFORE ever re-checking the destination's identity — a forced \
+             staging failure at the reclaim retry's own call site must surface here",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "MAJOR-1: expected ShardRollError::SealWriteFailed (E-SHD-001) — stage_temp_file \
+             must run BEFORE reclaim_identity_still_safe, so a forced staging failure surfaces \
+             before the FIFO's identity mismatch is ever consulted. Got {err:?} instead — if \
+             this is ShardRollError::SealedShardAlreadyExists, reclaim_identity_still_safe ran \
+             BEFORE stage_temp_file, which is exactly the ordering regression MAJOR-1 (PR #824 \
+             pr-review cycle 3) fixed: the re-check must sit immediately before the unlink, \
+             AFTER staging completes, never before it."
+        );
+
+        let post_call_meta = std::fs::symlink_metadata(&sealed_path).expect(
+            "MAJOR-1 ordering regression: the destination must still exist — a staging failure \
+             must never have unlinked it first",
+        );
+        assert!(
+            post_call_meta.file_type().is_fifo(),
+            "MAJOR-1 ordering regression: the pre-existing FIFO at the seal destination must be \
+             left COMPLETELY UNTOUCHED by a staging-side failure"
         );
     }
 
