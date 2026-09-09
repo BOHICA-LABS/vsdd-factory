@@ -4642,7 +4642,10 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
     original_record_count: usize,
     partitions: &[MechanismABackfillPartition],
 ) -> bool {
-    let total: usize = partitions.iter().map(|partition| partition.record_count).sum();
+    let total: usize = partitions
+        .iter()
+        .map(|partition| partition.record_count)
+        .sum();
     total == original_record_count
 }
 
@@ -4843,7 +4846,11 @@ pub fn run_mechanism_a_backfill_split(
     // orphan every already-sealed shard from the index it (re-)computes.
     write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
 
-    write_atomic_bytes(canonical_path, &current_partition.bytes, &entry.artifact_stem)?;
+    write_atomic_bytes(
+        canonical_path,
+        &current_partition.bytes,
+        &entry.artifact_stem,
+    )?;
 
     Ok(MechanismABackfillOutcome::Migrated {
         sealed_count,
