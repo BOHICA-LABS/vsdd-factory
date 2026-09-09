@@ -677,6 +677,137 @@ fn test_BC_1_18_006_AC024_EC014_real_invoke_wiring_retroactively_seals_qualifyin
     );
 }
 
+// ---------------------------------------------------------------------------
+// MINOR-4 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `main.rs`'s doc
+// comment for the catch-point-(i) call site previously claimed this wiring
+// was "exercised end-to-end by `bc_1_18_006_roll_test.rs`'s AC-024
+// integration test" — false: that test calls
+// `reconcile_replace_all_overcap_if_qualifying` directly and never goes
+// through `main::run` at all, so neither the call's PLACEMENT (before the
+// tier loop) nor its `cwd` argument (the CANONICALIZED `project_cwd`, not
+// raw `$CLAUDE_PROJECT_DIR`) was ever exercised. This is the ONE test in
+// this suite that spawns the REAL compiled binary end-to-end for the
+// PostToolUse leg — the concrete falsifier the pre-this-test architecture
+// made impossible to exercise, mirroring
+// `bc_1_18_005_shard_cap_trigger_test.rs`'s own
+// `test_MAJOR3_shard_cap_gate_fires_via_real_binary_when_no_plugin_matched`
+// falsifier for the PreToolUse leg.
+// ---------------------------------------------------------------------------
+
+/// Path to the compiled `factory-dispatcher` binary — `CARGO_BIN_EXE_factory-dispatcher`
+/// is set by Cargo for integration tests (see `bc_1_18_005_shard_cap_trigger_test.rs`'s
+/// own identical helper).
+fn binary_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_factory-dispatcher"))
+}
+
+/// MINOR-4 concrete falsifier: a real PostToolUse `Edit` `replace_all` call
+/// against an already-over-cap canonical, dispatched through the REAL
+/// compiled binary (`main::run`, not a direct library call), MUST still
+/// seal-and-truncate — proving catch point (i)'s placement AND its
+/// canonicalized-`cwd` argument both actually work end-to-end, which no
+/// existing test (all of which call `reconcile_replace_all_overcap_if_qualifying`
+/// or `execute_tiers` directly) previously exercised.
+#[test]
+fn test_MINOR4_catch_point_i_fires_via_real_binary_before_post_tool_use_tier_loop() {
+    use std::io::Write as _;
+
+    let plugin_root = tempfile::tempdir().expect("tempdir for plugin_root");
+    // schema_version=2, ZERO [[hooks]] entries: no registered PostToolUse
+    // plugin can be the one producing the observed side effects below —
+    // isolates catch point (i) as the sole source of the sealed shard /
+    // truncated canonical this test asserts on.
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .expect("write empty hooks-registry.toml");
+
+    let project_dir = tempfile::tempdir().expect("tempdir for project cwd");
+    write_shard_config(project_dir.path(), FLAT_SHARD_CONFIG);
+    let target = project_dir.path().join("decision-log.md");
+    // Simulates the under-projected replace_all write already having been
+    // APPLIED (EC-014): the canonical file is genuinely over cap on disk by
+    // the time this PostToolUse event fires — identical fixture shape to
+    // `test_BC_1_18_006_AC024_EC014_real_invoke_wiring_retroactively_seals_qualifying_replace_all_overcap_write`
+    // above, but driven through the REAL BINARY this time.
+    let over_cap_content = "z".repeat(49_500);
+    std::fs::write(&target, &over_cap_content).expect("write over-cap fixture content");
+
+    let payload = serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "session_id": "sess-minor4-real-binary",
+        "tool_input": {
+            "file_path": target.to_string_lossy(),
+            "old_string": "some old text",
+            "new_string": "some new text",
+            "replace_all": true,
+        },
+        "tool_response": {"success": true},
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new(binary_path())
+        .env("CLAUDE_PLUGIN_ROOT", plugin_root.path())
+        .env("CLAUDE_PROJECT_DIR", project_dir.path())
+        .env("VSDD_LOG_DIR", project_dir.path().join("logs"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn factory-dispatcher binary");
+
+    child
+        .stdin
+        .take()
+        .expect("child stdin must be available")
+        .write_all(payload.as_bytes())
+        .expect("failed to write payload to binary stdin");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for factory-dispatcher output");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "MINOR-4: a PostToolUse Edit replace_all dispatch through the real binary must still \
+         exit 0 (this leg never signals a HookResult — Decision 15 point 2) even with ZERO \
+         registered plugins.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // Step (b): the sealed shard is a byte-for-byte copy of the already-
+    // applied over-cap content — proves catch point (i) actually fired
+    // THROUGH main::run, not merely that the process exited cleanly.
+    let sealed_path = sealed_path_for(project_dir.path(), "decision-log", 1);
+    let sealed_content = std::fs::read_to_string(&sealed_path).unwrap_or_else(|e| {
+        panic!(
+            "MINOR-4: catch point (i) must publish a sealed shard via the REAL binary's \
+             main::run wiring, not merely the direct-call path AC-024 already covers; \
+             read_to_string({}) failed: {e}\nstdout: {}\nstderr: {}",
+            sealed_path.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        )
+    });
+    assert_eq!(
+        sealed_content, over_cap_content,
+        "MINOR-4: the sealed shard produced by the real binary must be a byte-for-byte copy of \
+         the over-cap content already on disk when the PostToolUse event fired"
+    );
+
+    // Step (c) / Invariant 6: canonical is exactly 0 bytes.
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        0,
+        "MINOR-4/Invariant 6: the canonical file must be exactly 0 bytes after the real binary's \
+         catch point (i) reconciles the over-cap state"
+    );
+}
+
 /// MAJOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): a `[[shard]]`
 /// entry with `artifact_path = "."` normalizes to an EMPTY registered
 /// component vector — `path_falls_under_or_equals`'s suffix-match leg is
