@@ -3129,14 +3129,22 @@ fn reclaim_identity_still_safe(path: &Path) -> bool {
     {
         use std::os::unix::fs::OpenOptionsExt;
 
-        #[cfg(target_os = "linux")]
+        // N-7 (PR #824 pr-review cycle 2, NIT): Android is Linux-ABI (these
+        // raw fcntl.h values match) but NOT `target_os = "linux"` — a
+        // Linux-only cfg would silently hand it the BSD values below
+        // instead (`0x0100` is `O_NOFOLLOW` on Linux/Android but
+        // `O_NOCTTY` on Linux — the wrong flag entirely). Theoretical
+        // today (Android is not a shipped release target: darwin-arm64/
+        // x86_64, linux-x86_64, linux-musl, windows-x86_64; musl is
+        // `target_os = "linux"`), but free to fix correctly.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         const O_NONBLOCK: i32 = 0o4000;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         const O_NOFOLLOW: i32 = 0o400_000;
-        // macOS/BSD raw fcntl.h values — distinct from Linux's.
-        #[cfg(not(target_os = "linux"))]
+        // macOS/BSD raw fcntl.h values — distinct from Linux/Android's.
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         const O_NONBLOCK: i32 = 0x0004;
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         const O_NOFOLLOW: i32 = 0x0100;
 
         std::fs::OpenOptions::new()
