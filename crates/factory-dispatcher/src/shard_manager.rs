@@ -1610,6 +1610,24 @@ pub fn shard_cap_gate_check(
                 return e.into();
             }
 
+            // PR #824 pr-review Finding #3 (MAJOR, TD-VSDD-060 sibling-
+            // callsite sweep): FIX-MED-2 was originally installed ONLY on
+            // the `Write` arm's own `current_shard_bytes_flat` call site
+            // below, leaving the `Edit`/`MultiEdit` arms' IDENTICAL
+            // `current_shard_bytes_flat(target_path)` calls unguarded (and
+            // untested) — a governed artifact path replaced with a symlink
+            // to a sensitive file elsewhere on the filesystem could still
+            // have its target's size `stat()`-leaked (CWE-200) through
+            // either of those two arms, and — had the leaked size ever
+            // tripped the roll trigger — its bytes durably sealed via
+            // `execute_roll`'s own (already-guarded) read path. HOISTED
+            // here, above the `match tool_kind` dispatch, so this single
+            // call covers all three mutation-tool arms uniformly — see
+            // `reject_canonical_symlink`'s own doc comment.
+            if let Err(e) = reject_canonical_symlink(&entry.artifact_stem, target_path) {
+                return e.into();
+            }
+
             // F-002 fix (S-25.02 Phase F4 LOCAL adversary pass-1 cluster-1,
             // MEDIUM), UPDATED by BC-1.18.006 v1.5 (F-C2-P1-002): BC-1.18.005
             // Postcondition 3's CORRECTED `Write` TRIGGER FORMULA
@@ -1690,12 +1708,12 @@ pub fn shard_cap_gate_check(
                     // `io::ErrorKind`.
                     //
                     // FIX-MED-2 (S-25.02 PR #824 second-security-review,
-                    // MEDIUM, CWE-59/CWE-200): refuse loud rather than
-                    // statting through a symlinked canonical path — see
-                    // `reject_canonical_symlink`'s own doc comment.
-                    if let Err(e) = reject_canonical_symlink(&entry.artifact_stem, target_path) {
-                        return e.into();
-                    }
+                    // MEDIUM, CWE-59/CWE-200): the symlinked-canonical guard
+                    // for this call site is now HOISTED above the
+                    // `match tool_kind` dispatch (PR #824 pr-review Finding
+                    // #3) so it also covers the `Edit`/`MultiEdit` arms
+                    // below — see the hoisted call's own comment just above
+                    // this `match`.
                     match current_shard_bytes_flat(target_path) {
                         Ok(current_bytes) if current_bytes > entry.shard_cap_bytes => {
                             if let Err(e) = reconcile_leading_probe_backstop(entry, target_path) {
@@ -1946,6 +1964,20 @@ pub fn shard_cap_gate_check(
                 .into();
             };
 
+            // PR #824 pr-review Finding #3 (MAJOR, TD-VSDD-060 sibling-
+            // callsite sweep): `read_changelog_item_count`'s `File::open`
+            // below DOES dereference a symlink at `target_path`, and reads
+            // its content (unlike the `"flat"` shape's `stat()`-only
+            // trigger) — the same CWE-59/CWE-200 exfiltration concern
+            // FIX-MED-2 already closes for the `"flat"` shape's three
+            // mutation-tool arms applies here too, via a different
+            // shape/read-cost path. Refuse loud rather than reading through
+            // a symlinked canonical — see `reject_canonical_symlink`'s own
+            // doc comment.
+            if let Err(e) = reject_canonical_symlink(&entry.artifact_stem, target_path) {
+                return e.into();
+            }
+
             let current_item_count = match read_changelog_item_count(target_path) {
                 Ok(count) => count,
                 Err(e) => {
@@ -2180,11 +2212,16 @@ pub enum ShardRollError {
     /// FIX-MED-2 (S-25.02 PR #824 second-security-review, MEDIUM, CWE-59/
     /// CWE-200, defense-in-depth): a governed artifact's canonical path was
     /// found to be a symlink at one of this module's canonical-path
-    /// read/stat sites (`read_canonical_content`'s roll-time read, the
-    /// Write-arm's `current_shard_bytes_flat` backstop probe,
-    /// `self_heal_resume_from_truncate`'s duplicate-content comparison
-    /// read, and `reconcile_post_write_replace_all_overcap`'s size probe).
-    /// If a governed artifact path is replaced with a symlink to a
+    /// read/stat sites (`read_canonical_content`'s roll-time read; the
+    /// hoisted `stat()` guard shared by ALL THREE `"flat"`-shape mutation-
+    /// tool arms — `Write`'s `current_shard_bytes_flat` backstop probe, and
+    /// `Edit`'s/`MultiEdit`'s IDENTICAL `current_shard_bytes_flat` trigger
+    /// reads, per PR #824 pr-review Finding #3's sibling-callsite sweep;
+    /// the `"frontmatter-changelog-array"` shape's `read_changelog_item_count`
+    /// read (same Finding #3 sweep); `self_heal_resume_from_truncate`'s
+    /// duplicate-content comparison read; and
+    /// `reconcile_post_write_replace_all_overcap`'s size probe). If a
+    /// governed artifact path is replaced with a symlink to a
     /// sensitive file elsewhere on the filesystem, silently reading/
     /// statting through it would let the symlink TARGET's bytes be
     /// durably sealed into a brand-new regular file — a real exfiltration
@@ -2485,42 +2522,198 @@ pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
 /// arbitrary attacker-chosen file, and the subsequent `hard_link` below
 /// (which does NOT dereference a symlink `src` by default) would then
 /// hard-link the SYMLINK ITSELF onto `path` — turning the "sealed shard"
-/// into a symlink and defeating write-once immutability. The resulting
-/// `AlreadyExists` is handled by [`publish_sealed_shard`]'s EXISTING
-/// collision-handling path exactly like any other exclusive-create
-/// collision — no new fail-loud branch is needed here.
-fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let basename = path
+/// into a symlink and defeating write-once immutability.
+///
+/// PR #824 pr-review Finding #2 (MAJOR): the temp path ALSO carries a
+/// random nonce (`random_nonce`), not merely `.{basename}.tmp-{pid}` — a
+/// fully deterministic path (observable via `ps`/`/proc`, since `pid` is
+/// the only variable) meant every retried/repeated call for the SAME
+/// destination collided on the exact SAME temp path, so a single stale
+/// leftover (or a pre-planted symlink) permanently blocked every
+/// subsequent seal attempt for that artifact_stem/seq — and, because
+/// [`publish_sealed_shard`] could not tell "the temp path collided" apart
+/// from "the destination already exists", it misreported the former as
+/// `E-SHD-009` (falsely implying real sealed history exists) and, on its
+/// 0-byte-reclaim retry, unlinked a reclaimable destination for a failure
+/// that had nothing to do with it. The nonce makes each call's temp path
+/// its own, closing the self-perpetuating collision; [`WriteExclusiveError`]
+/// closes the misattribution by keeping "temp path occupied" and
+/// "destination occupied" as distinct, never-conflated outcomes.
+#[derive(Debug)]
+enum WriteExclusiveError {
+    /// `create_new` on the TEMP path itself failed with `AlreadyExists` —
+    /// `path` (the destination) was never even touched.
+    TempPathOccupied(io::Error),
+    /// The temp file was created and durably written, but `hard_link`
+    /// failed because `path` (the destination) already exists.
+    DestinationOccupied,
+    /// Any other I/O failure at either step.
+    Io(io::Error),
+}
+
+impl From<StageError> for WriteExclusiveError {
+    fn from(err: StageError) -> Self {
+        match err {
+            StageError::TempPathOccupied(e) => WriteExclusiveError::TempPathOccupied(e),
+            StageError::Io(e) => WriteExclusiveError::Io(e),
+        }
+    }
+}
+
+impl From<PublishError> for WriteExclusiveError {
+    fn from(err: PublishError) -> Self {
+        match err {
+            PublishError::DestinationOccupied => WriteExclusiveError::DestinationOccupied,
+            PublishError::Io(e) => WriteExclusiveError::Io(e),
+        }
+    }
+}
+
+/// A collision-resistant (never cryptographically-unpredictable — `O_EXCL`
+/// is what actually defeats a determined adversary, PR #824 pr-review
+/// Finding #2) value mixed into `stage_temp_file`'s temp-file path, so
+/// repeated/retried calls for the SAME destination each get their OWN temp
+/// path rather than colliding on a single deterministic one. No new
+/// dependency (`rand`): mixes a per-process monotonic counter, wall-clock
+/// nanoseconds, and a stack address (differs per thread) — sufficient for
+/// collision-resistance across concurrent/retried calls, which is the
+/// actual failure mode Finding #2 identifies.
+fn random_nonce() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let stack_addr = std::ptr::addr_of!(counter) as u64;
+    nanos ^ counter.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ stack_addr
+}
+
+/// Half of `write_exclusive`'s two-step sequence: create a FRESH temp file
+/// (collision-resistant path, [`random_nonce`]) containing `content`,
+/// fully durable (`fsync`'d) — NEVER touching `final_path` itself. Returns
+/// the temp file's own path on success; the caller publishes it onto
+/// `final_path` via [`publish_staged_temp_file`].
+///
+/// PR #824 pr-review Finding #2 (MAJOR): split out of `write_exclusive` so
+/// [`publish_sealed_shard`]'s 0-byte-reclaim retry can stage the RETRY's
+/// content BEFORE unlinking the reclaimable destination — a staging
+/// failure here (temp-path collision or any other I/O error) therefore
+/// NEVER destroys the destination at all, closing the "a failed op
+/// destroys a reclaimable 0-byte destination" defect.
+fn stage_temp_file(final_path: &Path, content: &[u8]) -> Result<PathBuf, StageError> {
+    stage_temp_file_with_nonce(final_path, content, random_nonce())
+}
+
+/// [`stage_temp_file`], parameterized on its own nonce rather than always
+/// calling [`random_nonce`] internally — lets tests reproduce a KNOWN temp
+/// path deterministically (to plant a fixture symlink/collision at it)
+/// without weakening production's own real per-call randomness, which
+/// always goes through the [`stage_temp_file`] wrapper above.
+fn stage_temp_file_with_nonce(
+    final_path: &Path,
+    content: &[u8],
+    nonce: u64,
+) -> Result<PathBuf, StageError> {
+    let parent = final_path.parent().unwrap_or_else(|| Path::new("."));
+    let basename = final_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "shard".to_string());
-    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+    let tmp_path = parent.join(format!(
+        ".{basename}.tmp-{}-{nonce:016x}",
+        std::process::id()
+    ));
 
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
     {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp_path)?;
-        file.write_all(content)?;
-        file.sync_all()?;
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(StageError::TempPathOccupied(e));
+        }
+        Err(e) => return Err(StageError::Io(e)),
+    };
+
+    if let Err(e) = file.write_all(content).and_then(|()| file.sync_all()) {
+        // We created this temp file ourselves — clean it up on this early
+        // return (PR #824 pr-review Finding #2: the prior revision's
+        // late/single `remove_file` call, reached only after `hard_link`,
+        // never ran for a write_all/sync_all failure, leaking the temp
+        // file permanently on ENOSPC/EIO).
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(StageError::Io(e));
     }
 
-    let link_result = std::fs::hard_link(&tmp_path, path);
-    // Best-effort cleanup regardless of outcome — a leftover `.tmp-<pid>`
-    // here is a secondary symptom, never the primary error being reported.
-    let _ = std::fs::remove_file(&tmp_path);
-    link_result?;
+    Ok(tmp_path)
+}
 
-    // Best-effort directory fsync (Unix-only, mirroring `write_atomic`'s own
-    // precedent) so the hard-link's directory-entry update is itself
-    // durable across a crash, not just the file's bytes.
-    #[cfg(unix)]
-    if let Ok(dir) = std::fs::File::open(parent) {
-        let _ = dir.sync_all();
+/// The other half of `write_exclusive`'s two-step sequence: hard-link the
+/// already-staged `tmp_path` onto `final_path` — an atomic exclusive-
+/// create per this module's own write-once discipline — then best-effort
+/// remove the temp file regardless of outcome (on success its content
+/// also durably lives at `final_path` via the hard link; on failure it
+/// was never linked there at all).
+fn publish_staged_temp_file(tmp_path: &Path, final_path: &Path) -> Result<(), PublishError> {
+    let link_result = std::fs::hard_link(tmp_path, final_path);
+    // Best-effort cleanup regardless of outcome — a leftover staged temp
+    // file here is a secondary symptom, never the primary error reported.
+    let _ = std::fs::remove_file(tmp_path);
+
+    match link_result {
+        Ok(()) => {
+            // Best-effort directory fsync (Unix-only, mirroring
+            // `write_atomic`'s own precedent) so the hard-link's
+            // directory-entry update is itself durable across a crash, not
+            // just the file's bytes.
+            #[cfg(unix)]
+            if let Some(parent) = final_path.parent()
+                && let Ok(dir) = std::fs::File::open(parent)
+            {
+                let _ = dir.sync_all();
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            Err(PublishError::DestinationOccupied)
+        }
+        Err(e) => Err(PublishError::Io(e)),
     }
+}
 
-    Ok(())
+/// [`stage_temp_file`]'s own narrow error surface — never
+/// `DestinationOccupied`, since staging never touches `final_path`.
+#[derive(Debug)]
+enum StageError {
+    TempPathOccupied(io::Error),
+    Io(io::Error),
+}
+
+/// [`publish_staged_temp_file`]'s own narrow error surface — never
+/// `TempPathOccupied`, since the temp file was already staged
+/// successfully by the time this runs.
+#[derive(Debug)]
+enum PublishError {
+    DestinationOccupied,
+    Io(io::Error),
+}
+
+/// Atomically create a BRAND-NEW file at `path` containing exactly
+/// `content`'s bytes — write-once, no-clobber (BC-1.18.006 v1.8
+/// Postcondition 8 / F-C2-P4-002, MINOR, defense-in-depth). Fails with
+/// [`WriteExclusiveError::DestinationOccupied`] if `path` already exists,
+/// via an atomic EXCLUSIVE-CREATE primitive rather than a separate
+/// stat()-then-write check — closing the TOCTOU race window a plain "does
+/// it exist?" probe followed by a possibly-overwriting write would leave
+/// open. Composes [`stage_temp_file`] then [`publish_staged_temp_file`];
+/// see either's own doc comment for the FIX-HIGH-1/Finding #2 mechanism
+/// detail.
+fn write_exclusive(path: &Path, content: &[u8]) -> Result<(), WriteExclusiveError> {
+    let tmp_path = stage_temp_file(path, content)?;
+    publish_staged_temp_file(&tmp_path, path).map_err(Into::into)
 }
 
 /// Step (b): publish the sealed shard as a brand-NEW file at
@@ -2549,16 +2742,29 @@ fn write_exclusive(path: &Path, content: &[u8]) -> io::Result<()> {
 /// collides (a genuine race), this fails loud with
 /// `E-SHD-009`/[`ShardRollError::SealedShardAlreadyExists`] exactly as the
 /// write-once guarantee requires for real sealed content.
+///
+/// PR #824 pr-review Finding #2 (MAJOR): `write_exclusive`'s
+/// [`WriteExclusiveError`] distinguishes a TEMP-path collision from a
+/// DESTINATION collision — only the latter enters the 0-byte-reclaim
+/// logic below; a temp-path collision (or any other I/O failure) maps
+/// straight to `E-SHD-001`/[`ShardRollError::SealWriteFailed`], the same
+/// code every other genuine write-side failure already uses, rather than
+/// the misleading `E-SHD-009` (which falsely implies real sealed history
+/// exists at `sealed_path`) the prior revision reported for BOTH cases
+/// alike.
 pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), ShardRollError> {
-    let Err(first_err) = write_exclusive(sealed_path, content) else {
-        return Ok(());
-    };
-
-    if first_err.kind() != io::ErrorKind::AlreadyExists {
-        return Err(ShardRollError::SealWriteFailed {
-            artifact_stem: stem_from_sealed_path(sealed_path),
-            source: first_err,
-        });
+    match write_exclusive(sealed_path, content) {
+        Ok(()) => return Ok(()),
+        Err(WriteExclusiveError::DestinationOccupied) => {
+            // Fall through to the 0-byte-reclaim logic below — the ONLY
+            // outcome that logic is entitled to react to.
+        }
+        Err(WriteExclusiveError::TempPathOccupied(source) | WriteExclusiveError::Io(source)) => {
+            return Err(ShardRollError::SealWriteFailed {
+                artifact_stem: stem_from_sealed_path(sealed_path),
+                source,
+            });
+        }
     }
 
     let already_exists_err = || ShardRollError::SealedShardAlreadyExists {
@@ -2622,16 +2828,38 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
         return Err(already_exists_err());
     }
 
+    // PR #824 pr-review Finding #2 (MAJOR): STAGE the retry's content
+    // BEFORE unlinking the reclaimable 0-byte destination, never after.
+    // The prior revision unlinked first and only then attempted
+    // `write_exclusive`'s own internal staging — so a staging failure on
+    // the retry (e.g. a colliding temp path) left the destination already
+    // deleted with nothing published in its place, even though the
+    // failure had nothing to do with the destination at all. Staging
+    // first means a staging failure here leaves the reclaimable 0-byte
+    // destination COMPLETELY UNTOUCHED.
+    let staged_tmp_path = match stage_temp_file(sealed_path, content) {
+        Ok(tmp_path) => tmp_path,
+        Err(StageError::TempPathOccupied(source) | StageError::Io(source)) => {
+            return Err(ShardRollError::SealWriteFailed {
+                artifact_stem: stem_from_sealed_path(sealed_path),
+                source,
+            });
+        }
+    };
+
     // A failed unlink here (e.g. permission denied) leaves the 0-byte file
     // in place with nothing reclaimed — fail loud rather than silently
     // treating an unconfirmed reclaim as success (Invariant 1's "no version
     // may silently proceed past a condition it cannot verify safe",
-    // extended to the reclaim step itself).
+    // extended to the reclaim step itself). The already-staged temp file
+    // is never linked anywhere in this branch — best-effort cleanup so it
+    // is never left behind as a leftover.
     if std::fs::remove_file(sealed_path).is_err() {
+        let _ = std::fs::remove_file(&staged_tmp_path);
         return Err(already_exists_err());
     }
 
-    match write_exclusive(sealed_path, content) {
+    match publish_staged_temp_file(&staged_tmp_path, sealed_path) {
         Ok(()) => {
             tracing::warn!(
                 sealed_path = %sealed_path.display(),
@@ -2643,15 +2871,13 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
             Ok(())
         }
         // Genuine race: a concurrent writer placed real content at the
-        // path between the stat() and this single bounded retry — never
-        // retried again (no loop), fail loud exactly as the non-empty case
-        // does.
-        Err(retry_err) if retry_err.kind() == io::ErrorKind::AlreadyExists => {
-            Err(already_exists_err())
-        }
-        Err(retry_err) => Err(ShardRollError::SealWriteFailed {
+        // path between the unlink above and this single bounded retry —
+        // never retried again (no loop), fail loud exactly as the
+        // non-empty case does.
+        Err(PublishError::DestinationOccupied) => Err(already_exists_err()),
+        Err(PublishError::Io(source)) => Err(ShardRollError::SealWriteFailed {
             artifact_stem: stem_from_sealed_path(sealed_path),
-            source: retry_err,
+            source,
         }),
     }
 }
@@ -8045,15 +8271,190 @@ mod bc_1_18_006_roll_tests {
         );
     }
 
+    /// PR #824 pr-review Finding #3 (MAJOR): the `Edit` arm's own
+    /// `current_shard_bytes_flat(target_path)` call site — the sibling of
+    /// the Write-arm backstop probe covered by the test just above — was
+    /// shipped WITHOUT `reject_canonical_symlink`, and untested (the
+    /// missed-sibling-callsite pattern TD-VSDD-060 exists to catch).
+    /// Regression guard: an `Edit` against a symlinked canonical must
+    /// refuse loud with `E-SHD-010`, never `stat()` through the symlink.
+    #[cfg(unix)]
+    #[test]
+    fn test_FINDING3_edit_arm_symlink_canonical_fails_loud_e_shd_010() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = dir.path().join("decision-log.md");
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "attacker wants THIS content exfiltrated/sealed",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical)
+            .expect("plant a symlink at the governed canonical path");
+
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Edit",
+            &canonical,
+            &serde_json::json!({"old_string": "a", "new_string": "ab"}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("E-SHD-010"),
+                    "Finding #3: a symlinked canonical path at the Edit-arm's own \
+                     current_shard_bytes_flat call site MUST fail loud naming the E-SHD-010 \
+                     error code specifically — got a different HookResult::Error message: \
+                     {message:?}"
+                );
+            }
+            other => panic!(
+                "Finding #3: a symlinked canonical path MUST fail LOUD as HookResult::Error \
+                 naming E-SHD-010 — NOT silently stat() through the symlink (info-exposure side \
+                 channel) nor Continue/Block as if it were an ordinary file. Got: {other:?}"
+            ),
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&sensitive_target).expect("sensitive target must still exist"),
+            "attacker wants THIS content exfiltrated/sealed",
+            "Finding #3: the symlink target's content must be completely untouched"
+        );
+        assert!(
+            !dir.path().join("decision-log.0001.md").exists(),
+            "Finding #3: no sealed shard may ever be published from a refused symlinked \
+             canonical"
+        );
+    }
+
+    /// Companion to the test above (Finding #3): the `MultiEdit` arm's own
+    /// `current_shard_bytes_flat(target_path)` call site was likewise
+    /// shipped without the guard and untested.
+    #[cfg(unix)]
+    #[test]
+    fn test_FINDING3_multiedit_arm_symlink_canonical_fails_loud_e_shd_010() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = dir.path().join("decision-log.md");
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "attacker wants THIS content exfiltrated/sealed",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical)
+            .expect("plant a symlink at the governed canonical path");
+
+        let registry = ShardRegistry {
+            shards: vec![flat_entry("decision-log", 49_152)],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "MultiEdit",
+            &canonical,
+            &serde_json::json!({"edits": [{"old_string": "a", "new_string": "ab"}]}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("E-SHD-010"),
+                    "Finding #3: a symlinked canonical path at the MultiEdit-arm's own \
+                     current_shard_bytes_flat call site MUST fail loud naming the E-SHD-010 \
+                     error code specifically — got a different HookResult::Error message: \
+                     {message:?}"
+                );
+            }
+            other => panic!(
+                "Finding #3: a symlinked canonical path MUST fail LOUD as HookResult::Error \
+                 naming E-SHD-010 — NOT silently stat() through the symlink (info-exposure side \
+                 channel) nor Continue/Block as if it were an ordinary file. Got: {other:?}"
+            ),
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&sensitive_target).expect("sensitive target must still exist"),
+            "attacker wants THIS content exfiltrated/sealed",
+            "Finding #3: the symlink target's content must be completely untouched"
+        );
+        assert!(
+            !dir.path().join("decision-log.0001.md").exists(),
+            "Finding #3: no sealed shard may ever be published from a refused symlinked \
+             canonical"
+        );
+    }
+
+    /// PR #824 pr-review Finding #3 companion note: `read_changelog_item_count`'s
+    /// `File::open` (the `"frontmatter-changelog-array"` shape's own
+    /// canonical-path read site) is likewise unguarded against a symlinked
+    /// canonical path — same CWE-59/CWE-200 exfiltration concern as the
+    /// `"flat"` shape's three mutation-tool arms, just via a different
+    /// shape/read-cost path. Regression guard for the guard installed
+    /// before `shard_cap_gate_check`'s `ShardShape::FrontmatterChangelogArray`
+    /// arm calls `read_changelog_item_count`.
+    #[cfg(unix)]
+    #[test]
+    fn test_FINDING3_frontmatter_changelog_arm_symlink_canonical_fails_loud_e_shd_010() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = dir.path().join("BC-INDEX.md");
+        let sensitive_target = dir.path().join("sensitive-elsewhere.txt");
+        std::fs::write(
+            &sensitive_target,
+            "---\nchangelog:\n  - version: \"1.0\"\n---\n",
+        )
+        .expect("seed the symlink target file");
+        std::os::unix::fs::symlink(&sensitive_target, &canonical)
+            .expect("plant a symlink at the governed canonical path");
+
+        let mut entry = flat_entry("BC-INDEX", 49_152);
+        entry.shape = Some(ShardShape::FrontmatterChangelogArray);
+        entry.n = Some(50);
+        let registry = ShardRegistry {
+            shards: vec![entry],
+        };
+
+        let result = shard_cap_gate_check(
+            &registry,
+            "Edit",
+            &canonical,
+            &serde_json::json!({"old_string": "a", "new_string": "ab"}),
+        );
+
+        match result {
+            HookResult::Error { message } => {
+                assert!(
+                    message.contains("E-SHD-010"),
+                    "Finding #3: a symlinked canonical path at the FrontmatterChangelogArray \
+                     arm's read_changelog_item_count call site MUST fail loud naming the \
+                     E-SHD-010 error code specifically — got a different HookResult::Error \
+                     message: {message:?}"
+                );
+            }
+            other => panic!(
+                "Finding #3: a symlinked canonical path MUST fail LOUD as HookResult::Error \
+                 naming E-SHD-010 — NOT silently read through the symlink (info-exposure side \
+                 channel). Got: {other:?}"
+            ),
+        }
+    }
+
     /// FIX-HIGH-1 (S-25.02 PR #824 second-security-review, HIGH, CWE-59/
-    /// CWE-367/CWE-377): `write_exclusive`'s temp-file path is fully
-    /// deterministic (`.{basename}.tmp-{pid}`), and `pid` is observable via
-    /// `ps`/`/proc` — a co-resident local process could pre-plant a
-    /// symlink there before `write_exclusive` ever runs. This regression
-    /// guard confirms `write_exclusive` refuses loud (`create_new`'s
+    /// CWE-367/CWE-377): a co-resident local process could pre-plant a
+    /// symlink at `write_exclusive`'s temp-file path before it ever runs
+    /// (originally exploitable because that path was fully deterministic
+    /// — `.{basename}.tmp-{pid}`, `pid` observable via `ps`/`/proc`; PR
+    /// #824 pr-review Finding #2 later added a random nonce component,
+    /// which this test pins to a KNOWN value via `stage_temp_file_with_nonce`
+    /// so the fixture can still predict — and plant a symlink at — the
+    /// exact path, without weakening production's own real randomness).
+    /// This regression guard confirms staging refuses loud (`create_new`'s
     /// `O_EXCL` semantics) rather than writing the sealed content THROUGH
-    /// the symlink into an arbitrary attacker-chosen file, or later
-    /// hard-linking the symlink itself onto the destination.
+    /// the symlink into an arbitrary attacker-chosen file.
     #[cfg(unix)]
     #[test]
     fn test_FIXHIGH1_write_exclusive_refuses_to_follow_preplanted_symlink_at_temp_path() {
@@ -8064,27 +8465,28 @@ mod bc_1_18_006_roll_tests {
             .expect("sealed_path has a filename")
             .to_string_lossy()
             .into_owned();
-        // The EXACT deterministic temp-file path `write_exclusive` itself
-        // computes — `pid` observable via `ps`/`/proc` in a real attack.
-        let tmp_path = dir
-            .path()
-            .join(format!(".{basename}.tmp-{}", std::process::id()));
+        const KNOWN_NONCE: u64 = 0xDEAD_BEEF_0BAD_F00D;
+        // The EXACT temp-file path `stage_temp_file_with_nonce` itself
+        // computes for this fixed nonce.
+        let tmp_path = dir.path().join(format!(
+            ".{basename}.tmp-{}-{KNOWN_NONCE:016x}",
+            std::process::id()
+        ));
 
         let attacker_target = dir.path().join("attacker-target.txt");
         std::fs::write(&attacker_target, "pre-existing attacker-owned content")
             .expect("seed the attacker's target file");
         std::os::unix::fs::symlink(&attacker_target, &tmp_path)
-            .expect("pre-plant a symlink at the exact deterministic temp-file path");
+            .expect("pre-plant a symlink at the exact temp-file path");
 
-        let err = write_exclusive(&sealed_path, b"real sealed content").expect_err(
-            "FIX-HIGH-1: write_exclusive MUST refuse loud when a symlink occupies its \
-             deterministic temp-file path — never follow it to write through, never hard-link \
-             the symlink itself onto the destination",
-        );
-        assert_eq!(
-            err.kind(),
-            io::ErrorKind::AlreadyExists,
-            "FIX-HIGH-1: create_new's O_EXCL semantics must surface as AlreadyExists for a \
+        let err = stage_temp_file_with_nonce(&sealed_path, b"real sealed content", KNOWN_NONCE)
+            .expect_err(
+                "FIX-HIGH-1: staging MUST refuse loud when a symlink occupies its temp-file \
+                 path — never follow it to write through",
+            );
+        assert!(
+            matches!(err, StageError::TempPathOccupied(_)),
+            "FIX-HIGH-1: create_new's O_EXCL semantics must surface as TempPathOccupied for a \
              pre-existing symlink at the temp path (dangling or not) — got: {err:?}"
         );
 
@@ -8092,15 +8494,13 @@ mod bc_1_18_006_roll_tests {
             std::fs::read_to_string(&attacker_target)
                 .expect("attacker target must still be readable"),
             "pre-existing attacker-owned content",
-            "FIX-HIGH-1: the attacker's target file must be completely untouched — \
-             write_exclusive must never have written the sealed content THROUGH the pre-planted \
-             symlink"
+            "FIX-HIGH-1: the attacker's target file must be completely untouched — staging \
+             must never have written the sealed content THROUGH the pre-planted symlink"
         );
         assert!(
             !sealed_path.exists(),
-            "FIX-HIGH-1: the sealed destination must never come into existence — \
-             write_exclusive must never hard-link the attacker's symlink itself onto the \
-             destination path"
+            "FIX-HIGH-1: the sealed destination must never come into existence when staging \
+             itself already failed — the hard-link step is never even reached"
         );
         assert!(
             std::fs::symlink_metadata(&tmp_path)
@@ -8108,8 +8508,8 @@ mod bc_1_18_006_roll_tests {
                 .file_type()
                 .is_symlink(),
             "FIX-HIGH-1: the pre-planted symlink at the temp path must be left untouched — \
-             write_exclusive's best-effort cleanup only ever removes a temp file IT created, \
-             never a pre-existing symlink it refused to write through"
+             staging's best-effort cleanup only ever removes a temp file IT created, never a \
+             pre-existing symlink it refused to write through"
         );
     }
 
