@@ -184,16 +184,19 @@ fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
 /// resolves in a single `fs::metadata` call there; on Windows it also
 /// carries the traversal-through-a-file discrimination.
 ///
-/// NIT-3 (PR #824 pr-review cycle 3, still applicable): the walk's
-/// `Err(_) => cur = candidate.parent()` arm treats EVERY `std::fs::metadata`
-/// failure — genuine non-existence AND a permission/I/O failure (e.g.
-/// `EACCES`/`ERROR_ACCESS_DENIED` on an ancestor) alike — as "absent",
-/// walking further up rather than distinguishing them. No behavior change
-/// requested: [`is_genuinely_missing`]'s own early return already filters
-/// to `err.kind() == NotFound` before this helper is ever reached, so a
+/// NIT-3 (PR #824 pr-review cycle 3; hardened cycle 6 to match the research
+/// doc §5 step-2 prescription): the walk distinguishes a `NotFound`
+/// ancestor-`metadata` failure (genuine non-existence — strip this level and
+/// keep walking up) from any OTHER failure (e.g. `PermissionDenied`/
+/// `ERROR_ACCESS_DENIED` on an ancestor) — the latter now STOPS the walk and
+/// propagates (`return false`) rather than being conflated with "absent".
+/// [`is_genuinely_missing`]'s own early return already filters to
+/// `err.kind() == NotFound` before this helper is ever reached, so a
 /// `PermissionDenied` on the ORIGINAL failing operation never routes here;
-/// this conflation is scoped ONLY to an inconclusive `metadata()` call
-/// during the ancestor walk itself, which remains inert in practice today.
+/// this arm only governs an inconclusive `metadata()` call during the
+/// ancestor walk itself — which, per the TOCTOU-racy nature of the whole
+/// check, is now the strictly more conservative of the two possible
+/// resolutions.
 fn closest_existing_ancestor_is_directory_or_absent(path: &Path) -> bool {
     let mut cur = path.parent();
     while let Some(candidate) = cur {
@@ -202,7 +205,10 @@ fn closest_existing_ancestor_is_directory_or_absent(path: &Path) -> bool {
         }
         match std::fs::metadata(candidate) {
             Ok(meta) => return meta.is_dir(),
-            Err(_) => cur = candidate.parent(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => cur = candidate.parent(),
+            // A non-NotFound ancestor error (e.g. PermissionDenied) is not
+            // genuine absence — stop and propagate rather than claim missing.
+            Err(_) => return false,
         }
     }
     // No ancestor exists at all — nothing blocks traversal, the whole tree
@@ -4151,8 +4157,9 @@ mod tests {
     // -----------------------------------------------------------------
     // closest_existing_ancestor_is_directory_or_absent (N-2, PR #824
     // pr-review cycle 2) — the path-aware helper is unconditionally
-    // compiled under test (`#[cfg(any(windows, test))]`), so its logic is
-    // directly, portably unit-testable here without a live Windows runner.
+    // compiled on every platform (no `#[cfg]` gate at all, per the cycle-6
+    // portable ancestor-walk rewrite), so its logic is directly, portably
+    // unit-testable here without a live Windows runner.
     // -----------------------------------------------------------------
 
     #[test]
@@ -4196,6 +4203,82 @@ mod tests {
              traversal is genuinely blocked and must propagate as a real error — even though \
              the IMMEDIATE parent ('nested') does not itself exist, a naive parent-only check \
              would misjudge this as relievable"
+        );
+    }
+
+    /// NIT-B (PR #824 pr-review cycle 6): a non-`NotFound` ancestor
+    /// `metadata` error (e.g. `PermissionDenied`) must STOP the walk and
+    /// propagate (`false`), not be conflated with genuine absence.
+    ///
+    /// Deterministic fixture (`#[cfg(unix)]`, same unprivileged-permission-
+    /// bit precedent already established in this workspace — e.g.
+    /// `internal_log.rs`'s `silently_swallows_errors_on_read_only_dir`):
+    /// a directory `blocked/` is chmod'd to `0o000` (no search/execute
+    /// bit). Under POSIX, resolving ANY name nested inside a directory
+    /// with no search permission fails with `EACCES`
+    /// (`io::ErrorKind::PermissionDenied`) regardless of whether that name
+    /// actually exists — so `metadata(blocked/inner)` fails with
+    /// `PermissionDenied`, never `NotFound`, isolating exactly the arm
+    /// NIT-B hardens. The precondition assertion below fails loud (rather
+    /// than silently mis-testing) if this workspace's CI ever runs this
+    /// suite as a privileged user under which permission bits are not
+    /// enforced.
+    #[cfg(unix)]
+    #[test]
+    fn test_NIT_B_closest_existing_ancestor_propagates_non_notfound_ancestor_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let blocked = dir.path().join("blocked");
+        std::fs::create_dir(&blocked).expect("create the to-be-locked-down directory");
+
+        let mut perms = std::fs::metadata(&blocked)
+            .expect("stat blocked dir before chmod")
+            .permissions();
+        perms.set_mode(0o000);
+        std::fs::set_permissions(&blocked, perms).expect("chmod blocked dir to 0o000");
+
+        // Always restore permissions before returning (success, assertion
+        // failure, or panic) so the tempdir's own Drop cleanup can actually
+        // remove the directory tree — a leaked 0o000 directory would fail
+        // a subsequent `remove_dir_all` with the very same EACCES.
+        struct RestorePermsOnDrop(std::path::PathBuf);
+        impl Drop for RestorePermsOnDrop {
+            fn drop(&mut self) {
+                if let Ok(meta) = std::fs::metadata(&self.0) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = std::fs::set_permissions(&self.0, perms);
+                }
+            }
+        }
+        let _restore_guard = RestorePermsOnDrop(blocked.clone());
+
+        let path = blocked.join("inner").join("child.md");
+
+        // Precondition: confirm the fixture actually produces a genuine
+        // non-NotFound ancestor error before asserting on the helper under
+        // test — if this fails, the fixture (or the CI privilege level)
+        // is not exercising NIT-B's branch at all.
+        let probe_err = std::fs::metadata(blocked.join("inner")).expect_err(
+            "precondition: metadata() on a name nested inside a 0o000-permission directory \
+             must fail — if it succeeded, this test is running with elevated privileges that \
+             bypass permission bits and cannot exercise NIT-B's branch",
+        );
+        assert_eq!(
+            probe_err.kind(),
+            io::ErrorKind::PermissionDenied,
+            "precondition: the fixture must produce PermissionDenied specifically (not \
+             NotFound) — got {:?}",
+            probe_err.kind()
+        );
+
+        assert!(
+            !closest_existing_ancestor_is_directory_or_absent(&path),
+            "NIT-B: a non-NotFound ancestor metadata error (PermissionDenied) must STOP the \
+             walk and propagate (return false) — treating it as genuine absence would let a \
+             real permission failure during the walk be silently relieved as a legitimate \
+             not-yet-created path"
         );
     }
 
