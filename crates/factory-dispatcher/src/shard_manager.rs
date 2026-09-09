@@ -2681,8 +2681,97 @@ fn random_nonce() -> u64 {
 /// failure here (temp-path collision or any other I/O error) therefore
 /// NEVER destroys the destination at all, closing the "a failed op
 /// destroys a reclaimable 0-byte destination" defect.
+///
+/// N-1 (PR #824 pr-review cycle 2, MAJOR call-site regression coverage):
+/// checks [`FORCE_STAGE_FAILURE`] first, in `#[cfg(test)]` builds only —
+/// see that seam's own doc comment for why call-site tests need it (this
+/// function's own real per-call randomness makes its actual temp path
+/// impossible for a test to predict/pre-occupy). Compiles to nothing
+/// outside test builds, so production's own `stage_temp_file` never
+/// carries this branch.
 fn stage_temp_file(final_path: &Path, content: &[u8]) -> Result<PathBuf, StageError> {
+    #[cfg(test)]
+    if let Some(kind) = FORCE_STAGE_FAILURE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        match state.take() {
+            Some((0, kind)) => Some(kind),
+            Some((remaining, kind)) => {
+                *state = Some((remaining - 1, kind));
+                None
+            }
+            None => None,
+        }
+    }) {
+        return Err(match kind {
+            ForcedStageFailureKind::TempPathOccupied => StageError::TempPathOccupied(
+                io::Error::new(io::ErrorKind::AlreadyExists, "N-1 test-forced temp-path collision"),
+            ),
+            ForcedStageFailureKind::Io => {
+                StageError::Io(io::Error::other("N-1 test-forced staging I/O failure"))
+            }
+        });
+    }
     stage_temp_file_with_nonce(final_path, content, random_nonce())
+}
+
+/// N-1 (PR #824 pr-review cycle 2, MAJOR): which synthetic [`StageError`] a
+/// forced [`stage_temp_file`] failure should produce — see
+/// [`FORCE_STAGE_FAILURE`]'s own doc comment.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+enum ForcedStageFailureKind {
+    /// Mirrors a genuine temp-path collision (`create_new`'s
+    /// `AlreadyExists`) — the specific shape `publish_sealed_shard`'s
+    /// `TempPathOccupied` match arm distinguishes from `DestinationOccupied`.
+    TempPathOccupied,
+    /// Mirrors any other I/O failure at the staging step.
+    Io,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// N-1 call-site regression coverage (PR #824 pr-review cycle 2): lets
+    /// a test force `stage_temp_file` to fail on a specific (0-indexed,
+    /// 1-shot) upcoming call on THIS thread, without needing to predict
+    /// [`random_nonce`]'s deliberately-unpredictable output — the only way
+    /// a test could otherwise pre-occupy the EXACT temp path
+    /// `stage_temp_file` will compute. `publish_sealed_shard` calls
+    /// `stage_temp_file` at most twice per invocation (the initial attempt
+    /// inside `write_exclusive`, call #0, and the 0-byte-reclaim retry's
+    /// own staging call, call #1) — set via
+    /// [`force_stage_temp_file_failure`], which returns a guard clearing
+    /// this state on drop (including on test panic/unwind), so a forced
+    /// failure can never leak into another test sharing this worker
+    /// thread. `#[cfg(test)]`-gated — compiles to nothing outside test
+    /// builds, so production's own `stage_temp_file` never carries this
+    /// branch.
+    static FORCE_STAGE_FAILURE: std::cell::RefCell<Option<(u32, ForcedStageFailureKind)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Clears [`FORCE_STAGE_FAILURE`] on drop — see
+/// [`force_stage_temp_file_failure`].
+#[cfg(test)]
+struct ForceStageFailureGuard;
+
+#[cfg(test)]
+impl Drop for ForceStageFailureGuard {
+    fn drop(&mut self) {
+        FORCE_STAGE_FAILURE.with(|cell| *cell.borrow_mut() = None);
+    }
+}
+
+/// Forces the call to `stage_temp_file` `calls_to_allow` calls from now
+/// (0 = the VERY NEXT call, on THIS thread) to fail with `kind`, letting a
+/// test reach `publish_sealed_shard`'s own staging call sites
+/// deterministically — see [`FORCE_STAGE_FAILURE`]'s own doc comment.
+#[cfg(test)]
+fn force_stage_temp_file_failure(
+    calls_to_allow: u32,
+    kind: ForcedStageFailureKind,
+) -> ForceStageFailureGuard {
+    FORCE_STAGE_FAILURE.with(|cell| *cell.borrow_mut() = Some((calls_to_allow, kind)));
+    ForceStageFailureGuard
 }
 
 /// [`stage_temp_file`], parameterized on its own nonce rather than always
@@ -8937,6 +9026,109 @@ mod bc_1_18_006_roll_tests {
              be left COMPLETELY UNTOUCHED when the reclaim aborts — it must never be unlinked, \
              regardless of what publish_sealed_shard's internal staging did with the new \
              content"
+        );
+    }
+
+    /// N-1 (PR #824 pr-review cycle 2, MAJOR): Finding #2's `ef6ca3b4` fix
+    /// (stage-then-publish, distinguishing a TEMP-path collision from a
+    /// DESTINATION collision) had no call-site regression test driving it
+    /// through the real `publish_sealed_shard` entrypoint — the only
+    /// existing coverage called the private `stage_temp_file_with_nonce`
+    /// helper directly (`test_FIXHIGH1_*`), which pins the helper's own
+    /// error taxonomy but not how the CALLER reacts to it.
+    ///
+    /// This half proves the misattribution half of Finding #2: a
+    /// temp-path-collision-shaped staging failure (forced via
+    /// [`force_stage_temp_file_failure`] — the real per-call random nonce
+    /// makes literally pre-occupying the exact temp path impossible for a
+    /// test) at `publish_sealed_shard`'s FIRST (and only, for this
+    /// scenario) staging attempt must surface as `SealWriteFailed`
+    /// (E-SHD-001), never the misleading `SealedShardAlreadyExists`
+    /// (E-SHD-009) — even though a pre-existing NON-EMPTY destination sits
+    /// right there, which is exactly what a REGRESSED caller (one that
+    /// reverted the `TempPathOccupied`/`Io` match arm to fall through into
+    /// the 0-byte-reclaim block regardless of `WriteExclusiveError`
+    /// variant) would misreport as E-SHD-009 after probing that destination.
+    #[test]
+    fn test_N1_publish_sealed_shard_callsite_temp_path_collision_never_misattributed_as_already_exists()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        std::fs::write(&sealed_path, b"real pre-existing sealed history, non-empty")
+            .expect("seed a non-empty pre-existing destination");
+
+        // Force the FIRST (call #0) staging attempt to fail exactly as a
+        // genuine temp-path collision would.
+        let _guard = force_stage_temp_file_failure(0, ForcedStageFailureKind::TempPathOccupied);
+        let new_content = b"NEW-CONTENT-MUST-NEVER-BE-PUBLISHED";
+        let err = publish_sealed_shard(&sealed_path, new_content).expect_err(
+            "N-1 call-site regression: a temp-path collision at the FIRST staging attempt must \
+             surface as SealWriteFailed, never SealedShardAlreadyExists — reverting the \
+             TempPathOccupied/Io match arm to fall through into the 0-byte-reclaim block would \
+             instead probe the (non-empty) destination here and misreport E-SHD-009",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "N-1: expected ShardRollError::SealWriteFailed (E-SHD-001) for a temp-path collision \
+             — got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-001"),
+            "N-1: the error's Display text must name E-SHD-001, never the misleading E-SHD-009 \
+             — got: {err}"
+        );
+        assert_eq!(
+            std::fs::read(&sealed_path).expect("destination must still be readable"),
+            b"real pre-existing sealed history, non-empty",
+            "N-1: the pre-existing non-empty destination must be completely untouched by a \
+             staging-side failure"
+        );
+    }
+
+    /// N-1 (PR #824 pr-review cycle 2, MAJOR): the other half of Finding #2
+    /// — a staging failure on the 0-byte-reclaim RETRY (the SECOND
+    /// `stage_temp_file` call within one `publish_sealed_shard` invocation)
+    /// must never have unlinked the reclaimable destination first.
+    /// `ef6ca3b4` moved staging BEFORE the unlink specifically so a failed
+    /// retry-staging attempt leaves the destination COMPLETELY UNTOUCHED;
+    /// restoring the pre-fix unlink-then-stage ordering would delete the
+    /// destination before ever discovering the retry's own staging
+    /// failure.
+    ///
+    /// Lets the FIRST staging attempt (call #0, inside `write_exclusive`)
+    /// succeed for real — it fails at the hard_link step because
+    /// `sealed_path` already exists (0 bytes), driving `publish_sealed_shard`
+    /// into its 0-byte-reclaim branch — then forces ONLY the retry's own
+    /// staging call (call #1) to fail.
+    #[test]
+    fn test_N1_publish_sealed_shard_callsite_failed_retry_staging_never_destroys_reclaimable_destination()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        std::fs::write(&sealed_path, []).expect("seed a reclaimable 0-byte destination");
+
+        let _guard = force_stage_temp_file_failure(1, ForcedStageFailureKind::Io);
+        let new_content = b"NEW-CONTENT-MUST-NEVER-BE-PUBLISHED-EITHER";
+        let err = publish_sealed_shard(&sealed_path, new_content).expect_err(
+            "N-1 call-site regression: a staging failure on the 0-byte-reclaim RETRY must \
+             surface as SealWriteFailed and must never have unlinked the reclaimable \
+             destination first — restoring the pre-fix unlink-then-stage ordering would delete \
+             the destination BEFORE discovering the retry's own staging failure",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "N-1: expected ShardRollError::SealWriteFailed (E-SHD-001) for the retry's staging \
+             failure — got: {err:?}"
+        );
+
+        let meta = std::fs::symlink_metadata(&sealed_path).expect(
+            "N-1 call-site regression: the reclaimable 0-byte destination must still exist on \
+             disk — a staging failure on the retry must NEVER have unlinked it first",
+        );
+        assert!(
+            meta.file_type().is_file() && meta.len() == 0,
+            "N-1: the destination must still be the SAME untouched 0-byte regular file — got: \
+             {meta:?}"
         );
     }
 
