@@ -86,7 +86,10 @@ use vsdd_hook_sdk::HookResult;
 
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
-// Finding #1, BLOCKING on Windows CI)
+// Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
+// original `raw_os_error()`-branching design ALSO failed windows-x64 CI —
+// see `.factory/code-delivery/S-25.02/windows-path-semantics-research.md`,
+// source-verified against Rust std's `decode_error_kind`)
 // ---------------------------------------------------------------------------
 
 /// `true` iff `err` represents a path that is genuinely absent — never a
@@ -95,54 +98,52 @@ use vsdd_hook_sdk::HookResult;
 ///
 /// On Unix, "a path component is not a directory" (`ENOTDIR`) surfaces as
 /// the distinct `io::ErrorKind::NotADirectory` (stable since Rust 1.83,
-/// `io_error_more`) — never `io::ErrorKind::NotFound` — so a bare
-/// `err.kind() == io::ErrorKind::NotFound` check is already correctly
-/// disambiguated there.
+/// `io_error_more`) — never `io::ErrorKind::NotFound` — so the early
+/// `err.kind() != io::ErrorKind::NotFound` return below already correctly
+/// rejects it there, with no need to even reach the ancestor walk.
 ///
-/// On WINDOWS, the two cases raise DIFFERENT raw OS errors that the standard
-/// library nonetheless BOTH map onto the SAME `io::ErrorKind::NotFound`:
-/// `ERROR_FILE_NOT_FOUND` (2, genuinely missing) and `ERROR_PATH_NOT_FOUND`
-/// (3, a non-terminal path component does not exist / is not a directory).
-/// Without this disambiguation, this module's every `NotFound`-relief site
-/// (e.g. [`read_canonical_content`] treating a missing canonical as a
-/// legitimate zero-byte first-ever-write, BC-1.18.005 EC-004) would ALSO
-/// silently swallow a genuine `ERROR_PATH_NOT_FOUND` path-traversal failure
-/// into the same relief — returning `Ok(vec![])`/`Ok(0)` instead of
-/// propagating a real I/O error, which `execute_roll` would otherwise map to
+/// On WINDOWS, the identical traversal-through-a-file failure collapses to
+/// `io::ErrorKind::NotFound` (`ERROR_PATH_NOT_FOUND` = 3) — INDISTINGUISHABLE
+/// at the `ErrorKind` level from a genuinely-missing ancestor
+/// (`ERROR_FILE_NOT_FOUND` = 2, which ALSO maps to `NotFound`; both codes
+/// share one match arm in Rust std's `decode_error_kind`). Windows has no
+/// general `ENOTDIR` equivalent surfaced through ordinary `CreateFileW`
+/// path resolution. Critically, the raw Win32 code itself is NOT a robust
+/// discriminator either — 2-vs-3 is not a normative Microsoft contract, and
+/// an ancestor-directory-missing failure and an ancestor-is-a-plain-file
+/// failure can BOTH raise code 3 — so an earlier revision of this function
+/// that branched on `raw_os_error()` was intrinsically broken on Windows
+/// (see the research doc referenced above, §3-4) and is why this function
+/// was rewritten.
+///
+/// Without correct disambiguation, this module's every `NotFound`-relief
+/// site (e.g. [`read_canonical_content`] treating a missing canonical as a
+/// legitimate zero-byte first-ever-write, BC-1.18.005 EC-004) would
+/// silently swallow a genuine path-traversal failure into that same relief
+/// — returning `Ok(vec![])`/`Ok(0)` instead of propagating a real I/O
+/// error, which `execute_roll` would otherwise map to
 /// `ShardRollError::SealWriteFailed` (`E-SHD-001`) exactly as a genuine
 /// non-`NotFound` failure already does on Unix.
 ///
-/// Disambiguated via `raw_os_error()`: `ERROR_FILE_NOT_FOUND` (2) is always
-/// genuinely missing on Windows. `ERROR_PATH_NOT_FOUND` (3) is ITSELF
-/// ambiguous between the two situations this function's own doc comment
-/// above describes — see [`closest_existing_ancestor_is_directory_or_absent`]
-/// for the `path`-aware disambiguation between them (N-2, PR #824 pr-review
-/// cycle 2). Any other `NotFound`-kind error propagates as a real `Err`.
+/// The portable fix (research doc §5) is to NOT branch on `raw_os_error()`
+/// at all: match `ErrorKind::NotFound` broadly on every platform, then WALK
+/// the ancestor chain via [`closest_existing_ancestor_is_directory_or_absent`],
+/// which queries `fs::metadata(ancestor).is_dir()` — a property query that
+/// is reliable on both Windows and Unix because it directly answers "is
+/// traversal blocked by a file?" instead of inferring that from OS-error
+/// taxonomy Rust intentionally normalizes away.
 fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
     if err.kind() != io::ErrorKind::NotFound {
         return false;
     }
-    #[cfg(windows)]
-    {
-        const ERROR_FILE_NOT_FOUND: i32 = 2;
-        const ERROR_PATH_NOT_FOUND: i32 = 3;
-        match err.raw_os_error() {
-            Some(ERROR_FILE_NOT_FOUND) => true,
-            Some(ERROR_PATH_NOT_FOUND) => closest_existing_ancestor_is_directory_or_absent(path),
-            _ => false,
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = path;
-        true
-    }
+    closest_existing_ancestor_is_directory_or_absent(path)
 }
 
-/// N-2 (PR #824 pr-review cycle 2, MINOR): resolves `ERROR_PATH_NOT_FOUND`'s
-/// (3) own internal ambiguity for [`is_genuinely_missing`]'s Windows arm.
-/// That raw code covers TWO structurally different situations Windows maps
-/// onto the same code:
+/// Resolves `io::ErrorKind::NotFound`'s own internal ambiguity for
+/// [`is_genuinely_missing`]. A bare `NotFound` (on Windows; the only
+/// platform where this ambiguity is reachable at all, since Unix's
+/// `NotADirectory` never gets this far) covers TWO structurally different
+/// situations:
 ///
 /// 1. A non-terminal path component EXISTS but is a plain file, not a
 ///    directory — traversal genuinely cannot continue through it. A real
@@ -155,42 +156,50 @@ fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
 ///    file already does.
 ///
 /// Disambiguated by walking UP `path`'s ancestor chain to the FIRST
-/// ancestor that actually exists on disk, then reporting whether THAT
-/// ancestor is a directory: case 1 is a closest-existing-ancestor that is a
-/// plain file (blocking further traversal); case 2 is a closest-existing-
-/// ancestor that IS a directory (everything below it is simply not created
-/// yet), or no existing ancestor at all (the whole tree is unwritten,
-/// `dir.path()` itself in the fresh-tempdir sense — still ultimately
-/// resolves to a real root that exists, so this arm is reached only when a
-/// component genuinely doesn't exist below some real root). A single-level
+/// ancestor that actually exists on disk, using `fs::metadata` (which
+/// FOLLOWS symlinks/junctions, matching what `File::open`/`fs::read` would
+/// have resolved through — NOT `symlink_metadata`), then reporting whether
+/// THAT ancestor is a directory: case 1 is a closest-existing-ancestor that
+/// is a plain file (blocking further traversal); case 2 is a
+/// closest-existing-ancestor that IS a directory (everything below it is
+/// simply not created yet), or no existing ancestor at all (the whole tree
+/// is unwritten below some real root that does exist). A single-level
 /// `path.parent()`-only check would misjudge a MULTI-level-deep traversal
 /// failure (a non-terminal component two-or-more levels up blocked by a
 /// file, with the immediate parent ALSO consequently absent) as relievable
 /// — this walk avoids that by not stopping at the first missing level.
 ///
-/// Kept unconditionally compiled (`#[cfg(any(windows, test))]`, not
-/// `#[cfg(windows)]`) so this logic is directly unit-testable on every CI
-/// runner, even though today's only PRODUCTION call site is Windows-only
-/// (the raw-error-code ambiguity this resolves is itself Windows-specific
-/// — Unix already disambiguates the two cases via distinct `io::ErrorKind`s,
-/// `NotFound` vs `NotADirectory`, with no need for this walk at all).
+/// An empty ancestor component (e.g. `path.parent()` bottoming out at `""`
+/// for a relative bare filename) is treated as CWD-relative and therefore
+/// non-blocking — returns `true` immediately rather than probing
+/// `fs::metadata("")`, which is not a meaningful existence check on any
+/// platform.
 ///
-/// NIT-3 (PR #824 pr-review cycle 3): the walk's `Err(_) => cur =
-/// candidate.parent()` arm treats EVERY `std::fs::metadata` failure —
-/// genuine non-existence AND a permission/I/O failure (e.g. `EACCES` on an
-/// ancestor) alike — as "absent", walking further up rather than
-/// distinguishing them. No behavior change requested: a permission-denied
-/// ancestor surfaces to Windows as `ERROR_ACCESS_DENIED` (5), which never
-/// reaches this helper at all — [`is_genuinely_missing`]'s own `_ => false`
-/// arm only routes `ERROR_PATH_NOT_FOUND` (3) here, so the inconclusive-vs-
-/// absent conflation this walk's `Err(_)` arm embodies is inert in
-/// practice today. Documented here so a future caller of this helper from
-/// a context where an inconclusive `metadata()` IS reachable knows this
-/// walk treats that case identically to genuine absence.
-#[cfg(any(windows, test))]
+/// Unconditionally compiled and used on EVERY platform (no
+/// `#[cfg(windows)]` gate): this is now the WHOLE of
+/// [`is_genuinely_missing`]'s discrimination algorithm — there is no
+/// remaining `raw_os_error()` branch. On Unix this walk is reached only via
+/// `is_genuinely_missing`'s `NotFound` short-circuit for a genuinely-absent
+/// path (parent already exists as a directory in the ordinary case), so it
+/// resolves in a single `fs::metadata` call there; on Windows it also
+/// carries the traversal-through-a-file discrimination.
+///
+/// NIT-3 (PR #824 pr-review cycle 3, still applicable): the walk's
+/// `Err(_) => cur = candidate.parent()` arm treats EVERY `std::fs::metadata`
+/// failure — genuine non-existence AND a permission/I/O failure (e.g.
+/// `EACCES`/`ERROR_ACCESS_DENIED` on an ancestor) alike — as "absent",
+/// walking further up rather than distinguishing them. No behavior change
+/// requested: [`is_genuinely_missing`]'s own early return already filters
+/// to `err.kind() == NotFound` before this helper is ever reached, so a
+/// `PermissionDenied` on the ORIGINAL failing operation never routes here;
+/// this conflation is scoped ONLY to an inconclusive `metadata()` call
+/// during the ancestor walk itself, which remains inert in practice today.
 fn closest_existing_ancestor_is_directory_or_absent(path: &Path) -> bool {
     let mut cur = path.parent();
     while let Some(candidate) = cur {
+        if candidate.as_os_str().is_empty() {
+            return true;
+        }
         match std::fs::metadata(candidate) {
             Ok(meta) => return meta.is_dir(),
             Err(_) => cur = candidate.parent(),
@@ -4029,18 +4038,25 @@ mod tests {
         );
     }
 
+    /// S-25.02 cluster-2 (windows-x64 CI failure #1): traverse-through-a-file
+    /// (`not_a_dir` exists as a plain file, so `child.md` cannot be resolved
+    /// through it) is `io::ErrorKind::NotADirectory` on Unix but
+    /// `io::ErrorKind::NotFound` (`ERROR_PATH_NOT_FOUND`) on Windows — the
+    /// SAME kind a genuinely-missing ancestor produces there (see
+    /// `is_genuinely_missing`'s doc comment). A prior revision of this test
+    /// asserted `err.kind() != NotFound`, which is Unix-only and FAILS on
+    /// Windows for this identical fixture. Per the portable-fix research
+    /// (`.factory/code-delivery/S-25.02/windows-path-semantics-research.md`
+    /// §"Test-fixture portability recommendation"), assert the SEMANTIC
+    /// outcome instead — the error must propagate, never be relieved — which
+    /// holds identically on both platforms with no `cfg` gating needed.
     #[test]
     fn test_FINDING1_is_genuinely_missing_false_for_path_traversal_through_non_directory() {
-        // On Unix this reproduces as io::ErrorKind::NotADirectory (a
-        // distinct kind, never NotFound at all) — reconfirms
-        // is_genuinely_missing never even needs its Windows-specific branch
-        // to correctly refuse this case here.
         let dir = tempfile::tempdir().expect("tempdir");
         let not_a_dir = dir.path().join("plain-file");
         std::fs::write(&not_a_dir, "i am a file").expect("seed a plain file");
         let path = not_a_dir.join("child.md");
         let err = std::fs::read(&path).expect_err("reading through a non-directory must fail");
-        assert_ne!(err.kind(), io::ErrorKind::NotFound);
         assert!(
             !is_genuinely_missing(&err, &path),
             "a path-traversal-through-non-directory failure must never be treated as genuinely \
@@ -4053,8 +4069,12 @@ mod tests {
     /// available on this CI runner): Windows maps BOTH
     /// `ERROR_FILE_NOT_FOUND` (2, genuinely missing) and
     /// `ERROR_PATH_NOT_FOUND` (3, itself ambiguous — see N-2 below) onto the
-    /// SAME `io::ErrorKind::NotFound` — `raw_os_error()` is the only way to
-    /// tell code 2 apart from code 3 at all.
+    /// SAME `io::ErrorKind::NotFound`. (S-25.02 cluster-2: the raw code
+    /// itself is no longer what `is_genuinely_missing` branches on — only
+    /// `err.kind()` matters now, so this synthetic `raw_os_error(2)` fixture
+    /// exercises the SAME `NotFound` path a real `ERROR_FILE_NOT_FOUND`
+    /// would; the ancestor-walk correctly relieves it because the given
+    /// path's parent is empty/non-blocking.)
     #[cfg(windows)]
     #[test]
     fn test_FINDING1_is_genuinely_missing_windows_file_not_found_relieved() {
@@ -4071,7 +4091,10 @@ mod tests {
     /// test green under the now-`path`-aware disambiguation: a path whose
     /// immediate parent EXISTS but is a plain file (not a directory) is
     /// still a genuine path-traversal failure and must still propagate,
-    /// never be relieved.
+    /// never be relieved. (S-25.02 cluster-2: this fixture's real ancestor —
+    /// a plain file — is what makes the ancestor walk return `false` here;
+    /// the raw code 3 used to synthesize the `NotFound` kind is otherwise
+    /// irrelevant to the now-portable algorithm.)
     #[cfg(windows)]
     #[test]
     fn test_FINDING1_is_genuinely_missing_windows_path_not_found_propagates_through_non_directory()
@@ -4102,7 +4125,9 @@ mod tests {
     /// directory (e.g. the first `burst-log.md` write into a just-created
     /// cycle directory) — a case Windows raises the SAME raw code 3 for.
     /// This must relieve to `Ok`, exactly like `ERROR_FILE_NOT_FOUND` (2)
-    /// already does.
+    /// already does. (S-25.02 cluster-2: the ancestor walk relieves this
+    /// because the closest EXISTING ancestor — the tempdir root — is a real
+    /// directory; the raw code is incidental to a `NotFound`-kind error.)
     #[cfg(windows)]
     #[test]
     fn test_N2_is_genuinely_missing_windows_path_not_found_relieved_for_missing_parent_dir() {
@@ -7061,25 +7086,52 @@ mod bc_1_18_006_roll_tests {
 
     /// Companion to the test above (F-C2-P7-001): Precondition 2's
     /// "treated as a zero-byte current shard" relief is scoped ONLY to a
-    /// missing (`NotFound`) canonical — a genuine OTHER I/O failure (e.g. a
-    /// path component that is a plain file, not a directory, which fails
-    /// with `NotADirectory`, never `NotFound`) must still propagate as a
-    /// real `Err`, never be silently swallowed into `Ok(vec![])`.
+    /// missing (`NotFound`) canonical — a genuine OTHER I/O failure must
+    /// still propagate as a real `Err`, never be silently swallowed into
+    /// `Ok(vec![])`.
+    ///
+    /// S-25.02 cluster-2 (windows-x64 CI failure #2): the fixture producing
+    /// this "genuine non-NotFound" failure is platform-specific. On Unix,
+    /// reading THROUGH a path component that is a plain file (not a
+    /// directory) fails with `NotADirectory`/`ENOTDIR`. On Windows the SAME
+    /// layout collapses to `ErrorKind::NotFound` (`ERROR_PATH_NOT_FOUND`) —
+    /// this test's own SANITY precondition (the fixture's error must NOT be
+    /// `NotFound`) is FALSE there, so the Unix fixture cannot be reused
+    /// as-is (see `is_genuinely_missing`'s doc comment for why). Per the
+    /// portable-fix research
+    /// (`.factory/code-delivery/S-25.02/windows-path-semantics-research.md`
+    /// §"Test-fixture portability recommendation" option 2), Windows
+    /// instead uses a deterministic, filesystem-independent fixture: a path
+    /// containing an illegal filename character (`<`), which `CreateFileW`
+    /// rejects with `ERROR_INVALID_NAME` (123) -> `ErrorKind::InvalidFilename`
+    /// — a kind that never collapses to `NotFound` on any platform. Both
+    /// platforms then assert the SAME semantic outcome: the error
+    /// propagates and is genuinely non-`NotFound`.
     #[test]
     fn test_BC_1_18_006_P1a_read_canonical_content_genuine_non_notfound_io_error_still_propagates()
     {
         let dir = tempfile::tempdir().expect("tempdir");
-        let not_a_dir = dir.path().join("this-is-a-plain-file");
-        std::fs::write(&not_a_dir, "i am a file, not a directory").expect("seed a plain file");
-        // Reading THROUGH a path component that is a plain file (not a
-        // directory) fails with NotADirectory/ENOTDIR on Unix and Windows
-        // alike — never NotFound.
-        let path = not_a_dir.join("decision-log.md");
+
+        #[cfg(not(windows))]
+        let path = {
+            let not_a_dir = dir.path().join("this-is-a-plain-file");
+            std::fs::write(&not_a_dir, "i am a file, not a directory").expect("seed a plain file");
+            // Reading THROUGH a path component that is a plain file (not a
+            // directory) fails with NotADirectory/ENOTDIR on Unix.
+            not_a_dir.join("decision-log.md")
+        };
+        #[cfg(windows)]
+        let path = {
+            // An illegal filename character deterministically produces
+            // ERROR_INVALID_NAME -> ErrorKind::InvalidFilename on Windows,
+            // which never collapses to NotFound the way the Unix
+            // traverse-through-a-file fixture above does.
+            dir.path().join("decision<log.md")
+        };
 
         let result = read_canonical_content(&path);
         let err = result.expect_err(
-            "a genuine non-NotFound I/O error (reading through a path component that is a plain \
-             file, not a directory) must still propagate as Err — Precondition 2's \
+            "a genuine non-NotFound I/O error must still propagate as Err — Precondition 2's \
              zero-byte-current-shard treatment is scoped ONLY to a missing canonical, never to \
              every I/O failure",
         );
