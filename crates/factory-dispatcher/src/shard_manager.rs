@@ -3170,14 +3170,23 @@ fn reclaim_identity_still_safe(path: &Path) -> bool {
     {
         use std::os::unix::fs::OpenOptionsExt;
 
-        // N-7 (PR #824 pr-review cycle 2, NIT): Android is Linux-ABI (these
-        // raw fcntl.h values match) but NOT `target_os = "linux"` — a
-        // Linux-only cfg would silently hand it the BSD values below
-        // instead (`0x0100` is `O_NOFOLLOW` on Linux/Android but
-        // `O_NOCTTY` on Linux — the wrong flag entirely). Theoretical
-        // today (Android is not a shipped release target: darwin-arm64/
-        // x86_64, linux-x86_64, linux-musl, windows-x86_64; musl is
-        // `target_os = "linux"`), but free to fix correctly.
+        // N-7 (PR #824 pr-review cycle 2, NIT; corrected NIT-1, PR #824
+        // pr-review cycle 3 — the cycle-2 wording was itself inverted and
+        // self-contradictory, naming "Linux" on both sides of the
+        // distinction): Android is Linux-ABI (these raw fcntl.h values
+        // match) but NOT `target_os = "linux"` — a Linux-only cfg would
+        // silently hand it the macOS/BSD values below instead. The raw
+        // value `0x0100` is `O_NOFOLLOW` on macOS/BSD and `O_NOCTTY` on
+        // Linux/Android (Linux's own `O_NOFOLLOW` is `0o400_000`, the
+        // Linux/Android constant below) — handing Android the macOS/BSD
+        // value would silently substitute `O_NOCTTY` where `O_NOFOLLOW` was
+        // intended, the wrong flag entirely. Empirically confirmed correct
+        // as written: `test_N4_reclaim_identity_still_safe_rejects_symlink_via_o_nofollow`
+        // passes on a macOS host, which it could only do if `0x0100` really
+        // is `O_NOFOLLOW` on darwin. Theoretical today (Android is not a
+        // shipped release target: darwin-arm64/x86_64, linux-x86_64,
+        // linux-musl, windows-x86_64; musl is `target_os = "linux"`), but
+        // free to fix correctly.
         #[cfg(any(target_os = "linux", target_os = "android"))]
         const O_NONBLOCK: i32 = 0o4000;
         #[cfg(any(target_os = "linux", target_os = "android"))]
