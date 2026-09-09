@@ -3098,21 +3098,32 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
 /// abort the reclaim, fail loud with the existing E-SHD-009 collision
 /// error.
 ///
-/// PR #824 pr-review Finding #4 (MINOR): on Unix, the open is issued with
-/// `O_NONBLOCK` — a plain blocking open on a FIFO with no writer connected
-/// blocks INDEFINITELY, which would hang the PreToolUse dispatch this
-/// check gates; a regular file's open behavior is entirely unaffected by
-/// this flag (it only changes FIFO/device/socket open semantics), so
-/// every existing non-FIFO caller sees no behavior change. `O_NOFOLLOW` is
-/// added in the same call for free: this ALSO closes the residual
-/// symlink-dereference gap the paragraph above still documents as
-/// "no O_NOFOLLOW primitive available from std::fs alone" — a symlink
-/// substituted at `path` in the race window now fails the open outright
-/// (never silently dereferenced) rather than relying solely on the
-/// caller's own no-follow `remove_file` for safety. Neither flag's raw
-/// value is exposed by `std::fs`/`std::os::unix`, so both are hardcoded
-/// per-OS below (stable, well-known ABI constants) rather than pulling in
-/// a new `libc`/`nix` dependency for two `i32` values.
+/// PR #824 pr-review Finding #4 (MINOR): on Unix, the open is ALSO issued
+/// with `O_NONBLOCK`. A plain BLOCKING open of a FIFO for `O_RDONLY` waits
+/// for a writer to connect — with no writer ever connecting (the actual
+/// shape of the race this check must survive), that wait is INDEFINITE,
+/// hanging the PreToolUse dispatch this check gates.
+///
+/// N-5 (PR #824 pr-review cycle 2, NIT): `O_NONBLOCK` prevents that hang,
+/// but NOT by making the open itself fail — correcting this doc comment's
+/// own prior claim (and this fix's own commit message) that a FIFO "fails
+/// the open immediately". Per POSIX, `O_RDONLY | O_NONBLOCK` on a FIFO
+/// with no writer instead SUCCEEDS immediately, returning a valid file
+/// descriptor (only `O_WRONLY | O_NONBLOCK` with no reader fails, with
+/// `ENXIO` — not the read-only open this function issues). The FIFO is
+/// then correctly judged NOT reclaim-safe by the SAME
+/// `meta.file_type().is_file()` check every other non-regular-file case
+/// already uses: `is_file()` is `false` for a FIFO's metadata, exactly as
+/// it already is for a directory. A future reader must not remove
+/// `O_NONBLOCK` believing it is load-bearing for the open FAILING — it is
+/// load-bearing for the open never HANGING.
+///
+/// A regular file's open behavior is entirely unaffected by `O_NONBLOCK`
+/// (it only changes FIFO/device/socket open semantics), so every existing
+/// non-FIFO caller sees no behavior change. Neither flag's raw value is
+/// exposed by `std::fs`/`std::os::unix`, so both are hardcoded per-OS
+/// below (stable, well-known ABI constants) rather than pulling in a new
+/// `libc`/`nix` dependency for two `i32` values.
 fn reclaim_identity_still_safe(path: &Path) -> bool {
     #[cfg(unix)]
     {
