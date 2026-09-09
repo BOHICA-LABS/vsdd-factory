@@ -3126,13 +3126,18 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
 /// replacing the 0-byte placeholder with real (non-empty) sealed content,
 /// which `remove_file` would otherwise silently discard.
 ///
-/// Returns `false` — never reclaimable — for a symlink whose target is
-/// non-empty, for a file whose size changed since the first probe, and
-/// for a path that vanished or became inaccessible between the two
-/// checks (a failed/inconclusive open is treated as "not confirmed safe",
-/// never assumed safe). The caller treats every `false` identically:
-/// abort the reclaim, fail loud with the existing E-SHD-009 collision
-/// error.
+/// Returns `false` — never reclaimable — for: on Unix, ANY symlink at all
+/// (rejected outright by `O_NOFOLLOW`, regardless of the target's
+/// content — NIT-2, PR #824 pr-review cycle 3, correcting a prior revision
+/// of this paragraph that overstated the condition as "a symlink whose
+/// target is non-empty", true only of the `#[cfg(not(unix))]` fallback
+/// below, which has no `O_NOFOLLOW`-equivalent and so DOES dereference a
+/// symlink, judging it solely on the target's own size); for a file whose
+/// size changed since the first probe; and for a path that vanished or
+/// became inaccessible between the two checks (a failed/inconclusive open
+/// is treated as "not confirmed safe", never assumed safe). The caller
+/// treats every `false` identically: abort the reclaim, fail loud with the
+/// existing E-SHD-009 collision error.
 ///
 /// PR #824 pr-review Finding #4 (MINOR): on Unix, the open is ALSO issued
 /// with `O_NONBLOCK`. A plain BLOCKING open of a FIFO for `O_RDONLY` waits
