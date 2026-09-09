@@ -73,6 +73,35 @@
 //! `"frontmatter-changelog-array"` shape's item-count trigger now, whose
 //! observable rotate-and-retry outcome remains owned by the still-pending
 //! BC-1.18.009 cluster.
+//!
+//! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" — STUB ONLY,
+//! stub-architect burst, BC-5.38.001 Red Gate discipline)
+//!
+//! This burst adds the type/signature surface for BC-1.18.007 (Shard
+//! Retention/Compaction — AC-010/AC-011/AC-012) and BC-1.18.008 (Mandatory
+//! One-Time Backfill-Split of the Four Pre-Existing Oversized Cycle
+//! Append-Logs — AC-013/AC-014), landing near the end of this file, after
+//! cluster-2's `reconcile_leading_probe_backstop` and before the test
+//! modules. UNLIKE cluster-1/2's functions (real, green, above), every
+//! non-trivial cluster-3 function body below is `todo!()` — this is a
+//! compilable RED GATE stub only, per `tdd_mode: strict` and BC-5.38.001;
+//! test-writer's cluster-3 Red Gate suite is expected to FAIL against these
+//! stubs until implementer lands real logic. Two struct fields were added
+//! to already-shipped cluster-1/2 types to carry BC-1.18.007's own schema
+//! obligation (`ShardIndex::retention_count`, Postcondition 1) — additive,
+//! defaulted, and NOT a behavior change to any cluster-1/2 function; the two
+//! pre-existing `ShardIndex { .. }` struct-literal call sites (one
+//! production, one test) were mechanically extended with the new field's
+//! default value to keep the crate compiling, with no other change to
+//! either site. `ShardIndexEntry` itself was deliberately left UNCHANGED
+//! (no new field) — BC-1.18.007 Invariant 3 explicitly sanctions either "add
+//! an `archived: true` boolean" OR "update the entry's own `path` to reflect
+//! the new archived location" as an implementation detail; this stub adopts
+//! the path-mutation form precisely to avoid a multi-site collateral edit
+//! across cluster-1/2's own already-green `ShardIndexEntry { .. }` literals.
+//! BC-1.18.009/BC-1.18.010/BC-1.18.011/BC-1.18.012/BC-7.08.001 (mechanisms
+//! B1/B2 and the Cohort B flip) remain explicitly OUT OF SCOPE for this
+//! burst — later clusters (4-7) own them.
 
 use std::io;
 use std::io::Read as _;
@@ -2158,7 +2187,8 @@ pub struct ShardIndexEntry {
 }
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
-/// Postcondition 5's schema).
+/// Postcondition 5's schema; EXTENDED BC-1.18.007 Postcondition 1 with
+/// `retention_count`, S-25.02 F4 BC-cluster 3, stub-only this burst).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ShardIndex {
     pub schema_version: u32,
@@ -2169,6 +2199,16 @@ pub struct ShardIndex {
     pub safety_margin_bytes: u64,
     pub practical_fuel_ceiling: u64,
     pub worst_case_fuel_per_byte: f64,
+    /// BC-1.18.007 Postcondition 1: how many of this artifact's most-recent
+    /// sealed shards stay ACTIVE (un-archived) — a config value read from
+    /// the index, never hardcoded into this module's compaction logic
+    /// (Postcondition 1's own "never hardcoding 10" requirement).
+    /// `#[serde(default = "default_retention_count")]` keeps every
+    /// `[[shard]]` index produced before BC-1.18.007 existed loading
+    /// unchanged (backward compatible, mirrors `sealed_retroactively`'s own
+    /// additive-field precedent above).
+    #[serde(default = "default_retention_count")]
+    pub retention_count: u32,
     #[serde(default, rename = "shard")]
     pub shards: Vec<ShardIndexEntry>,
 }
@@ -3277,6 +3317,13 @@ pub fn publish_shard_index_update(
             safety_margin_bytes: entry.safety_margin,
             practical_fuel_ceiling: entry.practical_fuel_ceiling,
             worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            // BC-1.18.007 Postcondition 1 (S-25.02 cluster-3, sibling-site
+            // sweep accompanying the new `ShardIndex::retention_count`
+            // field): a freshly-synthesized index (first-ever seal for this
+            // artifact) starts at the config default — never a bespoke
+            // per-call value this narrow constructor has no other source
+            // for. No behavior change to BC-1.18.006's own roll sequence.
+            retention_count: default_retention_count(),
             shards: Vec::new(),
         });
 
@@ -3987,6 +4034,563 @@ pub fn reconcile_leading_probe_backstop(
     canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
     execute_roll(entry, canonical_path, true)
+}
+
+// ===========================================================================
+// BC-1.18.007 — Shard Retention/Compaction (S-25.02 F4 BC-cluster 3
+// "retention+backfill"; AC-010/AC-011/AC-012). STUB ONLY — every non-trivial
+// body below is `todo!()` per `tdd_mode: strict` / BC-5.38.001. GREEN-BY-
+// DESIGN/WIRING-EXEMPT exceptions are called out individually, mirroring
+// cluster-1/2's own precedent (`ShardEntry::cap_formula_inputs`,
+// `From<ShardConfigError> for HookResult`, `build_roll_retry_block_reason`).
+// ===========================================================================
+
+/// BC-1.18.007 Postcondition 1: the config default for
+/// [`ShardIndex::retention_count`] — 10 most-recent shards, a round,
+/// human-adjustable number per ADR-051 Decision 6. This BC's implementation
+/// MUST read `retention_count` from the shard-index; this function exists
+/// ONLY to seed a freshly-synthesized index (first-ever seal) and as the
+/// `#[serde(default = ...)]` value for a pre-BC-1.18.007 index loading
+/// without the field — never called from the ongoing per-write retention
+/// CHECK itself, which always reads the already-loaded `index.retention_count`.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single literal return — zero branching, no I/O, no calls to
+/// non-trivial helpers, one-line body. There is no domain decision here for
+/// a test to exercise non-trivially.
+pub fn default_retention_count() -> u32 {
+    10
+}
+
+/// BC-1.18.007 Postcondition 2: the OS-native filesystem destination for an
+/// archival move — `.factory/cycles/<cycle>/archive/<artifact-stem>/<sealed-
+/// filename>`, expressed relative to `cycle_root` (the sharded artifact's
+/// own cycle directory, i.e. `canonical_path`'s parent).
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// Pure path-segment joining — zero branching, no I/O (no filesystem access;
+/// this function only computes a path value), no calls to non-trivial
+/// helpers, single-expression body. There is no domain decision left for a
+/// test to exercise non-trivially: this is the literal, spec-quoted
+/// directory-naming convention (Postcondition 2), not a choice.
+pub fn archived_shard_path(
+    cycle_root: &Path,
+    artifact_stem: &str,
+    sealed_filename: &str,
+) -> PathBuf {
+    cycle_root
+        .join("archive")
+        .join(artifact_stem)
+        .join(sealed_filename)
+}
+
+/// Portable (always `/`-separated, OS-independent) form of the SAME
+/// archived location [`archived_shard_path`] names as an OS-native
+/// [`PathBuf`] — this is the string this module records into
+/// [`ShardIndexEntry::path`] after archival (BC-1.18.007 Invariant 3's
+/// path-mutation implementation choice; see this module's own cluster-3
+/// scope note). Deliberately NOT reused for the actual filesystem move
+/// (which needs [`archived_shard_path`]'s OS-native form) — TOML-stored
+/// index content is portable text, not an OS path.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single `format!()` expression over a fixed, spec-quoted literal
+/// template — zero branching, no I/O, no calls to non-trivial helpers,
+/// one-line body.
+pub fn archived_shard_index_path_string(artifact_stem: &str, sealed_filename: &str) -> String {
+    format!("archive/{artifact_stem}/{sealed_filename}")
+}
+
+/// `true` iff `entry` has already been archived — i.e. its own
+/// [`ShardIndexEntry::path`] has been rewritten (by
+/// [`archive_overflow_shards`]) to an [`archived_shard_index_path_string`]
+/// form, rather than still naming a bare sealed-shard filename sibling to
+/// the canonical file (BC-1.18.007 Invariant 3).
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single `str::starts_with` predicate against a fixed literal prefix —
+/// zero branching (no `if`/`match`/`?`/`unwrap`), no I/O, no calls to
+/// non-trivial helpers, one-line body.
+pub fn shard_index_entry_is_archived(entry: &ShardIndexEntry) -> bool {
+    entry.path.starts_with("archive/")
+}
+
+/// BC-1.18.007 EC-005 (E-SHD-002): the shard-index was missing or corrupt at
+/// the moment a retention check would run, or an archival move itself
+/// failed mid-invocation — either fails the SAME native-gate invocation
+/// loud, never silently. Reuses the E-SHD-002 code error-taxonomy.md
+/// already allocates for "Shard management errors ... shard-index missing
+/// or corrupt" (no new `E-SHD-NNN` code is expected from this story's
+/// implementation, per this story's own File Structure Requirements row).
+#[derive(Debug, Error)]
+pub enum ShardRetentionError {
+    /// EC-005: the retention check's own load of
+    /// `<artifact-stem>.shard-index.toml` failed (missing in an unexpected
+    /// way, or malformed TOML) at the moment a retention/compaction check
+    /// would run — retention/compaction MUST NOT silently skip its check
+    /// and proceed as if no archival were needed.
+    #[error(
+        "E-SHD-002: shard-index missing or corrupt for artifact_stem \"{artifact_stem}\": {source}"
+    )]
+    IndexUnavailable {
+        artifact_stem: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Postcondition 2: the archival move of an already-identified
+    /// overflow shard from the cycle root to `archive/<artifact-stem>/`
+    /// failed. No shard-index change is applied for a failed move (the
+    /// caller's own atomic-write of the updated index only proceeds once
+    /// every archival move this invocation intends to perform has durably
+    /// succeeded — same-invocation-atomicity composition with BC-1.18.006
+    /// Postcondition 4).
+    #[error(
+        "E-SHD-002: shard archival move failed for artifact_stem \"{artifact_stem}\" (shard \
+         \"{sealed_path}\") — retention/compaction aborted, no shard-index change applied: \
+         {source}"
+    )]
+    ArchivalMoveFailed {
+        artifact_stem: String,
+        sealed_path: String,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// Fail-loud retention/compaction errors surface to the dispatcher's
+/// handling path as `HookResult::Error` (EC-005's posture).
+///
+/// # WIRING-EXEMPT (BC-5.38.003)
+///
+/// `From<T>` blanket delegation to a single `Display`-forwarding call —
+/// identical in shape to this file's existing, already-shipped
+/// `From<ShardConfigError> for HookResult` / `From<ShardRollError> for
+/// HookResult` impls. No domain decision: `ShardRetentionError`'s own
+/// `Display` impl (via `thiserror`) already carries the full,
+/// artifact-stem-scoped diagnostic text.
+impl From<ShardRetentionError> for HookResult {
+    fn from(err: ShardRetentionError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// BC-1.18.007 EC-005: load `<artifact-stem>.shard-index.toml` for the
+/// retention-check path specifically, failing loud with
+/// [`ShardRetentionError::IndexUnavailable`] when the index is missing (in
+/// a way that is NOT the legitimate "no roll has ever occurred yet"
+/// first-artifact case — see [`load_shard_index`]'s own `Ok(None)`
+/// contract, which this function must NOT silently treat as "no archival
+/// needed" once a real seal is known to have just occurred) or corrupt.
+pub fn load_shard_index_for_retention_check(
+    canonical_path: &Path,
+    artifact_stem: &str,
+) -> Result<ShardIndex, ShardRetentionError> {
+    let index_path = shard_index_path_for(canonical_path, artifact_stem);
+    match load_shard_index(&index_path) {
+        Ok(Some(index)) => Ok(index),
+        // EC-005: a seal is known to have just occurred (Precondition 1), so
+        // an absent index HERE is an anomaly -- never the legitimate
+        // "no roll has ever occurred yet" case `load_shard_index`'s own
+        // `Ok(None)` contract otherwise carves out for a fresh artifact.
+        Ok(None) => Err(ShardRetentionError::IndexUnavailable {
+            artifact_stem: artifact_stem.to_string(),
+            source: io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "shard-index '{}' not found at retention-check time",
+                    index_path.display()
+                ),
+            ),
+        }),
+        Err(source) => Err(ShardRetentionError::IndexUnavailable {
+            artifact_stem: artifact_stem.to_string(),
+            source,
+        }),
+    }
+}
+
+/// BC-1.18.007 Postcondition 1/EC-001/EC-002 (AC-010): how many of
+/// `index`'s ACTIVE (non-archived, per [`shard_index_entry_is_archived`])
+/// shard entries exceed `index.retention_count` right now — the count of
+/// the OLDEST active shards [`archive_overflow_shards`] must relocate in
+/// this SAME invocation to bring the active count back within the
+/// (possibly newly-lowered, EC-002) limit. `0` when the active count is
+/// already `<= retention_count` (no archival needed).
+pub fn retention_overflow_count(index: &ShardIndex) -> usize {
+    let active_count = index
+        .shards
+        .iter()
+        .filter(|entry| !shard_index_entry_is_archived(entry))
+        .count();
+    active_count.saturating_sub(index.retention_count as usize)
+}
+
+/// BC-1.18.007 Postcondition 2/Invariant 1/Invariant 2 (AC-010): archive the
+/// oldest `retention_overflow_count(index)` ACTIVE shard(s) for the artifact
+/// `index` describes, moving each (never deleting — Invariant 1) from its
+/// current sibling location next to `canonical_path` to
+/// [`archived_shard_path`], and rewriting the moved entry's own
+/// [`ShardIndexEntry::path`] to [`archived_shard_index_path_string`]'s form
+/// (Invariant 3's path-mutation choice) IN PLACE within `index` — the SAME
+/// `index` value the caller subsequently persists (composing with
+/// BC-1.18.006 Postcondition 4's same-invocation atomicity guarantee).
+/// `index.retention_count` is this artifact's own, independent value
+/// (Invariant 2 — never a global constant). Returns the archived entries,
+/// oldest-first.
+pub fn archive_overflow_shards(
+    index: &mut ShardIndex,
+    canonical_path: &Path,
+) -> Result<Vec<ShardIndexEntry>, ShardRetentionError> {
+    let overflow = retention_overflow_count(index);
+    if overflow == 0 {
+        return Ok(Vec::new());
+    }
+
+    let cycle_root = canonical_path.parent().unwrap_or_else(|| Path::new(""));
+
+    // Oldest-first (lowest seq first) among the ACTIVE (non-archived)
+    // entries only -- an already-archived sibling never counts toward, nor
+    // is re-selected by, this pass (Invariant 2/3).
+    let mut active_seqs: Vec<u32> = index
+        .shards
+        .iter()
+        .filter(|entry| !shard_index_entry_is_archived(entry))
+        .map(|entry| entry.seq)
+        .collect();
+    active_seqs.sort_unstable();
+
+    let mut archived = Vec::with_capacity(overflow);
+    for seq in active_seqs.into_iter().take(overflow) {
+        let idx = index
+            .shards
+            .iter()
+            .position(|entry| entry.seq == seq)
+            .expect("seq collected from index.shards must still be present in index.shards");
+        let sealed_filename = index.shards[idx].path.clone();
+        let old_path = shard_sibling_path(canonical_path, &sealed_filename);
+        let new_path = archived_shard_path(cycle_root, &index.artifact_stem, &sealed_filename);
+
+        let to_error = |source: io::Error| ShardRetentionError::ArchivalMoveFailed {
+            artifact_stem: index.artifact_stem.clone(),
+            sealed_path: sealed_filename.clone(),
+            source,
+        };
+
+        if let Some(parent) = new_path.parent() {
+            std::fs::create_dir_all(parent).map_err(to_error)?;
+        }
+
+        // Invariant 1: move, never delete -- `rename` relocates the file's
+        // content byte-for-byte; nothing is read into memory and rewritten.
+        std::fs::rename(&old_path, &new_path).map_err(to_error)?;
+
+        // Invariant 3: the moved entry's own index record is rewritten IN
+        // PLACE (never removed) to reflect the new archived location.
+        index.shards[idx].path =
+            archived_shard_index_path_string(&index.artifact_stem, &sealed_filename);
+        archived.push(index.shards[idx].clone());
+    }
+
+    Ok(archived)
+}
+
+/// Whole-corpus shard-glob scope mode (BC-1.18.007 Postcondition 3/6;
+/// AC-011/AC-012). `DefaultExcluded` is the general default (honest
+/// `O(active shards)` accounting, Postcondition 3/4) — every existing
+/// generic whole-corpus validator. `ArchiveInclusive` is POLICY-1's
+/// (`append_only_numbering`) MANDATORY carve-out (Postcondition 6, EC-006)
+/// — never opt-in for that one audit class (AC-012).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeCorpusGlobScope {
+    DefaultExcluded,
+    ArchiveInclusive,
+}
+
+/// BC-1.18.007 Postcondition 3/4/6 (AC-011/AC-012; VP-122/VP-141):
+/// enumerate the shard file paths a whole-corpus reader should scan for
+/// `artifact_stem` under `cycle_root`, honoring `scope`'s archive-inclusion
+/// policy. `DefaultExcluded` returns only the current file plus active
+/// (non-archived) sealed shards at the cycle root — honestly
+/// `O(active shards)`, bounded by `retention_count`, never
+/// `O(all shards ever)` (AC-011). `ArchiveInclusive` additionally globs
+/// `archive/<artifact_stem>/<artifact_stem>*.md` — POLICY-1's mandatory
+/// carve-out, so an ID whose sole occurrence has aged into the archive
+/// remains visible to append-only/gap/uniqueness detection (AC-012, EC-006).
+pub fn whole_corpus_shard_paths(
+    cycle_root: &Path,
+    artifact_stem: &str,
+    scope: WholeCorpusGlobScope,
+) -> io::Result<Vec<PathBuf>> {
+    let mut paths = collect_shard_files_in_dir(cycle_root, artifact_stem)?;
+
+    if scope == WholeCorpusGlobScope::ArchiveInclusive {
+        let archive_dir = cycle_root.join("archive").join(artifact_stem);
+        match collect_shard_files_in_dir(&archive_dir, artifact_stem) {
+            Ok(mut archived) => paths.append(&mut archived),
+            // AC-011: an artifact that has never exceeded retention_count
+            // has no archive/ directory at all -- not an error, zero
+            // archived shards to include.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+/// Enumerate every regular file directly under `dir` whose filename matches
+/// `artifact_stem`'s own shard-naming convention (the bare current filename
+/// `<stem>.md`, or a sealed-shard filename `<stem>.<digits>.md`) -- used by
+/// [`whole_corpus_shard_paths`] against both the cycle root (active shards)
+/// and, under [`WholeCorpusGlobScope::ArchiveInclusive`], the
+/// `archive/<stem>/` subdirectory.
+fn collect_shard_files_in_dir(dir: &Path, artifact_stem: &str) -> io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        if is_shard_file_for_stem(&file_name.to_string_lossy(), artifact_stem) {
+            out.push(entry.path());
+        }
+    }
+    Ok(out)
+}
+
+/// `true` iff `file_name` is either `artifact_stem`'s bare current filename
+/// (`<stem>.md`) or a sealed-shard filename (`<stem>.<digits>.md`) --
+/// deliberately narrow (digits-only middle segment) so an unrelated
+/// same-stem-prefixed file (e.g. `<stem>-old.md`, `<stem>.shard-index.toml`)
+/// is never mistaken for a shard of this artifact.
+fn is_shard_file_for_stem(file_name: &str, artifact_stem: &str) -> bool {
+    if file_name == format!("{artifact_stem}.md") {
+        return true;
+    }
+    let prefix = format!("{artifact_stem}.");
+    match file_name
+        .strip_prefix(prefix.as_str())
+        .and_then(|rest| rest.strip_suffix(".md"))
+    {
+        Some(seq_part) => !seq_part.is_empty() && seq_part.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
+// ===========================================================================
+// BC-1.18.008 — Mandatory One-Time Backfill-Split of the Four Pre-Existing
+// Oversized Cycle Append-Logs (S-25.02 F4 BC-cluster 3 "retention+backfill";
+// AC-013/AC-014). STUB ONLY — every non-trivial body below is `todo!()` per
+// `tdd_mode: strict` / BC-5.38.001. Named `mechanism_a_*`/`MechanismA*`
+// throughout to avoid any future naming collision with BC-1.18.011's (B2)
+// and BC-1.18.012's (B1) own, structurally distinct one-time migrations,
+// which later clusters (6/7) will add to this same module.
+// ===========================================================================
+
+/// BC-1.18.008 EC-004 (E-SHD-003): the mechanism-A backfill-split's mandatory
+/// content-preservation/record-integrity verification gate (Postcondition
+/// 6) failed, or a genuine I/O failure occurred while staging the split.
+/// Either aborts the WHOLE operation; the original monolithic file is left
+/// completely untouched (fail-loud, never partial-and-silent). Reuses the
+/// E-SHD-003 code error-taxonomy.md already allocates for "backfill-split
+/// content-preservation verification failed" (no new `E-SHD-NNN` code
+/// expected from this story's implementation).
+#[derive(Debug, Error)]
+pub enum MechanismABackfillError {
+    /// Postcondition 6(a)/6(b): the staged partitions, concatenated in
+    /// order, do not reproduce the original monolithic file byte-for-byte,
+    /// or a structural record was found duplicated or dropped across the
+    /// staged partitions. `detail` names which of the two checks failed and
+    /// how (e.g. a byte offset, or a record identifier).
+    #[error(
+        "E-SHD-003: backfill-split content-preservation verification failed for artifact_stem \
+         \"{artifact_stem}\": {detail}"
+    )]
+    ContentPreservationFailed {
+        artifact_stem: String,
+        detail: String,
+    },
+
+    /// A genuine I/O failure while staging the split's shard files and
+    /// index (Postcondition 5's stage-then-verify-then-atomically-replace
+    /// sequence) — the original monolithic file is left untouched; the
+    /// operation is safely re-runnable from scratch (Postcondition 5, EC-003).
+    #[error(
+        "E-SHD-003: backfill-split I/O failure for artifact_stem \"{artifact_stem}\": {source}"
+    )]
+    Io {
+        artifact_stem: String,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// Fail-loud backfill-split errors surface to the operator/dispatcher
+/// handling path as `HookResult::Error`.
+///
+/// # WIRING-EXEMPT (BC-5.38.003)
+///
+/// `From<T>` blanket delegation to a single `Display`-forwarding call —
+/// identical in shape to this file's existing, already-shipped
+/// `From<ShardConfigError> for HookResult` / `From<ShardRollError> for
+/// HookResult` / `From<ShardRetentionError> for HookResult` impls. No
+/// domain decision: `MechanismABackfillError`'s own `Display` impl (via
+/// `thiserror`) already carries the full, artifact-stem-scoped diagnostic
+/// text.
+impl From<MechanismABackfillError> for HookResult {
+    fn from(err: MechanismABackfillError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// One structural partition of a mechanism-A backfill-split (BC-1.18.008
+/// Postcondition 2). `record_count` is this partition's own count of
+/// whole, native-format records (Postcondition 6(b)'s record-integrity
+/// check operates over these counts, summed across all partitions, against
+/// the original file's own total). `oversized_record` is `true` only for
+/// the rare EC-002 case — a single record alone exceeds `shard_cap_bytes`,
+/// which this BC allows for exactly that one record rather than splitting
+/// it mid-record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MechanismABackfillPartition {
+    pub bytes: Vec<u8>,
+    pub record_count: usize,
+    pub oversized_record: bool,
+}
+
+/// BC-1.18.008 Postcondition 2/Invariant 2: locate the structural
+/// record-boundary byte offsets native to `artifact_stem`'s own append-log
+/// format within `content` (e.g. `## Decisions Log` row boundaries for
+/// `"decision-log"`, `### <burst-heading>` boundaries for `"burst-log"`) —
+/// the ONLY points [`mechanism_a_partition_for_backfill`] may split at,
+/// never an arbitrary byte offset that could divide a single record across
+/// two shard files.
+pub fn mechanism_a_record_boundary_offsets(_artifact_stem: &str, _content: &[u8]) -> Vec<usize> {
+    todo!()
+}
+
+/// BC-1.18.008 Postcondition 2 (AC-013): partition `content` at
+/// `record_boundary_offsets` (never mid-record, Invariant 2), grouping
+/// consecutive whole records into chunks each `<= shard_cap_bytes` — except
+/// EC-002's single-oversized-record case, flagged
+/// `oversized_record: true` on its own partition rather than split. Returns
+/// partitions in original-file chronological order; the caller
+/// ([`run_mechanism_a_backfill_split`]) treats the LAST partition as the
+/// fresh "current" file and seals every partition before it with
+/// sequential `seq` numbers starting at 1 (Postcondition 2).
+pub fn mechanism_a_partition_for_backfill(
+    _content: &[u8],
+    _record_boundary_offsets: &[usize],
+    _shard_cap_bytes: u64,
+) -> Vec<MechanismABackfillPartition> {
+    todo!()
+}
+
+/// BC-1.18.008 Postcondition 6(a): `true` iff the byte-for-byte
+/// concatenation of `partitions`' own `bytes`, in order, reproduces
+/// `original_content` exactly (modulo the shard/index metadata itself,
+/// which is new). Part of the mandatory content-preservation verification
+/// gate (AC-014) — a hard gate: `false` here MUST abort the whole backfill
+/// operation via [`MechanismABackfillError::ContentPreservationFailed`],
+/// leaving the original file untouched.
+pub fn mechanism_a_verify_backfill_content_preserved(
+    _original_content: &[u8],
+    _partitions: &[MechanismABackfillPartition],
+) -> bool {
+    todo!()
+}
+
+/// BC-1.18.008 Postcondition 6(b): `true` iff the sum of every partition's
+/// own `record_count` equals `original_record_count` — every structural
+/// record that existed in the original file is present in EXACTLY ONE
+/// resulting shard (never zero, never two). The other half of the mandatory
+/// content-preservation verification gate (AC-014), alongside
+/// [`mechanism_a_verify_backfill_content_preserved`].
+pub fn mechanism_a_verify_backfill_record_counts_preserved(
+    _original_record_count: usize,
+    _partitions: &[MechanismABackfillPartition],
+) -> bool {
+    todo!()
+}
+
+/// BC-1.18.008 Invariant 3 (AC-014): `true` iff a mechanism-A backfill-split
+/// has ALREADY completed for this artifact — a shard-index already exists
+/// at this artifact's `<artifact-stem>.shard-index.toml` sibling path and
+/// already fully accounts for the artifact's pre-existing history. The
+/// idempotency short-circuit [`run_mechanism_a_backfill_split`] MUST
+/// consult before doing any split work: re-running the backfill against an
+/// already-migrated artifact must never double-split it into redundant
+/// shards.
+pub fn mechanism_a_backfill_already_migrated(
+    _canonical_path: &Path,
+    _artifact_stem: &str,
+) -> io::Result<bool> {
+    todo!()
+}
+
+/// One-time mechanism-A backfill-split outcome (BC-1.18.008 Postcondition
+/// 1/3/4).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MechanismABackfillOutcome {
+    /// [`mechanism_a_backfill_already_migrated`] found this artifact
+    /// already fully migrated (Invariant 3's idempotency short-circuit) —
+    /// no shards were (re-)produced this call.
+    AlreadyMigrated,
+    /// The backfill-split ran and published `sealed_count` newly-sealed
+    /// shards (`ceil(original_bytes / shard_cap_bytes) - 1`) plus a fresh
+    /// current file, publishing the full shard index for the complete
+    /// pre-existing history in this SAME operation (Postcondition 3).
+    /// `archived_count` names how many of the OLDEST of those, if any, were
+    /// ALSO archived in this SAME operation because the resulting shard
+    /// count already exceeded `retention_count` (Postcondition 4,
+    /// composing immediately with BC-1.18.007's retention policy — never
+    /// deferred to a later event).
+    Migrated {
+        sealed_count: u32,
+        archived_count: u32,
+    },
+}
+
+/// BC-1.18.008 Postcondition 1/2/3/4/5/6, Invariant 1/2/3 (AC-013/AC-014):
+/// the mechanism-A one-time backfill-split entry point, executed exactly
+/// once per artifact, as a one-time migration task at F4 activation — never
+/// as an ongoing per-write mechanism (Postcondition 1; distinct from
+/// [`execute_roll`]'s reactive, per-write roll).
+///
+/// Reuses BC-1.18.006's atomic-write / shard-index-schema primitives
+/// (Invariant 1) via a stage-then-verify-then-atomically-replace sequence
+/// (Postcondition 5): nothing durable about the original monolithic file's
+/// role changes until every resulting shard file AND the shard-index have
+/// been staged AND BOTH [`mechanism_a_verify_backfill_content_preserved`]
+/// and [`mechanism_a_verify_backfill_record_counts_preserved`] have passed
+/// (AC-014's hard gate) — a failure at any point aborts with the original
+/// file untouched and safely re-runnable from scratch (EC-003/EC-004).
+/// Idempotent (Invariant 3) via
+/// [`mechanism_a_backfill_already_migrated`]'s upfront check. Composes
+/// immediately with BC-1.18.007's retention policy in the SAME operation
+/// when the resulting shard count already exceeds `retention_count`
+/// (Postcondition 4) — `retention_count` is threaded in explicitly rather
+/// than re-derived, since no shard-index (and therefore no
+/// `ShardIndex::retention_count`) exists yet for an artifact that has never
+/// been backfilled.
+pub fn run_mechanism_a_backfill_split(
+    _entry: &ShardEntry,
+    _canonical_path: &Path,
+    _record_boundary_offsets: &[usize],
+    _retention_count: u32,
+) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
+    todo!()
 }
 
 // ---------------------------------------------------------------------------
@@ -8076,6 +8680,11 @@ mod bc_1_18_006_roll_tests {
             safety_margin_bytes: entry.safety_margin,
             practical_fuel_ceiling: entry.practical_fuel_ceiling,
             worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            // Sibling-site sweep (S-25.02 cluster-3): new
+            // `ShardIndex::retention_count` field, default value — this
+            // existing (cluster-1/2) test is unconcerned with retention and
+            // is otherwise unchanged.
+            retention_count: default_retention_count(),
             shards: vec![ShardIndexEntry {
                 seq: u32::MAX,
                 path: "decision-log.4294967295.md".to_string(),
