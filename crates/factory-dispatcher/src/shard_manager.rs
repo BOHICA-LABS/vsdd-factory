@@ -128,9 +128,7 @@ fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
         const ERROR_PATH_NOT_FOUND: i32 = 3;
         match err.raw_os_error() {
             Some(ERROR_FILE_NOT_FOUND) => true,
-            Some(ERROR_PATH_NOT_FOUND) => {
-                closest_existing_ancestor_is_directory_or_absent(path)
-            }
+            Some(ERROR_PATH_NOT_FOUND) => closest_existing_ancestor_is_directory_or_absent(path),
             _ => false,
         }
     }
@@ -2703,9 +2701,12 @@ fn stage_temp_file(final_path: &Path, content: &[u8]) -> Result<PathBuf, StageEr
         }
     }) {
         return Err(match kind {
-            ForcedStageFailureKind::TempPathOccupied => StageError::TempPathOccupied(
-                io::Error::new(io::ErrorKind::AlreadyExists, "N-1 test-forced temp-path collision"),
-            ),
+            ForcedStageFailureKind::TempPathOccupied => {
+                StageError::TempPathOccupied(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "N-1 test-forced temp-path collision",
+                ))
+            }
             ForcedStageFailureKind::Io => {
                 StageError::Io(io::Error::other("N-1 test-forced staging I/O failure"))
             }
@@ -4025,7 +4026,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_FINDING1_is_genuinely_missing_windows_path_not_found_propagates_through_non_directory()
-     {
+    {
         let dir = tempfile::tempdir().expect("tempdir");
         let not_a_dir = dir.path().join("plain-file");
         std::fs::write(&not_a_dir, "i am a file").expect("seed a plain file");
