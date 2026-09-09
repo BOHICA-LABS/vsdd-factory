@@ -3067,20 +3067,28 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
 /// `std::fs` allows without a new dependency.
 ///
 /// `File::open` (unlike `symlink_metadata`/`lstat`) DOES dereference a
-/// symlink, so if the path was replaced by a symlink in the race window
-/// this check cannot itself detect that substitution — no `O_NOFOLLOW`
-/// primitive is available from `std::fs` alone, and adding one would
-/// require a new dependency (`libc`/`nix`), out of scope for this
-/// defense-in-depth hardening. This residual case is still safe in
-/// practice: the caller's subsequent `remove_file`/`unlink()` never
-/// dereferences a symlink either (SEC-001's own no-follow discipline), so
-/// a symlink substituted in that narrower window is itself unlinked —
-/// never its target — and [`write_exclusive`]'s `O_EXCL` retry
-/// (FIX-HIGH-1) still refuses to write through any symlink that manages
-/// to reappear at the destination on the retry. What this check DOES
-/// close is the window this fix targets: a second, legitimate concurrent
-/// writer replacing the 0-byte placeholder with real (non-empty) sealed
-/// content, which `remove_file` would otherwise silently discard.
+/// symlink, so if the path was replaced by a symlink in the race window a
+/// plain open could not itself detect that substitution. N-4 (PR #824
+/// pr-review cycle 2, resolving this paragraph's own PRIOR self-
+/// contradiction with the "Finding #4" paragraph below, which correctly
+/// states the CURRENT truth): on Unix, this gap is now CLOSED — the open
+/// below additionally passes `O_NOFOLLOW` (PR #824 pr-review Finding #4),
+/// so a symlink substituted at `path` fails the open outright rather than
+/// being silently dereferenced. Only the `#[cfg(not(unix))]` fallback
+/// below still has this residual gap: no portable `O_NOFOLLOW`-equivalent
+/// is available from `std::fs` alone there, and adding one would require
+/// a new dependency (`libc`/`nix`/a platform-specific crate), out of scope
+/// for this defense-in-depth hardening. That fallback is still safe in
+/// practice for the same reason it always was: the caller's subsequent
+/// `remove_file`/`unlink()` never dereferences a symlink either (SEC-001's
+/// own no-follow discipline), so a symlink substituted in that narrower
+/// window is itself unlinked — never its target — and
+/// [`write_exclusive`]'s `O_EXCL` retry (FIX-HIGH-1) still refuses to
+/// write through any symlink that manages to reappear at the destination
+/// on the retry. What this check DOES close on every platform is the
+/// window this fix targets: a second, legitimate concurrent writer
+/// replacing the 0-byte placeholder with real (non-empty) sealed content,
+/// which `remove_file` would otherwise silently discard.
 ///
 /// Returns `false` — never reclaimable — for a symlink whose target is
 /// non-empty, for a file whose size changed since the first probe, and
@@ -8928,6 +8936,34 @@ mod bc_1_18_006_roll_tests {
             !reclaim_identity_still_safe(&path),
             "FIX-MED-1: a path that vanished (or never existed) must never be treated as \
              reclaim-safe — File::open failing is not evidence of safety"
+        );
+    }
+
+    /// N-4 (PR #824 pr-review cycle 2, MINOR): the two tests immediately
+    /// above pin the content-changed and missing-path arms, but neither
+    /// covers the Unix `O_NOFOLLOW` property Finding #4 added — untested
+    /// per the reviewer. Plants a symlink AT the checked path pointing at a
+    /// genuinely 0-byte, genuinely regular target — the only shape that
+    /// could otherwise fool a DEREFERENCING check into wrongly reporting
+    /// `true` — and asserts the re-check still refuses it: `O_NOFOLLOW`
+    /// makes the open itself fail for the symlink, never silently
+    /// dereferencing through to the target's metadata.
+    #[cfg(unix)]
+    #[test]
+    fn test_N4_reclaim_identity_still_safe_rejects_symlink_via_o_nofollow() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("zero-byte-target.md");
+        std::fs::write(&target, []).expect("seed a genuinely 0-byte regular target");
+
+        let path = dir.path().join("decision-log.0001.md");
+        std::os::unix::fs::symlink(&target, &path)
+            .expect("plant a symlink at the checked path, pointing at a 0-byte regular file");
+
+        assert!(
+            !reclaim_identity_still_safe(&path),
+            "N-4: a symlink at the checked path must be rejected via O_NOFOLLOW even when its \
+             TARGET is a genuinely 0-byte regular file — the open itself must fail for the \
+             symlink, never silently dereference through to report on the target's metadata"
         );
     }
 
