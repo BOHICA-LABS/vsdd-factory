@@ -8685,6 +8685,112 @@ mod bc_1_18_006_roll_tests {
         );
     }
 
+    /// PR #824 pr-review Finding #8 (MINOR): the two tests immediately
+    /// above pin `reclaim_identity_still_safe`'s OWN logic in isolation,
+    /// but neither drives the re-verify-before-unlink guarantee through the
+    /// REAL call site — `publish_sealed_shard`'s 0-byte-reclaim branch
+    /// (which calls `reclaim_identity_still_safe` immediately before its
+    /// `remove_file` unlink). A regression in how the CALLER wires this
+    /// check in (dropping the `if !reclaim_identity_still_safe(...)` guard
+    /// entirely, inverting it, or ignoring its return value) would not be
+    /// caught by either helper-level test above — both call the helper
+    /// directly and never touch `publish_sealed_shard`.
+    ///
+    /// This test deterministically (no thread races, no flakiness)
+    /// reproduces the SHAPE of the TOCTOU window `publish_sealed_shard`'s
+    /// own doc comment describes: a destination whose EARLIER, coarser
+    /// probe (`std::fs::symlink_metadata` — "not a symlink AND exactly 0
+    /// bytes") judges reclaimable, but whose LATER, finer re-check
+    /// (`reclaim_identity_still_safe`'s open-handle-based "is a REGULAR
+    /// file AND exactly 0 bytes") disagrees. A FIFO produces exactly this
+    /// disagreement with NO timing dependency at all: `symlink_metadata`
+    /// on a FIFO with no writer connected reports `is_symlink() == false`
+    /// and `len() == 0` (so the coarse probe says "reclaimable" — verified
+    /// as this test's own precondition below), while
+    /// `reclaim_identity_still_safe`'s `is_file()` check is `false` for a
+    /// FIFO (so the fine re-check correctly disagrees) — the same
+    /// "identity changed since the first probe" outcome a genuine
+    /// concurrent writer would also produce, reproduced here via a stable
+    /// file-type mismatch rather than a race window that would make the
+    /// test flaky.
+    ///
+    /// Asserts the abort surfaces through `publish_sealed_shard` itself
+    /// (never the private helper in isolation): the call must return
+    /// `Err(ShardRollError::SealedShardAlreadyExists)` (E-SHD-009), the
+    /// FIFO at the destination must be left COMPLETELY UNTOUCHED (never
+    /// unlinked), and the new content passed in must never be published
+    /// anywhere. If the caller's wiring regresses, this test fails: the
+    /// reclaim would instead unlink the FIFO and publish the new content,
+    /// producing `Ok(())` with the FIFO gone.
+    #[cfg(unix)]
+    #[test]
+    fn test_FIXMED1_publish_sealed_shard_callsite_aborts_reclaim_when_recheck_disagrees_with_initial_probe()
+     {
+        use std::os::unix::fs::FileTypeExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&sealed_path)
+            .status()
+            .expect("mkfifo must be available on this platform to run this test");
+        assert!(
+            status.success(),
+            "mkfifo must succeed in creating the FIFO fixture at the seal destination"
+        );
+
+        // Precondition: confirm the FIFO reproduces the exact disagreement
+        // this test depends on — publish_sealed_shard's own coarse
+        // is_zero_byte probe must judge it reclaimable (so the call
+        // actually reaches the reclaim_identity_still_safe re-check
+        // rather than being refused earlier by the `!is_zero_byte`
+        // branch), while the fine re-check must disagree.
+        let coarse_probe_says_reclaimable = std::fs::symlink_metadata(&sealed_path)
+            .map(|meta| !meta.file_type().is_symlink() && meta.len() == 0)
+            .unwrap_or(false);
+        assert!(
+            coarse_probe_says_reclaimable,
+            "precondition: publish_sealed_shard's own coarse is_zero_byte probe must see this \
+             FIFO as reclaimable (not a symlink, reports 0 bytes) for this test to actually \
+             exercise the re-check's disagreement rather than the earlier `!is_zero_byte` \
+             refusal"
+        );
+        assert!(
+            !reclaim_identity_still_safe(&sealed_path),
+            "precondition: the fine re-check must disagree with the coarse probe for a FIFO — a \
+             FIFO is never a 0-byte REGULAR file"
+        );
+
+        let new_content = b"NEW-SEAL-CONTENT-MUST-NEVER-BE-PUBLISHED-OVER-THE-FIFO";
+        let err = publish_sealed_shard(&sealed_path, new_content).expect_err(
+            "FIX-MED-1 call-site regression: publish_sealed_shard must abort the 0-byte reclaim \
+             (never proceed to unlink) when the re-check disagrees with the earlier coarse \
+             probe — a caller-side regression that stopped invoking, or stopped respecting the \
+             return value of, reclaim_identity_still_safe would instead report Ok(()) here",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealedShardAlreadyExists { .. }),
+            "FIX-MED-1: the abort must surface as ShardRollError::SealedShardAlreadyExists \
+             (E-SHD-009) — got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("E-SHD-009"),
+            "FIX-MED-1: the error's Display text must name the E-SHD-009 code — got: {err}"
+        );
+
+        let post_call_meta = std::fs::symlink_metadata(&sealed_path).expect(
+            "FIX-MED-1 call-site regression: the destination must still exist — an aborted \
+             reclaim must never unlink it",
+        );
+        assert!(
+            post_call_meta.file_type().is_fifo(),
+            "FIX-MED-1 call-site regression: the pre-existing FIFO at the seal destination must \
+             be left COMPLETELY UNTOUCHED when the reclaim aborts — it must never be unlinked, \
+             regardless of what publish_sealed_shard's internal staging did with the new \
+             content"
+        );
+    }
+
     /// PR #824 pr-review Finding #4 (MINOR): a plain blocking
     /// `std::fs::File::open` on a FIFO with NO writer connected blocks
     /// INDEFINITELY — hanging the PreToolUse dispatch this check gates.
