@@ -112,22 +112,82 @@ use vsdd_hook_sdk::HookResult;
 /// `ShardRollError::SealWriteFailed` (`E-SHD-001`) exactly as a genuine
 /// non-`NotFound` failure already does on Unix.
 ///
-/// Disambiguated via `raw_os_error()`: only `ERROR_FILE_NOT_FOUND` (2) is
-/// treated as genuinely missing on Windows; `ERROR_PATH_NOT_FOUND` (3) and
-/// any other `NotFound`-kind error propagate as a real `Err`.
-fn is_genuinely_missing(err: &io::Error) -> bool {
+/// Disambiguated via `raw_os_error()`: `ERROR_FILE_NOT_FOUND` (2) is always
+/// genuinely missing on Windows. `ERROR_PATH_NOT_FOUND` (3) is ITSELF
+/// ambiguous between the two situations this function's own doc comment
+/// above describes — see [`closest_existing_ancestor_is_directory_or_absent`]
+/// for the `path`-aware disambiguation between them (N-2, PR #824 pr-review
+/// cycle 2). Any other `NotFound`-kind error propagates as a real `Err`.
+fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
     if err.kind() != io::ErrorKind::NotFound {
         return false;
     }
     #[cfg(windows)]
     {
         const ERROR_FILE_NOT_FOUND: i32 = 2;
-        err.raw_os_error() == Some(ERROR_FILE_NOT_FOUND)
+        const ERROR_PATH_NOT_FOUND: i32 = 3;
+        match err.raw_os_error() {
+            Some(ERROR_FILE_NOT_FOUND) => true,
+            Some(ERROR_PATH_NOT_FOUND) => {
+                closest_existing_ancestor_is_directory_or_absent(path)
+            }
+            _ => false,
+        }
     }
     #[cfg(not(windows))]
     {
+        let _ = path;
         true
     }
+}
+
+/// N-2 (PR #824 pr-review cycle 2, MINOR): resolves `ERROR_PATH_NOT_FOUND`'s
+/// (3) own internal ambiguity for [`is_genuinely_missing`]'s Windows arm.
+/// That raw code covers TWO structurally different situations Windows maps
+/// onto the same code:
+///
+/// 1. A non-terminal path component EXISTS but is a plain file, not a
+///    directory — traversal genuinely cannot continue through it. A real
+///    error; must propagate.
+/// 2. An ancestor directory simply does not exist YET — a legitimate first
+///    write into a freshly-bootstrapped directory tree (e.g. the first
+///    `burst-log.md` write into a just-created cycle directory, or a
+///    multi-level-deep tree where NONE of the intervening directories have
+///    been created yet). Must relieve to `Ok`, exactly like a plain missing
+///    file already does.
+///
+/// Disambiguated by walking UP `path`'s ancestor chain to the FIRST
+/// ancestor that actually exists on disk, then reporting whether THAT
+/// ancestor is a directory: case 1 is a closest-existing-ancestor that is a
+/// plain file (blocking further traversal); case 2 is a closest-existing-
+/// ancestor that IS a directory (everything below it is simply not created
+/// yet), or no existing ancestor at all (the whole tree is unwritten,
+/// `dir.path()` itself in the fresh-tempdir sense — still ultimately
+/// resolves to a real root that exists, so this arm is reached only when a
+/// component genuinely doesn't exist below some real root). A single-level
+/// `path.parent()`-only check would misjudge a MULTI-level-deep traversal
+/// failure (a non-terminal component two-or-more levels up blocked by a
+/// file, with the immediate parent ALSO consequently absent) as relievable
+/// — this walk avoids that by not stopping at the first missing level.
+///
+/// Kept unconditionally compiled (`#[cfg(any(windows, test))]`, not
+/// `#[cfg(windows)]`) so this logic is directly unit-testable on every CI
+/// runner, even though today's only PRODUCTION call site is Windows-only
+/// (the raw-error-code ambiguity this resolves is itself Windows-specific
+/// — Unix already disambiguates the two cases via distinct `io::ErrorKind`s,
+/// `NotFound` vs `NotADirectory`, with no need for this walk at all).
+#[cfg(any(windows, test))]
+fn closest_existing_ancestor_is_directory_or_absent(path: &Path) -> bool {
+    let mut cur = path.parent();
+    while let Some(candidate) = cur {
+        match std::fs::metadata(candidate) {
+            Ok(meta) => return meta.is_dir(),
+            Err(_) => cur = candidate.parent(),
+        }
+    }
+    // No ancestor exists at all — nothing blocks traversal, the whole tree
+    // above `path` simply hasn't been created yet.
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,7 +1165,7 @@ pub fn current_shard_bytes_flat(shard_path: &Path) -> io::Result<u64> {
         // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
         // cross-platform disambiguation as `read_canonical_content` — see
         // `is_genuinely_missing`'s own doc comment.
-        Err(e) if is_genuinely_missing(&e) => Ok(0),
+        Err(e) if is_genuinely_missing(&e, shard_path) => Ok(0),
         Err(e) => Err(e),
     }
 }
@@ -1300,7 +1360,7 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         // Any OTHER io::Error kind stays fail-loud. TD-VSDD-060 sibling
         // sweep (PR #824 pr-review Finding #1): same cross-platform
         // disambiguation — see `is_genuinely_missing`'s own doc comment.
-        Err(e) if is_genuinely_missing(&e) => return Ok(0),
+        Err(e) if is_genuinely_missing(&e, target_path) => return Ok(0),
         Err(e) => return Err(e),
     };
     // M-2: a single capped read replaces the former separate
@@ -2400,7 +2460,7 @@ fn load_shard_index(index_path: &Path) -> io::Result<Option<ShardIndex>> {
         // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
         // cross-platform disambiguation — see `is_genuinely_missing`'s own
         // doc comment.
-        Err(e) if is_genuinely_missing(&e) => Ok(None),
+        Err(e) if is_genuinely_missing(&e, index_path) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -2504,7 +2564,7 @@ pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
         // to the SAME `io::ErrorKind::NotFound` as a genuine
         // `ERROR_FILE_NOT_FOUND`) still propagates as `Err` on every
         // platform, never silently relieved to `Ok(vec![])`.
-        Err(e) if is_genuinely_missing(&e) => Ok(vec![]),
+        Err(e) if is_genuinely_missing(&e, canonical_path) => Ok(vec![]),
         Err(e) => Err(e),
     }
 }
@@ -3304,7 +3364,7 @@ fn self_heal_recovery_plausible(entry: &ShardEntry, canonical_path: &Path) -> io
         // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
         // cross-platform disambiguation — see `is_genuinely_missing`'s own
         // doc comment.
-        Err(e) if is_genuinely_missing(&e) => return Ok(false),
+        Err(e) if is_genuinely_missing(&e, dir) => return Ok(false),
         Err(e) => return Err(e),
     };
 
@@ -3430,7 +3490,7 @@ pub fn self_heal_resume_from_truncate(
         // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
         // cross-platform disambiguation — see `is_genuinely_missing`'s own
         // doc comment.
-        Err(e) if is_genuinely_missing(&e) => return Ok(None),
+        Err(e) if is_genuinely_missing(&e, &sealed_path) => return Ok(None),
         Err(source) => {
             return Err(ShardRollError::TruncateFailedAfterSeal {
                 artifact_stem: entry.artifact_stem.clone(),
@@ -3470,7 +3530,7 @@ pub fn self_heal_resume_from_truncate(
         // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
         // cross-platform disambiguation — see `is_genuinely_missing`'s own
         // doc comment.
-        Err(e) if is_genuinely_missing(&e) => return Ok(None),
+        Err(e) if is_genuinely_missing(&e, canonical_path) => return Ok(None),
         Err(source) => {
             return Err(ShardRollError::TruncateFailedAfterSeal {
                 artifact_stem: entry.artifact_stem.clone(),
@@ -3780,7 +3840,7 @@ mod tests {
         let err = std::fs::read(&missing).expect_err("path must not exist");
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
         assert!(
-            is_genuinely_missing(&err),
+            is_genuinely_missing(&err, &missing),
             "a genuine 'file does not exist' error (real syscall, real raw_os_error) must be \
              treated as genuinely missing on every platform"
         );
@@ -3790,7 +3850,7 @@ mod tests {
     fn test_FINDING1_is_genuinely_missing_false_for_non_not_found_kind() {
         let err = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
         assert!(
-            !is_genuinely_missing(&err),
+            !is_genuinely_missing(&err, Path::new("irrelevant-to-this-case.md")),
             "any non-NotFound-kind error must never be treated as genuinely missing"
         );
     }
@@ -3808,7 +3868,7 @@ mod tests {
         let err = std::fs::read(&path).expect_err("reading through a non-directory must fail");
         assert_ne!(err.kind(), io::ErrorKind::NotFound);
         assert!(
-            !is_genuinely_missing(&err),
+            !is_genuinely_missing(&err, &path),
             "a path-traversal-through-non-directory failure must never be treated as genuinely \
              missing"
         );
@@ -3818,24 +3878,35 @@ mod tests {
     /// the disambiguation logic rather than a live Windows syscall (not
     /// available on this CI runner): Windows maps BOTH
     /// `ERROR_FILE_NOT_FOUND` (2, genuinely missing) and
-    /// `ERROR_PATH_NOT_FOUND` (3, path-traversal-through-non-directory) onto
-    /// the SAME `io::ErrorKind::NotFound` — `raw_os_error()` is the only way
-    /// to tell them apart, and only code 2 may relieve to `Ok`.
+    /// `ERROR_PATH_NOT_FOUND` (3, itself ambiguous — see N-2 below) onto the
+    /// SAME `io::ErrorKind::NotFound` — `raw_os_error()` is the only way to
+    /// tell code 2 apart from code 3 at all.
     #[cfg(windows)]
     #[test]
     fn test_FINDING1_is_genuinely_missing_windows_file_not_found_relieved() {
         let err = io::Error::from_raw_os_error(2); // ERROR_FILE_NOT_FOUND
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
         assert!(
-            is_genuinely_missing(&err),
+            is_genuinely_missing(&err, Path::new("irrelevant-for-error-code-2.md")),
             "Windows ERROR_FILE_NOT_FOUND (2) is the genuine missing-file case and must relieve \
-             to Ok"
+             to Ok regardless of path"
         );
     }
 
+    /// N-2 (PR #824 pr-review cycle 2, MINOR) keeps this cycle-1 Finding #1
+    /// test green under the now-`path`-aware disambiguation: a path whose
+    /// immediate parent EXISTS but is a plain file (not a directory) is
+    /// still a genuine path-traversal failure and must still propagate,
+    /// never be relieved.
     #[cfg(windows)]
     #[test]
-    fn test_FINDING1_is_genuinely_missing_windows_path_not_found_propagates() {
+    fn test_FINDING1_is_genuinely_missing_windows_path_not_found_propagates_through_non_directory()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("plain-file");
+        std::fs::write(&not_a_dir, "i am a file").expect("seed a plain file");
+        let path = not_a_dir.join("child.md");
+
         let err = io::Error::from_raw_os_error(3); // ERROR_PATH_NOT_FOUND
         assert_eq!(
             err.kind(),
@@ -3844,10 +3915,88 @@ mod tests {
              as ERROR_FILE_NOT_FOUND (2) — this is exactly the ambiguity Finding #1 identifies"
         );
         assert!(
-            !is_genuinely_missing(&err),
-            "Windows ERROR_PATH_NOT_FOUND (3) is a path-traversal failure (a non-terminal \
-             component is not a directory), not a genuinely missing file — it must propagate as \
-             a real Err, never be silently relieved to Ok"
+            !is_genuinely_missing(&err, &path),
+            "Windows ERROR_PATH_NOT_FOUND (3) for a path whose immediate parent EXISTS but is a \
+             plain file (not a directory) is a genuine path-traversal failure — it must \
+             propagate as a real Err, never be silently relieved to Ok"
+        );
+    }
+
+    /// N-2 (PR #824 pr-review cycle 2, MINOR): the cycle-1 fix over-corrected
+    /// `ERROR_PATH_NOT_FOUND` (3) into ALWAYS propagating, which also
+    /// blocked a legitimate first Write into a freshly-bootstrapped
+    /// directory (e.g. the first `burst-log.md` write into a just-created
+    /// cycle directory) — a case Windows raises the SAME raw code 3 for.
+    /// This must relieve to `Ok`, exactly like `ERROR_FILE_NOT_FOUND` (2)
+    /// already does.
+    #[cfg(windows)]
+    #[test]
+    fn test_N2_is_genuinely_missing_windows_path_not_found_relieved_for_missing_parent_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing_parent = dir.path().join("freshly-bootstrapped-cycle-dir");
+        let path = missing_parent.join("burst-log.md");
+        assert!(
+            !missing_parent.exists(),
+            "precondition: the parent directory must genuinely not exist yet"
+        );
+
+        let err = io::Error::from_raw_os_error(3); // ERROR_PATH_NOT_FOUND
+        assert!(
+            is_genuinely_missing(&err, &path),
+            "N-2: ERROR_PATH_NOT_FOUND must be relieved to Ok when the reason is a legitimately \
+             not-yet-created ancestor directory — over-correcting this (cycle-1's own \
+             regression) would block a valid first Write into a brand-new directory on Windows"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // closest_existing_ancestor_is_directory_or_absent (N-2, PR #824
+    // pr-review cycle 2) — the path-aware helper is unconditionally
+    // compiled under test (`#[cfg(any(windows, test))]`), so its logic is
+    // directly, portably unit-testable here without a live Windows runner.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_N2_closest_existing_ancestor_relieves_missing_parent_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing_parent = dir.path().join("freshly-bootstrapped-cycle-dir");
+        let path = missing_parent.join("burst-log.md");
+        assert!(
+            !missing_parent.exists(),
+            "precondition: the parent directory must genuinely not exist yet"
+        );
+        assert!(
+            closest_existing_ancestor_is_directory_or_absent(&path),
+            "N-2: a legitimately not-yet-created parent directory must be treated as \
+             relievable — the closest EXISTING ancestor (the tempdir root itself) IS a real \
+             directory, so nothing blocks traversal, it just hasn't been created yet"
+        );
+    }
+
+    #[test]
+    fn test_N2_closest_existing_ancestor_relieved_when_whole_chain_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("a").join("b").join("c.md");
+        assert!(
+            closest_existing_ancestor_is_directory_or_absent(&path),
+            "N-2: when NO ancestor above `path` exists yet (a multi-level-deep fresh directory \
+             tree), the closest existing ancestor is the tempdir root itself, a real directory \
+             — must relieve"
+        );
+    }
+
+    #[test]
+    fn test_N2_closest_existing_ancestor_propagates_when_blocked_by_a_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("plain-file");
+        std::fs::write(&not_a_dir, "i am a file").expect("seed a plain file");
+        let path = not_a_dir.join("nested").join("child.md");
+        assert!(
+            !closest_existing_ancestor_is_directory_or_absent(&path),
+            "N-2: when the closest EXISTING ancestor is a plain file (not a directory), \
+             traversal is genuinely blocked and must propagate as a real error — even though \
+             the IMMEDIATE parent ('nested') does not itself exist, a naive parent-only check \
+             would misjudge this as relievable"
         );
     }
 
