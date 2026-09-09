@@ -2409,9 +2409,28 @@ fn load_shard_index(index_path: &Path) -> io::Result<Option<ShardIndex>> {
 /// (Postcondition 5: "`seq` incrementing monotonically from 1") — the
 /// existing index's highest recorded `seq` plus one, or `1` when no index
 /// exists yet (first-ever roll).
+///
+/// PR #824 pr-review Finding #9 (NIT): `checked_add` — not a bare `+ 1` —
+/// so a recorded max `seq` already at `u32::MAX` (practically unreachable,
+/// but not provably impossible) fails loud with a genuine `io::Error`
+/// rather than panicking in debug builds or silently wrapping to `0` in
+/// release, which would otherwise collide with (or precede) `seq=1`'s own
+/// sealed shard. Both existing call sites already map any `next_seal_seq`
+/// `io::Error` to `ShardRollError::SealWriteFailed` (`E-SHD-001`), so this
+/// overflow surfaces through the SAME fail-loud path every other
+/// `next_seal_seq` I/O failure already uses — no caller change needed.
 fn next_seal_seq(index_path: &Path) -> io::Result<u32> {
     match load_shard_index(index_path)? {
-        Some(index) => Ok(index.shards.iter().map(|s| s.seq).max().unwrap_or(0) + 1),
+        Some(index) => {
+            let max_seq = index.shards.iter().map(|s| s.seq).max().unwrap_or(0);
+            max_seq.checked_add(1).ok_or_else(|| {
+                io::Error::other(format!(
+                    "shard-index '{}' already records seq={max_seq} (u32::MAX) — cannot \
+                     compute a next seq without overflowing (PR #824 pr-review Finding #9)",
+                    index_path.display()
+                ))
+            })
+        }
         None => Ok(1),
     }
 }
@@ -2913,11 +2932,52 @@ pub fn publish_sealed_shard(sealed_path: &Path, content: &[u8]) -> Result<(), Sh
 /// never assumed safe). The caller treats every `false` identically:
 /// abort the reclaim, fail loud with the existing E-SHD-009 collision
 /// error.
+///
+/// PR #824 pr-review Finding #4 (MINOR): on Unix, the open is issued with
+/// `O_NONBLOCK` — a plain blocking open on a FIFO with no writer connected
+/// blocks INDEFINITELY, which would hang the PreToolUse dispatch this
+/// check gates; a regular file's open behavior is entirely unaffected by
+/// this flag (it only changes FIFO/device/socket open semantics), so
+/// every existing non-FIFO caller sees no behavior change. `O_NOFOLLOW` is
+/// added in the same call for free: this ALSO closes the residual
+/// symlink-dereference gap the paragraph above still documents as
+/// "no O_NOFOLLOW primitive available from std::fs alone" — a symlink
+/// substituted at `path` in the race window now fails the open outright
+/// (never silently dereferenced) rather than relying solely on the
+/// caller's own no-follow `remove_file` for safety. Neither flag's raw
+/// value is exposed by `std::fs`/`std::os::unix`, so both are hardcoded
+/// per-OS below (stable, well-known ABI constants) rather than pulling in
+/// a new `libc`/`nix` dependency for two `i32` values.
 fn reclaim_identity_still_safe(path: &Path) -> bool {
-    std::fs::File::open(path)
-        .and_then(|f| f.metadata())
-        .map(|meta| meta.file_type().is_file() && meta.len() == 0)
-        .unwrap_or(false)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        #[cfg(target_os = "linux")]
+        const O_NONBLOCK: i32 = 0o4000;
+        #[cfg(target_os = "linux")]
+        const O_NOFOLLOW: i32 = 0o400_000;
+        // macOS/BSD raw fcntl.h values — distinct from Linux's.
+        #[cfg(not(target_os = "linux"))]
+        const O_NONBLOCK: i32 = 0x0004;
+        #[cfg(not(target_os = "linux"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NONBLOCK | O_NOFOLLOW)
+            .open(path)
+            .and_then(|f| f.metadata())
+            .map(|meta| meta.file_type().is_file() && meta.len() == 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::File::open(path)
+            .and_then(|f| f.metadata())
+            .map(|meta| meta.file_type().is_file() && meta.len() == 0)
+            .unwrap_or(false)
+    }
 }
 
 /// Step (c): atomically REPLACE the canonical file's content with empty via
@@ -7534,6 +7594,66 @@ mod bc_1_18_006_roll_tests {
         );
     }
 
+    /// PR #824 pr-review Finding #9 (NIT): `next_seal_seq`'s prior
+    /// `max().unwrap_or(0) + 1` panics in debug / silently wraps to 0 in
+    /// release once the recorded max `seq` reaches `u32::MAX` — this
+    /// fixture plants an index whose sole entry is already at `u32::MAX`
+    /// and asserts `execute_roll` fails loud (via the existing E-SHD-001
+    /// `SealWriteFailed` path every other `next_seal_seq` I/O failure
+    /// already uses) rather than wrapping to a bogus `seq=0` and silently
+    /// colliding with (or preceding) `seq=1`'s own sealed shard.
+    #[test]
+    fn test_FINDING9_next_seal_seq_overflow_at_u32_max_fails_loud() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_path = dir.path().join("decision-log.md");
+        let entry = flat_entry("decision-log", 49_152);
+
+        let index_path = index_path_for(dir.path(), "decision-log");
+        let index = ShardIndex {
+            schema_version: 1,
+            artifact_stem: "decision-log".to_string(),
+            current_shard: "decision-log.md".to_string(),
+            shard_cap_bytes: entry.shard_cap_bytes,
+            max_single_record_bytes: entry.max_single_record_bytes,
+            safety_margin_bytes: entry.safety_margin,
+            practical_fuel_ceiling: entry.practical_fuel_ceiling,
+            worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            shards: vec![ShardIndexEntry {
+                seq: u32::MAX,
+                path: "decision-log.4294967295.md".to_string(),
+                sealed_at: "2026-01-01T00:00:00Z".to_string(),
+                bytes_at_seal: 1,
+                sealed_retroactively: false,
+            }],
+        };
+        std::fs::write(
+            &index_path,
+            toml::to_string(&index).expect("serialize fixture index"),
+        )
+        .expect("write fixture index");
+
+        std::fs::write(&canonical_path, "a".repeat(2_000)).expect("seed a roll-triggering write");
+
+        let err = execute_roll(&entry, &canonical_path, false).expect_err(
+            "Finding #9: next_seal_seq must fail loud once the recorded max seq is already \
+             u32::MAX — never wrap/panic on the '+ 1', never silently compute a bogus seq",
+        );
+        assert!(
+            matches!(err, ShardRollError::SealWriteFailed { .. }),
+            "Finding #9: the overflow must surface as the SAME E-SHD-001/SealWriteFailed every \
+             other next_seal_seq I/O failure already uses — got: {err:?}"
+        );
+
+        // No partial roll may have occurred: canonical untouched, no
+        // sealed shard published.
+        assert_eq!(
+            std::fs::read_to_string(&canonical_path).expect("canonical must still be readable"),
+            "a".repeat(2_000),
+            "Finding #9: the canonical file must be left in its exact pre-roll state — no \
+             partial roll on an overflow failure"
+        );
+    }
+
     #[test]
     fn test_BC_1_18_006_AC024_execute_roll_retroactive_sets_sealed_retroactively_true() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -8562,6 +8682,42 @@ mod bc_1_18_006_roll_tests {
             !reclaim_identity_still_safe(&path),
             "FIX-MED-1: a path that vanished (or never existed) must never be treated as \
              reclaim-safe — File::open failing is not evidence of safety"
+        );
+    }
+
+    /// PR #824 pr-review Finding #4 (MINOR): a plain blocking
+    /// `std::fs::File::open` on a FIFO with NO writer connected blocks
+    /// INDEFINITELY — hanging the PreToolUse dispatch this check gates.
+    /// This regression guard plants a real FIFO (via the `mkfifo` utility
+    /// — no new crate dependency) with no writer ever connected and
+    /// asserts `reclaim_identity_still_safe` returns PROMPTLY (the test
+    /// process itself would hang forever otherwise, which is the actual
+    /// property under test — a bounded external `timeout` wraps this test
+    /// run in CI/local verification as an extra safety net, but the
+    /// production fix itself must never depend on that wrapper).
+    #[cfg(unix)]
+    #[test]
+    fn test_FINDING4_reclaim_identity_still_safe_does_not_hang_on_fifo() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fifo_path = dir.path().join("decision-log.0001.md");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .expect("mkfifo must be available on this platform to run this test");
+        assert!(
+            status.success(),
+            "mkfifo must succeed in creating the FIFO fixture"
+        );
+
+        // No writer is EVER connected — a plain blocking File::open(fifo)
+        // would hang here forever. A FIFO can never be a 0-byte REGULAR
+        // file either way (is_file() is false for a FIFO), so the correct
+        // answer is `false` — but the point of this test is that the call
+        // returns AT ALL.
+        assert!(
+            !reclaim_identity_still_safe(&fifo_path),
+            "Finding #4: a FIFO is never a 0-byte regular file, so this must return false — and \
+             it must do so promptly, never hang waiting for a writer that will never connect"
         );
     }
 
