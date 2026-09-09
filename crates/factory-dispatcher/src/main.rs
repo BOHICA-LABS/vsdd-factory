@@ -308,17 +308,63 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // non-registry-gated dispatcher-internal calls reached from this same
     // `run` function.
     //
+    // **Corrected scope (MINOR-3, S-25.02 cluster-2 PR #824 pr-review cycle
+    // 3):** "independent of the registry's matched-plugin count" means
+    // exactly that — independent of WHICH/HOW MANY `[[hooks]]` entries
+    // matched — never "independent of the registry entirely". Two registry
+    // paths still return BEFORE this call ever runs: `resolve_registry_path()?`
+    // (Tier 2 path resolution failure) and the fail-open `return Ok(exit_code)`
+    // arm on `Registry::load` failure, both above. A broken or unparseable
+    // `hooks-registry.toml` therefore disables catch point (i) for that
+    // dispatch too — an over-cap canonical left unreconciled — same as it
+    // disables every other registry-driven check in this function; this is
+    // an accepted consequence of the SAME fail-open registry-load contract
+    // (BC-1.08.001) every other native/WASM check in `run` already lives
+    // under, not a gap specific to this call site, and the registry-load
+    // failure itself is already surfaced via `emit_dispatcher_error`/the
+    // internal log above — never silently swallowed.
+    //
     // Silent filesystem side effect, no `HookResult` signaling (Decision 15
     // point 2 — a janitor, not a gate): this call never influences
     // `sync_tiers`/`partition.async_group` or this function's own return
     // value. Real, cheap, structural qualification filtering happens inside
     // `reconcile_replace_all_overcap_if_qualifying` itself (event/tool/
-    // `replace_all`/config-match — BC-1.18.006 Postcondition 7's own
-    // "zero added cost outside the narrow case" requirement); the actual
+    // `replace_all` — BC-1.18.006 Postcondition 7's own "zero added cost
+    // outside the narrow case" requirement); the `[[shard]]` config-match
+    // step itself is a real (bounded) TOML parse, not free — see that
+    // function's own corrected doc comment (NIT-4). The actual
     // `stat()`-and-retroactive-roll behavior it delegates into
     // (`shard_manager::reconcile_post_write_replace_all_overcap`) is fully
-    // implemented and unit-tested — this call site is wiring, exercised
-    // end-to-end by `bc_1_18_006_roll_test.rs`'s AC-024 integration test.
+    // implemented and unit-tested. **Corrected coverage claim (MINOR-4,
+    // cycle 3):** this call site's WIRING through `main::run` itself —
+    // placement before the tier loop, and `project_cwd` (canonicalized, not
+    // raw `$CLAUDE_PROJECT_DIR`) as the `cwd` argument — is NOT exercised by
+    // `bc_1_18_006_roll_test.rs`'s AC-024 test, which calls
+    // `reconcile_replace_all_overcap_if_qualifying` directly and never goes
+    // through `main::run`; that test covers ONLY the delegated
+    // stat()-and-retroactive-roll behavior. The real end-to-end wiring is
+    // covered by `bc_1_18_006_roll_test.rs`'s
+    // `test_MINOR4_catch_point_i_fires_via_real_binary_before_post_tool_use_tier_loop`,
+    // which spawns the compiled binary (mirroring MAJOR-3's own real-binary
+    // falsifier for the PreToolUse leg) and asserts the sealed shard and
+    // truncated canonical on disk after a real dispatch.
+    //
+    // **Ordering trade-off (MINOR-5, cycle 3):** because this call precedes
+    // the tier loop, a PostToolUse WASM plugin ALSO matched for this same
+    // `Edit`/`MultiEdit` dispatch runs AFTER the canonical has already been
+    // truncated to 0 bytes when this leg's reconciliation fires — such a
+    // plugin, if it re-reads the artifact it was invoked for (e.g. via
+    // `read_prefix`), observes the post-roll empty file, not the content the
+    // tool call just wrote. This is a plausible false-positive
+    // advisory/block source on precisely the dispatch where the roll fires.
+    // Risk assessed as ACCEPTED: no PostToolUse WASM plugin registered in
+    // this repository's own `hooks-registry.toml` reads the artifact its
+    // OWN dispatch just wrote (the class of plugin this would affect), and
+    // the alternative — running this leg AFTER the tier loop — reintroduces
+    // the strictly worse "silently stop firing if the plugin set changes"
+    // failure mode this placement exists to prevent (see above). Concretely
+    // demonstrated by `invoke.rs`'s
+    // `test_MINOR5_post_tool_use_validator_observes_truncated_canonical_after_catch_point_i`.
     factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying(&payload, &project_cwd);
 
     // BC-1.18.005 T-2 / MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle
