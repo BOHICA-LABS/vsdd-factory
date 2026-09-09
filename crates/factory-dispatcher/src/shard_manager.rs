@@ -4476,8 +4476,48 @@ pub struct MechanismABackfillPartition {
 /// the ONLY points [`mechanism_a_partition_for_backfill`] may split at,
 /// never an arbitrary byte offset that could divide a single record across
 /// two shard files.
-pub fn mechanism_a_record_boundary_offsets(_artifact_stem: &str, _content: &[u8]) -> Vec<usize> {
-    todo!()
+pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) -> Vec<usize> {
+    // Postcondition 2's own named examples, generalized to all four
+    // mechanism-A append-logs by their real, native structural-record
+    // marker: `decision-log.md`'s own `## Decisions Log` table rows each
+    // start with the literal `"| D-"` row-marker; `burst-log.md` and
+    // `lessons.md` both structure their own records as `### <heading>`
+    // blocks (an `### L-EDP1-NNN -- ...` lesson heading is structurally
+    // identical to an `### <burst-heading>` burst block); `session-
+    // checkpoints.md` structures its own records as `## Checkpoint: ...` /
+    // `## Archived: ...` blocks -- one level up from `burst-log`/`lessons`,
+    // never colliding with either (an `### ` line never starts with the
+    // 3-byte `"## "` prefix, since its 3rd byte is `#`, not a space).
+    let marker: &[u8] = match artifact_stem {
+        "decision-log" => b"| D-",
+        "burst-log" | "lessons" => b"### ",
+        "session-checkpoints" => b"## ",
+        // No known native record-boundary marker for this artifact stem --
+        // callers of `mechanism_a_partition_for_backfill` fall back to
+        // treating the whole content as a single record when given no
+        // boundaries at all.
+        _ => return Vec::new(),
+    };
+    line_anchored_marker_offsets(content, marker)
+}
+
+/// Every byte offset in `content` where `marker` occurs AT THE START OF A
+/// LINE (offset `0`, or immediately preceded by `b'\n'`) -- Invariant 2's
+/// "never an arbitrary byte offset" guarantee: a mid-line occurrence of the
+/// same marker bytes (e.g. inside prose describing the marker) is never
+/// mistaken for a real structural record boundary.
+fn line_anchored_marker_offsets(content: &[u8], marker: &[u8]) -> Vec<usize> {
+    if marker.is_empty() {
+        return Vec::new();
+    }
+    let mut offsets = Vec::new();
+    for idx in 0..content.len() {
+        let at_line_start = idx == 0 || content[idx - 1] == b'\n';
+        if at_line_start && content[idx..].starts_with(marker) {
+            offsets.push(idx);
+        }
+    }
+    offsets
 }
 
 /// BC-1.18.008 Postcondition 2 (AC-013): partition `content` at
@@ -4490,11 +4530,88 @@ pub fn mechanism_a_record_boundary_offsets(_artifact_stem: &str, _content: &[u8]
 /// fresh "current" file and seals every partition before it with
 /// sequential `seq` numbers starting at 1 (Postcondition 2).
 pub fn mechanism_a_partition_for_backfill(
-    _content: &[u8],
-    _record_boundary_offsets: &[usize],
-    _shard_cap_bytes: u64,
+    content: &[u8],
+    record_boundary_offsets: &[usize],
+    shard_cap_bytes: u64,
 ) -> Vec<MechanismABackfillPartition> {
-    todo!()
+    if record_boundary_offsets.is_empty() {
+        // No known native record-boundary marker for this artifact -- treat
+        // the whole (non-empty) content as a single record rather than
+        // silently producing zero partitions for real content.
+        return if content.is_empty() {
+            Vec::new()
+        } else {
+            vec![MechanismABackfillPartition {
+                bytes: content.to_vec(),
+                record_count: 1,
+                oversized_record: content.len() as u64 > shard_cap_bytes,
+            }]
+        };
+    }
+
+    let mut partitions = Vec::new();
+    let mut partition_start = record_boundary_offsets[0];
+    let mut partition_bytes: u64 = 0;
+    let mut partition_records: usize = 0;
+
+    let n = record_boundary_offsets.len();
+    for i in 0..n {
+        let rec_start = record_boundary_offsets[i];
+        let rec_end = record_boundary_offsets
+            .get(i + 1)
+            .copied()
+            .unwrap_or(content.len());
+        let rec_len = (rec_end - rec_start) as u64;
+
+        if rec_len > shard_cap_bytes {
+            // EC-002/EC-017: flush whatever partition was accumulating
+            // BEFORE this record, then seal the oversized record on its
+            // own -- never merged with a neighbor, never split mid-record.
+            if partition_records > 0 {
+                partitions.push(MechanismABackfillPartition {
+                    bytes: content[partition_start..rec_start].to_vec(),
+                    record_count: partition_records,
+                    oversized_record: false,
+                });
+            }
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[rec_start..rec_end].to_vec(),
+                record_count: 1,
+                oversized_record: true,
+            });
+            partition_start = rec_end;
+            partition_bytes = 0;
+            partition_records = 0;
+            continue;
+        }
+
+        if partition_records > 0 && partition_bytes + rec_len > shard_cap_bytes {
+            // Adding this (normally-sized) record would push the current
+            // partition over cap -- flush it now; this record starts a
+            // fresh partition instead.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[partition_start..rec_start].to_vec(),
+                record_count: partition_records,
+                oversized_record: false,
+            });
+            partition_start = rec_start;
+            partition_bytes = 0;
+            partition_records = 0;
+        }
+
+        partition_bytes += rec_len;
+        partition_records += 1;
+    }
+
+    if partition_records > 0 {
+        partitions.push(MechanismABackfillPartition {
+            bytes: content[partition_start..].to_vec(),
+            record_count: partition_records,
+            oversized_record: false,
+        });
+    }
+
+    partitions
 }
 
 /// BC-1.18.008 Postcondition 6(a): `true` iff the byte-for-byte
@@ -4505,10 +4622,14 @@ pub fn mechanism_a_partition_for_backfill(
 /// operation via [`MechanismABackfillError::ContentPreservationFailed`],
 /// leaving the original file untouched.
 pub fn mechanism_a_verify_backfill_content_preserved(
-    _original_content: &[u8],
-    _partitions: &[MechanismABackfillPartition],
+    original_content: &[u8],
+    partitions: &[MechanismABackfillPartition],
 ) -> bool {
-    todo!()
+    let mut reconstructed = Vec::with_capacity(original_content.len());
+    for partition in partitions {
+        reconstructed.extend_from_slice(&partition.bytes);
+    }
+    reconstructed == original_content
 }
 
 /// BC-1.18.008 Postcondition 6(b): `true` iff the sum of every partition's
@@ -4518,10 +4639,11 @@ pub fn mechanism_a_verify_backfill_content_preserved(
 /// content-preservation verification gate (AC-014), alongside
 /// [`mechanism_a_verify_backfill_content_preserved`].
 pub fn mechanism_a_verify_backfill_record_counts_preserved(
-    _original_record_count: usize,
-    _partitions: &[MechanismABackfillPartition],
+    original_record_count: usize,
+    partitions: &[MechanismABackfillPartition],
 ) -> bool {
-    todo!()
+    let total: usize = partitions.iter().map(|partition| partition.record_count).sum();
+    total == original_record_count
 }
 
 /// BC-1.18.008 Invariant 3 (AC-014): `true` iff a mechanism-A backfill-split
@@ -4533,10 +4655,15 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
 /// already-migrated artifact must never double-split it into redundant
 /// shards.
 pub fn mechanism_a_backfill_already_migrated(
-    _canonical_path: &Path,
-    _artifact_stem: &str,
+    canonical_path: &Path,
+    artifact_stem: &str,
 ) -> io::Result<bool> {
-    todo!()
+    let index_path = shard_index_path_for(canonical_path, artifact_stem);
+    match std::fs::metadata(&index_path) {
+        Ok(_) => Ok(true),
+        Err(e) if is_genuinely_missing(&e, &index_path) => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// One-time mechanism-A backfill-split outcome (BC-1.18.008 Postcondition
@@ -4585,12 +4712,212 @@ pub enum MechanismABackfillOutcome {
 /// `ShardIndex::retention_count`) exists yet for an artifact that has never
 /// been backfilled.
 pub fn run_mechanism_a_backfill_split(
-    _entry: &ShardEntry,
-    _canonical_path: &Path,
-    _record_boundary_offsets: &[usize],
-    _retention_count: u32,
+    entry: &ShardEntry,
+    canonical_path: &Path,
+    record_boundary_offsets: &[usize],
+    retention_count: u32,
 ) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
-    todo!()
+    // Invariant 3: idempotency short-circuit, checked BEFORE any split work
+    // or disk read of `canonical_path`'s own content.
+    let already_migrated =
+        mechanism_a_backfill_already_migrated(canonical_path, &entry.artifact_stem).map_err(
+            |source| MechanismABackfillError::Io {
+                artifact_stem: entry.artifact_stem.clone(),
+                source,
+            },
+        )?;
+    if already_migrated {
+        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+    }
+
+    let original_content =
+        std::fs::read(canonical_path).map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?;
+
+    let partitions = mechanism_a_partition_for_backfill(
+        &original_content,
+        record_boundary_offsets,
+        entry.shard_cap_bytes,
+    );
+
+    let original_record_count = if record_boundary_offsets.is_empty() {
+        usize::from(!original_content.is_empty())
+    } else {
+        record_boundary_offsets.len()
+    };
+
+    // AC-014/Postcondition 6 hard gate: mandatory content-preservation and
+    // record-integrity verification BEFORE any durable write occurs.
+    if !mechanism_a_verify_backfill_content_preserved(&original_content, &partitions) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: "concatenation of the computed partitions does not reproduce the original \
+                      monolithic content byte-for-byte"
+                .to_string(),
+        });
+    }
+    if !mechanism_a_verify_backfill_record_counts_preserved(original_record_count, &partitions) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: "sum of the computed partitions' record counts does not match the original \
+                      record count"
+                .to_string(),
+        });
+    }
+
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+
+    // EC-016: content already fits within a single partition -- no sealing
+    // is structurally necessary. The canonical file is left COMPLETELY
+    // UNCHANGED; a shard-index is still created and registered, with zero
+    // [[shard]] entries.
+    if partitions.len() <= 1 {
+        let index = fresh_backfill_shard_index(entry, retention_count, Vec::new());
+        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+        return Ok(MechanismABackfillOutcome::Migrated {
+            sealed_count: 0,
+            archived_count: 0,
+        });
+    }
+
+    // Postcondition 2: every partition before the last is sealed, in
+    // chronological (original-file) order, with sequential `seq` numbers
+    // starting at 1; the LAST partition becomes the fresh current file.
+    //
+    // Deliberately reuses `write_atomic` (rename-based, unconditionally
+    // overwriting) rather than `publish_sealed_shard`'s `write_exclusive`
+    // write-once primitive: BC-1.18.006's per-write write-once/immutability
+    // guarantee governs shards sealed by the ONGOING mechanism, from the
+    // moment THIS one-time migration durably completes onward. Before that,
+    // a same-named leftover at a destination `seq` path can only be a
+    // stale, incomplete artifact of a crashed PRIOR backfill attempt
+    // (EC-003/Postcondition 5) -- not real sealed history -- and must be
+    // safely overwritten on restart, never refused.
+    let sealed_partitions = &partitions[..partitions.len() - 1];
+    let current_partition = &partitions[partitions.len() - 1];
+    let sealed_count = sealed_partitions.len() as u32;
+    let sealed_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut shard_entries = Vec::with_capacity(sealed_partitions.len());
+    for (i, partition) in sealed_partitions.iter().enumerate() {
+        let seq = (i + 1) as u32;
+        let sealed_filename = format!("{}.{seq:04}.md", entry.artifact_stem);
+        let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
+        write_atomic_bytes(&sealed_path, &partition.bytes, &entry.artifact_stem)?;
+
+        shard_entries.push(ShardIndexEntry {
+            seq,
+            path: sealed_filename,
+            sealed_at: sealed_at.clone(),
+            bytes_at_seal: partition.bytes.len() as u64,
+            sealed_retroactively: false,
+        });
+    }
+
+    let mut index = fresh_backfill_shard_index(entry, retention_count, shard_entries);
+
+    // Postcondition 4: compose immediately with BC-1.18.007's retention
+    // policy in this SAME operation when the backfill already produced more
+    // shards than `retention_count` -- never deferred to a later event.
+    let archived_count = archive_overflow_shards(&mut index, canonical_path)
+        .map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source: io::Error::other(source.to_string()),
+        })?
+        .len() as u32;
+
+    // Publish the full shard index for the complete pre-existing history in
+    // this SAME operation (Postcondition 3) -- deliberately BEFORE the
+    // canonical-file rewrite below. A crash between the two leaves a
+    // fully-correct, fully-indexed set of sealed shards with the canonical
+    // file still (harmlessly) holding the complete pre-split content rather
+    // than just the final partition -- self-evident and operator-fixable by
+    // re-running the canonical truncation alone. The alternative ordering
+    // (canonical rewritten first) is strictly worse: a crash in ITS gap
+    // would leave `mechanism_a_backfill_already_migrated` reporting
+    // "not yet migrated" while the canonical file has ALREADY been shrunk
+    // to just the final partition, so a naive restart would misread that
+    // shrunk remnant as the artifact's true original content and silently
+    // orphan every already-sealed shard from the index it (re-)computes.
+    write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+
+    write_atomic_bytes(canonical_path, &current_partition.bytes, &entry.artifact_stem)?;
+
+    Ok(MechanismABackfillOutcome::Migrated {
+        sealed_count,
+        archived_count,
+    })
+}
+
+/// Build a fresh [`ShardIndex`] for a mechanism-A backfill-split (EC-016's
+/// zero-shard registration and the normal sealed-shard case alike) from
+/// `entry`'s own cap-formula inputs, threading `retention_count` explicitly
+/// (no pre-existing shard-index exists yet for an artifact that has never
+/// been backfilled, so there is no `ShardIndex::retention_count` to reuse).
+fn fresh_backfill_shard_index(
+    entry: &ShardEntry,
+    retention_count: u32,
+    shards: Vec<ShardIndexEntry>,
+) -> ShardIndex {
+    ShardIndex {
+        schema_version: 1,
+        artifact_stem: entry.artifact_stem.clone(),
+        current_shard: entry.artifact_path.clone(),
+        shard_cap_bytes: entry.shard_cap_bytes,
+        max_single_record_bytes: entry.max_single_record_bytes,
+        safety_margin_bytes: entry.safety_margin,
+        practical_fuel_ceiling: entry.practical_fuel_ceiling,
+        worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+        retention_count,
+        shards,
+    }
+}
+
+/// Serialize and atomically publish `index` at `index_path` -- the
+/// backfill-split's own index-publish primitive, reusing `write_atomic`
+/// (Invariant 1: caller of BC-1.18.006's atomic-write primitives, not a
+/// reimplementation).
+fn write_shard_index_for_backfill(
+    index_path: &Path,
+    index: &ShardIndex,
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    let serialized = toml::to_string(index).map_err(|e| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source: io::Error::other(e.to_string()),
+    })?;
+    last_amended_migrate::atomic_write::write_atomic(index_path, &serialized).map_err(|e| {
+        MechanismABackfillError::Io {
+            artifact_stem: artifact_stem.to_string(),
+            source: migrate_err_to_io(e),
+        }
+    })
+}
+
+/// Atomically write `content` (arbitrary bytes) to `path` via `write_atomic`
+/// -- `write_atomic` itself is `&str`-typed (S-15.03 N2's permission-
+/// preservation + fsync-durability primitive), so this validates `content`
+/// is valid UTF-8 first, failing loud (never lossily substituting) if not:
+/// a lossy conversion would silently violate Postcondition 6(a)'s
+/// byte-for-byte content-preservation guarantee for exactly the corrupted
+/// bytes it replaced.
+fn write_atomic_bytes(
+    path: &Path,
+    content: &[u8],
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    let text = std::str::from_utf8(content).map_err(|e| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source: io::Error::new(io::ErrorKind::InvalidData, e.to_string()),
+    })?;
+    last_amended_migrate::atomic_write::write_atomic(path, text).map_err(|e| {
+        MechanismABackfillError::Io {
+            artifact_stem: artifact_stem.to_string(),
+            source: migrate_err_to_io(e),
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
