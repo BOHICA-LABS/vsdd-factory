@@ -174,6 +174,19 @@ fn is_genuinely_missing(err: &io::Error, path: &Path) -> bool {
 /// (the raw-error-code ambiguity this resolves is itself Windows-specific
 /// — Unix already disambiguates the two cases via distinct `io::ErrorKind`s,
 /// `NotFound` vs `NotADirectory`, with no need for this walk at all).
+///
+/// NIT-3 (PR #824 pr-review cycle 3): the walk's `Err(_) => cur =
+/// candidate.parent()` arm treats EVERY `std::fs::metadata` failure —
+/// genuine non-existence AND a permission/I/O failure (e.g. `EACCES` on an
+/// ancestor) alike — as "absent", walking further up rather than
+/// distinguishing them. No behavior change requested: a permission-denied
+/// ancestor surfaces to Windows as `ERROR_ACCESS_DENIED` (5), which never
+/// reaches this helper at all — [`is_genuinely_missing`]'s own `_ => false`
+/// arm only routes `ERROR_PATH_NOT_FOUND` (3) here, so the inconclusive-vs-
+/// absent conflation this walk's `Err(_)` arm embodies is inert in
+/// practice today. Documented here so a future caller of this helper from
+/// a context where an inconclusive `metadata()` IS reachable knows this
+/// walk treats that case identically to genuine absence.
 #[cfg(any(windows, test))]
 fn closest_existing_ancestor_is_directory_or_absent(path: &Path) -> bool {
     let mut cur = path.parent();
