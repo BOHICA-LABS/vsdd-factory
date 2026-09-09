@@ -85,6 +85,52 @@ use thiserror::Error;
 use vsdd_hook_sdk::HookResult;
 
 // ---------------------------------------------------------------------------
+// Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
+// Finding #1, BLOCKING on Windows CI)
+// ---------------------------------------------------------------------------
+
+/// `true` iff `err` represents a path that is genuinely absent — never a
+/// path whose TRAVERSAL failed because a non-terminal component exists but
+/// is not a directory (e.g. `foo/bar` where `foo` is a plain file).
+///
+/// On Unix, "a path component is not a directory" (`ENOTDIR`) surfaces as
+/// the distinct `io::ErrorKind::NotADirectory` (stable since Rust 1.83,
+/// `io_error_more`) — never `io::ErrorKind::NotFound` — so a bare
+/// `err.kind() == io::ErrorKind::NotFound` check is already correctly
+/// disambiguated there.
+///
+/// On WINDOWS, the two cases raise DIFFERENT raw OS errors that the standard
+/// library nonetheless BOTH map onto the SAME `io::ErrorKind::NotFound`:
+/// `ERROR_FILE_NOT_FOUND` (2, genuinely missing) and `ERROR_PATH_NOT_FOUND`
+/// (3, a non-terminal path component does not exist / is not a directory).
+/// Without this disambiguation, this module's every `NotFound`-relief site
+/// (e.g. [`read_canonical_content`] treating a missing canonical as a
+/// legitimate zero-byte first-ever-write, BC-1.18.005 EC-004) would ALSO
+/// silently swallow a genuine `ERROR_PATH_NOT_FOUND` path-traversal failure
+/// into the same relief — returning `Ok(vec![])`/`Ok(0)` instead of
+/// propagating a real I/O error, which `execute_roll` would otherwise map to
+/// `ShardRollError::SealWriteFailed` (`E-SHD-001`) exactly as a genuine
+/// non-`NotFound` failure already does on Unix.
+///
+/// Disambiguated via `raw_os_error()`: only `ERROR_FILE_NOT_FOUND` (2) is
+/// treated as genuinely missing on Windows; `ERROR_PATH_NOT_FOUND` (3) and
+/// any other `NotFound`-kind error propagate as a real `Err`.
+fn is_genuinely_missing(err: &io::Error) -> bool {
+    if err.kind() != io::ErrorKind::NotFound {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        const ERROR_FILE_NOT_FOUND: i32 = 2;
+        err.raw_os_error() == Some(ERROR_FILE_NOT_FOUND)
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config surface — `[[shard]]` table (Preconditions 2/3)
 // ---------------------------------------------------------------------------
 
@@ -1056,7 +1102,10 @@ pub fn current_shard_bytes_flat(shard_path: &Path) -> io::Result<u64> {
     match std::fs::metadata(shard_path) {
         Ok(meta) => Ok(meta.len()),
         // EC-004: first write ever -> treated as size 0, not an io::Error.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
+        // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
+        // cross-platform disambiguation as `read_canonical_content` — see
+        // `is_genuinely_missing`'s own doc comment.
+        Err(e) if is_genuinely_missing(&e) => Ok(0),
         Err(e) => Err(e),
     }
 }
@@ -1248,8 +1297,10 @@ pub fn read_changelog_item_count(target_path: &Path) -> io::Result<u64> {
         // first-ever Write CREATING it, not a fail-loud condition — treated
         // as holding 0 existing changelog items, mirroring
         // current_shard_bytes_flat's EC-004 NotFound->Ok(0) precedent above.
-        // Any OTHER io::Error kind stays fail-loud.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        // Any OTHER io::Error kind stays fail-loud. TD-VSDD-060 sibling
+        // sweep (PR #824 pr-review Finding #1): same cross-platform
+        // disambiguation — see `is_genuinely_missing`'s own doc comment.
+        Err(e) if is_genuinely_missing(&e) => return Ok(0),
         Err(e) => return Err(e),
     };
     // M-2: a single capped read replaces the former separate
@@ -2309,7 +2360,10 @@ fn load_shard_index(index_path: &Path) -> io::Result<Option<ShardIndex>> {
             let index: ShardIndex = toml::from_str(&text).map_err(io::Error::other)?;
             Ok(Some(index))
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
+        // cross-platform disambiguation — see `is_genuinely_missing`'s own
+        // doc comment.
+        Err(e) if is_genuinely_missing(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -2387,8 +2441,14 @@ pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
     match std::fs::read(canonical_path) {
         Ok(content) => Ok(content),
         // F-C2-P7-001: first-ever write -> treated as zero-byte content,
-        // not an io::Error.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(vec![]),
+        // not an io::Error. PR #824 pr-review Finding #1 (BLOCKING,
+        // Windows-only): `is_genuinely_missing` — not a bare
+        // `e.kind() == NotFound` — so a path traversing through a
+        // non-directory component (Windows `ERROR_PATH_NOT_FOUND`, mapped
+        // to the SAME `io::ErrorKind::NotFound` as a genuine
+        // `ERROR_FILE_NOT_FOUND`) still propagates as `Err` on every
+        // platform, never silently relieved to `Ok(vec![])`.
+        Err(e) if is_genuinely_missing(&e) => Ok(vec![]),
         Err(e) => Err(e),
     }
 }
@@ -2414,10 +2474,7 @@ pub fn read_canonical_content(canonical_path: &Path) -> io::Result<Vec<u8>> {
 /// linked to `path` at all.
 ///
 /// FIX-HIGH-1 (S-25.02 PR #824 second-security-review, HIGH, CWE-59/
-/// CWE-367/CWE-377): the temp path is fully deterministic
-/// (`.{basename}.tmp-{pid}`), and `pid` is observable via `ps`/`/proc` — a
-/// co-resident local process could pre-plant a symlink at that exact path
-/// before this function ever runs. The temp file is therefore created via
+/// CWE-367/CWE-377): the temp path is created via
 /// `OpenOptions::new().write(true).create_new(true)` (`O_EXCL`, Unix /
 /// `CREATE_NEW`, Windows) rather than a plain `File::create`
 /// (`O_CREAT|O_WRONLY|O_TRUNC`, no `O_EXCL`): per POSIX, `create_new` fails
@@ -2958,7 +3015,10 @@ fn self_heal_recovery_plausible(entry: &ShardEntry, canonical_path: &Path) -> io
     // as an `Err`, unlike `Path::exists()`.
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
+        // cross-platform disambiguation — see `is_genuinely_missing`'s own
+        // doc comment.
+        Err(e) if is_genuinely_missing(&e) => return Ok(false),
         Err(e) => return Err(e),
     };
 
@@ -3081,7 +3141,10 @@ pub fn self_heal_resume_from_truncate(
     // lossy/failable `String` decoding of either.
     let sealed_bytes = match std::fs::read(&sealed_path) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
+        // cross-platform disambiguation — see `is_genuinely_missing`'s own
+        // doc comment.
+        Err(e) if is_genuinely_missing(&e) => return Ok(None),
         Err(source) => {
             return Err(ShardRollError::TruncateFailedAfterSeal {
                 artifact_stem: entry.artifact_stem.clone(),
@@ -3118,7 +3181,10 @@ pub fn self_heal_resume_from_truncate(
 
     let current_bytes = match std::fs::read(canonical_path) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // TD-VSDD-060 sibling sweep (PR #824 pr-review Finding #1): same
+        // cross-platform disambiguation — see `is_genuinely_missing`'s own
+        // doc comment.
+        Err(e) if is_genuinely_missing(&e) => return Ok(None),
         Err(source) => {
             return Err(ShardRollError::TruncateFailedAfterSeal {
                 artifact_stem: entry.artifact_stem.clone(),
@@ -3414,6 +3480,90 @@ pub fn reconcile_leading_probe_backstop(
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    // -----------------------------------------------------------------
+    // is_genuinely_missing (PR #824 pr-review Finding #1, BLOCKING on
+    // Windows CI) — the cross-platform NotFound-vs-path-traversal
+    // disambiguation every NotFound-relief site in this module now uses.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_FINDING1_is_genuinely_missing_true_for_real_not_found() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("does-not-exist.md");
+        let err = std::fs::read(&missing).expect_err("path must not exist");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            is_genuinely_missing(&err),
+            "a genuine 'file does not exist' error (real syscall, real raw_os_error) must be \
+             treated as genuinely missing on every platform"
+        );
+    }
+
+    #[test]
+    fn test_FINDING1_is_genuinely_missing_false_for_non_not_found_kind() {
+        let err = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+        assert!(
+            !is_genuinely_missing(&err),
+            "any non-NotFound-kind error must never be treated as genuinely missing"
+        );
+    }
+
+    #[test]
+    fn test_FINDING1_is_genuinely_missing_false_for_path_traversal_through_non_directory() {
+        // On Unix this reproduces as io::ErrorKind::NotADirectory (a
+        // distinct kind, never NotFound at all) — reconfirms
+        // is_genuinely_missing never even needs its Windows-specific branch
+        // to correctly refuse this case here.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let not_a_dir = dir.path().join("plain-file");
+        std::fs::write(&not_a_dir, "i am a file").expect("seed a plain file");
+        let path = not_a_dir.join("child.md");
+        let err = std::fs::read(&path).expect_err("reading through a non-directory must fail");
+        assert_ne!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            !is_genuinely_missing(&err),
+            "a path-traversal-through-non-directory failure must never be treated as genuinely \
+             missing"
+        );
+    }
+
+    /// PR #824 pr-review Finding #1's core claim, verified directly against
+    /// the disambiguation logic rather than a live Windows syscall (not
+    /// available on this CI runner): Windows maps BOTH
+    /// `ERROR_FILE_NOT_FOUND` (2, genuinely missing) and
+    /// `ERROR_PATH_NOT_FOUND` (3, path-traversal-through-non-directory) onto
+    /// the SAME `io::ErrorKind::NotFound` — `raw_os_error()` is the only way
+    /// to tell them apart, and only code 2 may relieve to `Ok`.
+    #[cfg(windows)]
+    #[test]
+    fn test_FINDING1_is_genuinely_missing_windows_file_not_found_relieved() {
+        let err = io::Error::from_raw_os_error(2); // ERROR_FILE_NOT_FOUND
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            is_genuinely_missing(&err),
+            "Windows ERROR_FILE_NOT_FOUND (2) is the genuine missing-file case and must relieve \
+             to Ok"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_FINDING1_is_genuinely_missing_windows_path_not_found_propagates() {
+        let err = io::Error::from_raw_os_error(3); // ERROR_PATH_NOT_FOUND
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::NotFound,
+            "sanity: Windows ERROR_PATH_NOT_FOUND (3) maps to the SAME io::ErrorKind::NotFound \
+             as ERROR_FILE_NOT_FOUND (2) — this is exactly the ambiguity Finding #1 identifies"
+        );
+        assert!(
+            !is_genuinely_missing(&err),
+            "Windows ERROR_PATH_NOT_FOUND (3) is a path-traversal failure (a non-terminal \
+             component is not a directory), not a genuinely missing file — it must propagate as \
+             a real Err, never be silently relieved to Ok"
+        );
+    }
 
     // -----------------------------------------------------------------
     // Test fixture helpers
