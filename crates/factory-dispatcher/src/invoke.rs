@@ -1607,6 +1607,170 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // MINOR-5 (S-25.02 cluster-2 PR #824 pr-review cycle 3): concrete
+    // demonstration of the ordering side effect `main.rs`'s catch-point-(i)
+    // placement rationale did not previously mention. Because
+    // `reconcile_replace_all_overcap_if_qualifying` runs BEFORE the
+    // registry-driven PostToolUse tier loop in `main::run`, a PostToolUse
+    // WASM plugin matched for the SAME `Edit`/`MultiEdit` dispatch that
+    // fires the roll observes the canonical artifact ALREADY truncated to 0
+    // bytes — not the content the tool call just wrote.
+    //
+    // This reproduces that exact sequence: the REAL production
+    // reconciliation function runs first (identical to `main::run`'s own
+    // call order), then a REAL `read_prefix` host-function round-trip (the
+    // SAME production `setup_host_on_store_data` linker path T-002 above
+    // proves correct) reads the SAME canonical path a PostToolUse validator
+    // would read. If catch point (i) were ever reordered to run AFTER the
+    // tier loop, this fixture's `out_len` would equal the over-cap content
+    // length instead of 0 and this assertion would fail — a regression
+    // detector for the documented ordering trade-off, not merely a
+    // characterization.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_MINOR5_post_tool_use_validator_observes_truncated_canonical_after_catch_point_i() {
+        use crate::registry::{Capabilities, ReadPrefixCaps};
+
+        let dir = tempfile::tempdir().expect("tempdir for MINOR-5 fixture");
+        let target = dir.path().join("decision-log.md");
+        let over_cap_content = "z".repeat(49_500);
+        std::fs::write(&target, &over_cap_content).expect("write over-cap fixture content");
+
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory dir");
+        std::fs::write(
+            factory_dir.join("shard-config.toml"),
+            "[[shard]]\n\
+             artifact_stem = \"decision-log\"\n\
+             artifact_path = \"decision-log.md\"\n\
+             practical_fuel_ceiling = 8000000\n\
+             worst_case_fuel_per_byte = 106.36\n\
+             max_single_record_bytes = 16384\n\
+             safety_margin = 8192\n\
+             shard_cap_bytes = 49152\n\
+             shape = \"flat\"\n",
+        )
+        .expect("write shard-config.toml fixture");
+
+        let payload_value = serde_json::json!({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "session_id": "sess-minor5",
+            "tool_input": {
+                "file_path": target.to_string_lossy(),
+                "old_string": "some old text",
+                "new_string": "some new text",
+                "replace_all": true,
+            },
+            "tool_response": {"success": true},
+        });
+        let payload: crate::payload::HookPayload = serde_json::from_value(payload_value)
+            .expect("HookPayload must deserialize from a well-formed PostToolUse envelope");
+
+        // Step 1 (real production call, the SAME function `main::run` invokes
+        // BEFORE the tier loop): reconciles the over-cap write, truncating
+        // the canonical to 0 bytes.
+        reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().len(),
+            0,
+            "precondition: catch point (i) must have truncated the canonical to 0 bytes before \
+             the PostToolUse validator step below runs"
+        );
+
+        // Step 2: a PostToolUse WASM validator, matched for the SAME
+        // Edit/MultiEdit dispatch, re-reads the canonical via the REAL
+        // production `read_prefix` host binding (the identical linker path
+        // T-002 proves correct above) — exactly what a content-inspecting
+        // validator would do.
+        let path_str = target.to_str().expect("path to str").to_string();
+        let mut ctx = bare_ctx();
+        ctx.capabilities = Capabilities {
+            read_prefix: Some(ReadPrefixCaps {
+                path_allow: vec![path_str.clone()],
+            }),
+            ..Capabilities::default()
+        };
+
+        let engine = build_engine().unwrap();
+        let mut linker: wasmtime::Linker<StoreData> = wasmtime::Linker::new(&engine);
+        setup_host_on_store_data(&mut linker).expect("setup_host_on_store_data must not error");
+
+        let module = compile(
+            &engine,
+            r#"(module
+              (import "vsdd" "read_prefix" (func $rp (param i32 i32 i32 i32 i32 i32) (result i32)))
+              (memory (export "memory") 2)
+              (func (export "call_rp") (param $path_ptr i32) (param $path_len i32) (result i32)
+                (call $rp
+                  (local.get $path_ptr)
+                  (local.get $path_len)
+                  (i32.const 65536)
+                  (i32.const 0)
+                  (i32.const 0)
+                  (i32.const 4)
+                )
+              )
+            )"#,
+        );
+
+        let wasi_ctx = WasiCtxBuilder::new().build_p1();
+        let store_data = StoreData {
+            host: ctx,
+            wasi: wasi_ctx,
+            host_output_too_large_seen: false,
+        };
+        let mut store = Store::new(&engine, store_data);
+        store
+            .set_fuel(1_000_000)
+            .expect("engine has fuel metering enabled");
+        store.set_epoch_deadline(u64::MAX);
+
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .expect("MINOR-5: instantiation must succeed");
+
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .expect("module exports memory");
+        let path_bytes = path_str.as_bytes();
+        memory
+            .write(&mut store, 128, path_bytes)
+            .expect("write path bytes to WASM memory");
+
+        let call_rp = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "call_rp")
+            .expect("module exports call_rp");
+        let ret = call_rp
+            .call(&mut store, (128, path_bytes.len() as i32))
+            .expect("call_rp must not trap");
+        assert_eq!(
+            ret, 0,
+            "MINOR-5: read_prefix must return codes::OK (0) for the allowed canonical path; got {}",
+            ret
+        );
+
+        let mem_data: Vec<u8> = memory.data(&store).to_vec();
+        let out_len = u32::from_le_bytes(
+            mem_data[4..8]
+                .try_into()
+                .expect("memory[4:8] must be 4 bytes"),
+        );
+        assert_eq!(
+            out_len,
+            0,
+            "MINOR-5: a PostToolUse validator reading the canonical AFTER catch point (i) ran \
+             (the real main::run ordering — this call precedes the tier loop) must observe 0 \
+             bytes, not the {}-byte over-cap content just written — if this is nonzero, either \
+             catch point (i) no longer runs before PostToolUse plugin execution (a correctness \
+             regression of the current documented ordering) or this fixture no longer reproduces \
+             the qualifying condition",
+            over_cap_content.len()
+        );
+        // dir goes out of scope here; tempfile::TempDir::drop auto-cleans the directory.
+    }
+
+    // -----------------------------------------------------------------------
     // S-19.09 T-002b — AC-002 head-c bound (D19 GREEN gate)
     //
     // read_prefix with a file LARGER than max_bytes must:
