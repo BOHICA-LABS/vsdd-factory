@@ -1292,3 +1292,122 @@ shard_cap_bytes = 49152
         String::from_utf8_lossy(&output.stderr),
     );
 }
+
+/// MINOR-N1 (S-25.02 cluster-2 PR #824 pr-review cycle 4): MAJOR-3's hoist
+/// moved `shard_cap_precheck` — whose fired branch already ran the
+/// destructive `execute_roll` (seal + truncate-to-0) — to BEFORE the
+/// widened empty-tier-groups early-return guard. Before this fix, a FIRED
+/// verdict on that guard's "both tier groups empty" path still fell through
+/// to `build_engine()` (needed only to run the registry-driven tier loop,
+/// which is empty on this exact path anyway); a `build_engine()` failure on
+/// that fallthrough then returned `Ok(0)`, silently downgrading the
+/// already-fired Block/Error verdict from exit 2 to exit 0 even though the
+/// destructive mutation had already happened on disk.
+///
+/// This test drives EXACTLY that combination through the real compiled
+/// binary — zero `[[hooks]]` entries (both `sync_tiers` and
+/// `partition.async_group` empty, mirroring
+/// `test_MAJOR3_shard_cap_gate_fires_via_real_binary_when_no_plugin_matched`
+/// above), a matched EC-009-malformed `[[shard]]` entry (fires
+/// `HookResult::Error`, handled identically to `HookResult::Block` by the
+/// translation this test exercises), AND
+/// `VSDD_FORCE_ENGINE_BUILD_FAILURE=1` (the test-only fault-injection seam
+/// added alongside this fix specifically because `build_engine()` has no
+/// other reachable failure mode to exercise this path with) — and asserts
+/// exit code 2.
+///
+/// Proves red-without-fix: reverting `main::run`'s MINOR-N1 short-circuit
+/// (restoring the original `shard_gate_precheck_result.is_none() && ...`
+/// guard, so a fired verdict falls through to the now-forced-failing
+/// `build_engine()`) makes this exact test fail with exit code 0 instead of
+/// 2 — the precise silent-downgrade defect MINOR-N1 describes. Confirmed by
+/// temporarily reverting the `main.rs` guard locally: this test goes from
+/// PASS to FAIL (`Some(0)` instead of `Some(2)`) with no other change,
+/// which is exactly what load-bearing means here — the test cannot pass
+/// via the `build_engine()`-succeeds path because that path is forced to
+/// fail for this dispatch.
+#[test]
+fn test_MINORN1_fired_shard_gate_verdict_on_empty_tiers_survives_build_engine_failure() {
+    use std::io::Write as _;
+
+    let plugin_root = tempfile::tempdir().expect("tempdir for plugin_root");
+    // Zero [[hooks]] entries — both partition.sync_group and
+    // partition.async_group resolve empty, exactly like the MAJOR-3
+    // real-binary test above.
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .expect("write empty hooks-registry.toml");
+
+    let project_dir = tempfile::tempdir().expect("tempdir for project cwd");
+    let target = project_dir.path().join("decision-log.md");
+    std::fs::write(&target, "x".repeat(100)).expect("write target fixture");
+
+    // Same EC-009 malformed body (omits `shape`) as the MAJOR-3 real-binary
+    // test above — fires `HookResult::Error`, translated by
+    // `shard_gate_verdict_outcomes` identically to `HookResult::Block`
+    // (both set block_intent=true and synthesize a blocking PluginOutcome).
+    let malformed_missing_shape = "\
+[[shard]]
+artifact_stem = \"decision-log\"
+artifact_path = \"decision-log.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 49152
+";
+    write_shard_config(project_dir.path(), malformed_missing_shape);
+
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "session_id": "sess-minorn1-real-binary",
+        "tool_input": {
+            "file_path": target.to_string_lossy(),
+            "old_string": "a",
+            "new_string": "ab",
+        },
+    })
+    .to_string();
+
+    let mut child = std::process::Command::new(binary_path())
+        .env("CLAUDE_PLUGIN_ROOT", plugin_root.path())
+        .env("CLAUDE_PROJECT_DIR", project_dir.path())
+        .env("VSDD_LOG_DIR", project_dir.path().join("logs"))
+        // The fault-injection seam this fix adds (main.rs, gated identically
+        // to VSDD_ASYNC_DRAIN_WINDOW_MS — debug builds + test-support release
+        // builds only): forces build_engine() to fail so this dispatch can
+        // ONLY reach exit code 2 via the MINOR-N1 short-circuit, never via
+        // the normal execute_tiers-after-build_engine path.
+        .env("VSDD_FORCE_ENGINE_BUILD_FAILURE", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn factory-dispatcher binary");
+
+    child
+        .stdin
+        .take()
+        .expect("child stdin must be available")
+        .write_all(payload.as_bytes())
+        .expect("failed to write payload to binary stdin");
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to wait for factory-dispatcher output");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "MINOR-N1: a fired shard-cap-gate verdict on the empty-tier-groups path MUST exit 2 \
+         even when build_engine() is forced to fail — if this is 0, the fired verdict fell \
+         through to build_engine() and was silently dropped by its failure path, reproducing \
+         the exact defect MINOR-N1 describes (a completed destructive execute_roll mutation \
+         whose Block/Error verdict never reaches the dispatcher's exit code).\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}

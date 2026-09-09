@@ -34,6 +34,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(debug_assertions, feature = "test-support"))]
+use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
     ExecutorInputs, PluginOutcome, execute_tiers, shard_cap_precheck, spawn_async_plugin,
@@ -77,6 +79,19 @@ const ENV_SINK_FILE: &str = "VSDD_SINK_FILE";
 // name does not appear in production binaries.
 #[cfg(any(debug_assertions, feature = "test-support"))]
 const ENV_ASYNC_DRAIN_WINDOW_MS: &str = "VSDD_ASYNC_DRAIN_WINDOW_MS";
+
+// VSDD_FORCE_ENGINE_BUILD_FAILURE: test-only fault-injection seam for
+// MINOR-N1 (S-25.02 cluster-2 PR #824 pr-review cycle 4). `build_engine()`
+// (wasmtime `Engine::new` over a static `Config`) has no other reachable
+// failure mode in this environment — the MINOR-N1 finding itself notes it
+// "effectively never fails outside OOM" — so there is no way to drive a
+// genuine `build_engine()` failure from a test without this seam. Gated
+// identically to `VSDD_ASYNC_DRAIN_WINDOW_MS` above: active in debug builds
+// AND release builds compiled with feature=test-support (CI integration
+// tests only), compiled out of shipped release artifacts (release.yml: no
+// features) so the env var name never appears in a production binary.
+#[cfg(any(debug_assertions, feature = "test-support"))]
+const ENV_FORCE_ENGINE_BUILD_FAILURE: &str = "VSDD_FORCE_ENGINE_BUILD_FAILURE";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -385,12 +400,20 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // genuine PreToolUse Edit/Write/MultiEdit candidate with a `[[shard]]`
     // config present.
     //
-    // Computed EXACTLY ONCE: threaded into `execute_tiers` below as a
-    // parameter, which CONSUMES it rather than recomputing it. The gate's
-    // fired branch reaches `shard_manager::execute_roll` — a destructive
-    // seal-and-truncate-to-0 operation — so evaluating this twice would
-    // corrupt on-disk state (the second evaluation would see the
-    // already-rolled canonical), not merely waste cycles.
+    // Computed EXACTLY ONCE: consumed either by `execute_tiers` below (via
+    // `shard_gate_verdict_outcomes`, when at least one tier group is
+    // non-empty) OR, since MINOR-N1 (S-25.02 cluster-2 PR #824 pr-review
+    // cycle 4), by this function's own empty-tier-groups short-circuit
+    // calling that SAME `shard_gate_verdict_outcomes` helper directly —
+    // never both, and never recomputed. The gate's fired branch reaches
+    // `shard_manager::execute_roll` — a destructive seal-and-truncate-to-0
+    // operation — so evaluating this twice would corrupt on-disk state (the
+    // second evaluation would see the already-rolled canonical), not merely
+    // waste cycles. **On the empty-tier-groups path (MINOR-N1), a fired
+    // verdict short-circuits DIRECTLY to its exit code — it is NO LONGER
+    // gated behind `build_engine()`, which that path never reaches at all**;
+    // see the empty-tier-groups guard immediately below for the full
+    // rationale.
     let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
@@ -402,11 +425,66 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // `tiers` vec with a fired precheck verdict is already handled
     // correctly by `execute_tiers` (empty `tiers` loop body, precheck
     // consumed unconditionally before it).
-    if shard_gate_precheck_result.is_none()
-        && sync_tiers.is_empty()
-        && partition.async_group.is_empty()
-    {
-        return Ok(0);
+    //
+    // MINOR-N1 fix (S-25.02 cluster-2 PR #824 pr-review cycle 4): on this
+    // empty-tier-groups path, a FIRED verdict (`Some(_)`) short-circuits
+    // DIRECTLY to its exit code here — via [`factory_dispatcher::executor::
+    // shard_gate_verdict_outcomes`], the SAME verdict-translation
+    // `execute_tiers` runs on its own shard-gate arm, followed by this
+    // function's own `extract_block_info` — and returns BEFORE
+    // `build_engine()` is ever reached. `build_engine()` exists only to run
+    // the registry-driven tier loop below; that loop is EMPTY on this path
+    // (`tiers` would be `Vec::new()`), so building a WASM engine here is
+    // pure waste, and — the actual defect this closes — a `build_engine()`
+    // failure previously returned `Ok(0)` on this path, silently
+    // downgrading an already-fired verdict from exit 2 to exit 0 even
+    // though the fired branch's destructive `execute_roll` (seal +
+    // truncate-to-0) had ALREADY completed against on-disk state. A
+    // non-fired (`None`) verdict is unaffected: it still returns `Ok(0)`
+    // immediately below, exactly as before this fix.
+    if sync_tiers.is_empty() && partition.async_group.is_empty() {
+        if shard_gate_precheck_result.is_none() {
+            return Ok(0);
+        }
+
+        let plugin_version = env!("CARGO_PKG_VERSION").to_string();
+        let (outcomes, block_intent) = factory_dispatcher::executor::shard_gate_verdict_outcomes(
+            shard_gate_precheck_result,
+            plugin_version,
+        );
+
+        // BC-1.15.001 PC2: PostCompact is advisory-only regardless of
+        // native-gate verdict — same suppression this function's normal
+        // (post-`execute_tiers`) path applies below.
+        let event_is_advisory_only =
+            factory_dispatcher::invoke::EventType::from_event_str(&payload.event_name)
+                .is_advisory_only();
+        let final_exit_code = if event_is_advisory_only {
+            0
+        } else if block_intent {
+            2
+        } else {
+            0
+        };
+
+        if final_exit_code == 2 {
+            let (blocking_names, block_reason) = extract_block_info(&outcomes);
+            eprintln!(
+                "  plugins_run={} total_ms=0 block_intent=true exit_code={} blocking_plugins={} block_reason=\"{}\"",
+                outcomes.len(),
+                final_exit_code,
+                blocking_names,
+                block_reason,
+            );
+        } else {
+            eprintln!(
+                "  plugins_run={} total_ms=0 block_intent=false exit_code={}",
+                outcomes.len(),
+                final_exit_code,
+            );
+        }
+
+        return Ok(final_exit_code);
     }
 
     // Execution layer. Build a shared engine + epoch ticker + module
@@ -414,7 +492,26 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // of cold-start cost but sidesteps any global state concerns for
     // the short-lived dispatcher process. S-1.5's `PluginCache` still
     // amortizes per-plugin compile cost within a single invocation.
-    let engine = match build_engine() {
+    // MINOR-N1 regression coverage (S-25.02 cluster-2 PR #824 pr-review
+    // cycle 4): `VSDD_FORCE_ENGINE_BUILD_FAILURE`, gated identically to
+    // `VSDD_ASYNC_DRAIN_WINDOW_MS` above, lets a test drive a genuine
+    // `build_engine()` failure — otherwise unreachable outside OOM — so
+    // `test_MINORN1_fired_shard_gate_verdict_on_empty_tiers_survives_build_engine_failure`
+    // can prove the empty-tier-groups short-circuit above never depends on
+    // `build_engine()` succeeding. Absent from shipped release builds.
+    #[cfg(any(debug_assertions, feature = "test-support"))]
+    let engine_build_result = if std::env::var(ENV_FORCE_ENGINE_BUILD_FAILURE).is_ok() {
+        Err(EngineError::Config(
+            "VSDD_FORCE_ENGINE_BUILD_FAILURE forced failure (test-support fault injection)"
+                .to_string(),
+        ))
+    } else {
+        build_engine()
+    };
+    #[cfg(not(any(debug_assertions, feature = "test-support")))]
+    let engine_build_result = build_engine();
+
+    let engine = match engine_build_result {
         Ok(e) => e,
         Err(e) => {
             emit_dispatcher_error(
