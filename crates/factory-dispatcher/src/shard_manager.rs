@@ -4550,7 +4550,15 @@ pub fn mechanism_a_partition_for_backfill(
     }
 
     let mut partitions = Vec::new();
-    let mut partition_start = record_boundary_offsets[0];
+    // BLOCKER-1 (Postcondition 6(a)/Postcondition 2): `partition_start`
+    // begins at byte 0, NOT at `record_boundary_offsets[0]`. A real
+    // artifact's leading preamble (a title/section header before its first
+    // structural record) belongs to no record of its own, but every byte of
+    // it still MUST round-trip -- it is folded into whichever partition ends
+    // up holding the first record, exactly like an oversized cap allowance
+    // rather than a cap-accounted record. When `record_boundary_offsets[0]`
+    // is already `0` (no preamble), this is a no-op vs. the prior seeding.
+    let mut partition_start = 0usize;
     let mut partition_bytes: u64 = 0;
     let mut partition_records: usize = 0;
 
@@ -4564,10 +4572,15 @@ pub fn mechanism_a_partition_for_backfill(
         let rec_len = (rec_end - rec_start) as u64;
 
         if rec_len > shard_cap_bytes {
-            // EC-002/EC-017: flush whatever partition was accumulating
-            // BEFORE this record, then seal the oversized record on its
-            // own -- never merged with a neighbor, never split mid-record.
-            if partition_records > 0 {
+            // EC-002/EC-017: flush whatever was accumulating BEFORE this
+            // record -- possibly zero whole records but still the leading
+            // preamble bytes on the very first iteration -- then seal the
+            // oversized record on its own -- never merged with a neighbor,
+            // never split mid-record. Flushing is keyed on unflushed BYTES
+            // (`partition_start < rec_start`), not `partition_records > 0`,
+            // so a preamble-only leftover (first record itself oversized)
+            // is never silently dropped.
+            if partition_start < rec_start {
                 partitions.push(MechanismABackfillPartition {
                     bytes: content[partition_start..rec_start].to_vec(),
                     record_count: partition_records,
@@ -4603,7 +4616,7 @@ pub fn mechanism_a_partition_for_backfill(
         partition_records += 1;
     }
 
-    if partition_records > 0 {
+    if partition_start < content.len() {
         partitions.push(MechanismABackfillPartition {
             bytes: content[partition_start..].to_vec(),
             record_count: partition_records,
