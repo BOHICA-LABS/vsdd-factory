@@ -8990,3 +8990,116 @@ Refs: D-1192, D-1191, S-25.02, BC-1.18.008 v1.3, F-C3-P2-001..004, O-C3-P2-001..
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1192 | D-1192-S2502-CLUSTER3-PASS2-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-2 = NOT CLEAN — 2 HIGH (F-C3-P2-001, F-C3-P2-002) + 2 MEDIUM (F-C3-P2-003, F-C3-P2-004) + 3 non-blocking observations (O-C3-P2-001..003).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-2.md`. F-C3-P2-001 (HIGH): PC6(b) gate's pass-1 union cross-check was blind to over-detection/same-count-swap — replaced with an oracle SET-EQUALITY cross-check. F-C3-P2-002 (HIGH): EC-002's `oversized_record` flag was computed but dropped at shard-index publication — added `oversized_record: bool` to `ShardIndexEntry`, populated, TD-VSDD-060 sibling-swept. F-C3-P2-003 (MEDIUM): `partition_bytes` cap-accounting accumulator never counted the leading preamble — seeded with preamble length. F-C3-P2-004 (MEDIUM): stale "expected to fail" test-module header rewritten to status-neutral prose — 2nd occurrence of this class this cluster, `[process-watch]` recorded (3rd occurrence crosses BC-5.39.001 threshold, MUST codify). 3 observations non-blocking: O-C3-P2-001 (tautological-but-intentional defense-in-depth), O-C3-P2-002 (untested preamble-only zero-record edge), O-C3-P2-003 (SPEC-HYGIENE — BC-1.18.008 PC2 clause (a) wording loose vs. correct code, Drift Item anchored next spec touch). No BC/story/index content change — BC-1.18.008 stays v1.3, story stays v3.4, input-hashes UNCHANGED. Feature branch `feature/S-25.02-backfill` @ `5d195519` (pushed); `bc_1_18_008` 34/34 green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-2 not clean; pass-3 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-3, fresh context, against BC-1.18.008 v1.3/code `5d195519`.** Refs: D-1192, D-1191, S-25.02, BC-1.18.008 v1.3, F-C3-P2-001..004, `3bdf83f7`, `5d195519`. STATE.md v10.17→v10.18. | S-25.02 F4 | 2026-09-10 |
+
+## D-1193
+
+**D-1193-S2502-CLUSTER3-PASS3-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1192 (this file, immediately above). D-1193 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-3 = NOT CLEAN** 2026-09-10 (fresh-context adversary + implementer + test-writer code-side
+content + product-owner spec amendment; state-manager bookkeeping + single-commit TD-VSDD-053) — 1
+HIGH (F-C3-P3-001), 1 MEDIUM (F-C3-P3-002), 1 MINOR (F-C3-P3-003), plus 1 non-blocking observation
+(O-C3-P3-001). Full Part A persisted as a standalone artifact, matching pass-1/pass-2's own
+convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-3.md` (`diff_base=5d195519`,
+`diff_head=5d195519`).
+
+**F-C3-P3-001 (HIGH):** a leading preamble large enough that the preamble ALONE reaches
+`shard_cap_bytes` had no sanctioned flush point — the greedy boundary-preserving packer only
+flushes at a record boundary, and the preamble is not a record — so the first sealed shard's
+`bytes_at_seal` could silently exceed `shard_cap_bytes` with `oversized_record` left `false` (not
+EC-002's single-oversized-record exception, since the excess content is a non-record preamble).
+Not reachable against the 4 real target artifacts today; a genuine, silent per-shard-cap escape
+hatch nonetheless. FIXED: product-owner amended **BC-1.18.008 v1.3→v1.4** — new **Leading-Preamble
+Handling Rule** (a first partition whose accumulated preamble bytes alone reach or exceed
+`shard_cap_bytes` MUST be flushed as its own preamble-only shard, explicitly flagged, before any
+record is packed into it), new **Postcondition 6(c)** fail-loud hard gate (every sealed shard's
+`bytes_at_seal <= shard_cap_bytes` unless flagged `oversized_record: true`, the degenerate-preamble
+case being a sanctioned sub-case of the same flag), an **Invariant 4** restatement scoping the
+per-shard-cap bound to explicitly cover the preamble-only-shard case, and new EC-007
+(large-but-under-cap preamble folds into the first record shard unflagged, per pass-2's existing
+behavior) / EC-008 (preamble alone at/over cap: preamble-only shard sealed and flagged). Implementer
+(`10f49d1c`): added `is_preamble_shard: bool` and `records: Vec<...>` fields to the
+partition/shard-index bookkeeping (TD-VSDD-060 sibling-swept across every `ShardIndexEntry`/
+partition construction site touched by this change), a preamble-only flush path executed before the
+greedy record-packing loop when the preamble alone is at/over cap, and a new hard gate
+`mechanism_a_verify_backfill_per_shard_cap_preserved` that explicitly checks every sealed shard's
+`bytes_at_seal` against `shard_cap_bytes`, failing loud unless the shard carries `oversized_record:
+true`. RED fixtures added (`16effd52`) for EC-007/EC-008; both exercised pre-fix, pass post-fix.
+
+**F-C3-P3-002 (MEDIUM):** the PC6(b) set-equality oracle cross-check's documented empty-oracle
+fallback ("when the oracle recognizes no boundary at all... the caller's offsets are trusted at
+face value") was implemented as a blanket fallback keyed only on zero detected boundaries, not on
+whether `artifact_stem` is actually one of the 4 legitimate mechanism-A targets — an unrecognized
+or mistyped stem silently fell into the same "trust the caller" path as genuinely-empty recognized
+content, reintroducing blind trust for that input shape. FIXED (implementer, `10f49d1c`): added
+`is_known_mechanism_a_artifact_stem` (an explicit allow-list check against the 4 real target
+stems), gating the empty-oracle fallback so it only fires for a recognized stem with genuinely no
+detected boundaries; an unrecognized stem now returns
+`MechanismABackfillError::UnrecognizedArtifactStem` fail-loud. test-writer (`16effd52`) rebuilt the
+existing F-004 fixtures — which had incidentally been using an oracle-undetectable stem, routing
+them through the blind-trust fallback rather than the real cross-check — to use an
+oracle-detectable stem/content pairing.
+
+**F-C3-P3-003 (MINOR):** `is_lesson_h2_record_heading` and `is_pass_fix_burst_heading` used loose
+`starts_with`-style matching that over-matches a small number of legitimate sibling headings
+sharing a common prefix in BC-1.18.008's own marker-table (e.g. `## LESSON CATEGORY:` over-matching
+`## LESSON`). Not reachable against the 4 real target artifacts' actual current content. FIXED
+(implementer, `10f49d1c`): both predicates tightened to exact marker-table heading forms (anchored
+prefix plus a required following delimiter/whitespace boundary).
+
+**Observation (non-blocking, no in-scope action):** O-C3-P3-001 — `heal_or_confirm_already_migrated`'s
+structural-prefix heuristic relies on a structural-prefix match rather than a stronger
+content-hash-based confirmation; not reachable as a defect against the current single-operator,
+single-invocation activation model (F-C3-P1-006's own T-12 scope-boundary deferral means this code
+path has no production caller yet). Recorded for completeness — no test added, no fix made, no
+Drift Item opened; the function's actual load-bearing behavior is owed the T-12 production-wiring
+review.
+
+story-writer's S-25.02 v3.4→v3.5: AC-013/AC-014 EXTENDED IN PLACE (Leading-Preamble Handling
+Rule/Postcondition 6(c)/Invariant 4/EC-007/EC-008); new §Edge Cases rows EC-048/EC-049 mirroring BC
+EC-007/EC-008; RED-Gate/stub-coverage count stays 25 ACs (AC-013/AC-014 extended, not new).
+
+This burst: BC-INDEX v5.76→v5.77 (BC-1.18.008 cell v1.3→v1.4); STORY-INDEX v4.453→v4.454 (S-25.02
+BC list cell BC-1.18.008 v1.3→v1.4 sync + story-cell v3.4→v3.5); VP-INDEX v3.09→v3.10 (architect's
+same-burst propagation, VP-123 v1.0→v1.1 THIRD proptest facet — per-shard-cap invariant — per
+BC-1.18.008 v1.4's own routing note; `total_vps` UNCHANGED 141, one facet extension, no new VP
+allocated); verification-architecture.md v1.26→v1.27 + verification-coverage-matrix.md
+v1.24→v1.25 (POLICY 9 propagation, same burst); ARCH-INDEX v4.24 UNCHANGED. Input-hashes
+reconciled via `compute-input-hash --update`: BC-1.18.008.md `a68be55`→`763d2ab` (own body amended
+v1.3→v1.4); story `e47d034`→`5cf0eda` (cascading recompute after the BC hash update);
+verification-architecture.md/verification-coverage-matrix.md CONFIRMED CURRENT `eb285db`
+(already updated by architect same burst); `--check` CLEAN on all four.
+
+**STATE.md "26 VPs" advisory RE-CONFIRMED, NOT changed:** architect's `validate-count-propagation`
+re-flagged the same pre-existing scope-mismatch false positive already investigated and closed at
+D-1177 and RE-CONFIRMED at D-1186 — STATE.md's "26 VPs" citations are a legitimate STORY-scoped
+count (S-25.02's own `verification_properties:` range VP-116..VP-141), independently correct
+alongside VP-INDEX's catalog-wide `total_vps: 141`; both numbers are accurate for what they each
+describe, and overwriting STATE.md's story-scoped citation to 141 would itself be a regression. Not
+changed this burst — RE-CONFIRMED per the established D-1177 Drift Item, still anchored to a future
+`validate-count-propagation` source fix (comparison-semantics scoping), out of state-manager's
+`.factory/`-only tool access.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `10f49d1c` (RED-fixtures commit `16effd52`
+immediately prior, both pushed to origin): full `cargo test --workspace --all-targets` suite green;
+`cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-3 not clean; pass-4 next, fresh context;
+cycle-level 3/3 CONVERGED streak UNCHANGED — separate track). No trajectory-tail drift — unchanged
+→0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass). `pipeline:` stays
+**PAUSED** (mid-convergence fix burst; consistent with prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-4, fresh context, against BC-1.18.008 v1.4 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `10f49d1c`.**
+
+Refs: D-1193, D-1192, S-25.02, BC-1.18.008 v1.4, F-C3-P3-001..003, O-C3-P3-001, VP-123 v1.1,
+`16effd52`, `10f49d1c`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1193 | D-1193-S2502-CLUSTER3-PASS3-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-3 = NOT CLEAN — 1 HIGH (F-C3-P3-001) + 1 MEDIUM (F-C3-P3-002) + 1 MINOR (F-C3-P3-003) + 1 non-blocking observation (O-C3-P3-001).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-3.md`. F-C3-P3-001 (HIGH): a leading preamble alone reaching `shard_cap_bytes` had no sanctioned flush point, silently exceeding the first shard's cap unflagged — product-owner amended **BC-1.18.008 v1.3→v1.4** (Leading-Preamble Handling Rule, new Postcondition 6(c) fail-loud gate, Invariant 4 restatement, EC-007/EC-008); implementer added `is_preamble_shard`/`records` fields (TD-VSDD-060 sibling-swept), a preamble-only flush path, and the `mechanism_a_verify_backfill_per_shard_cap_preserved` hard gate. F-C3-P3-002 (MEDIUM): the PC6(b) empty-oracle fallback trusted the caller for ANY unrecognized artifact_stem — fixed via `is_known_mechanism_a_artifact_stem` allow-list gating, fail-loud on a miss; test-writer rebuilt the F-004 fixtures to be oracle-detectable. F-C3-P3-003 (MINOR): `is_lesson_h2_record_heading`/`is_pass_fix_burst_heading` over-matched marker-table siblings — tightened to exact-form matches. O-C3-P3-001 (observation, non-blocking): `heal_or_confirm_already_migrated` structural-prefix heuristic noted, deferred to the T-12 production-wiring review. BC-INDEX v5.76→v5.77; STORY-INDEX v4.453→v4.454 (story v3.4→v3.5); VP-INDEX v3.09→v3.10 (VP-123 v1.0→v1.1, THIRD proptest facet, `total_vps` UNCHANGED 141); verification-architecture.md v1.26→v1.27 + verification-coverage-matrix.md v1.24→v1.25 (POLICY 9 propagation). Input-hashes reconciled (BC-1.18.008.md `a68be55`→`763d2ab`; story `e47d034`→`5cf0eda`); `--check` CLEAN on all four. STATE.md "26 VPs" advisory RE-CONFIRMED as the pre-existing D-1177 scope-mismatch false positive — NOT changed (would be a regression). Feature branch `feature/S-25.02-backfill` @ `10f49d1c` (RED `16effd52`, both pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-3 not clean; pass-4 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-4, fresh context, against BC-1.18.008 v1.4/code `10f49d1c`.** Refs: D-1193, D-1192, S-25.02, BC-1.18.008 v1.4, F-C3-P3-001..003, O-C3-P3-001, `16effd52`, `10f49d1c`. STATE.md v10.18→v10.19. | S-25.02 F4 | 2026-09-10 |

@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: product-owner
-timestamp: 2026-09-10T01:00:00Z
+timestamp: 2026-09-10T03:00:00Z
 phase: F2
 inputs:
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
@@ -12,7 +12,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.007.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f1-delta-analysis.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "a68be55"
+input-hash: "763d2ab"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -143,13 +143,69 @@ default (no partial/MVP delivery of a shipped feature).
    silently mis-partition, and this BC MUST be amended to extend the marker table before the
    backfill is re-run.
 
+   **Leading-preamble handling rule (this amendment, F-C3-P3-001).** Every one of the four
+   mandatory artifacts begins with content that precedes its first record-boundary line — the
+   LEADING PREAMBLE. Per direct inspection of the real `v1.0-brownfield-backfill/` and
+   `v1.0-feature-engine-discipline-pass-1/` artifacts as of this amendment (2026-09-10), the
+   preamble comprises: the YAML frontmatter block (`---` ... `---`), any title heading and
+   introductory prose, and — for `decision-log.md` only — the markdown table header row plus its
+   `|---|...|` separator row that precede the first `| D-NNN |` record line. (One observed
+   instance, `v1.0-feature-engine-discipline-pass-1/burst-log.md`, has a near-empty preamble — a
+   leading blank line and a bare `---` rule, no frontmatter or title — confirming the preamble is a
+   real, per-artifact-instance quantity that MUST be measured at backfill time, never assumed
+   fixed or non-empty.) The preamble is a single atomic, indivisible packing unit: like a record,
+   it is NEVER split across a shard boundary — splitting a YAML frontmatter block or a table header
+   row mid-structure would corrupt the artifact's own format, not merely misplace a boundary.
+
+   Let `preamble_bytes` be the leading preamble's byte length and `first_record_bytes` be the byte
+   length of the first record in file order. The packer resolves the preamble once, before
+   record-based greedy packing begins, as follows:
+
+   - **Normal case — `preamble_bytes + first_record_bytes <= shard_cap_bytes`:** the preamble rides
+     in the SAME shard as the first record (and as many subsequent whole records as fit under the
+     greedy packing rule) — no separate preamble-only shard is created. This is the expected
+     outcome for all four mandatory artifacts at their current measured preamble sizes (a few
+     hundred bytes at most — two to three orders of magnitude below any calibrated
+     `shard_cap_bytes`), so this rule preserves today's actual packing behavior unless a future
+     record happens to leave near-zero headroom under the cap.
+   - **Overflow case — `preamble_bytes + first_record_bytes > shard_cap_bytes`:** the preamble
+     seals as its OWN shard (`seq=1`), containing zero records, BEFORE record-based packing begins.
+     Greedy packing then starts fresh at the first record, which opens the next shard. This is the
+     ONLY way the per-shard cap bound below can be guaranteed to hold for shard 1 without folding
+     the preamble into a record it does not fit alongside — the unsanctioned cap violation this
+     overflow-case rule exists specifically to prevent (F-C3-P3-001: folding the preamble
+     unconditionally into the first record's shard, with no overflow check, is the defect this rule
+     corrects).
+   - **Degenerate case — the preamble ALONE exceeds `shard_cap_bytes`** (not reachable for any of
+     the four mandatory artifacts at their current measured preamble sizes, but specified for a
+     future artifact or a drastically lowered cap): the preamble seals as its own oversized shard,
+     using the SAME EC-002 oversized-atomic-unit exception already established below for an
+     oversized single record — NOT a fail-loud abort. EC-002's rationale ("content atomicity beats
+     the cap for a single indivisible unit that cannot be split without corrupting structure")
+     applies identically to the preamble. This shard is flagged in the shard index with the SAME
+     `oversized_record: true` field EC-002 defines, broadened here to cover any oversized atomic
+     packing unit — a record OR the leading preamble — not literally only a domain record, so
+     downstream tooling sees one consistent oversized-content signal regardless of which kind of
+     atomic unit triggered it.
+
+   A shard produced by either the overflow case or the degenerate case is a **preamble shard**: it
+   holds zero domain records and is flagged `is_preamble_shard: true` in its `[[shard]]` index
+   entry (new field, this amendment), distinguishing it from an ordinary record-bearing shard for
+   downstream readers — including Postcondition 3's index publication, Postcondition 4's retention
+   composition, and Postcondition 6(b)'s record-count accounting below — without those readers
+   having to re-derive record count from file content.
+
 3. **The full shard index is published for the complete pre-existing history in the same
    operation.** The resulting `<artifact-stem>.shard-index.toml` contains one `[[shard]]` entry
    per sealed partition (not just future seals) — `sealed_at` for these backfilled entries is set
    to the backfill operation's own execution timestamp (the true historical seal moments for
    PRE-existing content are not recoverable from the monolithic file alone, since it was never
    previously sharded; this is a documented, accepted approximation, not a defect — genuinely
-   time-accurate `sealed_at` values only exist for shards sealed AFTER Layer 2 goes live).
+   time-accurate `sealed_at` values only exist for shards sealed AFTER Layer 2 goes live). A
+   preamble shard produced by Postcondition 2's Leading-Preamble Handling Rule receives a
+   `[[shard]]` entry exactly like a record-bearing shard — same `seq` numbering, same `sealed_at`
+   convention — plus `is_preamble_shard: true` and `records: 0`, and (in the degenerate case only)
+   `oversized_record: true`.
 
 4. **The backfill-split composes with BC-1.18.007's retention policy immediately.** If the number
    of shards a backfill-split produces for a given artifact already exceeds `retention_count`
@@ -159,7 +215,16 @@ default (no partial/MVP delivery of a shipped feature).
    exactly how much higher than 19 the real packed count turns out to be), the retention/compaction
    archival move (BC-1.18.007 Postcondition 2) applies to the OLDEST backfilled shards in the SAME
    operation, keyed on the ACTUAL packed shard count (never the `ceil()` estimate) — the backfill
-   does not first produce an over-retention active set and defer archival to a later event.
+   does not first produce an over-retention active set and defer archival to a later event. **A
+   preamble shard (Postcondition 2's Leading-Preamble Handling Rule) is NOT exempted from
+   `retention_count` accounting or archival eligibility, and is not specially retained as a
+   permanent "head."** It counts toward the actual packed shard count and is archived under the
+   SAME oldest-first rule as any other backfilled shard; since a preamble shard is always `seq=1`
+   (chronologically the oldest possible content), it is typically the FIRST candidate BC-1.18.007's
+   archival move considers once the artifact accumulates more than `retention_count` shards. This
+   is consistent with BC-1.18.006's own precedent for the ongoing per-write case: a rolled
+   canonical file's header/frontmatter is swept into whatever shard is sealed at the time and is
+   never treated as permanent or specially preserved once superseded.
 
 5. **Atomicity: the backfill-split for a given artifact is all-or-nothing.** If the split
    operation is interrupted partway (e.g., process crash after writing 3 of 19 shard files), the
@@ -179,8 +244,16 @@ default (no partial/MVP delivery of a shipped feature).
    h3-exception records, a lessons.md entry per the same table — including its two confirmed
    `### L-EDP1-050`/`### L-EDP1-051` h3-exception records, or a session-checkpoints.md h2
    checkpoint entry) that existed in the original file is present in exactly one resulting shard —
-   never zero, never two. This verification is a hard gate: if it fails, the backfill-split aborts
-   and the original monolithic file is left untouched (fail-loud, not partial-and-silent).
+   never zero, never two, and (c) **(this amendment, F-C3-P3-001)** every sealed shard's
+   `bytes_at_seal` is `<= shard_cap_bytes`, EXCEPT a shard explicitly flagged `oversized_record:
+   true` in the shard index (EC-002's oversized-single-record exception, or this amendment's
+   degenerate oversized-preamble exception under Postcondition 2's Leading-Preamble Handling Rule)
+   — an unflagged over-cap shard is exactly the unsanctioned Postcondition 2 violation Layer 2
+   exists to eliminate, and MUST fail this gate precisely like a byte-count or record-count
+   mismatch; this per-shard-cap check MUST be executed explicitly against the actual bytes written
+   to each sealed shard file, never merely assumed to hold because the packing procedure ran.
+   Checks (a), (b), and (c) are each a hard gate: if any fails, the backfill-split aborts and the
+   original monolithic file is left untouched (fail-loud, not partial-and-silent).
 
 ## Invariants
 
@@ -205,6 +278,17 @@ default (no partial/MVP delivery of a shipped feature).
    either resume from the last verified-complete shard or detect the already-sharded state and
    skip re-splitting (never double-split an already-sharded artifact into redundant shards).
 
+4. **(this amendment, F-C3-P3-001) Every sealed shard satisfies the per-shard cap bound, enforced
+   as a fail-loud verification gate, never merely implied by the packer's own behavior.**
+   Postcondition 6(c) requires this to be checked explicitly, post-hoc, against the actual bytes
+   written to disk for every sealed shard — not inferred from the packing procedure (including
+   Postcondition 2's Leading-Preamble Handling Rule) having run correctly. The two documented
+   exceptions — EC-002's oversized single record, and this amendment's degenerate oversized-preamble
+   case — are the ONLY conditions under which an over-cap shard is sanctioned, and both MUST be
+   explicitly flagged (`oversized_record: true`) in the shard index for the verification gate to
+   recognize them as sanctioned rather than as a failure. This invariant is what prevents the
+   backfill from re-creating the very over-cap-shard condition Layer 2 exists to eliminate.
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
@@ -215,6 +299,8 @@ default (no partial/MVP delivery of a shipped feature).
 | EC-004 | Content-preservation verification (Postcondition 6) finds a byte-count or record-count mismatch | Backfill aborts; original file left untouched; fail-loud error surfaced to the operator running the F4 migration (analogous to ADR-049's own one-time migration pattern, which this BC is explicitly modeled on) |
 | EC-005 | The four artifacts have grown further between F2 (this BC's authoring) and F4 (its execution) — the illustrative byte counts in Precondition 3 are stale by then | Not a defect: Precondition 3 explicitly requires re-measurement at actual F4 execution time; the illustrative F2-era counts exist only to establish scale (5-19× over cap), not as literal backfill inputs |
 | EC-006 | A monolithic `burst-log.md` or `lessons.md` contains a record whose heading level deviates from that artifact's dominant h2 form (e.g. burst-log.md's `### Pass-39 Fix Burst`/`### Pass-40 Fix Burst`, or lessons.md's pre-`L-EDP1-052` `### L-EDP1-050`/`### L-EDP1-051`) | The backfill MUST detect these via the Postcondition 2 Record-Boundary Marker Table's documented h3-exception patterns and treat them as record boundaries identical in kind to the artifact's h2 records; an h2-only detector that misses these records (silently no-ops or mid-record-splits) fails Postcondition 6's content-preservation gate and MUST abort per EC-004 |
+| EC-007 | **(this amendment, F-C3-P3-001)** The leading preamble (YAML frontmatter + title/intro, plus — for decision-log.md — the table header/separator rows) combined with the first record's bytes exceeds `shard_cap_bytes`, though the first record ALONE does not | Per Postcondition 2's Leading-Preamble Handling Rule overflow case, the preamble seals as its own zero-record shard (`is_preamble_shard: true`) BEFORE record packing begins; the first record then opens a fresh shard. Distinct from EC-002: the record itself is under cap — only the record-plus-preamble combination is not — so folding them together (the naive behavior this finding corrects) would be an unsanctioned Postcondition 2 violation, not a documented exception |
+| EC-008 | **(this amendment, F-C3-P3-001)** The leading preamble ALONE exceeds `shard_cap_bytes` (not reachable for any of the four mandatory artifacts at their current measured preamble sizes — two to three orders of magnitude below any calibrated cap — but specified for completeness) | Per Postcondition 2's Leading-Preamble Handling Rule degenerate case, the preamble seals as its own oversized shard using the SAME EC-002 oversized-atomic-unit exception (`oversized_record: true`), NOT a fail-loud abort — content atomicity for an indivisible structural unit (a frontmatter/title block that cannot be split without corrupting the artifact's format) takes precedence over the cap, identically to EC-002's rationale for an oversized record |
 
 ## Canonical Test Vectors
 
@@ -235,6 +321,8 @@ packing algorithm against the real (or a byte-faithful synthetic) `decision-log.
 | A single decision-log row of 60,000 bytes (exceeds 49,152-byte cap alone) | That shard's `bytes_at_seal = 60000 > shard_cap_bytes`, flagged `oversized_record: true`; NOT split mid-record (unaffected by this amendment: this vector asserts a per-shard bound exception via EC-002, not a total shard count) | edge-case |
 | Backfill interrupted after 3/`N` shards written (`N` = the actual greedy-packed count for `decision-log.md`, `N >= 19` per the row above), restarted | **NEEDS-UPDATE (count only; behavior unchanged):** original file byte-identical to pre-crash state; restart produces the same `N`-shard result as an uninterrupted run — deterministic, since the greedy packer is a pure function of the original content and `shard_cap_bytes` | error |
 | `burst-log.md` fixture containing `## F5 pass-38 fix burst`, `### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`, `## Burst: F5 pass-41 fix burst` in sequence, with `### Block N:` sub-headings nested inside the h2 records | Boundary detector produces exactly 4 records (pass-38, pass-39, pass-40, pass-41) — the two h3-exception records are each their own record; nested `### Block N:` sub-headings do NOT create additional record boundaries (unaffected by this amendment: this vector asserts record-boundary DETECTION, not shard COUNT) | edge-case |
+| **(this amendment, F-C3-P3-001, EC-007)** A `decision-log.md`-shaped fixture whose leading preamble (frontmatter + title + intro + table header/separator rows, measured at fixture-build time) plus its first `\| D-NNN \|` record row together exceed `shard_cap_bytes`, while the first record alone does not | Shard `seq=1` contains ONLY the preamble — `is_preamble_shard: true`, `records: 0` in the shard-index entry, `bytes_at_seal = preamble_bytes <= shard_cap_bytes`; shard `seq=2` opens with the first record; Postcondition 6(c)'s per-shard-cap gate passes for both shards without either being flagged `oversized_record` | edge-case |
+| **(this amendment, F-C3-P3-001, EC-008)** A synthetic fixture whose leading preamble alone (independent of any record) exceeds `shard_cap_bytes` | Shard `seq=1` contains ONLY the oversized preamble, flagged `oversized_record: true` AND `is_preamble_shard: true` in the shard-index entry, `bytes_at_seal > shard_cap_bytes` for this one shard only; backfill does NOT abort (Postcondition 2's degenerate case is a documented, index-flagged exception, not a fail-loud condition); Postcondition 6(c)'s gate recognizes the flag and treats this shard as sanctioned | edge-case |
 
 ## Verification Properties
 
@@ -242,6 +330,7 @@ packing algorithm against the real (or a byte-faithful synthetic) `decision-log.
 |--------|----------|-------------|
 | VP-123 | Content-preservation invariant — concatenation of all resulting shards (in `seq` order) plus the final current file reproduces the original monolithic file byte-for-byte | property test / golden-file round-trip against real (or synthetic fixture) monolithic files |
 | VP-123 | Record-integrity invariant — every structural record present in the original file appears in EXACTLY ONE resulting shard | property test (record-count-conservation check against synthetic fixtures with known record counts) |
+| VP-123 | **(this amendment, F-C3-P3-001)** Per-shard-cap invariant — every sealed shard's `bytes_at_seal` is `<= shard_cap_bytes` UNLESS explicitly flagged `oversized_record: true` in the shard index (EC-002 or the degenerate oversized-preamble case, EC-008), enforced as Postcondition 6(c)'s fail-loud hard gate | property test / golden-file (assert `bytes_at_seal <= shard_cap_bytes` for every `[[shard]]` entry not carrying `oversized_record: true`; assert the two flagged-exception fixtures — EC-002, EC-008 — are the ONLY entries where the bound is exceeded) |
 | VP-124 | Atomicity-under-interruption invariant — a simulated crash at any point during the split leaves the original file either fully intact or the split fully complete, never a partial/corrupt intermediate state | integration test / fault-injection (simulated crash at each of N write steps; assert post-recovery state is one of the two valid states) |
 | VP-124 | Idempotency invariant — running the backfill-split twice against an already-sharded artifact does not produce duplicate or additional shards | integration test (double-invocation against a fixture with a pre-existing shard-index) |
 
@@ -293,7 +382,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 ## VP Anchors
 
-- VP-123, VP-124 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-123 (proptest / golden-file; content-preservation byte-for-byte + record integrity), VP-124 (integration; atomicity-under-interruption + fail-loud preservation gate E-SHD-003 + idempotency). Cap-constant numeric bound PROVISIONAL-until-F4.
+- VP-123, VP-124 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-123 (proptest / golden-file; content-preservation byte-for-byte + record integrity), VP-124 (integration; atomicity-under-interruption + fail-loud preservation gate E-SHD-003 + idempotency). Cap-constant numeric bound PROVISIONAL-until-F4. **(this amendment, F-C3-P3-001):** VP-123 gains a third facet (per-shard-cap fail-loud invariant, Postcondition 6(c)) — VP citation change; architect must propagate this facet to `VP-INDEX.md`, `verification-architecture.md`, and `verification-coverage-matrix.md` per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9).
 
 ## Traceability
 
@@ -312,6 +401,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.4 | 2026-09-10 | product-owner | Adjudication of two findings from a fresh-context adversarial review of S-25.02 F4 cluster-3 (mechanism-A backfill). **F-C3-P3-001 (HIGH) — leading-preamble handling under Postcondition 2's per-shard cap, RESOLVED.** All four mandatory artifacts have a leading preamble (YAML frontmatter + title/intro, plus — for `decision-log.md` — table header/separator rows) before their first record-boundary line, which Postcondition 2 never addressed; the shipped implementation folds the preamble unconditionally into the first record's shard, so when `preamble_bytes + first_record_bytes > shard_cap_bytes` the first sealed shard exceeds cap — an unsanctioned Postcondition 2 violation distinct from EC-002 (the record itself is under cap), re-creating the exact over-cap-shard condition Layer 2 exists to eliminate. Verified by direct inspection of the real preamble content of all four artifacts in both `v1.0-brownfield-backfill/` and `v1.0-feature-engine-discipline-pass-1/` (one instance, that cycle's `burst-log.md`, has a near-empty preamble — a bare leading `---` with no frontmatter/title — confirming preamble size is a real per-instance quantity, not a fixed assumption). ADJUDICATED (Postcondition 2, new **Leading-preamble handling rule** sub-clause): the preamble is an atomic, indivisible packing unit resolved once before record packing begins — normal case (`preamble_bytes + first_record_bytes <= shard_cap_bytes`) rides with the first record's shard unchanged from today's behavior; overflow case seals the preamble as its own zero-record shard (`seq=1`, new `is_preamble_shard: true` index field) before record packing starts fresh; degenerate case (preamble alone exceeds cap — not reachable for any of the four artifacts at current measured preamble sizes, 2-3 orders of magnitude below any calibrated cap, but specified for completeness) reuses EC-002's oversized-atomic-unit exception (`oversized_record: true`, broadened to cover the preamble as well as a record) rather than a fail-loud abort, since the same atomicity rationale applies. Postcondition 3 extended to specify the preamble shard's index entry shape. Postcondition 4 extended: a preamble shard is NOT exempt from `retention_count`/archival — it is the typical FIRST archival candidate (always `seq=1`), consistent with BC-1.18.006's own precedent that a rolled canonical file's header is swept into whatever shard seals it and is never specially preserved. **ADDED Postcondition 6(c) and new Invariant 4 (the second requested addition, also F-C3-P3-001): the split MUST verify, as a hard fail-loud gate, that EVERY sealed shard's `bytes_at_seal <= shard_cap_bytes` except a shard explicitly flagged `oversized_record: true`** — this per-shard-cap bound is now checked explicitly against actual on-disk bytes, never merely implied by the packer having run. Added EC-007 (overflow case) and EC-008 (degenerate case) with matching Canonical Test Vectors, and a new VP-123 facet row (per-shard-cap fail-loud invariant) — VP citation change routed to architect per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9) for propagation to `VP-INDEX.md`, `verification-architecture.md`, `verification-coverage-matrix.md`. **F-C3-P3-002 — fail-loud-on-unrecognized-heading-form language, CONFIRMED, no amendment needed.** The reviewer asked whether Postcondition 2's Normalization rule already states that an unrecognized future heading form must fail loud rather than silently mis-partition. Confirmed present and unchanged in v1.3 (carried forward verbatim into v1.4): "If a future cycle introduces a heading form outside this enumeration, Postcondition 6's fail-loud content-preservation gate MUST reject the backfill run rather than silently mis-partition, and this BC MUST be amended to extend the marker table before the backfill is re-run." This is already sufficiently authoritative (an explicit MUST binding Postcondition 6's gate) for the implementer to align the code's empty-oracle path to fail loud; no strengthening required. **Stories affected by BC changes (→ story-writer, per `bc_array_changes_propagate_to_body_and_acs`):** S-25.02 — no `bcs:` frontmatter array change (this BC was already listed), but the story body's BC-1.18.008 content summary/AC trace (if it echoes Postcondition 2/6 mechanics) should be reviewed for propagation of the Leading-Preamble Handling Rule, Postcondition 6(c), and Invariant 4. **Canonical Test Vectors test-writer must add/update:** the two new EC-007/EC-008 rows (net-new fixtures); no existing row's expected output changed. No change to Preconditions, the Record-Boundary Marker Table, the `ceil()`-is-a-lower-bound reconciliation (v1.3), or Postconditions 1/5. |
 | 1.3 | 2026-09-10 | product-owner | Fresh-context adversarial review of S-25.02 F4 cluster-3 (finding F-004, MEDIUM) found Postcondition 2's `ceil(current_bytes / shard_cap_bytes)` shard-count formula jointly unsatisfiable with the same postcondition's "preserving record boundaries" requirement for non-uniform record sizes (counterexample: five 40-byte records against a 70-byte cap — `ceil(200/70)=3`, but no boundary-preserving packing fits two 40-byte records into one 70-byte shard, so the actual greedy packer produces 5), while the Canonical Test Vectors table asserted the `ceil()` value as an EXACT expected shard count (19 for `decision-log.md`, 5 for `lessons.md`), which only passes when a fixture's records happen to pack without slack. Reconciled: Postcondition 2 now specifies `ceil()` as a documented LOWER BOUND on shard count, adds an explicit deterministic greedy boundary-preserving packing procedure as the algorithm's actual split-point rule, and states the general inequality `actual_count >= ceil(current_bytes / shard_cap_bytes)` with the equality condition spelled out. Postcondition 4's retention-composition reasoning reworded from an approximate `≈ 19 shards` framing to an explicit lower-bound inequality (`actual_count >= 19 > retention_count of 10`, robust regardless of the real packed count). Marked the two Canonical Test Vectors asserting exact `ceil()` counts (`decision-log.md` 19-shard row, `lessons.md` 5-shard row) plus the dependent interrupted-restart row as `NEEDS-UPDATE`, with an explicit instruction that test-writer must measure the actual packed-shard count from the real fixture rather than re-asserting `ceil()` arithmetic; the three unaffected rows (under-cap single-shard, oversized-single-record, burst-log h3-exception-detection) are annotated as out-of-scope for this correction, with the reason stated inline. No new `E-SHD-NNN` error-taxonomy code is warranted: a packed shard count exceeding the `ceil()` lower bound is expected, correct algorithm behavior, not a failure condition — the existing `E-SHD-003` content-preservation gate (Postcondition 6, EC-004) already covers the actual failure mode (a boundary violation or record loss/duplication), which this amendment does not touch. Finding F-002 (session-checkpoints.md marker-heuristic narrowing) from the same review was adjudicated separately and required NO spec change: direct inspection of both real `session-checkpoints.md` files (`v1.0-brownfield-backfill/`, 182 h2 records; `v1.0-feature-engine-discipline-pass-1/`, 12 h2 records) confirmed every h2 heading in both files is a genuine checkpoint record with zero legitimate non-record h2 asides, so this BC's existing `session-checkpoints.md` marker-table row ("any h2 = boundary", no confirmed exception forms) is already correct as written — the code-side `is_checkpoint_record_heading` heuristic (filtering h2 on `starts_with("Archived")`/`contains("Checkpoint")`) is the defective party and is routed to implementer for deletion/revert-to-`^## `, not a spec issue; evidence includes a real record the code's case-sensitive heuristic itself would silently drop (`## ARCHIVED CHECKPOINT: 2026-08-27 — pass-60 CLEAN D-1117...`, all-caps, matches neither `starts_with("Archived")` nor `contains("Checkpoint")`). No other Postcondition, Invariant, Edge Case, or Verification Property content changed. |
 | 1.2 | 2026-09-10 | product-owner | Fresh-context adversarial review found PC2 internally self-contradictory on burst-log record-boundary granularity: PC2 named an h3 (`### <burst-heading>`) boundary phrase in one clause while PC2's own "never split" clause and PC6(b)'s record-integrity clause both correctly said h2 — the erroneous h3 phrase misled implementation toward `### ` as the burst-log/lessons.md record marker, which silently no-ops backfill on the two largest artifacts (finds ≤2 boundaries against real h2-keyed content) and splits records mid-record where nested `### Block N:` sub-headings occur inside brownfield burst records. Reconciled: removed the erroneous h3 phrase from PC2; PC2 and PC6(b) now unambiguously key burst-log.md and session-checkpoints.md on `## ` (h2) boundaries. Added an authoritative Record-Boundary Marker Table to PC2, derived from direct inspection of the real `v1.0-feature-engine-discipline-pass-1/` and `v1.0-brownfield-backfill/` cycle artifacts, enumerating the exact record-start pattern per artifact and two confirmed real-world h3-exception record forms that a naive h2-only rule would miss: burst-log.md's `### Pass-39/40 Fix Burst` records (engine cycle, sitting between two h2 records) and lessons.md's pre-L-EDP1-052 `### L-EDP1-050`/`### L-EDP1-051` records (the L-EDP1-052+ form switched to h2). Added a single implementable normalization predicate covering all confirmed forms across both cycles, including decision-log.md's table-row primary key plus its Appendix sub-clause h3 blocks as a secondary non-splittable unit. Tightened Invariant 2 to cite the marker table and to forbid keying partition points on heading level alone. Added EC-006 and a corresponding canonical test vector covering the h3-exception detection requirement. No change to the split algorithm's core semantics (Postconditions 1, 3, 4, 5), Atomicity, Idempotency, or the artifact's CAP-043 anchor. |
 | 1.1 | 2026-09-05 | product-owner | Fix-burst amendment (F-S2502-F2-003 + F-S2502-F2-007): VP-124's idempotency row Proof Method reconciled from "unit test" to "integration" per VP-INDEX v3.02's authoritative method assignment (both VP-124 rows now consistently read "integration test"); the atomicity row's wording tightened to lead with "integration test" for internal consistency. Added `## SDK Grounding Evidence` section with literal stable-anchor grep output for `write_atomic`, `rotate_changelog`, and `HookResult`. No postcondition/invariant content change. Related BCs gained a cross-reference to the new BC-1.18.011 (B2 migration BC modeled on this BC's governance pattern). |

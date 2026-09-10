@@ -7966,3 +7966,56 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 ### §8. BC-5.39.001 streak
 
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-1 = NOT CLEAN, streak stays 0/3** — 7 of 8 findings fixed this burst; F-C3-P1-006 human-adjudicated deferred (not a defect, doesn't block streak advance in principle — but pass-1 itself was NOT CLEAN, so streak does not advance). NEXT = fresh cluster-3 LOCAL adversary pass-2.
+
+---
+
+## Session Resume Checkpoint (2026-09-10 — S2502-CLUSTER3-PASS2-FIX-BURST; develop 0959e34b (PR #824 merged); main 51023185; merged_count 120; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+Archived from STATE.md by the D-1193 pass-3 fix-burst (2026-09-10). Full content preserved in git: `git show <prior-factory-artifacts-HEAD>:.factory/STATE.md` (factory-artifacts HEAD at archive time, D-1192 commit).
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on `feature/S-25.02-backfill` @ `5d195519` (pushed to origin). LOCAL BC-5.39.001 pass-2 = NOT CLEAN (2 HIGH + 2 MEDIUM, F-C3-P2-001..004, + 3 non-blocking observations); ALL 4 in-scope findings fixed this burst. No BC/story/index content change — BC-1.18.008 stays v1.3, story stays v3.4, input-hashes CONFIRMED UNCHANGED. Streak stays **0/3**. `pipeline:` stays **PAUSED**. NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-3.
+> Prior checkpoint (S2502-CLUSTER3-PASS1-FIX-BURST, D-1191) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-10. Cycle v1.0-brownfield-backfill. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on branch `feature/S-25.02-backfill`. LOCAL adversary pass-2 fix-burst COMPLETE (D-1192); all 4 in-scope findings fixed, 3 non-blocking observations recorded (1 as a SPEC-HYGIENE Drift Item). NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-3, fresh context, against BC-1.18.008 v1.3 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `5d195519`.
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL cluster-3 streak = **0/3** (pass-1 not clean, all 7 in-scope findings fixed; pass-2 not clean, all 4 in-scope findings fixed; pass-3 not yet run). Cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED (separate track).
+
+### §3. In-flight (c)
+
+- `feature/S-25.02-backfill` @ `5d195519` (PUSHED to origin). Contains, on top of pass-1's `41c81fc4`: test-writer's RED fixtures + stale-header rewrite (`3bdf83f7`, covering strict-superset over-detection, same-count-swap, and the F-C3-P2-004 status-neutral rewrite), and implementer's F-C3-P2-001/002/003 fixes (`5d195519`: oracle SET-EQUALITY PC6(b) cross-check, `oversized_record` flag on `ShardIndexEntry` + TD-VSDD-060 sibling-sweep, preamble-seeded `partition_bytes`). `bc_1_18_008` suite 34/34 green; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- NEXT = dispatch `vsdd-factory:adversary` for a fresh cluster-3 LOCAL adversary pass-3 (fresh context, no prior-pass visibility beyond this cascade's own convention) against BC-1.18.008 v1.3 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `5d195519`.
+- No abandoned/stalled agents this burst.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+None open. No human decision point arose this pass — all 4 findings were mechanically routable (implementer/test-writer), and the 1 spec-touching observation (O-C3-P2-003) is a non-blocking wording tightening, not a defect requiring adjudication; recorded as a Drift Item (SPEC-HYGIENE), anchored to the next BC-1.18.008 spec touch.
+
+### §5. WIP branches (e)
+
+`feature/S-25.02-backfill` @ `5d195519` (pushed origin). `factory-artifacts` carries this burst's fix-burst bookkeeping commit (standalone pass-2 report, INDEX.md pass-2 row + Convergence Status advance, decision-log.md D-1192).
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active** (POL-14 promoted at D-1186, UNCHANGED this burst) + BC-1.18.007 v1.2/**008 v1.3**/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 and cluster-2's BC-1.18.006 are the 2 ACTIVE ones of the 9 (7 remain draft, clusters 3-7 not yet shipped; BC-1.18.008 stays v1.3, UNCHANGED this burst — no spec amendment this pass). BC-INDEX **v5.76** (2,006 BCs, UNCHANGED this burst). VP-INDEX v3.09 (141 VPs, UNCHANGED this burst). STORY-INDEX **v4.453** (176 stories; 25 epics; S-25.02 stays **v3.4**, UNCHANGED this burst; status ready, cluster-1 + cluster-2 DELIVERED/MERGED, cluster-3 IN PROGRESS; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md **v1.8** (UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`0959e34b29a41a1b064ff1c7ec62096e94a31c7e`** (PR #824 squash-merged, base `fff5e4cc`). merged_count **120**. UNCHANGED this burst.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED this burst.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD. Carries this D-1192 fix-burst bookkeeping commit (standalone pass-2 report, INDEX.md cluster-3 pass-2 row, decision-log.md D-1192, STATE.md advance), now on the branch.
+- `feature/S-25.02-backfill`: **IN PROGRESS, PUSHED** @ `5d195519` (cluster-3, mechanism-A backfill). Full code gate GREEN; 0 tests RED.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-2 = NOT CLEAN, streak stays 0/3** — all 4 in-scope findings fixed this burst (pass-1 was also NOT CLEAN — 2 not-clean passes so far, 0 consecutive clean). NEXT = fresh cluster-3 LOCAL adversary pass-3.
