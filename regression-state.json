@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-09T17:41:57Z","command":"cargo test --workspace --all-targets 2>&1 | tee /tmp/full_test_output.log | grep -E \"FAILED|error\\[|^error:|test result: FAILED\" ; echo \"---SUMMARY---\"; grep \"test result:\" /tmp/full_test_output.log"}
+{"status":"pass","timestamp":"2026-09-10T12:38:21Z","command":"cargo test -p factory-dispatcher --test bc_1_18_007_retention_test 2>&1 | tail -20\necho \"=== clippy ===\"\ncargo clippy -p factory-dispatcher --tests -- -D warnings 2>&1 | tail -40"}
