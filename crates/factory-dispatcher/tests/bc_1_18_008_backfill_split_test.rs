@@ -9,9 +9,14 @@
 //! Every non-trivial function this file drives
 //! (`mechanism_a_record_boundary_offsets`, `mechanism_a_partition_for_backfill`,
 //! `mechanism_a_verify_backfill_content_preserved`,
+//! `mechanism_a_verify_backfill_per_shard_cap_preserved` (BC-1.18.008 v1.4's
+//! new Postcondition 6(c)/Invariant 4 hard gate — this file's own test
+//! authorship defines this function's expected name/signature; it does not
+//! yet exist in `shard_manager.rs` as of this amendment, and its absence is
+//! itself part of this file's RED surface until the implementer adds it),
 //! `mechanism_a_verify_backfill_record_counts_preserved`,
 //! `mechanism_a_backfill_already_migrated`, `run_mechanism_a_backfill_split`)
-//! is a real, fully implemented body (no `todo!()` stubs). This file's tests
+//! is a real, fully implemented body (no `todo!()` stubs) once GREEN. This file's tests
 //! are organized by the BC-1.18.008 clause each one pins, with the
 //! originating fresh-context adversarial finding (BLOCKER-1, HIGH-2, MED-3,
 //! F-001, F-002, F-004, P2-001, P2-002, P2-003, ...) named in each test's own
@@ -54,6 +59,7 @@ use factory_dispatcher::shard_manager::{
     ShardIndex, ShardIndexEntry, ShardShape, mechanism_a_backfill_already_migrated,
     mechanism_a_partition_for_backfill, mechanism_a_record_boundary_offsets,
     mechanism_a_verify_backfill_content_preserved,
+    mechanism_a_verify_backfill_per_shard_cap_preserved,
     mechanism_a_verify_backfill_record_counts_preserved, run_mechanism_a_backfill_split,
 };
 
@@ -1485,26 +1491,93 @@ fn test_BC_1_18_008_F001_run_backfill_split_aborts_when_supplied_offsets_miss_a_
 // (POLICY 11 no-tautology).
 // ---------------------------------------------------------------------------
 
-/// One `size`-byte synthetic "record" (a single repeated fill byte derived
-/// from `idx`, purely for at-a-glance debuggability on assertion failure --
-/// the byte VALUE carries no semantic meaning to the partitioner).
-fn sized_record(idx: usize, size: usize) -> Vec<u8> {
-    let fill = b'A' + ((idx % 26) as u8);
-    vec![fill; size]
+/// One `total_len`-byte, ORACLE-DETECTABLE synthetic `decision-log.md`
+/// record: a real `"| D-NNN | ... |"` table row that matches
+/// `mechanism_a_record_boundary_offsets`'s own `^\| D-[0-9]+ \|` marker
+/// regex exactly (via `is_decision_log_row_marker`), padded with a
+/// repeated `'A'` fill byte to hit `total_len` precisely. `idx` (1-based,
+/// zero-padded to 3 digits) is folded into the row's own `D-NNN` id so no
+/// two rows in the same fixture collide.
+///
+/// P3-002 (MEDIUM, S-25.02 F4 cluster-3 adversarial pass-3): this REPLACES
+/// the prior `sized_record`/`concat_sized_records` fill-byte fixture
+/// (below, superseded) that a fresh-context adversarial pass-3 review found
+/// rode the "oracle finds ZERO markers -> trust the caller's offsets at
+/// face value" fallback in `run_mechanism_a_backfill_split` rather than
+/// exercising the REAL `mechanism_a_record_boundary_offsets` oracle
+/// cross-check (F-001/P2-001's own load-bearing gate) at all -- every
+/// F-004 test below now drives genuinely oracle-matched content instead.
+///
+/// Hand-verified byte-length arithmetic (not derived from calling this
+/// function and pinning whatever it returns, POLICY 11): the fixed
+/// (non-padding) overhead is exactly 13 bytes --
+/// `"| D-" + "NNN" (3 digits) + " | "` = `4 + 3 + 3 = 10` bytes of prefix,
+/// plus `" |\n"` = `3` bytes of suffix, `10 + 3 = 13`. `pad_len =
+/// total_len - 13`.
+fn decision_log_row_of_len(idx: usize, total_len: usize) -> Vec<u8> {
+    let prefix = format!("| D-{idx:03} | ");
+    let suffix = " |\n";
+    let pad_len = total_len
+        .checked_sub(prefix.len() + suffix.len())
+        .expect("total_len must be large enough to hold the D-NNN row's own prefix+suffix");
+    let mut row = prefix.into_bytes();
+    row.extend_from_slice(&b"A".repeat(pad_len));
+    row.extend_from_slice(suffix.as_bytes());
+    row
 }
 
-/// `count` consecutive `size`-byte synthetic records, concatenated in
-/// order -- record `i` therefore starts at byte offset `i * size`.
-fn concat_sized_records(count: usize, size: usize) -> Vec<u8> {
-    (0..count).flat_map(|i| sized_record(i, size)).collect()
+/// `count` consecutive `row_len`-byte oracle-detectable
+/// [`decision_log_row_of_len`] records (1-based `D-NNN` ids), concatenated
+/// in order -- record `i` (0-based) therefore starts at byte offset
+/// `i * row_len`, exactly like the superseded fill-byte
+/// `concat_sized_records` fixture's own offset arithmetic.
+fn concat_decision_log_rows(count: usize, row_len: usize) -> Vec<u8> {
+    (0..count)
+        .flat_map(|i| decision_log_row_of_len(i + 1, row_len))
+        .collect()
+}
+
+/// One `total_len`-byte, ORACLE-DETECTABLE synthetic `lessons.md` record: a
+/// real `"## L-EDP1-NNN ..."` ID-tagged h2 heading that matches
+/// `mechanism_a_record_boundary_offsets`'s own primary `lessons.md` marker
+/// exactly (via `is_lesson_h2_record_heading`/`is_id_tagged_lesson_heading`),
+/// padded with a repeated `'A'` fill byte to hit `total_len` precisely.
+///
+/// Hand-verified byte-length arithmetic: the fixed (non-padding) overhead
+/// is exactly 15 bytes -- `"## " + "L-EDP1-" + "NNN" (3 digits) + " "` =
+/// `3 + 7 + 3 + 1 = 14` bytes of prefix, plus the trailing `'\n'` = `1`
+/// byte, `14 + 1 = 15`. `pad_len = total_len - 15`.
+fn lessons_h2_row_of_len(idx: usize, total_len: usize) -> Vec<u8> {
+    let prefix = format!("## L-EDP1-{idx:03} ");
+    let pad_len = total_len
+        .checked_sub(prefix.len() + 1)
+        .expect("total_len must be large enough to hold the L-EDP1-NNN heading's own prefix");
+    let mut row = prefix.into_bytes();
+    row.extend_from_slice(&b"A".repeat(pad_len));
+    row.push(b'\n');
+    row
+}
+
+/// `count` consecutive `row_len`-byte oracle-detectable
+/// [`lessons_h2_row_of_len`] records (1-based `L-EDP1-NNN` ids),
+/// concatenated in order -- record `i` (0-based) starts at byte offset
+/// `i * row_len`.
+fn concat_lessons_rows(count: usize, row_len: usize) -> Vec<u8> {
+    (0..count)
+        .flat_map(|i| lessons_h2_row_of_len(i + 1, row_len))
+        .collect()
 }
 
 /// The trivially-known record-boundary offsets (`i * size`) for
-/// [`concat_sized_records`]'s own output -- independent of (and never
-/// exercising) this module's separately-tested
-/// `mechanism_a_record_boundary_offsets` marker-detection logic, exactly
-/// like this file's existing `concat_records`/fixed-boundary fixture
-/// convention above.
+/// [`concat_decision_log_rows`]/[`concat_lessons_rows`]'s own
+/// fixed-record-length output -- independent of (and never exercising)
+/// this module's separately-tested `mechanism_a_record_boundary_offsets`
+/// boundary-detection logic itself, exactly like this file's existing
+/// `concat_records`/fixed-boundary fixture convention above. (The two
+/// builders above are independently ALSO oracle-detectable -- every F-004
+/// test below cross-checks this hand-computed offsets list against the
+/// real oracle's own output before using it, so this function's role is
+/// purely "the hand-derived expectation", never the sole source of truth.)
 fn boundary_offsets_for(count: usize, size: usize) -> Vec<usize> {
     (0..count).map(|i| i * size).collect()
 }
@@ -1535,13 +1608,25 @@ fn test_BC_1_18_008_F004_run_backfill_split_decision_log_canonical_vector_actual
     //   ceil(bytes/cap)` inequality holds with STRICT inequality here --
     //   exactly the shape of PC2's own five-40-byte-records-vs-70-byte-cap
     //   worked example, at a decision-log-scaled magnitude.
+    //
+    // P3-002 (MEDIUM, adversarial pass-3): REBUILT from the prior fill-byte
+    // `sized_record`/`concat_sized_records` fixture (which used a
+    // `decision-log` stem but content the real oracle never matches, so the
+    // test rode `run_mechanism_a_backfill_split`'s "oracle finds ZERO
+    // markers -> trust the caller's offsets" fallback rather than the real
+    // `mechanism_a_record_boundary_offsets` cross-check) to use
+    // `decision_log_row_of_len` -- genuine, oracle-detectable `| D-NNN | |`
+    // rows padded to the SAME 24,577-byte `RECORD_SIZE` this vector's own
+    // hand arithmetic above already establishes, so the packed-shard-count
+    // arithmetic is unchanged; only the fixture's oracle-detectability
+    // changed.
     const RECORD_SIZE: usize = 24_577;
     const RECORD_COUNT: usize = 19;
     const CAP: u64 = 49_152;
 
     let dir = tempfile::tempdir().unwrap();
     let canonical_path = dir.path().join("decision-log.md");
-    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    let original_content = concat_decision_log_rows(RECORD_COUNT, RECORD_SIZE);
     assert_eq!(
         original_content.len(),
         466_963,
@@ -1550,6 +1635,15 @@ fn test_BC_1_18_008_F004_run_backfill_split_decision_log_canonical_vector_actual
     std::fs::write(&canonical_path, &original_content).unwrap();
 
     let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let oracle_offsets = mechanism_a_record_boundary_offsets("decision-log", &original_content);
+    assert_eq!(
+        oracle_offsets, boundaries,
+        "P3-002: this fixture's hand-derived offsets must match the REAL oracle's own detected \
+         `| D-NNN |` row boundaries exactly -- proving this test now exercises the genuine \
+         `mechanism_a_record_boundary_offsets` cross-check (F-001/P2-001's own load-bearing \
+         gate) rather than the empty-oracle trust-the-caller fallback the superseded fill-byte \
+         fixture rode. Got: {oracle_offsets:?}"
+    );
     let entry = flat_entry("decision-log", CAP);
 
     let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100)
@@ -1613,13 +1707,22 @@ fn test_BC_1_18_008_F004_run_backfill_split_lessons_canonical_vector_actual_exce
     //     the 5th (last) becomes the fresh current file.
     //   5 > 3 confirms the `actual_count >= ceil(bytes/cap)` inequality
     //   with strict inequality for this fixture too.
+    //
+    // P3-002 (MEDIUM, adversarial pass-3): REBUILT from the prior fill-byte
+    // `sized_record`/`concat_sized_records` fixture to use
+    // `lessons_h2_row_of_len` -- genuine, oracle-detectable
+    // `## L-EDP1-NNN ...` h2 headings padded to the SAME 24,577-byte
+    // `RECORD_SIZE` this vector's own hand arithmetic above already
+    // establishes, so the packed-shard-count arithmetic is unchanged; only
+    // the fixture's oracle-detectability changed (same rationale as the
+    // sibling decision-log F-004 test above).
     const RECORD_SIZE: usize = 24_577;
     const RECORD_COUNT: usize = 5;
     const CAP: u64 = 49_152;
 
     let dir = tempfile::tempdir().unwrap();
     let canonical_path = dir.path().join("lessons.md");
-    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    let original_content = concat_lessons_rows(RECORD_COUNT, RECORD_SIZE);
     assert_eq!(
         original_content.len(),
         122_885,
@@ -1628,6 +1731,14 @@ fn test_BC_1_18_008_F004_run_backfill_split_lessons_canonical_vector_actual_exce
     std::fs::write(&canonical_path, &original_content).unwrap();
 
     let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let oracle_offsets = mechanism_a_record_boundary_offsets("lessons", &original_content);
+    assert_eq!(
+        oracle_offsets, boundaries,
+        "P3-002: this fixture's hand-derived offsets must match the REAL oracle's own detected \
+         `## L-EDP1-NNN` heading boundaries exactly -- proving this test now exercises the \
+         genuine `mechanism_a_record_boundary_offsets` cross-check rather than the empty-oracle \
+         trust-the-caller fallback. Got: {oracle_offsets:?}"
+    );
     let entry = flat_entry("lessons", CAP);
 
     let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100)
@@ -1681,13 +1792,19 @@ fn test_BC_1_18_008_F004_run_backfill_split_interrupted_restart_reproduces_same_
     // result an uninterrupted run would have (Postcondition 5's own
     // determinism guarantee: the greedy packer is a pure function of the
     // original content and `shard_cap_bytes`).
+    //
+    // P3-002 (MEDIUM, adversarial pass-3): REBUILT from the prior fill-byte
+    // `sized_record`/`concat_sized_records` fixture to use
+    // `decision_log_row_of_len` -- genuine, oracle-detectable `| D-NNN | |`
+    // rows, exactly like the sibling F-004 decision-log test above (same
+    // 466,963-byte / 19-record / 24,577-byte-per-row arithmetic, unchanged).
     const RECORD_SIZE: usize = 24_577;
     const RECORD_COUNT: usize = 19;
     const CAP: u64 = 49_152;
 
     let dir = tempfile::tempdir().unwrap();
     let canonical_path = dir.path().join("decision-log.md");
-    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    let original_content = concat_decision_log_rows(RECORD_COUNT, RECORD_SIZE);
     std::fs::write(&canonical_path, &original_content).unwrap();
 
     // Stale, WRONG leftovers at the first 3 destination seq paths from a
@@ -1701,6 +1818,12 @@ fn test_BC_1_18_008_F004_run_backfill_split_interrupted_restart_reproduces_same_
     }
 
     let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let oracle_offsets = mechanism_a_record_boundary_offsets("decision-log", &original_content);
+    assert_eq!(
+        oracle_offsets, boundaries,
+        "P3-002: this fixture's hand-derived offsets must match the REAL oracle's own detected \
+         boundaries exactly. Got: {oracle_offsets:?}"
+    );
     let entry = flat_entry("decision-log", CAP);
 
     let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100).expect(
@@ -2043,5 +2166,581 @@ fn test_BC_1_18_008_P2003_run_backfill_split_sealed_shards_never_exceed_cap_when
         "P2-003/Postcondition 2: the fresh current file ({} bytes) must not exceed \
          shard_cap_bytes ({cap})",
         current_bytes.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P3-001 (S-25.02 F4 cluster-3 adversarial pass-3, HIGH; BC-1.18.008 v1.4's
+// new Leading-Preamble Handling Rule, EC-007/EC-008): the preamble/first-
+// record cap-overflow case. Prior to this amendment, `mechanism_a_partition_for_backfill`
+// (post-BLOCKER-1/P2-003) unconditionally folds every leading-preamble byte
+// into whichever partition ends up holding the first record, with no
+// overflow check -- when `preamble_bytes + first_record_bytes >
+// shard_cap_bytes`, that fold pushes the FIRST sealed shard over cap without
+// any sanctioning `oversized_record`/`is_preamble_shard` flag, re-creating
+// exactly the unsanctioned Postcondition 2 violation Layer 2 exists to
+// eliminate. v1.4's Leading-Preamble Handling Rule resolves this: the
+// preamble is now a single atomic, indivisible packing unit resolved ONCE
+// before record-based packing begins, sealing as its own zero-record shard
+// in the overflow case (EC-007) -- or, in the degenerate case where the
+// preamble ALONE exceeds cap (EC-008), sealing as its own oversized shard
+// via the SAME EC-002 oversized-atomic-unit exception.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_P3001_EC007_partition_for_backfill_preamble_overflow_seals_as_own_zero_record_partition()
+ {
+    // The exact case the fresh-context adversarial pass-3 review flagged:
+    // a 50-byte preamble + five 30-byte records, cap 70.
+    // preamble_bytes (50) + first_record_bytes (30) = 80 > 70 -> OVERFLOW
+    // case (Postcondition 2's Leading-Preamble Handling Rule): the preamble
+    // must seal as its OWN zero-record partition BEFORE record-based
+    // packing begins; record packing then starts fresh over the five
+    // 30-byte records against the SAME 70-byte cap this file's existing
+    // `test_BC_1_18_008_PC2_partition_for_backfill_never_splits_mid_record_and_stays_under_cap`
+    // test already hand-verifies produces 3 partitions (60/60/30 bytes) --
+    // so this fixture's total expected partition count is 1 (preamble) + 3
+    // (records) = 4.
+    let preamble = b"p".repeat(50);
+    let records = concat_records(&[1, 2, 3, 4, 5]); // five 30-byte records, 150 bytes
+    let mut content = preamble.clone();
+    content.extend_from_slice(&records);
+    let boundaries: Vec<usize> = [0usize, 30, 60, 90, 120]
+        .iter()
+        .map(|o| o + preamble.len())
+        .collect();
+    assert!(
+        (preamble.len() + 30) > 70,
+        "test fixture precondition: preamble_bytes + first_record_bytes must exceed \
+         shard_cap_bytes (70) to exercise the OVERFLOW case, not the normal case"
+    );
+
+    let cap = 70u64;
+    let partitions = mechanism_a_partition_for_backfill(&content, &boundaries, cap);
+
+    assert_eq!(
+        partitions.len(),
+        4,
+        "EC-007: 1 preamble-only partition + 3 record partitions (60/60/30 bytes, per this \
+         file's own existing PC2 five-30-byte-records-vs-70-byte-cap vector) expected. Got {} \
+         partitions: {partitions:?}",
+        partitions.len()
+    );
+
+    // Every partition (this fixture has no individually-oversized record or
+    // preamble) must respect the cap.
+    for (i, p) in partitions.iter().enumerate() {
+        assert!(
+            p.bytes.len() as u64 <= cap,
+            "EC-007/Postcondition 2: partition {i} ({} bytes) must not exceed shard_cap_bytes \
+             ({cap}) -- the {}-byte preamble plus the first 30-byte record together exceed cap, \
+             so they must NOT be folded into the same partition. Partition {i}: {p:?}",
+            p.bytes.len(),
+            preamble.len()
+        );
+    }
+
+    // The FIRST partition must be the preamble alone: zero records, exactly
+    // the preamble's own bytes, and NOT flagged oversized (the preamble
+    // alone, 50 bytes, is well under the 70-byte cap -- only
+    // preamble+first-record together exceed it, which is EC-007's overflow
+    // case, distinct from EC-008's degenerate case below).
+    assert_eq!(
+        partitions[0].bytes, preamble,
+        "EC-007/Leading-Preamble Handling Rule (overflow case): the FIRST partition must contain \
+         ONLY the preamble bytes, sealed before record-based packing begins"
+    );
+    assert_eq!(
+        partitions[0].record_count, 0,
+        "EC-007: the preamble-only partition holds zero domain records"
+    );
+    assert!(
+        !partitions[0].oversized_record,
+        "EC-007 (not EC-008): the preamble ALONE ({} bytes) does not exceed shard_cap_bytes \
+         ({cap}) on its own -- only preamble+first-record together do -- so this must NOT be \
+         flagged oversized_record (that flag is reserved for EC-008's degenerate case)",
+        preamble.len()
+    );
+
+    // Postcondition 6(a)/6(b): every byte and every record must still
+    // round-trip exactly, preamble included.
+    let mut reconstructed = Vec::new();
+    let mut total_records = 0usize;
+    for p in &partitions {
+        reconstructed.extend_from_slice(&p.bytes);
+        total_records += p.record_count;
+    }
+    assert_eq!(
+        reconstructed, content,
+        "Postcondition 6(a): all partitions concatenated (preamble partition included) must \
+         reproduce the original content byte-for-byte"
+    );
+    assert_eq!(
+        total_records, 5,
+        "Postcondition 6(b): total record_count across all partitions (including the \
+         zero-record preamble partition) must equal the 5 real records -- never zero, never \
+         two, for any record"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_P3001_EC007_run_backfill_split_preamble_overflow_seals_own_shard_flagged_is_preamble_shard_end_to_end()
+ {
+    // End-to-end counterpart, driven through the real, on-disk
+    // `run_mechanism_a_backfill_split` entry point: the FIRST sealed shard
+    // (seq=1) must be the preamble-only shard, its own file bytes `<= cap`,
+    // and its PUBLISHED shard-index entry must carry
+    // `is_preamble_shard: true` and `records: 0` (Postcondition 3's
+    // extended preamble-shard index-entry shape) -- read back as a generic
+    // `toml::Value` (same technique this file's existing P2-002 test uses)
+    // so this test does not itself assume these NEW fields already exist on
+    // the strongly-typed `ShardIndexEntry` struct. EVERY sealed shard this
+    // call produces must respect the cap (Postcondition 6(c)/Invariant 4).
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+
+    let preamble = b"p".repeat(50);
+    let records = concat_records(&[1, 2, 3, 4, 5]);
+    let mut original_content = preamble.clone();
+    original_content.extend_from_slice(&records);
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries: Vec<usize> = [0usize, 30, 60, 90, 120]
+        .iter()
+        .map(|o| o + preamble.len())
+        .collect();
+    let cap = 70u64;
+    let entry = flat_entry("decision-log", cap);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("EC-007: a well-formed backfill with a preamble-overflow condition must succeed");
+
+    let MechanismABackfillOutcome::Migrated { sealed_count, .. } = outcome else {
+        panic!("EC-007: expected a Migrated outcome for this fixture, got {outcome:?}");
+    };
+
+    // Postcondition 6(c)/Invariant 4: EVERY sealed shard's actual on-disk
+    // bytes must respect cap.
+    for seq in 1..=sealed_count {
+        let sealed_bytes = std::fs::read(dir.path().join(format!("decision-log.{seq:04}.md")))
+            .unwrap_or_else(|e| panic!("EC-007: sealed shard seq={seq} must exist: {e}"));
+        assert!(
+            sealed_bytes.len() as u64 <= cap,
+            "PC6(c)/Invariant 4: sealed shard seq={seq} ({} bytes) exceeds shard_cap_bytes \
+             ({cap}) without a sanctioned exception",
+            sealed_bytes.len()
+        );
+    }
+
+    // The FIRST sealed shard (seq=1) is the preamble-only shard.
+    let seq1_bytes = std::fs::read(dir.path().join("decision-log.0001.md")).unwrap();
+    assert_eq!(
+        seq1_bytes, preamble,
+        "EC-007: sealed shard seq=1 must contain ONLY the preamble bytes"
+    );
+
+    let index_toml =
+        std::fs::read_to_string(dir.path().join("decision-log.shard-index.toml")).unwrap();
+    let index_value: toml::Value =
+        toml::from_str(&index_toml).expect("the shard-index TOML must parse as generic TOML");
+    let shards = index_value
+        .get("shard")
+        .and_then(|v| v.as_array())
+        .expect("the shard-index must publish a [[shard]] array");
+    let seq1_entry = shards
+        .iter()
+        .find(|s| s.get("seq").and_then(toml::Value::as_integer) == Some(1))
+        .expect("seq=1 entry must exist in the published shard-index");
+
+    assert_eq!(
+        seq1_entry
+            .get("is_preamble_shard")
+            .and_then(toml::Value::as_bool),
+        Some(true),
+        "PC2/PC3 Leading-Preamble Handling Rule: the preamble-only shard's PUBLISHED index entry \
+         must carry `is_preamble_shard: true`, distinguishing it from an ordinary record-bearing \
+         shard for downstream readers without having to re-derive record count from file \
+         content. Got shard entry: {seq1_entry:?}"
+    );
+    assert_eq!(
+        seq1_entry.get("records").and_then(toml::Value::as_integer),
+        Some(0),
+        "PC3: the preamble shard's PUBLISHED index entry must carry `records: 0`. Got shard \
+         entry: {seq1_entry:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_P3001_EC008_partition_for_backfill_preamble_alone_exceeds_cap_sealed_whole_oversized()
+ {
+    // Leading-Preamble Handling Rule, DEGENERATE case (EC-008): the
+    // preamble ALONE exceeds shard_cap_bytes (not reachable for any of the
+    // four mandatory artifacts at their current measured preamble sizes,
+    // per BC-1.18.008 v1.4's own EC-008 text, but specified for
+    // completeness). Per Postcondition 2, the preamble seals as its own
+    // oversized shard using the SAME EC-002 oversized-atomic-unit
+    // exception (`oversized_record: true`) -- NOT a fail-loud abort;
+    // content atomicity for an indivisible structural unit takes
+    // precedence over the cap, identically to EC-002's own rationale for
+    // an oversized record.
+    let preamble = b"p".repeat(100); // exceeds the 70-byte cap alone
+    let records = concat_records(&[1, 2]); // two 30-byte records, 60 bytes total (fits under cap)
+    let mut content = preamble.clone();
+    content.extend_from_slice(&records);
+    let boundaries: Vec<usize> = [0usize, 30].iter().map(|o| o + preamble.len()).collect();
+
+    let cap = 70u64;
+    assert!(
+        preamble.len() as u64 > cap,
+        "test fixture precondition: the preamble ALONE must exceed shard_cap_bytes (70) to \
+         exercise the DEGENERATE case"
+    );
+
+    let partitions = mechanism_a_partition_for_backfill(&content, &boundaries, cap);
+
+    assert_eq!(
+        partitions[0].bytes, preamble,
+        "EC-008: the first partition must contain ONLY the oversized preamble"
+    );
+    assert_eq!(
+        partitions[0].record_count, 0,
+        "EC-008: the preamble holds zero domain records"
+    );
+    assert!(
+        partitions[0].oversized_record,
+        "EC-008/Leading-Preamble Handling Rule (degenerate case): a preamble that ALONE exceeds \
+         shard_cap_bytes ({cap}) must be flagged `oversized_record: true` (the SAME EC-002 \
+         oversized-atomic-unit exception, broadened here to cover the preamble too) -- NOT a \
+         fail-loud abort"
+    );
+
+    // Content-preservation across all partitions (preamble + the two
+    // 30-byte records that fit together under cap, forming the fresh
+    // current partition).
+    let mut reconstructed = Vec::new();
+    let mut total_records = 0usize;
+    for p in &partitions {
+        reconstructed.extend_from_slice(&p.bytes);
+        total_records += p.record_count;
+    }
+    assert_eq!(reconstructed, content);
+    assert_eq!(total_records, 2);
+}
+
+#[test]
+fn test_BC_1_18_008_P3001_EC008_run_backfill_split_preamble_alone_exceeds_cap_flagged_oversized_and_is_preamble_shard_end_to_end()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+
+    let preamble = b"p".repeat(100);
+    let records = concat_records(&[1, 2]);
+    let mut original_content = preamble.clone();
+    original_content.extend_from_slice(&records);
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries: Vec<usize> = [0usize, 30].iter().map(|o| o + preamble.len()).collect();
+    let cap = 70u64;
+    let entry = flat_entry("decision-log", cap);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10).expect(
+        "EC-008: a backfill with an oversized preamble must SUCCEED (not abort) -- content \
+             atomicity for an indivisible unit beats the cap, identically to EC-002",
+    );
+
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        },
+        "EC-008: only the oversized preamble seals (seq=1); the two 30-byte records together \
+         fit under cap and become the fresh current file"
+    );
+
+    let seq1_bytes = std::fs::read(dir.path().join("decision-log.0001.md")).unwrap();
+    assert_eq!(
+        seq1_bytes, preamble,
+        "EC-008: sealed shard seq=1 must contain the FULL oversized preamble, un-truncated"
+    );
+
+    let index_toml =
+        std::fs::read_to_string(dir.path().join("decision-log.shard-index.toml")).unwrap();
+    let index_value: toml::Value = toml::from_str(&index_toml).unwrap();
+    let shards = index_value
+        .get("shard")
+        .and_then(|v| v.as_array())
+        .expect("the shard-index must publish a [[shard]] array");
+    let seq1_entry = shards
+        .iter()
+        .find(|s| s.get("seq").and_then(toml::Value::as_integer) == Some(1))
+        .expect("seq=1 entry must exist");
+
+    assert_eq!(
+        seq1_entry
+            .get("oversized_record")
+            .and_then(toml::Value::as_bool),
+        Some(true),
+        "EC-008: the published shard-index entry must carry `oversized_record: true` (the SAME \
+         EC-002 flag, broadened to the oversized-preamble case). Got: {seq1_entry:?}"
+    );
+    assert_eq!(
+        seq1_entry
+            .get("is_preamble_shard")
+            .and_then(toml::Value::as_bool),
+        Some(true),
+        "EC-008: the published shard-index entry must ALSO carry `is_preamble_shard: true`. \
+         Got: {seq1_entry:?}"
+    );
+    assert_eq!(
+        seq1_entry.get("records").and_then(toml::Value::as_integer),
+        Some(0),
+        "EC-008: the published shard-index entry must carry `records: 0`. Got: {seq1_entry:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P3-001 (continued) -- new Postcondition 6(c)/Invariant 4 hard gate:
+// `mechanism_a_verify_backfill_per_shard_cap_preserved` (this file's own
+// test authorship defines this function's expected name/signature,
+// mirroring the existing `mechanism_a_verify_backfill_content_preserved`
+// (Postcondition 6(a)) / `mechanism_a_verify_backfill_record_counts_preserved`
+// (Postcondition 6(b)) precedent exactly -- Postcondition 6(c) is the THIRD
+// sub-clause of the SAME mandatory verification gate, so a third dedicated
+// predicate, tested at the identical unit-test grain as its two siblings
+// via this file's existing `partition()` helper, is the natural
+// implementation shape). `run_mechanism_a_backfill_split` is expected to
+// wire this in as a hard, fail-loud gate BEFORE any durable write occurs --
+// exactly like its two siblings -- per Invariant 4's own text: "enforced as
+// a fail-loud verification gate, never merely implied by the packer's own
+// behavior."
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_PC6c_INV4_verify_per_shard_cap_preserved_true_when_every_shard_within_cap() {
+    let partitions = vec![
+        partition(&[b'a'; 50], 2, false),
+        partition(&[b'b'; 70], 2, false),
+    ];
+
+    assert!(
+        mechanism_a_verify_backfill_per_shard_cap_preserved(&partitions, 70),
+        "PC6(c)/Invariant 4: every partition at or under shard_cap_bytes (70), none flagged \
+         oversized_record, must verify as preserved"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_PC6c_INV4_verify_per_shard_cap_preserved_false_when_unflagged_shard_exceeds_cap()
+ {
+    let partitions = vec![
+        partition(&[b'a'; 50], 2, false),
+        partition(&[b'b'; 90], 2, false), // exceeds cap (70), NOT flagged oversized_record
+    ];
+
+    assert!(
+        !mechanism_a_verify_backfill_per_shard_cap_preserved(&partitions, 70),
+        "PC6(c)/Invariant 4: an unflagged partition exceeding shard_cap_bytes is EXACTLY the \
+         unsanctioned Postcondition 2 violation Layer 2 exists to eliminate -- this hard gate \
+         must detect it as NOT preserved, mirroring PC6(a)/PC6(b)'s own hard-gate shape, so that \
+         `run_mechanism_a_backfill_split` aborts with `ContentPreservationFailed` (E-SHD-003) \
+         rather than durably writing an unsanctioned over-cap shard"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_PC6c_INV4_verify_per_shard_cap_preserved_true_when_oversized_record_flagged_exception()
+ {
+    let partitions = vec![
+        partition(&[b'a'; 200], 1, true), // exceeds cap but sanctioned via EC-002/EC-008
+        partition(&[b'b'; 30], 1, false),
+    ];
+
+    assert!(
+        mechanism_a_verify_backfill_per_shard_cap_preserved(&partitions, 70),
+        "PC6(c)/Invariant 4: a partition exceeding shard_cap_bytes that IS flagged \
+         `oversized_record: true` (EC-002's single-oversized-record exception, or EC-008's \
+         degenerate oversized-preamble exception -- this module represents BOTH identically via \
+         `oversized_record: true` on the returned partition) is the SANCTIONED exception -- must \
+         verify as preserved, never abort"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P3-002 (S-25.02 F4 cluster-3 adversarial pass-3, MEDIUM): the "oracle
+// recognizes NO independently-detectable boundary at all" fallback in
+// `run_mechanism_a_backfill_split` -- "the caller-supplied offsets are
+// trusted at face value" -- must fail loud, not silently proceed, for an
+// artifact_stem this module has literally NO marker rule for at all (falls
+// through `mechanism_a_record_boundary_offsets`'s own `_ => Vec::new()`
+// arm). BC-1.18.008 v1.4's own Changelog (F-C3-P3-002) confirms
+// Postcondition 2's Normalization rule already states this MUST reject the
+// backfill run "rather than silently mis-partition" for content this
+// module cannot classify -- this test pins that already-mandated behavior
+// as executable coverage.
+//
+// Scope note: this test deliberately targets a stem OUTSIDE the four
+// mandatory artifacts (`decision-log`/`burst-log`/`lessons`/
+// `session-checkpoints`), never one of those four with merely
+// non-marker-matching fixture content (e.g. this file's own
+// `concat_records`-based fixtures for `decision-log`) -- the latter shape
+// is unaffected by this fix and remains covered, unmodified, by this
+// file's many pre-existing `decision-log`/`burst-log` fixtures elsewhere.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_P3002_run_backfill_split_aborts_when_artifact_stem_unrecognized_with_caller_offsets()
+ {
+    let content =
+        b"arbitrary content for an artifact_stem this module has no marker rule for at all"
+            .to_vec();
+
+    let oracle_offsets =
+        mechanism_a_record_boundary_offsets("some-unrecognized-artifact", &content);
+    assert!(
+        oracle_offsets.is_empty(),
+        "test fixture precondition: this module has no marker rule for \
+         'some-unrecognized-artifact' -- the oracle must return an empty boundary set. Got: \
+         {oracle_offsets:?}"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("some-unrecognized-artifact.md");
+    std::fs::write(&canonical_path, &content).unwrap();
+
+    let entry = flat_entry("some-unrecognized-artifact", 20);
+    let caller_offsets = [0usize, 40]; // well-formed, but utterly unverifiable by the oracle
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &caller_offsets, 10);
+
+    assert!(
+        matches!(
+            outcome,
+            Err(MechanismABackfillError::ContentPreservationFailed { .. })
+        ),
+        "P3-002/PC2 Normalization rule: an artifact_stem this module has NO marker rule for at \
+         all, combined with a caller-supplied `record_boundary_offsets` argument, must ABORT -- \
+         the oracle has nothing to corroborate the caller's claim against, so trusting it at \
+         face value is exactly the silently-mis-partition outcome the Normalization rule \
+         forbids. Got: {outcome:?}"
+    );
+
+    let post_content = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post_content, content,
+        "P3-002/Postcondition 6: on abort, the original monolithic file MUST be left completely \
+         untouched (fail-loud, never partial-and-silent)"
+    );
+    assert!(
+        !dir.path()
+            .join("some-unrecognized-artifact.0001.md")
+            .exists(),
+        "P3-002/Postcondition 5: on abort, no sealed shard file may have been durably written"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): predicate
+// over-match decoys. `is_lesson_h2_record_heading`'s `"LESSON (D-"` /
+// `"RECURRENCE NOTE (D-"` branches and `is_pass_fix_burst_heading`'s
+// `" Fix Burst"` suffix check both currently use a bare
+// `starts_with`/prefix match rather than the Record-Boundary Marker
+// Table's own full regex (`^## LESSON \(D-[0-9]+\)` /
+// `^### Pass-[0-9]+ Fix Burst\b`) -- neither requires digits to actually
+// follow `D-`, nor a word boundary immediately after `Burst`, so a heading
+// that merely SHARES the marker's own leading substring (without matching
+// its full documented shape) is misdetected as a genuine record boundary.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_P3003_record_boundary_offsets_lessons_rejects_lesson_marker_without_digits() {
+    // Marker table regex: `^## LESSON \(D-[0-9]+\)` -- REQUIRES one-or-more
+    // ASCII digits immediately after `D-`. `## LESSON (D-foo)` (non-digit
+    // suffix) and `## LESSON (D-)` (no suffix at all) both share the bare
+    // `"LESSON (D-"` prefix the current implementation checks via
+    // `starts_with`, but neither is a genuine `D-NNN`-tagged lesson record.
+    let real_lesson = "## LESSON (D-1065) — a genuine, digit-tagged lesson record\n";
+    let decoy_non_digit = "## LESSON (D-foo) — not a real D-NNN ID, must not be a boundary\n";
+    let decoy_empty = "## LESSON (D-) — no digits at all, must not be a boundary\n";
+
+    let content = format!(
+        "# Lessons Learned\n\n\
+         {decoy_non_digit}\
+         Body text for the non-digit decoy.\n\n\
+         {decoy_empty}\
+         Body text for the empty-suffix decoy.\n\n\
+         {real_lesson}\
+         Body text for the genuine record.\n"
+    );
+
+    let offset_decoy1 = content.find(decoy_non_digit).unwrap();
+    let offset_decoy2 = content.find(decoy_empty).unwrap();
+    let offset_real = content.find(real_lesson).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("lessons", content.as_bytes());
+
+    assert_eq!(
+        offsets,
+        vec![offset_real],
+        "P3-003/PC2 Record-Boundary Marker Table: only the digit-tagged `## LESSON (D-1065)` \
+         heading is a genuine record boundary -- `## LESSON (D-foo)` and `## LESSON (D-)` \
+         merely share the bare `\"LESSON (D-\"` prefix without matching the marker table's own \
+         `^## LESSON \\(D-[0-9]+\\)` regex, and must NOT be treated as boundaries. Got: \
+         {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_decoy1) && !offsets.contains(&offset_decoy2),
+        "P3-003: neither non-digit-suffix decoy may appear in the boundary set. Got: {offsets:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_P3003_record_boundary_offsets_burst_log_rejects_fix_burst_heading_without_word_boundary()
+ {
+    // Marker table regex: `^### Pass-[0-9]+ Fix Burst\b` -- the `\b` word
+    // boundary REQUIRES the text immediately after "Burst" to be a
+    // non-word character (whitespace, punctuation, end-of-line) -- never
+    // another word character continuing the same word. `### Pass-39 Fix
+    // Bursting — ...` shares the bare `" Fix Burst"` prefix the current
+    // implementation checks via `starts_with`, but "Bursting" is a
+    // DIFFERENT word than "Burst" -- not a genuine Pass-N-Fix-Burst record.
+    let h2_a = "## F5 pass-38 fix burst\n";
+    let decoy_no_word_boundary = "### Pass-39 Fix Bursting — not a real Pass-N Fix Burst record\n";
+    let real_pass_fix_burst = "### Pass-40 Fix Burst — a genuine h3-exception record\n";
+    let h2_b = "## Burst: F5 pass-41 fix burst\n";
+
+    let content = format!(
+        "# burst-log\n\n\
+         {h2_a}\
+         Body of pass-38.\n\n\
+         {decoy_no_word_boundary}\
+         Body text for the no-word-boundary decoy.\n\n\
+         {real_pass_fix_burst}\
+         Body of the genuine pass-40 h3-exception record.\n\n\
+         {h2_b}\
+         Body of pass-41.\n"
+    );
+
+    let offset_h2_a = content.find(h2_a).unwrap();
+    let offset_decoy = content.find(decoy_no_word_boundary).unwrap();
+    let offset_real = content.find(real_pass_fix_burst).unwrap();
+    let offset_h2_b = content.find(h2_b).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("burst-log", content.as_bytes());
+
+    assert_eq!(
+        offsets,
+        vec![offset_h2_a, offset_real, offset_h2_b],
+        "P3-003/PC2 Record-Boundary Marker Table: `### Pass-39 Fix Bursting` shares the bare \
+         `\" Fix Burst\"` prefix without matching the marker table's own \
+         `^### Pass-[0-9]+ Fix Burst\\b` regex (no word boundary after \"Burst\" -- \"Bursting\" \
+         continues the same word) and must NOT be treated as a boundary; only the two genuine h2 \
+         records and the genuine `### Pass-40 Fix Burst` h3-exception record are boundaries. \
+         Got: {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_decoy),
+        "P3-003: the no-word-boundary decoy must never appear in the boundary set. Got: \
+         {offsets:?}"
     );
 }
