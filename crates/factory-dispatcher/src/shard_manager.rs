@@ -5016,13 +5016,15 @@ fn heal_or_confirm_already_migrated(
     // vanished in the interim (a DIFFERENT, worse corruption than the crash
     // window this function heals), so this surfaces loudly rather than
     // silently falling back to a fresh migration.
-    let index = load_shard_index(index_path).map_err(io_err)?.ok_or_else(|| {
-        io_err(io::Error::other(format!(
-            "shard-index '{}' reported present by `mechanism_a_backfill_already_migrated` but \
+    let index = load_shard_index(index_path)
+        .map_err(io_err)?
+        .ok_or_else(|| {
+            io_err(io::Error::other(format!(
+                "shard-index '{}' reported present by `mechanism_a_backfill_already_migrated` but \
              vanished before this self-heal check could read it back",
-            index_path.display()
-        )))
-    })?;
+                index_path.display()
+            )))
+        })?;
 
     if index.shards.is_empty() {
         // EC-016: zero-shard registration -- the original run never
