@@ -4605,6 +4605,51 @@ pub enum MechanismABackfillError {
         artifact_stem: String,
         detail: String,
     },
+
+    /// F-C3-P8-002 (S-25.02 F4 cluster-3 LOCAL adversarial pass-8 review,
+    /// MEDIUM; BC-1.18.008 v1.8 Postcondition 6(c)'s new
+    /// happy-path-canonical-write extension, Invariant 5, EC-013;
+    /// `E-SHD-013`, `prd-supplements/error-taxonomy.md` v1.12): after
+    /// Postcondition 5 step (ii)'s ORDINARY, non-recovery, first-time/
+    /// uninterrupted completion of the canonical-truncate write
+    /// (`write_atomic_bytes(canonical_path, &current_partition.bytes, ..)`),
+    /// a FRESH post-hoc disk read-back of the canonical file does NOT match
+    /// the Backfill Recovery Manifest's own `(final_bytes, final_sha256)`
+    /// pair — already durably published in Postcondition 5 step (i), before
+    /// step (ii) ever runs, so no new oracle value is computed here; the
+    /// SAME pair the heal write already verifies against. Distinct from
+    /// `E-SHD-012` (`SliceVerificationFailed`): that code's own read-back
+    /// gate covers the DANGEROUS-window HEAL write (a crash-recovery
+    /// re-invocation of an INTERRUPTED prior migration); this code covers
+    /// the FIRST, uninterrupted happy-path write that the heal exists to
+    /// recover FROM. The destructive write has already happened at this
+    /// point — unlike Postcondition 6(a)/(b)'s pre-write
+    /// content-preservation checks, which gate BEFORE the original file is
+    /// ever touched — so this surfaces the corruption immediately for
+    /// operator remediation from git history/backup rather than reporting
+    /// the migration complete over silently-corrupted content. Per EC-013's
+    /// own Canonical Test Vector note, the shard-index and Backfill Recovery
+    /// Manifest are already durably published (Postcondition 5 step (i))
+    /// strictly BEFORE this failing write, so a follow-on re-invocation
+    /// resolves the now-corrupted canonical file via the ordinary
+    /// recovery-confirmation path (AMBIGUOUS, `E-SHD-011`, per Invariant 3)
+    /// rather than getting stuck or silently re-migrating.
+    #[error(
+        "E-SHD-013: post-hoc canonical-file verification failed after happy-path \
+         final-partition write for artifact_stem \"{artifact_stem}\" — fresh disk read-back \
+         ({read_back_bytes} bytes, sha256 {read_back_sha256}) does NOT match the Backfill \
+         Recovery Manifest's recorded final partition ({final_bytes} bytes, sha256 \
+         {final_sha256}) — the destructive write already completed; original monolithic \
+         content is no longer recoverable from the canonical file itself; halting for \
+         operator investigation from git history/backup"
+    )]
+    CanonicalWriteVerificationFailed {
+        artifact_stem: String,
+        read_back_bytes: u64,
+        read_back_sha256: String,
+        final_bytes: u64,
+        final_sha256: String,
+    },
 }
 
 /// Fail-loud backfill-split errors surface to the operator/dispatcher
@@ -5816,11 +5861,46 @@ pub fn run_mechanism_a_backfill_split(
         Some(&backfill_manifest),
     )?;
 
-    write_atomic_bytes(
+    // F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
+    // happy-path canonical-truncate write", Invariant 5, EC-013): this is
+    // the ORDINARY, non-recovery, first-time/uninterrupted completion of
+    // Postcondition 5 step (ii)'s destructive, source-overwriting write --
+    // structurally identical in kind to the DANGEROUS-window heal write
+    // `heal_or_confirm_already_migrated` already verifies (F-C3-P7-001), and
+    // to the sealed-shard writes above (F-C3-P6-002). It receives the SAME
+    // post-hoc disk read-back discipline via the SAME shared
+    // `write_and_read_back` primitive, verified against the SAME Backfill
+    // Recovery Manifest `(final_bytes, final_sha256)` pair already durably
+    // published in Postcondition 5 step (i) immediately above -- no new
+    // oracle value is computed here.
+    let read_back = write_and_read_back(
         canonical_path,
         &current_partition.bytes,
         &entry.artifact_stem,
     )?;
+    let read_back_bytes = read_back.len() as u64;
+    let read_back_sha256 = sha256_hex(&read_back);
+    if read_back_bytes != backfill_manifest.final_bytes
+        || read_back_sha256 != backfill_manifest.final_sha256
+    {
+        // The destructive write has already happened at this point -- fail
+        // loud with the NEW `E-SHD-013` code (distinct from `E-SHD-012`,
+        // which covers the crash-recovery heal's own read-back mismatch)
+        // rather than reporting `Migrated` over silently-corrupted content.
+        // The shard-index and Backfill Recovery Manifest are already
+        // durably published (Postcondition 5 step (i), above), so a
+        // follow-on re-invocation resolves the now-corrupted canonical file
+        // via the ordinary AMBIGUOUS (`E-SHD-011`) recovery-confirmation
+        // path per EC-013's own Canonical Test Vector note -- deliberately
+        // not suppressed here.
+        return Err(MechanismABackfillError::CanonicalWriteVerificationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            read_back_bytes,
+            read_back_sha256,
+            final_bytes: backfill_manifest.final_bytes,
+            final_sha256: backfill_manifest.final_sha256,
+        });
+    }
 
     Ok(MechanismABackfillOutcome::Migrated {
         sealed_count,
