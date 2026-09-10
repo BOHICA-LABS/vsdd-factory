@@ -2747,3 +2747,120 @@ fn test_BC_1_18_008_P3003_record_boundary_offsets_burst_log_rejects_fix_burst_he
          {offsets:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-C3-P5-001 (S-25.02 F4 cluster-3 adversarial pass-5, LOW): the empty
+// caller-offsets twin of P3-002 above. `run_mechanism_a_backfill_split`'s
+// `original_record_count` computation branches directly on
+// `record_boundary_offsets.is_empty()`; the `is_empty()` arm falls back to
+// `usize::from(!original_content.is_empty())` WITHOUT ever consulting the
+// `mechanism_a_record_boundary_offsets` oracle -- unlike the non-empty-offsets
+// branch immediately below it, which cross-checks the caller's list against
+// the oracle's own output (F-001/P2-001/P3-002).
+// `mechanism_a_partition_for_backfill` shares the identical blind spot: an
+// empty `record_boundary_offsets` argument makes it treat the WHOLE content
+// as a single record, regardless of how many genuine records the oracle can
+// independently find. For a KNOWN stem (`decision-log`) whose real content
+// contains multiple genuine, oracle-detectable `| D-NNN |` rows, this
+// collapses `partitions.len()` to `1`, tripping the EC-016 "nothing to do"
+// path and reporting `Ok(Migrated { sealed_count: 0 })` -- the mandated
+// split silently does not happen, and the outcome is reported as success.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_P5001_run_backfill_split_aborts_when_caller_offsets_empty_but_oracle_finds_real_boundaries()
+ {
+    let row_len = 50;
+    let record_count = 5;
+    let content = concat_decision_log_rows(record_count, row_len);
+
+    // Fixture precondition: the oracle genuinely finds all `record_count`
+    // real `| D-NNN |` row boundaries in this content -- there is real
+    // structure here for an empty caller-offsets argument to miss.
+    let oracle_offsets = mechanism_a_record_boundary_offsets("decision-log", &content);
+    assert_eq!(
+        oracle_offsets,
+        boundary_offsets_for(record_count, row_len),
+        "test fixture precondition: the oracle must find all {record_count} genuine \
+         `| D-NNN |` row boundaries in this fixture's content. Got: {oracle_offsets:?}"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    std::fs::write(&canonical_path, &content).unwrap();
+
+    // A small test cap that genuinely mandates a multi-shard split for this
+    // content's real byte size (`ceil(250/100) = 3 > 1`) -- not a borderline
+    // "nothing to split" fixture; the split is structurally required.
+    let shard_cap_bytes = 100;
+    let entry = flat_entry("decision-log", shard_cap_bytes);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &[], 10);
+
+    assert!(
+        matches!(
+            outcome,
+            Err(MechanismABackfillError::ContentPreservationFailed { .. })
+        ),
+        "F-C3-P5-001: an empty caller-supplied `record_boundary_offsets` combined with a KNOWN \
+         stem whose real content the oracle can genuinely partition into {record_count} records \
+         must ABORT fail-loud -- the oracle found real boundaries the empty caller-offsets \
+         argument missed entirely, which is exactly the silently-mis-partition outcome \
+         Postcondition 2's Normalization rule forbids (P3-002 already covers the 'no oracle \
+         rule at all' case above; this is its twin for 'an oracle rule exists and finds real \
+         structure, but the caller supplied nothing'). Got: {outcome:?}"
+    );
+
+    let post_content = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post_content, content,
+        "F-C3-P5-001/Postcondition 6: on abort, the original monolithic file MUST be left \
+         completely untouched (fail-loud, never partial-and-silent)"
+    );
+    assert!(
+        !dir.path().join("decision-log.0001.md").exists(),
+        "F-C3-P5-001/Postcondition 5: on abort, no sealed shard file may have been durably \
+         written"
+    );
+    assert!(
+        !dir.path().join("decision-log.shard-index.toml").exists(),
+        "F-C3-P5-001: on abort, no shard-index may have been durably written either"
+    );
+}
+
+/// Companion to the abort test above: the genuinely-valid empty-content +
+/// empty-offsets no-op path (EC-016's zero-record case) must keep succeeding
+/// -- there is no real record structure here for an empty caller-offsets
+/// argument to have missed, so this shape must never be swept up by
+/// F-C3-P5-001's fix into an unwarranted abort.
+#[test]
+fn test_BC_1_18_008_P5001_run_backfill_split_empty_content_and_empty_offsets_still_succeeds() {
+    let content: Vec<u8> = Vec::new();
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    std::fs::write(&canonical_path, &content).unwrap();
+
+    let entry = flat_entry("decision-log", 10_000);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &[], 10).expect(
+        "F-C3-P5-001 companion: genuinely empty content with an empty \
+         `record_boundary_offsets` argument has no real record structure for the oracle to \
+         have missed, and must continue to succeed as a legitimate zero-record no-op",
+    );
+
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 0,
+            archived_count: 0
+        },
+        "F-C3-P5-001 companion: an empty artifact with empty caller offsets seals zero shards"
+    );
+
+    let post_content = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post_content, content,
+        "F-C3-P5-001 companion: the canonical (empty) file must remain unchanged"
+    );
+}
