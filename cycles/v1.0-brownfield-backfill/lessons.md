@@ -1710,3 +1710,69 @@ self-caught instance, not (yet) a recurring pattern — should this shape recur,
 `[process-gap]` territory under the project's established 3+-recurrence rule (cf. `L-BB-D1183`,
 `L-BB-D1194`).
 `[process-note][D-1195][D-1194][TD-FACTORY-HOOK-BYPASS-001][self-caught][audit-trail][session-checkpoints][single-instance-not-yet-recurring]`
+
+---
+
+**L-BB-D1196-cross-vendor-adversary-pass-surfaces-same-vendor-blind-spots** [process-gap][codified] —
+during the S-25.02 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary cascade, the
+sixth pass was the FIRST run by a model outside the Claude family: OpenAI Codex, dispatched per D-1195's
+explicit human authorization to bring cross-vendor review into the human-authorized full
+grind-to-literal-3-CONSECUTIVE-CLEAN drive. This single cross-vendor pass surfaced **3 findings — 2
+HIGH, 1 MEDIUM — every one of them NOVEL: none had been raised, in this shape, by 5 consecutive
+same-vendor (Claude) adversary passes that had each examined the same code, the same spec, and in two
+cases the exact same underlying mechanism.**
+
+**F-C3-P6-001 (HIGH, data-loss)** is the most striking instance: the recovery/idempotency arm's
+structural byte-prefix heuristic (`canonical_bytes[..sealed_concat.len()] == sealed_concat[..]`)
+silently DESTROYS an intact, legitimately-migrated record whenever its content happens to share a
+byte-identical prefix with an already-sealed shard (e.g. two duplicate checkpoint entries) — a
+realistic, non-adversarial input shape, not a crafted attack. Pass-3's own same-vendor review
+(O-C3-P3-001) EXAMINED this exact recovery mechanism and explicitly characterized it "not reachable
+today... deferred to T-12" — a dismissal, not a silent miss. The cross-vendor pass did not merely
+notice what pass-3 overlooked; it constructed a concrete counterexample that DIRECTLY FALSIFIES
+pass-3's own prior adjudication. **F-C3-P6-002 (HIGH, spec-fidelity)** compounds the pattern: BC-1.18.008
+Postcondition 6(c)/Invariant 4's own text — "checked explicitly against the actual bytes written to
+each sealed shard file" / "post-hoc, against the actual bytes written to disk" — was READ by passes 4
+and 5 (both same-vendor) without either pass flagging that the shipped code verifies only an in-memory
+`Vec<u8>` length BEFORE any write occurs, never reading a sealed shard file back off disk at all. Two
+consecutive passes read the SAME sentence in the SAME spec and did not notice the implementation never
+does what the sentence says.
+
+**Root-cause analysis:** this is not "the same-vendor passes were careless." Passes 1-5 collectively
+found and fixed 1 BLOCKER + 3 HIGH + 6 MEDIUM + 2 MINOR + 1 ADVISORY across a rigorous 5-pass cascade —
+substantive, careful work. The pattern instead points to a SYSTEMATIC blind spot correlated with model
+family: a same-vendor pass, however many times repeated, tends to re-derive the same mental model of
+"what this code is trying to do" that the immediately-prior same-vendor pass (and, transitively, the
+original implementer) already held, and is therefore statistically less likely to construct the
+specific adversarial counterexample (the exact-duplicate-record collision; the "does this sentence's
+verification claim match what the code literally does, word for word" cross-check) that falls OUTSIDE
+that shared mental model. A genuinely different model family, trained differently and without exposure
+to this project's own prior review narrative, is more likely to construct exactly that kind of
+counterexample — precisely because it does NOT share the same priors. This is the SAME structural
+argument CLAUDE.md's own "Constructive spec/story review (different-model cognitive diversity)" /
+"PR diff code review (different-model cognitive diversity)" routing-table entries already make for
+`spec-reviewer`/`code-reviewer` — this lesson extends that argument to the ADVERSARIAL review role
+specifically, where it had not yet been operationalized as a protocol requirement.
+
+**Going-forward discipline — PROCESS-LEVEL fix, not a one-off cross-vendor experiment:** the
+recommended remedy is to amend the BC-5.39.001 convergence-protocol documentation (the
+`vsdd-factory:adversarial-review` skill, and the orchestrator's per-cluster/per-story adversary-dispatch
+prompt) to REQUIRE at least one cross-vendor (non-Claude-family) adversary pass as an explicit,
+non-optional step within every BC-5.39.001 3-CLEAN convergence cascade — not merely a discretionary
+practice invoked once a same-vendor cascade already "feels" exhausted. The natural placement (per this
+pass's own evidence) is EARLY in a cascade, not only as a late-stage exhaustion check: had the
+cross-vendor pass run at, say, pass-2 or pass-3 instead of pass-6, the data-loss bug in F-C3-P6-001
+would have been caught 3-4 passes sooner. **Anchor (Canonical Principle Rule 3 — concrete future
+dependency + specific story/wave, not an un-anchored observation):** routed to a NEW draft follow-up
+story **S-12.10** (E-12 Engine Governance, registered this burst in `STORY-INDEX.md`), the SAME epic
+this cluster has already used for its other codified cross-cutting process-gap lessons
+(`L-BB-D1172-partial-fix-propagation-stale-comment-sibling-sweep`,
+`L-BB-D1183-weak-substring-error-assertion-recurring-3x-process-gap`,
+`L-BB-D1194-transient-status-test-doc-comment-recurring-3x-process-gap`) — this is a convergence-protocol
+design gap general to any BC-driven adversarial cascade, not specific to BC-1.18.008, so the fix
+belongs in that engine-wide governance follow-up. Distinct from `L-BB-D1183`/`L-BB-D1194`'s
+3+-recurrence trigger: this lesson does not require a third occurrence to codify, because the FIRST
+cross-vendor pass alone already produced a 100%-novelty-rate outcome (3 of 3 findings novel) against a
+5-pass same-vendor baseline — that ratio is itself sufficient evidence of a structural (not incidental)
+blind spot, per the Canonical Principle's "most advisories become blockers" self-audit discipline.
+`[codified][process-gap][D-1196][cross-vendor][adversarial-review][openai-codex][model-diversity][S-12.10][E-12][BC-5.39.001][convergence-protocol][data-loss][spec-fidelity]`

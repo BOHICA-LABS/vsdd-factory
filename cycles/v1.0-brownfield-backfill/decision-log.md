@@ -9324,3 +9324,147 @@ Refs: D-1195, D-1194, S-25.02, BC-1.18.008 v1.5, F-C3-P5-001, S-12.09, `26c79f13
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1195 | D-1195-S2502-CLUSTER3-PASS5-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-5 = NOT CLEAN — 1 LOW finding (F-C3-P5-001, twin of F-C3-P3-002) + 1 non-blocking already-adjudicated integration observation.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-5.md`. Adversary independently re-verified every prior fix (passes 1-4) — correctness surface clean for the 2nd consecutive pass. F-C3-P5-001 (LOW): empty caller-`offsets` for a recognized stem with non-empty real content silently no-op'd the mandated split instead of consulting the oracle — the same shape as F-C3-P3-002, one call-site layer further out; FIXED (`feature/S-25.02-backfill` @ `26c79f13`) via an unconditional oracle-consult before the empty-caller no-op decision, aborting `ContentPreservationFailed` when real boundaries exist; valid empty-content/empty-oracle path (O-1/pass-4) preserved and regression-guarded. No BC/AC/EC/VP/behavior change. Integration observation: no production caller yet — SAME item as F-C3-P1-006/pass-1, ALREADY HUMAN-ADJUDICATED `[D-1191]` deferred to T-12; re-surfaced, no new routing. **Process-note (self-caught, audit trail):** pass-4's burst (`33f521ab`) used a raw shell `>>` append instead of Edit/Write for one `session-checkpoints.md` write — a TD-FACTORY-HOOK-BYPASS-001 P0 deviation; content verified well-formed this burst (no recovery needed); codified `[process-note]` lesson `L-BB-D1195-hook-bypass-shell-append-self-caught-process-note`. BC-INDEX v5.78 / STORY-INDEX v4.455 / VP-INDEX v3.10 / ARCH-INDEX v4.24 all UNCHANGED (pure code-side fix, no spec touched). Feature branch `feature/S-25.02-backfill` @ `26c79f13` (pushed); full workspace test suite green (46 tests), fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-5 not clean; substantive CODE defect surface EXHAUSTED after 2 consecutive LOW-only/clean-correctness passes; pass-6 next = FIRST attempt of the human-authorized full 3-CLEAN drive; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-6, fresh context, against BC-1.18.008 v1.5/code `26c79f13` — FIRST attempt of the 3-CLEAN drive.** Refs: D-1195, D-1194, S-25.02, BC-1.18.008 v1.5, F-C3-P5-001, S-12.09, `26c79f13`, `33f521ab`. STATE.md v10.20→v10.21. | S-25.02 F4 | 2026-09-10 |
+
+## D-1196
+
+**D-1196-S2502-CLUSTER3-PASS6-CROSSVENDOR-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1195 (this file, immediately above). D-1196 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-6 = NOT CLEAN — 2 HIGH + 1 MEDIUM finding, CROSS-VENDOR (OpenAI Codex)** 2026-09-10
+(cross-vendor adversary + implementer + test-writer code-side content + product-owner spec content;
+state-manager bookkeeping + single-commit TD-VSDD-053) — 2 HIGH (F-C3-P6-001 data-loss,
+F-C3-P6-002 spec-fidelity/missing disk-read-back), 1 MEDIUM (F-C3-P6-003, h3 word-boundary,
+code-only), ALL THREE fixed this burst. **This is the FIRST CROSS-VENDOR pass run against this BC's
+cascade** — the adversary role was fulfilled by OpenAI Codex, not the Claude-family model used for
+passes 1-5, per D-1195's explicit human authorization bringing cross-vendor review into the
+grind-to-3-CLEAN drive. All 3 findings are NOVEL: none were raised, in this shape, by any of the 5
+prior same-vendor passes — F-C3-P6-001's underlying mechanism was examined at pass-3 (O-C3-P3-001)
+and explicitly characterized "not reachable today... deferred to T-12" without constructing the
+repeated-prefix counterexample that falsifies that characterization; F-C3-P6-002's exact spec
+language ("actual bytes written to disk") was read by passes 4 and 5 without the missing-disk-
+read-back gap being flagged. Full Part A rendered from the raw Codex review JSON
+(`scratchpad/codex-pass6/codex-review.json`) and persisted as a standalone artifact, matching
+pass-1..5's own convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-6.md` (`diff_base=26c79f13`,
+`diff_head=26c79f13`).
+
+**F-C3-P6-001 (HIGH, data-loss):** the recovery/idempotency arm of the mechanism-A backfill entry
+point classified an already-published shard-index re-invocation as "interrupted, needs resuming"
+using ONLY a structural byte-prefix comparison (`canonical_bytes[..sealed_concat.len()] ==
+sealed_concat[..]`), then unconditionally overwrote the canonical file with the presumed-unsealed
+tail. Codex constructed a concrete counterexample — two byte-identical checkpoint records
+(`A + A + "more\n"`) — where a second invocation mistakes the already-sealed first record's bytes for
+an interruption marker and silently DESTROYS the second record's intact heading and body, which were
+never actually sealed and are unrecoverable from the shard files. FIXED: product-owner amended
+**BC-1.18.008 v1.5→v1.6**: NEW Backfill Recovery Manifest (`[backfill_manifest]` shard-index table:
+`original_bytes`/`original_sha256`, `final_bytes`/`final_sha256`, written durably at split time) added
+to Postcondition 3; NEW Recovery-Confirmation Rule added to Postcondition 5 — a re-invocation's
+disposition (SAFE no-op / DANGEROUS complete-the-interrupted-truncate / AMBIGUOUS fail loud) is
+determined SOLELY by exact whole-file `(length, SHA-256)` comparison against the Manifest's two
+recorded pairs, NEVER by re-concatenating sealed shards and comparing prefixes; Invariant 3 rewritten
+to require this exact-manifest basis and explicitly forbid the byte-prefix heuristic; NEW EC-009
+(legitimate repeated-prefix content correctly classified SAFE) and EC-010 (a match against neither
+manifest pair fails loud, new error `E-SHD-011`, rather than guessing). implementer,
+`feature/S-25.02-backfill`, rebuilt the recovery function around whole-file `(length, SHA-256)`
+identity against the Manifest instead of byte-prefix comparison; product-owner added `E-SHD-011` to
+`error-taxonomy.md` v1.9→v1.10. test-writer retired the obsolete pre-v1.6 self-heal test (asserted the
+now-forbidden byte-prefix behavior) and added a genuine disk-corruption-race fault-injection test plus
+a repeated-prefix regression test (the exact counterexample).
+
+**F-C3-P6-002 (HIGH, spec-fidelity):** BC-1.18.008 Postcondition 6(c)/Invariant 4's own "actual bytes
+written to each sealed shard file" / "actual bytes written to disk" language — present in the spec
+since pass-3 (D-1193) and read without complaint by passes 4 and 5 — was never actually implemented as
+a disk read-back: the production cap-verification gate checked only in-memory
+`partition.bytes.len()` BEFORE any write occurred, then wrote, published the index, and rewrote the
+canonical file without ever reading a sealed shard file back off disk. FIXED: product-owner ruled
+(no BC text amendment required — the existing v1.5 language already specified disk-verification; the
+code was non-compliant with already-correct spec text) that PC6(c)/Invariant 4 REQUIRE a genuine
+post-hoc disk read-back. implementer extracted `mechanism_a_write_and_verify_sealed_shard`, which
+writes via `write_atomic_bytes` then reads the resulting file back off disk (`std::fs::read` against
+the sealed path, not the in-memory buffer) and verifies the actual on-disk byte length against
+`shard_cap_bytes` (or the `oversized_record`/`is_preamble_shard` exception) before the shard is
+considered sealed and before index publication proceeds. test-writer added a disk-corruption-race
+fault-injection test (writes a sealed shard, corrupts/truncates it on disk between write and the
+verification read-back via a controlled test seam, asserts fail-loud abort).
+
+**F-C3-P6-003 (MEDIUM, code-only, no story/BC change):** `is_id_tagged_lesson_heading`'s numeric-
+suffix check (`after_dash.starts_with(|c| c.is_ascii_digit())`) omitted BC-1.18.008 PC2's documented
+`\b` word-boundary anchor (`^### L-<tag>-[0-9]+\b`), over-matching `### L-EDP1-050details` and
+`### L-EDP1-050_extra` as record boundaries — a nested sub-heading of this shape inside an existing
+lesson could become a spurious shard boundary. The THIRD distinct marker-heading-precision bug this
+cascade (after F-C3-P1-002/pass-1, F-C3-P3-003/pass-3). FIXED: implementer tightened the predicate to
+consume the complete digit run and require the documented word boundary afterward, TD-VSDD-060
+sibling-swept against `is_lesson_record_heading`; test-writer added negative alphabetic/underscore-
+suffix fixtures plus an end-to-end packing test.
+
+**Propagation:** architect propagated a THIRD VP-124 facet (recovery-confirmation correctness
+invariant, per POLICY 9 `vp_index_is_vp_catalog_source_of_truth`, per BC-1.18.008 v1.6's own routing
+note): VP-INDEX v3.10→v3.11 (`total_vps` UNCHANGED 141), verification-architecture.md v1.27→v1.28,
+verification-coverage-matrix.md v1.25→v1.26 — architect already ran `compute-input-hash --update` on
+both arch docs same-burst. story-writer's S-25.02 body v3.6→v3.7: AC-014 EXTENDED IN PLACE (trace
+citation unchanged — postcondition 5, postcondition 6, invariant 3, invariant 4 already covered this
+content) with the Recovery-Confirmation Rule and the post-hoc disk-read-back ruling; AC-013 body text
+UNCHANGED (its traced postconditions 1/2/3 are untouched by v1.6); §Edge Cases gained EC-050 (mirrors
+BC EC-009) and EC-051 (mirrors BC EC-010); §Behavioral Contracts BC-1.18.008 cell v1.5→v1.6; §Token
+Budget BC-1.18.008 line 5,600→6,600 tokens, Total ~84,400→~85,400 (~43%). BC-INDEX v5.78→v5.79
+(BC-1.18.008 version-cell v1.5→v1.6 per POLICY 8); STORY-INDEX v4.455→v4.456 (S-25.02 BC-list cell +
+row narrative; NEW draft follow-up story **S-12.10** registered, E-12 Engine Governance).
+
+**Input-hash reconciliation (dependency-ordered):** BC-1.18.008.md declares VP-INDEX.md as an input
+(architect's VP-124 facet extension changed it) — recomputed first, `763d2ab`→`d136e83`.
+`prd-supplements/error-taxonomy.md` declares BC-1.18.008.md as an input — recomputed second, AFTER
+BC-1.18.008.md settled, `226df61`→`c5ba1e0` (an intermediate `b15a45c` value computed before this
+dependency ordering was identified is superseded — recorded here for audit-trail completeness, not
+otherwise persisted anywhere). The S-25.02 story declares both BC-1.18.008.md and error-taxonomy.md as
+inputs — recomputed third/last, after both settled, `c432a34`→`5af158b`. `--check` CLEAN on all three
+post-reconciliation, plus BC-1.18.008.md, verification-architecture.md, and
+verification-coverage-matrix.md. This 3-file dependency chain (BC → error-taxonomy → story) is itself
+a process observation worth carrying forward: `compute-input-hash --update` on a set of files with
+cross-references between them is NOT commutative — the correct order is topological (leaves first,
+dependents last), and an out-of-order `--update` produces a hash that a subsequent `--check` will
+immediately re-flag as drifted, requiring a second pass. Not escalated to a formal lesson this burst
+(a single self-corrected instance, not yet a recurring pattern) but noted for state-manager's own
+future input-hash reconciliation bursts touching more than one file in a declared-input relationship.
+
+**Cross-vendor process lesson (`[codified]`):** a single OpenAI Codex cross-vendor pass surfaced 1
+data-loss bug (F-C3-P6-001) and 2 spec-fidelity gaps (F-C3-P6-002, F-C3-P6-003) that 5 consecutive
+same-vendor (Claude) adversary passes either missed outright or, for F-C3-P6-001, examined the exact
+same underlying mechanism and explicitly rationalized as non-blocking (O-C3-P3-001, pass-3) without
+constructing the falsifying counterexample; for F-C3-P6-002, read the governing spec language across 3
+subsequent passes without flagging the implementation gap. Codified as lesson
+`L-BB-D1196-cross-vendor-adversary-pass-surfaces-same-vendor-blind-spots`
+(`cycles/v1.0-brownfield-backfill/lessons.md`). Per Canonical Principle Rule 3 (concrete future
+dependency + specific anchor): routed to NEW draft follow-up story **S-12.10** (E-12 Engine
+Governance, registered this burst in `STORY-INDEX.md`) — a `vsdd-factory:adversarial-review` skill +
+orchestrator-prompt amendment requiring at least one cross-vendor (non-Claude-family) adversary pass
+as part of every BC-5.39.001 3-CLEAN convergence cascade, promoting cross-vendor review from optional
+practice to a required protocol step.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `b1134954` (implementer's F-C3-P6-001/002/003
+fixes + test-writer's new/retired test set, immediately after `26c79f13`, pushed to origin): full
+`cargo test --workspace --all-targets` suite green (784 tests); `cargo fmt --check --all` clean;
+`cargo clippy --workspace --all-targets -- -D warnings` clean. BC-5.39.001 cluster-3 LOCAL streak stays
+**0/3** (pass-6 NOT CLEAN — 2 HIGH + 1 MEDIUM, ALL fixed same-pass; the substantive-CODE-defect-
+surface-EXHAUSTED assessment reached after passes 4/5 is REOPENED — it held only for the same-vendor
+review perspective; pass-7 next, fresh context, continuing the human-authorized full 3-CLEAN drive
+with cross-vendor passes now an explicit part of the rotation; cycle-level 3/3 CONVERGED streak
+UNCHANGED). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a
+cycle-level adversary pass). `pipeline:` stays **PAUSED** (mid-convergence fix burst; consistent with
+prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-7, fresh context, against BC-1.18.008 v1.6 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `b1134954` — continuing the human-authorized full 3-CLEAN
+drive, with cross-vendor passes now an explicit part of the rotation per this pass's own codified
+process lesson.**
+
+Refs: D-1196, D-1195, S-25.02, BC-1.18.008 v1.6, F-C3-P6-001..003, S-12.10, `b1134954`, `26c79f13`,
+`d136e83`, `c5ba1e0`, `5af158b`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1196 | D-1196-S2502-CLUSTER3-PASS6-CROSSVENDOR-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-6 = NOT CLEAN — 2 HIGH + 1 MEDIUM finding, FIRST CROSS-VENDOR (OpenAI Codex) pass this cascade.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-6.md`. All 3 findings NOVEL — missed or rationalized away across 5 prior same-vendor (Claude) passes. F-C3-P6-001 (HIGH, data-loss): recovery arm's byte-prefix heuristic false-positived on legitimate repeated-prefix content and silently destroyed an intact record — FIXED via product-owner's **BC-1.18.008 v1.5→v1.6** (NEW Backfill Recovery Manifest in PC3 + NEW Recovery-Confirmation Rule in PC5 — exact whole-file `(length, SHA-256)` vs. byte-prefix — + Invariant 3 rewrite + EC-009/EC-010, `E-SHD-011`) plus implementer's manifest-based recovery rebuild. F-C3-P6-002 (HIGH, spec-fidelity): PC6(c)/Invariant 4's "actual bytes written to disk" was never implemented as a disk read-back — FIXED via a same-burst product-owner ruling plus implementer's new `mechanism_a_write_and_verify_sealed_shard` post-hoc disk read-back. F-C3-P6-003 (MEDIUM, code-only): lesson h3 marker missing documented `\b` word boundary — FIXED, TD-VSDD-060 sibling-swept. architect propagated a THIRD VP-124 facet (VP-INDEX v3.10→v3.11, verification-architecture.md v1.27→v1.28, verification-coverage-matrix.md v1.25→v1.26, `total_vps` UNCHANGED 141). BC-INDEX v5.78→v5.79; STORY-INDEX v4.455→v4.456 (story v3.6→v3.7, AC-014 extended, EC-050/EC-051 added; NEW draft follow-up story S-12.10 registered, E-12). Input-hashes reconciled in dependency order (BC-1.18.008.md `763d2ab`→`d136e83`; error-taxonomy.md `226df61`→`c5ba1e0`; story `c432a34`→`5af158b`); `--check` CLEAN on all touched files. `[codified]` lesson `L-BB-D1196-cross-vendor-adversary-pass-surfaces-same-vendor-blind-spots` — cross-vendor review promoted from optional to a REQUIRED BC-5.39.001 convergence-protocol step, anchored to S-12.10. Feature branch `feature/S-25.02-backfill` @ `b1134954` (pushed); full workspace test suite green (784 tests), fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-6 not clean; substantive-CODE-defect-surface-EXHAUSTED assessment from passes 4/5 REOPENED — held only for same-vendor review; pass-7 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-7, fresh context, against BC-1.18.008 v1.6/code `b1134954` — cross-vendor passes now part of the rotation.** Refs: D-1196, D-1195, S-25.02, BC-1.18.008 v1.6, F-C3-P6-001..003, S-12.10, `b1134954`, `26c79f13`. STATE.md v10.21→v10.22. | S-25.02 F4 | 2026-09-10 |

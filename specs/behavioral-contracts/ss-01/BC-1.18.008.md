@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5"
+version: "1.6"
 status: draft
 producer: product-owner
-timestamp: 2026-09-10T03:00:00Z
+timestamp: 2026-09-10T06:00:00Z
 phase: F2
 inputs:
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
@@ -12,7 +12,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.007.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f1-delta-analysis.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "763d2ab"
+input-hash: "d136e83"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -239,6 +239,26 @@ default (no partial/MVP delivery of a shipped feature).
    convention — plus `is_preamble_shard: true` and `records: 0`, and (in the degenerate case only)
    `oversized_record: true`.
 
+   **Backfill Recovery Manifest (this amendment, F-C3-P6-001).** The published shard-index
+   additionally carries a `[backfill_manifest]` table, populated in the SAME atomic index-publish
+   write as the `[[shard]]` entries themselves. This manifest is the SOLE authoritative basis
+   Postcondition 5's crash-recovery/idempotency determination relies on (see Postcondition 5's
+   Recovery-Confirmation Rule and Invariant 3) — never a structural comparison of the canonical
+   file's own bytes against a re-concatenation of already-sealed shards. It contains four fields,
+   each computed exactly once, at split time, from the SAME `original_content` buffer already read
+   into memory to drive Postcondition 2's partitioning:
+
+   - `original_bytes` (u64) — the pre-split monolithic file's exact byte length.
+   - `original_sha256` (hex-encoded string) — the pre-split monolithic file's SHA-256 content hash.
+   - `final_bytes` (u64) — the byte length of the LAST partition (the content the canonical file is
+     intended to hold once Postcondition 5's canonical-truncate step completes).
+   - `final_sha256` (hex-encoded string) — the SHA-256 content hash of that same last partition.
+
+   Because the manifest is written in the SAME atomic write as the `[[shard]]` entries — durably
+   persisted BEFORE the canonical-truncate step that follows it in Postcondition 5's sequence — it
+   is guaranteed to exist and be trustworthy for every recovery-confirmation check a later
+   invocation performs, including one landing in the crash window Postcondition 5 names below.
+
 4. **The backfill-split composes with BC-1.18.007's retention policy immediately.** If the number
    of shards a backfill-split produces for a given artifact already exceeds `retention_count`
    (plausible for `decision-log.md` at 908,938 bytes ÷ ~49,152-byte cap: `ceil() = 19` shards as a
@@ -267,6 +287,66 @@ default (no partial/MVP delivery of a shipped feature).
    staged results atomically replace the original monolithic file's role via the same
    temp-file-then-rename discipline BC-1.18.006 already establishes.
 
+   **Two-phase publish and the index-publish/canonical-truncate crash window.** The
+   staged-and-validated results become durable in TWO SEQUENTIAL writes, not one: (i) the
+   shard-index — including every `[[shard]]` entry AND the Backfill Recovery Manifest
+   (Postcondition 3) — is published first, via `write_atomic`; (ii) the canonical file is then
+   truncated-in-place to hold ONLY the final (unsealed) partition's bytes. A crash between (i) and
+   (ii) is a real, reachable window distinct from the pre-staging-complete window the paragraph
+   above already covers: the index (and manifest) are durable, but the canonical file still holds
+   the COMPLETE pre-split content. On any later invocation against the same artifact — where
+   Invariant 3's idempotency short-circuit finds the shard-index already exists — this window MUST
+   be distinguished from (a) the SAFE window where step (ii) already completed, and from (b) a
+   genuinely corrupted/tampered on-disk state matching neither.
+
+   **Recovery-confirmation rule (this amendment, F-C3-P6-001): exact whole-file identity against
+   the Backfill Recovery Manifest — NEVER a structural byte-prefix heuristic.** The
+   recovery-confirmation determination reads the canonical file's CURRENT on-disk bytes exactly
+   once and computes their exact byte length and SHA-256 content hash, then compares that
+   `(length, hash)` pair against the Backfill Recovery Manifest's two recorded pairs:
+
+   - If `(length, hash) == (final_bytes, final_sha256)` — the canonical file already holds EXACTLY
+     the intended final-partition content — the prior run's step (ii) already completed. SAFE
+     window: no write is performed; the invocation reports the artifact as already migrated.
+   - If `(length, hash) == (original_bytes, original_sha256)` — the canonical file still holds
+     EXACTLY the original pre-split monolithic content, byte-for-byte unmodified — step (ii) never
+     ran (or crashed before writing any bytes). DANGEROUS window, unambiguously confirmed: recovery
+     completes the interrupted step (ii) by atomically writing the manifest's own recorded
+     `final_bytes` content (the SAME bytes already independently established, at split time, as the
+     last partition — never re-derived by slicing the current canonical bytes at an offset) to the
+     canonical file.
+   - If `(length, hash)` matches NEITHER recorded pair — the on-disk state is AMBIGUOUS (the
+     canonical file has been modified by something other than this migration's own two-phase
+     publish sequence, or is corrupted). This MUST fail loud (`E-SHD-011`) and MUST NOT write
+     anything to the canonical file; recovery halts for operator investigation. Silently defaulting
+     to either the SAFE or DANGEROUS disposition on an ambiguous match is exactly the class of
+     defect this rule exists to prevent (see Invariant 3).
+
+   **Why a structural byte-prefix heuristic is insufficient (the defect this rule corrects,
+   F-C3-P6-001, HIGH).** A prior implementation pass classified the DANGEROUS window by checking
+   whether the canonical file's leading bytes structurally reproduce the concatenation of the
+   artifact's own already-sealed shards (`canonical_bytes[..sealed_concat.len()] ==
+   sealed_concat`). This heuristic FALSE-POSITIVES whenever the artifact's real content
+   legitimately repeats a sealed shard's exact bytes as a PREFIX of the SAFE-window final
+   partition — which Postcondition 2's own Record-Boundary Marker Table confirms is a realistic,
+   non-adversarial occurrence for `session-checkpoints.md` in particular (no uniqueness requirement
+   is imposed on checkpoint headings or bodies). Concrete counterexample: let `A =
+   "## Checkpoint\nx\n"` (16 bytes) and original content `A + A + "more\n"` (37 bytes) with
+   `shard_cap_bytes = 16`. Greedy packing (Postcondition 2) seals the first `A` as shard 1
+   (`sealed_concat = A`, 16 bytes) and leaves `A + "more\n"` (21 bytes) as the final, unsealed
+   partition — a legitimate, fully-correct SAFE-window state after the first, uninterrupted run. On
+   a SECOND invocation, `canonical_bytes = A + "more\n"` structurally satisfies
+   `canonical_bytes[..16] == sealed_concat` (its own leading 16 bytes happen to be byte-identical to
+   the sealed shard's content, because the artifact's real content legitimately repeats it) — the
+   byte-prefix heuristic misclassifies this SAFE state as the DANGEROUS window and overwrites the
+   canonical file with `canonical_bytes[16..]` alone (`"more\n"`), DESTROYING the legitimate `A`
+   prefix that belongs to the final partition — permanent, silent data loss of a real record's
+   heading and body. The Recovery-Confirmation Rule above eliminates this failure mode entirely: it
+   never compares the canonical file's bytes against a re-concatenation of sealed shards at all —
+   only against the two whole-file `(length, SHA-256)` pairs recorded once, durably, in the
+   Backfill Recovery Manifest at split time, which cannot coincidentally collide with a shorter
+   prefix repetition the way a prefix-match can.
+
 6. **Content-preservation verification is mandatory before the original monolithic file's role is
    retired.** The backfill-split MUST verify, before completing: (a) the concatenation of all
    sealed shards in `seq` order plus the final current file reproduces the original monolithic
@@ -284,6 +364,30 @@ default (no partial/MVP delivery of a shipped feature).
    exists to eliminate, and MUST fail this gate precisely like a byte-count or record-count
    mismatch; this per-shard-cap check MUST be executed explicitly against the actual bytes written
    to each sealed shard file, never merely assumed to hold because the packing procedure ran.
+
+   **Ruling (this amendment, F-C3-P6-002): "the actual bytes written to disk" — in clause (c)
+   above, in this Postcondition's own governing sentence, and in Invariant 4 — means a POST-HOC
+   READ-BACK of each sealed shard file from disk, via a FRESH file read performed AFTER that
+   shard's write completes, compared against the in-memory partition buffer that was intended to
+   be written.** Checking only the in-memory partition buffer's length before issuing the write —
+   with no subsequent disk read-back — does NOT satisfy checks (a), (b), or (c): it cannot detect a
+   write that silently truncated, partially flushed, or otherwise landed corrupted bytes on disk,
+   which is precisely the failure mode this gate exists to catch BEFORE the original monolithic
+   file is retired and its content becomes unrecoverable except via git history. Concretely, the
+   staging sequence is: stage each partition in memory (Postcondition 2) -> write each partition to
+   its staged/temp path -> READ BACK each just-written file from disk -> verify the read-back
+   bytes' length (and, for checks (a)/(b), their full byte-for-byte content and record accounting)
+   against the in-memory partition that was intended -> only THEN proceed to Postcondition 5's
+   atomic index-publish and canonical-truncate sequence. This is the safer of the two possible
+   readings, and the one CLAUDE.md's production-grade default requires for a ONE-TIME migration
+   that overwrites/deletes its own source content: an in-memory-only check cannot detect a failed
+   or corrupted disk write before the source is gone, whereas a post-hoc disk read-back can. This
+   ruling changes no Postcondition/Invariant/EC/VP semantic content beyond disambiguation — checks
+   (a), (b), and (c) already described a post-hoc verification against "actual bytes" — it only
+   forecloses the in-memory-only reading a prior implementation pass took as "compliant with
+   intent," which the shipped code (checking `partition.bytes.len()` before any write, never
+   reading a sealed shard file back from disk) did not in fact satisfy.
+
    Checks (a), (b), and (c) are each a hard gate: if any fails, the backfill-split aborts and the
    original monolithic file is left untouched (fail-loud, not partial-and-silent).
 
@@ -304,17 +408,34 @@ default (no partial/MVP delivery of a shipped feature).
    burst-log.md's `### Block N:` blocks) are never boundaries despite matching the same heading
    level.
 
-3. **The backfill-split is idempotent against a shard-index that already exists for that
-   artifact.** If a partial or complete backfill-split has already run for an artifact (e.g., a
-   prior interrupted attempt left a valid partial shard-index), re-running the backfill MUST
-   either resume from the last verified-complete shard or detect the already-sharded state and
-   skip re-splitting (never double-split an already-sharded artifact into redundant shards).
+3. **The backfill-split is idempotent against a shard-index that already exists for that artifact,
+   and the recovery-confirmation determination MUST use Postcondition 5's exact whole-file
+   `(length, SHA-256)` comparison against the Backfill Recovery Manifest — NEVER a structural
+   byte-prefix comparison against a re-concatenation of already-sealed shards (this amendment,
+   F-C3-P6-001).** If a partial or complete backfill-split has already run for an artifact (e.g., a
+   prior interrupted attempt left a valid, fully-published shard-index), re-running the backfill
+   MUST resolve to exactly one of three dispositions: (a) confirm the SAFE window (canonical bytes
+   exactly match the manifest's `final_bytes`/`final_sha256`) and take no action; (b) complete the
+   interrupted canonical-truncate step for the confirmed DANGEROUS window (canonical bytes exactly
+   match the manifest's `original_bytes`/`original_sha256`); or (c) fail loud (`E-SHD-011`) for an
+   AMBIGUOUS on-disk state matching neither manifest value. Never silently overwrite the canonical
+   file on an ambiguous or heuristically-inferred match, and never double-split an already-sharded
+   artifact into redundant shards. A structural byte-prefix heuristic is explicitly insufficient
+   for this determination — see Postcondition 5's concrete counterexample — because it cannot
+   distinguish a genuinely-interrupted canonical-truncate from an artifact whose legitimately
+   fully-migrated final partition happens to begin with content byte-identical to an already-sealed
+   shard, which Postcondition 2's own Record-Boundary Marker Table confirms is a realistic,
+   non-adversarial occurrence for `session-checkpoints.md` (no uniqueness requirement is imposed on
+   checkpoint headings or bodies).
 
-4. **(this amendment, F-C3-P3-001) Every sealed shard satisfies the per-shard cap bound, enforced
-   as a fail-loud verification gate, never merely implied by the packer's own behavior.**
-   Postcondition 6(c) requires this to be checked explicitly, post-hoc, against the actual bytes
-   written to disk for every sealed shard — not inferred from the packing procedure (including
-   Postcondition 2's Leading-Preamble Handling Rule) having run correctly. The two documented
+4. **(this amendment, F-C3-P3-001; ruling tightened F-C3-P6-002) Every sealed shard satisfies the
+   per-shard cap bound, enforced as a fail-loud verification gate, never merely implied by the
+   packer's own behavior.** Postcondition 6(c) requires this to be checked explicitly, post-hoc,
+   against the actual bytes written to disk for every sealed shard — not inferred from the packing
+   procedure (including Postcondition 2's Leading-Preamble Handling Rule) having run correctly, and
+   NOT satisfied by checking only the in-memory partition buffer's length before the write is
+   issued: "actual bytes written to disk" means a FRESH READ-BACK of the sealed shard file from
+   disk after the write completes, per Postcondition 6's F-C3-P6-002 ruling. The two documented
    exceptions — EC-002's oversized single record, and this amendment's degenerate oversized-preamble
    case — are the ONLY conditions under which an over-cap shard is sanctioned, and both MUST be
    explicitly flagged (`oversized_record: true`) in the shard index for the verification gate to
@@ -333,6 +454,8 @@ default (no partial/MVP delivery of a shipped feature).
 | EC-006 | A monolithic `burst-log.md` or `lessons.md` contains a record whose heading level deviates from that artifact's dominant h2 form (e.g. burst-log.md's `### Pass-39 Fix Burst`/`### Pass-40 Fix Burst`, or lessons.md's pre-`L-EDP1-052` `### L-EDP1-050`/`### L-EDP1-051`) | The backfill MUST detect these via the Postcondition 2 Record-Boundary Marker Table's documented h3-exception patterns and treat them as record boundaries identical in kind to the artifact's h2 records; an h2-only detector that misses these records (silently no-ops or mid-record-splits) fails Postcondition 6's content-preservation gate and MUST abort per EC-004 |
 | EC-007 | **(this amendment, F-C3-P3-001)** The leading preamble (YAML frontmatter + title/intro, plus — for decision-log.md — the table header/separator rows) combined with the first record's bytes exceeds `shard_cap_bytes`, though the first record ALONE does not | Per Postcondition 2's Leading-Preamble Handling Rule overflow case, the preamble seals as its own zero-record shard (`is_preamble_shard: true`) BEFORE record packing begins; the first record then opens a fresh shard. Distinct from EC-002: the record itself is under cap — only the record-plus-preamble combination is not — so folding them together (the naive behavior this finding corrects) would be an unsanctioned Postcondition 2 violation, not a documented exception |
 | EC-008 | **(this amendment, F-C3-P3-001)** The leading preamble ALONE exceeds `shard_cap_bytes` (not reachable for any of the four mandatory artifacts at their current measured preamble sizes — two to three orders of magnitude below any calibrated cap — but specified for completeness) | Per Postcondition 2's Leading-Preamble Handling Rule degenerate case, the preamble seals as its own oversized shard using the SAME EC-002 oversized-atomic-unit exception (`oversized_record: true`), NOT a fail-loud abort — content atomicity for an indivisible structural unit (a frontmatter/title block that cannot be split without corrupting the artifact's format) takes precedence over the cap, identically to EC-002's rationale for an oversized record |
+| EC-009 | **(this amendment, F-C3-P6-001)** Repeated-prefix content: a sealed shard's content recurs byte-identically as the LEADING PREFIX of the legitimately-migrated final partition's own content (realistic for `session-checkpoints.md`, since Postcondition 2's Record-Boundary Marker Table imposes no uniqueness requirement on checkpoint headings/bodies) — e.g. `A + A + "more\n"` with `A` as both the sole sealed shard's content and the final partition's own leading bytes | Postcondition 5's Recovery-Confirmation Rule correctly classifies this as the SAFE window (canonical bytes exactly match the Backfill Recovery Manifest's `final_bytes`/`final_sha256`) and takes NO action, preserving the canonical file byte-for-byte. A structural byte-prefix heuristic would misclassify this as the DANGEROUS window and destroy the final partition's legitimate leading bytes — this is the exact false-positive data-loss failure mode F-C3-P6-001 corrects |
+| EC-010 | **(this amendment, F-C3-P6-001)** At recovery-confirmation time, the canonical file's `(length, SHA-256)` matches NEITHER the Backfill Recovery Manifest's `original_bytes`/`original_sha256` NOR its `final_bytes`/`final_sha256` (e.g. an operator manually edited the canonical file between a crash and the recovery attempt, or the file is corrupted) | AMBIGUOUS state per Postcondition 5's Recovery-Confirmation Rule: fails loud with `E-SHD-011`; the canonical file is NOT written to under any circumstance; recovery halts pending operator investigation — never silently defaults to either the SAFE or DANGEROUS disposition |
 
 ## Canonical Test Vectors
 
@@ -355,6 +478,9 @@ packing algorithm against the real (or a byte-faithful synthetic) `decision-log.
 | `burst-log.md` fixture containing `## F5 pass-38 fix burst`, `### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`, `## Burst: F5 pass-41 fix burst` in sequence, with `### Block N:` sub-headings nested inside the h2 records | Boundary detector produces exactly 4 records (pass-38, pass-39, pass-40, pass-41) — the two h3-exception records are each their own record; nested `### Block N:` sub-headings do NOT create additional record boundaries (unaffected by this amendment: this vector asserts record-boundary DETECTION, not shard COUNT) | edge-case |
 | **(this amendment, F-C3-P3-001, EC-007)** A `decision-log.md`-shaped fixture whose leading preamble (frontmatter + title + intro + table header/separator rows, measured at fixture-build time) plus its first `\| D-NNN \|` record row together exceed `shard_cap_bytes`, while the first record alone does not | Shard `seq=1` contains ONLY the preamble — `is_preamble_shard: true`, `records: 0` in the shard-index entry, `bytes_at_seal = preamble_bytes <= shard_cap_bytes`; shard `seq=2` opens with the first record; Postcondition 6(c)'s per-shard-cap gate passes for both shards without either being flagged `oversized_record` | edge-case |
 | **(this amendment, F-C3-P3-001, EC-008)** A synthetic fixture whose leading preamble alone (independent of any record) exceeds `shard_cap_bytes` | Shard `seq=1` contains ONLY the oversized preamble, flagged `oversized_record: true` AND `is_preamble_shard: true` in the shard-index entry, `bytes_at_seal > shard_cap_bytes` for this one shard only; backfill does NOT abort (Postcondition 2's degenerate case is a documented, index-flagged exception, not a fail-loud condition); Postcondition 6(c)'s gate recognizes the flag and treats this shard as sanctioned | edge-case |
+| **(this amendment, F-C3-P6-001, EC-009)** `session-checkpoints.md`-shaped fixture: `A + A + "more\n"` where `A = "## Checkpoint\nx\n"` (16 bytes), `shard_cap_bytes = 16`. Backfill run ONCE (seals shard 1 = `A`; final/current partition = `A + "more\n"`, 21 bytes; Backfill Recovery Manifest records `original_bytes=37`/`original_sha256=<hash of A+A+"more\n">`, `final_bytes=21`/`final_sha256=<hash of A+"more\n">`), then `run_mechanism_a_backfill_split` invoked a SECOND time against the SAME artifact with no intervening crash | Recovery-confirmation reads canonical bytes (`A + "more\n"`, 21 bytes) and finds `(21, hash) == (final_bytes, final_sha256)` — SAFE window — returns `AlreadyMigrated`; NO write is issued; canonical file remains byte-for-byte `A + "more\n"` (21 bytes) — the second `A` and `"more\n"` are NOT lost. Pins the F-C3-P6-001 fix directly (a byte-prefix heuristic would instead overwrite the canonical file with just `"more\n"`, 5 bytes) | edge-case |
+| Same `A + A + "more\n"` / `shard_cap_bytes = 16` fixture, but the canonical file is set to still hold the FULL pre-split content (`A + A + "more\n"`, 37 bytes) while the shard-index + Backfill Recovery Manifest are already durably published (simulating a crash between Postcondition 5's index-publish and canonical-truncate writes) | Recovery-confirmation finds `(37, hash) == (original_bytes, original_sha256)` — DANGEROUS window, unambiguously confirmed — atomically writes the manifest's own recorded `final_bytes` content (`A + "more\n"`, 21 bytes, NOT re-derived by slicing the current canonical bytes) to the canonical file; returns `Healed { sealed_count: 1 }` | error |
+| Same fixture, but the canonical file's bytes match NEITHER `(original_bytes, original_sha256)` NOR `(final_bytes, final_sha256)` (e.g. an operator appended text to the canonical file between the crash and the recovery attempt) | AMBIGUOUS: recovery fails loud with `E-SHD-011`; the canonical file is NOT written to; the artifact is left exactly as found, pending operator investigation (EC-010) | error |
 
 ## Verification Properties
 
@@ -365,10 +491,21 @@ packing algorithm against the real (or a byte-faithful synthetic) `decision-log.
 | VP-123 | **(this amendment, F-C3-P3-001)** Per-shard-cap invariant — every sealed shard's `bytes_at_seal` is `<= shard_cap_bytes` UNLESS explicitly flagged `oversized_record: true` in the shard index (EC-002 or the degenerate oversized-preamble case, EC-008), enforced as Postcondition 6(c)'s fail-loud hard gate | property test / golden-file (assert `bytes_at_seal <= shard_cap_bytes` for every `[[shard]]` entry not carrying `oversized_record: true`; assert the two flagged-exception fixtures — EC-002, EC-008 — are the ONLY entries where the bound is exceeded) |
 | VP-124 | Atomicity-under-interruption invariant — a simulated crash at any point during the split leaves the original file either fully intact or the split fully complete, never a partial/corrupt intermediate state | integration test / fault-injection (simulated crash at each of N write steps; assert post-recovery state is one of the two valid states) |
 | VP-124 | Idempotency invariant — running the backfill-split twice against an already-sharded artifact does not produce duplicate or additional shards | integration test (double-invocation against a fixture with a pre-existing shard-index) |
+| VP-124 | **(this amendment, F-C3-P6-001)** Recovery-confirmation correctness invariant — the SAFE/DANGEROUS/AMBIGUOUS disposition of a re-invocation against an existing shard-index is determined SOLELY by exact whole-file `(length, SHA-256)` comparison against the Backfill Recovery Manifest (Postcondition 5), NEVER by a structural byte-prefix comparison; in particular, content where a sealed shard's bytes recur as a genuine prefix of the legitimately-migrated final partition (EC-009) is correctly classified SAFE and left byte-for-byte untouched, and an on-disk state matching neither manifest value fails loud (`E-SHD-011`, EC-010) rather than silently overwriting | integration test / fixture-based (the three Canonical Test Vector rows above — SAFE no-op, DANGEROUS heal, AMBIGUOUS fail-loud — plus a repeated-prefix fixture family generalizing EC-009 across varying prefix-repeat lengths) |
 
 **Fix-burst note (F-S2502-F2-003):** the second VP-124 row's Proof Method previously read "unit
 test"; reconciled to the authoritative `VP-INDEX.md` v3.02 catalog assignment — VP-124 =
 integration — matching the sibling VP-124 row above. No property content changed.
+
+**Fix-burst note (F-C3-P6-001/F-C3-P6-002, this amendment):** VP-124 gains a third facet
+(Recovery-confirmation correctness invariant, Postcondition 5) — VP citation change; architect
+must propagate this facet to `VP-INDEX.md`, `verification-architecture.md`, and
+`verification-coverage-matrix.md` per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9). No new
+VP-NNN allocated — this is an additional PROPERTY STATEMENT under the existing VP-124 grant
+(mirroring how VP-123 gained its per-shard-cap facet under F-C3-P3-001 in v1.4), not a request for
+a new ID. F-C3-P6-002 (the PC6(c)/Invariant-4 disk-read-back ruling) introduces no new VP row: it
+is a wording disambiguation of the EXISTING VP-123 per-shard-cap facet's "actual bytes" language,
+not a new property.
 
 ## Related BCs
 
@@ -414,7 +551,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 ## VP Anchors
 
-- VP-123, VP-124 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-123 (proptest / golden-file; content-preservation byte-for-byte + record integrity), VP-124 (integration; atomicity-under-interruption + fail-loud preservation gate E-SHD-003 + idempotency). Cap-constant numeric bound PROVISIONAL-until-F4. **(this amendment, F-C3-P3-001):** VP-123 gains a third facet (per-shard-cap fail-loud invariant, Postcondition 6(c)) — VP citation change; architect must propagate this facet to `VP-INDEX.md`, `verification-architecture.md`, and `verification-coverage-matrix.md` per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9).
+- VP-123, VP-124 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-123 (proptest / golden-file; content-preservation byte-for-byte + record integrity), VP-124 (integration; atomicity-under-interruption + fail-loud preservation gate E-SHD-003 + idempotency). Cap-constant numeric bound PROVISIONAL-until-F4. **(this amendment, F-C3-P3-001):** VP-123 gains a third facet (per-shard-cap fail-loud invariant, Postcondition 6(c)) — VP citation change; architect must propagate this facet to `VP-INDEX.md`, `verification-architecture.md`, and `verification-coverage-matrix.md` per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9). **(this amendment, F-C3-P6-001):** VP-124 gains a third facet (Recovery-confirmation correctness invariant — exact whole-file manifest comparison, never a byte-prefix heuristic, Postcondition 5) — a second VP citation change routed to architect under the SAME `vp_index_is_vp_catalog_source_of_truth` propagation obligation (POLICY 9), to land in the SAME propagation pass as the still-outstanding VP-123 third-facet propagation from v1.4.
 
 ## Traceability
 
@@ -433,6 +570,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.6 | 2026-09-10 | product-owner | Adjudication of two findings from a fresh-context CROSS-VENDOR (OpenAI Codex) adversarial review of S-25.02 F4 cluster-3 — the first cross-vendor pass on this BC after five prior same-vendor (Claude) adversary passes missed both gaps. **F-C3-P6-001 (HIGH) — recovery/idempotency contract too weak, causes silent data loss on repeated-prefix content, RESOLVED.** The shipped `heal_or_confirm_already_migrated` (`crates/factory-dispatcher/src/shard_manager.rs`) classified an interrupted-vs-completed migration using ONLY a structural byte-prefix match (`canonical_bytes[..sealed_concat.len()] == sealed_concat`), then overwrote `canonical_bytes[sealed_concat.len()..]` when it matched. Concrete counterexample verified against the shipped code: `session-checkpoints.md` content `A + A + "more\n"` (`A = "## Checkpoint\nx\n"`, 16 bytes), `shard_cap_bytes = 16` — first migration correctly seals `A` as shard 1 and leaves `A + "more\n"` (21 bytes) as the legitimate final partition; a SECOND invocation false-positives (the canonical file's own leading 16 bytes happen to equal `sealed_concat`, since the content legitimately repeats it) and OVERWRITES the canonical file with `canonical_bytes[16..]` = `"more\n"` alone — permanently destroying the second `A` record's heading and body. Postcondition 2's Record-Boundary Marker Table already documents that `session-checkpoints.md` imposes no uniqueness requirement on checkpoint headings/bodies, making this a realistic, non-adversarial occurrence, not a contrived edge case. ADJUDICATED: added a **Backfill Recovery Manifest** to Postcondition 3 — `[backfill_manifest]` in the shard-index, populated in the SAME atomic write as the `[[shard]]` entries, recording `original_bytes`/`original_sha256` (the pre-split monolithic file's exact length + SHA-256) and `final_bytes`/`final_sha256` (the intended final-partition's exact length + SHA-256), both computed once at split time from the same in-memory `original_content` buffer — reusing the ALREADY-PERSISTED shard-index rather than inventing a separate mechanism, per the finding's own suggested direction. Postcondition 5 gained a new **Two-phase publish and the index-publish/canonical-truncate crash window** subsection (naming the exact crash window `heal_or_confirm_already_migrated` targets, previously undocumented) and a new **Recovery-confirmation rule**: the determination now compares the canonical file's exact whole-file `(length, SHA-256)` against the Manifest's two recorded pairs — match `final_bytes`/`final_sha256` ⇒ SAFE (no-op); match `original_bytes`/`original_sha256` ⇒ DANGEROUS (heal by writing the manifest's own recorded `final_bytes` content, never re-derived by slicing); match NEITHER ⇒ AMBIGUOUS, fails loud (`E-SHD-011`, NEW — added to `prd-supplements/error-taxonomy.md` v1.10 in this SAME burst), never silently overwrites. Invariant 3 rewritten to require this exact-manifest-comparison basis and explicitly forbid the byte-prefix heuristic. Added EC-009 (repeated-prefix content correctly classified SAFE) and EC-010 (ambiguous state fails loud) with three matching Canonical Test Vectors (SAFE no-op, DANGEROUS heal, AMBIGUOUS fail-loud, all built on the verified counterexample) and a new VP-124 third facet (Recovery-confirmation correctness invariant) — VP citation change routed to architect per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9), to land alongside the still-outstanding VP-123 third-facet propagation from v1.4. **F-C3-P6-002 (HIGH) — PC6(c)/Invariant 4 authoritative interpretation: disk read-back vs in-memory, RULED (a) — post-hoc DISK read-back is REQUIRED, confirming the spec's existing literal wording.** The shipped code checks the in-memory `partition.bytes` length before writing and never reads a sealed shard back from disk after writing; a prior Claude pass had concluded this was "compliant with intent" despite PC6(c)/Invariant 4's existing text already saying "actual bytes written to disk" / "post-hoc, against the actual bytes written to disk." RULED: reading (a) is authoritative — a one-time migration that overwrites/deletes its own source content must verify the destination actually landed on disk before the source is gone, since an in-memory-only check cannot detect a truncated, partially-flushed, or corrupted write. Added an explicit **Ruling** paragraph to Postcondition 6 (immediately after clause (c)) and a matching parenthetical to Invariant 4, both stating "actual bytes written to disk" means a FRESH READ-BACK after the write completes — foreclosing the in-memory-only reading — and specifying the corrected staging sequence (stage in memory → write → READ BACK from disk → verify → THEN publish index/truncate). No new Postcondition/Invariant/EC/VP semantic content beyond this disambiguation; the existing VP-123 per-shard-cap facet (v1.4) already covers the property, this ruling only removes the ambiguity a prior implementation pass exploited. **Implementer scope (routed, not yet executed by this burst):** `heal_or_confirm_already_migrated` must be restructured around the Recovery-Confirmation Rule (SHA-256 hashing of canonical-file reads, Manifest-comparison disposition logic, new `MechanismABackfillOutcome`/`MechanismABackfillError` variant for the AMBIGUOUS/`E-SHD-011` case); the shard-write staging sequence must gain the post-hoc disk read-back step. **Stories affected by BC changes (→ story-writer, per `bc_array_changes_propagate_to_body_and_acs`):** S-25.02 — no `bcs:` frontmatter array change (already listed); story-writer should confirm the story body's PC5/PC6/Invariant-3/4 summaries (if any) reflect the Recovery-Confirmation Rule and the disk-read-back ruling. **`prd-supplements/error-taxonomy.md` amended in the SAME burst** (v1.9→v1.10, `E-SHD-011` added) since this is the product-owner-owned PRD supplement this new error code belongs in — not deferred to a follow-up burst. Input-hash recompute owed to state-manager (this file's own content changed v1.5→v1.6). |
 | 1.5 | 2026-09-10 | product-owner | Adjudication of two findings from a fresh-context adversarial review of S-25.02 F4 cluster-3. **F-C3-P4-001 (MEDIUM) — PC2 "Normalization rule" ⟂ Record-Boundary Marker Table contradiction, RESOLVED.** v1.4's Normalization rule phrased clause (a) ("it matches `^## ` (any h2)") as an additive global disjunct applying across all four artifacts, which directly contradicted the same Postcondition's own Record-Boundary Marker Table rows for `decision-log.md` (boundary = `^\| D-[0-9]+ \|` only; a bare `## Decisions Log` / `## Appendix: Sub-clause Expansion` heading is a section label, not a record) and `lessons.md` (boundary = tagged h2 forms only — `## L-<tag>-NNN` / `## LESSON (D-NNN)` / `## RECURRENCE NOTE (D-NNN)` — not any untagged `## ` aside). Applied literally, clause (a) would make every `## ` heading in those two artifacts a record boundary, silently over-splitting decision-log.md at its section labels and lessons.md at untagged asides — a spec-internal contradiction, though the shipped implementation was never defective (it correctly follows the marker table, not the literal disjunctive predicate). ADJUDICATED: the Normalization rule is now explicitly PER-ARTIFACT-SCOPED and subordinate to the Record-Boundary Marker Table (restated as the table's authoritative predicate form, not an independent additive source of boundaries) — clause (a)'s "any h2" wording is stated to hold as written ONLY for `burst-log.md` and `session-checkpoints.md` (whose marker-table rows say "any h2 heading"), and is explicitly OVERRIDDEN for `decision-log.md` (primary key `^\| D-[0-9]+ \|`; bare `## ` headings are section labels) and `lessons.md` (only the three tagged h2 forms; untagged `## ` asides are not boundaries). The fail-loud clause for an unrecognized future heading form (Postcondition 6's gate) is preserved verbatim in substance — no detection-behavior change, wording-only consistency fix. **O-1 (LOW) — recognized-stem-empty-oracle invariant, documented.** Added a note (Postcondition 2, immediately after the Normalization rule) recording that each of the four recognized artifacts always yields a non-empty oracle boundary set for non-empty content (each always contains at least one `\| D-NNN \|`/h2/tagged-h2 marker), so a "recognized stem + empty oracle ⇒ trust caller" code branch is unreachable in production and exists only for synthetic test inputs; the unrecognized-stem case remains covered by Postcondition 6's fail-loud path. Documentation only, no behavior change. **No AC/EC/VP/behavior change** — pure spec-internal consistency fix; the shipped code already implements the marker-table-scoped behavior this amendment now states unambiguously. No Canonical Test Vector requires updating (all existing vectors already assert marker-table-consistent expected outputs, not the contradictory literal disjunctive reading). **Stories affected by BC changes (→ story-writer, per `bc_array_changes_propagate_to_body_and_acs`):** S-25.02 — no `bcs:` frontmatter array change; no story body propagation required since no AC/behavior changed, but story-writer should confirm the story body's PC2 summary (if any) does not itself repeat the additive-disjunct phrasing this amendment corrects. |
 | 1.4 | 2026-09-10 | product-owner | Adjudication of two findings from a fresh-context adversarial review of S-25.02 F4 cluster-3 (mechanism-A backfill). **F-C3-P3-001 (HIGH) — leading-preamble handling under Postcondition 2's per-shard cap, RESOLVED.** All four mandatory artifacts have a leading preamble (YAML frontmatter + title/intro, plus — for `decision-log.md` — table header/separator rows) before their first record-boundary line, which Postcondition 2 never addressed; the shipped implementation folds the preamble unconditionally into the first record's shard, so when `preamble_bytes + first_record_bytes > shard_cap_bytes` the first sealed shard exceeds cap — an unsanctioned Postcondition 2 violation distinct from EC-002 (the record itself is under cap), re-creating the exact over-cap-shard condition Layer 2 exists to eliminate. Verified by direct inspection of the real preamble content of all four artifacts in both `v1.0-brownfield-backfill/` and `v1.0-feature-engine-discipline-pass-1/` (one instance, that cycle's `burst-log.md`, has a near-empty preamble — a bare leading `---` with no frontmatter/title — confirming preamble size is a real per-instance quantity, not a fixed assumption). ADJUDICATED (Postcondition 2, new **Leading-preamble handling rule** sub-clause): the preamble is an atomic, indivisible packing unit resolved once before record packing begins — normal case (`preamble_bytes + first_record_bytes <= shard_cap_bytes`) rides with the first record's shard unchanged from today's behavior; overflow case seals the preamble as its own zero-record shard (`seq=1`, new `is_preamble_shard: true` index field) before record packing starts fresh; degenerate case (preamble alone exceeds cap — not reachable for any of the four artifacts at current measured preamble sizes, 2-3 orders of magnitude below any calibrated cap, but specified for completeness) reuses EC-002's oversized-atomic-unit exception (`oversized_record: true`, broadened to cover the preamble as well as a record) rather than a fail-loud abort, since the same atomicity rationale applies. Postcondition 3 extended to specify the preamble shard's index entry shape. Postcondition 4 extended: a preamble shard is NOT exempt from `retention_count`/archival — it is the typical FIRST archival candidate (always `seq=1`), consistent with BC-1.18.006's own precedent that a rolled canonical file's header is swept into whatever shard seals it and is never specially preserved. **ADDED Postcondition 6(c) and new Invariant 4 (the second requested addition, also F-C3-P3-001): the split MUST verify, as a hard fail-loud gate, that EVERY sealed shard's `bytes_at_seal <= shard_cap_bytes` except a shard explicitly flagged `oversized_record: true`** — this per-shard-cap bound is now checked explicitly against actual on-disk bytes, never merely implied by the packer having run. Added EC-007 (overflow case) and EC-008 (degenerate case) with matching Canonical Test Vectors, and a new VP-123 facet row (per-shard-cap fail-loud invariant) — VP citation change routed to architect per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9) for propagation to `VP-INDEX.md`, `verification-architecture.md`, `verification-coverage-matrix.md`. **F-C3-P3-002 — fail-loud-on-unrecognized-heading-form language, CONFIRMED, no amendment needed.** The reviewer asked whether Postcondition 2's Normalization rule already states that an unrecognized future heading form must fail loud rather than silently mis-partition. Confirmed present and unchanged in v1.3 (carried forward verbatim into v1.4): "If a future cycle introduces a heading form outside this enumeration, Postcondition 6's fail-loud content-preservation gate MUST reject the backfill run rather than silently mis-partition, and this BC MUST be amended to extend the marker table before the backfill is re-run." This is already sufficiently authoritative (an explicit MUST binding Postcondition 6's gate) for the implementer to align the code's empty-oracle path to fail loud; no strengthening required. **Stories affected by BC changes (→ story-writer, per `bc_array_changes_propagate_to_body_and_acs`):** S-25.02 — no `bcs:` frontmatter array change (this BC was already listed), but the story body's BC-1.18.008 content summary/AC trace (if it echoes Postcondition 2/6 mechanics) should be reviewed for propagation of the Leading-Preamble Handling Rule, Postcondition 6(c), and Invariant 4. **Canonical Test Vectors test-writer must add/update:** the two new EC-007/EC-008 rows (net-new fixtures); no existing row's expected output changed. No change to Preconditions, the Record-Boundary Marker Table, the `ceil()`-is-a-lower-bound reconciliation (v1.3), or Postconditions 1/5. |
 | 1.3 | 2026-09-10 | product-owner | Fresh-context adversarial review of S-25.02 F4 cluster-3 (finding F-004, MEDIUM) found Postcondition 2's `ceil(current_bytes / shard_cap_bytes)` shard-count formula jointly unsatisfiable with the same postcondition's "preserving record boundaries" requirement for non-uniform record sizes (counterexample: five 40-byte records against a 70-byte cap — `ceil(200/70)=3`, but no boundary-preserving packing fits two 40-byte records into one 70-byte shard, so the actual greedy packer produces 5), while the Canonical Test Vectors table asserted the `ceil()` value as an EXACT expected shard count (19 for `decision-log.md`, 5 for `lessons.md`), which only passes when a fixture's records happen to pack without slack. Reconciled: Postcondition 2 now specifies `ceil()` as a documented LOWER BOUND on shard count, adds an explicit deterministic greedy boundary-preserving packing procedure as the algorithm's actual split-point rule, and states the general inequality `actual_count >= ceil(current_bytes / shard_cap_bytes)` with the equality condition spelled out. Postcondition 4's retention-composition reasoning reworded from an approximate `≈ 19 shards` framing to an explicit lower-bound inequality (`actual_count >= 19 > retention_count of 10`, robust regardless of the real packed count). Marked the two Canonical Test Vectors asserting exact `ceil()` counts (`decision-log.md` 19-shard row, `lessons.md` 5-shard row) plus the dependent interrupted-restart row as `NEEDS-UPDATE`, with an explicit instruction that test-writer must measure the actual packed-shard count from the real fixture rather than re-asserting `ceil()` arithmetic; the three unaffected rows (under-cap single-shard, oversized-single-record, burst-log h3-exception-detection) are annotated as out-of-scope for this correction, with the reason stated inline. No new `E-SHD-NNN` error-taxonomy code is warranted: a packed shard count exceeding the `ceil()` lower bound is expected, correct algorithm behavior, not a failure condition — the existing `E-SHD-003` content-preservation gate (Postcondition 6, EC-004) already covers the actual failure mode (a boundary violation or record loss/duplication), which this amendment does not touch. Finding F-002 (session-checkpoints.md marker-heuristic narrowing) from the same review was adjudicated separately and required NO spec change: direct inspection of both real `session-checkpoints.md` files (`v1.0-brownfield-backfill/`, 182 h2 records; `v1.0-feature-engine-discipline-pass-1/`, 12 h2 records) confirmed every h2 heading in both files is a genuine checkpoint record with zero legitimate non-record h2 asides, so this BC's existing `session-checkpoints.md` marker-table row ("any h2 = boundary", no confirmed exception forms) is already correct as written — the code-side `is_checkpoint_record_heading` heuristic (filtering h2 on `starts_with("Archived")`/`contains("Checkpoint")`) is the defective party and is routed to implementer for deletion/revert-to-`^## `, not a spec issue; evidence includes a real record the code's case-sensitive heuristic itself would silently drop (`## ARCHIVED CHECKPOINT: 2026-08-27 — pass-60 CLEAN D-1117...`, all-caps, matches neither `starts_with("Archived")` nor `contains("Checkpoint")`). No other Postcondition, Invariant, Edge Case, or Verification Property content changed. |
