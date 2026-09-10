@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-10T17:41:15Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && git log --oneline -1 && echo --- && cargo test -p factory-dispatcher --all-targets 2>&1 | grep -E \"^test test_BC_1_18_008_P3|^test test_BC_1_18_008_P2003|test result: ok. 44 passed\" "}
+{"status":"pass","timestamp":"2026-09-10T18:13:50Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && cargo test -p factory-dispatcher --test bc_1_18_008_backfill_split_test 2>&1 | tail -40"}

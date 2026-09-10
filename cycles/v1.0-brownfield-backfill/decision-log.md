@@ -9103,3 +9103,110 @@ Refs: D-1193, D-1192, S-25.02, BC-1.18.008 v1.4, F-C3-P3-001..003, O-C3-P3-001, 
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1193 | D-1193-S2502-CLUSTER3-PASS3-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-3 = NOT CLEAN — 1 HIGH (F-C3-P3-001) + 1 MEDIUM (F-C3-P3-002) + 1 MINOR (F-C3-P3-003) + 1 non-blocking observation (O-C3-P3-001).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-3.md`. F-C3-P3-001 (HIGH): a leading preamble alone reaching `shard_cap_bytes` had no sanctioned flush point, silently exceeding the first shard's cap unflagged — product-owner amended **BC-1.18.008 v1.3→v1.4** (Leading-Preamble Handling Rule, new Postcondition 6(c) fail-loud gate, Invariant 4 restatement, EC-007/EC-008); implementer added `is_preamble_shard`/`records` fields (TD-VSDD-060 sibling-swept), a preamble-only flush path, and the `mechanism_a_verify_backfill_per_shard_cap_preserved` hard gate. F-C3-P3-002 (MEDIUM): the PC6(b) empty-oracle fallback trusted the caller for ANY unrecognized artifact_stem — fixed via `is_known_mechanism_a_artifact_stem` allow-list gating, fail-loud on a miss; test-writer rebuilt the F-004 fixtures to be oracle-detectable. F-C3-P3-003 (MINOR): `is_lesson_h2_record_heading`/`is_pass_fix_burst_heading` over-matched marker-table siblings — tightened to exact-form matches. O-C3-P3-001 (observation, non-blocking): `heal_or_confirm_already_migrated` structural-prefix heuristic noted, deferred to the T-12 production-wiring review. BC-INDEX v5.76→v5.77; STORY-INDEX v4.453→v4.454 (story v3.4→v3.5); VP-INDEX v3.09→v3.10 (VP-123 v1.0→v1.1, THIRD proptest facet, `total_vps` UNCHANGED 141); verification-architecture.md v1.26→v1.27 + verification-coverage-matrix.md v1.24→v1.25 (POLICY 9 propagation). Input-hashes reconciled (BC-1.18.008.md `a68be55`→`763d2ab`; story `e47d034`→`5cf0eda`); `--check` CLEAN on all four. STATE.md "26 VPs" advisory RE-CONFIRMED as the pre-existing D-1177 scope-mismatch false positive — NOT changed (would be a regression). Feature branch `feature/S-25.02-backfill` @ `10f49d1c` (RED `16effd52`, both pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-3 not clean; pass-4 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-4, fresh context, against BC-1.18.008 v1.4/code `10f49d1c`.** Refs: D-1193, D-1192, S-25.02, BC-1.18.008 v1.4, F-C3-P3-001..003, O-C3-P3-001, `16effd52`, `10f49d1c`. STATE.md v10.18→v10.19. | S-25.02 F4 | 2026-09-10 |
+
+## D-1194
+
+**D-1194-S2502-CLUSTER3-PASS4-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1193 (this file, immediately above). D-1194 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-4 = CODE CLEAN — NOT CLEAN OVERALL** 2026-09-10 (fresh-context adversary + product-owner spec
+amendment + test-writer code-side content; state-manager bookkeeping + single-commit TD-VSDD-053)
+— 0 CODE findings (Critical/High/Medium), 1 MEDIUM SPEC-internal contradiction (F-C3-P4-001), plus
+3 non-blocking observations (O-1/O-2/O-3). The adversary independently re-derived and re-verified
+every fix landed across passes 1-3, finding zero Critical/High/Medium CODE defects — the first
+CODE-clean pass in this cascade. Full Part A persisted as a standalone artifact, matching pass-1/2/3's
+own convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-4.md` (`diff_base=10f49d1c`,
+`diff_head=10f49d1c`).
+
+**F-C3-P4-001 (MEDIUM, SPEC-internal, not a code defect):** BC-1.18.008 Postcondition 2's
+"Normalization rule" clause (a) — "it matches `^## ` (any h2)" — read as an unqualified disjunct
+applying uniformly across all four mandatory backfill-split target artifacts, directly contradicting
+the SAME Postcondition's own authoritative Record-Boundary Marker Table two clauses earlier, whose
+`decision-log.md` row keys record boundaries on `^\| D-[0-9]+ \|` table rows only (NOT any h2 — a
+bare `## Decisions Log` heading is a section label, not a record) and whose `lessons.md` row keys
+record boundaries on three TAGGED h2 forms only (an untagged `## ` aside is explicitly NOT a
+boundary). Applied literally, clause (a) would silently over-split `decision-log.md` at its own
+section labels and `lessons.md` at untagged asides — a genuine internal inconsistency within one
+Postcondition's own text. This escalates pass-2's O-C3-P2-003 observation (non-blocking, "spec
+wording loose, code correct") to a blocking finding: the same imprecise clause, independently
+re-derived by a fresh-context pass as a genuine contradiction rather than merely an isolated-reading
+ambiguity. Confirmed NOT a code defect — `mechanism_a_record_boundary_offsets` was independently
+re-verified this pass to already implement the marker-table-scoped behavior correctly against all
+four real target artifacts in both cycle directories. FIXED: product-owner amended **BC-1.18.008
+v1.4→v1.5** — the Normalization rule is now explicitly PER-ARTIFACT-SCOPED and subordinate to the
+Record-Boundary Marker Table (restated as the table's own authoritative predicate form, not an
+independent additive source of boundaries); clause (a)'s "any h2" wording is stated to hold as
+written ONLY for `burst-log.md`/`session-checkpoints.md` (whose marker-table rows say "any h2
+heading"), and is explicitly OVERRIDDEN for `decision-log.md` (primary key `^\| D-[0-9]+ \|`) and
+`lessons.md` (only the three tagged h2 forms). The fail-loud clause for an unrecognized future
+heading form (Postcondition 6's gate) is preserved verbatim in substance. **No AC/EC/VP/behavior
+change** — pure spec-internal consistency fix; no Canonical Test Vector requires updating.
+
+**Observation O-1 (LOW, documentary):** each of the four recognized artifacts always yields a
+non-empty oracle boundary set for non-empty content, so a "recognized stem + empty oracle ⇒ trust
+caller" code branch is unreachable in production and exists only for synthetic test inputs; the
+unrecognized-stem case is separately covered by Postcondition 6's fail-loud gate (closed at
+pass-3). Documented via a new Postcondition 2 note in BC-1.18.008 v1.5; no detection-behavior
+change.
+
+**Observation O-2 (LOW, process-gap-class — THIRD recurrence, CODIFIED this burst):** the test
+module's doc comment describing the pass-3 `mechanism_a_verify_backfill_per_shard_cap_preserved`
+hard-gate fixtures used transient "expected to fail pre-fix" / "does not yet exist" framing that
+went stale the moment pass-3's own fix landed in the same burst. This is the THIRD occurrence of the
+exact same transient-status-header defect shape in this cluster's own cascade: F-C3-P1-005 (pass-1),
+F-C3-P2-004 (pass-2), and now this instance. Per the project's established 3+-recurrence rule (the
+same threshold that triggered `[process-gap]` codification for the weak-substring-error-assertion
+class at D-1183/cluster-2 pass-9), this THIRD recurrence is CODIFIED as a `[process-gap]` rather
+than tracked as a further one-off fix. FIXED this burst (test-writer, `feature/S-25.02-backfill` @
+`22ffc00a`, comments only — no test logic change; 44 tests still green). The STATE.md `[D-1192]
+[process-watch]` Drift Item tracking this class at 2/3 recurrences is ESCALATED this burst to
+`[process-gap][codified]`, routed to a NEW draft follow-up story **S-12.09** (E-12 Engine
+Governance, registered this burst in `STORY-INDEX.md`) recommending a test-writer agent-prompt
+amendment forbidding transient-status prose ("expected to fail" / "does not yet exist" / "RED
+surface") in test doc-comment headers, requiring status-neutral "this test pins X" framing instead.
+Codified as lesson `L-BB-D1194-transient-status-test-doc-comment-recurring-3x-process-gap`
+(`cycles/v1.0-brownfield-backfill/lessons.md`).
+
+**Observation O-3 (LOW):** Postcondition 6(c)'s prose wording versus the implementation's actual
+per-shard, post-hoc verification grain (`mechanism_a_verify_backfill_per_shard_cap_preserved`) was
+independently re-derived and confirmed COMPLIANT this pass — no mismatch found, no action needed.
+
+story-writer's S-25.02 v3.5→v3.6: version-cell + changelog only — PO confirmed a pure
+wording/consistency fix with NO AC/EC/VP/behavior change, so AC-013/AC-014 body text is UNCHANGED
+(both already describe the marker-table-scoped, per-artifact behavior and never repeated the
+additive-disjunct phrasing this amendment corrects). §Behavioral Contracts table BC-1.18.008 cell
+v1.4→v1.5 (Role cell unchanged).
+
+This burst: BC-INDEX v5.77→v5.78 (BC-1.18.008 cell v1.4→v1.5); STORY-INDEX v4.454→v4.455 (S-25.02
+BC list cell BC-1.18.008 v1.4→v1.5 sync + story-cell v3.5→v3.6; new S-12.09 draft stub registered
+in the E-12 table); VP-INDEX v3.10 UNCHANGED (no VP content touched — this amendment is
+wording-only); verification-architecture.md/verification-coverage-matrix.md UNCHANGED; ARCH-INDEX
+v4.24 UNCHANGED. Input-hashes reconciled: BC-1.18.008.md CONFIRMED CURRENT `763d2ab` via
+`compute-input-hash --check` (own declared `inputs:` unchanged by a body-only amendment); story
+`5cf0eda`→`c432a34` via `compute-input-hash --update` (story-writer's own flagged drift, cascading
+recompute after the BC hash update); `--check` CLEAN on both.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `22ffc00a` (comment-only fix immediately after
+`10f49d1c`, pushed to origin): full `cargo test --workspace --all-targets` suite green (44 tests in
+the mechanism-A module); `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets --
+-D warnings` clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-4 CODE CLEAN but NOT
+CLEAN overall due to the spec-internal MEDIUM, now fixed same-pass; pass-5 next, fresh context;
+cycle-level 3/3 CONVERGED streak UNCHANGED — separate track). No trajectory-tail drift — unchanged
+→0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass). `pipeline:` stays
+**PAUSED** (mid-convergence fix burst; consistent with prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-5, fresh context, against BC-1.18.008 v1.5 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `22ffc00a`.**
+
+Refs: D-1194, D-1193, S-25.02, BC-1.18.008 v1.5, F-C3-P4-001, O-1, O-2, O-3, S-12.09,
+`22ffc00a`, `10f49d1c`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1194 | D-1194-S2502-CLUSTER3-PASS4-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-4 = CODE CLEAN — NOT CLEAN OVERALL — 0 CODE findings + 1 MEDIUM SPEC-internal contradiction (F-C3-P4-001) + 3 non-blocking observations (O-1/O-2/O-3).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-4.md`. Adversary independently re-verified every prior fix (passes 1-3) — first CODE-clean pass this cascade. F-C3-P4-001 (MEDIUM, spec-internal): Postcondition 2's Normalization rule clause (a) contradicted the same Postcondition's own Record-Boundary Marker Table — escalates pass-2's O-C3-P2-003 observation to a finding; fixed via product-owner's **BC-1.18.008 v1.4→v1.5** (Normalization rule PER-ARTIFACT-SCOPED, subordinate to the Marker Table); NO AC/EC/VP/behavior change. O-1 (LOW): recognized-stem-empty-oracle invariant documented. O-2 (LOW, process-gap-class, THIRD recurrence F-C3-P1-005→F-C3-P2-004→O-2): fixed (test-writer `22ffc00a`, comments only) and CODIFIED as `[process-gap]`, routed to NEW draft follow-up story **S-12.09** (E-12). O-3 (LOW): PC6(c) wording re-derived compliant, no action. BC-INDEX v5.77→v5.78; STORY-INDEX v4.454→v4.455 (story v3.5→v3.6; S-12.09 registered). VP-INDEX v3.10 UNCHANGED (wording-only amendment). Input-hashes: BC-1.18.008.md CONFIRMED CURRENT `763d2ab`; story `5cf0eda`→`c432a34`; `--check` CLEAN on both. Feature branch `feature/S-25.02-backfill` @ `22ffc00a` (comment-only fix, pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (spec-internal MEDIUM fixed same-pass; pass-5 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-5, fresh context, against BC-1.18.008 v1.5/code `22ffc00a`.** Refs: D-1194, D-1193, S-25.02, BC-1.18.008 v1.5, F-C3-P4-001, O-1, O-2, O-3, S-12.09, `22ffc00a`. STATE.md v10.19→v10.20. | S-25.02 F4 | 2026-09-10 |
