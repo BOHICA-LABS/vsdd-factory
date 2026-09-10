@@ -33,9 +33,10 @@
 //! plus EC-016/EC-017/idempotency/crash-atomicity.
 
 use factory_dispatcher::shard_manager::{
-    MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry, ShardShape,
-    mechanism_a_backfill_already_migrated, mechanism_a_partition_for_backfill,
-    mechanism_a_record_boundary_offsets, mechanism_a_verify_backfill_content_preserved,
+    MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry, ShardIndex,
+    ShardIndexEntry, ShardShape, mechanism_a_backfill_already_migrated,
+    mechanism_a_partition_for_backfill, mechanism_a_record_boundary_offsets,
+    mechanism_a_verify_backfill_content_preserved,
     mechanism_a_verify_backfill_record_counts_preserved, run_mechanism_a_backfill_split,
 };
 
@@ -739,5 +740,376 @@ fn test_BC_1_18_008_EC003_run_backfill_split_restart_after_partial_prior_attempt
         reconstructed, original_content,
         "EC-003/Postcondition 6(a): the restart's real output must reproduce the original \
          monolithic content byte-for-byte, exactly as an uninitialized run would"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F4 BC-cluster-3 adversarial-review RED-GATE additions (adv-cluster3-p1)
+//
+// The four groups below encode four findings from the fresh-context
+// adversarial pass over this cluster's implementation. Each test asserts
+// the REAL, spec-mandated outcome (never a weakened/should-panic
+// substitute) and is expected to presently FAIL against the current
+// `shard_manager.rs` implementation — the fix belongs to the implementer,
+// not to this file.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// BLOCKER-1 (BC-1.18.008 Postcondition 2/Postcondition 6(a)): preamble byte
+// loss. `mechanism_a_partition_for_backfill` seeds `partition_start` from
+// `record_boundary_offsets[0]` — when the first detected record boundary is
+// NOT at byte 0 (a real leading preamble, e.g. a `# decision-log` header
+// before the first `## Decisions Log` table row), every byte in
+// `content[0..record_boundary_offsets[0])` is silently DROPPED from every
+// returned partition, which then fails Postcondition 6(a)'s mandatory
+// byte-for-byte content-preservation gate.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_BLOCKER1_partition_for_backfill_preserves_preamble_bytes_before_first_boundary()
+{
+    // Realistic decision-log.md shape: a document header/preamble BEFORE
+    // the first real `| D-` row -- offsets[0] is therefore > 0, a real
+    // leading preamble the split must not drop.
+    let header = "# decision-log\n\n## Decisions Log\n\n";
+    let row1 = "| D-001 | decided one | author |\n";
+    let row2 = "| D-002 | decided two | author |\n";
+    let content = format!("{header}{row1}{row2}");
+    let content_bytes = content.as_bytes();
+
+    let offsets = mechanism_a_record_boundary_offsets("decision-log", content_bytes);
+    assert!(
+        offsets[0] > 0,
+        "test fixture precondition: the first detected record boundary must be AFTER a real, \
+         non-empty preamble (offsets[0] == 0 would not exercise BLOCKER-1). Got offsets: \
+         {offsets:?}"
+    );
+
+    // A large cap -> structurally a single partition; the whole content
+    // (preamble included) must round-trip regardless of partition count.
+    let partitions = mechanism_a_partition_for_backfill(content_bytes, &offsets, 10_000);
+
+    let mut reconstructed = Vec::new();
+    for p in &partitions {
+        reconstructed.extend_from_slice(&p.bytes);
+    }
+    assert_eq!(
+        reconstructed,
+        content_bytes,
+        "BLOCKER-1 (PC6(a)/PC2): the concatenation of ALL returned partitions must reproduce \
+         the ORIGINAL content byte-for-byte, including the {} leading preamble bytes before the \
+         first record boundary at offset {} -- the current implementation seeds \
+         `partition_start` from `record_boundary_offsets[0]` and silently DROPS \
+         content[0..{}) from every partition. Reconstructed length: {}, original length: {}",
+        offsets[0],
+        offsets[0],
+        offsets[0],
+        reconstructed.len(),
+        content_bytes.len()
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_BLOCKER1_run_backfill_split_preserves_preamble_bytes_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+
+    // Same realistic preamble-before-first-row shape as the unit-level test
+    // above, but driven all the way through the real, on-disk end-to-end
+    // entry point.
+    let preamble = b"# decision-log\n\n## Decisions Log\n\n".to_vec();
+    let records = concat_records(&[1, 2, 3, 4, 5]); // 150 bytes, 5 records
+    let mut original_content = preamble.clone();
+    original_content.extend_from_slice(&records);
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries: Vec<usize> = [0usize, 30, 60, 90, 120]
+        .iter()
+        .map(|o| o + preamble.len())
+        .collect();
+    assert!(
+        boundaries[0] > 0,
+        "test fixture precondition: a real leading preamble before the first record boundary"
+    );
+
+    let entry = flat_entry("decision-log", 70);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+    let outcome = outcome.unwrap_or_else(|e| {
+        panic!(
+            "BLOCKER-1: a backfill over content with a leading preamble before its first record \
+             boundary must SUCCEED (byte-for-byte content-preservation must hold over the WHOLE \
+             original content, preamble included) -- got an error instead, which means the \
+             preamble bytes were silently dropped from the computed partitions and the \
+             Postcondition 6 hard gate (correctly) caught the resulting corruption: {e}"
+        )
+    });
+
+    let MechanismABackfillOutcome::Migrated { sealed_count, .. } = outcome else {
+        panic!(
+            "BLOCKER-1: expected a Migrated outcome for this oversized-with-preamble fixture, \
+             got {outcome:?}"
+        );
+    };
+
+    // Postcondition 6(a), end-to-end: every sealed shard (seq order) plus
+    // the fresh current file must reproduce the ORIGINAL monolithic
+    // content byte-for-byte, preamble included.
+    let mut reconstructed = Vec::new();
+    for seq in 1..=sealed_count {
+        let sealed_path = dir.path().join(format!("decision-log.{seq:04}.md"));
+        let sealed_bytes = std::fs::read(&sealed_path)
+            .unwrap_or_else(|e| panic!("BLOCKER-1: sealed shard seq={seq} must exist: {e}"));
+        reconstructed.extend_from_slice(&sealed_bytes);
+    }
+    reconstructed.extend_from_slice(&std::fs::read(&canonical_path).unwrap());
+
+    assert_eq!(
+        reconstructed,
+        original_content,
+        "BLOCKER-1 (PC6(a)): sealed shards (in seq order) + fresh current file must reproduce \
+         the ORIGINAL monolithic content byte-for-byte, including its {}-byte leading preamble",
+        preamble.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// HIGH-2 (BC-1.18.008 Postcondition 5, Invariant 3, VP-124 Property
+// Statement 1): a crash between the shard-index publish and the canonical-
+// truncate write is not self-healed on re-run. `run_mechanism_a_backfill_split`
+// publishes the shard-index BEFORE truncating the canonical file (by design,
+// per this module's own doc comment reasoning) -- but
+// `mechanism_a_backfill_already_migrated` keys ONLY on the shard-index's
+// existence. A re-run against exactly this crash window observes the index
+// already exists, reports `AlreadyMigrated`, and returns immediately WITHOUT
+// ever truncating the canonical file -- leaving the canonical file holding
+// the FULL original content (records already duplicated into the sealed
+// shards AND still present in the untouched canonical file), a silent,
+// permanent whole-corpus double-count corruption. This is the DANGEROUS
+// crash window VP-124 names distinctly from EC-003's SAFE no-index-yet
+// window (already covered by the existing EC-003 test above).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publish_and_canonical_truncate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    // Same 5-record / cap=70 fixture as the PC2/PC3 happy-path test above:
+    // partitions = [0..60) seq=1, [60..120) seq=2, [120..150) current.
+    let original_content = concat_records(&[1, 2, 3, 4, 5]); // 150 bytes
+    let sealed1 = &original_content[0..60];
+    let sealed2 = &original_content[60..120];
+    let expected_current = &original_content[120..150];
+
+    // Simulate the crash window: the canonical file is STILL the full,
+    // untruncated original (the crash happened AFTER the index publish
+    // below, BEFORE the canonical-truncate write) ...
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    // ... but BOTH sealed shard files ...
+    std::fs::write(dir.path().join("decision-log.0001.md"), sealed1).unwrap();
+    std::fs::write(dir.path().join("decision-log.0002.md"), sealed2).unwrap();
+
+    // ... AND the shard-index (fully accounting for both seals) already
+    // exist on disk, exactly as a completed split's index-publish step
+    // would have left them.
+    let index = ShardIndex {
+        schema_version: 1,
+        artifact_stem: "decision-log".to_string(),
+        current_shard: "decision-log.md".to_string(),
+        shard_cap_bytes: 70,
+        max_single_record_bytes: 16_384,
+        safety_margin_bytes: 8_192,
+        practical_fuel_ceiling: 8_000_000,
+        worst_case_fuel_per_byte: 106.36,
+        retention_count: 10,
+        shards: vec![
+            ShardIndexEntry {
+                seq: 1,
+                path: "decision-log.0001.md".to_string(),
+                sealed_at: "2026-01-01T00:00:00Z".to_string(),
+                bytes_at_seal: sealed1.len() as u64,
+                sealed_retroactively: false,
+            },
+            ShardIndexEntry {
+                seq: 2,
+                path: "decision-log.0002.md".to_string(),
+                sealed_at: "2026-01-01T00:00:00Z".to_string(),
+                bytes_at_seal: sealed2.len() as u64,
+                sealed_retroactively: false,
+            },
+        ],
+    };
+    let index_toml = toml::to_string(&index).expect("ShardIndex must serialize to valid TOML");
+    std::fs::write(dir.path().join("decision-log.shard-index.toml"), index_toml).unwrap();
+
+    let entry = flat_entry("decision-log", 70);
+    let boundaries = [0, 30, 60, 90, 120];
+
+    let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+    assert!(
+        result.is_ok(),
+        "HIGH-2/VP-124: re-running the backfill against the dangerous crash window (index \
+         already published, canonical NOT yet truncated) must self-heal, not error. Got: {:?}",
+        result.err()
+    );
+
+    // The self-heal MUST complete the truncation the crash interrupted:
+    // the canonical file must end up holding ONLY the final partition, not
+    // the full pre-crash original content.
+    let post_canonical = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post_canonical,
+        expected_current,
+        "HIGH-2/VP-124: after self-healing this crash window, the canonical file MUST be \
+         truncated to exactly the final partition's content -- got {} bytes (still holding the \
+         full {}-byte pre-crash original) instead of the expected {} bytes. Leaving the \
+         canonical file un-truncated here means records 1-4 exist BOTH in the sealed shards AND \
+         in the still-full canonical file -- a silent, permanent whole-corpus double-count \
+         corruption that `mechanism_a_backfill_already_migrated`'s index-existence-only check \
+         allowed to persist forever (it never re-inspects the canonical file's own content).",
+        post_canonical.len(),
+        original_content.len(),
+        expected_current.len()
+    );
+
+    // Whole-corpus reconstruction: sealed shard 1 + sealed shard 2 + the
+    // (now-healed) canonical file must reproduce the original content
+    // EXACTLY ONCE -- no record dropped, no record duplicated.
+    let mut reconstructed = Vec::new();
+    reconstructed
+        .extend_from_slice(&std::fs::read(dir.path().join("decision-log.0001.md")).unwrap());
+    reconstructed
+        .extend_from_slice(&std::fs::read(dir.path().join("decision-log.0002.md")).unwrap());
+    reconstructed.extend_from_slice(&std::fs::read(&canonical_path).unwrap());
+    assert_eq!(
+        reconstructed, original_content,
+        "HIGH-2/VP-124 Property Statement 1: sealed shard 1 + sealed shard 2 + the healed \
+         canonical file must reconstruct the original content EXACTLY ONCE -- no duplicated, no \
+         dropped records"
+    );
+
+    // The shard-index itself must remain exactly 2 entries -- the self-heal
+    // must never re-seal already-sealed content into new, redundant shards.
+    let index_toml_after =
+        std::fs::read_to_string(dir.path().join("decision-log.shard-index.toml")).unwrap();
+    let index_after: ShardIndex = toml::from_str(&index_toml_after).unwrap();
+    assert_eq!(
+        index_after.shards.len(),
+        2,
+        "HIGH-2/VP-124 (Idempotency, Invariant 3): the self-heal must never produce additional \
+         or duplicate shard-index entries beyond the 2 that already correctly existed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MED-3 (BC-1.18.008 Postcondition 2/Invariant 2): `lessons.md` and
+// `session-checkpoints.md` boundary detection over REALISTIC content. The
+// current implementation matches ANY line-anchored `"### "` (lessons) or
+// `"## "` (session-checkpoints) occurrence as a record boundary, with no way
+// to distinguish a genuine new-record heading from a NESTED, non-record
+// sub-heading inside an existing record's own body -- both real formats
+// contain exactly this shape (see e.g. `.factory/cycles/*/lessons.md`'s own
+// `### L-EDP1-NNN` records containing nested `###`-free prose, and
+// `.factory/cycles/*/session-checkpoints.md`'s own `## Session Resume
+// Checkpoint (...)` records, which some entries nest `### State` / `###
+// Resume Path A` / `### Outstanding follow-up tasks` sub-headings under).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_MED3_record_boundary_offsets_lessons_ignores_nested_non_record_subheading() {
+    // Realistic lessons.md shape (mirrors the real
+    // `v1.0-feature-engine-discipline-pass-1/lessons.md` L-EDP1-NNN record
+    // convention): each genuine lesson record starts with a line-anchored
+    // `### L-EDP1-NNN -- ...` heading. A lesson's own BODY may contain a
+    // nested sub-heading at the SAME `### ` markdown level (e.g. breaking
+    // out a numbered recursion-ply mapping) that is NOT itself a new lesson
+    // record -- it carries no `L-EDP1-NNN` tag and is clearly part of the
+    // PRECEDING lesson's own content.
+    let lesson1 = "### L-EDP1-050 -- 49th-layer recurrence: nineteenth consecutive violation\n";
+    let decoy_subheading = "### Recursion ply mapping (nested detail, NOT a new lesson record)\n";
+    let lesson2 = "### L-EDP1-051 -- 50th-layer recurrence: twentieth consecutive violation\n";
+    let content = format!(
+        "# Lessons Learned -- engine-discipline cycle\n\n\
+         {lesson1}\
+         **Pattern:** body text describing the 49th-layer recurrence in detail.\n\n\
+         {decoy_subheading}\
+         - Level-1: rule applied to named findings only\n\
+         - Level-2: fix-extension applied to named forms only\n\n\
+         {lesson2}\
+         **Pattern:** body text describing the 50th-layer recurrence in detail.\n"
+    );
+
+    let offset1 = content.find(lesson1).unwrap();
+    let decoy_offset = content.find(decoy_subheading).unwrap();
+    let offset2 = content.find(lesson2).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("lessons", content.as_bytes());
+
+    assert!(
+        !offsets.contains(&decoy_offset),
+        "MED-3 (PC2/Invariant 2): a nested `### ` sub-heading inside a lesson's OWN body (no \
+         `L-EDP1-NNN` tag -- not a new lesson record) must NOT be treated as a structural record \
+         boundary, or the backfill-split would cut the L-EDP1-050 lesson's own body in half \
+         across two shards. Got offsets: {offsets:?} (decoy at {decoy_offset})"
+    );
+    assert_eq!(
+        offsets,
+        vec![offset1, offset2],
+        "MED-3: only the two genuine `### L-EDP1-NNN` lesson-record headings are real \
+         structural boundaries. Got: {offsets:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_MED3_record_boundary_offsets_session_checkpoints_ignores_nested_non_record_subheading()
+ {
+    // Realistic session-checkpoints.md shape (mirrors the real
+    // `.factory/cycles/*/session-checkpoints.md` convention): each genuine
+    // record starts with a line-anchored `## Session Resume Checkpoint
+    // (...)` (or `## Archived Checkpoint: ...` / `## Archived: ...`)
+    // heading. A checkpoint's own body routinely nests `### `-level
+    // sub-headings (e.g. `### State`, `### Resume Path A`, `### Outstanding
+    // follow-up tasks`) which are one level DEEPER than the `## ` record
+    // marker and so never collide with it by literal prefix -- but a
+    // checkpoint's body can equally nest a nAMED SECTION at the SAME `## `
+    // level (e.g. a "## Related Links" aside) that is NOT itself a new
+    // checkpoint record.
+    let checkpoint1 =
+        "## Session Resume Checkpoint (2026-08-20 -- PIPELINE ACTIVE; pass-12 dispatch NEXT)\n";
+    let decoy_heading = "## Related Links (reference section, NOT a checkpoint record)\n";
+    let checkpoint2 =
+        "## Session Resume Checkpoint (2026-08-05 -- PIPELINE ACTIVE; pass-6 fix burst NEXT)\n";
+    let content = format!(
+        "# Session Checkpoints -- v1.0-brownfield-backfill\n\n\
+         {checkpoint1}\
+         Archived from STATE.md by the D-1052 pass-12 CLEAN burst.\n\n\
+         {decoy_heading}\
+         - `git show 06bdde56:.factory/STATE.md`\n\n\
+         {checkpoint2}\
+         Archived from STATE.md by the SESSION-WRAP-2026-08-05 pause burst.\n"
+    );
+
+    let offset1 = content.find(checkpoint1).unwrap();
+    let decoy_offset = content.find(decoy_heading).unwrap();
+    let offset2 = content.find(checkpoint2).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("session-checkpoints", content.as_bytes());
+
+    assert!(
+        !offsets.contains(&decoy_offset),
+        "MED-3 (PC2/Invariant 2): a `## `-level reference/aside heading inside a checkpoint's \
+         own body (not itself a new `## Session Resume Checkpoint (...)` / `## Archived...` \
+         record) must NOT be treated as a structural record boundary. Got offsets: {offsets:?} \
+         (decoy at {decoy_offset})"
+    );
+    assert_eq!(
+        offsets,
+        vec![offset1, offset2],
+        "MED-3: only the two genuine checkpoint-record headings are real structural boundaries. \
+         Got: {offsets:?}"
     );
 }

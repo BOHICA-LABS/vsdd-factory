@@ -378,6 +378,111 @@ fn test_BC_1_18_007_AC010_PC2_archive_overflow_shards_moves_oldest_active_shard_
     }
 }
 
+// F4 BC-cluster-3 adversarial-review finding MED-4 (EC-014, BC-1.18.007
+// Postcondition 2/EC-002 — "potentially archiving more than one shard in a
+// single invocation"): the existing PC2 test above covers only a
+// SINGLE-shard overflow (11 active vs retention_count=10 -> exactly 1
+// archived). This test exercises the genuinely MULTI-shard real-filesystem
+// MOVE the same edge case names explicitly — retention_count lowered
+// mid-flight while several shards are already active, in one invocation.
+#[test]
+fn test_BC_1_18_007_MED4_EC014_archive_overflow_shards_moves_multiple_oldest_active_shards_in_one_invocation()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    std::fs::write(&canonical_path, "current shard content").unwrap();
+
+    // 5 active sealed shards on disk at the cycle root, retention_count
+    // lowered to 2 -> exactly 3 overflow (seq 1, 2, 3 — the three oldest).
+    let mut shards = Vec::new();
+    for seq in 1..=5u32 {
+        let filename = format!("decision-log.{seq:04}.md");
+        let content = format!("sealed-content-for-seq-{seq}");
+        std::fs::write(dir.path().join(&filename), &content).unwrap();
+        shards.push(active_entry(seq, "decision-log", content.len() as u64));
+    }
+    let mut index = sample_index("decision-log", 2, shards);
+
+    let archived = archive_overflow_shards(&mut index, &canonical_path).expect(
+        "MED-4/EC-014: a well-formed multi-shard overflow archival move must succeed in one \
+         invocation",
+    );
+
+    assert_eq!(
+        archived.len(),
+        3,
+        "MED-4/EC-014: exactly retention_overflow_count (3) shards must be archived in this \
+         SINGLE invocation, not just the single oldest one. Got: {archived:?}"
+    );
+    let mut archived_seqs: Vec<u32> = archived.iter().map(|e| e.seq).collect();
+    archived_seqs.sort_unstable();
+    assert_eq!(
+        archived_seqs,
+        vec![1, 2, 3],
+        "MED-4/EC-014: the THREE oldest active shards (lowest seq) must be archived — oldest-\
+         first order across the whole overflow, not just the single oldest"
+    );
+
+    // Invariant 1: move (never delete) — EVERY one of the 3 overflow shards
+    // must have been physically relocated off the cycle root, each with its
+    // content preserved byte-for-byte at its new archive location.
+    for seq in 1..=3u32 {
+        let old_path = dir.path().join(format!("decision-log.{seq:04}.md"));
+        assert!(
+            !old_path.exists(),
+            "MED-4/EC-014: archived shard seq={seq} must no longer exist at its old cycle-root \
+             sibling location"
+        );
+        let new_path = dir
+            .path()
+            .join("archive")
+            .join("decision-log")
+            .join(format!("decision-log.{seq:04}.md"));
+        let moved_content = std::fs::read_to_string(&new_path).unwrap_or_else(|e| {
+            panic!(
+                "MED-4/EC-014 Invariant 1: archived shard seq={seq} must exist, byte-for-byte, \
+                 at archive/<artifact-stem>/<sealed-filename>: {e}"
+            )
+        });
+        assert_eq!(moved_content, format!("sealed-content-for-seq-{seq}"));
+
+        // Invariant 3: EACH moved entry's own index record is rewritten in
+        // place (within the SAME `index` value) — never just the first one.
+        let rewritten = index
+            .shards
+            .iter()
+            .find(|e| e.seq == seq)
+            .unwrap_or_else(|| {
+                panic!("MED-4/EC-014 Invariant 3: archived seq={seq} must remain enumerable")
+            });
+        assert_eq!(
+            rewritten.path,
+            format!("archive/decision-log/decision-log.{seq:04}.md"),
+            "MED-4/EC-014 Invariant 3: archived seq={seq}'s path must be rewritten to the \
+             archive-relative form"
+        );
+    }
+
+    // The 2 shards within the new retention window (seq 4, 5) must remain
+    // untouched at the cycle root — NOTHING beyond the 3 overflow shards is
+    // deleted, truncated, or moved.
+    for seq in 4..=5u32 {
+        let path = dir.path().join(format!("decision-log.{seq:04}.md"));
+        assert!(
+            path.exists(),
+            "MED-4/EC-014: shard seq={seq} is within the (new, lowered) retention window and \
+             must remain at the cycle root, untouched"
+        );
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content,
+            format!("sealed-content-for-seq-{seq}"),
+            "MED-4/EC-014 Invariant 1: the retained shard's own content must be completely \
+             unmodified (move-only semantics never touch retained shards)"
+        );
+    }
+}
+
 #[test]
 fn test_BC_1_18_007_EC005_archive_overflow_shards_missing_source_file_fails_loud() {
     let dir = tempfile::tempdir().unwrap();
