@@ -829,6 +829,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "sha2",
  "sink-core",
  "sink-datadog",
  "sink-file",

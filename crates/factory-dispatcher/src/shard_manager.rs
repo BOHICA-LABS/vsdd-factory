@@ -4521,6 +4521,57 @@ pub enum MechanismABackfillError {
         #[source]
         source: io::Error,
     },
+
+    /// F-C3-P6-001 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+    /// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 5's
+    /// Recovery-Confirmation Rule, Invariant 3, EC-010; `E-SHD-011`,
+    /// `prd-supplements/error-taxonomy.md` v1.10): at recovery-confirmation
+    /// time, the canonical file's exact whole-file `(length, SHA-256)`
+    /// matches NEITHER the Backfill Recovery Manifest's recorded
+    /// `original_bytes`/`original_sha256` pair NOR its
+    /// `final_bytes`/`final_sha256` pair — the on-disk state is AMBIGUOUS
+    /// (modified by something other than this migration's own two-phase
+    /// publish sequence, or corrupted). Fails loud; the canonical file is
+    /// NOT written to under any circumstance; recovery halts for operator
+    /// investigation. Message format matches the error-taxonomy row
+    /// verbatim.
+    #[error(
+        "E-SHD-011: backfill recovery-confirmation ambiguous for artifact_stem \
+         \"{artifact_stem}\" — canonical file bytes ({canonical_bytes} bytes, sha256 \
+         {canonical_sha256}) match NEITHER the pre-split original ({original_bytes} bytes, \
+         sha256 {original_sha256}) NOR the intended final partition ({final_bytes} bytes, sha256 \
+         {final_sha256}) recorded in the Backfill Recovery Manifest — refusing to guess; \
+         canonical file left untouched pending operator investigation"
+    )]
+    AmbiguousRecoveryState {
+        artifact_stem: String,
+        canonical_bytes: u64,
+        canonical_sha256: String,
+        original_bytes: u64,
+        original_sha256: String,
+        final_bytes: u64,
+        final_sha256: String,
+    },
+
+    /// F-C3-P6-001 companion: the shard-index already exists (so
+    /// [`mechanism_a_backfill_already_migrated`] reported this artifact as
+    /// migrated) and has at least one sealed shard, but carries NO Backfill
+    /// Recovery Manifest at all (Postcondition 3) — Postcondition 5's
+    /// Recovery-Confirmation Rule is the SOLE authoritative basis for the
+    /// SAFE/DANGEROUS/AMBIGUOUS determination and literally cannot be
+    /// applied without it. Rather than falling back to the byte-prefix
+    /// heuristic this same finding retires (which is exactly the defect
+    /// class F-C3-P6-001 corrects), this also fails loud under the `E-SHD-011`
+    /// code — a missing manifest is just as unable to support a safe
+    /// disposition as a manifest whose values match neither the canonical
+    /// file's original nor final state.
+    #[error(
+        "E-SHD-011: backfill recovery-confirmation ambiguous for artifact_stem \
+         \"{artifact_stem}\" — the published shard-index has no Backfill Recovery Manifest \
+         ([backfill_manifest]) to compare the canonical file's current bytes against — refusing \
+         to guess; canonical file left untouched pending operator investigation"
+    )]
+    MissingBackfillManifest { artifact_stem: String },
 }
 
 /// Fail-loud backfill-split errors surface to the operator/dispatcher
@@ -4556,6 +4607,97 @@ pub struct MechanismABackfillPartition {
     pub bytes: Vec<u8>,
     pub record_count: usize,
     pub oversized_record: bool,
+}
+
+/// BC-1.18.008 v1.6 Postcondition 3's **Backfill Recovery Manifest**
+/// (F-C3-P6-001): four fields, each computed exactly once, at split time,
+/// from the SAME `original_content` buffer that drives Postcondition 2's
+/// partitioning — `original_bytes`/`original_sha256` (the pre-split
+/// monolithic file's own exact length + SHA-256 content hash) and
+/// `final_bytes`/`final_sha256` (the intended LAST partition's own exact
+/// length + SHA-256 content hash, i.e. the content the canonical file is
+/// intended to hold once Postcondition 5's canonical-truncate step
+/// completes). Postcondition 5's Recovery-Confirmation Rule is the SOLE
+/// authoritative basis for the later SAFE/DANGEROUS/AMBIGUOUS
+/// recovery-confirmation determination in [`heal_or_confirm_already_migrated`]
+/// — an exact whole-file `(length, SHA-256)` comparison against these two
+/// recorded pairs, NEVER a structural byte-prefix comparison against a
+/// re-concatenation of already-sealed shards (Invariant 3).
+///
+/// Deliberately NOT a field of [`ShardIndex`] itself: `ShardIndex` is
+/// constructed via exhaustive struct-literal syntax at multiple pre-existing
+/// call sites this burst's scope does not touch (this module's own
+/// `bc_1_18_006_roll_tests` unit-test module, and the separate
+/// `bc_1_18_007_retention_test.rs`/`bc_1_18_008_backfill_split_test.rs`
+/// integration test files, none of which construct a
+/// `backfill_manifest` field) — adding a new required struct field there
+/// would be a breaking sibling-site change this burst is explicitly scoped
+/// not to make (test files are out of bounds; the pre-existing production
+/// literals would need updating for a benefit the manifest itself doesn't
+/// need, since it is meaningful ONLY for mechanism-A backfill-split
+/// indices, never for the ongoing per-write roll/retention indices those
+/// call sites build). Instead, [`write_shard_index_for_backfill`] appends
+/// this manifest as an independent `[backfill_manifest]` TOML table in the
+/// SAME atomic write as the `ShardIndex`'s own serialized text (valid TOML:
+/// a new table header may always follow a preceding `[[shard]]`
+/// array-of-tables' final entry), and [`read_backfill_manifest`] parses it
+/// back out of the SAME file independently of [`load_shard_index`] — which
+/// harmlessly ignores the trailing table as an unrecognized key, exactly
+/// like any other forward-compatible additive TOML field this module's own
+/// additive-field precedents (`sealed_retroactively`, `oversized_record`,
+/// `is_preamble_shard`) already establish for `ShardIndexEntry`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+struct BackfillManifest {
+    original_bytes: u64,
+    original_sha256: String,
+    final_bytes: u64,
+    final_sha256: String,
+}
+
+/// Serialization-only wrapper producing a `[backfill_manifest]` TOML table
+/// header around [`BackfillManifest`]'s own scalar fields — a bare
+/// `toml::to_string(&manifest)` call would instead emit its fields as
+/// top-level (headerless) keys, which is invalid to append after the
+/// `ShardIndex`'s own already-emitted `[[shard]]` array-of-tables.
+#[derive(Serialize)]
+struct BackfillManifestWrapper<'a> {
+    backfill_manifest: &'a BackfillManifest,
+}
+
+/// Deserialization-only counterpart to [`BackfillManifestWrapper`]: parses
+/// JUST the `[backfill_manifest]` table back out of a
+/// `<artifact-stem>.shard-index.toml` file's raw text, ignoring every other
+/// key (`schema_version`, `[[shard]]`, ...) the same file also carries —
+/// `#[serde(default)]` so a file with no `[backfill_manifest]` table at all
+/// (e.g. a genuinely corrupted or hand-edited index) deserializes to `None`
+/// rather than failing to parse.
+#[derive(Debug, Clone, Deserialize)]
+struct BackfillManifestDocument {
+    #[serde(default)]
+    backfill_manifest: Option<BackfillManifest>,
+}
+
+/// SHA-256 content hash of `bytes`, hex-encoded (lowercase, no separator) —
+/// the exact encoding [`BackfillManifest`]'s `original_sha256`/`final_sha256`
+/// fields and [`MechanismABackfillError::AmbiguousRecoveryState`]'s
+/// `canonical_sha256` field use throughout.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Reads back the [`BackfillManifest`] published at `index_path`'s own
+/// `[backfill_manifest]` TOML table (see [`BackfillManifestWrapper`]'s doc
+/// comment for why this is a standalone parse rather than a `ShardIndex`
+/// field), or `Ok(None)` if the file carries no such table at all.
+fn read_backfill_manifest(index_path: &Path) -> io::Result<Option<BackfillManifest>> {
+    let text = std::fs::read_to_string(index_path)?;
+    let doc: BackfillManifestDocument =
+        toml::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(doc.backfill_manifest)
 }
 
 /// BC-1.18.008 Postcondition 2/Invariant 2 (v1.2's Record-Boundary Marker
@@ -5462,7 +5604,25 @@ pub fn run_mechanism_a_backfill_split(
     // [[shard]] entries.
     if partitions.len() <= 1 {
         let index = fresh_backfill_shard_index(entry, retention_count, Vec::new());
-        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+        // Postcondition 3's Backfill Recovery Manifest: even in the
+        // no-split EC-001 case, the manifest is populated from the SAME
+        // `original_content` buffer already read above -- with `final_*`
+        // equal to `original_*` (the canonical file is left COMPLETELY
+        // UNCHANGED, so what it will hold once "done" IS the original
+        // content). This artifact will always short-circuit at
+        // `mechanism_a_backfill_already_migrated`'s zero-shard branch on
+        // any later re-invocation (`heal_or_confirm_already_migrated`'s own
+        // `index.shards.is_empty()` guard, below), so the manifest is not
+        // load-bearing for THIS artifact's own recovery -- it is populated
+        // anyway for consistency with the "computed once, at split time"
+        // contract Postcondition 3 states unconditionally.
+        let manifest = BackfillManifest {
+            original_bytes: original_content.len() as u64,
+            original_sha256: sha256_hex(&original_content),
+            final_bytes: original_content.len() as u64,
+            final_sha256: sha256_hex(&original_content),
+        };
+        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem, Some(&manifest))?;
         return Ok(MechanismABackfillOutcome::Migrated {
             sealed_count: 0,
             archived_count: 0,
@@ -5549,7 +5709,28 @@ pub fn run_mechanism_a_backfill_split(
     // to just the final partition, so a naive restart would misread that
     // shrunk remnant as the artifact's true original content and silently
     // orphan every already-sealed shard from the index it (re-)computes.
-    write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+    //
+    // F-C3-P6-001 (BC-1.18.008 v1.6 Postcondition 3): the Backfill Recovery
+    // Manifest, computed from the SAME `original_content` buffer that drove
+    // Postcondition 2's partitioning above and the SAME `current_partition`
+    // that becomes the fresh canonical file below -- published in this SAME
+    // atomic index-publish write, durably BEFORE the canonical-truncate
+    // write that follows it, so it is guaranteed to exist for
+    // `heal_or_confirm_already_migrated`'s Recovery-Confirmation Rule on
+    // any later re-invocation, including one landing in the crash window
+    // this comment block already describes.
+    let backfill_manifest = BackfillManifest {
+        original_bytes: original_content.len() as u64,
+        original_sha256: sha256_hex(&original_content),
+        final_bytes: current_partition.bytes.len() as u64,
+        final_sha256: sha256_hex(&current_partition.bytes),
+    };
+    write_shard_index_for_backfill(
+        &index_path,
+        &index,
+        &entry.artifact_stem,
+        Some(&backfill_manifest),
+    )?;
 
     write_atomic_bytes(
         canonical_path,
@@ -5563,24 +5744,51 @@ pub fn run_mechanism_a_backfill_split(
     })
 }
 
-/// F4 BC-cluster-3 adversarial-review finding HIGH-2 (BC-1.18.008
-/// Postcondition 5, Invariant 3; VP-124 Property Statement 1): distinguishes
+/// F4 BC-cluster-3 adversarial-review finding HIGH-2, RESTRUCTURED under
+/// F-C3-P6-001 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 5's
+/// Recovery-Confirmation Rule, Invariant 3, EC-009/EC-010): distinguishes
 /// the SAFE crash window (a prior [`run_mechanism_a_backfill_split`] call
 /// completed in full) from the DANGEROUS one (that call's own index-publish
 /// write landed durably but its canonical-truncate write, immediately
-/// after, did not) — and self-heals the dangerous case.
+/// after, did not) — and self-heals the DANGEROUS case, or fails loud
+/// (`E-SHD-011`) on a genuinely AMBIGUOUS one.
 ///
-/// Detection is structural, not a completion flag: every sealed shard this
-/// artifact's `index` already accounts for is read back and concatenated,
-/// in `seq` order, into `sealed_concat`. In the DANGEROUS window the
-/// canonical file was never truncated, so it still holds the FULL
-/// pre-split content — `sealed_concat` followed by the not-yet-written
-/// final partition's own bytes — i.e. `canonical_bytes` starts with
-/// `sealed_concat` as a strict prefix with bytes left over. In the SAFE
-/// window the canonical file already holds ONLY its own final partition,
-/// which (bar an adversarial coincidence ruled out by this being the
-/// artifact's own structured content, not attacker-controlled) does not
-/// reproduce the full `sealed_concat` prefix.
+/// **Manifest-based, never a structural byte-prefix heuristic.** A PRIOR
+/// implementation classified the DANGEROUS window structurally: read every
+/// already-sealed shard back from disk, concatenate them (`sealed_concat`),
+/// and check whether the canonical file's own leading bytes reproduce that
+/// concatenation as a PREFIX. BC-1.18.008 v1.6 retires this — it
+/// FALSE-POSITIVES whenever the artifact's real content legitimately
+/// repeats a sealed shard's exact bytes as a prefix of the SAFE-window
+/// final partition (EC-009; realistic for `session-checkpoints.md`, which
+/// imposes no uniqueness requirement on checkpoint headings/bodies), and it
+/// has NO ambiguous-state disposition at all — it only ever silently
+/// resolved SAFE or DANGEROUS, which is the exact class of defect
+/// Postcondition 5's Recovery-Confirmation Rule exists to eliminate.
+///
+/// The determination now reads the canonical file's CURRENT on-disk bytes
+/// exactly once and computes their exact whole-file `(length, SHA-256)`,
+/// then compares that pair against the Backfill Recovery Manifest's two
+/// recorded pairs ([`read_backfill_manifest`]) — the SOLE authoritative
+/// basis for this determination (Invariant 3):
+///   - matches `(final_bytes, final_sha256)` exactly ⇒ SAFE: the prior
+///     run's canonical-truncate write already completed; no action.
+///   - matches `(original_bytes, original_sha256)` exactly ⇒ DANGEROUS,
+///     unambiguously confirmed: the canonical file still holds the FULL
+///     pre-split content byte-for-byte, so step (ii) never ran (or crashed
+///     before writing any bytes). Healing completes the interrupted write.
+///     The bytes to write are the canonical file's own trailing
+///     `original_bytes - final_bytes` bytes — safe to isolate ONLY because
+///     the canonical file's FULL contents were just confirmed, by exact
+///     SHA-256 match, to be byte-identical to the very `original_content`
+///     buffer Postcondition 2's packer partitioned at split time, so this
+///     is the SAME final partition already independently established
+///     then, never a heuristic re-derivation from an unconfirmed prefix
+///     match (the defect this rule corrects).
+///   - matches NEITHER pair ⇒ AMBIGUOUS: fails loud with `E-SHD-011`
+///     (EC-010); the canonical file is NOT written to under any
+///     circumstance.
 ///
 /// Healing never re-derives partitions or re-seals any shard — the
 /// shard-index already correctly and completely accounts for the
@@ -5618,33 +5826,83 @@ fn heal_or_confirm_already_migrated(
         return Ok(MechanismABackfillOutcome::AlreadyMigrated);
     }
 
-    let mut sealed_concat =
-        Vec::with_capacity(index.shards.iter().map(|s| s.bytes_at_seal as usize).sum());
-    for shard in &index.shards {
-        let sealed_path = shard_sibling_path(canonical_path, &shard.path);
-        let bytes = std::fs::read(&sealed_path).map_err(io_err)?;
-        sealed_concat.extend_from_slice(&bytes);
-    }
+    // Postcondition 5's Recovery-Confirmation Rule: the Backfill Recovery
+    // Manifest is the SOLE authoritative basis for this determination
+    // (Invariant 3) -- a shard-index with sealed shards but no manifest at
+    // all cannot support ANY safe disposition, so this fails loud under the
+    // SAME `E-SHD-011` code rather than falling back to a structural
+    // heuristic.
+    let manifest = read_backfill_manifest(index_path)
+        .map_err(io_err)?
+        .ok_or_else(|| MechanismABackfillError::MissingBackfillManifest {
+            artifact_stem: entry.artifact_stem.clone(),
+        })?;
 
     let canonical_bytes = std::fs::read(canonical_path).map_err(io_err)?;
+    let canonical_len = canonical_bytes.len() as u64;
+    let canonical_sha256 = sha256_hex(&canonical_bytes);
 
-    let is_dangerous_crash_window = canonical_bytes.len() > sealed_concat.len()
-        && canonical_bytes[..sealed_concat.len()] == sealed_concat[..];
-
-    if !is_dangerous_crash_window {
-        // SAFE window: the canonical file no longer reproduces the sealed
-        // shards' own content as its leading prefix -- the prior run's
-        // canonical-truncate write already completed. Nothing to heal.
+    if canonical_len == manifest.final_bytes && canonical_sha256 == manifest.final_sha256 {
+        // SAFE window: the canonical file's exact whole-file (length,
+        // SHA-256) already matches the manifest's recorded intended-final
+        // pair -- the prior run's canonical-truncate write already
+        // completed. Nothing to heal, nothing written.
         return Ok(MechanismABackfillOutcome::AlreadyMigrated);
     }
 
-    // DANGEROUS window: complete the interrupted Postcondition-5 sequence
-    // by finishing the canonical-truncate write the crash cut short.
-    let healed_tail = canonical_bytes[sealed_concat.len()..].to_vec();
-    write_atomic_bytes(canonical_path, &healed_tail, &entry.artifact_stem)?;
+    if canonical_len == manifest.original_bytes && canonical_sha256 == manifest.original_sha256 {
+        // DANGEROUS window, unambiguously confirmed: the canonical file's
+        // exact whole-file (length, SHA-256) matches the manifest's
+        // recorded pre-split-original pair byte-for-byte -- step (ii) never
+        // ran. `sealed_len` (the sum of every already-sealed shard's own
+        // recorded `bytes_at_seal`) is this artifact's structural split
+        // point, independent of the manifest -- by construction at split
+        // time, `sealed_len + final_bytes == original_bytes`, so slicing
+        // the JUST-CONFIRMED-byte-identical-to-original canonical buffer at
+        // this offset recovers exactly the same final partition
+        // Postcondition 2's packer independently produced then (never an
+        // unconfirmed heuristic guess, unlike the retired byte-prefix
+        // check this replaces).
+        let sealed_len: u64 = index.shards.iter().map(|s| s.bytes_at_seal).sum();
+        let sealed_len = usize::try_from(sealed_len).map_err(|_| {
+            MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "sealed shard byte total {sealed_len} does not fit a platform usize while \
+                     healing the DANGEROUS crash window"
+                ),
+            }
+        })?;
+        let healed_tail = canonical_bytes.get(sealed_len..).ok_or_else(|| {
+            MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "sealed shard byte total {sealed_len} exceeds the canonical file's own \
+                     confirmed-original length {canonical_len} while healing the DANGEROUS crash \
+                     window -- shard-index and manifest disagree on this artifact's own split \
+                     point"
+                ),
+            }
+        })?;
+        write_atomic_bytes(canonical_path, healed_tail, &entry.artifact_stem)?;
 
-    Ok(MechanismABackfillOutcome::Healed {
-        sealed_count: index.shards.len() as u32,
+        return Ok(MechanismABackfillOutcome::Healed {
+            sealed_count: index.shards.len() as u32,
+        });
+    }
+
+    // AMBIGUOUS (EC-010): the canonical file's exact whole-file
+    // (length, SHA-256) matches NEITHER recorded manifest pair -- never
+    // silently default to either the SAFE or DANGEROUS disposition. Fail
+    // loud; the canonical file is NOT written to.
+    Err(MechanismABackfillError::AmbiguousRecoveryState {
+        artifact_stem: entry.artifact_stem.clone(),
+        canonical_bytes: canonical_len,
+        canonical_sha256,
+        original_bytes: manifest.original_bytes,
+        original_sha256: manifest.original_sha256,
+        final_bytes: manifest.final_bytes,
+        final_sha256: manifest.final_sha256,
     })
 }
 
@@ -5676,15 +5934,32 @@ fn fresh_backfill_shard_index(
 /// backfill-split's own index-publish primitive, reusing `write_atomic`
 /// (Invariant 1: caller of BC-1.18.006's atomic-write primitives, not a
 /// reimplementation).
+///
+/// F-C3-P6-001 (BC-1.18.008 v1.6 Postcondition 3): when `backfill_manifest`
+/// is `Some`, its own `[backfill_manifest]` TOML table ([`BackfillManifestWrapper`])
+/// is appended to `index`'s own serialized text and the COMBINED text is
+/// published in this ONE `write_atomic` call -- satisfying Postcondition
+/// 3's "populated in the SAME atomic index-publish write as the `[[shard]]`
+/// entries themselves" requirement exactly (one durable write, not two).
 fn write_shard_index_for_backfill(
     index_path: &Path,
     index: &ShardIndex,
     artifact_stem: &str,
+    backfill_manifest: Option<&BackfillManifest>,
 ) -> Result<(), MechanismABackfillError> {
-    let serialized = toml::to_string(index).map_err(|e| MechanismABackfillError::Io {
+    let to_err = |e: toml::ser::Error| MechanismABackfillError::Io {
         artifact_stem: artifact_stem.to_string(),
         source: io::Error::other(e.to_string()),
-    })?;
+    };
+    let mut serialized = toml::to_string(index).map_err(to_err)?;
+    if let Some(manifest) = backfill_manifest {
+        let manifest_toml = toml::to_string(&BackfillManifestWrapper {
+            backfill_manifest: manifest,
+        })
+        .map_err(to_err)?;
+        serialized.push('\n');
+        serialized.push_str(&manifest_toml);
+    }
     last_amended_migrate::atomic_write::write_atomic(index_path, &serialized).map_err(|e| {
         MechanismABackfillError::Io {
             artifact_stem: artifact_stem.to_string(),
