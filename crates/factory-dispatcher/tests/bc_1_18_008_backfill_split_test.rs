@@ -4,55 +4,78 @@
 //! the mechanism-A one-time backfill-split functions in `shard_manager.rs`
 //! (AC-013/AC-014).
 //!
-//! # Current implementation status (MED-E header correction, F4
-//! cluster-3-p1 record-boundary re-grounding burst)
+//! # Current implementation status (F4 cluster-3-p1 adversarial pass-1
+//! fix-burst; corrected again by the pass-1-closure test-writer burst that
+//! authored this header revision)
 //!
 //! Every non-trivial function this file drives
 //! (`mechanism_a_record_boundary_offsets`, `mechanism_a_partition_for_backfill`,
 //! `mechanism_a_verify_backfill_content_preserved`,
 //! `mechanism_a_verify_backfill_record_counts_preserved`,
 //! `mechanism_a_backfill_already_migrated`, `run_mechanism_a_backfill_split`)
-//! is IMPLEMENTED (not `todo!()`) as of the implementer's cluster-3 burst,
-//! and the great majority of tests in this file PASS against that
-//! implementation today. The prior claim that "every function is `todo!()`"
-//! and that all tests "presently FAIL" is stale and no longer describes
-//! this file's actual state.
+//! is IMPLEMENTED (not `todo!()`). The prior claim that "every function is
+//! `todo!()`" and that all tests "presently FAIL" is stale and no longer
+//! describes this file's actual state.
 //!
-//! The EXCEPTION is the PC2 / Record-Boundary-Marker-Table re-grounded
-//! `mechanism_a_record_boundary_offsets` tests (the burst-log and lessons
-//! fixtures grounded directly in the real, on-disk
+//! The PC2 / Record-Boundary-Marker-Table re-grounded
+//! `mechanism_a_record_boundary_offsets` tests (the `test_BC_1_18_008_PC2_MT_*`
+//! burst-log and lessons fixtures grounded directly in the real, on-disk
 //! `.factory/cycles/v1.0-feature-engine-discipline-pass-1/` and
 //! `.factory/cycles/v1.0-brownfield-backfill/` content, per BC-1.18.008
-//! v1.2's amended marker table): the current implementation keys
-//! `burst-log`/`lessons` boundary detection on heading LEVEL (`### ` only)
-//! rather than on the marker table's artifact-specific primary-pattern +
-//! confirmed-exception-pattern rules, so those specific tests are EXPECTED
-//! TO FAIL against the current implementation until the implementer
-//! rewrites detection to match the amended spec — this is intentional,
-//! targeted Red Gate coverage for a real, confirmed defect, not a residual
-//! stub-era claim about the whole file's status. The decision-log Appendix
-//! sub-clause-block confirmation test is NOT expected to fail (decision-log's
-//! `| D-` row-keyed detection already matches the marker table correctly in
-//! both cycles).
+//! v1.2's amended marker table) are NO LONGER expected to fail: the
+//! implementer's follow-up burst rewrote `mechanism_a_record_boundary_offsets`
+//! to key `burst-log`/`lessons` detection on the marker table's
+//! artifact-specific primary-pattern + confirmed-exception-pattern rules
+//! (`is_pass_fix_burst_heading`, `is_lesson_record_heading`,
+//! `is_lesson_h2_record_heading`), not on heading LEVEL alone — these tests
+//! now PASS and remain as permanent regression coverage. The prior claim
+//! that they were "EXPECTED TO FAIL … until the implementer rewrites
+//! detection" is stale and no longer describes this file's actual state.
+//!
+//! The CURRENTLY open Red Gate coverage in this file (as of this header
+//! revision) is:
+//! - The F-002 (BC-1.18.008 v1.3 fix-burst) `session-checkpoints` bare-`^## `
+//!   re-grounding — see `test_BC_1_18_008_F002_*` below: product-owner's
+//!   DECISION on the fresh-context adversarial finding was revert-to-any-h2
+//!   (the marker table's `session-checkpoints.md` row already documents "any
+//!   h2 = boundary, no confirmed exception forms" as correct), so the
+//!   defective party is the CODE's own `is_checkpoint_record_heading`
+//!   content-based filter (`starts_with("Archived") || contains("Checkpoint")`),
+//!   which is case-sensitive and silently drops real records — this test is
+//!   EXPECTED TO FAIL against the current implementation until the
+//!   implementer deletes that filter and reverts to bare `^## ` detection.
+//! - The F-001 (BC-1.18.008 v1.3 fix-burst, BLOCKER) `run_mechanism_a_backfill_split`
+//!   content-preservation-abort injectability gap — see
+//!   `test_BC_1_18_008_F001_*` below: this test IS EXPECTED TO FAIL against
+//!   the current implementation (no abort fires) until the implementer makes
+//!   the Postcondition 6 hard gate load-bearing against a
+//!   caller-supplied-but-wrong `record_boundary_offsets` argument, per that
+//!   test's own doc comment.
 //!
 //! # Content-preservation hard-gate coverage note (AC-014, Postcondition 6)
 //!
 //! `run_mechanism_a_backfill_split`'s own implementation computes its
 //! partitions internally (via `mechanism_a_partition_for_backfill`, whose
 //! output always structurally satisfies content-preservation by
-//! construction) — there is no external caller-visible way to inject a
-//! genuine content/record-count MISMATCH into that internal call and force
-//! the Postcondition 6 hard gate to fire an abort from outside the module.
-//! The two `mechanism_a_verify_backfill_*` predicates that make up that hard
-//! gate are therefore covered directly at the unit level below (both their
-//! `true` and `false` outcomes), which is the correct-grained place to test
-//! a boolean predicate's own logic; `run_mechanism_a_backfill_split`'s own
-//! tests cover its ORCHESTRATION of a successful (gate-passing) run, plus
+//! construction when the `record_boundary_offsets` argument itself
+//! genuinely matches the content's real record structure) — the two
+//! `mechanism_a_verify_backfill_*` predicates that make up that hard gate
+//! are covered directly at the unit level below (both their `true` and
+//! `false` outcomes), which is the correct-grained place to test a boolean
+//! predicate's own logic. The prior claim that "there is no external
+//! caller-visible way to inject a genuine content/record-count MISMATCH …
+//! from outside the module" is STALE and, per the F-001 finding above, was
+//! itself the bug: a caller CAN supply a `record_boundary_offsets` argument
+//! that is well-formed (strictly ascending, in-bounds) but does not match
+//! the actual content's real record boundaries (e.g. missing a genuine
+//! boundary) — see `test_BC_1_18_008_F001_*`'s own doc comment for the full
+//! mechanism. `run_mechanism_a_backfill_split`'s remaining tests cover its
+//! ORCHESTRATION of a successful (gate-passing) run, plus
 //! EC-016/EC-017/idempotency/crash-atomicity.
 
 use factory_dispatcher::shard_manager::{
-    MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry, ShardIndex,
-    ShardIndexEntry, ShardShape, mechanism_a_backfill_already_migrated,
+    MechanismABackfillError, MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry,
+    ShardIndex, ShardIndexEntry, ShardShape, mechanism_a_backfill_already_migrated,
     mechanism_a_partition_for_backfill, mechanism_a_record_boundary_offsets,
     mechanism_a_verify_backfill_content_preserved,
     mechanism_a_verify_backfill_record_counts_preserved, run_mechanism_a_backfill_split,
@@ -951,19 +974,20 @@ fn test_BC_1_18_008_EC003_run_backfill_split_restart_after_partial_prior_attempt
 // over this cluster's implementation. Each test asserts the REAL,
 // spec-mandated outcome (never a weakened/should-panic substitute).
 //
-// BLOCKER-1, HIGH-2, and the original MED-3 findings below have since been
-// FIXED by the implementer — their tests now PASS against the current
-// `shard_manager.rs` implementation and remain in this file as permanent
-// regression coverage, not as open Red Gate findings. (The prior claim that
-// this whole section "is expected to presently FAIL" is stale.)
+// BLOCKER-1, HIGH-2, the original MED-3 findings, and the PC2 /
+// Record-Boundary-Marker-Table re-grounding (`test_BC_1_18_008_PC2_MT_*`)
+// below have since been FIXED by the implementer — their tests now PASS
+// against the current `shard_manager.rs` implementation and remain in this
+// file as permanent regression coverage, not as open Red Gate findings.
+// (The prior claim that this whole section, or the PC2_MT tests
+// specifically, "is expected to presently FAIL" is stale.)
 //
-// The CURRENTLY open Red Gate coverage in this file is the PC2 /
-// Record-Boundary-Marker-Table re-grounding added by the follow-up
-// adversarial pass over BC-1.18.008 v1.2's amended marker table — see the
-// `test_BC_1_18_008_PC2_MT_*` tests earlier in this file (grounded burst-log
-// h2/h3-exception fixture and lessons h2/h3-exception fixture), and the
-// module-level doc comment at the top of this file for their expected-fail
-// status.
+// The CURRENTLY open Red Gate coverage in this file is the F-002
+// (session-checkpoints bare-`^## ` re-grounding) and F-001
+// (content-preservation-abort injectability) findings from the BC-1.18.008
+// v1.3 fresh-context adversarial fix-burst — see `test_BC_1_18_008_F002_*`
+// and `test_BC_1_18_008_F001_*` below, and the module-level doc comment at
+// the top of this file for their expected-fail status.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -1276,52 +1300,469 @@ fn test_BC_1_18_008_MED3_record_boundary_offsets_lessons_ignores_nested_non_reco
     );
 }
 
+// ---------------------------------------------------------------------------
+// F-002 (BC-1.18.008 v1.3 fix-burst, HIGH): session-checkpoints.md bare
+// `^## ` re-grounding. The original MED-3 finding (test replaced below) had
+// argued session-checkpoints.md needed the SAME content-based h2 filtering
+// lessons.md uses (`is_checkpoint_record_heading`, gating on
+// `starts_with("Archived") || contains("Checkpoint")`). A follow-up
+// fresh-context adversarial pass over BC-1.18.008 v1.3 found this filter
+// itself defective and product-owner's DECISION (BC-1.18.008 v1.3
+// Changelog, finding F-002) was to revert to the ORIGINAL "any h2 = record
+// boundary" rule: direct inspection of BOTH real `session-checkpoints.md`
+// files (`v1.0-brownfield-backfill/`, 182 h2 records; `v1.0-feature-
+// engine-discipline-pass-1/`, 12 h2 records) confirmed every h2 heading in
+// both files is a genuine checkpoint record with ZERO legitimate non-record
+// h2 asides -- so the marker table's own session-checkpoints.md row ("any h2
+// = boundary, no confirmed exception forms") was ALREADY correct as
+// written. The code-side `is_checkpoint_record_heading` heuristic is the
+// defective party: being case-sensitive, it silently drops real records
+// whose heading text doesn't literally contain the substrings "Archived"
+// (title-case) or "Checkpoint" (title-case) -- e.g. the real, verbatim
+// `## ARCHIVED CHECKPOINT: 2026-08-27 -- pass-60 CLEAN D-1117...` record
+// (all-caps) matches NEITHER `starts_with("Archived")` NOR
+// `contains("Checkpoint")`, so today's filter incorrectly excludes it.
+// ---------------------------------------------------------------------------
+
 #[test]
-fn test_BC_1_18_008_MED3_record_boundary_offsets_session_checkpoints_ignores_nested_non_record_subheading()
+fn test_BC_1_18_008_F002_record_boundary_offsets_session_checkpoints_treats_every_bare_h2_as_boundary()
  {
-    // Realistic session-checkpoints.md shape (mirrors the real
-    // `.factory/cycles/*/session-checkpoints.md` convention): each genuine
-    // record starts with a line-anchored `## Session Resume Checkpoint
-    // (...)` (or `## Archived Checkpoint: ...` / `## Archived: ...`)
-    // heading. A checkpoint's own body routinely nests `### `-level
-    // sub-headings (e.g. `### State`, `### Resume Path A`, `### Outstanding
-    // follow-up tasks`) which are one level DEEPER than the `## ` record
-    // marker and so never collide with it by literal prefix -- but a
-    // checkpoint's body can equally nest a nAMED SECTION at the SAME `## `
-    // level (e.g. a "## Related Links" aside) that is NOT itself a new
-    // checkpoint record.
-    let checkpoint1 =
+    // Real, verbatim heading forms per BC-1.18.008 v1.3's own F-002
+    // adjudication evidence: the all-caps `## ARCHIVED CHECKPOINT: ...` form
+    // is lifted directly from the BC changelog's cited real record. The
+    // `## SESSION WRAP -- ...` heading is a genuine checkpoint record that
+    // contains NEITHER "Archived" NOR "Checkpoint" in any case -- proving
+    // the current case-sensitive, content-based heuristic drops legitimate
+    // records outright, not merely mis-cases the all-caps form.
+    let h2_checkpoint1 =
         "## Session Resume Checkpoint (2026-08-20 -- PIPELINE ACTIVE; pass-12 dispatch NEXT)\n";
-    let decoy_heading = "## Related Links (reference section, NOT a checkpoint record)\n";
-    let checkpoint2 =
-        "## Session Resume Checkpoint (2026-08-05 -- PIPELINE ACTIVE; pass-6 fix burst NEXT)\n";
+    let h3_nested = "### State\n";
+    let h2_archived_allcaps =
+        "## ARCHIVED CHECKPOINT: 2026-08-27 -- pass-60 CLEAN D-1117 confirmed\n";
+    let h2_no_keyword = "## SESSION WRAP -- 2026-07-01 (pause burst, D-987 pre-clear)\n";
+
     let content = format!(
         "# Session Checkpoints -- v1.0-brownfield-backfill\n\n\
-         {checkpoint1}\
+         {h2_checkpoint1}\
          Archived from STATE.md by the D-1052 pass-12 CLEAN burst.\n\n\
-         {decoy_heading}\
-         - `git show 06bdde56:.factory/STATE.md`\n\n\
-         {checkpoint2}\
-         Archived from STATE.md by the SESSION-WRAP-2026-08-05 pause burst.\n"
+         {h3_nested}\
+         Nested sub-heading inside checkpoint 1's own body -- NOT a boundary (one level deeper \
+         than the `## ` record marker, per the marker table's own \"NOT a boundary\" column).\n\n\
+         {h2_archived_allcaps}\
+         Body text for the real, all-caps ARCHIVED CHECKPOINT record form.\n\n\
+         {h2_no_keyword}\
+         Body text for a genuine checkpoint record whose own heading contains neither \
+         \"Archived\" nor \"Checkpoint\" in any case.\n"
     );
 
-    let offset1 = content.find(checkpoint1).unwrap();
-    let decoy_offset = content.find(decoy_heading).unwrap();
-    let offset2 = content.find(checkpoint2).unwrap();
+    let offset1 = content.find(h2_checkpoint1).unwrap();
+    let offset_h3 = content.find(h3_nested).unwrap();
+    let offset_archived = content.find(h2_archived_allcaps).unwrap();
+    let offset_no_keyword = content.find(h2_no_keyword).unwrap();
 
     let offsets = mechanism_a_record_boundary_offsets("session-checkpoints", content.as_bytes());
 
-    assert!(
-        !offsets.contains(&decoy_offset),
-        "MED-3 (PC2/Invariant 2): a `## `-level reference/aside heading inside a checkpoint's \
-         own body (not itself a new `## Session Resume Checkpoint (...)` / `## Archived...` \
-         record) must NOT be treated as a structural record boundary. Got offsets: {offsets:?} \
-         (decoy at {decoy_offset})"
-    );
     assert_eq!(
         offsets,
-        vec![offset1, offset2],
-        "MED-3: only the two genuine checkpoint-record headings are real structural boundaries. \
-         Got: {offsets:?}"
+        vec![offset1, offset_archived, offset_no_keyword],
+        "F-002/PC2 Record-Boundary Marker Table (session-checkpoints.md row, 'any h2, no \
+         confirmed exception forms'): EVERY bare `^## ` heading is a record boundary -- \
+         including the all-caps `## ARCHIVED CHECKPOINT: ...` form and a genuine record whose \
+         heading contains neither \"Archived\" nor \"Checkpoint\" -- regardless of a \
+         content-based filter. Got: {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_h3),
+        "Invariant 2: a nested `### ` sub-heading (one level deeper than the `## ` record \
+         marker) must never be treated as a boundary. Got: {offsets:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-001 (BC-1.18.008 v1.3 fix-burst, BLOCKER): the Postcondition 6
+// content-preservation abort (`E-SHD-003`) was UN-injectable from outside
+// the module. `run_mechanism_a_backfill_split` derives BOTH sides of its
+// Postcondition 6(b) record-count comparison from the SAME
+// `record_boundary_offsets.len()` value: `original_record_count` is set
+// directly from `record_boundary_offsets.len()`, and
+// `mechanism_a_partition_for_backfill`'s own `record_count` sum, by
+// construction, always totals exactly `record_boundary_offsets.len()` too
+// (the partitioning loop iterates the offsets list exactly once per entry).
+// The MED-C fix (`record_boundary_offsets_are_well_formed`) only rejects a
+// STRUCTURALLY malformed offsets argument (non-ascending, duplicate,
+// out-of-bounds) -- it does NOT verify the offsets actually correspond to
+// the content's REAL record boundaries. A caller can supply an offsets list
+// that is perfectly well-formed (strictly ascending, in-bounds) but simply
+// WRONG -- missing a genuine boundary the content actually contains (stale
+// against the just-read `original_content`) -- and both content-
+// preservation AND record-count-preservation will tautologically report
+// "preserved", because both checks are computed FROM the same wrong
+// offsets, never against the content's own independently-detectable true
+// structure. This test feeds `run_mechanism_a_backfill_split` a
+// `decision-log` fixture with 3 genuine `"| D-"` row boundaries but a
+// caller-supplied `record_boundary_offsets` missing the middle one, and
+// asserts the operation ABORTS with `E-SHD-003` (BC-1.18.008 Postcondition
+// 6, EC-004/EC-006), leaving the original file completely untouched. This
+// MUST fail today (no abort fires; the file IS modified) and pass once the
+// implementer makes the gate independently recompute (or otherwise validate
+// against) the content's own true record structure rather than trusting the
+// caller-supplied offsets count at face value.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_F001_run_backfill_split_aborts_when_supplied_offsets_miss_a_real_boundary() {
+    // Three genuine, uniformly-sized `decision-log` rows -- real record
+    // boundaries independently detectable via
+    // `mechanism_a_record_boundary_offsets`, the SAME function
+    // `run_mechanism_a_backfill_split` must eventually cross-check its
+    // caller-supplied offsets against once F-001 is fixed.
+    let row1 = "| D-001 | decided one | author |\n";
+    let row2 = "| D-002 | decided two | author |\n";
+    let row3 = "| D-003 | decided six | author |\n";
+    let content = format!("{row1}{row2}{row3}");
+    let original_content = content.into_bytes();
+
+    let true_offsets = mechanism_a_record_boundary_offsets("decision-log", &original_content);
+    assert_eq!(
+        true_offsets.len(),
+        3,
+        "test fixture precondition: exactly 3 genuine `| D-` row boundaries must be \
+         independently detectable in this content. Got: {true_offsets:?}"
+    );
+
+    // STALE/WRONG caller-supplied offsets: well-formed (strictly ascending,
+    // in-bounds -- passes MED-C's `record_boundary_offsets_are_well_formed`
+    // check) but SILENTLY MISSING the real middle boundary
+    // (`true_offsets[1]`, row2's own start) -- exactly the "offsets that
+    // miss a real boundary, or are stale vs the content" scenario F-001
+    // names.
+    let stale_offsets = vec![true_offsets[0], true_offsets[2]];
+    assert!(
+        stale_offsets.windows(2).all(|pair| pair[0] < pair[1])
+            && stale_offsets
+                .last()
+                .is_some_and(|&last| last < original_content.len()),
+        "test fixture precondition: the stale offsets must themselves be well-formed (ascending, \
+         in-bounds) -- this test targets the INDEPENDENT-recomputation gap, not the already-fixed \
+         MED-C well-formedness gap"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    // A cap small enough that row1+row2 merged (as the stale offsets would
+    // have it) exceeds cap on its own -- forcing an actual durable write
+    // (oversized-record seal + canonical truncation) if the bug silently
+    // "succeeds," which is exactly what must NOT happen once F-001 is
+    // fixed.
+    let entry = flat_entry("decision-log", 40);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &stale_offsets, 10);
+
+    assert!(
+        matches!(
+            outcome,
+            Err(MechanismABackfillError::ContentPreservationFailed { .. })
+        ),
+        "F-001/Postcondition 6/EC-004/EC-006: a `record_boundary_offsets` argument that silently \
+         omits a real record boundary present in the actual on-disk content MUST abort with \
+         E-SHD-003 (`ContentPreservationFailed`), never succeed. Got: {outcome:?}"
+    );
+
+    let post_content = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post_content, original_content,
+        "F-001/Postcondition 6: on abort, the original monolithic file MUST be left completely \
+         untouched (fail-loud, never partial-and-silent) -- got a file that no longer matches the \
+         pre-call original content, meaning the buggy path silently sealed/truncated despite the \
+         missing real boundary"
+    );
+    assert!(
+        !dir.path().join("decision-log.0001.md").exists(),
+        "F-001/Postcondition 5: on abort, no sealed shard file may have been durably written"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-004 (BC-1.18.008 v1.3 fix-burst, MEDIUM): Canonical Test Vectors
+// correction. Three rows in BC-1.18.008's Canonical Test Vectors table were
+// marked NEEDS-UPDATE: they previously asserted the EXACT `ceil(bytes/cap)`
+// value (19 for `decision-log.md`, 5 for `lessons.md`, plus the dependent
+// interrupted-restart row) as if `ceil()` were the exact resulting shard
+// count. Postcondition 2 (v1.3) now documents `ceil()` as a LOWER BOUND
+// only -- the exact count is whatever the greedy boundary-preserving packer
+// actually produces for the real record-size distribution, which is
+// `>= ceil()` and equal to it only when records happen to pack without
+// slack.
+//
+// Per BC-1.18.008 Precondition 3/EC-005, the real F2-era byte counts
+// (908,938 / 234,731) are explicitly illustrative-scale-only, NOT literal
+// test inputs -- exact re-measurement at F4 execution time is mandated
+// instead. Reproducing an exact 908,938-byte real `decision-log.md` inline
+// in a unit test is neither possible (the real file's content is not a
+// fixed artifact of this codebase) nor spec-required. The three tests below
+// instead use independently hand-verified, byte-faithful SYNTHETIC fixtures
+// at the SAME production `shard_cap_bytes` (49,152) that deliberately
+// reproduce the ORIGINAL placeholder counts (19, 5) as the fixtures'
+// genuinely-computed ACTUAL packed-shard counts -- while proving those
+// counts are NOT equal to `ceil(fixture_bytes/49152)` for these fixtures,
+// which is the exact defect the v1.3 amendment corrects. Every expected
+// count below is derived by hand arithmetic in each test's own doc comment,
+// never by calling the packer once and pinning whatever it returns
+// (POLICY 11 no-tautology).
+// ---------------------------------------------------------------------------
+
+/// One `size`-byte synthetic "record" (a single repeated fill byte derived
+/// from `idx`, purely for at-a-glance debuggability on assertion failure --
+/// the byte VALUE carries no semantic meaning to the partitioner).
+fn sized_record(idx: usize, size: usize) -> Vec<u8> {
+    let fill = b'A' + ((idx % 26) as u8);
+    vec![fill; size]
+}
+
+/// `count` consecutive `size`-byte synthetic records, concatenated in
+/// order -- record `i` therefore starts at byte offset `i * size`.
+fn concat_sized_records(count: usize, size: usize) -> Vec<u8> {
+    (0..count).flat_map(|i| sized_record(i, size)).collect()
+}
+
+/// The trivially-known record-boundary offsets (`i * size`) for
+/// [`concat_sized_records`]'s own output -- independent of (and never
+/// exercising) this module's separately-tested
+/// `mechanism_a_record_boundary_offsets` marker-detection logic, exactly
+/// like this file's existing `concat_records`/fixed-boundary fixture
+/// convention above.
+fn boundary_offsets_for(count: usize, size: usize) -> Vec<usize> {
+    (0..count).map(|i| i * size).collect()
+}
+
+#[test]
+fn test_BC_1_18_008_F004_run_backfill_split_decision_log_canonical_vector_actual_exceeds_ceil_lower_bound()
+ {
+    // Hand arithmetic (shown, not derived from the implementation under
+    // test):
+    //   shard_cap_bytes = 49,152 (real production cap, BC-1.18.008
+    //     Precondition 3's own cited value).
+    //   RECORD_SIZE = cap/2 + 1 = 24,577 bytes -- chosen so that exactly
+    //     ONE such record fits under cap (24,577 <= 49,152, 24,575 bytes of
+    //     slack remain) but a SECOND record can never be added to the same
+    //     shard: 24,577 * 2 = 49,154 > 49,152.
+    //   RECORD_COUNT = 19 -- reproducing the SUPERSEDED vector's own
+    //     placeholder number, but now as the genuinely-computed ACTUAL
+    //     count rather than an asserted `ceil()` estimate.
+    //   total bytes = 19 * 24,577 = 466,963.
+    //   ceil(466,963 / 49,152) = ceil(9.5007...) = 10  <-- LOWER BOUND only
+    //     (49,152 * 9 = 442,368 < 466,963 <= 49,152 * 10 = 491,520).
+    //   greedy packing: since no two records can ever share a shard (as
+    //     established above), the packer seals after every single record
+    //     -- ACTUAL packed count = 19, one partition per record. 18 of the
+    //     19 partitions are sealed (seq 1..=18); the 19th (last) becomes
+    //     the fresh current file (Postcondition 2).
+    //   19 > 10 confirms Postcondition 2's `actual_count >=
+    //   ceil(bytes/cap)` inequality holds with STRICT inequality here --
+    //   exactly the shape of PC2's own five-40-byte-records-vs-70-byte-cap
+    //   worked example, at a decision-log-scaled magnitude.
+    const RECORD_SIZE: usize = 24_577;
+    const RECORD_COUNT: usize = 19;
+    const CAP: u64 = 49_152;
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    assert_eq!(
+        original_content.len(),
+        466_963,
+        "arithmetic precondition: 19 * 24,577 must equal 466,963"
+    );
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let entry = flat_entry("decision-log", CAP);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100)
+        .expect("F-004: a well-formed oversized-artifact backfill must succeed");
+
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 18,
+            archived_count: 0
+        },
+        "F-004 (Canonical Test Vectors, decision-log.md row, NEEDS-UPDATE): the ACTUAL \
+         greedy-packed count for this hand-verified fixture is 19 total partitions (18 sealed + \
+         1 fresh current) -- NOT ceil(466963/49152) = 10, which Postcondition 2 documents as a \
+         lower bound only. See this test's own doc comment for the full hand arithmetic."
+    );
+
+    // Postcondition 6(a), end-to-end across the real files this call
+    // produced: every sealed shard is exactly one whole record, and the
+    // full reconstruction reproduces the original content byte-for-byte.
+    let mut reconstructed = Vec::new();
+    for seq in 1..=18u32 {
+        let sealed_path = dir.path().join(format!("decision-log.{seq:04}.md"));
+        let sealed_bytes = std::fs::read(&sealed_path)
+            .unwrap_or_else(|e| panic!("F-004: sealed shard seq={seq} must exist on disk: {e}"));
+        assert_eq!(
+            sealed_bytes.len(),
+            RECORD_SIZE,
+            "F-004: sealed shard seq={seq} must hold exactly one {RECORD_SIZE}-byte record"
+        );
+        reconstructed.extend_from_slice(&sealed_bytes);
+    }
+    let current_bytes = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(current_bytes.len(), RECORD_SIZE);
+    reconstructed.extend_from_slice(&current_bytes);
+    assert_eq!(
+        reconstructed, original_content,
+        "Postcondition 6(a): 18 sealed shards + fresh current file must reproduce the original \
+         content byte-for-byte"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_F004_run_backfill_split_lessons_canonical_vector_actual_exceeds_ceil_lower_bound()
+ {
+    // Hand arithmetic (shown, not derived from the implementation under
+    // test):
+    //   shard_cap_bytes = 49,152 (real production cap).
+    //   RECORD_SIZE = cap/2 + 1 = 24,577 bytes (same forced
+    //     one-record-per-shard construction as the decision-log vector
+    //     above: 24,577 * 2 = 49,154 > 49,152, so no two records ever
+    //     share a shard).
+    //   RECORD_COUNT = 5 -- reproducing the SUPERSEDED lessons.md vector's
+    //     own placeholder number, now as the genuinely-computed ACTUAL
+    //     count.
+    //   total bytes = 5 * 24,577 = 122,885.
+    //   ceil(122,885 / 49,152) = ceil(2.500...) = 3  <-- LOWER BOUND only
+    //     (49,152 * 2 = 98,304 < 122,885 <= 49,152 * 3 = 147,456).
+    //   greedy packing: one record per shard (established above) -- ACTUAL
+    //     packed count = 5. 4 of the 5 partitions are sealed (seq 1..=4);
+    //     the 5th (last) becomes the fresh current file.
+    //   5 > 3 confirms the `actual_count >= ceil(bytes/cap)` inequality
+    //   with strict inequality for this fixture too.
+    const RECORD_SIZE: usize = 24_577;
+    const RECORD_COUNT: usize = 5;
+    const CAP: u64 = 49_152;
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("lessons.md");
+    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    assert_eq!(
+        original_content.len(),
+        122_885,
+        "arithmetic precondition: 5 * 24,577 must equal 122,885"
+    );
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let entry = flat_entry("lessons", CAP);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100)
+        .expect("F-004: a well-formed oversized-artifact backfill must succeed");
+
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 4,
+            archived_count: 0
+        },
+        "F-004 (Canonical Test Vectors, lessons.md row, NEEDS-UPDATE): the ACTUAL greedy-packed \
+         count for this hand-verified fixture is 5 total partitions (4 sealed + 1 fresh current) \
+         -- NOT ceil(122885/49152) = 3, which Postcondition 2 documents as a lower bound only. \
+         See this test's own doc comment for the full hand arithmetic."
+    );
+
+    let mut reconstructed = Vec::new();
+    for seq in 1..=4u32 {
+        let sealed_path = dir.path().join(format!("lessons.{seq:04}.md"));
+        let sealed_bytes = std::fs::read(&sealed_path)
+            .unwrap_or_else(|e| panic!("F-004: sealed shard seq={seq} must exist on disk: {e}"));
+        assert_eq!(sealed_bytes.len(), RECORD_SIZE);
+        reconstructed.extend_from_slice(&sealed_bytes);
+    }
+    let current_bytes = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(current_bytes.len(), RECORD_SIZE);
+    reconstructed.extend_from_slice(&current_bytes);
+    assert_eq!(
+        reconstructed, original_content,
+        "Postcondition 6(a): 4 sealed shards + fresh current file must reproduce the original \
+         content byte-for-byte"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_F004_run_backfill_split_interrupted_restart_reproduces_same_actual_count() {
+    // Canonical Test Vectors, "Backfill interrupted after 3/N shards
+    // written" row (NEEDS-UPDATE, count only -- behavior unchanged): N is
+    // the ACTUAL greedy-packed count for decision-log.md, which the
+    // sibling F-004 decision-log test above hand-verifies as 19 (18 sealed
+    // + 1 current), NOT the superseded ceil()-only placeholder. This test
+    // reuses that SAME 19-record fixture and simulates a crash after 3 of
+    // the expected 18 sealed shard files were durably written (a stale,
+    // incomplete leftover at each of the first 3 destination `seq` paths,
+    // with NO shard-index present -- the crash happened before the
+    // operation ever durably completed, so
+    // `mechanism_a_backfill_already_migrated` correctly reports `false`),
+    // then asserts a from-scratch restart against the still-untouched
+    // original monolithic file produces the IDENTICAL 19-total-partition
+    // result an uninterrupted run would have (Postcondition 5's own
+    // determinism guarantee: the greedy packer is a pure function of the
+    // original content and `shard_cap_bytes`).
+    const RECORD_SIZE: usize = 24_577;
+    const RECORD_COUNT: usize = 19;
+    const CAP: u64 = 49_152;
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    let original_content = concat_sized_records(RECORD_COUNT, RECORD_SIZE);
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    // Stale, WRONG leftovers at the first 3 destination seq paths from a
+    // simulated crashed prior attempt -- no shard-index alongside them.
+    for seq in 1..=3u32 {
+        std::fs::write(
+            dir.path().join(format!("decision-log.{seq:04}.md")),
+            b"stale garbage from a crash",
+        )
+        .unwrap();
+    }
+
+    let boundaries = boundary_offsets_for(RECORD_COUNT, RECORD_SIZE);
+    let entry = flat_entry("decision-log", CAP);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 100).expect(
+        "EC-003/Postcondition 5: a from-scratch restart over a stale, incomplete prior attempt \
+         must succeed, not be blocked or corrupted by the stray leftovers",
+    );
+
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 18,
+            archived_count: 0
+        },
+        "F-004 (interrupted-restart row, NEEDS-UPDATE — count only, behavior unchanged): the \
+         restart must produce the SAME 19-total-partition (18 sealed + 1 current) result an \
+         uninitialized run would have produced -- deterministic, since the greedy packer is a \
+         pure function of the original content and shard_cap_bytes"
+    );
+
+    let mut reconstructed = Vec::new();
+    for seq in 1..=18u32 {
+        let sealed_bytes =
+            std::fs::read(dir.path().join(format!("decision-log.{seq:04}.md"))).unwrap();
+        assert_ne!(
+            sealed_bytes, b"stale garbage from a crash",
+            "EC-003/Postcondition 5: the restart must OVERWRITE every stale leftover with the \
+             correct, freshly-computed sealed content -- seq={seq}"
+        );
+        reconstructed.extend_from_slice(&sealed_bytes);
+    }
+    reconstructed.extend_from_slice(&std::fs::read(&canonical_path).unwrap());
+    assert_eq!(
+        reconstructed, original_content,
+        "EC-003/Postcondition 6(a): the restart's real output must reproduce the original \
+         monolithic content byte-for-byte, exactly as an uninitialized run would"
     );
 }
