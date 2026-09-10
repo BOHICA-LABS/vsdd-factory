@@ -4480,14 +4480,16 @@ pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) 
     // Postcondition 2's own named examples, generalized to all four
     // mechanism-A append-logs by their real, native structural-record
     // marker: `decision-log.md`'s own `## Decisions Log` table rows each
-    // start with the literal `"| D-"` row-marker; `burst-log.md` and
-    // `lessons.md` both structure their own records as `### <heading>`
-    // blocks (an `### L-EDP1-NNN -- ...` lesson heading is structurally
-    // identical to an `### <burst-heading>` burst block); `session-
-    // checkpoints.md` structures its own records as `## Checkpoint: ...` /
-    // `## Archived: ...` blocks -- one level up from `burst-log`/`lessons`,
-    // never colliding with either (an `### ` line never starts with the
-    // 3-byte `"## "` prefix, since its 3rd byte is `#`, not a space).
+    // start with the literal `"| D-"` row-marker; `burst-log.md` structures
+    // its own records as `### <burst-heading>` blocks; `lessons.md`
+    // structures its own records as `### L-EDP1-NNN -- ...` blocks (an
+    // ID-tagged heading, structurally one level narrower than a bare
+    // `burst-log` heading -- see `is_lesson_record_heading`); `session-
+    // checkpoints.md` structures its own records as `## Session Resume
+    // Checkpoint (...)` / `## Archived...` / `## Checkpoint...` blocks --
+    // one level up from `burst-log`/`lessons`, never colliding with either
+    // (an `### ` line never starts with the 3-byte `"## "` prefix, since
+    // its 3rd byte is `#`, not a space).
     let marker: &[u8] = match artifact_stem {
         "decision-log" => b"| D-",
         "burst-log" | "lessons" => b"### ",
@@ -4498,7 +4500,91 @@ pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) 
         // boundaries at all.
         _ => return Vec::new(),
     };
-    line_anchored_marker_offsets(content, marker)
+    let candidates = line_anchored_marker_offsets(content, marker);
+
+    // F4 BC-cluster-3 adversarial-review finding MED-3 (Postcondition
+    // 2/Invariant 2): `lessons.md` and `session-checkpoints.md` both nest
+    // sub-headings, at the SAME markdown level as their own genuine record
+    // marker, inside a record's own body (see the two heading-recognizer
+    // doc comments below for the real on-disk shapes this is grounded in).
+    // A bare line-anchored prefix match cannot distinguish those from a
+    // genuine new-record heading -- `decision-log` and `burst-log` need no
+    // such extra discriminator (a `"| D-"` row-marker and a bare `### `
+    // burst heading are already unambiguous at their own artifact's real
+    // format), so only these two filter further.
+    match artifact_stem {
+        "lessons" => candidates
+            .into_iter()
+            .filter(|&offset| is_lesson_record_heading(heading_line(content, offset, marker.len())))
+            .collect(),
+        "session-checkpoints" => candidates
+            .into_iter()
+            .filter(|&offset| {
+                is_checkpoint_record_heading(heading_line(content, offset, marker.len()))
+            })
+            .collect(),
+        _ => candidates,
+    }
+}
+
+/// The text of the heading line starting at `marker_offset + marker_len`
+/// (i.e. immediately after the record-boundary marker itself), up to but
+/// not including the next `b'\n'` or the end of `content` -- the substring
+/// [`is_lesson_record_heading`] and [`is_checkpoint_record_heading`] apply
+/// their own real-format discriminators to.
+fn heading_line(content: &[u8], marker_offset: usize, marker_len: usize) -> &[u8] {
+    let start = marker_offset + marker_len;
+    let rest = &content[start..];
+    let end = rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// MED-3: `true` iff `heading` (the text right after a `lessons.md` `### `
+/// marker) is a GENUINE lesson-record heading rather than a nested,
+/// non-record sub-heading inside an existing lesson's own body. Grounded in
+/// the real `.factory/cycles/v1.0-feature-engine-discipline-pass-1/
+/// lessons.md` convention: every genuine lesson record is tagged with its
+/// own `L-EDP1-NNN`-shaped ID (`"L-"` + an alphanumeric cycle-prefix tag +
+/// `"-"` + a numeric sequence) immediately after the marker; that file's own
+/// lesson bodies use bold prose labels (`**Pattern:**`, `**Trend:**`, ...)
+/// for internal structure, never a further `### ` sub-heading, so ANY
+/// `### ` line lacking this ID tag is necessarily nested body content, not
+/// a new record.
+fn is_lesson_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    let Some(rest) = heading.strip_prefix("L-") else {
+        return false;
+    };
+    let tag_len = rest
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(rest.len());
+    if tag_len == 0 {
+        return false;
+    }
+    rest[tag_len..]
+        .strip_prefix('-')
+        .is_some_and(|after_dash| after_dash.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// MED-3: `true` iff `heading` (the text right after a `session-
+/// checkpoints.md` `## ` marker) is a GENUINE checkpoint-record heading
+/// rather than a nested, same-level aside heading inside an existing
+/// checkpoint's own body. Grounded in the real `.factory/cycles/*/
+/// session-checkpoints.md` convention: every genuine record heading is one
+/// of `"Session Resume Checkpoint"`, `"Archived"` (`"Archived: ..."` /
+/// `"Archived Checkpoint: ..."`), `"Checkpoint"` (`"Checkpoint: ..."` /
+/// `"Checkpoint D-NNN ..."`), or `"D-<NNN> Checkpoint ..."` -- every one of
+/// which either starts with `"Archived"` or carries the capitalized token
+/// `"Checkpoint"` (a heading's own proper-noun section title, never a
+/// lowercase mid-sentence word as an unrelated aside heading's own prose
+/// would use it).
+fn is_checkpoint_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    heading.starts_with("Archived") || heading.contains("Checkpoint")
 }
 
 /// Every byte offset in `content` where `marker` occurs AT THE START OF A
