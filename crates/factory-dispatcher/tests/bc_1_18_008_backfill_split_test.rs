@@ -2864,3 +2864,497 @@ fn test_BC_1_18_008_P5001_run_backfill_split_empty_content_and_empty_offsets_sti
         "F-C3-P5-001 companion: the canonical (empty) file must remain unchanged"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-C3-P6-001 (BC-1.18.008 v1.6 Postcondition 5's Recovery-Confirmation
+// Rule, Invariant 3, EC-009/EC-010): a fresh-context CROSS-VENDOR (OpenAI
+// Codex) adversarial pass-6 review found `heal_or_confirm_already_migrated`
+// classifies the SAFE/DANGEROUS crash-window disposition using ONLY a
+// structural byte-prefix comparison (`canonical_bytes[..sealed_concat.len()]
+// == sealed_concat`) against the artifact's own already-sealed shards. This
+// heuristic false-positives whenever the artifact's real content
+// legitimately repeats a sealed shard's exact bytes as a PREFIX of the
+// SAFE-window final partition -- realistic for `session-checkpoints.md`,
+// since the Record-Boundary Marker Table imposes no uniqueness requirement
+// on checkpoint headings/bodies. BC-1.18.008 v1.6 replaces this heuristic
+// with a Backfill Recovery Manifest (`[backfill_manifest]` in the
+// shard-index: `original_bytes`/`original_sha256`/`final_bytes`/
+// `final_sha256`, computed once at split time) and an exact whole-file
+// `(length, SHA-256)` comparison against it: match `final_*` => SAFE
+// no-op; match `original_*` => DANGEROUS, heal by writing the manifest's
+// own recorded `final_bytes`; match neither => AMBIGUOUS, fail loud with
+// the new `E-SHD-011` error code (added to `prd-supplements/
+// error-taxonomy.md` v1.10 in the same burst) -- never silently overwrite.
+//
+// The three tests below drive the BC's own verified counterexample
+// (`A = "## Checkpoint\nx\n"`, 16 bytes; `shard_cap_bytes = 16`) end-to-end
+// through the real, public `run_mechanism_a_backfill_split` entry point --
+// no internal struct is hand-constructed, since `ShardIndex` does not yet
+// expose a typed `backfill_manifest` field; the manifest's own presence is
+// pinned separately below at the raw-TOML level. This file's own doc
+// comment (top of file) governs the discipline followed here: each test
+// names the BC clause it pins and the real-world shape that motivated it,
+// never a live claim about its own current pass/fail status.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_FC3P6001_EC009_run_backfill_split_second_invocation_preserves_repeated_prefix_content()
+ {
+    // BC-1.18.008 v1.6's own verified counterexample: `session-checkpoints`
+    // content whose real body legitimately repeats a sealed shard's exact
+    // bytes as the leading prefix of the SAFE-window final partition.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n");
+    assert_eq!(
+        original_content.len(),
+        37,
+        "fixture precondition: A + A + \"more\\n\" must be 37 bytes, matching BC-1.18.008 v1.6's \
+         own cited counterexample"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    assert_eq!(
+        boundaries,
+        vec![0, 16],
+        "fixture precondition: the two repeated `## Checkpoint` headings are the content's own \
+         two real record boundaries"
+    );
+
+    let entry = flat_entry("session-checkpoints", 16);
+
+    // First (uninterrupted) migration: seals the first `A` as shard 1;
+    // the fresh current file legitimately holds `A + "more\n"` (21 bytes) --
+    // this is a genuinely-correct SAFE-window state, not a crash.
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        },
+        "precondition: the first run must seal exactly the first `A` and leave `A + \"more\\n\"` \
+         as the fresh current file"
+    );
+    let sealed_shard =
+        std::fs::read(dir.path().join("session-checkpoints.0001.md")).expect("shard must exist");
+    assert_eq!(
+        sealed_shard, a,
+        "precondition: the sealed shard must hold exactly the first `A`"
+    );
+    let expected_final = &original_content[16..]; // A + "more\n", 21 bytes
+    let after_first = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        after_first, expected_final,
+        "precondition: after the first run the canonical file must hold exactly the legitimate \
+         final partition"
+    );
+
+    // SECOND invocation, no intervening crash: the canonical file's own
+    // leading 16 bytes happen to be byte-identical to the sealed shard's
+    // content (the artifact's real content legitimately repeats it) --
+    // exactly the false-positive shape F-C3-P6-001 names. The
+    // Recovery-Confirmation Rule must classify this as SAFE (canonical
+    // bytes exactly match the manifest's `final_bytes`/`final_sha256`) and
+    // take NO action.
+    let second = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10).expect(
+        "EC-009: a second invocation against a legitimately-migrated, repeated-prefix \
+                 artifact must not error",
+    );
+
+    assert_eq!(
+        second,
+        MechanismABackfillOutcome::AlreadyMigrated,
+        "EC-009/Postcondition 5 Recovery-Confirmation Rule: the canonical file's exact whole-file \
+         (length, SHA-256) matches the manifest's `final_bytes`/`final_sha256` -- SAFE window, no \
+         action. Got: {second:?}"
+    );
+
+    let after_second = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        after_second,
+        expected_final,
+        "EC-009 (the data-loss regression F-C3-P6-001 corrects): the canonical file must remain \
+         byte-for-byte `A + \"more\\n\"` (21 bytes) after the second invocation -- a structural \
+         byte-prefix heuristic instead misclassifies this as the DANGEROUS window (the canonical \
+         file's own leading 16 bytes coincidentally equal the sealed shard's content) and \
+         overwrites the canonical file with just `canonical_bytes[16..]` (\"more\\n\", 5 bytes), \
+         permanently destroying the second `A` record's heading and body. Got {} bytes instead of \
+         the expected 21.",
+        after_second.len()
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6001_run_backfill_split_second_invocation_heals_genuine_crash_window() {
+    // Companion to the EC-009 test above: a GENUINE crash window (the
+    // canonical file was never truncated after the first run's index
+    // publish) must still be healed correctly by the manifest-based rule --
+    // this pins the DANGEROUS disposition's own positive behavior, not just
+    // its negative (EC-009) false-positive guard.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n");
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    // Simulate the genuine crash window named by Postcondition 5's "Two-phase
+    // publish and the index-publish/canonical-truncate crash window"
+    // subsection: the shard-index (and its Backfill Recovery Manifest) are
+    // already durably published from the real first run above, but the
+    // canonical file is restored to hold the FULL pre-split content, as if
+    // the canonical-truncate write never completed.
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let expected_final = original_content[16..].to_vec(); // A + "more\n", 21 bytes
+
+    let second = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10).expect(
+        "a re-invocation against the confirmed DANGEROUS crash window must self-heal, \
+                 not error",
+    );
+
+    assert_eq!(
+        second,
+        MechanismABackfillOutcome::Healed { sealed_count: 1 },
+        "Postcondition 5 Recovery-Confirmation Rule: canonical bytes exactly match the manifest's \
+         `original_bytes`/`original_sha256` -- DANGEROUS window, unambiguously confirmed. Got: \
+         {second:?}"
+    );
+
+    let healed = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        healed, expected_final,
+        "Postcondition 5: recovery must complete the interrupted canonical-truncate write by \
+         atomically writing the manifest's OWN recorded `final_bytes` content -- which for this \
+         single-sealed-shard fixture is exactly the same 21 bytes independently established at \
+         split time as the last partition, `A + \"more\\n\"`"
+    );
+
+    let index_toml =
+        std::fs::read_to_string(dir.path().join("session-checkpoints.shard-index.toml")).unwrap();
+    let index: ShardIndex = toml::from_str(&index_toml).unwrap();
+    assert_eq!(
+        index.shards.len(),
+        1,
+        "Invariant 3 (Idempotency): self-healing the interrupted truncation must never re-seal \
+         already-sealed content into new, redundant shards"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6001_EC010_run_backfill_split_ambiguous_on_disk_state_fails_loud_e_shd_011()
+{
+    // EC-010: at recovery-confirmation time, the canonical file's
+    // `(length, SHA-256)` matches NEITHER the manifest's `original_*` nor
+    // `final_*` pair (e.g. an operator manually edited the canonical file
+    // between a crash and the recovery attempt, or the file is corrupted).
+    // This MUST fail loud with `E-SHD-011` and MUST NOT write anything to
+    // the canonical file -- never silently default to either the SAFE or
+    // DANGEROUS disposition on an ambiguous match.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n");
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    // Tamper with the canonical file so its bytes match NEITHER the
+    // manifest's `original_*` (37 bytes, A+A+"more\n") NOR `final_*` (21
+    // bytes, A+"more\n") pair -- e.g. an operator manually edited it between
+    // the crash and the recovery attempt. Deliberately does NOT start with
+    // `A` either, so it is unambiguous under BOTH the old heuristic and the
+    // new manifest-based rule that this state is neither SAFE nor DANGEROUS.
+    let tampered: Vec<u8> =
+        b"ZZZ operator-edited content unrelated to either recorded manifest state\n".to_vec();
+    std::fs::write(&canonical_path, &tampered).unwrap();
+
+    let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+    let err = result.expect_err(
+        "EC-010/Postcondition 5 Recovery-Confirmation Rule: an on-disk canonical state matching \
+         NEITHER the manifest's original nor final (length, SHA-256) pair MUST fail loud, never \
+         silently resolve to SAFE or DANGEROUS",
+    );
+    let err_message = err.to_string();
+    assert!(
+        err_message.contains("E-SHD-011"),
+        "EC-010: the AMBIGUOUS disposition must surface the NEW `E-SHD-011` error code (per \
+         `prd-supplements/error-taxonomy.md` v1.10) -- got a different error: {err_message}"
+    );
+
+    let post = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post, tampered,
+        "EC-010: on the AMBIGUOUS disposition, the canonical file MUST NOT be written to under \
+         any circumstance -- it must remain exactly as found, pending operator investigation"
+    );
+    assert!(
+        !dir.path().join("session-checkpoints.0002.md").exists(),
+        "EC-010: an AMBIGUOUS recovery attempt must never seal an additional shard either"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6001_PC3_run_backfill_split_publishes_backfill_recovery_manifest_fields() {
+    // Postcondition 3's Backfill Recovery Manifest: the published
+    // `<artifact-stem>.shard-index.toml` must carry a `[backfill_manifest]`
+    // table -- written in the SAME atomic index-publish write as the
+    // `[[shard]]` entries -- with `original_bytes`/`original_sha256` (the
+    // pre-split monolithic file's own exact length + SHA-256) and
+    // `final_bytes`/`final_sha256` (the intended final partition's own exact
+    // length + SHA-256), both computed once at split time from the same
+    // in-memory `original_content` buffer that drives Postcondition 2's
+    // partitioning. Checked here at the raw-TOML-text level, since this file
+    // only imports the pre-existing (not-yet-extended) `ShardIndex` schema
+    // for its typed round-trips elsewhere.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n");
+    assert_eq!(original_content.len(), 37);
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    assert_eq!(boundaries, vec![0, 16]);
+
+    let entry = flat_entry("session-checkpoints", 16);
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first migration over this fixture must succeed");
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    let index_toml =
+        std::fs::read_to_string(dir.path().join("session-checkpoints.shard-index.toml"))
+            .expect("the shard-index must be published");
+
+    assert!(
+        index_toml.contains("[backfill_manifest]"),
+        "Postcondition 3: the published shard-index MUST carry a `[backfill_manifest]` table, \
+         populated in the SAME atomic write as the `[[shard]]` entries. Got:\n{index_toml}"
+    );
+    assert!(
+        index_toml.contains("original_bytes = 37"),
+        "Postcondition 3: `original_bytes` must record the pre-split monolithic file's exact \
+         byte length (37 = len(A + A + \"more\\n\")). Got:\n{index_toml}"
+    );
+    assert!(
+        index_toml.contains("final_bytes = 21"),
+        "Postcondition 3: `final_bytes` must record the intended final (last) partition's exact \
+         byte length (21 = len(A + \"more\\n\")). Got:\n{index_toml}"
+    );
+    assert!(
+        index_toml.contains("original_sha256"),
+        "Postcondition 3: `original_sha256` (the pre-split monolithic file's own content hash) \
+         must be present. Got:\n{index_toml}"
+    );
+    assert!(
+        index_toml.contains("final_sha256"),
+        "Postcondition 3: `final_sha256` (the intended final partition's own content hash) must \
+         be present. Got:\n{index_toml}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C3-P6-002 (BC-1.18.008 v1.6 Postcondition 6(c)/Invariant 4's disk
+// read-back ruling): a fresh-context CROSS-VENDOR (OpenAI Codex) adversarial
+// pass-6 review asked whether "the actual bytes written to disk" (PC6(c),
+// Invariant 4) means a POST-HOC read-back of each sealed shard file from
+// disk after its write completes, or is satisfied by checking only the
+// in-memory partition buffer's length before the write is issued. The BC
+// RULED (a): a fresh, post-hoc disk read-back is REQUIRED. The shipped
+// `run_mechanism_a_backfill_split` (`crates/factory-dispatcher/src/
+// shard_manager.rs`) currently only calls `mechanism_a_verify_backfill_*`
+// against the COMPUTED IN-MEMORY partitions (before line ~5462's write
+// loop) and never re-reads a sealed shard file back from disk after
+// `write_atomic_bytes` writes it, so it cannot detect a write that silently
+// truncated, partially flushed, or otherwise landed corrupted bytes on
+// disk.
+//
+// A genuine fault-injection test for this ruling requires interposing
+// BETWEEN a sealed shard's write completing and the function's own
+// continuation -- there is no such seam in the current public API
+// (`run_mechanism_a_backfill_split` is one synchronous call with no
+// injectable I/O layer, callback, or lower-level "write one shard, then
+// verify" function exposed for a test to drive independently and corrupt
+// the file in between). Fabricating a "fault injection" via ordinary
+// filesystem tricks (permission bits, pre-existing files, symlinks) would
+// only exercise synchronous I/O *error* propagation (a different code path,
+// already covered by `MechanismABackfillError::Io`), not the silent-
+// corruption-after-a-successful-write scenario PC6(c)/Invariant 4's ruling
+// targets -- writing such a test would not be genuine coverage of this
+// finding, it would be a paper-fix.
+//
+// Per this task's own instruction ("If the production API doesn't expose a
+// fault-injection seam, add a minimal test-only hook request in a comment
+// and STOP to report to me -- do not fabricate"): this finding is NOT
+// authored as a test in this burst. It requires a minimal production-side
+// seam first -- e.g. a test-only injectable post-write hook/callback
+// parameter on the sealed-shard write step (or a lower-level
+// `mechanism_a_write_and_verify_sealed_shard(path, bytes) -> Result<...>`
+// function extracted from the write loop, itself unit-testable with a
+// corrupted-write double) -- which is `src/` production code, out of this
+// test-writer burst's scope (test-writer must not touch `src/`). Routed
+// back per the task's own instruction; see this file's PR/burst notes for
+// the human-facing report.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// F-C3-P6-003 (BC-1.18.008 v1.6 Record-Boundary Marker Table, `lessons.md`
+// row): the marker table's `lessons.md` id-tag shape is
+// `^L-<tag>-[0-9]+\b` for BOTH the h3 confirmed-exception form
+// (`is_lesson_record_heading`) and the h2 primary form
+// (`is_lesson_h2_record_heading`) -- both share the SAME
+// `is_id_tagged_lesson_heading` predicate. That predicate only checks that
+// the byte immediately following the tag's trailing `-` is an ASCII digit;
+// it never checks what follows the digit RUN, so a heading whose numeric id
+// is immediately followed by another word character (no `\b` word
+// boundary) is misdetected as a genuine tagged record -- `### L-EDP1-050details`
+// and `### L-EDP1-050_extra` merely SHARE the `L-EDP1-050` id prefix with a
+// genuine record; they are prose in that record's own body, not new
+// records.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_FC3P6003_record_boundary_offsets_lessons_h3_id_tag_requires_word_boundary_after_digits()
+ {
+    let genuine_bare = "### L-EDP1-050\n";
+    let genuine_titled = "### L-EDP1-050 title\n";
+    let decoy_suffix_word = "### L-EDP1-050details\n";
+    let decoy_underscore = "### L-EDP1-050_extra\n";
+    let decoy_trailing_char = "### L-EDP1-050x\n";
+
+    let content = format!(
+        "# Lessons Learned\n\n\
+         {genuine_bare}\
+         Body one.\n\n\
+         {decoy_suffix_word}\
+         Nested prose that merely shares the L-EDP1-050 id prefix -- not a new record.\n\n\
+         {decoy_underscore}\
+         Same -- an underscore is a word character too, so no boundary exists here either.\n\n\
+         {decoy_trailing_char}\
+         Same again -- a trailing alnum char with no separator is still no boundary.\n\n\
+         {genuine_titled}\
+         Body two.\n"
+    );
+
+    let offset_bare = content.find(genuine_bare).unwrap();
+    let offset_titled = content.find(genuine_titled).unwrap();
+    let offset_decoy_word = content.find(decoy_suffix_word).unwrap();
+    let offset_decoy_underscore = content.find(decoy_underscore).unwrap();
+    let offset_decoy_trailing = content.find(decoy_trailing_char).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("lessons", content.as_bytes());
+
+    assert!(
+        !offsets.contains(&offset_decoy_word)
+            && !offsets.contains(&offset_decoy_underscore)
+            && !offsets.contains(&offset_decoy_trailing),
+        "F-C3-P6-003/PC2 Record-Boundary Marker Table (`^### L-<tag>-[0-9]+\\b`): a heading whose \
+         numeric id run is immediately followed by another word character (no word boundary) \
+         must NOT be treated as a record boundary -- `### L-EDP1-050details`, \
+         `### L-EDP1-050_extra`, and `### L-EDP1-050x` each merely SHARE the `L-EDP1-050` id \
+         prefix with a genuine record, they are not one. Got: {offsets:?} (decoys at \
+         {offset_decoy_word}, {offset_decoy_underscore}, {offset_decoy_trailing})"
+    );
+    assert_eq!(
+        offsets,
+        vec![offset_bare, offset_titled],
+        "F-C3-P6-003: only the two genuine `### L-EDP1-050` headings (bare, and followed by a \
+         space) are real record boundaries. Got: {offsets:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6003_record_boundary_offsets_lessons_h2_id_tag_requires_word_boundary_after_digits()
+ {
+    // Same F-C3-P6-003 defect, exercised through the h2 primary-form caller
+    // (`is_lesson_h2_record_heading`) -- both h2 and h3 lessons.md detection
+    // share the SAME `is_id_tagged_lesson_heading` predicate, so the missing
+    // word-boundary check affects both marker forms identically.
+    let genuine_bare = "## L-EDP1-052\n";
+    let genuine_titled = "## L-EDP1-053 title\n";
+    let decoy_suffix_word = "## L-EDP1-052details\n";
+    let decoy_underscore = "## L-EDP1-052_extra\n";
+    let decoy_trailing_char = "## L-EDP1-052x\n";
+
+    let content = format!(
+        "# Lessons Learned\n\n\
+         {genuine_bare}\
+         Body one.\n\n\
+         {decoy_suffix_word}\
+         Nested prose sharing the id prefix -- not a new record.\n\n\
+         {decoy_underscore}\
+         Same defect via an underscore suffix.\n\n\
+         {decoy_trailing_char}\
+         Same defect via a trailing alnum char.\n\n\
+         {genuine_titled}\
+         Body two.\n"
+    );
+
+    let offset_bare = content.find(genuine_bare).unwrap();
+    let offset_titled = content.find(genuine_titled).unwrap();
+    let offset_decoy_word = content.find(decoy_suffix_word).unwrap();
+    let offset_decoy_underscore = content.find(decoy_underscore).unwrap();
+    let offset_decoy_trailing = content.find(decoy_trailing_char).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("lessons", content.as_bytes());
+
+    assert!(
+        !offsets.contains(&offset_decoy_word)
+            && !offsets.contains(&offset_decoy_underscore)
+            && !offsets.contains(&offset_decoy_trailing),
+        "F-C3-P6-003 (h2 form): a heading whose numeric id run is immediately followed by \
+         another word character must NOT be a record boundary. Got: {offsets:?}"
+    );
+    assert_eq!(
+        offsets,
+        vec![offset_bare, offset_titled],
+        "F-C3-P6-003 (h2 form): only the two genuine `## L-EDP1-NNN` headings are real record \
+         boundaries. Got: {offsets:?}"
+    );
+}
