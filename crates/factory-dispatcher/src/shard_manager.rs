@@ -4572,6 +4572,39 @@ pub enum MechanismABackfillError {
          to guess; canonical file left untouched pending operator investigation"
     )]
     MissingBackfillManifest { artifact_stem: String },
+
+    /// F-C3-P7-001 (S-25.02 F4 cluster-3 LOCAL adversarial pass-7 review,
+    /// HIGH; BC-1.18.008 v1.7 Postcondition 5's Manifest-Authoritative
+    /// Slice-and-Verify Rule, EC-011, Invariant 3; Postcondition
+    /// 6(c)/Invariant 4's heal-write disk-read-back extension; `E-SHD-012`,
+    /// `prd-supplements/error-taxonomy.md` v1.11): at the confirmed
+    /// DANGEROUS window (the top-level `(length, hash)` check already
+    /// matched the Manifest's `original_bytes`/`original_sha256` pair), the
+    /// Manifest-derived candidate slice fails ONE LEVEL DEEPER — either (a)
+    /// the mandatory pre-write verification (`sliced.len() == final_bytes
+    /// AND sha256(sliced) == final_sha256`) fails before anything is
+    /// written, or (b) a FRESH post-hoc disk read-back of the heal's own
+    /// just-completed write does not match `(final_bytes, final_sha256)`,
+    /// surfacing a write that silently truncated, partially flushed, or
+    /// otherwise landed corrupted bytes on disk. `detail` names which of
+    /// the two hard gates failed. Distinct from `E-SHD-011`
+    /// (`AmbiguousRecoveryState`): that code fires when the TOP-LEVEL check
+    /// cannot confirm DANGEROUS at all; this code fires only AFTER
+    /// DANGEROUS is already unambiguously confirmed, signaling that the
+    /// Manifest's own `final_bytes`/`final_sha256` fields (or the code
+    /// deriving/writing the slice) are themselves in an inconsistent state.
+    /// On disposition (a) the canonical file is left untouched; on
+    /// disposition (b) the destructive write already happened, so this
+    /// surfaces the corruption immediately for operator remediation from
+    /// git history/backup rather than reporting the heal complete.
+    #[error(
+        "E-SHD-012: backfill recovery heal slice-verification failed for artifact_stem \
+         \"{artifact_stem}\": {detail}"
+    )]
+    SliceVerificationFailed {
+        artifact_stem: String,
+        detail: String,
+    },
 }
 
 /// Fail-loud backfill-split errors surface to the operator/dispatcher
@@ -5905,37 +5938,94 @@ fn heal_or_confirm_already_migrated(
         // DANGEROUS window, unambiguously confirmed: the canonical file's
         // exact whole-file (length, SHA-256) matches the manifest's
         // recorded pre-split-original pair byte-for-byte -- step (ii) never
-        // ran. `sealed_len` (the sum of every already-sealed shard's own
-        // recorded `bytes_at_seal`) is this artifact's structural split
-        // point, independent of the manifest -- by construction at split
-        // time, `sealed_len + final_bytes == original_bytes`, so slicing
-        // the JUST-CONFIRMED-byte-identical-to-original canonical buffer at
-        // this offset recovers exactly the same final partition
-        // Postcondition 2's packer independently produced then (never an
-        // unconfirmed heuristic guess, unlike the retired byte-prefix
-        // check this replaces).
-        let sealed_len: u64 = index.shards.iter().map(|s| s.bytes_at_seal).sum();
-        let sealed_len = usize::try_from(sealed_len).map_err(|_| {
-            MechanismABackfillError::ContentPreservationFailed {
+        // ran. Postcondition 5's Manifest-Authoritative Slice-and-Verify
+        // Rule (F-C3-P7-001): the healed content is ALWAYS obtained by
+        // slicing the canonical file's own current bytes at an offset
+        // derived from the Manifest itself (`original_bytes - final_bytes`)
+        // -- NEVER by summing the shard-index's own `bytes_at_seal` fields
+        // (a separate, independently-corruptible piece of on-disk state
+        // the PRIOR implementation relied on, EC-011) -- and that slice is
+        // NEVER written before being confirmed against the Manifest's own
+        // `final_bytes`/`final_sha256` pair.
+        let offset = manifest
+            .original_bytes
+            .checked_sub(manifest.final_bytes)
+            .ok_or_else(|| MechanismABackfillError::SliceVerificationFailed {
                 artifact_stem: entry.artifact_stem.clone(),
                 detail: format!(
-                    "sealed shard byte total {sealed_len} does not fit a platform usize while \
-                     healing the DANGEROUS crash window"
+                    "the Backfill Recovery Manifest's final_bytes ({}) exceeds its own \
+                     original_bytes ({}) -- the Manifest is internally inconsistent; refusing to \
+                     derive a slice offset from it",
+                    manifest.final_bytes, manifest.original_bytes
+                ),
+            })?;
+        let offset = usize::try_from(offset).map_err(|_| {
+            MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Manifest-derived slice offset {offset} does not fit a platform usize"
                 ),
             }
         })?;
-        let healed_tail = canonical_bytes.get(sealed_len..).ok_or_else(|| {
-            MechanismABackfillError::ContentPreservationFailed {
+        let sliced = canonical_bytes.get(offset..).ok_or_else(|| {
+            MechanismABackfillError::SliceVerificationFailed {
                 artifact_stem: entry.artifact_stem.clone(),
                 detail: format!(
-                    "sealed shard byte total {sealed_len} exceeds the canonical file's own \
-                     confirmed-original length {canonical_len} while healing the DANGEROUS crash \
-                     window -- shard-index and manifest disagree on this artifact's own split \
-                     point"
+                    "the Manifest-derived slice offset {offset} exceeds the canonical file's own \
+                     confirmed-original length {canonical_len}"
                 ),
             }
         })?;
-        write_atomic_bytes(canonical_path, healed_tail, &entry.artifact_stem)?;
+
+        // Step 2 (hard gate, pre-write): the candidate slice MUST verify
+        // against the Manifest's own recorded final-partition pair before
+        // anything is written -- a wrong slice (a future regression, a
+        // corrupted Manifest value, or a legacy caller still deriving the
+        // offset from the shard index) fails this check and is never
+        // written.
+        let sliced_len = sliced.len() as u64;
+        let sliced_sha256 = sha256_hex(sliced);
+        if sliced_len != manifest.final_bytes || sliced_sha256 != manifest.final_sha256 {
+            return Err(MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Manifest-derived candidate slice ({sliced_len} bytes, sha256 \
+                     {sliced_sha256}) does not verify against the Backfill Recovery Manifest's \
+                     own recorded final partition ({} bytes, sha256 {}) -- refusing to write an \
+                     unverified slice; canonical file left untouched pending operator \
+                     investigation",
+                    manifest.final_bytes, manifest.final_sha256
+                ),
+            });
+        }
+
+        // Step 3: both checks passed -- write the verified slice, then
+        // (Postcondition 6(c)/Invariant 4's F-C3-P7-001 extension) perform
+        // the SAME post-hoc disk read-back discipline sealed-shard writes
+        // already receive (F-C3-P6-002) on the heal's OWN destructive
+        // write, since it is the final write of the interrupted migration
+        // and the pre-heal content is irretrievably gone the moment it
+        // lands.
+        let read_back = write_and_read_back(canonical_path, sliced, &entry.artifact_stem)?;
+        let read_back_len = read_back.len() as u64;
+        let read_back_sha256 = sha256_hex(&read_back);
+        if read_back_len != manifest.final_bytes || read_back_sha256 != manifest.final_sha256 {
+            return Err(MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "post-hoc disk read-back of the heal's own write to '{}' \
+                     ({read_back_len} bytes, sha256 {read_back_sha256}) does not match the \
+                     Backfill Recovery Manifest's recorded final partition ({} bytes, sha256 \
+                     {}) -- the write silently truncated, partially flushed, or otherwise \
+                     landed corrupted bytes on disk; the destructive write already happened, so \
+                     this surfaces the corruption immediately for operator remediation from git \
+                     history/backup rather than reporting the heal complete",
+                    canonical_path.display(),
+                    manifest.final_bytes,
+                    manifest.final_sha256
+                ),
+            });
+        }
 
         return Ok(MechanismABackfillOutcome::Healed {
             sealed_count: index.shards.len() as u32,
@@ -6085,12 +6175,7 @@ pub fn mechanism_a_write_and_verify_sealed_shard(
     bytes: &[u8],
     artifact_stem: &str,
 ) -> Result<(), MechanismABackfillError> {
-    write_atomic_bytes(sealed_path, bytes, artifact_stem)?;
-
-    let read_back = std::fs::read(sealed_path).map_err(|source| MechanismABackfillError::Io {
-        artifact_stem: artifact_stem.to_string(),
-        source,
-    })?;
+    let read_back = write_and_read_back(sealed_path, bytes, artifact_stem)?;
 
     if read_back != bytes {
         return Err(MechanismABackfillError::ContentPreservationFailed {
@@ -6108,6 +6193,33 @@ pub fn mechanism_a_write_and_verify_sealed_shard(
     }
 
     Ok(())
+}
+
+/// Shared low-level I/O primitive behind BOTH
+/// [`mechanism_a_write_and_verify_sealed_shard`]'s sealed-shard write
+/// (F-C3-P6-002) AND `heal_or_confirm_already_migrated`'s DANGEROUS-window
+/// heal write (F-C3-P7-001's Postcondition 6(c)/Invariant 4 extension):
+/// writes `bytes` to `path` via [`write_atomic_bytes`], then performs a
+/// POST-HOC READ-BACK of the just-written file from disk, returning the
+/// read-back bytes for the CALLER's own verification. The two call sites
+/// verify against different "intended content" (a sealed shard's own
+/// in-memory partition buffer for the former, the Backfill Recovery
+/// Manifest's `final_bytes`/`final_sha256` pair for the latter) and report
+/// DIFFERENT error codes on a mismatch (`ContentPreservationFailed` for
+/// sealed shards, `SliceVerificationFailed` / `E-SHD-012` for the heal
+/// write) -- so the comparison itself stays with each caller rather than
+/// being baked into this shared write-then-read-back primitive.
+fn write_and_read_back(
+    path: &Path,
+    bytes: &[u8],
+    artifact_stem: &str,
+) -> Result<Vec<u8>, MechanismABackfillError> {
+    write_atomic_bytes(path, bytes, artifact_stem)?;
+
+    std::fs::read(path).map_err(|source| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source,
+    })
 }
 
 // ---------------------------------------------------------------------------
