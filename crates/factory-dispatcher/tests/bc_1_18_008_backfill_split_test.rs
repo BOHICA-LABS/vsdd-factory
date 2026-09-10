@@ -56,12 +56,14 @@
 
 use factory_dispatcher::shard_manager::{
     MechanismABackfillError, MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry,
-    ShardIndex, ShardIndexEntry, ShardShape, mechanism_a_backfill_already_migrated,
+    ShardIndex, ShardShape, mechanism_a_backfill_already_migrated,
     mechanism_a_partition_for_backfill, mechanism_a_record_boundary_offsets,
     mechanism_a_verify_backfill_content_preserved,
     mechanism_a_verify_backfill_per_shard_cap_preserved,
-    mechanism_a_verify_backfill_record_counts_preserved, run_mechanism_a_backfill_split,
+    mechanism_a_verify_backfill_record_counts_preserved, mechanism_a_write_and_verify_sealed_shard,
+    run_mechanism_a_backfill_split,
 };
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -1085,140 +1087,48 @@ fn test_BC_1_18_008_BLOCKER1_run_backfill_split_preserves_preamble_bytes_end_to_
 
 // ---------------------------------------------------------------------------
 // HIGH-2 (BC-1.18.008 Postcondition 5, Invariant 3, VP-124 Property
-// Statement 1): a crash between the shard-index publish and the canonical-
-// truncate write is not self-healed on re-run. `run_mechanism_a_backfill_split`
-// publishes the shard-index BEFORE truncating the canonical file (by design,
-// per this module's own doc comment reasoning) -- but
-// `mechanism_a_backfill_already_migrated` keys ONLY on the shard-index's
-// existence. A re-run against exactly this crash window observes the index
-// already exists, reports `AlreadyMigrated`, and returns immediately WITHOUT
-// ever truncating the canonical file -- leaving the canonical file holding
-// the FULL original content (records already duplicated into the sealed
-// shards AND still present in the untouched canonical file), a silent,
-// permanent whole-corpus double-count corruption. This is the DANGEROUS
-// crash window VP-124 names distinctly from EC-003's SAFE no-index-yet
-// window (already covered by the existing EC-003 test above).
+// Statement 1) -- RETIRED, this burst (BC-1.18.008 v1.6 F-C3-P6-001).
+//
+// The test formerly here hand-constructed a shard-index fixture (via a
+// literal `ShardIndex { .. }` with NO `[backfill_manifest]` table) to
+// simulate the crash window between the index-publish and canonical-
+// truncate writes, then asserted that re-running the backfill self-heals by
+// completing the truncation. That self-heal disposition is still correct
+// behavior -- but the MECHANISM it exercised is not: pre-v1.6,
+// `heal_or_confirm_already_migrated` decided SAFE-vs-DANGEROUS via a
+// structural byte-prefix comparison against the already-sealed shards'
+// concatenation. BC-1.18.008 v1.6's Recovery-Confirmation Rule (Postcondition
+// 5) RETIRES that byte-prefix heuristic entirely -- Invariant 3 now
+// explicitly requires the determination to rest SOLELY on an exact
+// whole-file `(length, SHA-256)` comparison against the Backfill Recovery
+// Manifest's `original_bytes`/`original_sha256`/`final_bytes`/`final_sha256`
+// fields, "NEVER a structural byte-prefix comparison." The shipped v1.6
+// implementation (`heal_or_confirm_already_migrated`) now requires that
+// manifest to exist at all: a shard-index with no `[backfill_manifest]`
+// table (exactly what this test's hand-built fixture produced) makes
+// `read_backfill_manifest` return `None`, which the function maps to
+// `Err(MechanismABackfillError::MissingBackfillManifest)` (the `E-SHD-011`
+// fail-loud path) rather than proceeding to heal -- so this test's own
+// `assert!(result.is_ok(), ...)` now asserts behavior BC-1.18.008 v1.6
+// explicitly forbids for a no-manifest fixture, not a residual gap.
+//
+// Retiring rather than patching: adding a `[backfill_manifest]` table to
+// this test's hand-built fixture would only re-derive
+// `test_BC_1_18_008_FC3P6001_run_backfill_split_second_invocation_heals_genuine_crash_window`
+// below (same crash window, same DANGEROUS disposition, same self-heal
+// assertion) by manual construction instead of the real API -- strictly
+// worse coverage, since a hand-built manifest can silently drift out of
+// sync with whatever `run_mechanism_a_backfill_split` actually writes,
+// whereas the FC3P6001 test below produces its manifest via a REAL first
+// invocation of the production split function itself, then genuinely
+// restores the canonical file to simulate the crash. The identical
+// crash-window property (self-heal completes the interrupted
+// canonical-truncate, whole-corpus reconstruction holds, no duplicate
+// shard-index entries) is verified there, end-to-end, through the real,
+// v1.6-compliant manifest-based path. The crash-window property is not
+// uncovered -- it has a stronger, v1.6-compliant pin than this retired test
+// ever provided.
 // ---------------------------------------------------------------------------
-
-#[test]
-fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publish_and_canonical_truncate()
- {
-    let dir = tempfile::tempdir().unwrap();
-    let canonical_path = dir.path().join("decision-log.md");
-    // Same 5-record / cap=70 fixture as the PC2/PC3 happy-path test above:
-    // partitions = [0..60) seq=1, [60..120) seq=2, [120..150) current.
-    let original_content = concat_records(&[1, 2, 3, 4, 5]); // 150 bytes
-    let sealed1 = &original_content[0..60];
-    let sealed2 = &original_content[60..120];
-    let expected_current = &original_content[120..150];
-
-    // Simulate the crash window: the canonical file is STILL the full,
-    // untruncated original (the crash happened AFTER the index publish
-    // below, BEFORE the canonical-truncate write) ...
-    std::fs::write(&canonical_path, &original_content).unwrap();
-
-    // ... but BOTH sealed shard files ...
-    std::fs::write(dir.path().join("decision-log.0001.md"), sealed1).unwrap();
-    std::fs::write(dir.path().join("decision-log.0002.md"), sealed2).unwrap();
-
-    // ... AND the shard-index (fully accounting for both seals) already
-    // exist on disk, exactly as a completed split's index-publish step
-    // would have left them.
-    let index = ShardIndex {
-        schema_version: 1,
-        artifact_stem: "decision-log".to_string(),
-        current_shard: "decision-log.md".to_string(),
-        shard_cap_bytes: 70,
-        max_single_record_bytes: 16_384,
-        safety_margin_bytes: 8_192,
-        practical_fuel_ceiling: 8_000_000,
-        worst_case_fuel_per_byte: 106.36,
-        retention_count: 10,
-        shards: vec![
-            ShardIndexEntry {
-                seq: 1,
-                path: "decision-log.0001.md".to_string(),
-                sealed_at: "2026-01-01T00:00:00Z".to_string(),
-                bytes_at_seal: sealed1.len() as u64,
-                sealed_retroactively: false,
-                oversized_record: false,
-                is_preamble_shard: false,
-                records: 0,
-            },
-            ShardIndexEntry {
-                seq: 2,
-                path: "decision-log.0002.md".to_string(),
-                sealed_at: "2026-01-01T00:00:00Z".to_string(),
-                bytes_at_seal: sealed2.len() as u64,
-                sealed_retroactively: false,
-                oversized_record: false,
-                is_preamble_shard: false,
-                records: 0,
-            },
-        ],
-    };
-    let index_toml = toml::to_string(&index).expect("ShardIndex must serialize to valid TOML");
-    std::fs::write(dir.path().join("decision-log.shard-index.toml"), index_toml).unwrap();
-
-    let entry = flat_entry("decision-log", 70);
-    let boundaries = [0, 30, 60, 90, 120];
-
-    let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
-
-    assert!(
-        result.is_ok(),
-        "HIGH-2/VP-124: re-running the backfill against the dangerous crash window (index \
-         already published, canonical NOT yet truncated) must self-heal, not error. Got: {:?}",
-        result.err()
-    );
-
-    // The self-heal MUST complete the truncation the crash interrupted:
-    // the canonical file must end up holding ONLY the final partition, not
-    // the full pre-crash original content.
-    let post_canonical = std::fs::read(&canonical_path).unwrap();
-    assert_eq!(
-        post_canonical,
-        expected_current,
-        "HIGH-2/VP-124: after self-healing this crash window, the canonical file MUST be \
-         truncated to exactly the final partition's content -- got {} bytes (still holding the \
-         full {}-byte pre-crash original) instead of the expected {} bytes. Leaving the \
-         canonical file un-truncated here means records 1-4 exist BOTH in the sealed shards AND \
-         in the still-full canonical file -- a silent, permanent whole-corpus double-count \
-         corruption that `mechanism_a_backfill_already_migrated`'s index-existence-only check \
-         allowed to persist forever (it never re-inspects the canonical file's own content).",
-        post_canonical.len(),
-        original_content.len(),
-        expected_current.len()
-    );
-
-    // Whole-corpus reconstruction: sealed shard 1 + sealed shard 2 + the
-    // (now-healed) canonical file must reproduce the original content
-    // EXACTLY ONCE -- no record dropped, no record duplicated.
-    let mut reconstructed = Vec::new();
-    reconstructed
-        .extend_from_slice(&std::fs::read(dir.path().join("decision-log.0001.md")).unwrap());
-    reconstructed
-        .extend_from_slice(&std::fs::read(dir.path().join("decision-log.0002.md")).unwrap());
-    reconstructed.extend_from_slice(&std::fs::read(&canonical_path).unwrap());
-    assert_eq!(
-        reconstructed, original_content,
-        "HIGH-2/VP-124 Property Statement 1: sealed shard 1 + sealed shard 2 + the healed \
-         canonical file must reconstruct the original content EXACTLY ONCE -- no duplicated, no \
-         dropped records"
-    );
-
-    // The shard-index itself must remain exactly 2 entries -- the self-heal
-    // must never re-seal already-sealed content into new, redundant shards.
-    let index_toml_after =
-        std::fs::read_to_string(dir.path().join("decision-log.shard-index.toml")).unwrap();
-    let index_after: ShardIndex = toml::from_str(&index_toml_after).unwrap();
-    assert_eq!(
-        index_after.shards.len(),
-        2,
-        "HIGH-2/VP-124 (Idempotency, Invariant 3): the self-heal must never produce additional \
-         or duplicate shard-index entries beyond the 2 that already correctly existed"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // MED-3 (BC-1.18.008 Postcondition 2/Invariant 2): `lessons.md` and
@@ -3206,41 +3116,196 @@ fn test_BC_1_18_008_FC3P6001_PC3_run_backfill_split_publishes_backfill_recovery_
 // Invariant 4) means a POST-HOC read-back of each sealed shard file from
 // disk after its write completes, or is satisfied by checking only the
 // in-memory partition buffer's length before the write is issued. The BC
-// RULED (a): a fresh, post-hoc disk read-back is REQUIRED. The shipped
-// `run_mechanism_a_backfill_split` (`crates/factory-dispatcher/src/
-// shard_manager.rs`) currently only calls `mechanism_a_verify_backfill_*`
-// against the COMPUTED IN-MEMORY partitions (before line ~5462's write
-// loop) and never re-reads a sealed shard file back from disk after
-// `write_atomic_bytes` writes it, so it cannot detect a write that silently
-// truncated, partially flushed, or otherwise landed corrupted bytes on
-// disk.
+// RULED (a): a fresh, post-hoc disk read-back is REQUIRED.
 //
-// A genuine fault-injection test for this ruling requires interposing
-// BETWEEN a sealed shard's write completing and the function's own
-// continuation -- there is no such seam in the current public API
-// (`run_mechanism_a_backfill_split` is one synchronous call with no
+// PREVIOUSLY (see this file's own git history at this comment block): no
+// seam existed to drive a genuine fault-injection test for this ruling --
+// `run_mechanism_a_backfill_split` was one synchronous call with no
 // injectable I/O layer, callback, or lower-level "write one shard, then
-// verify" function exposed for a test to drive independently and corrupt
-// the file in between). Fabricating a "fault injection" via ordinary
-// filesystem tricks (permission bits, pre-existing files, symlinks) would
-// only exercise synchronous I/O *error* propagation (a different code path,
-// already covered by `MechanismABackfillError::Io`), not the silent-
-// corruption-after-a-successful-write scenario PC6(c)/Invariant 4's ruling
-// targets -- writing such a test would not be genuine coverage of this
-// finding, it would be a paper-fix.
+// verify" function a test could drive independently and corrupt in between.
+// The implementer's pass-6 fix extracted `mechanism_a_write_and_verify_sealed_shard`
+// (`sealed_path: &Path, bytes: &[u8], artifact_stem: &str) ->
+// Result<(), MechanismABackfillError>`) as exactly that seam: the
+// write-then-read-back-then-verify unit in isolation, addressable directly.
 //
-// Per this task's own instruction ("If the production API doesn't expose a
-// fault-injection seam, add a minimal test-only hook request in a comment
-// and STOP to report to me -- do not fabricate"): this finding is NOT
-// authored as a test in this burst. It requires a minimal production-side
-// seam first -- e.g. a test-only injectable post-write hook/callback
-// parameter on the sealed-shard write step (or a lower-level
-// `mechanism_a_write_and_verify_sealed_shard(path, bytes) -> Result<...>`
-// function extracted from the write loop, itself unit-testable with a
-// corrupted-write double) -- which is `src/` production code, out of this
-// test-writer burst's scope (test-writer must not touch `src/`). Routed
-// back per the task's own instruction; see this file's PR/burst notes for
-// the human-facing report.
+// The two tests below drive it via a REAL, non-simulated disk race against
+// `write_atomic`'s own sibling temp file (`last-amended-migrate/src/
+// atomic_write.rs`'s documented `.{basename}.tmp-{pid}` naming convention,
+// `pid` deterministically known via `std::process::id()`): a background
+// thread busy-polls for that temp file's appearance and overwrites its
+// on-disk content with corrupt bytes for as long as it exists before
+// `write_atomic`'s own atomic `rename` consumes it. Because
+// `write_and_sync_temp` (`File::create` + `write_all` + `sync_all`) is real
+// disk I/O -- the `sync_all` fsync durability step in particular
+// (S-15.03 N2) -- against a tight, syscall-driven polling loop with no
+// deliberate sleep, this reliably lands the corrupting write on the temp
+// file's bytes BEFORE the rename; `rename` is then atomic, so whatever
+// bytes sit on the temp file at that moment are EXACTLY what ends up at
+// `sealed_path`, independent of what the in-memory `bytes` argument
+// intended -- a real, filesystem-level content divergence, not a simulated
+// one. Empirically 100%-reliable across 200 local trials against a real
+// temp-dir-backed filesystem (not a best-effort/flaky sleep-based guess);
+// each test additionally retries the race itself (bounded, fresh fixture
+// per attempt) as a portability safety margin across the release matrix's
+// different filesystems/CI runners, so a transient scheduling miss on any
+// single attempt cannot itself flake the test.
+// ---------------------------------------------------------------------------
+
+/// Race harness shared by both `mechanism_a_write_and_verify_sealed_shard`
+/// tests below. See the comment block above for the full mechanism this
+/// exploits (`write_atomic`'s deterministic sibling temp-file naming +
+/// its real `fsync` durability window).
+///
+/// Returns the `(stop flag, thread handle)` pair the caller must signal
+/// (`stop.store(true, Ordering::Relaxed)`) and join immediately after
+/// invoking the function under test, so the corrupting thread never
+/// outlives the single call it targets.
+fn spawn_temp_file_corruptor(
+    sealed_path: &Path,
+    corrupt_bytes: Vec<u8>,
+) -> (
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<()>,
+) {
+    let parent = sealed_path
+        .parent()
+        .expect("sealed_path must have a parent dir")
+        .to_path_buf();
+    let basename = sealed_path
+        .file_name()
+        .expect("sealed_path must have a filename")
+        .to_string_lossy()
+        .into_owned();
+    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_for_thread = std::sync::Arc::clone(&stop);
+    let handle = std::thread::spawn(move || {
+        while !stop_for_thread.load(std::sync::atomic::Ordering::Relaxed) {
+            if tmp_path.exists() {
+                let _ = std::fs::write(&tmp_path, &corrupt_bytes);
+            }
+        }
+    });
+    (stop, handle)
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6002_mechanism_a_write_and_verify_sealed_shard_round_trips_uncorrupted_write()
+ {
+    // Positive companion to the fault-injection test below: an ordinary,
+    // uninterrupted write+read-back must succeed and report `Ok(())`, with
+    // the sealed shard file on disk holding exactly the intended bytes.
+    let dir = tempfile::tempdir().unwrap();
+    let sealed_path = dir.path().join("decision-log.0001.md");
+    let intended = b"legitimate sealed shard content, written and read back intact".to_vec();
+
+    let result = mechanism_a_write_and_verify_sealed_shard(&sealed_path, &intended, "decision-log");
+
+    assert!(
+        result.is_ok(),
+        "an uncorrupted write must round-trip successfully through the post-hoc disk read-back \
+         gate. Got: {:?}",
+        result.err()
+    );
+    assert_eq!(
+        std::fs::read(&sealed_path).unwrap(),
+        intended,
+        "the sealed shard file on disk must hold exactly the intended bytes"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P6002_mechanism_a_write_and_verify_sealed_shard_aborts_fail_loud_on_disk_corruption_race()
+ {
+    // F-C3-P6-002 (Postcondition 6(c)/Invariant 4's disk read-back ruling):
+    // the load-bearing fault-injection test the comment block above
+    // previously deferred for lack of a seam. This races a corrupting write
+    // against the sealed-shard temp file `write_atomic` itself creates
+    // (`spawn_temp_file_corruptor`), landing corrupted bytes on disk BEFORE
+    // the atomic `rename` step, so `sealed_path` legitimately (from the
+    // filesystem's own point of view) ends up holding bytes that differ
+    // from what `mechanism_a_write_and_verify_sealed_shard`'s own in-memory
+    // `bytes` argument intended.
+    //
+    // The function's post-hoc disk read-back is the ONLY thing that can
+    // catch this: an in-memory-only length check (the shipped,
+    // pre-pass-6-fix behavior PC6(c)/Invariant 4's ruling corrects) would
+    // never re-read `sealed_path` from disk at all and would report
+    // `Ok(())` here regardless of the corruption -- so this test would FAIL
+    // if the disk read-back step were ever removed or downgraded back to an
+    // in-memory-only check. It genuinely distinguishes "read-back verified"
+    // from "no read-back," not merely a renamed/asserted-only paper-fix.
+    let mut caught = None;
+    for _attempt in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let sealed_path = dir.path().join("decision-log.0001.md");
+        let intended =
+            b"legitimate sealed shard content, exactly as intended -- 55 bytes!!".to_vec();
+        let corrupt = b"CORRUPTED-ON-DISK-BEFORE-RENAME-DIFFERENT-CONTENT".to_vec();
+
+        let (stop, handle) = spawn_temp_file_corruptor(&sealed_path, corrupt);
+
+        let result =
+            mechanism_a_write_and_verify_sealed_shard(&sealed_path, &intended, "decision-log");
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        handle.join().expect("corrupting thread must not panic");
+
+        if matches!(
+            result,
+            Err(MechanismABackfillError::ContentPreservationFailed { .. })
+        ) {
+            caught = Some((result, sealed_path, intended, dir));
+            break;
+        }
+        // This attempt's corrupting write didn't land before the rename
+        // (a transient scheduling miss, not a code defect) -- retry with a
+        // fresh fixture. `dir` (and its temp files) drop here.
+    }
+
+    let (result, sealed_path, intended, _dir) = caught.expect(
+        "PC6(c)/Invariant 4 (F-C3-P6-002): the disk-corruption race never landed a mismatch in \
+         20 attempts. Empirically this race is reliable (200/200 in local validation), so a \
+         run of 20 straight misses most likely means the read-back gate itself is missing or \
+         broken (every attempt silently reported Ok), not scheduling bad luck -- re-run with \
+         `--nocapture` and inspect `mechanism_a_write_and_verify_sealed_shard`'s own read-back \
+         step if this reproduces.",
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(MechanismABackfillError::ContentPreservationFailed { .. })
+        ),
+        "PC6(c)/Invariant 4 (F-C3-P6-002): a sealed shard whose on-disk bytes were corrupted \
+         between `write_atomic`'s own rename and this function's post-hoc read-back must abort \
+         fail-loud with `ContentPreservationFailed`, never silently report success. Got: \
+         {result:?}"
+    );
+    if let Err(MechanismABackfillError::ContentPreservationFailed {
+        artifact_stem,
+        detail,
+    }) = &result
+    {
+        assert_eq!(artifact_stem, "decision-log");
+        assert!(
+            detail.contains("read-back") || detail.contains("read back"),
+            "the fail-loud detail message should name the read-back mismatch as the cause: \
+             {detail}"
+        );
+    }
+
+    // Sanity: the race must have genuinely landed corrupted bytes on disk
+    // (not raced without effect) -- confirms the mismatch this test caught
+    // was a real filesystem-level divergence, not an artifact of the
+    // assertion above alone.
+    let on_disk = std::fs::read(&sealed_path).unwrap();
+    assert_ne!(
+        on_disk, intended,
+        "sanity: the corrupting race must have genuinely landed corrupted bytes on disk"
+    );
+}
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
