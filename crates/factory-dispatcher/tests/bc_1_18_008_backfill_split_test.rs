@@ -1136,6 +1136,7 @@ fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publ
                 sealed_at: "2026-01-01T00:00:00Z".to_string(),
                 bytes_at_seal: sealed1.len() as u64,
                 sealed_retroactively: false,
+                oversized_record: false,
             },
             ShardIndexEntry {
                 seq: 2,
@@ -1143,6 +1144,7 @@ fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publ
                 sealed_at: "2026-01-01T00:00:00Z".to_string(),
                 bytes_at_seal: sealed2.len() as u64,
                 sealed_retroactively: false,
+                oversized_record: false,
             },
         ],
     };

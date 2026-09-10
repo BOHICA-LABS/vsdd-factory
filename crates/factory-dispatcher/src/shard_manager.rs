@@ -2188,6 +2188,18 @@ pub struct ShardIndexEntry {
     /// `[[shard]]` index entry produced before Postcondition 7 existed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sealed_retroactively: bool,
+    /// P2-002 (S-25.02 F4 cluster-3 adversarial pass-2, HIGH; BC-1.18.008
+    /// EC-002's own Canonical Test Vector): `true` iff this seal is the
+    /// mechanism-A backfill-split's EC-002 single-oversized-record exception
+    /// -- a record that alone exceeds `shard_cap_bytes`, sealed whole rather
+    /// than split mid-record (`bytes_at_seal` MAY then exceed
+    /// `shard_cap_bytes` for this ONE entry, a documented exception
+    /// distinct from `sealed_retroactively`'s Postcondition 7 exception).
+    /// `#[serde(default)]` -- backward compatible with every `[[shard]]`
+    /// index entry produced before this field existed (mirrors
+    /// `sealed_retroactively`'s own additive-field precedent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oversized_record: bool,
 }
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
@@ -3425,6 +3437,11 @@ pub fn execute_roll(
         sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         bytes_at_seal: content.len() as u64,
         sealed_retroactively,
+        // P2-002 sibling-sweep (TD-VSDD-060): the BC-1.18.006 ongoing
+        // per-write roll mechanism has no mechanism-A backfill-split
+        // record-level concept -- `oversized_record` is exclusively an
+        // EC-002 backfill-split exception (see `run_mechanism_a_backfill_split`).
+        oversized_record: false,
     };
 
     // Step (d).
@@ -3807,6 +3824,9 @@ pub fn self_heal_resume_from_truncate(
         // guarantee), so `bytes_at_seal > shard_cap_bytes` is
         // proof-by-construction that this seal was retroactive.
         sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
+        // P2-002 sibling-sweep (TD-VSDD-060): not the mechanism-A
+        // backfill-split path -- see the roll-mechanism note above.
+        oversized_record: false,
     };
 
     publish_shard_index_update(&index_path, entry, new_entry.clone())
@@ -3925,6 +3945,9 @@ pub fn self_heal_reconcile_missing_index_entries(
             // `bytes_at_seal > shard_cap_bytes` is proof-by-construction of
             // retroactivity (EC-018).
             sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
+            // P2-002 sibling-sweep (TD-VSDD-060): not the mechanism-A
+            // backfill-split path -- see the roll-mechanism note above.
+            oversized_record: false,
         };
         publish_shard_index_update(&index_path, entry, new_entry.clone())
             .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &path))?;
@@ -4803,8 +4826,21 @@ pub fn mechanism_a_partition_for_backfill(
     // up holding the first record, exactly like an oversized cap allowance
     // rather than a cap-accounted record. When `record_boundary_offsets[0]`
     // is already `0` (no preamble), this is a no-op vs. the prior seeding.
+    //
+    // P2-003 (Postcondition 2's per-partition `<= shard_cap_bytes` bound):
+    // `partition_bytes` -- the accumulator that decides when to flush --
+    // must be seeded with those SAME preamble bytes, not just `0`. Every
+    // byte physically folded into the first partition's `bytes` field (the
+    // preamble, per BLOCKER-1 above) must also count toward the cap
+    // decision that governs that partition, or a real leading preamble can
+    // silently push a sealed shard's true on-disk size over
+    // `shard_cap_bytes` while the accounting variable that decided whether
+    // to flush never saw it. Since `partition_start` begins at `0`, the
+    // preamble is exactly `content[0..record_boundary_offsets[0])` --
+    // `record_boundary_offsets[0]` bytes (a no-op when it is already `0`,
+    // i.e. no preamble).
     let mut partition_start = 0usize;
-    let mut partition_bytes: u64 = 0;
+    let mut partition_bytes: u64 = record_boundary_offsets[0] as u64;
     let mut partition_records: usize = 0;
 
     let n = record_boundary_offsets.len();
@@ -4915,9 +4951,10 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
 /// This predicate validates ORDERING and BOUNDS ONLY — it says nothing
 /// about whether `offsets` actually corresponds to `artifact_stem`'s real
 /// record structure (a well-formed-but-wrong offsets list, e.g. one that
-/// silently omits a genuine boundary present in the content, passes this
-/// check trivially). [`run_mechanism_a_backfill_split`] validates this
-/// BEFORE feeding `record_boundary_offsets` into
+/// silently omits a genuine boundary present in the content, OR adds a
+/// spurious extra offset the content's real structure doesn't have, passes
+/// this check trivially either way). [`run_mechanism_a_backfill_split`]
+/// validates this BEFORE feeding `record_boundary_offsets` into
 /// [`mechanism_a_partition_for_backfill`] at all — rejecting a
 /// structurally malformed argument here rather than reaching
 /// [`mechanism_a_partition_for_backfill`]'s own `rec_end - rec_start`
@@ -4927,9 +4964,14 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
 /// [`mechanism_a_partition_for_backfill`]'s own F-003 guard, which reuses
 /// this same predicate). The genuinely-failable, record-integrity-aware
 /// half of the Postcondition 6 hard gate — catching a well-formed offsets
-/// list that is nonetheless WRONG against the content's real structure —
-/// is [`run_mechanism_a_backfill_split`]'s own independent recompute via
-/// [`mechanism_a_record_boundary_offsets`] (F-001), not this predicate.
+/// list that is nonetheless WRONG against the content's real structure, in
+/// EITHER direction (F-001's UNDER-detection, a missing real boundary; or
+/// P2-001's OVER-detection, a spurious extra one) — is
+/// [`run_mechanism_a_backfill_split`]'s own independent recompute via
+/// [`mechanism_a_record_boundary_offsets`], cross-checked by SET EQUALITY
+/// (not just cardinality, and not merely a union) against the
+/// caller-supplied offsets whenever that oracle recognizes any genuine
+/// boundary at all — not this predicate.
 fn record_boundary_offsets_are_well_formed(content_len: usize, offsets: &[usize]) -> bool {
     offsets.windows(2).all(|pair| pair[0] < pair[1])
         && offsets.last().is_some_and(|&last| last < content_len)
@@ -5071,42 +5113,66 @@ pub fn run_mechanism_a_backfill_split(
         entry.shard_cap_bytes,
     );
 
-    // F-001 (BLOCKER, Postcondition 6 load-bearing fix): independently
-    // recompute this artifact's TRUE record boundaries from the just-read
-    // `original_content` via this module's own oracle
-    // (`mechanism_a_record_boundary_offsets`) and fold any genuinely
-    // detected boundary the caller's own `record_boundary_offsets` is
-    // missing into the expected record count below. Without this, both
-    // sides of the Postcondition 6(b) comparison
+    // F-001/P2-001 (BLOCKER/HIGH, Postcondition 6(b) load-bearing fix,
+    // BOTH-DIRECTIONS): independently recompute this artifact's TRUE record
+    // boundaries from the just-read `original_content` via this module's own
+    // oracle (`mechanism_a_record_boundary_offsets`) and require the
+    // caller-supplied `record_boundary_offsets` to match that oracle set
+    // EXACTLY (set equality -- same elements, neither a subset nor a
+    // superset) whenever the oracle independently recognizes ANY genuine
+    // structural boundary at all. Without this, both sides of the
+    // Postcondition 6(b) comparison
     // (`mechanism_a_verify_backfill_record_counts_preserved`, just below)
-    // derived from the SAME caller-supplied `record_boundary_offsets`
-    // value -- `mechanism_a_partition_for_backfill`'s own `record_count`
-    // sum, by construction, always totals exactly
-    // `record_boundary_offsets.len()` too -- so a caller-supplied offsets
-    // list that is well-formed (MED-C's check, above, passes) but SILENTLY
-    // MISSING a real record boundary present in the actual on-disk content
+    // derived from the SAME caller-supplied `record_boundary_offsets` value
+    // -- `mechanism_a_partition_for_backfill`'s own `record_count` sum, by
+    // construction, always totals exactly `record_boundary_offsets.len()`
+    // too -- so a caller-supplied offsets list that is well-formed (MED-C's
+    // check, above, passes) but wrong against the content's real structure
     // would tautologically report "preserved" regardless of how wrong it
-    // was; see this function's own module-level doc comment and the F-001
-    // test for the full mechanism. When the oracle recognizes NO
-    // independently-detectable boundary this artifact_stem/content pair is
-    // missing from the caller's own list (e.g. an artifact_stem this
-    // module has no marker rule for, or a fixture whose synthetic content
-    // does not match any real marker form), this reduces to the ORIGINAL
-    // `record_boundary_offsets.len()` value exactly -- it is only
-    // load-bearing when the module can independently corroborate genuine
-    // structure the caller's offsets missed.
+    // was. A prior fix (F-001) unioned the caller's list with the oracle's,
+    // which catches UNDER-detection (a caller list missing a real boundary)
+    // but is structurally blind to OVER-detection (a caller list that is a
+    // STRICT SUPERSET of the oracle -- every real boundary present, plus one
+    // spurious extra landing mid-record): the union contributes nothing new
+    // in that shape (`|caller ∪ oracle| == |caller|`), so both sides of the
+    // comparison stayed tautologically equal even though the spurious
+    // offset would physically split a real record across two shard files. A
+    // fresh-context adversarial pass-2 review (P2-001) found this gap; see
+    // this function's own module-level doc comment and the F-001/P2-001
+    // tests for the full mechanism. When the oracle recognizes NO
+    // independently-detectable boundary at all for this artifact_stem/
+    // content pair (e.g. an artifact_stem this module has no marker rule
+    // for, or a fixture whose synthetic content does not match any real
+    // marker form), there is nothing for the oracle to corroborate OR
+    // refute against, so the caller-supplied offsets are trusted at face
+    // value -- this reduces to the ORIGINAL `record_boundary_offsets.len()`
+    // value exactly, unchanged from pre-P2-001 behavior for that case.
     let true_boundary_offsets =
         mechanism_a_record_boundary_offsets(&entry.artifact_stem, &original_content);
     let original_record_count = if record_boundary_offsets.is_empty() {
         usize::from(!original_content.is_empty())
+    } else if true_boundary_offsets.is_empty() {
+        record_boundary_offsets.len()
     } else {
-        let mut combined_offsets: Vec<usize> = record_boundary_offsets.to_vec();
-        for offset in true_boundary_offsets {
-            if !combined_offsets.contains(&offset) {
-                combined_offsets.push(offset);
-            }
+        let mut sorted_caller_offsets: Vec<usize> = record_boundary_offsets.to_vec();
+        sorted_caller_offsets.sort_unstable();
+        sorted_caller_offsets.dedup();
+        let mut sorted_true_offsets = true_boundary_offsets;
+        sorted_true_offsets.sort_unstable();
+        if sorted_caller_offsets != sorted_true_offsets {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "record_boundary_offsets {record_boundary_offsets:?} diverges from the \
+                     independently-detected true record boundaries {sorted_true_offsets:?} for \
+                     this artifact's own on-disk content -- every genuine boundary must be \
+                     present and no spurious offset may be added (Postcondition 6(b)/Invariant \
+                     2/EC-004/EC-006 -- catches both UNDER-detection, F-001, and \
+                     OVER-detection, P2-001)"
+                ),
+            });
         }
-        combined_offsets.len()
+        record_boundary_offsets.len()
     };
 
     // AC-014/Postcondition 6 hard gate: mandatory content-preservation and
@@ -5172,6 +5238,11 @@ pub fn run_mechanism_a_backfill_split(
             sealed_at: sealed_at.clone(),
             bytes_at_seal: partition.bytes.len() as u64,
             sealed_retroactively: false,
+            // P2-002 (EC-002 Canonical Test Vector): surface
+            // `mechanism_a_partition_for_backfill`'s own already-computed
+            // `oversized_record` flag through to the published shard-index
+            // entry -- previously computed but silently dropped here.
+            oversized_record: partition.oversized_record,
         });
     }
 
@@ -9240,6 +9311,7 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
+            oversized_record: false,
         };
 
         let index = publish_shard_index_update(&index_path, &entry, new_entry.clone()).expect(
@@ -9274,6 +9346,7 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 40_000,
             sealed_retroactively: false,
+            oversized_record: false,
         };
         publish_shard_index_update(&index_path, &entry, first.clone())
             .expect("first publish must succeed");
@@ -9284,6 +9357,7 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-08T00:00:00Z".to_string(),
             bytes_at_seal: 41_000,
             sealed_retroactively: false,
+            oversized_record: false,
         };
         let index = publish_shard_index_update(&index_path, &entry, second.clone())
             .expect("second publish must succeed");
@@ -9311,6 +9385,7 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
+            oversized_record: false,
         };
 
         let err = publish_shard_index_update(&index_path, &entry, new_entry)
@@ -9470,6 +9545,7 @@ mod bc_1_18_006_roll_tests {
                 sealed_at: "2026-01-01T00:00:00Z".to_string(),
                 bytes_at_seal: 1,
                 sealed_retroactively: false,
+                oversized_record: false,
             }],
         };
         std::fs::write(
@@ -9677,6 +9753,7 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 800,
             sealed_retroactively: false,
+            oversized_record: false,
         };
         publish_shard_index_update(&index_path, &entry, already_indexed)
             .expect("pre-seed the index with the already-correct entry");

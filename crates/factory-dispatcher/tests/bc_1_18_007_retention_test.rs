@@ -82,6 +82,7 @@ fn active_entry(seq: u32, artifact_stem: &str, bytes_at_seal: u64) -> ShardIndex
         sealed_at: "2026-01-01T00:00:00Z".to_string(),
         bytes_at_seal,
         sealed_retroactively: false,
+        oversized_record: false,
     }
 }
 
@@ -96,6 +97,7 @@ fn archived_entry(seq: u32, artifact_stem: &str, bytes_at_seal: u64) -> ShardInd
         sealed_at: "2026-01-01T00:00:00Z".to_string(),
         bytes_at_seal,
         sealed_retroactively: false,
+        oversized_record: false,
     }
 }
 
