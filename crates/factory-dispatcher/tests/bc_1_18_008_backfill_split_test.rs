@@ -3423,3 +3423,403 @@ fn test_BC_1_18_008_FC3P6003_record_boundary_offsets_lessons_h2_id_tag_requires_
          boundaries. Got: {offsets:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-C3-P7-002 (BC-1.18.008 v1.7 Record-Boundary Marker Table, `decision-log.md`
+// row; EC-012): a LOCAL adversarial pass-7 review found the decision-log
+// primary-key regex was still the bare-only `^\| D-[0-9]+ \|` form
+// (`is_decision_log_row_marker`) even though real `decision-log.md` content
+// in both cycles carries two confirmed sub-clause-suffix row shapes:
+// parenthetical suffixes (`| D-440(a) |`, the combined `| D-446(a/b/c/d/e) |`
+// form) and the hyphenated non-parenthetical suffix (`| D-355-AMEND |`). The
+// bare-only regex silently fails to match any of them, under-segmenting the
+// artifact by absorbing each sub-clause row into the PRECEDING record --
+// this test pins the corrected regex,
+// `^\| D-[0-9]+(\([a-z0-9/]+\)|-[A-Za-z]+)? \|`, treating all three forms
+// as boundaries identical in kind to a bare `| D-NNN |` row.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_FC3P7002_EC012_record_boundary_offsets_decision_log_matches_subclause_and_amend_rows()
+ {
+    let row_bare = "| D-100 | a bare decision row | author |\n";
+    let row_paren_single = "| D-440(a) | single-letter sub-clause suffix | author |\n";
+    let row_paren_combined = "| D-446(a/b/c/d/e) | combined sub-clause suffix | author |\n";
+    let row_hyphen_amend = "| D-355-AMEND | hyphenated amend suffix | author |\n";
+    let non_row_no_digits = "| D-something, not a row, continues a multi-line cell...\n";
+    let appendix_heading = "## Appendix: Sub-clause Expansion\n";
+    let appendix_subclause = "### D-440 (F5 pass-60 codification block)\n";
+
+    let content = format!(
+        "# decision-log\n\n\
+         ## Decisions Log\n\n\
+         {row_bare}\
+         {row_paren_single}\
+         {row_paren_combined}\
+         {row_hyphen_amend}\
+         {non_row_no_digits}\n\
+         {appendix_heading}\n\
+         {appendix_subclause}\
+         Sub-clause expansion detail (elided).\n"
+    );
+
+    let offset_bare = content.find(row_bare).unwrap();
+    let offset_paren_single = content.find(row_paren_single).unwrap();
+    let offset_paren_combined = content.find(row_paren_combined).unwrap();
+    let offset_hyphen_amend = content.find(row_hyphen_amend).unwrap();
+    let offset_non_row = content.find(non_row_no_digits).unwrap();
+    let offset_appendix = content.find(appendix_heading).unwrap();
+    let offset_subclause = content.find(appendix_subclause).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("decision-log", content.as_bytes());
+
+    assert_eq!(
+        offsets,
+        vec![
+            offset_bare,
+            offset_paren_single,
+            offset_paren_combined,
+            offset_hyphen_amend
+        ],
+        "EC-012/F-C3-P7-002's corrected primary-key regex \
+         `^\\| D-[0-9]+(\\([a-z0-9/]+\\)|-[A-Za-z]+)? \\|` MUST detect the bare `| D-NNN |` form \
+         AND both confirmed sub-clause-suffix forms -- the parenthetical single-letter suffix \
+         (`| D-440(a) |`), the combined multi-letter parenthetical suffix \
+         (`| D-446(a/b/c/d/e) |`), and the hyphenated non-parenthetical suffix \
+         (`| D-355-AMEND |`) -- as boundaries identical in kind to a bare row. The PRIOR \
+         bare-only regex `^\\| D-[0-9]+ \\|` silently failed to match any of the three suffix \
+         forms, under-segmenting the artifact by absorbing each sub-clause row into the preceding \
+         record (the defect F-C3-P7-002 corrects). Got: {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_non_row)
+            && !offsets.contains(&offset_appendix)
+            && !offsets.contains(&offset_subclause),
+        "the corrected regex must still EXCLUDE a non-row wrapped-prose continuation line (no \
+         digits immediately after the `| D-` prefix), the `## Appendix: Sub-clause Expansion` \
+         section label, and its nested `### D-NNN (...)` Appendix h3 blocks -- none of these are \
+         PRIMARY partition boundaries for decision-log.md. Got: {offsets:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C3-P7-001 (BC-1.18.008 v1.7 Postcondition 5's Manifest-Authoritative
+// Slice-and-Verify Rule; EC-011; Invariant 3): a LOCAL adversarial pass-7
+// review found `heal_or_confirm_already_migrated`'s DANGEROUS-window heal
+// derives its slice offset by SUMMING the shard-index's own per-shard
+// `bytes_at_seal` fields (`index.shards.iter().map(|s| s.bytes_at_seal).sum()`)
+// and writes the resulting slice via `write_atomic_bytes` UNCONDITIONALLY --
+// with no verification against the Backfill Recovery Manifest's own
+// `final_bytes`/`final_sha256` fields at all, and no post-hoc disk read-back
+// of its own write. This is precisely the defect the BC's "Rationale" prose
+// names: a corrupted or stale `bytes_at_seal` value on any sealed shard (or
+// a corrupted Manifest field, or a corrupted on-disk write) silently mis-heals
+// the canonical file with NO check catching it.
+//
+// The corrected behavior (Postcondition 5's Manifest-Authoritative
+// Slice-and-Verify Rule):
+//   1. Derive `offset = original_bytes - final_bytes` from the Manifest
+//      itself, NEVER from summing shard-index `bytes_at_seal` fields.
+//   2. Verify `sliced.len() == final_bytes AND sha256(sliced) == final_sha256`
+//      before writing anything.
+//   3. On success, write via `write_atomic`, then perform a FRESH disk
+//      read-back confirming `(length, SHA-256) == (final_bytes, final_sha256)`
+//      -- the SAME post-hoc disk-read-back discipline
+//      `mechanism_a_write_and_verify_sealed_shard` (F-C3-P6-002) already
+//      gives sealed shard writes. On ANY mismatch at either step 2 or step
+//      3, fail loud with `E-SHD-012` and write nothing (step 2) or surface
+//      the corruption immediately (step 3, since the destructive write
+//      already landed by then).
+// ---------------------------------------------------------------------------
+
+/// Corrupts the on-disk `[backfill_manifest]` table's `final_sha256` value at
+/// `index_path` to a DIFFERENT (still syntactically valid) hex-looking
+/// string, leaving every other manifest field (`original_bytes`,
+/// `original_sha256`, `final_bytes`) untouched and correct -- targets
+/// exactly the failure mode EC-011's own text names: "the Manifest's own
+/// `final_bytes`/`final_sha256` fields are themselves in an inconsistent
+/// state." Reversing the real digest (rather than fabricating an unrelated
+/// one) guarantees a value that is still a same-length string without this
+/// test needing to compute or know the real SHA-256 digest itself.
+fn corrupt_manifest_final_sha256(index_path: &Path) {
+    let text = std::fs::read_to_string(index_path)
+        .expect("the shard-index file must exist after a successful first migration");
+    let key = "final_sha256 = \"";
+    let key_start = text
+        .find(key)
+        .expect("the published shard-index must carry a `final_sha256` field to corrupt");
+    let value_start = key_start + key.len();
+    let value_end = text[value_start..]
+        .find('"')
+        .map(|i| value_start + i)
+        .expect("`final_sha256`'s value must be a quoted TOML string");
+    let original_value = text[value_start..value_end].to_string();
+    let corrupted_value: String = original_value.chars().rev().collect();
+    assert_ne!(
+        corrupted_value, original_value,
+        "sanity: reversing a real SHA-256 hex digest must differ from the original (a palindrome \
+         digest is astronomically unlikely for real content)"
+    );
+    let mut corrupted_text = text;
+    corrupted_text.replace_range(value_start..value_end, &corrupted_value);
+    std::fs::write(index_path, corrupted_text)
+        .expect("writing the corrupted shard-index back to disk must succeed");
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P7001_EC011_run_backfill_split_heal_aborts_e_shd_012_when_manifest_slice_verification_fails()
+ {
+    // The load-bearing EC-011 test: forces a DANGEROUS-window recovery where
+    // the Manifest-derived candidate slice does NOT verify against the
+    // Manifest's own (here, deliberately corrupted) `final_sha256` field --
+    // Postcondition 5 step 2's pre-write gate MUST catch this and abort
+    // loud with `E-SHD-012`, writing nothing. Distinct from EC-010's
+    // `E-SHD-011`: the TOP-LEVEL `(length, hash)` check here still
+    // unambiguously confirms DANGEROUS (canonical bytes exactly match the
+    // manifest's UNCORRUPTED `original_bytes`/`original_sha256` pair) -- the
+    // failure is ONE LEVEL DEEPER, in the slice-verification step itself.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n"); // 37 bytes total
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    let index_path = dir.path().join("session-checkpoints.shard-index.toml");
+    corrupt_manifest_final_sha256(&index_path);
+
+    // Simulate the confirmed DANGEROUS window: canonical bytes still exactly
+    // match the manifest's UNCORRUPTED `original_bytes`/`original_sha256`
+    // pair, as if the prior run's canonical-truncate write never ran.
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+    let err = result.expect_err(
+        "EC-011/Postcondition 5's Manifest-Authoritative Slice-and-Verify Rule: when the derived \
+         slice's SHA-256 does not match the Manifest's own (corrupted) `final_sha256`, the heal \
+         MUST fail loud with `E-SHD-012` and MUST NOT write the unverified slice -- silently \
+         writing a slice that was never confirmed against the Manifest is exactly the class of \
+         defect this amendment closes (the shipped `canonical_bytes[sealed_len..]` write with no \
+         verification at all).",
+    );
+    let err_message = err.to_string();
+    assert!(
+        err_message.contains("E-SHD-012"),
+        "EC-011: the slice-verification-failure disposition must surface the NEW `E-SHD-012` \
+         error code (distinct from EC-010's top-level `E-SHD-011`) -- got: {err_message}"
+    );
+
+    let post = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        post, original_content,
+        "Postcondition 5 step 3: on ANY slice-verification mismatch the heal MUST NOT write \
+         anything to the canonical file -- it must remain exactly as found (the confirmed \
+         DANGEROUS-window original content), pending operator investigation."
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_offset_derived_from_manifest_never_shard_index_bytes_at_seal()
+ {
+    // Positive companion to the EC-011 abort test above, and the direct
+    // regression pin for the BC's own "Rationale" paragraph: a genuine
+    // DANGEROUS window whose Manifest-derived slice DOES verify must still
+    // heal correctly to the manifest-verified final content -- even when
+    // the shard-index's own `bytes_at_seal` field (the PRIOR implementation's
+    // sole offset source, now retired) is corrupted to a wrong value. This
+    // proves the offset is Manifest-derived (`original_bytes - final_bytes`),
+    // never re-derived by summing shard-index `bytes_at_seal` entries.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n"); // 37 bytes total
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    // Corrupt the published shard-index's `bytes_at_seal` field for the one
+    // sealed shard (16 -> 5) -- a LEGACY offset-derivation (summing
+    // `bytes_at_seal` across shards, the exact defect this amendment
+    // retires) would compute a WRONG split point, while the Backfill
+    // Recovery Manifest's own `original_bytes`/`final_bytes`/`*_sha256`
+    // fields remain untouched and correct.
+    let index_path = dir.path().join("session-checkpoints.shard-index.toml");
+    let index_toml = std::fs::read_to_string(&index_path).unwrap();
+    assert!(
+        index_toml.contains("bytes_at_seal = 16"),
+        "fixture assumption: the one sealed shard's `bytes_at_seal` must be 16 pre-corruption. \
+         Got:\n{index_toml}"
+    );
+    let corrupted_index_toml = index_toml.replacen("bytes_at_seal = 16", "bytes_at_seal = 5", 1);
+    std::fs::write(&index_path, &corrupted_index_toml).unwrap();
+
+    // Simulate the confirmed DANGEROUS window.
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let expected_final = original_content[16..].to_vec(); // "A" + "more\n", 21 bytes -- the REAL final partition
+
+    let second = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10).expect(
+        "a re-invocation against the confirmed DANGEROUS window must self-heal correctly even \
+         with a corrupted shard-index `bytes_at_seal` field -- the Manifest, not the shard index, \
+         is the sole authoritative offset source (Invariant 3)",
+    );
+    assert_eq!(
+        second,
+        MechanismABackfillOutcome::Healed { sealed_count: 1 }
+    );
+
+    let healed = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        healed,
+        expected_final,
+        "Postcondition 5's Manifest-Authoritative Slice-and-Verify Rule (F-C3-P7-001): the heal's \
+         slice offset MUST be derived from the Backfill Recovery Manifest's own \
+         `original_bytes - final_bytes` arithmetic, NEVER by summing the shard-index's \
+         `bytes_at_seal` fields -- a corrupted `bytes_at_seal` (5 instead of the real 16) must NOT \
+         perturb the healed result at all. Got {} bytes: {:?}",
+        healed.len(),
+        healed
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_write_receives_disk_read_back_verification() {
+    // v1.7's "Extension to the DANGEROUS-window heal write" (Postcondition
+    // 6, this amendment F-C3-P7-001): the heal's own destructive write to
+    // the canonical file must receive the SAME post-hoc disk read-back
+    // discipline `mechanism_a_write_and_verify_sealed_shard` already gives
+    // sealed shard writes (F-C3-P6-002) -- an in-memory-only confidence that
+    // `write_atomic` succeeded does NOT satisfy this; it cannot detect a
+    // write that silently truncated, partially flushed, or otherwise landed
+    // corrupted bytes on disk, at the exact moment the pre-heal content
+    // becomes irretrievably gone.
+    //
+    // Fault-injection mechanism: this reuses `spawn_temp_file_corruptor` --
+    // the SAME real, non-simulated disk race the F-C3-P6-002 sealed-shard
+    // tests above establish against `write_atomic`'s own deterministic
+    // sibling temp-file naming convention -- this time targeting
+    // `canonical_path` itself, since `heal_or_confirm_already_migrated`'s
+    // own write is a `write_atomic_bytes(canonical_path, ...)` call using
+    // the EXACT SAME underlying `write_atomic` primitive as sealed shard
+    // writes. This IS reachable at the public `run_mechanism_a_backfill_split`
+    // entry point with no source change: re-invoking it against a confirmed
+    // DANGEROUS window exercises the heal path (and therefore the heal's own
+    // write) automatically.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n"); // 37 bytes total
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first, uninterrupted migration over this fixture must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    let expected_final = original_content[16..].to_vec(); // "A" + "more\n", 21 bytes
+    let corrupt = b"CORRUPTED-DURING-HEAL-WRITE-BEFORE-RENAME-DIFFERENT-LENGTH".to_vec();
+
+    let mut caught = None;
+    for _attempt in 0..20 {
+        // Re-arm the confirmed DANGEROUS window fresh for every attempt --
+        // a prior failed attempt may have left corrupted bytes on disk (the
+        // heal's own destructive write already happened by the time its
+        // read-back would catch it), so it must never be reused as the next
+        // attempt's starting state.
+        std::fs::write(&canonical_path, &original_content).unwrap();
+
+        let (stop, handle) = spawn_temp_file_corruptor(&canonical_path, corrupt.clone());
+
+        let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        handle.join().expect("corrupting thread must not panic");
+
+        let on_disk = std::fs::read(&canonical_path).unwrap();
+        if on_disk != expected_final {
+            // The race landed corrupted bytes on disk before the rename --
+            // a real, filesystem-level divergence, independent of whether
+            // this (possibly still-defective) implementation caught it.
+            caught = Some((result, on_disk));
+            break;
+        }
+        // This attempt's corrupting write didn't land before the rename (a
+        // transient scheduling miss, not a code defect) -- retry with a
+        // fresh attempt.
+    }
+
+    let (result, on_disk) = caught.expect(
+        "F-C3-P7-001: the heal-write disk-corruption race never landed a mismatch in 20 attempts \
+         -- re-run with --nocapture and inspect the heal's own write step if this reproduces (the \
+         sealed-shard F-C3-P6-002 race above is empirically 100% reliable across 200 local trials \
+         against the same `write_atomic` primitive).",
+    );
+
+    assert!(
+        result.is_err(),
+        "Postcondition 6(c)/Invariant 4's F-C3-P7-001 extension: the heal's own destructive write \
+         to the canonical file MUST receive a FRESH post-hoc disk read-back confirming \
+         `(length, SHA-256) == (final_bytes, final_sha256)` before reporting the heal complete -- \
+         an in-memory-only confidence in `write_atomic`'s own return value (the current gap this \
+         test pins) cannot detect a write that landed corrupted bytes on disk. Got Ok(_) over \
+         on-disk bytes that do NOT match the manifest-verified final content ({} bytes, expected \
+         {}): {:?}",
+        on_disk.len(),
+        expected_final.len(),
+        on_disk
+    );
+    let err_message = result.unwrap_err().to_string();
+    assert!(
+        err_message.contains("E-SHD-012"),
+        "the heal-write read-back mismatch must surface the E-SHD-012 error code (the SAME code \
+         EC-011's pre-write slice-verification failure uses, since both are hard gates of the \
+         Manifest-Authoritative Slice-and-Verify Rule / its Postcondition 6(c) extension): \
+         {err_message}"
+    );
+    assert_ne!(
+        on_disk, expected_final,
+        "sanity: the corrupting race must have genuinely landed corrupted bytes on disk, not the \
+         correct manifest-verified final content"
+    );
+}
