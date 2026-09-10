@@ -5652,7 +5652,11 @@ pub fn run_mechanism_a_backfill_split(
         let seq = (i + 1) as u32;
         let sealed_filename = format!("{}.{seq:04}.md", entry.artifact_stem);
         let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
-        write_atomic_bytes(&sealed_path, &partition.bytes, &entry.artifact_stem)?;
+        mechanism_a_write_and_verify_sealed_shard(
+            &sealed_path,
+            &partition.bytes,
+            &entry.artifact_stem,
+        )?;
 
         shard_entries.push(ShardIndexEntry {
             seq,
@@ -5990,6 +5994,73 @@ fn write_atomic_bytes(
             source: migrate_err_to_io(e),
         }
     })
+}
+
+/// F-C3-P6-002 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 6(c)'s
+/// disk-read-back ruling, Invariant 4): writes `bytes` to `sealed_path` via
+/// [`write_atomic_bytes`], then performs a POST-HOC READ-BACK of the
+/// JUST-WRITTEN file from disk and verifies the read-back bytes are
+/// byte-for-byte identical to `bytes` — the BC's own ruling text: "'actual
+/// bytes written to disk' means a POST-HOC READ-BACK of each sealed shard
+/// file from disk, via a FRESH file read performed AFTER that shard's
+/// write completes, compared against the in-memory partition buffer that
+/// was intended to be written." Checking only the in-memory buffer's own
+/// length/content before issuing the write (the shipped behavior this
+/// finding corrects) cannot detect a write that silently truncated,
+/// partially flushed, or otherwise landed corrupted bytes on disk — exactly
+/// the failure mode this gate exists to catch BEFORE the original
+/// monolithic file is retired and its content becomes unrecoverable except
+/// via git history. On a read-back mismatch, aborts fail-loud via
+/// [`MechanismABackfillError::ContentPreservationFailed`] — the original
+/// monolithic file is untouched and the operation is safely re-runnable
+/// from scratch (Postcondition 5, EC-003/EC-004), consistent with
+/// Postcondition 6's existing hard-gate discipline.
+///
+/// **The extracted fault-injection seam (`pub`, not a `#[cfg(test)]` hook):**
+/// [`run_mechanism_a_backfill_split`]'s own sealed-shard write loop is one
+/// synchronous call with no injectable I/O layer for a test to interpose
+/// between a shard's write completing and this gate's own read-back — this
+/// function is that seam, extracted as the write-then-read-back-then-verify
+/// unit in isolation, addressable directly by a fault-injection test (e.g.
+/// one that races a corrupting write against `sealed_path` between this
+/// function's own `write_atomic_bytes` call and its read-back) without
+/// needing to fabricate a full `run_mechanism_a_backfill_split` invocation.
+/// A lower-level extracted function was chosen over a test-only injectable
+/// callback parameter threaded through the whole call chain: it keeps
+/// production call sites simple (`mechanism_a_write_and_verify_sealed_shard(path,
+/// bytes, stem)?` reads identically to the `write_atomic_bytes` call it
+/// replaces) and needs no `#[cfg(test)]`-gated parameter on a `pub` function
+/// signature, while still giving a fault-injection test a single, real,
+/// disk-level operation to drive independently.
+pub fn mechanism_a_write_and_verify_sealed_shard(
+    sealed_path: &Path,
+    bytes: &[u8],
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    write_atomic_bytes(sealed_path, bytes, artifact_stem)?;
+
+    let read_back = std::fs::read(sealed_path).map_err(|source| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source,
+    })?;
+
+    if read_back != bytes {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: artifact_stem.to_string(),
+            detail: format!(
+                "post-hoc disk read-back of sealed shard '{}' ({} bytes) does not match the \
+                 in-memory partition that was just written ({} bytes) -- the write silently \
+                 truncated, partially flushed, or otherwise landed corrupted bytes on disk \
+                 (Postcondition 6(c)/Invariant 4's F-C3-P6-002 disk-read-back ruling)",
+                sealed_path.display(),
+                read_back.len(),
+                bytes.len()
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
