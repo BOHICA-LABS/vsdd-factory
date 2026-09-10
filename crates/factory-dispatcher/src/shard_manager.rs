@@ -4987,13 +4987,16 @@ fn is_pass_fix_burst_heading(heading: &[u8]) -> bool {
 }
 
 /// F-007 (BC-1.18.008 Record-Boundary Marker Table, `decision-log.md` row,
-/// MINOR): every byte offset in `content` where a line matches the table's
-/// full `^\| D-[0-9]+ \|` marker regex -- the literal `"| D-"` prefix
-/// followed by one-or-more ASCII digits and a closing `" |"` -- NOT the bare
-/// `"| D-"` prefix alone. The bare-prefix form would misdetect a wrapped
-/// prose table cell that merely happens to START a continuation line with
-/// the literal text `"| D-"` (e.g. `"| D-something, not a row, continues a
-/// multi-line cell..."` with no digits/closing pipe) as a record boundary.
+/// MINOR); regex corrected by F-C3-P7-002 (v1.7, EC-012): every byte offset
+/// in `content` where a line matches the table's full
+/// `^\| D-[0-9]+(\([a-z0-9/]+\)|-[A-Za-z]+)? \|` marker regex -- the literal
+/// `"| D-"` prefix, one-or-more ASCII digits, an OPTIONAL sub-clause suffix
+/// (a parenthesized `([a-z0-9/]+)` form or a hyphenated `-[A-Za-z]+` form),
+/// and a closing `" |"` -- NOT the bare `"| D-"` prefix alone. The
+/// bare-prefix form would misdetect a wrapped prose table cell that merely
+/// happens to START a continuation line with the literal text `"| D-"`
+/// (e.g. `"| D-something, not a row, continues a multi-line cell..."` with
+/// no digits/closing pipe) as a record boundary.
 fn decision_log_record_boundary_offsets(content: &[u8]) -> Vec<usize> {
     line_anchored_marker_offsets(content, b"| D-")
         .into_iter()
@@ -5003,15 +5006,59 @@ fn decision_log_record_boundary_offsets(content: &[u8]) -> Vec<usize> {
 
 /// `true` iff the line starting at `marker_offset` (already confirmed to
 /// start with the literal `"| D-"` prefix by
-/// [`line_anchored_marker_offsets`]) continues with one-or-more ASCII
-/// digits immediately followed by a closing `" |"` -- i.e. the full `^\|
-/// D-[0-9]+ \|` marker regex the Record-Boundary Marker Table specifies for
-/// `decision-log.md`, not the bare prefix alone.
+/// [`line_anchored_marker_offsets`]) matches the full `^\|
+/// D-[0-9]+(\([a-z0-9/]+\)|-[A-Za-z]+)? \|` marker regex the Record-Boundary
+/// Marker Table specifies for `decision-log.md` (v1.7, F-C3-P7-002/EC-012)
+/// -- one-or-more ASCII digits, an OPTIONAL sub-clause suffix
+/// ([`decision_log_subclause_suffix_len`]), then a closing `" |"`. The PRIOR
+/// bare-only form (`^\| D-[0-9]+ \|`, with no optional-suffix clause)
+/// silently failed to match either confirmed suffix form -- the
+/// parenthetical `| D-440(a) |` / combined `| D-446(a/b/c/d/e) |` forms, and
+/// the hyphenated `| D-355-AMEND |` form -- under-segmenting the artifact by
+/// absorbing each sub-clause row into the preceding record (the defect this
+/// amendment corrects).
 fn is_decision_log_row_marker(content: &[u8], marker_offset: usize) -> bool {
     const PREFIX: &[u8] = b"| D-";
     let rest = &content[marker_offset + PREFIX.len()..];
     let digit_len = rest.iter().take_while(|b| b.is_ascii_digit()).count();
-    digit_len > 0 && rest[digit_len..].starts_with(b" |")
+    if digit_len == 0 {
+        return false;
+    }
+    let after_digits = &rest[digit_len..];
+    let suffix_len = decision_log_subclause_suffix_len(after_digits);
+    after_digits[suffix_len..].starts_with(b" |")
+}
+
+/// The optional sub-clause suffix's own byte length at the START of
+/// `after_digits` (`0` if it carries neither confirmed form) -- EITHER a
+/// parenthesized `([a-z0-9/]+)` sub-clause suffix (one-or-more
+/// lowercase-ASCII-letter/digit/`/` bytes between a literal `(` and `)`,
+/// e.g. `(a)` or the combined `(a/b/c/d/e)` form) OR a hyphenated
+/// `-[A-Za-z]+` suffix (one-or-more ASCII-alphabetic bytes after a literal
+/// `-`, e.g. `-AMEND`). A malformed near-match (an empty `()`, an unclosed
+/// paren, or a bare trailing hyphen with no following letters) yields `0`,
+/// deferring to [`is_decision_log_row_marker`]'s own closing-`" |"` check on
+/// the UNCONSUMED bytes -- which then correctly rejects the line as not a
+/// boundary, rather than this helper guessing at a partial match.
+fn decision_log_subclause_suffix_len(after_digits: &[u8]) -> usize {
+    if let Some(inner) = after_digits.strip_prefix(b"(") {
+        let inner_len = inner
+            .iter()
+            .take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || **b == b'/')
+            .count();
+        if inner_len > 0 && inner.get(inner_len) == Some(&b')') {
+            return 1 + inner_len + 1; // '(' + inner + ')'
+        }
+        return 0;
+    }
+    if let Some(inner) = after_digits.strip_prefix(b"-") {
+        let alpha_len = inner.iter().take_while(|b| b.is_ascii_alphabetic()).count();
+        if alpha_len > 0 {
+            return 1 + alpha_len; // '-' + letters
+        }
+        return 0;
+    }
+    0
 }
 
 /// Every byte offset in `content` where `marker` occurs AT THE START OF A
