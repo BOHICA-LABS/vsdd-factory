@@ -1143,6 +1143,8 @@ fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publ
                 bytes_at_seal: sealed1.len() as u64,
                 sealed_retroactively: false,
                 oversized_record: false,
+                is_preamble_shard: false,
+                records: 0,
             },
             ShardIndexEntry {
                 seq: 2,
@@ -1151,6 +1153,8 @@ fn test_BC_1_18_008_HIGH2_run_backfill_split_self_heals_crash_between_index_publ
                 bytes_at_seal: sealed2.len() as u64,
                 sealed_retroactively: false,
                 oversized_record: false,
+                is_preamble_shard: false,
+                records: 0,
             },
         ],
     };

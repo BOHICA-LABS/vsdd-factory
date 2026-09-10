@@ -83,6 +83,8 @@ fn active_entry(seq: u32, artifact_stem: &str, bytes_at_seal: u64) -> ShardIndex
         bytes_at_seal,
         sealed_retroactively: false,
         oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     }
 }
 
@@ -98,6 +100,8 @@ fn archived_entry(seq: u32, artifact_stem: &str, bytes_at_seal: u64) -> ShardInd
         bytes_at_seal,
         sealed_retroactively: false,
         oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     }
 }
 

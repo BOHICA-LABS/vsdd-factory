@@ -2200,6 +2200,42 @@ pub struct ShardIndexEntry {
     /// `sealed_retroactively`'s own additive-field precedent).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub oversized_record: bool,
+    /// P3-001 (S-25.02 F4 cluster-3 adversarial pass-3, HIGH; BC-1.18.008
+    /// v1.4's Leading-Preamble Handling Rule, EC-007/EC-008): `true` iff this
+    /// seal is a **preamble shard** — produced by Postcondition 2's Leading-
+    /// Preamble Handling Rule sealing the artifact's leading preamble (YAML
+    /// frontmatter + title/intro, plus — for `decision-log.md` — its table
+    /// header/separator rows) as its own shard, either because
+    /// `preamble_bytes + first_record_bytes > shard_cap_bytes` (EC-007's
+    /// overflow case, `oversized_record: false`) or because the preamble
+    /// ALONE exceeds `shard_cap_bytes` (EC-008's degenerate case,
+    /// `oversized_record: true`). A preamble shard always carries
+    /// `records: 0`. Distinguishes it from an ordinary record-bearing shard
+    /// for downstream readers (Postcondition 3, Postcondition 4's retention
+    /// composition, Postcondition 6(b)'s record-count accounting) without
+    /// those readers having to re-derive record count from file content.
+    /// `#[serde(default)]` -- backward compatible with every `[[shard]]`
+    /// index entry produced before this field existed (mirrors
+    /// `oversized_record`'s own additive-field precedent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_preamble_shard: bool,
+    /// P3-001 (BC-1.18.008 v1.4 Postcondition 3): this shard's own count of
+    /// whole, native-format domain records
+    /// ([`MechanismABackfillPartition::record_count`], surfaced through to
+    /// the published index) — `0` for a preamble shard (Postcondition 2's
+    /// Leading-Preamble Handling Rule) or for a non-mechanism-A entry (the
+    /// BC-1.18.006 ongoing per-write roll mechanism has no record-level
+    /// concept, mirroring `oversized_record`'s own N/A convention there).
+    /// Always serialized (never `skip_serializing_if`) so a preamble shard's
+    /// `records: 0` is distinguishable, on the wire, from the field being
+    /// absent entirely -- Postcondition 3's own text requires a preamble
+    /// shard's PUBLISHED index entry to carry `records: 0` explicitly, not
+    /// merely default-deserialize to it. `#[serde(default)]` keeps every
+    /// `[[shard]]` index entry produced before this field existed loading
+    /// unchanged (mirrors `oversized_record`'s own additive-field
+    /// precedent).
+    #[serde(default)]
+    pub records: u32,
 }
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
@@ -3437,11 +3473,14 @@ pub fn execute_roll(
         sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         bytes_at_seal: content.len() as u64,
         sealed_retroactively,
-        // P2-002 sibling-sweep (TD-VSDD-060): the BC-1.18.006 ongoing
+        // P2-002/P3-001 sibling-sweep (TD-VSDD-060): the BC-1.18.006 ongoing
         // per-write roll mechanism has no mechanism-A backfill-split
-        // record-level concept -- `oversized_record` is exclusively an
-        // EC-002 backfill-split exception (see `run_mechanism_a_backfill_split`).
+        // record-level concept -- `oversized_record`/`is_preamble_shard` are
+        // exclusively mechanism-A backfill-split concepts (see
+        // `run_mechanism_a_backfill_split`).
         oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     };
 
     // Step (d).
@@ -3824,9 +3863,11 @@ pub fn self_heal_resume_from_truncate(
         // guarantee), so `bytes_at_seal > shard_cap_bytes` is
         // proof-by-construction that this seal was retroactive.
         sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
-        // P2-002 sibling-sweep (TD-VSDD-060): not the mechanism-A
+        // P2-002/P3-001 sibling-sweep (TD-VSDD-060): not the mechanism-A
         // backfill-split path -- see the roll-mechanism note above.
         oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     };
 
     publish_shard_index_update(&index_path, entry, new_entry.clone())
@@ -3945,9 +3986,11 @@ pub fn self_heal_reconcile_missing_index_entries(
             // `bytes_at_seal > shard_cap_bytes` is proof-by-construction of
             // retroactivity (EC-018).
             sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
-            // P2-002 sibling-sweep (TD-VSDD-060): not the mechanism-A
+            // P2-002/P3-001 sibling-sweep (TD-VSDD-060): not the mechanism-A
             // backfill-split path -- see the roll-mechanism note above.
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, entry, new_entry.clone())
             .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &path))?;
@@ -4624,6 +4667,23 @@ pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) 
     }
 }
 
+/// P3-002 (S-25.02 F4 cluster-3 adversarial pass-3, MEDIUM): `true` iff
+/// `artifact_stem` is one of the four KNOWN mechanism-A backfill-split
+/// artifacts this module's own Record-Boundary Marker Table has a rule for
+/// (`decision-log`/`burst-log`/`lessons`/`session-checkpoints`) --
+/// [`mechanism_a_record_boundary_offsets`]'s own match arms, named here
+/// rather than re-derived from its `_ => Vec::new()` fallthrough so
+/// [`run_mechanism_a_backfill_split`] can distinguish "this artifact is
+/// recognized but its content simply has no markers" (trust the caller,
+/// unaffected) from "this artifact_stem has no marker rule at all" (abort
+/// fail-loud, P3-002).
+fn is_known_mechanism_a_artifact_stem(artifact_stem: &str) -> bool {
+    matches!(
+        artifact_stem,
+        "decision-log" | "burst-log" | "lessons" | "session-checkpoints"
+    )
+}
+
 /// The text of the heading line starting at `marker_offset + marker_len`
 /// (i.e. immediately after the record-boundary marker itself), up to but
 /// not including the next `b'\n'` or the end of `content` -- the substring
@@ -4681,6 +4741,25 @@ fn is_lesson_record_heading(heading: &[u8]) -> bool {
     is_id_tagged_lesson_heading(heading)
 }
 
+/// P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): `true` iff
+/// `heading` starts with `prefix` immediately followed by one-or-more ASCII
+/// digits and a closing `")"` — the full `^<prefix>[0-9]+\)` shape the
+/// Record-Boundary Marker Table specifies for `## LESSON (D-NNN)` / `##
+/// RECURRENCE NOTE (D-NNN)`, not the bare `<prefix>` alone. A bare-prefix
+/// `starts_with` check would misdetect `"LESSON (D-foo)"` (non-digit
+/// suffix) or `"LESSON (D-)"` (no suffix at all) — headings that merely
+/// SHARE the marker's own leading substring without matching its full
+/// documented shape — as genuine record boundaries.
+fn is_digit_tagged_paren_marker(heading: &str, prefix: &str) -> bool {
+    let Some(rest) = heading.strip_prefix(prefix) else {
+        return false;
+    };
+    let digit_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    digit_len > 0 && rest[digit_len..].starts_with(')')
+}
+
 /// PC2 Record-Boundary Marker Table (`lessons.md` row), PRIMARY column:
 /// `true` iff `heading` (the text right after a `lessons.md` `## ` marker)
 /// is a GENUINE lesson-record heading — either the `L-EDP1-052`-onward
@@ -4692,8 +4771,8 @@ fn is_lesson_h2_record_heading(heading: &[u8]) -> bool {
         return false;
     };
     is_id_tagged_lesson_heading(heading)
-        || heading.starts_with("LESSON (D-")
-        || heading.starts_with("RECURRENCE NOTE (D-")
+        || is_digit_tagged_paren_marker(heading, "LESSON (D-")
+        || is_digit_tagged_paren_marker(heading, "RECURRENCE NOTE (D-")
 }
 
 /// PC2 Record-Boundary Marker Table (`burst-log.md` row), CONFIRMED
@@ -4719,7 +4798,21 @@ fn is_pass_fix_burst_heading(heading: &[u8]) -> bool {
     if digit_len == 0 {
         return false;
     }
-    rest[digit_len..].starts_with(" Fix Burst")
+    // P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): the marker
+    // table's own regex is `^### Pass-[0-9]+ Fix Burst\b` -- the `\b` word
+    // boundary REQUIRES the character immediately after "Burst" (if any) to
+    // be a non-word character, never another word character continuing the
+    // same word. A bare `starts_with(" Fix Burst")` check would misdetect
+    // `"Pass-39 Fix Bursting"` -- sharing the same leading substring, but
+    // "Bursting" is a DIFFERENT word than "Burst" -- as a genuine
+    // Pass-N-Fix-Burst record.
+    let Some(after_burst) = rest[digit_len..].strip_prefix(" Fix Burst") else {
+        return false;
+    };
+    after_burst
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
 }
 
 /// F-007 (BC-1.18.008 Record-Boundary Marker Table, `decision-log.md` row,
@@ -4818,30 +4911,73 @@ pub fn mechanism_a_partition_for_backfill(
     }
 
     let mut partitions = Vec::new();
-    // BLOCKER-1 (Postcondition 6(a)/Postcondition 2): `partition_start`
-    // begins at byte 0, NOT at `record_boundary_offsets[0]`. A real
-    // artifact's leading preamble (a title/section header before its first
-    // structural record) belongs to no record of its own, but every byte of
-    // it still MUST round-trip -- it is folded into whichever partition ends
-    // up holding the first record, exactly like an oversized cap allowance
-    // rather than a cap-accounted record. When `record_boundary_offsets[0]`
-    // is already `0` (no preamble), this is a no-op vs. the prior seeding.
+    // BLOCKER-1 (Postcondition 6(a)/Postcondition 2), SUPERSEDED by P3-001's
+    // Leading-Preamble Handling Rule (BC-1.18.008 v1.4, F-C3-P3-001): a real
+    // artifact's leading preamble (a title/section header, plus --
+    // decision-log.md only -- the table header/separator rows) belongs to no
+    // record of its own, but every byte of it still MUST round-trip
+    // (Postcondition 6(a)). BLOCKER-1's original fix unconditionally folded
+    // the preamble into whichever partition ends up holding the first
+    // record; a fresh-context adversarial pass-3 review (P3-001, HIGH) found
+    // that fold has no overflow check -- when
+    // `preamble_bytes + first_record_bytes > shard_cap_bytes`, the fold
+    // pushes the FIRST sealed shard over cap without any sanctioning
+    // `oversized_record`/`is_preamble_shard` flag, re-creating exactly the
+    // unsanctioned Postcondition 2 violation Layer 2 exists to eliminate.
     //
-    // P2-003 (Postcondition 2's per-partition `<= shard_cap_bytes` bound):
-    // `partition_bytes` -- the accumulator that decides when to flush --
-    // must be seeded with those SAME preamble bytes, not just `0`. Every
-    // byte physically folded into the first partition's `bytes` field (the
-    // preamble, per BLOCKER-1 above) must also count toward the cap
-    // decision that governs that partition, or a real leading preamble can
-    // silently push a sealed shard's true on-disk size over
-    // `shard_cap_bytes` while the accounting variable that decided whether
-    // to flush never saw it. Since `partition_start` begins at `0`, the
-    // preamble is exactly `content[0..record_boundary_offsets[0])` --
-    // `record_boundary_offsets[0]` bytes (a no-op when it is already `0`,
-    // i.e. no preamble).
-    let mut partition_start = 0usize;
-    let mut partition_bytes: u64 = record_boundary_offsets[0] as u64;
-    let mut partition_records: usize = 0;
+    // The preamble is now resolved ONCE, as a single atomic, indivisible
+    // packing unit, BEFORE record-based greedy packing begins:
+    //   - normal case (`preamble_bytes + first_record_bytes <=
+    //     shard_cap_bytes`): the preamble rides in the SAME shard as the
+    //     first record -- unchanged from BLOCKER-1/P2-003's own behavior
+    //     (P2-003: `partition_bytes` must be seeded with the preamble bytes
+    //     too, so the cap decision governing that first partition actually
+    //     sees them).
+    //   - overflow case (EC-007): preamble alone is under cap, but
+    //     preamble+first-record together are not -- the preamble seals as
+    //     its own zero-record partition (`record_count: 0`,
+    //     `oversized_record: false`; `run_mechanism_a_backfill_split` maps a
+    //     zero-record partition to `is_preamble_shard: true` in the
+    //     published index) before record packing starts fresh.
+    //   - degenerate case (EC-008): the preamble ALONE exceeds cap -- seals
+    //     as its own oversized partition (`record_count: 0`,
+    //     `oversized_record: true`), reusing EC-002's oversized-atomic-unit
+    //     exception rather than a fail-loud abort (content atomicity for an
+    //     indivisible structural unit beats the cap, identically to EC-002).
+    // When `record_boundary_offsets[0]` is already `0` (no preamble at all),
+    // this reduces to the pre-P3-001 seeding exactly (a no-op).
+    let preamble_bytes = record_boundary_offsets[0] as u64;
+    let first_record_end = record_boundary_offsets
+        .get(1)
+        .copied()
+        .unwrap_or(content.len());
+    let first_record_bytes = (first_record_end - record_boundary_offsets[0]) as u64;
+
+    let (mut partition_start, mut partition_bytes, mut partition_records): (usize, u64, usize) =
+        if preamble_bytes == 0 {
+            (0, 0, 0)
+        } else if preamble_bytes > shard_cap_bytes {
+            // EC-008 degenerate case.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[0..record_boundary_offsets[0]].to_vec(),
+                record_count: 0,
+                oversized_record: true,
+            });
+            (record_boundary_offsets[0], 0, 0)
+        } else if preamble_bytes + first_record_bytes > shard_cap_bytes {
+            // EC-007 overflow case.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[0..record_boundary_offsets[0]].to_vec(),
+                record_count: 0,
+                oversized_record: false,
+            });
+            (record_boundary_offsets[0], 0, 0)
+        } else {
+            // Normal case: fold the preamble into the first record's
+            // partition, seeding the cap accumulator with its bytes too
+            // (P2-003).
+            (0, preamble_bytes, 0)
+        };
 
     let n = record_boundary_offsets.len();
     for i in 0..n {
@@ -4941,6 +5077,30 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
         .map(|partition| partition.record_count)
         .sum();
     total == original_record_count
+}
+
+/// BC-1.18.008 Postcondition 6(c)/Invariant 4 (this amendment, F-C3-P3-001):
+/// `true` iff EVERY partition's own byte length is `<= shard_cap_bytes`,
+/// UNLESS that partition is flagged `oversized_record: true` (EC-002's
+/// single-oversized-record exception, or EC-008's degenerate
+/// oversized-preamble exception — this module represents both identically
+/// via `oversized_record: true` on the partition). The THIRD sub-clause of
+/// the SAME mandatory content-preservation verification gate (AC-014),
+/// alongside [`mechanism_a_verify_backfill_content_preserved`] (6(a)) and
+/// [`mechanism_a_verify_backfill_record_counts_preserved`] (6(b)) —
+/// [`run_mechanism_a_backfill_split`] wires this in as a hard, fail-loud
+/// gate BEFORE any durable write occurs, checked explicitly against the
+/// actual computed partition bytes rather than merely implied by the
+/// packer's own behavior (Invariant 4's own text). An unflagged partition
+/// exceeding `shard_cap_bytes` is exactly the unsanctioned Postcondition 2
+/// violation Layer 2 exists to eliminate.
+pub fn mechanism_a_verify_backfill_per_shard_cap_preserved(
+    partitions: &[MechanismABackfillPartition],
+    shard_cap_bytes: u64,
+) -> bool {
+    partitions.iter().all(|partition| {
+        partition.oversized_record || partition.bytes.len() as u64 <= shard_cap_bytes
+    })
 }
 
 /// MED-C: `true` iff `offsets` (a non-empty `record_boundary_offsets` list)
@@ -5141,17 +5301,44 @@ pub fn run_mechanism_a_backfill_split(
     // this function's own module-level doc comment and the F-001/P2-001
     // tests for the full mechanism. When the oracle recognizes NO
     // independently-detectable boundary at all for this artifact_stem/
-    // content pair (e.g. an artifact_stem this module has no marker rule
-    // for, or a fixture whose synthetic content does not match any real
-    // marker form), there is nothing for the oracle to corroborate OR
-    // refute against, so the caller-supplied offsets are trusted at face
-    // value -- this reduces to the ORIGINAL `record_boundary_offsets.len()`
-    // value exactly, unchanged from pre-P2-001 behavior for that case.
+    // content pair, two shapes are possible, and P3-002 (S-25.02 F4
+    // cluster-3 adversarial pass-3, MEDIUM) requires them to be handled
+    // DIFFERENTLY:
+    //   - `artifact_stem` is one of the four KNOWN mechanism-A artifacts
+    //     (`decision-log`/`burst-log`/`lessons`/`session-checkpoints`), but
+    //     THIS particular content simply does not match any real marker
+    //     form (e.g. a synthetic test fixture) -- there is genuinely
+    //     nothing for the oracle to corroborate OR refute against for a
+    //     recognized artifact's own content, so the caller-supplied offsets
+    //     are trusted at face value, unchanged from pre-P3-002 behavior.
+    //   - `artifact_stem` has NO marker rule at all (falls through
+    //     `mechanism_a_record_boundary_offsets`'s own `_ => Vec::new()`
+    //     arm) -- the oracle has nothing to corroborate the caller's claim
+    //     against, full stop, so trusting it at face value is exactly the
+    //     silently-mis-partition outcome Postcondition 2's Normalization
+    //     rule forbids ("If a future cycle introduces a heading form
+    //     outside this enumeration, Postcondition 6's fail-loud
+    //     content-preservation gate MUST reject the backfill run rather
+    //     than silently mis-partition"). This ABORTS fail-loud.
     let true_boundary_offsets =
         mechanism_a_record_boundary_offsets(&entry.artifact_stem, &original_content);
     let original_record_count = if record_boundary_offsets.is_empty() {
         usize::from(!original_content.is_empty())
     } else if true_boundary_offsets.is_empty() {
+        if !is_known_mechanism_a_artifact_stem(&entry.artifact_stem) {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "artifact_stem \"{}\" has no known BC-1.18.008 Record-Boundary Marker Table \
+                     rule at all, so the independently-detected oracle boundary set is empty and \
+                     cannot corroborate the caller-supplied record_boundary_offsets \
+                     {record_boundary_offsets:?} -- per Postcondition 2's Normalization rule, an \
+                     unrecognized artifact's content must never be silently mis-partitioned by \
+                     trusting caller-supplied offsets at face value (P3-002)",
+                    entry.artifact_stem
+                ),
+            });
+        }
         record_boundary_offsets.len()
     } else {
         let mut sorted_caller_offsets: Vec<usize> = record_boundary_offsets.to_vec();
@@ -5191,6 +5378,24 @@ pub fn run_mechanism_a_backfill_split(
             detail: "sum of the computed partitions' record counts does not match the original \
                       record count"
                 .to_string(),
+        });
+    }
+    // Postcondition 6(c)/Invariant 4 (this amendment, F-C3-P3-001): the
+    // THIRD sub-clause of the SAME mandatory content-preservation hard gate
+    // -- every computed partition's own byte length must respect
+    // `shard_cap_bytes`, EXCEPT one flagged `oversized_record: true`
+    // (EC-002/EC-008). Checked against the actual computed partition bytes,
+    // BEFORE any durable write occurs, never merely implied by the packer's
+    // own behavior.
+    if !mechanism_a_verify_backfill_per_shard_cap_preserved(&partitions, entry.shard_cap_bytes) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: format!(
+                "at least one computed partition exceeds shard_cap_bytes ({}) without being \
+                 flagged oversized_record -- this is exactly the unsanctioned Postcondition 2 \
+                 violation Layer 2 exists to eliminate (Postcondition 6(c)/Invariant 4)",
+                entry.shard_cap_bytes
+            ),
         });
     }
 
@@ -5243,6 +5448,18 @@ pub fn run_mechanism_a_backfill_split(
             // `oversized_record` flag through to the published shard-index
             // entry -- previously computed but silently dropped here.
             oversized_record: partition.oversized_record,
+            // P3-001 (Leading-Preamble Handling Rule, Postcondition 3): a
+            // preamble shard is the ONLY partition shape with zero domain
+            // records (every ordinary record-bearing partition has
+            // `record_count >= 1` by construction) -- `record_count == 0`
+            // is therefore a sound, sufficient discriminator for
+            // `is_preamble_shard` without needing a dedicated field on
+            // `MechanismABackfillPartition` itself.
+            is_preamble_shard: partition.record_count == 0,
+            // Postcondition 3: surface this partition's own record count
+            // through to the published index entry -- `0` for a preamble
+            // shard, `>= 1` for an ordinary record-bearing shard.
+            records: partition.record_count as u32,
         });
     }
 
@@ -9312,6 +9529,8 @@ mod bc_1_18_006_roll_tests {
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
 
         let index = publish_shard_index_update(&index_path, &entry, new_entry.clone()).expect(
@@ -9347,6 +9566,8 @@ mod bc_1_18_006_roll_tests {
             bytes_at_seal: 40_000,
             sealed_retroactively: false,
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, &entry, first.clone())
             .expect("first publish must succeed");
@@ -9358,6 +9579,8 @@ mod bc_1_18_006_roll_tests {
             bytes_at_seal: 41_000,
             sealed_retroactively: false,
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         let index = publish_shard_index_update(&index_path, &entry, second.clone())
             .expect("second publish must succeed");
@@ -9386,6 +9609,8 @@ mod bc_1_18_006_roll_tests {
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
 
         let err = publish_shard_index_update(&index_path, &entry, new_entry)
@@ -9546,6 +9771,8 @@ mod bc_1_18_006_roll_tests {
                 bytes_at_seal: 1,
                 sealed_retroactively: false,
                 oversized_record: false,
+                is_preamble_shard: false,
+                records: 0,
             }],
         };
         std::fs::write(
@@ -9754,6 +9981,8 @@ mod bc_1_18_006_roll_tests {
             bytes_at_seal: 800,
             sealed_retroactively: false,
             oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, &entry, already_indexed)
             .expect("pre-seed the index with the already-correct entry");
