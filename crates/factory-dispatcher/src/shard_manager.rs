@@ -4690,6 +4690,17 @@ pub enum MechanismABackfillOutcome {
         sealed_count: u32,
         archived_count: u32,
     },
+    /// F4 BC-cluster-3 adversarial-review finding HIGH-2 (BC-1.18.008
+    /// Postcondition 5, Invariant 3; VP-124 Property Statement 1): this
+    /// re-run landed on the DANGEROUS crash window between a prior run's
+    /// index-publish and canonical-truncate writes (the shard-index already
+    /// fully and correctly accounted for `sealed_count` sealed shards, but
+    /// the canonical file was still holding the complete pre-split
+    /// content). The self-heal completed the interrupted truncation this
+    /// call — never re-sealing any already-sealed content into new,
+    /// redundant shards. Distinct from `AlreadyMigrated` (the SAFE window:
+    /// no gap to heal) and from `Migrated` (a genuinely fresh split).
+    Healed { sealed_count: u32 },
 }
 
 /// BC-1.18.008 Postcondition 1/2/3/4/5/6, Invariant 1/2/3 (AC-013/AC-014):
@@ -4720,6 +4731,8 @@ pub fn run_mechanism_a_backfill_split(
     record_boundary_offsets: &[usize],
     retention_count: u32,
 ) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+
     // Invariant 3: idempotency short-circuit, checked BEFORE any split work
     // or disk read of `canonical_path`'s own content.
     let already_migrated =
@@ -4730,7 +4743,13 @@ pub fn run_mechanism_a_backfill_split(
             },
         )?;
     if already_migrated {
-        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+        // HIGH-2/VP-124: index-existence alone cannot distinguish a fully
+        // committed prior run (SAFE) from a crash landing in the DANGEROUS
+        // gap between this function's own index-publish and
+        // canonical-truncate writes below (see their ordering comment) --
+        // self-heal that gap here rather than silently accepting a
+        // permanent whole-corpus duplication.
+        return heal_or_confirm_already_migrated(entry, canonical_path, &index_path);
     }
 
     let original_content =
@@ -4769,8 +4788,6 @@ pub fn run_mechanism_a_backfill_split(
                 .to_string(),
         });
     }
-
-    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
 
     // EC-016: content already fits within a single partition -- no sealing
     // is structurally necessary. The canonical file is left COMPLETELY
@@ -4835,9 +4852,13 @@ pub fn run_mechanism_a_backfill_split(
     // this SAME operation (Postcondition 3) -- deliberately BEFORE the
     // canonical-file rewrite below. A crash between the two leaves a
     // fully-correct, fully-indexed set of sealed shards with the canonical
-    // file still (harmlessly) holding the complete pre-split content rather
-    // than just the final partition -- self-evident and operator-fixable by
-    // re-running the canonical truncation alone. The alternative ordering
+    // file still (harmlessly, TEMPORARILY) holding the complete pre-split
+    // content rather than just the final partition -- HIGH-2/VP-124:
+    // `heal_or_confirm_already_migrated` (invoked via this function's own
+    // upfront `already_migrated` branch above on the NEXT run) detects
+    // exactly this gap and completes the interrupted truncation itself, so
+    // the "operator-fixable by re-running" property above is genuinely
+    // self-healing, not just self-evident. The alternative ordering
     // (canonical rewritten first) is strictly worse: a crash in ITS gap
     // would leave `mechanism_a_backfill_already_migrated` reporting
     // "not yet migrated" while the canonical file has ALREADY been shrunk
@@ -4855,6 +4876,89 @@ pub fn run_mechanism_a_backfill_split(
     Ok(MechanismABackfillOutcome::Migrated {
         sealed_count,
         archived_count,
+    })
+}
+
+/// F4 BC-cluster-3 adversarial-review finding HIGH-2 (BC-1.18.008
+/// Postcondition 5, Invariant 3; VP-124 Property Statement 1): distinguishes
+/// the SAFE crash window (a prior [`run_mechanism_a_backfill_split`] call
+/// completed in full) from the DANGEROUS one (that call's own index-publish
+/// write landed durably but its canonical-truncate write, immediately
+/// after, did not) — and self-heals the dangerous case.
+///
+/// Detection is structural, not a completion flag: every sealed shard this
+/// artifact's `index` already accounts for is read back and concatenated,
+/// in `seq` order, into `sealed_concat`. In the DANGEROUS window the
+/// canonical file was never truncated, so it still holds the FULL
+/// pre-split content — `sealed_concat` followed by the not-yet-written
+/// final partition's own bytes — i.e. `canonical_bytes` starts with
+/// `sealed_concat` as a strict prefix with bytes left over. In the SAFE
+/// window the canonical file already holds ONLY its own final partition,
+/// which (bar an adversarial coincidence ruled out by this being the
+/// artifact's own structured content, not attacker-controlled) does not
+/// reproduce the full `sealed_concat` prefix.
+///
+/// Healing never re-derives partitions or re-seals any shard — the
+/// shard-index already correctly and completely accounts for the
+/// artifact's pre-existing history (Postcondition 3 already happened); it
+/// only finishes the single interrupted write.
+fn heal_or_confirm_already_migrated(
+    entry: &ShardEntry,
+    canonical_path: &Path,
+    index_path: &Path,
+) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
+    let io_err = |source: io::Error| MechanismABackfillError::Io {
+        artifact_stem: entry.artifact_stem.clone(),
+        source,
+    };
+
+    // `mechanism_a_backfill_already_migrated` (this function's only caller)
+    // just confirmed the index file exists -- a `None` here would mean it
+    // vanished in the interim (a DIFFERENT, worse corruption than the crash
+    // window this function heals), so this surfaces loudly rather than
+    // silently falling back to a fresh migration.
+    let index = load_shard_index(index_path).map_err(io_err)?.ok_or_else(|| {
+        io_err(io::Error::other(format!(
+            "shard-index '{}' reported present by `mechanism_a_backfill_already_migrated` but \
+             vanished before this self-heal check could read it back",
+            index_path.display()
+        )))
+    })?;
+
+    if index.shards.is_empty() {
+        // EC-016: zero-shard registration -- the original run never
+        // rewrote the canonical file at all (nothing was ever sealed), so
+        // there is no interrupted truncation to complete.
+        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+    }
+
+    let mut sealed_concat =
+        Vec::with_capacity(index.shards.iter().map(|s| s.bytes_at_seal as usize).sum());
+    for shard in &index.shards {
+        let sealed_path = shard_sibling_path(canonical_path, &shard.path);
+        let bytes = std::fs::read(&sealed_path).map_err(io_err)?;
+        sealed_concat.extend_from_slice(&bytes);
+    }
+
+    let canonical_bytes = std::fs::read(canonical_path).map_err(io_err)?;
+
+    let is_dangerous_crash_window = canonical_bytes.len() > sealed_concat.len()
+        && canonical_bytes[..sealed_concat.len()] == sealed_concat[..];
+
+    if !is_dangerous_crash_window {
+        // SAFE window: the canonical file no longer reproduces the sealed
+        // shards' own content as its leading prefix -- the prior run's
+        // canonical-truncate write already completed. Nothing to heal.
+        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+    }
+
+    // DANGEROUS window: complete the interrupted Postcondition-5 sequence
+    // by finishing the canonical-truncate write the crash cut short.
+    let healed_tail = canonical_bytes[sealed_concat.len()..].to_vec();
+    write_atomic_bytes(canonical_path, &healed_tail, &entry.artifact_stem)?;
+
+    Ok(MechanismABackfillOutcome::Healed {
+        sealed_count: index.shards.len() as u32,
     })
 }
 
