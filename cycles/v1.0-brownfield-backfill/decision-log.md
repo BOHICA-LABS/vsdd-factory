@@ -9593,3 +9593,147 @@ Refs: D-1197, D-1196, S-25.02, BC-1.18.008 v1.7, F-C3-P7-001, F-C3-P7-002, `915b
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1197 | D-1197-S2502-CLUSTER3-PASS7-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-7 = NOT CLEAN — 1 HIGH + 1 MEDIUM finding.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-7.md`. F-C3-P7-001 (HIGH, data-loss): DANGEROUS-window heal wrote an unverified shard-index-summed slice — root cause a PC5/PC3 spec incoherence (v1.6 PC5 said the heal writes manifest-stored content the length+hash-only Manifest schema cannot supply) — FIXED via product-owner's **BC-1.18.008 v1.6→v1.7** (NEW Manifest-Authoritative Slice-and-Verify Rule in PC5 — offset `original_bytes - final_bytes`, both Manifest-derived, verified before every write, `E-SHD-012` fail-loud on mismatch — + Invariant 3 rewrite + EC-011; same-burst PC6(c)/Invariant 4 heal-write disk-read-back extension) plus implementer's heal rewrite + shared `write_and_read_back` helper. F-C3-P7-002 (MEDIUM): decision-log.md marker-table regex missed real `\| D-NNN(x) \|`/`\| D-NNN-AMEND \|` sub-clause rows (144 engine rows: 109 bare + 34 parenthetical + 1 AMEND) — FIXED via product-owner's corrected regex + EC-012, implementer's `is_decision_log_row_marker` update. architect propagated a FOURTH VP-124 facet (VP-INDEX v3.11→v3.12, verification-architecture.md v1.28→v1.29, verification-coverage-matrix.md v1.26→v1.27, `total_vps` UNCHANGED 141). BC-INDEX v5.79→v5.80; STORY-INDEX v4.456→v4.457 (story v3.7→v3.8, AC-014 updated, EC-052/EC-053 added). Input-hashes reconciled in topological order (BC-1.18.008.md `d136e83`→`dc4b072`; error-taxonomy.md `c5ba1e0`→`cd1a1e6`; story `5af158b`→`8d5f873`); `--check` CLEAN on all touched files. Feature branch `feature/S-25.02-backfill` @ `915b898c` (pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-7 not clean; pass-8 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-8, fresh context, against BC-1.18.008 v1.7/code `915b898c`.** Refs: D-1197, D-1196, S-25.02, BC-1.18.008 v1.7, F-C3-P7-001, F-C3-P7-002, `915b898c`, `b1134954`. STATE.md v10.22→v10.23. | S-25.02 F4 | 2026-09-10 |
+
+## D-1198
+
+**D-1198-S2502-CLUSTER3-PASS8-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1197 (this file, immediately above). D-1198 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-8 = NOT CLEAN — 2 MEDIUM findings** 2026-09-10 (LOCAL Claude adversary + implementer + product-
+owner spec content; state-manager bookkeeping + single-commit TD-VSDD-053) — 2 MEDIUM (F-C3-P8-001,
+`E-SHD-012` taxonomy Message Format documentation drift vs the shipped `Display`, the 4th recurrence
+of this defect class in the cluster; F-C3-P8-002, the happy-path canonical-truncate write lacked the
+post-hoc disk read-back the DANGEROUS-window heal write already requires — an unsanctioned asymmetry
+with a latent silent-data-loss consequence), BOTH fixed this burst. **This is a LOCAL Claude
+adversary pass** — human directed drive-to-3-CLEAN continues using LOCAL adversary only, no further
+cross-vendor rotation unless the human specifies. Full Part A persisted as a standalone artifact,
+matching pass-1..7's own convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-8.md` (`diff_base=915b898c`,
+`diff_head=915b898c`).
+
+**F-C3-P8-001 (MEDIUM, doc-only):** `error-taxonomy.md`'s `E-SHD-012` row documented a single fixed
+structured Message Format; the shipped `MechanismABackfillError::SliceVerificationFailed` `Display`
+instead emits a `{detail}`-placeholder form covering FIVE distinct detail shapes (manifest-
+inconsistency `checked_sub` underflow, `usize` offset-arithmetic overflow, offset-exceeds-canonical-
+length, the pre-write slice mismatch the row previously documented as if it were the only case, and a
+post-hoc read-back mismatch after the heal's write already completed). This is the **4th recurrence**
+of the taxonomy-drift-vs-shipped-`Display` defect class in this cluster, following prior occurrences
+on `E-SHD-008`/`E-SHD-009` (cluster-2 pass-9, F-C2-P9-002) and this cluster's own earlier taxonomy
+corrections. Companion observation folded into the same disposition: `E-SHD-011`'s row also
+documented only its top-level three-way `(length, hash)` mismatch form; `MechanismABackfillError::
+MissingBackfillManifest` emits a SECOND, distinct message under the SAME code (a durable shard-index
+with no `[backfill_manifest]` table — e.g. a pre-v1.6 shard-index) that the row never documented.
+BC-1.18.008 v1.7 Invariant 3(c) already sanctions reusing `E-SHD-011` for this precondition-failure
+case, so this is a taxonomy completeness gap, not a code defect, and no new code was allocated.
+**FIXED, DOC-ONLY:** product-owner corrected `E-SHD-012`'s Message Format cell to the
+`{detail}`-placeholder form (all five shapes enumerated, noting cases (1)-(4) leave the canonical
+file untouched while case (5) does not) and completed `E-SHD-011`'s row to document both real
+emissions as forms (a) and (b). `prd-supplements/error-taxonomy.md` v1.11→v1.12.
+
+**F-C3-P8-002 (MEDIUM, spec-internal asymmetry + latent silent-data-loss):** Postcondition 6(c)/
+Invariant 4 already mandate a post-hoc disk read-back for every sealed-shard write (F-C3-P6-002), and
+pass-7's F-C3-P7-001 fix already extends that requirement to the DANGEROUS-window heal write, on the
+rationale that the heal write "permanently replaces the canonical file's content at the moment the
+pre-heal content is irretrievably gone." That rationale applies IDENTICALLY to the happy-path
+canonical-truncate write in Postcondition 5 step (ii) — the ORDINARY, first-time/uninterrupted
+`write_atomic` that discards the original monolithic file's content in the same act the final
+partition's bytes become the canonical file's only copy — but the spec text enumerated only the
+DANGEROUS-window heal for this discipline. The more-frequently-executed path (every uninterrupted
+migration run, not merely its crash-recovery counterpart) was therefore LESS verified than the path
+that exists specifically to recover from ITS OWN failure — a silent truncation or corruption of the
+happy-path write would go undetected at migration time, discovered (if at all) only after the
+original monolithic content is already gone, recoverable only from git history. **FIXED:**
+product-owner amended **BC-1.18.008 v1.7→v1.8** — added an **Extension to the happy-path
+canonical-truncate write** paragraph to Postcondition 6(c), requiring the SAME fresh post-hoc disk
+read-back (verified against the SAME Backfill Recovery Manifest `(final_bytes, final_sha256)` pair
+already published in step (i), so no new value needs computing) BEFORE the migration reports success;
+a mismatch fails loud with **NEW `E-SHD-013`**. Added a **Summary** paragraph naming all three
+destructive-write sites (sealed shard / heal / happy-path canonical) now under the same discipline,
+and a **NEW Invariant 5** generalizing the principle once: no destructive write of this BC's one-time
+migration is ever trusted on its own return value alone. Added EC-013 (happy-path write silently
+corrupted on disk, detected via read-back, fails loud `E-SHD-013`, with a follow-on note that a
+subsequent recovery attempt correctly reports the AMBIGUOUS `E-SHD-011` disposition rather than
+silently accepting the corruption) and a matching Canonical Test Vector. `error-taxonomy.md`
+v1.11→v1.12 gained `E-SHD-013` in the SAME burst (folded into F-C3-P8-001's taxonomy pass). Added
+VP-124's FIFTH facet (happy-path canonical-write verification invariant) — VP citation change routed
+to architect per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9). implementer routed the
+happy-path write through the SAME shared `write_and_read_back` helper F-C3-P7-001 extracted, verifying
+`(length, sha256)` against the shard-index's already-published `[backfill_manifest]` `(final_bytes,
+final_sha256)` and surfacing the NEW `E-SHD-013` variant (`CanonicalWriteVerificationFailed`,
+mirroring `SliceVerificationFailed`'s shape) on mismatch — all THREE destructive write sites this BC
+specifies are now independently read-back-guarded via one shared helper, **completing the class of
+findings progressively closed across passes 6, 7, and 8.**
+
+**Propagation:** architect propagated a FIFTH VP-124 facet (happy-path canonical-write verification
+invariant, per POLICY 9 `vp_index_is_vp_catalog_source_of_truth`, per BC-1.18.008 v1.8's own routing
+note): VP-INDEX v3.12→v3.13 (`total_vps` UNCHANGED 141), verification-architecture.md v1.29→v1.30,
+verification-coverage-matrix.md v1.27→v1.28 — architect already ran `compute-input-hash --update` on
+both arch docs same-burst (`f52e536`). story-writer's S-25.02 body v3.8→v3.9: AC-014 updated in place
+(trace citation widened to add `invariant 5`) with a new Happy-path canonical-write disk read-back
+paragraph mirroring the existing Heal-write disk read-back paragraph, and a closing Invariant 5
+paragraph; §Edge Cases gained EC-054 (mirrors BC EC-013); §Behavioral Contracts BC-1.18.008 cell
+v1.7→v1.8; §Token Budget BC-1.18.008 line 7,300→7,700 tokens. BC-INDEX v5.80→v5.81 (BC-1.18.008
+version-cell v1.7→v1.8 per POLICY 8); STORY-INDEX v4.457→v4.458 (S-25.02 BC-list cell + row
+narrative).
+
+**Input-hash reconciliation (dependency-ordered, per D-1196's own process observation):**
+BC-1.18.008.md declares VP-INDEX.md as an input (architect's VP-124 fifth-facet extension changed
+it) — recomputed first, `dc4b072`→`9182c9a`. `prd-supplements/error-taxonomy.md` declares
+BC-1.18.008.md as an input — recomputed second, AFTER BC-1.18.008.md settled, `cd1a1e6`→`f5ba001`.
+The S-25.02 story declares both BC-1.18.008.md and error-taxonomy.md as inputs — recomputed
+third/last, after both settled, `8d5f873`→`5eb344f`. `--check` CLEAN on all three
+post-reconciliation, plus BC-1.18.008.md, verification-architecture.md, and
+verification-coverage-matrix.md (both arch docs already current at `f52e536`, architect's own
+same-burst update).
+
+**BC-5.45.001 write-path regression closed (this burst, discovered incidentally while preparing this
+commit):** running the mandatory `last-amended-migrate migrate --check` pre-push guard across the 5
+BC-5.45.001-governed files (STORY-INDEX.md, BC-INDEX.md, ARCH-INDEX.md, VP-INDEX.md, STATE.md) found
+3 files out of shape, none introduced this burst: **VP-INDEX.md** had grown a `PriorChainSplit`
+defect — architect's own v3.13 edit (this burst, POLICY 9 propagation) wrapped its new `last_amended`
+narrative around an ALREADY-PRESENT inline `[Prior: v3.12 ...[Prior: v3.11 ...[Prior: v3.10 ...]]]`
+chain inherited from at least the pass-6/pass-7 bursts, which had not been caught by either of those
+prior state-manager bursts. FIXED via the sanctioned full-recovery split:
+`last-amended-migrate migrate --path .factory/specs/verification-properties/VP-INDEX.md` (PC7,
+`entries_relocated=2` — the v3.12 and v3.11 chain entries relocated into `changelog:`, current v3.13
+entry left as the sole `last_amended` value). **BC-INDEX.md** carried a D-1144 unescaped-`\|`
+escape defect in its (then-current) v5.80 `last_amended` value (the F-C3-P7-002 regex citation's
+literal `\|` characters were not YAML-escaped as `\\|`) — auto-fixed via the same tool
+(`escape_fixed=true`). **BC-INDEX.md** additionally carried a pre-existing, unrelated, much older
+(2026-05-12-era, pass-50 fix burst) malformed-YAML defect in its `changelog:` array: a missing
+`- date: 2026-05-12` list-item marker immediately ahead of the `v1.93` entry, which had silently
+merged that entry's `change:` key into the PRECEDING (`v1.94`) list item as a duplicate mapping key —
+this defect blocked `last-amended-migrate` from validating/writing the file at all
+(`duplicate entry with key "change" at line 409 column 5`). Per the CLAUDE.md production-grade
+default (a 1-line, unambiguous, mechanical YAML-structure fix, discovered while touching this exact
+file this burst), FIXED IN-SCOPE via a targeted Edit restoring the missing `- date:` marker, BEFORE
+re-running the tool. **STATE.md** carried its own D-1144 unescaped-`\|` escape defect in its
+then-current `last_amended` value — auto-fixed via the same tool (`escape_fixed=true`;
+`changelog=SkippedStateFile`, no chain — STATE.md's own `last_amended` was never chained). Post-fix:
+`last-amended-migrate migrate --check` reports CLEAN (exit 0) across all 5 governed files.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `8e2a37f4` (implementer's F-C3-P8-002 fix,
+immediately after `915b898c`, pushed to origin): full `cargo test --workspace --all-targets` suite
+green; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings`
+clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-8 NOT CLEAN — 2 MEDIUM, BOTH
+fixed/disposed same-pass; pass-9 next, fresh context, continuing the human-authorized full 3-CLEAN
+drive with LOCAL adversary only unless the human specifies otherwise; cycle-level 3/3 CONVERGED
+streak UNCHANGED). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade,
+not a cycle-level adversary pass). `pipeline:` stays **PAUSED** (mid-convergence fix burst;
+consistent with prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-9, fresh context, against BC-1.18.008 v1.8 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `8e2a37f4` — continuing the human-authorized full 3-CLEAN
+drive with LOCAL adversary only, no further cross-vendor rotation unless the human specifies.**
+
+Refs: D-1198, D-1197, S-25.02, BC-1.18.008 v1.8, F-C3-P8-001, F-C3-P8-002, `8e2a37f4`, `915b898c`,
+`9182c9a`, `f5ba001`, `5eb344f`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1198 | D-1198-S2502-CLUSTER3-PASS8-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-8 = NOT CLEAN — 2 MEDIUM findings.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-8.md`. F-C3-P8-001 (MEDIUM, doc-only): `E-SHD-012` taxonomy Message Format cell documented a fixed structured wording; shipped `Display` emits a `{detail}`-placeholder form (5 detail shapes) — 4th recurrence of the taxonomy-drift-vs-shipped-Display class in the cluster — FIXED via product-owner's corrected cell + completed `E-SHD-011` row (2nd real emission, `MissingBackfillManifest`, sanctioned reuse per BC-1.18.008 v1.7 Invariant 3(c)). F-C3-P8-002 (MEDIUM): the happy-path canonical-truncate write lacked the post-hoc disk read-back the DANGEROUS-window heal write gained at pass-7 — an unsanctioned asymmetry with a latent silent-data-loss consequence — FIXED via product-owner's **BC-1.18.008 v1.7→v1.8** (NEW Postcondition 6(c) happy-path read-back extension, NEW Invariant 5 generalizing the discipline across all three destructive write sites, NEW EC-013, NEW `E-SHD-013`) plus implementer's `write_and_read_back`-routed happy-path write — all THREE destructive write sites (sealed-shard/heal/happy-path canonical) now independently read-back-guarded via one shared helper, completing the class passes 6-8 progressively closed. `error-taxonomy.md` v1.11→v1.12 (E-SHD-013 added; E-SHD-012/E-SHD-011 cells corrected/completed). architect propagated a FIFTH VP-124 facet (VP-INDEX v3.12→v3.13, verification-architecture.md v1.29→v1.30, verification-coverage-matrix.md v1.27→v1.28, `total_vps` UNCHANGED 141). BC-INDEX v5.80→v5.81; STORY-INDEX v4.457→v4.458 (story v3.8→v3.9, AC-014 updated [trace widened to invariant 5], EC-054 added). Input-hashes reconciled in topological order (BC-1.18.008.md `dc4b072`→`9182c9a`; error-taxonomy.md `cd1a1e6`→`f5ba001`; story `8d5f873`→`5eb344f`); `--check` CLEAN on all touched files, plus verification-architecture.md/verification-coverage-matrix.md (architect's own same-burst update, `f52e536`). This burst ALSO closed a pre-existing multi-burst BC-5.45.001 write-path regression discovered on the 5 governed files: VP-INDEX.md's `last_amended` had grown an inline `[Prior: ...]` chain (2 entries relocated to `changelog:` via the sanctioned `last-amended-migrate` full-recovery split, PC7); BC-INDEX.md and STATE.md each carried an unescaped-`\|` D-1144 escape defect (both auto-fixed by the same tool); BC-INDEX.md additionally carried a pre-existing (2026-05-12-era) malformed-YAML duplicate-key defect (a missing `- date:` list-item marker ahead of its `v1.93` entry) — fixed in-scope (1-line mechanical correction) before the tool could validate/write the file. `last-amended-migrate migrate --check` now CLEAN (exit 0) across all 5 governed files. Feature branch `feature/S-25.02-backfill` @ `8e2a37f4` (pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-8 not clean; pass-9 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-9, fresh context, against BC-1.18.008 v1.8/code `8e2a37f4`.** Refs: D-1198, D-1197, S-25.02, BC-1.18.008 v1.8, F-C3-P8-001, F-C3-P8-002, `8e2a37f4`, `915b898c`. STATE.md v10.23→v10.24. | S-25.02 F4 | 2026-09-10 |

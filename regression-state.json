@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-10T21:23:38Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && cargo test -p factory-dispatcher --all-targets 2>&1 | grep -E \"FAILED|error\\[|^error:\" ; echo \"grep exit: $?\""}
+{"status":"pass","timestamp":"2026-09-10T22:12:45Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && cargo test -p factory-dispatcher --all-targets 2>&1 | grep -E \"FAILED|error\\[|test result:|running [0-9]+ tests|^error\" "}
