@@ -8890,3 +8890,103 @@ BC-INDEX v5.76, STORY-INDEX v4.453.
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1191 | D-1191-S2502-CLUSTER3-PASS1-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-1 = NOT CLEAN — 1 BLOCKER (F-C3-P1-001) + 1 HIGH (F-C3-P1-002) + 3 MEDIUM (F-C3-P1-003/004/005) + 1 additional MEDIUM-labeled scope-boundary item (F-C3-P1-006) + 1 MINOR (F-C3-P1-007) + 1 ADVISORY (F-C3-P1-008).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-1.md` (standalone artifact, closing the gap that lost the prior unpersisted `adv-cluster3-p1` attempt). F-C3-P1-001 (BLOCKER): PC6(b) tautological content-preservation gate replaced with an independent byte-identity check. F-C3-P1-002 (HIGH): `is_checkpoint_record_heading` case-sensitive-broken heuristic DELETED — product-owner ADJUDICATED REVERT-TO-ANY-H2 (no spec change, the BC's marker-table row was already correct). F-C3-P1-003 (MEDIUM): panic guard added (`E-SHD-003`). F-C3-P1-004 (MEDIUM): BC-1.18.008 **v1.2→v1.3** (`03b9c1bc`) — PC2's `ceil()` reframed as a LOWER BOUND, deterministic greedy boundary-preserving packing procedure specified, PC4 reworded to a lower-bound inequality, 3 CTVs corrected. F-C3-P1-005 (MEDIUM): stale test doc comment fixed. F-C3-P1-006 (MEDIUM): no production caller for the backfill-split — HUMAN-ADJUDICATED DEFERRED to **T-12** (Cohort-B-flip capstone), not an in-scope fix, recorded as a Drift Item. F-C3-P1-007 (MINOR): stray marker removed. F-C3-P1-008 (ADVISORY): folded into F-C3-P1-002. This burst ALSO closes the decision-log.md SoT gap (D-1185..D-1189 backfilled immediately above) and formalizes it as a Drift Items table row. Feature branch `feature/S-25.02-backfill` @ `41c81fc4` (pushed); `bc_1_18_008` 30/30 green, fmt+clippy clean. BC-INDEX v5.75→v5.76; STORY-INDEX v4.452→v4.453 (story v3.3→v3.4); input-hashes CLEAN (story `3619d63`→`e47d034`; BC-1.18.008.md CONFIRMED CURRENT). BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-1 not clean; pass-2 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-2, fresh context, against BC-1.18.008 v1.3/code `41c81fc4`.** Refs: D-1191, D-1190, D-1189, S-25.02, BC-1.18.008 v1.3, F-C3-P1-001..008, `03b9c1bc`, `41c81fc4`. STATE.md v10.16→v10.17. | S-25.02 F4 | 2026-09-10 |
+
+## D-1192
+
+**D-1192-S2502-CLUSTER3-PASS2-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1191 (this file, immediately above). D-1192 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-2 = NOT CLEAN** 2026-09-10 (fresh-context adversary + implementer + test-writer code-side
+content; state-manager bookkeeping + single-commit TD-VSDD-053) — 2 HIGH (F-C3-P2-001,
+F-C3-P2-002) + 2 MEDIUM (F-C3-P2-003, F-C3-P2-004) + 3 non-blocking observations (O-C3-P2-001,
+O-C3-P2-002, O-C3-P2-003). Full Part A persisted as a standalone artifact, matching pass-1's own
+convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-2.md` (`diff_base=41c81fc4`,
+`diff_head=5d195519`).
+
+**F-C3-P2-001 (HIGH):** the PC6(b) content-preservation gate fixed at pass-1 (F-C3-P1-001) replaced
+the original tautological gate with an independent recompute, but implemented the cross-check as a
+UNION of the caller-supplied offsets and the oracle's own detected boundaries, compared by
+cardinality only — structurally blind to over-detection (a caller offsets list that is a strict
+superset of the true boundaries contributes nothing new to a union, so `|caller ∪ oracle| ==
+|caller|` even though a spurious extra offset would physically split a real record across two
+shard files) and separately vulnerable to a same-count swap. FIXED (implementer, `5d195519`): the
+gate now performs an oracle SET-EQUALITY cross-check (sorted, deduplicated caller offsets must
+exactly match the independently-recomputed true boundary set whenever the oracle recognizes any
+boundary at all), catching under-, over-, and same-count-swap mis-detection uniformly, with an
+explicit `MechanismABackfillError::ContentPreservationFailed` detail message citing both failure
+directions. RED fixtures added (`3bdf83f7`) for strict-superset over-detection and
+same-count-swap; both fail pre-fix, pass post-fix.
+
+**F-C3-P2-002 (HIGH):** BC-1.18.008 EC-002's single-oversized-record exception flag was computed
+per-partition by `mechanism_a_partition_for_backfill` but silently dropped at shard-index
+publication — `ShardIndexEntry` had no field to carry it, so no downstream reader of the
+shard-index could distinguish a legitimate EC-002 exception from a cap-accounting bug without
+re-deriving it against the source content. FIXED (implementer, `5d195519`): added `pub
+oversized_record: bool` to `ShardIndexEntry` (`#[serde(default, skip_serializing_if =
+"std::ops::Not::not")]`, mirroring `sealed_retroactively`'s additive-compatibility precedent),
+populated from `partition.oversized_record` at `run_mechanism_a_backfill_split`'s publication
+site. TD-VSDD-060 sibling-swept across every other `ShardIndexEntry` construction site
+(`execute_roll`, `self_heal_resume_from_truncate`, `self_heal_reconcile_missing_index_entries`,
+and all in-module test fixtures) — each explicitly set `oversized_record: false` with a scope-note
+comment, since none of those call sites is a backfill-split partition.
+
+**F-C3-P2-003 (MEDIUM):** BLOCKER-1's pre-pass-1 fix folded leading preamble bytes into the first
+partition's `bytes` accumulator, but the separate `partition_bytes` accumulator that the
+Postcondition 2 cap decision actually reads was still seeded at `0` — a real leading preamble could
+be physically written into the first partition while never counting toward the cap-flush decision,
+silently allowing an over-cap shard. FIXED (implementer, `5d195519`): `partition_bytes` now seeded
+with `record_boundary_offsets[0] as u64` (the exact preamble length), matching BLOCKER-1's `bytes`
+seeding; no-op when there is no preamble.
+
+**F-C3-P2-004 (MEDIUM):** the test-module header for the `bc_1_18_008_backfill_split_test.rs` suite
+still described the F-001/F-002 fixtures in transient "expected to fail pre-fix" framing, stale
+since pass-1's fixes (`41c81fc4`) landed — misleading to a reader encountering the module in
+isolation. This is the SECOND occurrence of a transient-status-in-a-doc-comment defect in this
+cluster's own cascade (the first, F-C3-P1-005 at pass-1, described a withdrawn `ceil()` framing in
+the same module). FIXED (test-writer, `3bdf83f7`): header rewritten to status-neutral prose,
+describing what each fixture verifies by BC/EC/finding-ID citation rather than a transient
+pass/fail expectation tied to a specific commit's state. **[process-watch]** recorded in STATE.md
+Drift Items: if this class recurs a 3rd time, it crosses the BC-5.39.001 3×-recurrence threshold
+and MUST be codified as a process-gap (test-writer agent-prompt amendment for status-neutral test
+headers).
+
+**Observations (non-blocking, no in-scope action):** O-C3-P2-001 — the original PC6(b)
+content-preservation (byte-identity) check is tautological in isolation once F-C3-P2-001's
+set-equality check also runs, but the two are intentional defense-in-depth against independent
+failure modes (boundary-list divergence vs. a downstream partitioning bug), not a defect.
+O-C3-P2-002 — a preamble-only, zero-record shard is an untested edge case for the partitioning
+path; not reachable against the 4 real target artifacts, flagged for a future pass. O-C3-P2-003
+(SPEC-WORDING) — BC-1.18.008 Postcondition 2's normalization clause (a) reads as if "any `^## `
+h2" applies uniformly to all 4 target artifacts including `decision-log.md`, though the shipped
+code correctly keys `decision-log.md`'s own record boundaries on `^\| D-[0-9]+ \|` per the BC's own
+marker-table elsewhere — the code is correct, the clause (a) prose is loosely worded. Recorded as a
+Drift Item (SPEC-HYGIENE), anchored to the next BC-1.18.008 spec touch (product-owner); NOT fixed
+this burst (no spec amendment this pass — a non-blocking wording tightening, not a defect).
+
+No BC/story/VP/index content change this burst — BC-1.18.008 stays v1.3, BC-1.18.007 stays v1.2,
+S-25.02 story stays v3.4, input-hashes CONFIRMED UNCHANGED (BC-1.18.008.md `a68be55`; story
+`e47d034`); BC-INDEX v5.76 / STORY-INDEX v4.453 / VP-INDEX v3.09 / ARCH-INDEX v4.24 all UNCHANGED.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `5d195519` (pushed to origin): `bc_1_18_008`
+suite 34/34 passed; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D
+warnings` clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-2 not clean; pass-3 next,
+fresh context; cycle-level 3/3 CONVERGED streak UNCHANGED — separate track). No trajectory-tail
+drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass).
+`pipeline:` stays **PAUSED** (mid-convergence fix burst; consistent with prior cluster fix-burst
+state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-3, fresh context, against BC-1.18.008 v1.3 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `5d195519`.**
+
+Refs: D-1192, D-1191, S-25.02, BC-1.18.008 v1.3, F-C3-P2-001..004, O-C3-P2-001..003, `3bdf83f7`,
+`5d195519`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1192 | D-1192-S2502-CLUSTER3-PASS2-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-2 = NOT CLEAN — 2 HIGH (F-C3-P2-001, F-C3-P2-002) + 2 MEDIUM (F-C3-P2-003, F-C3-P2-004) + 3 non-blocking observations (O-C3-P2-001..003).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-2.md`. F-C3-P2-001 (HIGH): PC6(b) gate's pass-1 union cross-check was blind to over-detection/same-count-swap — replaced with an oracle SET-EQUALITY cross-check. F-C3-P2-002 (HIGH): EC-002's `oversized_record` flag was computed but dropped at shard-index publication — added `oversized_record: bool` to `ShardIndexEntry`, populated, TD-VSDD-060 sibling-swept. F-C3-P2-003 (MEDIUM): `partition_bytes` cap-accounting accumulator never counted the leading preamble — seeded with preamble length. F-C3-P2-004 (MEDIUM): stale "expected to fail" test-module header rewritten to status-neutral prose — 2nd occurrence of this class this cluster, `[process-watch]` recorded (3rd occurrence crosses BC-5.39.001 threshold, MUST codify). 3 observations non-blocking: O-C3-P2-001 (tautological-but-intentional defense-in-depth), O-C3-P2-002 (untested preamble-only zero-record edge), O-C3-P2-003 (SPEC-HYGIENE — BC-1.18.008 PC2 clause (a) wording loose vs. correct code, Drift Item anchored next spec touch). No BC/story/index content change — BC-1.18.008 stays v1.3, story stays v3.4, input-hashes UNCHANGED. Feature branch `feature/S-25.02-backfill` @ `5d195519` (pushed); `bc_1_18_008` 34/34 green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-2 not clean; pass-3 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-3, fresh context, against BC-1.18.008 v1.3/code `5d195519`.** Refs: D-1192, D-1191, S-25.02, BC-1.18.008 v1.3, F-C3-P2-001..004, `3bdf83f7`, `5d195519`. STATE.md v10.17→v10.18. | S-25.02 F4 | 2026-09-10 |
