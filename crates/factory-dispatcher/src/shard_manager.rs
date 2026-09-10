@@ -5323,6 +5323,34 @@ pub fn run_mechanism_a_backfill_split(
     let true_boundary_offsets =
         mechanism_a_record_boundary_offsets(&entry.artifact_stem, &original_content);
     let original_record_count = if record_boundary_offsets.is_empty() {
+        // F-C3-P5-001 (S-25.02 F4 cluster-3 adversarial pass-5, LOW): the
+        // empty-caller-offsets twin of P3-002, above. An empty
+        // `record_boundary_offsets` argument must NOT be trusted at face
+        // value as "no real records exist" without first consulting the
+        // SAME oracle the non-empty branch below already cross-checks
+        // against -- otherwise a known stem's real, marker-bearing content
+        // silently collapses to a single partition (EC-016's zero-shard
+        // no-op) even though the oracle can independently find genuine
+        // record boundaries the caller's empty list missed entirely. This
+        // is exactly the silently-mis-partition outcome Postcondition 2's
+        // Normalization rule forbids. Abort fail-loud ONLY when the oracle
+        // finds real structure; a genuinely empty file, or a known stem
+        // whose content has zero oracle-detectable markers (e.g. a
+        // title-only preamble), has nothing for the oracle to have missed,
+        // so both remain valid zero/single-record no-ops.
+        if !true_boundary_offsets.is_empty() {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "record_boundary_offsets is empty but the independently-detected oracle \
+                     boundary set {true_boundary_offsets:?} finds genuine record boundaries in \
+                     this artifact's own on-disk content -- an empty caller-supplied \
+                     record_boundary_offsets must never silently no-op a mandated split when \
+                     real records exist (Postcondition 6(b)/Invariant 2/EC-004/EC-006, \
+                     F-C3-P5-001, twin of P3-002)"
+                ),
+            });
+        }
         usize::from(!original_content.is_empty())
     } else if true_boundary_offsets.is_empty() {
         if !is_known_mechanism_a_artifact_stem(&entry.artifact_stem) {
