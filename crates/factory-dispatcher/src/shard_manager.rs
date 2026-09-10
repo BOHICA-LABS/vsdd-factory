@@ -4848,6 +4848,37 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
     total == original_record_count
 }
 
+/// MED-C (Postcondition 6(b) load-bearing fix): `true` iff `offsets` (a
+/// non-empty `record_boundary_offsets` list) is well-formed against a
+/// `content_len`-byte original content buffer — strictly ascending (no
+/// duplicate or out-of-order offset) and every offset strictly less than
+/// `content_len`.
+///
+/// [`run_mechanism_a_backfill_split`] validates this BEFORE trusting
+/// `record_boundary_offsets.len()` as the expected record count fed into
+/// [`mechanism_a_verify_backfill_record_counts_preserved`], and before
+/// feeding `record_boundary_offsets` into
+/// [`mechanism_a_partition_for_backfill`] at all. Without this check, both
+/// sides of that record-count comparison derive, by construction, from the
+/// SAME `record_boundary_offsets.len()` value — the partitioning loop
+/// iterates exactly that many times, contributing exactly one
+/// `record_count` unit per iteration regardless of whether the offsets were
+/// genuinely valid — so the comparison could never fail from within
+/// [`run_mechanism_a_backfill_split`] no matter how corrupted, stale (e.g.
+/// computed against a prior read of the file), or out-of-order the
+/// caller-supplied offsets were. This predicate gives the Postcondition 6
+/// hard gate an independent, genuinely-failable basis: a malformed
+/// `record_boundary_offsets` argument is now REJECTED here rather than
+/// silently producing a wrong split — or worse, reaching
+/// [`mechanism_a_partition_for_backfill`]'s own unchecked `rec_end -
+/// rec_start` byte-length subtraction, which silently assumes ascending
+/// order and would panic on unsigned overflow (debug builds) or compute a
+/// bogus huge length (release builds) for a non-ascending offset pair.
+fn record_boundary_offsets_are_well_formed(content_len: usize, offsets: &[usize]) -> bool {
+    offsets.windows(2).all(|pair| pair[0] < pair[1])
+        && offsets.last().is_some_and(|&last| last < content_len)
+}
+
 /// BC-1.18.008 Invariant 3 (AC-014): `true` iff a mechanism-A backfill-split
 /// has ALREADY completed for this artifact — a shard-index already exists
 /// at this artifact's `<artifact-stem>.shard-index.toml` sibling path and
@@ -4956,6 +4987,27 @@ pub fn run_mechanism_a_backfill_split(
             artifact_stem: entry.artifact_stem.clone(),
             source,
         })?;
+
+    // MED-C (Postcondition 6(b) load-bearing fix): validate
+    // `record_boundary_offsets` against the ACTUAL just-read
+    // `original_content` bytes BEFORE trusting it to drive partitioning or
+    // the record-count expectation at all — see
+    // [`record_boundary_offsets_are_well_formed`]'s own doc comment for why
+    // this is necessary for the Postcondition 6 hard gate to be genuinely
+    // load-bearing rather than tautological.
+    if !record_boundary_offsets.is_empty()
+        && !record_boundary_offsets_are_well_formed(original_content.len(), record_boundary_offsets)
+    {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: format!(
+                "record_boundary_offsets {record_boundary_offsets:?} is not well-formed \
+                 against the {}-byte original content read from disk (offsets must be \
+                 strictly ascending, non-duplicate, and in-bounds)",
+                original_content.len()
+            ),
+        });
+    }
 
     let partitions = mechanism_a_partition_for_backfill(
         &original_content,
