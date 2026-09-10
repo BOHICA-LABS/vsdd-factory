@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
-timestamp: 2026-09-10T00:00:00Z
+timestamp: 2026-09-10T01:00:00Z
 phase: F2
 inputs:
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
@@ -68,8 +68,9 @@ default (no partial/MVP delivery of a shipped feature).
    proactively, once, against each artifact's PRE-EXISTING content at the moment Layer 2's cap
    check goes live for that artifact.
 
-2. **Split algorithm: partition pre-existing content into `ceil(current_bytes / shard_cap_bytes)`
-   sealed shards, preserving record boundaries.** The monolithic file's content is partitioned at
+2. **Split algorithm: partition pre-existing content into sealed shards via greedy, boundary-preserving
+   packing, with `ceil(current_bytes / shard_cap_bytes)` as the algorithm's LOWER BOUND on resulting
+   shard count — never its exact target.** The monolithic file's content is partitioned at
    the structural record-boundary markers native to the artifact's own format. Boundary detection
    for all four mandatory artifacts MUST use the exact patterns enumerated in the
    **Record-Boundary Marker Table** below — never at an arbitrary byte offset that could split a
@@ -78,11 +79,42 @@ default (no partial/MVP delivery of a shipped feature).
    insufficient (see the marker table's confirmed h3-exception record forms, which an h2-only
    detector would either silently skip — causing backfill to no-op on the artifact's true content
    — or mis-treat a nested `### ` sub-heading as a false boundary, splitting a record mid-record).
+
+   **Packing procedure (deterministic, pure function of content + `shard_cap_bytes`).** The packer
+   walks the ordered list of records (as delimited by the Record-Boundary Marker Table) and
+   accumulates whole records into the CURRENT shard, in original-file order, until appending the
+   next whole record would push the current shard's byte size past `shard_cap_bytes`. At that
+   point the current shard is sealed AS-IS — even if it has slack remaining below
+   `shard_cap_bytes`, since no partial record may ever be appended to close that slack — and a new
+   shard begins with that next record. This is the ONLY split-point rule; there is no secondary
+   rule that rebalances shards toward an exact target count.
+
+   **`ceil()` is a lower bound, not an exact count.** For a NON-uniform record-size distribution
+   (which is the norm, not the exception, across all four mandatory artifacts — see the
+   Record-Boundary Marker Table's own cross-cycle evidence), greedy boundary-preserving packing
+   does not in general achieve the information-theoretic minimum shard count. Example: five
+   40-byte records against a 70-byte cap: `ceil(200/70) = 3`, but no boundary-preserving packing
+   can fit two 40-byte records into one 70-byte shard (80 > 70), so the greedy packer actually
+   produces 5 shards. In general, the actual resulting shard count for any of the four mandatory
+   artifacts is `>= ceil(current_bytes / shard_cap_bytes)`, with equality holding only in the
+   special case where every shard's greedy-packed content leaves less than one additional whole
+   record's worth of slack under the cap. `ceil(current_bytes / shard_cap_bytes)` remains useful
+   as a deterministic LOWER-BOUND sizing estimate (pre-allocating shard-index capacity,
+   progress-reporting denominators, and the retention-composition reasoning in Postcondition 4)
+   but MUST NOT be asserted, in this BC's own Canonical Test Vectors, in tests, or in any
+   downstream documentation, as the exact resulting shard count — the exact count is whatever the
+   greedy boundary-preserving packer actually produces for that artifact's real record-size
+   distribution at F4 execution time.
+
    Each resulting shard's byte size is `<= shard_cap_bytes` (BC-1.18.005's per-artifact effective
-   cap, via the Cross-Validator Minimum Rule). The LAST partition becomes the fresh "current" file
-   at the canonical name (per BC-1.18.006's stable-current-filename convention); all partitions
-   before it are sealed with sequential `seq` numbers starting at 1, in chronological
-   (original-file-order) sequence.
+   cap, via the Cross-Validator Minimum Rule) — this per-shard bound is unaffected by the count
+   correction above; it is the packing CONSTRAINT the greedy procedure enforces at every seal
+   decision, not a claim about the total number of shards it takes to satisfy that constraint.
+   EC-002's oversized-single-record exception (a record itself larger than `shard_cap_bytes`)
+   remains the sole documented exception to this per-shard bound. The LAST partition becomes the
+   fresh "current" file at the canonical name (per BC-1.18.006's stable-current-filename
+   convention); all partitions before it are sealed with sequential `seq` numbers starting at 1,
+   in chronological (original-file-order) sequence.
 
    **Record-Boundary Marker Table (authoritative).** Verified by direct inspection of the real
    on-disk content of both `.factory/cycles/v1.0-feature-engine-discipline-pass-1/` and
@@ -121,9 +153,12 @@ default (no partial/MVP delivery of a shipped feature).
 
 4. **The backfill-split composes with BC-1.18.007's retention policy immediately.** If the number
    of shards a backfill-split produces for a given artifact already exceeds `retention_count`
-   (plausible for `decision-log.md` at 908,938 bytes ÷ ~49,152-byte cap ≈ 19 shards, versus a
-   default `retention_count` of 10), the retention/compaction archival move (BC-1.18.007
-   Postcondition 2) applies to the OLDEST backfilled shards in the SAME operation — the backfill
+   (plausible for `decision-log.md` at 908,938 bytes ÷ ~49,152-byte cap: `ceil() = 19` shards as a
+   LOWER BOUND per Postcondition 2 — the actual greedy-packed count MAY be higher — versus a
+   default `retention_count` of 10, the inequality `actual_count >= 19 > 10` holds regardless of
+   exactly how much higher than 19 the real packed count turns out to be), the retention/compaction
+   archival move (BC-1.18.007 Postcondition 2) applies to the OLDEST backfilled shards in the SAME
+   operation, keyed on the ACTUAL packed shard count (never the `ceil()` estimate) — the backfill
    does not first produce an over-retention active set and defer archival to a later event.
 
 5. **Atomicity: the backfill-split for a given artifact is all-or-nothing.** If the split
@@ -183,14 +218,23 @@ default (no partial/MVP delivery of a shipped feature).
 
 ## Canonical Test Vectors
 
+**NEEDS-UPDATE (F-S2502-F4-004, this amendment):** the three rows marked `NEEDS-UPDATE` below
+previously asserted an EXACT shard count equal to `ceil(bytes/cap)`. Postcondition 2 now documents
+`ceil()` as a LOWER BOUND only — the exact count is whatever greedy boundary-preserving packing
+produces against the real record-size distribution of the actual fixture file, which is `>= ceil()`
+and equal to it only when records happen to pack without slack. **test-writer MUST replace the `N`
+placeholders below with the actual measured packed-shard count** obtained by running the real
+packing algorithm against the real (or a byte-faithful synthetic) `decision-log.md` /
+`lessons.md` fixture — NOT by re-asserting the `ceil()` arithmetic as if it were exact.
+
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| `decision-log.md` at 908,938 bytes, cap 49,152 bytes, records never spanning a boundary | `ceil(908938/49152) = 19` shards produced (`decision-log.0001.md`..`decision-log.0018.md` sealed + `decision-log.md` fresh current); shard-index with 18 `[[shard]]` entries | happy-path |
-| `lessons.md` at 234,731 bytes, cap 49,152 bytes | `ceil(234731/49152) = 5` shards (4 sealed + 1 current) | happy-path |
-| Artifact at 40,000 bytes, cap 49,152 bytes (under cap) | 1 "shard" total = the unchanged current file; shard-index created with 0 sealed `[[shard]]` entries | edge-case |
-| A single decision-log row of 60,000 bytes (exceeds 49,152-byte cap alone) | That shard's `bytes_at_seal = 60000 > shard_cap_bytes`, flagged `oversized_record: true`; NOT split mid-record | edge-case |
-| Backfill interrupted after 3/19 shards written, restarted | Original file byte-identical to pre-crash state; restart produces the same 19-shard result as an uninterrupted run | error |
-| `burst-log.md` fixture containing `## F5 pass-38 fix burst`, `### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`, `## Burst: F5 pass-41 fix burst` in sequence, with `### Block N:` sub-headings nested inside the h2 records | Boundary detector produces exactly 4 records (pass-38, pass-39, pass-40, pass-41) — the two h3-exception records are each their own record; nested `### Block N:` sub-headings do NOT create additional record boundaries | edge-case |
+| `decision-log.md` at 908,938 bytes, cap 49,152 bytes, records never spanning a boundary | **NEEDS-UPDATE:** `N` shards produced (`decision-log.0001.md`..`decision-log.000<N-1 zero-padded>.md` sealed + `decision-log.md` fresh current), where `N = ` the actual greedy-packed count and `N >= ceil(908938/49152) = 19` (lower bound only, not the asserted value); shard-index with `N-1` `[[shard]]` entries | happy-path |
+| `lessons.md` at 234,731 bytes, cap 49,152 bytes | **NEEDS-UPDATE:** `N` shards (`N-1` sealed + 1 current), where `N >= ceil(234731/49152) = 5` (lower bound only, not the asserted value) | happy-path |
+| Artifact at 40,000 bytes, cap 49,152 bytes (under cap) | 1 "shard" total = the unchanged current file; shard-index created with 0 sealed `[[shard]]` entries (unaffected by this amendment: a single-shard, under-cap artifact never has a record-boundary slack question — `ceil(40000/49152) = 1` is always exactly achievable) | edge-case |
+| A single decision-log row of 60,000 bytes (exceeds 49,152-byte cap alone) | That shard's `bytes_at_seal = 60000 > shard_cap_bytes`, flagged `oversized_record: true`; NOT split mid-record (unaffected by this amendment: this vector asserts a per-shard bound exception via EC-002, not a total shard count) | edge-case |
+| Backfill interrupted after 3/`N` shards written (`N` = the actual greedy-packed count for `decision-log.md`, `N >= 19` per the row above), restarted | **NEEDS-UPDATE (count only; behavior unchanged):** original file byte-identical to pre-crash state; restart produces the same `N`-shard result as an uninterrupted run — deterministic, since the greedy packer is a pure function of the original content and `shard_cap_bytes` | error |
+| `burst-log.md` fixture containing `## F5 pass-38 fix burst`, `### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`, `## Burst: F5 pass-41 fix burst` in sequence, with `### Block N:` sub-headings nested inside the h2 records | Boundary detector produces exactly 4 records (pass-38, pass-39, pass-40, pass-41) — the two h3-exception records are each their own record; nested `### Block N:` sub-headings do NOT create additional record boundaries (unaffected by this amendment: this vector asserts record-boundary DETECTION, not shard COUNT) | edge-case |
 
 ## Verification Properties
 
@@ -268,6 +312,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.3 | 2026-09-10 | product-owner | Fresh-context adversarial review of S-25.02 F4 cluster-3 (finding F-004, MEDIUM) found Postcondition 2's `ceil(current_bytes / shard_cap_bytes)` shard-count formula jointly unsatisfiable with the same postcondition's "preserving record boundaries" requirement for non-uniform record sizes (counterexample: five 40-byte records against a 70-byte cap — `ceil(200/70)=3`, but no boundary-preserving packing fits two 40-byte records into one 70-byte shard, so the actual greedy packer produces 5), while the Canonical Test Vectors table asserted the `ceil()` value as an EXACT expected shard count (19 for `decision-log.md`, 5 for `lessons.md`), which only passes when a fixture's records happen to pack without slack. Reconciled: Postcondition 2 now specifies `ceil()` as a documented LOWER BOUND on shard count, adds an explicit deterministic greedy boundary-preserving packing procedure as the algorithm's actual split-point rule, and states the general inequality `actual_count >= ceil(current_bytes / shard_cap_bytes)` with the equality condition spelled out. Postcondition 4's retention-composition reasoning reworded from an approximate `≈ 19 shards` framing to an explicit lower-bound inequality (`actual_count >= 19 > retention_count of 10`, robust regardless of the real packed count). Marked the two Canonical Test Vectors asserting exact `ceil()` counts (`decision-log.md` 19-shard row, `lessons.md` 5-shard row) plus the dependent interrupted-restart row as `NEEDS-UPDATE`, with an explicit instruction that test-writer must measure the actual packed-shard count from the real fixture rather than re-asserting `ceil()` arithmetic; the three unaffected rows (under-cap single-shard, oversized-single-record, burst-log h3-exception-detection) are annotated as out-of-scope for this correction, with the reason stated inline. No new `E-SHD-NNN` error-taxonomy code is warranted: a packed shard count exceeding the `ceil()` lower bound is expected, correct algorithm behavior, not a failure condition — the existing `E-SHD-003` content-preservation gate (Postcondition 6, EC-004) already covers the actual failure mode (a boundary violation or record loss/duplication), which this amendment does not touch. Finding F-002 (session-checkpoints.md marker-heuristic narrowing) from the same review was adjudicated separately and required NO spec change: direct inspection of both real `session-checkpoints.md` files (`v1.0-brownfield-backfill/`, 182 h2 records; `v1.0-feature-engine-discipline-pass-1/`, 12 h2 records) confirmed every h2 heading in both files is a genuine checkpoint record with zero legitimate non-record h2 asides, so this BC's existing `session-checkpoints.md` marker-table row ("any h2 = boundary", no confirmed exception forms) is already correct as written — the code-side `is_checkpoint_record_heading` heuristic (filtering h2 on `starts_with("Archived")`/`contains("Checkpoint")`) is the defective party and is routed to implementer for deletion/revert-to-`^## `, not a spec issue; evidence includes a real record the code's case-sensitive heuristic itself would silently drop (`## ARCHIVED CHECKPOINT: 2026-08-27 — pass-60 CLEAN D-1117...`, all-caps, matches neither `starts_with("Archived")` nor `contains("Checkpoint")`). No other Postcondition, Invariant, Edge Case, or Verification Property content changed. |
 | 1.2 | 2026-09-10 | product-owner | Fresh-context adversarial review found PC2 internally self-contradictory on burst-log record-boundary granularity: PC2 named an h3 (`### <burst-heading>`) boundary phrase in one clause while PC2's own "never split" clause and PC6(b)'s record-integrity clause both correctly said h2 — the erroneous h3 phrase misled implementation toward `### ` as the burst-log/lessons.md record marker, which silently no-ops backfill on the two largest artifacts (finds ≤2 boundaries against real h2-keyed content) and splits records mid-record where nested `### Block N:` sub-headings occur inside brownfield burst records. Reconciled: removed the erroneous h3 phrase from PC2; PC2 and PC6(b) now unambiguously key burst-log.md and session-checkpoints.md on `## ` (h2) boundaries. Added an authoritative Record-Boundary Marker Table to PC2, derived from direct inspection of the real `v1.0-feature-engine-discipline-pass-1/` and `v1.0-brownfield-backfill/` cycle artifacts, enumerating the exact record-start pattern per artifact and two confirmed real-world h3-exception record forms that a naive h2-only rule would miss: burst-log.md's `### Pass-39/40 Fix Burst` records (engine cycle, sitting between two h2 records) and lessons.md's pre-L-EDP1-052 `### L-EDP1-050`/`### L-EDP1-051` records (the L-EDP1-052+ form switched to h2). Added a single implementable normalization predicate covering all confirmed forms across both cycles, including decision-log.md's table-row primary key plus its Appendix sub-clause h3 blocks as a secondary non-splittable unit. Tightened Invariant 2 to cite the marker table and to forbid keying partition points on heading level alone. Added EC-006 and a corresponding canonical test vector covering the h3-exception detection requirement. No change to the split algorithm's core semantics (Postconditions 1, 3, 4, 5), Atomicity, Idempotency, or the artifact's CAP-043 anchor. |
 | 1.1 | 2026-09-05 | product-owner | Fix-burst amendment (F-S2502-F2-003 + F-S2502-F2-007): VP-124's idempotency row Proof Method reconciled from "unit test" to "integration" per VP-INDEX v3.02's authoritative method assignment (both VP-124 rows now consistently read "integration test"); the atomicity row's wording tightened to lead with "integration test" for internal consistency. Added `## SDK Grounding Evidence` section with literal stable-anchor grep output for `write_atomic`, `rotate_changelog`, and `HookResult`. No postcondition/invariant content change. Related BCs gained a cross-reference to the new BC-1.18.011 (B2 migration BC modeled on this BC's governance pattern). |
 | 1.0 | 2026-09-05 | product-owner | Initial creation (NEW BC, not in the original F1 enumeration — required per ADR-051 Decision 2's finding that AC-002/AC-003 only gate future writes). One-time backfill-split of the four pre-existing oversized cycle append-log files, record-boundary-safe partitioning, content-preservation verification gate, composition with the retention policy. CAP-043 capability anchor. ADR-051 §D2 citation. |
