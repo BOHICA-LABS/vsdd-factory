@@ -1,25 +1,43 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! BC-1.18.008 (S-25.02 F4 BC-cluster 3 "retention+backfill") RED GATE
-//! coverage for the mechanism-A one-time backfill-split functions in
-//! `shard_manager.rs` (AC-013/AC-014).
+//! BC-1.18.008 (S-25.02 F4 BC-cluster 3 "retention+backfill") coverage for
+//! the mechanism-A one-time backfill-split functions in `shard_manager.rs`
+//! (AC-013/AC-014).
 //!
-//! # BC-5.38.001 Red Gate discipline — RED (all tests FAIL against the stub)
+//! # Current implementation status (MED-E header correction, F4
+//! cluster-3-p1 record-boundary re-grounding burst)
 //!
 //! Every non-trivial function this file drives
 //! (`mechanism_a_record_boundary_offsets`, `mechanism_a_partition_for_backfill`,
 //! `mechanism_a_verify_backfill_content_preserved`,
 //! `mechanism_a_verify_backfill_record_counts_preserved`,
 //! `mechanism_a_backfill_already_migrated`, `run_mechanism_a_backfill_split`)
-//! is `todo!()` as of the stub-architect's cluster-3 burst. Every test below
-//! asserts the REAL, spec-mandated expected outcome (never `#[should_panic]`)
-//! so each test currently fails via the `todo!()` panic (or, once
-//! implementer lands a partial implementation, via a normal assertion
-//! failure) until real logic replaces the stub.
+//! is IMPLEMENTED (not `todo!()`) as of the implementer's cluster-3 burst,
+//! and the great majority of tests in this file PASS against that
+//! implementation today. The prior claim that "every function is `todo!()`"
+//! and that all tests "presently FAIL" is stale and no longer describes
+//! this file's actual state.
+//!
+//! The EXCEPTION is the PC2 / Record-Boundary-Marker-Table re-grounded
+//! `mechanism_a_record_boundary_offsets` tests (the burst-log and lessons
+//! fixtures grounded directly in the real, on-disk
+//! `.factory/cycles/v1.0-feature-engine-discipline-pass-1/` and
+//! `.factory/cycles/v1.0-brownfield-backfill/` content, per BC-1.18.008
+//! v1.2's amended marker table): the current implementation keys
+//! `burst-log`/`lessons` boundary detection on heading LEVEL (`### ` only)
+//! rather than on the marker table's artifact-specific primary-pattern +
+//! confirmed-exception-pattern rules, so those specific tests are EXPECTED
+//! TO FAIL against the current implementation until the implementer
+//! rewrites detection to match the amended spec — this is intentional,
+//! targeted Red Gate coverage for a real, confirmed defect, not a residual
+//! stub-era claim about the whole file's status. The decision-log Appendix
+//! sub-clause-block confirmation test is NOT expected to fail (decision-log's
+//! `| D-` row-keyed detection already matches the marker table correctly in
+//! both cycles).
 //!
 //! # Content-preservation hard-gate coverage note (AC-014, Postcondition 6)
 //!
-//! `run_mechanism_a_backfill_split`'s own future implementation computes its
+//! `run_mechanism_a_backfill_split`'s own implementation computes its
 //! partitions internally (via `mechanism_a_partition_for_backfill`, whose
 //! output always structurally satisfies content-preservation by
 //! construction) — there is no external caller-visible way to inject a
@@ -27,10 +45,10 @@
 //! the Postcondition 6 hard gate to fire an abort from outside the module.
 //! The two `mechanism_a_verify_backfill_*` predicates that make up that hard
 //! gate are therefore covered directly at the unit level below (both their
-//! `true` and `false` outcomes), which is the correct-grained place to
-//! Red-Gate-test a boolean predicate's own logic; `run_mechanism_a_backfill_split`'s
-//! own tests cover its ORCHESTRATION of a successful (gate-passing) run,
-//! plus EC-016/EC-017/idempotency/crash-atomicity.
+//! `true` and `false` outcomes), which is the correct-grained place to test
+//! a boolean predicate's own logic; `run_mechanism_a_backfill_split`'s own
+//! tests cover its ORCHESTRATION of a successful (gate-passing) run, plus
+//! EC-016/EC-017/idempotency/crash-atomicity.
 
 use factory_dispatcher::shard_manager::{
     MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry, ShardIndex,
@@ -101,21 +119,204 @@ fn test_BC_1_18_008_PC2_record_boundary_offsets_decision_log_finds_row_starts() 
 }
 
 #[test]
-fn test_BC_1_18_008_PC2_record_boundary_offsets_burst_log_finds_heading_starts() {
-    let heading1 = "### Burst 1 — first burst\n";
-    let heading2 = "### Burst 2 — second burst\n";
-    let content = format!("# burst-log\n\n{heading1}body one\n\n{heading2}body two\n");
+fn test_BC_1_18_008_PC2_MT_record_boundary_offsets_burst_log_grounded_h2_h3_exception_and_nested_block()
+ {
+    // Re-grounded per BC-1.18.008 v1.2's Record-Boundary Marker Table
+    // (2026-09-10 amendment) and its EC-006 canonical test vector. This
+    // fixture REPLACES the prior fabricated `### Burst 1`/`### Burst 2`
+    // fixture (which used an h3-only form that isn't any real burst-log.md
+    // record shape and certified detection at the WRONG marker level — the
+    // fresh-context adversarial finding this re-grounding fixes: an h2-only
+    // OR h3-only detector either silently no-ops on real h2-keyed content
+    // or mis-treats a nested `### Block N:` sub-heading as a false
+    // boundary).
+    //
+    // Real, verbatim heading forms: the two h2 records + two confirmed
+    // `### Pass-N Fix Burst` h3-exception records are lifted from
+    // `.factory/cycles/v1.0-feature-engine-discipline-pass-1/burst-log.md`
+    // (lines 1951, 2033, 2099, 2163); the nested `### Block N:`
+    // sub-headings are lifted from `.factory/cycles/v1.0-brownfield-
+    // backfill/burst-log.md`'s own 8-block burst structure (e.g. line
+    // 151's `### Block 8: factory-artifacts commit`).
+    let h2_pass38 = "## F5 pass-38 fix burst\n";
+    let h3_pass39 = "### Pass-39 Fix Burst — F5 Engine Discipline (2026-05-12)\n";
+    let block3_decoy = "### Block 3: Codifications\n";
+    let h3_pass40 = "### Pass-40 Fix Burst — F5 Engine Discipline (2026-05-12)\n";
+    let h2_pass41 = "## Burst: F5 pass-41 fix burst (2026-05-12)\n";
+    let block8_decoy = "### Block 8: factory-artifacts commit\n";
 
-    let offset1 = content.find(heading1).unwrap();
-    let offset2 = content.find(heading2).unwrap();
+    let content = format!(
+        "# burst-log\n\n\
+         {h2_pass38}\
+         Body of the pass-38 fix burst (elided).\n\n\
+         {h3_pass39}\
+         Body of the pass-39 fix burst (elided).\n\n\
+         {block3_decoy}\
+         Decision D-NNN codified here — nested sub-structure, NOT its own record.\n\n\
+         {h3_pass40}\
+         Body of the pass-40 fix burst (elided).\n\n\
+         {h2_pass41}\
+         Body of the pass-41 fix burst (elided).\n\n\
+         {block8_decoy}\
+         Committed to factory-artifacts — nested sub-structure, NOT its own record.\n"
+    );
+
+    let offset_pass38 = content.find(h2_pass38).unwrap();
+    let offset_pass39 = content.find(h3_pass39).unwrap();
+    let offset_pass40 = content.find(h3_pass40).unwrap();
+    let offset_pass41 = content.find(h2_pass41).unwrap();
+    let offset_block3 = content.find(block3_decoy).unwrap();
+    let offset_block8 = content.find(block8_decoy).unwrap();
 
     let offsets = mechanism_a_record_boundary_offsets("burst-log", content.as_bytes());
 
     assert_eq!(
         offsets,
-        vec![offset1, offset2],
-        "PC2: burst-log.md's structural record boundaries are its own `### <burst-heading>` \
-         block starts"
+        vec![offset_pass38, offset_pass39, offset_pass40, offset_pass41],
+        "PC2 Record-Boundary Marker Table / EC-006 canonical test vector: burst-log.md's real \
+         record boundaries are its `## ` (h2) records PLUS the two confirmed `### Pass-N Fix \
+         Burst` h3-exception records — exactly 4 boundaries here (pass-38, pass-39, pass-40, \
+         pass-41), never keyed on heading level alone. Got: {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_block3) && !offsets.contains(&offset_block8),
+        "PC2/Invariant 2: nested `### Block N:` sub-headings must be excluded from the boundary \
+         set even though they share the `### ` prefix with the genuine h3-exception records — \
+         mistaking them for boundaries would split a record mid-record. Got: {offsets:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_PC2_MT_record_boundary_offsets_lessons_grounded_h2_h3_heterogeneous_forms() {
+    // Re-grounded per BC-1.18.008 v1.2's Record-Boundary Marker Table
+    // (2026-09-10 amendment). The prior MED-3 lessons test (below) only
+    // ever exercised the pre-052 h3-exception form; it never exercised the
+    // h2 primary form that covers the MAJORITY of real lesson records in
+    // both cycles, so it could not have caught an h3-only detector missing
+    // that content entirely — exactly the false-green gap the fresh-context
+    // adversarial pass found.
+    //
+    // Real, verbatim heading forms: the pre-`L-EDP1-052` h3-exception
+    // records `### L-EDP1-050 ...` / `### L-EDP1-051 ...` (lines 24, 123 of
+    // `.factory/cycles/v1.0-feature-engine-discipline-pass-1/lessons.md`),
+    // the h2 form adopted starting at `## L-EDP1-052 ...` (line 210 of the
+    // same file), and brownfield's own h2 forms `## LESSON (D-NNNN) ...` /
+    // `## RECURRENCE NOTE (D-NNNN) ...` (lines 96, 16 of
+    // `.factory/cycles/v1.0-brownfield-backfill/lessons.md`).
+    let h3_l050 =
+        "### L-EDP1-050 — 49th-layer L-EDP1-003 recurrence: nineteenth consecutive violation\n";
+    let decoy_subheading = "### Recursion ply mapping (nested detail, NOT a new lesson record)\n";
+    let h3_l051 =
+        "### L-EDP1-051 — 50th-layer L-EDP1-003 recurrence: twentieth consecutive violation\n";
+    let h2_l052 = "## L-EDP1-052 — F5 pass-60 51st-layer L-EDP1-003 recurrence\n";
+    let h2_lesson_d1065 = "## LESSON (D-1065) — S-21.19 is the first of the 7 split stories\n";
+    let h2_recurrence_d1063 =
+        "## RECURRENCE NOTE (D-1063) — D-1044(g)/D-995 class recurs one layer further out\n";
+
+    let content = format!(
+        "# Lessons Learned — engine-discipline cycle\n\n\
+         {h3_l050}\
+         **Pattern:** body text describing the 49th-layer recurrence in detail.\n\n\
+         {decoy_subheading}\
+         - Level-1: rule applied to named findings only\n\n\
+         {h3_l051}\
+         **Pattern:** body text describing the 50th-layer recurrence in detail.\n\n\
+         {h2_l052}\
+         **Pattern:** the h2 form adopted starting at this record.\n\n\
+         {h2_lesson_d1065}\
+         Brownfield's own LESSON (D-NNNN) h2 record form.\n\n\
+         {h2_recurrence_d1063}\
+         Brownfield's own RECURRENCE NOTE (D-NNNN) h2 record form.\n"
+    );
+
+    let offset_l050 = content.find(h3_l050).unwrap();
+    let offset_decoy = content.find(decoy_subheading).unwrap();
+    let offset_l051 = content.find(h3_l051).unwrap();
+    let offset_l052 = content.find(h2_l052).unwrap();
+    let offset_lesson = content.find(h2_lesson_d1065).unwrap();
+    let offset_recurrence = content.find(h2_recurrence_d1063).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("lessons", content.as_bytes());
+
+    assert!(
+        !offsets.contains(&offset_decoy),
+        "PC2/Invariant 2: a nested `### ` sub-heading inside a lesson's own body (no L-<tag>-NNN \
+         tag) must never be treated as a boundary. Got: {offsets:?}"
+    );
+    assert_eq!(
+        offsets,
+        vec![
+            offset_l050,
+            offset_l051,
+            offset_l052,
+            offset_lesson,
+            offset_recurrence
+        ],
+        "PC2 Record-Boundary Marker Table: lessons.md's real record boundaries are its h2 \
+         `## L-<tag>-NNN` / `## LESSON (D-NNNN)` / `## RECURRENCE NOTE (D-NNNN)` forms PLUS the \
+         two confirmed pre-052 `### L-EDP1-050`/`### L-EDP1-051` h3-exception records — never \
+         keyed on heading level alone. Got: {offsets:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_PC2_MT_record_boundary_offsets_decision_log_ignores_appendix_subclause_h3_blocks()
+ {
+    // Re-grounded per BC-1.18.008 v1.2's Record-Boundary Marker Table:
+    // decision-log.md's PRIMARY partition key is the `| D-` table row start
+    // (already confirmed correct in both cycles); its `## Appendix:
+    // Sub-clause Expansion` section nests `### D-NNN (...)` blocks (real,
+    // verbatim heading forms per `.factory/cycles/v1.0-feature-engine-
+    // discipline-pass-1/decision-log.md` lines 158/170/182/194/206, e.g.
+    // `### D-440 (F5 pass-60 codification block; META-LEVEL-15 CANDIDATE
+    // CONFIRMED)`) — these are secondary atomic units tied to their D-NNN
+    // row, never themselves a primary shard-boundary. This test is NOT
+    // expected to fail against the current implementation (its `| D-`
+    // marker already never matches a `### ` or `## Appendix` line); it
+    // exists as permanent regression coverage for the marker table's
+    // decision-log row.
+    let row_439 = "| D-439 | decided something | author |\n";
+    let row_440 = "| D-440 | decided something else | author |\n";
+    let appendix_heading = "## Appendix: Sub-clause Expansion\n";
+    let subclause_440 =
+        "### D-440 (F5 pass-60 codification block; META-LEVEL-15 CANDIDATE CONFIRMED)\n";
+    let subclause_441 =
+        "### D-441 (F5 pass-61 codification block; META-LEVEL-16 CANDIDATE CONFIRMED)\n";
+
+    let content = format!(
+        "# decision-log\n\n\
+         ## Decisions Log\n\n\
+         {row_439}\
+         {row_440}\n\
+         {appendix_heading}\n\
+         {subclause_440}\
+         Sub-clause expansion detail for D-440 (elided).\n\n\
+         {subclause_441}\
+         Sub-clause expansion detail for D-441 (elided).\n"
+    );
+
+    let offset_439 = content.find(row_439).unwrap();
+    let offset_440 = content.find(row_440).unwrap();
+    let offset_appendix = content.find(appendix_heading).unwrap();
+    let offset_sub440 = content.find(subclause_440).unwrap();
+    let offset_sub441 = content.find(subclause_441).unwrap();
+
+    let offsets = mechanism_a_record_boundary_offsets("decision-log", content.as_bytes());
+
+    assert_eq!(
+        offsets,
+        vec![offset_439, offset_440],
+        "PC2 Record-Boundary Marker Table: decision-log.md's PRIMARY partition key is the `| D- \
+         ` table row start — the `## Appendix: Sub-clause Expansion` section heading and its \
+         nested `### D-NNN (...)` sub-clause blocks are secondary atomic units, never a primary \
+         shard-boundary. Got: {offsets:?}"
+    );
+    assert!(
+        !offsets.contains(&offset_appendix)
+            && !offsets.contains(&offset_sub440)
+            && !offsets.contains(&offset_sub441),
+        "Appendix section heading and D-NNN sub-clause blocks must never appear in the primary \
+         boundary set. Got: {offsets:?}"
     );
 }
 
@@ -744,14 +945,25 @@ fn test_BC_1_18_008_EC003_run_backfill_split_restart_after_partial_prior_attempt
 }
 
 // ---------------------------------------------------------------------------
-// F4 BC-cluster-3 adversarial-review RED-GATE additions (adv-cluster3-p1)
+// F4 BC-cluster-3 adversarial-review additions (adv-cluster3-p1)
 //
-// The four groups below encode four findings from the fresh-context
-// adversarial pass over this cluster's implementation. Each test asserts
-// the REAL, spec-mandated outcome (never a weakened/should-panic
-// substitute) and is expected to presently FAIL against the current
-// `shard_manager.rs` implementation — the fix belongs to the implementer,
-// not to this file.
+// The groups below encode findings from a fresh-context adversarial pass
+// over this cluster's implementation. Each test asserts the REAL,
+// spec-mandated outcome (never a weakened/should-panic substitute).
+//
+// BLOCKER-1, HIGH-2, and the original MED-3 findings below have since been
+// FIXED by the implementer — their tests now PASS against the current
+// `shard_manager.rs` implementation and remain in this file as permanent
+// regression coverage, not as open Red Gate findings. (The prior claim that
+// this whole section "is expected to presently FAIL" is stale.)
+//
+// The CURRENTLY open Red Gate coverage in this file is the PC2 /
+// Record-Boundary-Marker-Table re-grounding added by the follow-up
+// adversarial pass over BC-1.18.008 v1.2's amended marker table — see the
+// `test_BC_1_18_008_PC2_MT_*` tests earlier in this file (grounded burst-log
+// h2/h3-exception fixture and lessons h2/h3-exception fixture), and the
+// module-level doc comment at the top of this file for their expected-fail
+// status.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

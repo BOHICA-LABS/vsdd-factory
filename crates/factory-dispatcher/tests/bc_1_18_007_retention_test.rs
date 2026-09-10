@@ -1,22 +1,22 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! BC-1.18.007 (S-25.02 F4 BC-cluster 3 "retention+backfill") RED GATE
-//! coverage for the retention/compaction functions in `shard_manager.rs`
+//! BC-1.18.007 (S-25.02 F4 BC-cluster 3 "retention+backfill") coverage for
+//! the retention/compaction functions in `shard_manager.rs`
 //! (AC-010/AC-011/AC-012).
 //!
-//! # BC-5.38.001 Red Gate discipline — RED (all tests FAIL against the stub)
+//! # Current implementation status (MED-E header correction)
 //!
 //! Every non-trivial function this file drives
 //! (`load_shard_index_for_retention_check`, `retention_overflow_count`,
-//! `archive_overflow_shards`, `whole_corpus_shard_paths`) is `todo!()` as of
-//! the stub-architect's cluster-3 burst (see `shard_manager.rs`'s own
-//! "Scope note (S-25.02 F4 BC-cluster 3 ...)" doc comment). Every test below
-//! asserts the REAL, spec-mandated expected outcome (never `#[should_panic]`)
-//! — the same methodology `bc_1_18_005_shard_cap_trigger_test.rs` and
-//! `bc_1_18_006_roll_test.rs` establish for this crate — so each test
-//! currently fails via the `todo!()` panic (or, once implementer lands a
-//! partial implementation, via a normal assertion failure) until real logic
-//! replaces the stub.
+//! `archive_overflow_shards`, `whole_corpus_shard_paths`) is IMPLEMENTED
+//! (not `todo!()`) as of the implementer's cluster-3 burst. All tests in
+//! this file PASS against the current implementation — the prior claim that
+//! every function was `todo!()` and every test "presently FAILS" is stale
+//! and no longer describes this file's actual state. Each test below still
+//! asserts the REAL, spec-mandated expected outcome (never
+//! `#[should_panic]`) — the same methodology `bc_1_18_005_shard_cap_trigger_test.rs`
+//! and `bc_1_18_006_roll_test.rs` establish for this crate — and this file
+//! now serves as permanent regression coverage for AC-010/AC-011/AC-012.
 //!
 //! Deliberately NOT covered here (GREEN-BY-DESIGN / WIRING-EXEMPT per
 //! `shard_manager.rs`'s own per-function doc comments, mirroring cluster-1/2's
