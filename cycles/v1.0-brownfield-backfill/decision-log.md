@@ -9468,3 +9468,128 @@ Refs: D-1196, D-1195, S-25.02, BC-1.18.008 v1.6, F-C3-P6-001..003, S-12.10, `b11
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1196 | D-1196-S2502-CLUSTER3-PASS6-CROSSVENDOR-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-6 = NOT CLEAN — 2 HIGH + 1 MEDIUM finding, FIRST CROSS-VENDOR (OpenAI Codex) pass this cascade.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-6.md`. All 3 findings NOVEL — missed or rationalized away across 5 prior same-vendor (Claude) passes. F-C3-P6-001 (HIGH, data-loss): recovery arm's byte-prefix heuristic false-positived on legitimate repeated-prefix content and silently destroyed an intact record — FIXED via product-owner's **BC-1.18.008 v1.5→v1.6** (NEW Backfill Recovery Manifest in PC3 + NEW Recovery-Confirmation Rule in PC5 — exact whole-file `(length, SHA-256)` vs. byte-prefix — + Invariant 3 rewrite + EC-009/EC-010, `E-SHD-011`) plus implementer's manifest-based recovery rebuild. F-C3-P6-002 (HIGH, spec-fidelity): PC6(c)/Invariant 4's "actual bytes written to disk" was never implemented as a disk read-back — FIXED via a same-burst product-owner ruling plus implementer's new `mechanism_a_write_and_verify_sealed_shard` post-hoc disk read-back. F-C3-P6-003 (MEDIUM, code-only): lesson h3 marker missing documented `\b` word boundary — FIXED, TD-VSDD-060 sibling-swept. architect propagated a THIRD VP-124 facet (VP-INDEX v3.10→v3.11, verification-architecture.md v1.27→v1.28, verification-coverage-matrix.md v1.25→v1.26, `total_vps` UNCHANGED 141). BC-INDEX v5.78→v5.79; STORY-INDEX v4.455→v4.456 (story v3.6→v3.7, AC-014 extended, EC-050/EC-051 added; NEW draft follow-up story S-12.10 registered, E-12). Input-hashes reconciled in dependency order (BC-1.18.008.md `763d2ab`→`d136e83`; error-taxonomy.md `226df61`→`c5ba1e0`; story `c432a34`→`5af158b`); `--check` CLEAN on all touched files. `[codified]` lesson `L-BB-D1196-cross-vendor-adversary-pass-surfaces-same-vendor-blind-spots` — cross-vendor review promoted from optional to a REQUIRED BC-5.39.001 convergence-protocol step, anchored to S-12.10. Feature branch `feature/S-25.02-backfill` @ `b1134954` (pushed); full workspace test suite green (784 tests), fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-6 not clean; substantive-CODE-defect-surface-EXHAUSTED assessment from passes 4/5 REOPENED — held only for same-vendor review; pass-7 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-7, fresh context, against BC-1.18.008 v1.6/code `b1134954` — cross-vendor passes now part of the rotation.** Refs: D-1196, D-1195, S-25.02, BC-1.18.008 v1.6, F-C3-P6-001..003, S-12.10, `b1134954`, `26c79f13`. STATE.md v10.21→v10.22. | S-25.02 F4 | 2026-09-10 |
+
+## D-1197
+
+**D-1197-S2502-CLUSTER3-PASS7-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1196 (this file, immediately above). D-1197 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-7 = NOT CLEAN — 1 HIGH + 1 MEDIUM finding** 2026-09-10 (LOCAL Claude adversary + implementer +
+test-writer code-side content + product-owner spec content; state-manager bookkeeping + single-commit
+TD-VSDD-053) — 1 HIGH (F-C3-P7-001, DANGEROUS-window heal wrote an unverified shard-index-summed
+slice), 1 MEDIUM (F-C3-P7-002, decision-log.md marker-table regex missed real sub-clause-suffixed
+rows), BOTH fixed this burst. **This is a LOCAL Claude adversary pass** — human directed drive-to-
+3-CLEAN continues using LOCAL adversary only, no further cross-vendor rotation unless the human
+specifies (per D-1196's own codified lesson, cross-vendor is now a REQUIRED step somewhere in the
+cascade, not necessarily every pass). Full Part A persisted as a standalone artifact, matching
+pass-1..6's own convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-7.md` (`diff_base=b1134954`,
+`diff_head=b1134954`).
+
+**F-C3-P7-001 (HIGH, data-loss):** at the confirmed DANGEROUS window (top-level `(length, hash)`
+recovery-confirmation check already matched the Manifest's `original_bytes`/`original_sha256`), the
+shipped heal derived the slice offset by SUMMING the shard-index's per-shard `bytes_at_seal` fields
+— a source independent of, and separately corruptible from, the Backfill Recovery Manifest — and
+wrote the resulting slice with **no verification of any kind** against the Manifest's
+`final_bytes`/`final_sha256`. **Root cause: a PC5/PC3 spec incoherence.** BC-1.18.008 v1.6's own
+Postcondition 5 text said the heal "writes the manifest's own recorded `final_bytes` content," but
+Postcondition 3's Manifest schema stores only a length (`final_bytes`) and a hash (`final_sha256`) —
+no content of any kind. The v1.6 text was literally unimplementable from the manifest alone; the
+implementation that shipped, correctly noting the manifest holds no content, instead picked an
+alternative (shard-index-summed offset, no verification) that reintroduced exactly the
+unverified-write risk the Manifest was created (v1.6, F-C3-P6-001) to eliminate. FIXED: product-owner
+amended **BC-1.18.008 v1.6→v1.7**: added the **Manifest-Authoritative Slice-and-Verify Rule** to
+Postcondition 5 — the heal's offset is now `original_bytes - final_bytes`, both operands read from
+the Manifest itself (the shard-index `bytes_at_seal` sum is no longer consulted for this purpose at
+all), and the resulting slice MUST satisfy `sliced.len() == final_bytes AND sha256(sliced) ==
+final_sha256` BEFORE it is written; on any mismatch the heal fails loud with **NEW `E-SHD-012`**
+(added to `error-taxonomy.md` in this SAME burst) and writes nothing. Invariant 3 rewritten: the
+Manifest "authorizes/verifies the bytes written, it is not required to store them." Also closes the
+adversary's PC6(c)/Invariant-4 observation: the DANGEROUS heal's own destructive write previously got
+no post-hoc disk read-back (unlike sealed-shard writes, per PC6(c)'s F-C3-P6-002 ruling) —
+Postcondition 6(c) gained an explicit Extension paragraph, and Invariant 4's scope note now covers
+it, requiring the SAME fresh-read-back-and-compare-to-`(final_bytes, final_sha256)` discipline after
+the heal's `write_atomic` call. Added EC-011 (Manifest-verification mismatch at a confirmed DANGEROUS
+window — fails loud, `E-SHD-012`, no write) and a matching Canonical Test Vector; corrected the
+existing DANGEROUS-heal CTV row's expected-behavior text (it previously asserted the now-incoherent
+"NOT re-derived by slicing" claim). implementer, `feature/S-25.02-backfill`, rewrote the
+DANGEROUS-window heal around the Manifest-derived offset and extracted a shared
+`write_and_read_back` helper (reused by both the heal write and the sealed-shard write path, closing
+a would-be duplication between the F-C3-P6-002 and this fix's read-back logic). test-writer added
+the EC-011 corrupted-Manifest fixture, a genuine-slice-passes-and-is-written-and-read-back-verified
+positive fixture, and regression-guarded the shared read-back helper.
+
+**F-C3-P7-002 (MEDIUM, correctness):** the `decision-log.md` primary partition-key regex,
+`^\| D-[0-9]+ \|`, requires digits immediately followed by ` \|` and cannot match a real
+sub-clause-suffixed row such as `\| D-440(a) \|`, the combined-suffix form `\| D-446(a/b/c/d/e) \|`,
+or the hyphenated form `\| D-355-AMEND \|`. Direct re-inspection of the live engine-cycle
+`decision-log.md` (2026-09-10) confirmed 144 total `\| D-...` rows = 109 bare `\| D-NNN \|` + 34
+parenthetical-suffix rows + 1 hyphenated-suffix row (`D-355-AMEND`) — none of the 35 non-bare rows
+matched the old regex, so the marker table's own "144 table rows ... CONFIRMED CORRECT" evidence was
+unachievable by the regex it cited. The sibling brownfield `decision-log.md` was also re-inspected:
+265 rows as of this amendment (grown from the prior 254-row measurement, consistent with EC-005's
+documented staleness precedent), all bare form, 0 sub-clause exceptions in that cycle. FIXED:
+product-owner corrected the primary-key regex to `^\| D-[0-9]+(\([a-z0-9/]+\)\|-[A-Za-z]+)? \|` —
+confirmed by direct grep to match every row in both cycles (144/144 engine, 265/265 brownfield, zero
+unmatched). Updated the Normalization rule's `decision-log.md` bullet to cite the corrected regex and
+enumerate the two suffix forms as ONE primary-key class (not three). Reconciled the marker table's
+evidence cell with the exact 109+34+1=144 breakdown and the re-measured 265-row brownfield count.
+Added EC-012 (sub-clause rows detected as boundaries) and a matching Canonical Test Vector (6-row
+fixture: bare, single-letter-parenthetical ×2, combined-parenthetical, hyphenated, bare — corrected
+regex detects all 6 as distinct boundaries; old regex would detect only 2). **Answered the
+adversary's Appendix cap-bounding question (one-line clarification, no spec-behavior change):** added
+a clarification paragraph confirming the `## Appendix: Sub-clause Expansion` section is packed as ONE
+trailing atomic unit after the shard sealing the file's last `\| D-NNN(...) \|` row, flagged
+`oversized_record: true` under the EXISTING EC-002 exception when it does not fit — direct
+measurement confirms this is the REAL case for the engine cycle (Appendix section = 74,989 bytes,
+already over the illustrative 49,152-byte cap on its own). No new VP citation for this finding — the
+EXISTING VP-123 Record-integrity facet's fixture coverage is extended, not a new facet or ID.
+implementer updated `is_decision_log_row_marker` to the corrected regex (TD-VSDD-060 sibling-swept
+against sibling marker predicates). test-writer added the EC-012 6-row fixture and a negative case
+confirming the old regex under-counts.
+
+**Propagation:** architect propagated a FOURTH VP-124 facet (heal slice-verification invariant, per
+POLICY 9 `vp_index_is_vp_catalog_source_of_truth`, per BC-1.18.008 v1.7's own routing note): VP-INDEX
+v3.11→v3.12 (`total_vps` UNCHANGED 141), verification-architecture.md v1.28→v1.29,
+verification-coverage-matrix.md v1.26→v1.27 — architect already ran `compute-input-hash --update` on
+both arch docs same-burst (`a5078ab`). story-writer's S-25.02 body v3.7→v3.8: AC-014 updated in place
+with the Manifest-Authoritative Slice-and-Verify Rule and the heal-write disk-read-back extension;
+§Edge Cases gained EC-052 (mirrors BC EC-011) and EC-053 (mirrors BC EC-012); §Behavioral Contracts
+BC-1.18.008 cell v1.6→v1.7; §Token Budget BC-1.18.008 line 6,600→7,300 tokens. BC-INDEX v5.79→v5.80
+(BC-1.18.008 version-cell v1.6→v1.7 per POLICY 8); STORY-INDEX v4.456→v4.457 (S-25.02 BC-list cell +
+row narrative).
+
+**Input-hash reconciliation (dependency-ordered, per D-1196's own process observation):** BC-1.18.008.md
+declares VP-INDEX.md as an input (architect's VP-124 fourth-facet extension changed it) — recomputed
+first, `d136e83`→`dc4b072`. `prd-supplements/error-taxonomy.md` declares BC-1.18.008.md as an input —
+recomputed second, AFTER BC-1.18.008.md settled, `c5ba1e0`→`cd1a1e6`. The S-25.02 story declares both
+BC-1.18.008.md and error-taxonomy.md as inputs — recomputed third/last, after both settled,
+`5af158b`→`8d5f873`. `--check` CLEAN on all three post-reconciliation, plus BC-1.18.008.md,
+verification-architecture.md, and verification-coverage-matrix.md (both arch docs already current at
+`a5078ab`, architect's own same-burst update).
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `915b898c` (implementer's F-C3-P7-001/002 fixes
++ test-writer's new/retired test set, immediately after `b1134954`, pushed to origin): full
+`cargo test --workspace --all-targets` suite green; `cargo fmt --check --all` clean;
+`cargo clippy --workspace --all-targets -- -D warnings` clean. BC-5.39.001 cluster-3 LOCAL streak
+stays **0/3** (pass-7 NOT CLEAN — 1 HIGH + 1 MEDIUM, BOTH fixed same-pass; pass-8 next, fresh
+context, continuing the human-authorized full 3-CLEAN drive with LOCAL adversary only unless the
+human specifies otherwise; cycle-level 3/3 CONVERGED streak UNCHANGED). No trajectory-tail drift —
+unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass). `pipeline:`
+stays **PAUSED** (mid-convergence fix burst; consistent with prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-8, fresh context, against BC-1.18.008 v1.7 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `915b898c` — continuing the human-authorized full 3-CLEAN
+drive with LOCAL adversary only, no further cross-vendor rotation unless the human specifies.**
+
+Refs: D-1197, D-1196, S-25.02, BC-1.18.008 v1.7, F-C3-P7-001, F-C3-P7-002, `915b898c`, `b1134954`,
+`dc4b072`, `cd1a1e6`, `8d5f873`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1197 | D-1197-S2502-CLUSTER3-PASS7-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-7 = NOT CLEAN — 1 HIGH + 1 MEDIUM finding.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-7.md`. F-C3-P7-001 (HIGH, data-loss): DANGEROUS-window heal wrote an unverified shard-index-summed slice — root cause a PC5/PC3 spec incoherence (v1.6 PC5 said the heal writes manifest-stored content the length+hash-only Manifest schema cannot supply) — FIXED via product-owner's **BC-1.18.008 v1.6→v1.7** (NEW Manifest-Authoritative Slice-and-Verify Rule in PC5 — offset `original_bytes - final_bytes`, both Manifest-derived, verified before every write, `E-SHD-012` fail-loud on mismatch — + Invariant 3 rewrite + EC-011; same-burst PC6(c)/Invariant 4 heal-write disk-read-back extension) plus implementer's heal rewrite + shared `write_and_read_back` helper. F-C3-P7-002 (MEDIUM): decision-log.md marker-table regex missed real `\| D-NNN(x) \|`/`\| D-NNN-AMEND \|` sub-clause rows (144 engine rows: 109 bare + 34 parenthetical + 1 AMEND) — FIXED via product-owner's corrected regex + EC-012, implementer's `is_decision_log_row_marker` update. architect propagated a FOURTH VP-124 facet (VP-INDEX v3.11→v3.12, verification-architecture.md v1.28→v1.29, verification-coverage-matrix.md v1.26→v1.27, `total_vps` UNCHANGED 141). BC-INDEX v5.79→v5.80; STORY-INDEX v4.456→v4.457 (story v3.7→v3.8, AC-014 updated, EC-052/EC-053 added). Input-hashes reconciled in topological order (BC-1.18.008.md `d136e83`→`dc4b072`; error-taxonomy.md `c5ba1e0`→`cd1a1e6`; story `5af158b`→`8d5f873`); `--check` CLEAN on all touched files. Feature branch `feature/S-25.02-backfill` @ `915b898c` (pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-7 not clean; pass-8 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-8, fresh context, against BC-1.18.008 v1.7/code `915b898c`.** Refs: D-1197, D-1196, S-25.02, BC-1.18.008 v1.7, F-C3-P7-001, F-C3-P7-002, `915b898c`, `b1134954`. STATE.md v10.22→v10.23. | S-25.02 F4 | 2026-09-10 |

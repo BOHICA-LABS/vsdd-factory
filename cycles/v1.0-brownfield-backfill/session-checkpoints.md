@@ -8172,3 +8172,52 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 ### §8. BC-5.39.001 streak
 
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-5 = NOT CLEAN, streak stays 0/3** — the sole finding (F-C3-P5-001, LOW) fixed this burst (passes 1-4 were also NOT CLEAN — 5 not-clean passes so far, 0 consecutive clean by the literal streak definition, though passes 4 and 5 are the first 2 consecutive passes with only LOW/no-HIGH-MEDIUM CODE findings). Substantive CODE defect surface assessed EXHAUSTED; human has AUTHORIZED a full grind-to-literal-3-CONSECUTIVE-CLEAN drive (the cluster-1/D-1172 standard) rather than closing via asymptotic acceptance (the cluster-2/D-1184 precedent). NEXT = fresh cluster-3 LOCAL adversary pass-6, the FIRST attempt of that drive.
+
+## Session Resume Checkpoint (2026-09-10 — S2502-CLUSTER3-PASS6-CROSSVENDOR-FIX-BURST; develop 0959e34b (PR #824 merged); main 51023185; merged_count 120; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on `feature/S-25.02-backfill` @ `b1134954` (pushed to origin). LOCAL BC-5.39.001 pass-6 = NOT CLEAN (2 HIGH + 1 MEDIUM, F-C3-P6-001..003), FIRST CROSS-VENDOR (OpenAI Codex) pass this cascade; ALL fixed/disposed this burst. All 3 findings NOVEL — missed or rationalized away across 5 prior same-vendor (Claude) passes. Streak stays **0/3**. The substantive-CODE-defect-surface-EXHAUSTED assessment reached after passes 4/5 is **REOPENED** — it held only for the same-vendor review perspective. `pipeline:` stays **PAUSED**. Human has AUTHORIZED a full grind-to-literal-3-CONSECUTIVE-CLEAN drive, and cross-vendor passes are now an explicit part of the rotation (this pass's own `[codified]` lesson, `L-BB-D1196`, routed to NEW draft follow-up story S-12.10) — NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-7.
+> Prior checkpoint (S2502-CLUSTER3-PASS5-FIX-BURST, D-1195) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-10. Cycle v1.0-brownfield-backfill. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on branch `feature/S-25.02-backfill`. LOCAL adversary pass-6 fix-burst COMPLETE (D-1196) — the FIRST CROSS-VENDOR (OpenAI Codex) pass this cascade; 2 HIGH + 1 MEDIUM found, ALL fixed. F-C3-P6-001 (HIGH, data-loss) and F-C3-P6-002 (HIGH, spec-fidelity) were both novel to 5 consecutive same-vendor passes — F-C3-P6-001 directly falsifies pass-3's own O-C3-P3-001 adjudication. The human-authorized full 3-CLEAN drive continues; cross-vendor review is now promoted to a required rotation step (lesson `L-BB-D1196`, anchored to new draft follow-up story S-12.10, E-12 Engine Governance). NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-7, fresh context, against BC-1.18.008 v1.6 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `b1134954`.
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL cluster-3 streak = **0/3** (pass-1 not clean, all 7 in-scope findings fixed; pass-2 not clean, all 4 in-scope findings fixed; pass-3 not clean, all 3 in-scope findings fixed; pass-4 CODE CLEAN but NOT CLEAN OVERALL, 1 spec-internal MEDIUM fixed; pass-5 NOT CLEAN, 1 LOW finding fixed; pass-6 NOT CLEAN, 2 HIGH + 1 MEDIUM fixed, FIRST CROSS-VENDOR pass — the substantive-CODE-defect-surface-EXHAUSTED assessment from passes 4/5 REOPENED; pass-7 not yet run). Cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED (separate track).
+
+### §3. In-flight (c)
+
+- `feature/S-25.02-backfill` @ `b1134954` (PUSHED to origin). Contains, on top of pass-5's `26c79f13`: implementer's F-C3-P6-001/002/003 fixes (manifest-based recovery rebuild; `mechanism_a_write_and_verify_sealed_shard` post-hoc disk read-back; `is_id_tagged_lesson_heading` word-boundary tightening) plus test-writer's retired obsolete test + new disk-corruption-race + repeated-prefix + h3-suffix fixtures (784 tests total). No BC/AC/EC/VP/behavior change beyond BC-1.18.008 v1.5→v1.6's own already-adjudicated additions. Full `cargo test --workspace --all-targets` green; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- NEXT = dispatch `vsdd-factory:adversary` for a fresh cluster-3 LOCAL adversary pass-7 (fresh context, no prior-pass visibility beyond this cascade's own convention) against BC-1.18.008 v1.6 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `b1134954` — continuing the human-authorized full grind-to-literal-3-CONSECUTIVE-CLEAN drive, with cross-vendor passes now an explicit part of the rotation.
+- No abandoned/stalled agents this burst.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+None open. No human decision point arose this pass — all 3 findings (F-C3-P6-001/002/003) were mechanically routable to product-owner/implementer/test-writer/architect, and the product-owner ruling on PC6(c)/Invariant 4 (F-C3-P6-002) required no new human decision (the existing v1.5 spec language was already correct; only the code was non-compliant). No new open Drift Item — the cross-vendor blind-spot finding was CODIFIED as a `[process-gap]` lesson and routed to a new draft follow-up story (S-12.10) in the same burst, not left open.
+
+### §5. WIP branches (e)
+
+`feature/S-25.02-backfill` @ `b1134954` (pushed origin). `factory-artifacts` carries this burst's fix-burst bookkeeping commit (standalone pass-6 report, INDEX.md pass-6 row + Convergence Status advance, decision-log.md D-1196, lessons.md `[codified]` lesson entry, BC-INDEX/STORY-INDEX version-sync + S-12.10 registration, STATE.md advance) — BC-INDEX v5.78→v5.79, STORY-INDEX v4.455→v4.456, VP-INDEX v3.10→v3.11 all changed this burst (BC-1.18.008 v1.5→v1.6 content amendment + VP-124 facet extension).
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active** (POL-14 promoted at D-1186, UNCHANGED this burst) + BC-1.18.007 v1.2/**008 v1.6**/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 and cluster-2's BC-1.18.006 are the 2 ACTIVE ones of the 9 (7 remain draft, clusters 3-7 not yet shipped; BC-1.18.008 v1.5→v1.6 this burst — Backfill Recovery Manifest + Recovery-Confirmation Rule). BC-INDEX **v5.79** (2,006 BCs, UNCHANGED this burst — content amendment only, no new BC). VP-INDEX v3.11 (141 VPs, UNCHANGED this burst — VP-124 3rd facet extension only). STORY-INDEX **v4.456** (178 catalog rows incl. S-12.10 draft stub, UNCHANGED count semantics from v4.455's established convention; 25 epics; S-25.02 v3.7; status ready, cluster-1 + cluster-2 DELIVERED/MERGED, cluster-3 IN PROGRESS; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; S-12.09 + S-12.10 draft stubs, E-12, no BC authored yet). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md **v1.10** (E-SHD-011 added this burst).
+
+### §7. HEADs
+
+- `develop`: **`0959e34b29a41a1b064ff1c7ec62096e94a31c7e`** (PR #824 squash-merged, base `fff5e4cc`). merged_count **120**. UNCHANGED this burst.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED this burst.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD. Carries this D-1196 fix-burst bookkeeping commit (standalone pass-6 report, INDEX.md cluster-3 pass-6 row, decision-log.md D-1196, lessons.md `[codified]` entry, BC-INDEX/STORY-INDEX/VP-INDEX version-sync, STATE.md advance), now on the branch.
+- `feature/S-25.02-backfill`: **IN PROGRESS, PUSHED** @ `b1134954` (cluster-3, mechanism-A backfill; F-C3-P6-001/002/003 fixes immediately after `26c79f13`). Full code gate GREEN; 0 tests RED.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-6 = NOT CLEAN, streak stays 0/3** — 2 HIGH + 1 MEDIUM fixed this burst, the FIRST CROSS-VENDOR (OpenAI Codex) pass this cascade, 100% novelty rate (all 3 findings novel to 5 prior same-vendor passes). Substantive CODE defect surface assessed EXHAUSTED after passes 4/5 is REOPENED by this pass's evidence — that assessment held only for the same-vendor review perspective. Human's AUTHORIZED full grind-to-literal-3-CONSECUTIVE-CLEAN drive continues (the cluster-1/D-1172 standard), now with cross-vendor passes an explicit part of the rotation per this pass's own codified process lesson. NEXT = fresh cluster-3 LOCAL adversary pass-7.
