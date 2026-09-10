@@ -4469,61 +4469,107 @@ pub struct MechanismABackfillPartition {
     pub oversized_record: bool,
 }
 
-/// BC-1.18.008 Postcondition 2/Invariant 2: locate the structural
-/// record-boundary byte offsets native to `artifact_stem`'s own append-log
-/// format within `content` (e.g. `## Decisions Log` row boundaries for
-/// `"decision-log"`, `### <burst-heading>` boundaries for `"burst-log"`) —
-/// the ONLY points [`mechanism_a_partition_for_backfill`] may split at,
-/// never an arbitrary byte offset that could divide a single record across
-/// two shard files.
+/// BC-1.18.008 Postcondition 2/Invariant 2 (v1.2's Record-Boundary Marker
+/// Table + its single implementable normalization predicate): locate the
+/// structural record-boundary byte offsets native to `artifact_stem`'s own
+/// append-log format within `content` — the ONLY points
+/// [`mechanism_a_partition_for_backfill`] may split at, never an arbitrary
+/// byte offset that could divide a single record across two shard files, and
+/// never keyed on heading LEVEL (h2 vs h3) alone.
+///
+/// Per artifact, per the marker table:
+/// - `decision-log.md`: PRIMARY key is the `"| D-"` table-row start
+///   (Appendix `### D-NNN (...)` sub-clause blocks are secondary atomic
+///   units, never a primary boundary — [`is_lesson_record_heading`]-style
+///   filtering is unnecessary here since `"| D-"` never collides with a
+///   `#`-prefixed heading line at all).
+/// - `burst-log.md`: PRIMARY key is any `"## "` (h2) heading, PLUS the
+///   confirmed `### Pass-N Fix Burst` h3-exception form
+///   ([`is_pass_fix_burst_heading`]) — a nested `### Block N:` sub-heading
+///   (or any other `### ` line) is never a boundary.
+/// - `lessons.md`: PRIMARY key is an ID-tagged `"## L-<tag>-NNN"` heading, OR
+///   `"## LESSON (D-NNN)"`, OR `"## RECURRENCE NOTE (D-NNN)"`
+///   ([`is_lesson_h2_record_heading`]), PLUS the confirmed pre-`L-EDP1-052`
+///   `### L-<tag>-NNN` h3-exception form ([`is_lesson_record_heading`]) — a
+///   nested `### ` sub-heading lacking the `L-<tag>-NNN` tag is never a
+///   boundary, and an untagged `"## "` aside is never a boundary either.
+/// - `session-checkpoints.md`: PRIMARY key is any `"## "` (h2) heading
+///   matching the confirmed checkpoint-record forms
+///   ([`is_checkpoint_record_heading`]) — nested `### ` sub-headings are
+///   never a boundary.
 pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) -> Vec<usize> {
-    // Postcondition 2's own named examples, generalized to all four
-    // mechanism-A append-logs by their real, native structural-record
-    // marker: `decision-log.md`'s own `## Decisions Log` table rows each
-    // start with the literal `"| D-"` row-marker; `burst-log.md` structures
-    // its own records as `### <burst-heading>` blocks; `lessons.md`
-    // structures its own records as `### L-EDP1-NNN -- ...` blocks (an
-    // ID-tagged heading, structurally one level narrower than a bare
-    // `burst-log` heading -- see `is_lesson_record_heading`); `session-
-    // checkpoints.md` structures its own records as `## Session Resume
-    // Checkpoint (...)` / `## Archived...` / `## Checkpoint...` blocks --
-    // one level up from `burst-log`/`lessons`, never colliding with either
-    // (an `### ` line never starts with the 3-byte `"## "` prefix, since
-    // its 3rd byte is `#`, not a space).
-    let marker: &[u8] = match artifact_stem {
-        "decision-log" => b"| D-",
-        "burst-log" | "lessons" => b"### ",
-        "session-checkpoints" => b"## ",
+    const H2: &[u8] = b"## ";
+    const H3: &[u8] = b"### ";
+
+    match artifact_stem {
+        "decision-log" => line_anchored_marker_offsets(content, b"| D-"),
+
+        "burst-log" => {
+            // PRIMARY: any h2 heading is a genuine burst-log record boundary
+            // (the marker table names no content-based h2 filter for this
+            // artifact — every confirmed h2 record form qualifies).
+            let mut offsets = line_anchored_marker_offsets(content, H2);
+            // CONFIRMED EXCEPTION: `### Pass-N Fix Burst` h3 records (e.g.
+            // the engine cycle's `### Pass-39/40 Fix Burst` records sitting
+            // between two h2 records). Every OTHER `### ` line (e.g. a
+            // nested `### Block N:` sub-heading) is excluded.
+            offsets.extend(
+                line_anchored_marker_offsets(content, H3)
+                    .into_iter()
+                    .filter(|&offset| {
+                        is_pass_fix_burst_heading(heading_line(content, offset, H3.len()))
+                    }),
+            );
+            offsets.sort_unstable();
+            offsets
+        }
+
+        "lessons" => {
+            // PRIMARY: an h2 heading that is either ID-tagged
+            // (`## L-<tag>-NNN`, the h2 form adopted starting at
+            // `L-EDP1-052`) or one of brownfield's own `## LESSON (D-NNN)` /
+            // `## RECURRENCE NOTE (D-NNN)` forms — an untagged h2 aside is
+            // never a boundary.
+            let mut offsets: Vec<usize> = line_anchored_marker_offsets(content, H2)
+                .into_iter()
+                .filter(|&offset| {
+                    is_lesson_h2_record_heading(heading_line(content, offset, H2.len()))
+                })
+                .collect();
+            // CONFIRMED EXCEPTION: the pre-`L-EDP1-052` `### L-<tag>-NNN` h3
+            // records (e.g. `### L-EDP1-050`/`### L-EDP1-051`) — a nested
+            // `### ` sub-heading lacking the `L-<tag>-NNN` tag (i.e. part of
+            // the preceding lesson's own body) is never a boundary.
+            offsets.extend(
+                line_anchored_marker_offsets(content, H3)
+                    .into_iter()
+                    .filter(|&offset| {
+                        is_lesson_record_heading(heading_line(content, offset, H3.len()))
+                    }),
+            );
+            offsets.sort_unstable();
+            offsets
+        }
+
+        "session-checkpoints" => {
+            // F4 BC-cluster-3 adversarial-review finding MED-3 (Postcondition
+            // 2/Invariant 2): session-checkpoints.md's own h2 headings can
+            // nest a same-level reference/aside section (e.g. a
+            // `## Related Links` block) inside a checkpoint record's own
+            // body — filtered to the confirmed checkpoint-record forms only.
+            line_anchored_marker_offsets(content, H2)
+                .into_iter()
+                .filter(|&offset| {
+                    is_checkpoint_record_heading(heading_line(content, offset, H2.len()))
+                })
+                .collect()
+        }
+
         // No known native record-boundary marker for this artifact stem --
         // callers of `mechanism_a_partition_for_backfill` fall back to
         // treating the whole content as a single record when given no
         // boundaries at all.
-        _ => return Vec::new(),
-    };
-    let candidates = line_anchored_marker_offsets(content, marker);
-
-    // F4 BC-cluster-3 adversarial-review finding MED-3 (Postcondition
-    // 2/Invariant 2): `lessons.md` and `session-checkpoints.md` both nest
-    // sub-headings, at the SAME markdown level as their own genuine record
-    // marker, inside a record's own body (see the two heading-recognizer
-    // doc comments below for the real on-disk shapes this is grounded in).
-    // A bare line-anchored prefix match cannot distinguish those from a
-    // genuine new-record heading -- `decision-log` and `burst-log` need no
-    // such extra discriminator (a `"| D-"` row-marker and a bare `### `
-    // burst heading are already unambiguous at their own artifact's real
-    // format), so only these two filter further.
-    match artifact_stem {
-        "lessons" => candidates
-            .into_iter()
-            .filter(|&offset| is_lesson_record_heading(heading_line(content, offset, marker.len())))
-            .collect(),
-        "session-checkpoints" => candidates
-            .into_iter()
-            .filter(|&offset| {
-                is_checkpoint_record_heading(heading_line(content, offset, marker.len()))
-            })
-            .collect(),
-        _ => candidates,
+        _ => Vec::new(),
     }
 }
 
@@ -4539,21 +4585,15 @@ fn heading_line(content: &[u8], marker_offset: usize, marker_len: usize) -> &[u8
     &rest[..end]
 }
 
-/// MED-3: `true` iff `heading` (the text right after a `lessons.md` `### `
-/// marker) is a GENUINE lesson-record heading rather than a nested,
-/// non-record sub-heading inside an existing lesson's own body. Grounded in
-/// the real `.factory/cycles/v1.0-feature-engine-discipline-pass-1/
-/// lessons.md` convention: every genuine lesson record is tagged with its
-/// own `L-EDP1-NNN`-shaped ID (`"L-"` + an alphanumeric cycle-prefix tag +
-/// `"-"` + a numeric sequence) immediately after the marker; that file's own
-/// lesson bodies use bold prose labels (`**Pattern:**`, `**Trend:**`, ...)
-/// for internal structure, never a further `### ` sub-heading, so ANY
-/// `### ` line lacking this ID tag is necessarily nested body content, not
-/// a new record.
-fn is_lesson_record_heading(heading: &[u8]) -> bool {
-    let Ok(heading) = std::str::from_utf8(heading) else {
-        return false;
-    };
+/// `true` iff `heading` (already confirmed UTF-8-decodable prose, i.e. the
+/// text right after a `lessons.md` record marker) starts with an
+/// `L-<tag>-NNN`-shaped ID (`"L-"` + an alphanumeric cycle-prefix tag + `"-"`
+/// + a numeric sequence) — the ID-tag shape shared by BOTH lessons.md's
+/// pre-`L-EDP1-052` h3-exception records ([`is_lesson_record_heading`]) and
+/// its h2 primary-form records ([`is_lesson_h2_record_heading`]). Factored
+/// out so both callers apply the identical tag-detection rule rather than
+/// two independently-drifting copies (TD-VSDD-060).
+fn is_id_tagged_lesson_heading(heading: &str) -> bool {
     let Some(rest) = heading.strip_prefix("L-") else {
         return false;
     };
@@ -4566,6 +4606,66 @@ fn is_lesson_record_heading(heading: &[u8]) -> bool {
     rest[tag_len..]
         .strip_prefix('-')
         .is_some_and(|after_dash| after_dash.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// PC2 Record-Boundary Marker Table (`lessons.md` row), CONFIRMED EXCEPTION
+/// column: `true` iff `heading` (the text right after a `lessons.md` `### `
+/// marker) is the confirmed pre-`L-EDP1-052` h3-exception record form
+/// (`### L-<tag>-NNN ...`) rather than a nested, non-record sub-heading
+/// inside an existing lesson's own body. Grounded in the real
+/// `.factory/cycles/v1.0-feature-engine-discipline-pass-1/lessons.md`
+/// convention: every genuine pre-052 lesson record is tagged with its own
+/// `L-EDP1-NNN`-shaped ID immediately after the marker; that file's own
+/// lesson bodies use bold prose labels (`**Pattern:**`, `**Trend:**`, ...)
+/// for internal structure, never a further `### ` sub-heading, so ANY
+/// `### ` line lacking this ID tag is necessarily nested body content, not
+/// a new record.
+fn is_lesson_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    is_id_tagged_lesson_heading(heading)
+}
+
+/// PC2 Record-Boundary Marker Table (`lessons.md` row), PRIMARY column:
+/// `true` iff `heading` (the text right after a `lessons.md` `## ` marker)
+/// is a GENUINE lesson-record heading — either the `L-EDP1-052`-onward
+/// ID-tagged h2 form (`## L-<tag>-NNN ...`), or one of brownfield's own
+/// `## LESSON (D-NNN) ...` / `## RECURRENCE NOTE (D-NNN) ...` forms — rather
+/// than an untagged h2 aside nested inside a lesson's own body.
+fn is_lesson_h2_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    is_id_tagged_lesson_heading(heading)
+        || heading.starts_with("LESSON (D-")
+        || heading.starts_with("RECURRENCE NOTE (D-")
+}
+
+/// PC2 Record-Boundary Marker Table (`burst-log.md` row), CONFIRMED
+/// EXCEPTION column: `true` iff `heading` (the text right after a
+/// `burst-log.md` `### ` marker) is the confirmed `### Pass-N Fix Burst`
+/// h3-exception record form rather than a nested, non-record sub-heading
+/// (e.g. `### Block N: ...`) inside an existing h2 burst record's own body.
+/// Grounded in the real
+/// `.factory/cycles/v1.0-feature-engine-discipline-pass-1/burst-log.md`
+/// convention: `### Pass-39 Fix Burst — ...` / `### Pass-40 Fix Burst — ...`
+/// are the only two confirmed real h3-level burst-log records, both shaped
+/// `"Pass-"` + digits + `" Fix Burst"`.
+fn is_pass_fix_burst_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    let Some(rest) = heading.strip_prefix("Pass-") else {
+        return false;
+    };
+    let digit_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if digit_len == 0 {
+        return false;
+    }
+    rest[digit_len..].starts_with(" Fix Burst")
 }
 
 /// MED-3: `true` iff `heading` (the text right after a `session-
