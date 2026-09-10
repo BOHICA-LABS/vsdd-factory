@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
-timestamp: 2026-09-05T00:00:00Z
+timestamp: 2026-09-10T00:00:00Z
 phase: F2
 inputs:
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
@@ -70,14 +70,46 @@ default (no partial/MVP delivery of a shipped feature).
 
 2. **Split algorithm: partition pre-existing content into `ceil(current_bytes / shard_cap_bytes)`
    sealed shards, preserving record boundaries.** The monolithic file's content is partitioned at
-   the same structural boundaries the artifact's own format uses (e.g., `## Decisions Log` row
-   boundaries for `decision-log.md`, `### <burst-heading>` boundaries for `burst-log.md`) — never
-   at an arbitrary byte offset that could split a single record (a D-NNN row, a burst-log h2 block)
-   across two shard files. Each resulting shard's byte size is `<= shard_cap_bytes`
-   (BC-1.18.005's per-artifact effective cap, via the Cross-Validator Minimum Rule). The LAST
-   partition becomes the fresh "current" file at the canonical name (per BC-1.18.006's stable-
-   current-filename convention); all partitions before it are sealed with sequential `seq`
-   numbers starting at 1, in chronological (original-file-order) sequence.
+   the structural record-boundary markers native to the artifact's own format. Boundary detection
+   for all four mandatory artifacts MUST use the exact patterns enumerated in the
+   **Record-Boundary Marker Table** below — never at an arbitrary byte offset that could split a
+   single record (a D-NNN row, a burst-log record, a lessons.md entry, a session-checkpoint entry)
+   across two shard files, and never keyed on heading LEVEL alone: h2-only detection is
+   insufficient (see the marker table's confirmed h3-exception record forms, which an h2-only
+   detector would either silently skip — causing backfill to no-op on the artifact's true content
+   — or mis-treat a nested `### ` sub-heading as a false boundary, splitting a record mid-record).
+   Each resulting shard's byte size is `<= shard_cap_bytes` (BC-1.18.005's per-artifact effective
+   cap, via the Cross-Validator Minimum Rule). The LAST partition becomes the fresh "current" file
+   at the canonical name (per BC-1.18.006's stable-current-filename convention); all partitions
+   before it are sealed with sequential `seq` numbers starting at 1, in chronological
+   (original-file-order) sequence.
+
+   **Record-Boundary Marker Table (authoritative).** Verified by direct inspection of the real
+   on-disk content of both `.factory/cycles/v1.0-feature-engine-discipline-pass-1/` and
+   `.factory/cycles/v1.0-brownfield-backfill/` cycle artifacts as of this amendment (2026-09-10).
+   The backfill implementation's test fixtures MUST reproduce this heterogeneity, not assume a
+   single idealized form:
+
+   | Artifact | Primary record-start pattern | Confirmed exception form(s) | NOT a boundary (nested sub-structure) | Cross-cycle evidence |
+   |---|---|---|---|---|
+   | `decision-log.md` | `^\| D-[0-9]+ \|` (a decision-log table row) | `^### D-[0-9]+ \(` — an Appendix sub-clause-expansion block under the `## Appendix: Sub-clause Expansion` section; each such h3 block is a secondary atomic unit tied to its D-NNN row and MUST NOT itself be split mid-block, even though the table row remains the PRIMARY partition key | The `## Appendix: Sub-clause Expansion` heading is a section label, not a record | Engine: 144 table rows. Brownfield: 254 table rows. Table-row form CONFIRMED CORRECT already in both cycles |
+   | `burst-log.md` | `^## ` (any h2 heading) | `^### Pass-[0-9]+ Fix Burst\b` — 2 confirmed real records in the engine cycle (`### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`), sitting between the h2 records `## F5 pass-38 fix burst` and `## Burst: F5 pass-41 fix burst (2026-05-12)`, use h3 as their actual top-level heading instead of h2. The backfill MUST treat this exact pattern as an additional record boundary | `^### Block [0-9]+:` (brownfield's 8-block burst structure — `Block 1: Parent-commit` through `Block 8: factory-artifacts commit`), `^### Extracted banner content`, and any other `### ` line NOT matching the Pass-N-Fix-Burst exception pattern | Engine: 73 h2 records + 2 h3-exception records = 75 total. Brownfield: 81 h2 records, 0 h3-exception records (its 80 `### ` headings are all nested `Block N:` sub-structure) |
+   | `lessons.md` | `^## L-<tag>-[0-9]+` (e.g. `## L-EDP1-[0-9]+`), OR `^## LESSON \(D-[0-9]+\)`, OR `^## RECURRENCE NOTE \(D-[0-9]+\)` | `^### L-<tag>-[0-9]+\b` — 2 confirmed real records in the engine cycle (`### L-EDP1-050`, `### L-EDP1-051`) use h3; the h2 form was adopted starting at `## L-EDP1-052`. The backfill MUST treat this exact pattern as an additional record boundary | None confirmed nested under a lessons.md record in either cycle | Engine live file starts at L-EDP1-050 (L-EDP1-001..049 already archived to `lessons-archive-pass1-49.md`, out of this BC's scope — the backfill operates only on the CURRENT monolithic file's content). Brownfield: 5 records, all `LESSON (D-NNNN)` / `RECURRENCE NOTE (D-NNNN)` h2 form, 0 h3-exception records |
+   | `session-checkpoints.md` | `^## ` (any h2 heading — `## Session Resume Checkpoint (...)`, `## Checkpoint: ...`, `## Archived: ...`, `## Archived Checkpoint...`) | None confirmed | `^### ` (e.g. `### State`, `### §N. <label>`, `### Resume Path A`) — always nested substructure within the enclosing h2 checkpoint record in both cycles, never a boundary itself | Engine: 12 h2 records, 8 nested h3 sub-headings (all under one archived checkpoint). Brownfield: 181 h2 records, 811 nested h3 sub-headings |
+
+   **Normalization rule (single implementable predicate).** A line is a record-boundary line if
+   and only if: (a) it matches `^## ` (any h2); OR (b) it matches one of the two documented
+   artifact-specific h3-exception patterns above (`^### Pass-[0-9]+ Fix Burst\b` for
+   `burst-log.md`; `^### L-<tag>-[0-9]+\b` for `lessons.md`); OR (c) — for `decision-log.md` only —
+   it matches `^\| D-[0-9]+ \|` as the PRIMARY partition key (the `### D-NNN (` Appendix h3 blocks
+   are secondary atomic units that must never be split internally, but do not themselves define
+   the primary shard-boundary grid). Every other `^#{3,4} ` line is nested sub-structure and MUST
+   NOT be treated as a boundary. This predicate is exhaustive against every confirmed heading form
+   in both `v1.0-feature-engine-discipline-pass-1/` and `v1.0-brownfield-backfill/` as of
+   2026-09-10. If a future cycle introduces a heading form outside this enumeration,
+   Postcondition 6's fail-loud content-preservation gate MUST reject the backfill run rather than
+   silently mis-partition, and this BC MUST be amended to extend the marker table before the
+   backfill is re-run.
 
 3. **The full shard index is published for the complete pre-existing history in the same
    operation.** The resulting `<artifact-stem>.shard-index.toml` contains one `[[shard]]` entry
@@ -107,10 +139,13 @@ default (no partial/MVP delivery of a shipped feature).
    retired.** The backfill-split MUST verify, before completing: (a) the concatenation of all
    sealed shards in `seq` order plus the final current file reproduces the original monolithic
    file's content byte-for-byte (modulo the shard/index metadata itself, which is new), and (b)
-   every record (D-NNN row, burst-log h2 block, lessons entry, session-checkpoint entry) that
-   existed in the original file is present in exactly one resulting shard — never zero, never two.
-   This verification is a hard gate: if it fails, the backfill-split aborts and the original
-   monolithic file is left untouched (fail-loud, not partial-and-silent).
+   every record (a decision-log.md `D-NNN` table row, a burst-log.md record per the
+   Record-Boundary Marker Table — including its two confirmed `### Pass-N Fix Burst`
+   h3-exception records, a lessons.md entry per the same table — including its two confirmed
+   `### L-EDP1-050`/`### L-EDP1-051` h3-exception records, or a session-checkpoints.md h2
+   checkpoint entry) that existed in the original file is present in exactly one resulting shard —
+   never zero, never two. This verification is a hard gate: if it fails, the backfill-split aborts
+   and the original monolithic file is left untouched (fail-loud, not partial-and-silent).
 
 ## Invariants
 
@@ -121,7 +156,13 @@ default (no partial/MVP delivery of a shipped feature).
    (pre-existing monolithic content, iteratively partitioned, rather than a single new block).
 
 2. **No record is ever split across a shard boundary.** The partition points (Postcondition 2) are
-   always at structural record boundaries native to the artifact's own format, never mid-record.
+   always at the structural record-boundary markers enumerated in Postcondition 2's
+   Record-Boundary Marker Table, never mid-record, and never determined from heading level (h2 vs
+   h3) alone — the marker table's documented h3-exception forms (burst-log.md's `### Pass-39/40
+   Fix Burst` records; lessons.md's pre-`L-EDP1-052` `### L-EDP1-050`/`### L-EDP1-051` records)
+   are record boundaries despite their heading level, while nested `### ` sub-headings (e.g.
+   burst-log.md's `### Block N:` blocks) are never boundaries despite matching the same heading
+   level.
 
 3. **The backfill-split is idempotent against a shard-index that already exists for that
    artifact.** If a partial or complete backfill-split has already run for an artifact (e.g., a
@@ -138,6 +179,7 @@ default (no partial/MVP delivery of a shipped feature).
 | EC-003 | Backfill process crashes after writing shard files 1-3 of an expected 19 | Postcondition 5's atomicity guarantee: the original monolithic file is untouched (staging was incomplete), and the partial staged output is discarded on the next backfill attempt, which restarts cleanly from the original file |
 | EC-004 | Content-preservation verification (Postcondition 6) finds a byte-count or record-count mismatch | Backfill aborts; original file left untouched; fail-loud error surfaced to the operator running the F4 migration (analogous to ADR-049's own one-time migration pattern, which this BC is explicitly modeled on) |
 | EC-005 | The four artifacts have grown further between F2 (this BC's authoring) and F4 (its execution) — the illustrative byte counts in Precondition 3 are stale by then | Not a defect: Precondition 3 explicitly requires re-measurement at actual F4 execution time; the illustrative F2-era counts exist only to establish scale (5-19× over cap), not as literal backfill inputs |
+| EC-006 | A monolithic `burst-log.md` or `lessons.md` contains a record whose heading level deviates from that artifact's dominant h2 form (e.g. burst-log.md's `### Pass-39 Fix Burst`/`### Pass-40 Fix Burst`, or lessons.md's pre-`L-EDP1-052` `### L-EDP1-050`/`### L-EDP1-051`) | The backfill MUST detect these via the Postcondition 2 Record-Boundary Marker Table's documented h3-exception patterns and treat them as record boundaries identical in kind to the artifact's h2 records; an h2-only detector that misses these records (silently no-ops or mid-record-splits) fails Postcondition 6's content-preservation gate and MUST abort per EC-004 |
 
 ## Canonical Test Vectors
 
@@ -148,6 +190,7 @@ default (no partial/MVP delivery of a shipped feature).
 | Artifact at 40,000 bytes, cap 49,152 bytes (under cap) | 1 "shard" total = the unchanged current file; shard-index created with 0 sealed `[[shard]]` entries | edge-case |
 | A single decision-log row of 60,000 bytes (exceeds 49,152-byte cap alone) | That shard's `bytes_at_seal = 60000 > shard_cap_bytes`, flagged `oversized_record: true`; NOT split mid-record | edge-case |
 | Backfill interrupted after 3/19 shards written, restarted | Original file byte-identical to pre-crash state; restart produces the same 19-shard result as an uninterrupted run | error |
+| `burst-log.md` fixture containing `## F5 pass-38 fix burst`, `### Pass-39 Fix Burst — F5 Engine Discipline`, `### Pass-40 Fix Burst — F5 Engine Discipline`, `## Burst: F5 pass-41 fix burst` in sequence, with `### Block N:` sub-headings nested inside the h2 records | Boundary detector produces exactly 4 records (pass-38, pass-39, pass-40, pass-41) — the two h3-exception records are each their own record; nested `### Block N:` sub-headings do NOT create additional record boundaries | edge-case |
 
 ## Verification Properties
 
@@ -225,5 +268,6 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.2 | 2026-09-10 | product-owner | Fresh-context adversarial review found PC2 internally self-contradictory on burst-log record-boundary granularity: PC2 named an h3 (`### <burst-heading>`) boundary phrase in one clause while PC2's own "never split" clause and PC6(b)'s record-integrity clause both correctly said h2 — the erroneous h3 phrase misled implementation toward `### ` as the burst-log/lessons.md record marker, which silently no-ops backfill on the two largest artifacts (finds ≤2 boundaries against real h2-keyed content) and splits records mid-record where nested `### Block N:` sub-headings occur inside brownfield burst records. Reconciled: removed the erroneous h3 phrase from PC2; PC2 and PC6(b) now unambiguously key burst-log.md and session-checkpoints.md on `## ` (h2) boundaries. Added an authoritative Record-Boundary Marker Table to PC2, derived from direct inspection of the real `v1.0-feature-engine-discipline-pass-1/` and `v1.0-brownfield-backfill/` cycle artifacts, enumerating the exact record-start pattern per artifact and two confirmed real-world h3-exception record forms that a naive h2-only rule would miss: burst-log.md's `### Pass-39/40 Fix Burst` records (engine cycle, sitting between two h2 records) and lessons.md's pre-L-EDP1-052 `### L-EDP1-050`/`### L-EDP1-051` records (the L-EDP1-052+ form switched to h2). Added a single implementable normalization predicate covering all confirmed forms across both cycles, including decision-log.md's table-row primary key plus its Appendix sub-clause h3 blocks as a secondary non-splittable unit. Tightened Invariant 2 to cite the marker table and to forbid keying partition points on heading level alone. Added EC-006 and a corresponding canonical test vector covering the h3-exception detection requirement. No change to the split algorithm's core semantics (Postconditions 1, 3, 4, 5), Atomicity, Idempotency, or the artifact's CAP-043 anchor. |
 | 1.1 | 2026-09-05 | product-owner | Fix-burst amendment (F-S2502-F2-003 + F-S2502-F2-007): VP-124's idempotency row Proof Method reconciled from "unit test" to "integration" per VP-INDEX v3.02's authoritative method assignment (both VP-124 rows now consistently read "integration test"); the atomicity row's wording tightened to lead with "integration test" for internal consistency. Added `## SDK Grounding Evidence` section with literal stable-anchor grep output for `write_atomic`, `rotate_changelog`, and `HookResult`. No postcondition/invariant content change. Related BCs gained a cross-reference to the new BC-1.18.011 (B2 migration BC modeled on this BC's governance pattern). |
 | 1.0 | 2026-09-05 | product-owner | Initial creation (NEW BC, not in the original F1 enumeration — required per ADR-051 Decision 2's finding that AC-002/AC-003 only gate future writes). One-time backfill-split of the four pre-existing oversized cycle append-log files, record-boundary-safe partitioning, content-preservation verification gate, composition with the retention policy. CAP-043 capability anchor. ADR-051 §D2 citation. |
