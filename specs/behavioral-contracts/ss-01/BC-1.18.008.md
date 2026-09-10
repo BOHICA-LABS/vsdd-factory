@@ -12,7 +12,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.007.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f1-delta-analysis.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "d7ab601"
+input-hash: "a68be55"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null

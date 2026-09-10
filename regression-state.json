@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-10T12:38:21Z","command":"cargo test -p factory-dispatcher --test bc_1_18_007_retention_test 2>&1 | tail -20\necho \"=== clippy ===\"\ncargo clippy -p factory-dispatcher --tests -- -D warnings 2>&1 | tail -40"}
+{"status":"pass","timestamp":"2026-09-10T14:46:44Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && cargo test --package factory-dispatcher --test bc_1_18_008_backfill_split_test 2>&1 | tail -60"}
