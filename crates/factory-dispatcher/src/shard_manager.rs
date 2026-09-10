@@ -74,34 +74,38 @@
 //! observable rotate-and-retry outcome remains owned by the still-pending
 //! BC-1.18.009 cluster.
 //!
-//! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" — STUB ONLY,
-//! stub-architect burst, BC-5.38.001 Red Gate discipline)
+//! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" —
+//! IMPLEMENTED, BC-5.38.001 Red Gate discipline)
 //!
-//! This burst adds the type/signature surface for BC-1.18.007 (Shard
-//! Retention/Compaction — AC-010/AC-011/AC-012) and BC-1.18.008 (Mandatory
-//! One-Time Backfill-Split of the Four Pre-Existing Oversized Cycle
-//! Append-Logs — AC-013/AC-014), landing near the end of this file, after
-//! cluster-2's `reconcile_leading_probe_backstop` and before the test
-//! modules. UNLIKE cluster-1/2's functions (real, green, above), every
-//! non-trivial cluster-3 function body below is `todo!()` — this is a
-//! compilable RED GATE stub only, per `tdd_mode: strict` and BC-5.38.001;
-//! test-writer's cluster-3 Red Gate suite is expected to FAIL against these
-//! stubs until implementer lands real logic. Two struct fields were added
-//! to already-shipped cluster-1/2 types to carry BC-1.18.007's own schema
-//! obligation (`ShardIndex::retention_count`, Postcondition 1) — additive,
-//! defaulted, and NOT a behavior change to any cluster-1/2 function; the two
-//! pre-existing `ShardIndex { .. }` struct-literal call sites (one
-//! production, one test) were mechanically extended with the new field's
-//! default value to keep the crate compiling, with no other change to
-//! either site. `ShardIndexEntry` itself was deliberately left UNCHANGED
-//! (no new field) — BC-1.18.007 Invariant 3 explicitly sanctions either "add
-//! an `archived: true` boolean" OR "update the entry's own `path` to reflect
-//! the new archived location" as an implementation detail; this stub adopts
-//! the path-mutation form precisely to avoid a multi-site collateral edit
-//! across cluster-1/2's own already-green `ShardIndexEntry { .. }` literals.
-//! BC-1.18.009/BC-1.18.010/BC-1.18.011/BC-1.18.012/BC-7.08.001 (mechanisms
-//! B1/B2 and the Cohort B flip) remain explicitly OUT OF SCOPE for this
-//! burst — later clusters (4-7) own them.
+//! This cluster adds BC-1.18.007 (Shard Retention/Compaction —
+//! AC-010/AC-011/AC-012) and BC-1.18.008 (Mandatory One-Time Backfill-Split
+//! of the Four Pre-Existing Oversized Cycle Append-Logs — AC-013/AC-014),
+//! landing near the end of this file, after cluster-2's
+//! `reconcile_leading_probe_backstop` and before the test modules.
+//! **UPDATE (S-25.02 F4 cluster-3 implementer burst):** like cluster-1/2's
+//! functions above, every non-trivial cluster-3 function body is now a REAL,
+//! fully implemented body — the stub-architect's original `todo!()`
+//! placeholders have all been replaced per BC-1.18.007's and BC-1.18.008's
+//! own postconditions, driving test-writer's cluster-3 Red Gate suites
+//! (`bc_1_18_007_retention_test.rs`, `bc_1_18_008_backfill_split_test.rs`)
+//! to green — see the "BC-1.18.007 — Shard Retention/Compaction" and
+//! "BC-1.18.008 — Mandatory One-Time Backfill-Split..." section headers
+//! further below for their own per-section implementation notes. Two struct
+//! fields were added to already-shipped cluster-1/2 types to carry
+//! BC-1.18.007's own schema obligation (`ShardIndex::retention_count`,
+//! Postcondition 1) — additive, defaulted, and NOT a behavior change to any
+//! cluster-1/2 function; the two pre-existing `ShardIndex { .. }`
+//! struct-literal call sites (one production, one test) were mechanically
+//! extended with the new field's default value, with no other change to
+//! either site. `ShardIndexEntry` itself was deliberately left UNCHANGED (no
+//! new field) — BC-1.18.007 Invariant 3 explicitly sanctions either "add an
+//! `archived: true` boolean" OR "update the entry's own `path` to reflect
+//! the new archived location" as an implementation detail; this module
+//! adopts the path-mutation form precisely to avoid a multi-site collateral
+//! edit across cluster-1/2's own already-green `ShardIndexEntry { .. }`
+//! literals. BC-1.18.009/BC-1.18.010/BC-1.18.011/BC-1.18.012/BC-7.08.001
+//! (mechanisms B1/B2 and the Cohort B flip) remain explicitly OUT OF SCOPE
+//! for this cluster — later clusters (4-7) own them.
 
 use std::io;
 use std::io::Read as _;
@@ -4038,11 +4042,21 @@ pub fn reconcile_leading_probe_backstop(
 
 // ===========================================================================
 // BC-1.18.007 — Shard Retention/Compaction (S-25.02 F4 BC-cluster 3
-// "retention+backfill"; AC-010/AC-011/AC-012). STUB ONLY — every non-trivial
-// body below is `todo!()` per `tdd_mode: strict` / BC-5.38.001. GREEN-BY-
-// DESIGN/WIRING-EXEMPT exceptions are called out individually, mirroring
-// cluster-1/2's own precedent (`ShardEntry::cap_formula_inputs`,
-// `From<ShardConfigError> for HookResult`, `build_roll_retry_block_reason`).
+// "retention+backfill"; AC-010/AC-011/AC-012).
+//
+// # BC-5.38.001 Red Gate discipline — IMPLEMENTED (S-25.02 F4 cluster-3)
+//
+// Every function below is now a REAL, fully implemented body — the
+// stub-architect's original `todo!()` placeholders have all been replaced by
+// implementer per BC-1.18.007's postconditions, driving test-writer's Red
+// Gate suite (`bc_1_18_007_retention_test.rs`'s integration tests) to green.
+// GREEN-BY-DESIGN/WIRING-EXEMPT exceptions (`default_retention_count`,
+// `archived_shard_path`, `archived_shard_index_path_string`,
+// `shard_index_entry_is_archived`, `From<ShardRetentionError> for
+// HookResult`) were real from the stub-architect's own initial burst, per
+// their own doc comments, mirroring cluster-1/2's own precedent
+// (`ShardEntry::cap_formula_inputs`, `From<ShardConfigError> for
+// HookResult`, `build_roll_retry_block_reason`).
 // ===========================================================================
 
 /// BC-1.18.007 Postcondition 1: the config default for
@@ -4389,11 +4403,20 @@ fn is_shard_file_for_stem(file_name: &str, artifact_stem: &str) -> bool {
 // ===========================================================================
 // BC-1.18.008 — Mandatory One-Time Backfill-Split of the Four Pre-Existing
 // Oversized Cycle Append-Logs (S-25.02 F4 BC-cluster 3 "retention+backfill";
-// AC-013/AC-014). STUB ONLY — every non-trivial body below is `todo!()` per
-// `tdd_mode: strict` / BC-5.38.001. Named `mechanism_a_*`/`MechanismA*`
-// throughout to avoid any future naming collision with BC-1.18.011's (B2)
-// and BC-1.18.012's (B1) own, structurally distinct one-time migrations,
-// which later clusters (6/7) will add to this same module.
+// AC-013/AC-014). Named `mechanism_a_*`/`MechanismA*` throughout to avoid
+// any future naming collision with BC-1.18.011's (B2) and BC-1.18.012's
+// (B1) own, structurally distinct one-time migrations, which later clusters
+// (6/7) will add to this same module.
+//
+// # BC-5.38.001 Red Gate discipline — IMPLEMENTED (S-25.02 F4 cluster-3)
+//
+// Every function below is now a REAL, fully implemented body — the
+// stub-architect's original `todo!()` placeholders have all been replaced by
+// implementer per BC-1.18.008's postconditions, driving test-writer's Red
+// Gate suite (`bc_1_18_008_backfill_split_test.rs`'s integration and unit
+// tests) to green, including a fresh-context adversarial-review pattern-based
+// rewrite of `mechanism_a_record_boundary_offsets` against BC-1.18.008 v1.2's
+// amended Record-Boundary Marker Table.
 // ===========================================================================
 
 /// BC-1.18.008 EC-004 (E-SHD-003): the mechanism-A backfill-split's mandatory
