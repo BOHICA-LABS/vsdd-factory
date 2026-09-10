@@ -4516,16 +4516,17 @@ pub struct MechanismABackfillPartition {
 ///   `### L-<tag>-NNN` h3-exception form ([`is_lesson_record_heading`]) — a
 ///   nested `### ` sub-heading lacking the `L-<tag>-NNN` tag is never a
 ///   boundary, and an untagged `"## "` aside is never a boundary either.
-/// - `session-checkpoints.md`: PRIMARY key is any `"## "` (h2) heading
-///   matching the confirmed checkpoint-record forms
-///   ([`is_checkpoint_record_heading`]) — nested `### ` sub-headings are
-///   never a boundary.
+/// - `session-checkpoints.md`: PRIMARY key is any `"## "` (h2) heading, with
+///   NO content-based filtering (F-002, BC-1.18.008 v1.3: direct inspection
+///   of both real `session-checkpoints.md` files confirmed every h2 heading
+///   in both is a genuine checkpoint record with zero legitimate non-record
+///   h2 asides) — nested `### ` sub-headings are never a boundary.
 pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) -> Vec<usize> {
     const H2: &[u8] = b"## ";
     const H3: &[u8] = b"### ";
 
     match artifact_stem {
-        "decision-log" => line_anchored_marker_offsets(content, b"| D-"),
+        "decision-log" => decision_log_record_boundary_offsets(content),
 
         "burst-log" => {
             // PRIMARY: any h2 heading is a genuine burst-log record boundary
@@ -4575,17 +4576,21 @@ pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) 
         }
 
         "session-checkpoints" => {
-            // F4 BC-cluster-3 adversarial-review finding MED-3 (Postcondition
-            // 2/Invariant 2): session-checkpoints.md's own h2 headings can
-            // nest a same-level reference/aside section (e.g. a
-            // `## Related Links` block) inside a checkpoint record's own
-            // body — filtered to the confirmed checkpoint-record forms only.
+            // F-002 (BC-1.18.008 v1.3 fix-burst, HIGH): reverted from the
+            // MED-3 content-based `is_checkpoint_record_heading` filter
+            // back to bare `^## ` (any h2) detection, per product-owner's
+            // DECISION (BC-1.18.008 v1.3 Changelog, finding F-002): direct
+            // inspection of BOTH real session-checkpoints.md files (brownfield:
+            // 182 h2 records; engine: 12 h2 records) confirmed every h2
+            // heading in both is a genuine checkpoint record with ZERO
+            // legitimate non-record h2 asides — the marker table's own
+            // "any h2 = boundary, no confirmed exception forms" row was
+            // already correct. The removed filter was itself the defect:
+            // being case-sensitive, it silently dropped real records such
+            // as the verbatim all-caps `## ARCHIVED CHECKPOINT: ...` form,
+            // which matches neither `starts_with("Archived")` nor
+            // `contains("Checkpoint")`.
             line_anchored_marker_offsets(content, H2)
-                .into_iter()
-                .filter(|&offset| {
-                    is_checkpoint_record_heading(heading_line(content, offset, H2.len()))
-                })
-                .collect()
         }
 
         // No known native record-boundary marker for this artifact stem --
@@ -4599,8 +4604,11 @@ pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) 
 /// The text of the heading line starting at `marker_offset + marker_len`
 /// (i.e. immediately after the record-boundary marker itself), up to but
 /// not including the next `b'\n'` or the end of `content` -- the substring
-/// [`is_lesson_record_heading`] and [`is_checkpoint_record_heading`] apply
-/// their own real-format discriminators to.
+/// [`is_lesson_record_heading`], [`is_lesson_h2_record_heading`], and
+/// [`is_pass_fix_burst_heading`] apply their own real-format discriminators
+/// to. `session-checkpoints.md` no longer applies a content-based
+/// discriminator (F-002, BC-1.18.008 v1.3): every bare `^## ` heading is a
+/// boundary, so this function is not called for that artifact stem.
 fn heading_line(content: &[u8], marker_offset: usize, marker_len: usize) -> &[u8] {
     let start = marker_offset + marker_len;
     let rest = &content[start..];
@@ -4691,23 +4699,32 @@ fn is_pass_fix_burst_heading(heading: &[u8]) -> bool {
     rest[digit_len..].starts_with(" Fix Burst")
 }
 
-/// MED-3: `true` iff `heading` (the text right after a `session-
-/// checkpoints.md` `## ` marker) is a GENUINE checkpoint-record heading
-/// rather than a nested, same-level aside heading inside an existing
-/// checkpoint's own body. Grounded in the real `.factory/cycles/*/
-/// session-checkpoints.md` convention: every genuine record heading is one
-/// of `"Session Resume Checkpoint"`, `"Archived"` (`"Archived: ..."` /
-/// `"Archived Checkpoint: ..."`), `"Checkpoint"` (`"Checkpoint: ..."` /
-/// `"Checkpoint D-NNN ..."`), or `"D-<NNN> Checkpoint ..."` -- every one of
-/// which either starts with `"Archived"` or carries the capitalized token
-/// `"Checkpoint"` (a heading's own proper-noun section title, never a
-/// lowercase mid-sentence word as an unrelated aside heading's own prose
-/// would use it).
-fn is_checkpoint_record_heading(heading: &[u8]) -> bool {
-    let Ok(heading) = std::str::from_utf8(heading) else {
-        return false;
-    };
-    heading.starts_with("Archived") || heading.contains("Checkpoint")
+/// F-007 (BC-1.18.008 Record-Boundary Marker Table, `decision-log.md` row,
+/// MINOR): every byte offset in `content` where a line matches the table's
+/// full `^\| D-[0-9]+ \|` marker regex -- the literal `"| D-"` prefix
+/// followed by one-or-more ASCII digits and a closing `" |"` -- NOT the bare
+/// `"| D-"` prefix alone. The bare-prefix form would misdetect a wrapped
+/// prose table cell that merely happens to START a continuation line with
+/// the literal text `"| D-"` (e.g. `"| D-something, not a row, continues a
+/// multi-line cell..."` with no digits/closing pipe) as a record boundary.
+fn decision_log_record_boundary_offsets(content: &[u8]) -> Vec<usize> {
+    line_anchored_marker_offsets(content, b"| D-")
+        .into_iter()
+        .filter(|&offset| is_decision_log_row_marker(content, offset))
+        .collect()
+}
+
+/// `true` iff the line starting at `marker_offset` (already confirmed to
+/// start with the literal `"| D-"` prefix by
+/// [`line_anchored_marker_offsets`]) continues with one-or-more ASCII
+/// digits immediately followed by a closing `" |"` -- i.e. the full `^\|
+/// D-[0-9]+ \|` marker regex the Record-Boundary Marker Table specifies for
+/// `decision-log.md`, not the bare prefix alone.
+fn is_decision_log_row_marker(content: &[u8], marker_offset: usize) -> bool {
+    const PREFIX: &[u8] = b"| D-";
+    let rest = &content[marker_offset + PREFIX.len()..];
+    let digit_len = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+    digit_len > 0 && rest[digit_len..].starts_with(b" |")
 }
 
 /// Every byte offset in `content` where `marker` occurs AT THE START OF A
@@ -4743,10 +4760,29 @@ pub fn mechanism_a_partition_for_backfill(
     record_boundary_offsets: &[usize],
     shard_cap_bytes: u64,
 ) -> Vec<MechanismABackfillPartition> {
-    if record_boundary_offsets.is_empty() {
-        // No known native record-boundary marker for this artifact -- treat
-        // the whole (non-empty) content as a single record rather than
-        // silently producing zero partitions for real content.
+    // F-003 (MINOR): guard against a malformed (non-ascending, duplicate,
+    // or out-of-bounds) `record_boundary_offsets` argument BEFORE this
+    // function's own partitioning loop below ever computes `rec_end -
+    // rec_start` (would underflow for a non-ascending pair) or slices
+    // `content[rec_start..rec_end]` (would panic for an out-of-bounds
+    // offset). This function is `pub`; callers other than
+    // `run_mechanism_a_backfill_split` (which independently validates
+    // well-formedness upfront via `record_boundary_offsets_are_well_formed`
+    // before ever reaching here, and additionally cross-checks against this
+    // module's own detected boundaries per F-001) may call it directly with
+    // an unchecked offsets list. Rather than trusting the caller and
+    // risking a panic in this critical path, fall back to the SAME safe
+    // "treat the whole content as a single record" behavior already used
+    // for an empty offsets list -- never panic, never silently fabricate a
+    // partial/corrupt partition set from offsets that don't genuinely
+    // describe this content's own structure.
+    if record_boundary_offsets.is_empty()
+        || !record_boundary_offsets_are_well_formed(content.len(), record_boundary_offsets)
+    {
+        // No known native record-boundary marker for this artifact (or a
+        // malformed offsets argument) -- treat the whole (non-empty)
+        // content as a single record rather than silently producing zero
+        // partitions for real content, or panicking on bad input.
         return if content.is_empty() {
             Vec::new()
         } else {
@@ -4871,32 +4907,29 @@ pub fn mechanism_a_verify_backfill_record_counts_preserved(
     total == original_record_count
 }
 
-/// MED-C (Postcondition 6(b) load-bearing fix): `true` iff `offsets` (a
-/// non-empty `record_boundary_offsets` list) is well-formed against a
-/// `content_len`-byte original content buffer — strictly ascending (no
-/// duplicate or out-of-order offset) and every offset strictly less than
-/// `content_len`.
+/// MED-C: `true` iff `offsets` (a non-empty `record_boundary_offsets` list)
+/// is STRUCTURALLY well-formed against a `content_len`-byte original
+/// content buffer — strictly ascending (no duplicate or out-of-order
+/// offset) and every offset strictly less than `content_len`.
 ///
-/// [`run_mechanism_a_backfill_split`] validates this BEFORE trusting
-/// `record_boundary_offsets.len()` as the expected record count fed into
-/// [`mechanism_a_verify_backfill_record_counts_preserved`], and before
-/// feeding `record_boundary_offsets` into
-/// [`mechanism_a_partition_for_backfill`] at all. Without this check, both
-/// sides of that record-count comparison derive, by construction, from the
-/// SAME `record_boundary_offsets.len()` value — the partitioning loop
-/// iterates exactly that many times, contributing exactly one
-/// `record_count` unit per iteration regardless of whether the offsets were
-/// genuinely valid — so the comparison could never fail from within
-/// [`run_mechanism_a_backfill_split`] no matter how corrupted, stale (e.g.
-/// computed against a prior read of the file), or out-of-order the
-/// caller-supplied offsets were. This predicate gives the Postcondition 6
-/// hard gate an independent, genuinely-failable basis: a malformed
-/// `record_boundary_offsets` argument is now REJECTED here rather than
-/// silently producing a wrong split — or worse, reaching
-/// [`mechanism_a_partition_for_backfill`]'s own unchecked `rec_end -
-/// rec_start` byte-length subtraction, which silently assumes ascending
-/// order and would panic on unsigned overflow (debug builds) or compute a
-/// bogus huge length (release builds) for a non-ascending offset pair.
+/// This predicate validates ORDERING and BOUNDS ONLY — it says nothing
+/// about whether `offsets` actually corresponds to `artifact_stem`'s real
+/// record structure (a well-formed-but-wrong offsets list, e.g. one that
+/// silently omits a genuine boundary present in the content, passes this
+/// check trivially). [`run_mechanism_a_backfill_split`] validates this
+/// BEFORE feeding `record_boundary_offsets` into
+/// [`mechanism_a_partition_for_backfill`] at all — rejecting a
+/// structurally malformed argument here rather than reaching
+/// [`mechanism_a_partition_for_backfill`]'s own `rec_end - rec_start`
+/// byte-length subtraction, which assumes ascending order and would
+/// otherwise panic on unsigned overflow (debug builds) or compute a bogus
+/// huge length (release builds) for a non-ascending offset pair (see
+/// [`mechanism_a_partition_for_backfill`]'s own F-003 guard, which reuses
+/// this same predicate). The genuinely-failable, record-integrity-aware
+/// half of the Postcondition 6 hard gate — catching a well-formed offsets
+/// list that is nonetheless WRONG against the content's real structure —
+/// is [`run_mechanism_a_backfill_split`]'s own independent recompute via
+/// [`mechanism_a_record_boundary_offsets`] (F-001), not this predicate.
 fn record_boundary_offsets_are_well_formed(content_len: usize, offsets: &[usize]) -> bool {
     offsets.windows(2).all(|pair| pair[0] < pair[1])
         && offsets.last().is_some_and(|&last| last < content_len)
@@ -5038,10 +5071,42 @@ pub fn run_mechanism_a_backfill_split(
         entry.shard_cap_bytes,
     );
 
+    // F-001 (BLOCKER, Postcondition 6 load-bearing fix): independently
+    // recompute this artifact's TRUE record boundaries from the just-read
+    // `original_content` via this module's own oracle
+    // (`mechanism_a_record_boundary_offsets`) and fold any genuinely
+    // detected boundary the caller's own `record_boundary_offsets` is
+    // missing into the expected record count below. Without this, both
+    // sides of the Postcondition 6(b) comparison
+    // (`mechanism_a_verify_backfill_record_counts_preserved`, just below)
+    // derived from the SAME caller-supplied `record_boundary_offsets`
+    // value -- `mechanism_a_partition_for_backfill`'s own `record_count`
+    // sum, by construction, always totals exactly
+    // `record_boundary_offsets.len()` too -- so a caller-supplied offsets
+    // list that is well-formed (MED-C's check, above, passes) but SILENTLY
+    // MISSING a real record boundary present in the actual on-disk content
+    // would tautologically report "preserved" regardless of how wrong it
+    // was; see this function's own module-level doc comment and the F-001
+    // test for the full mechanism. When the oracle recognizes NO
+    // independently-detectable boundary this artifact_stem/content pair is
+    // missing from the caller's own list (e.g. an artifact_stem this
+    // module has no marker rule for, or a fixture whose synthetic content
+    // does not match any real marker form), this reduces to the ORIGINAL
+    // `record_boundary_offsets.len()` value exactly -- it is only
+    // load-bearing when the module can independently corroborate genuine
+    // structure the caller's offsets missed.
+    let true_boundary_offsets =
+        mechanism_a_record_boundary_offsets(&entry.artifact_stem, &original_content);
     let original_record_count = if record_boundary_offsets.is_empty() {
         usize::from(!original_content.is_empty())
     } else {
-        record_boundary_offsets.len()
+        let mut combined_offsets: Vec<usize> = record_boundary_offsets.to_vec();
+        for offset in true_boundary_offsets {
+            if !combined_offsets.contains(&offset) {
+                combined_offsets.push(offset);
+            }
+        }
+        combined_offsets.len()
     };
 
     // AC-014/Postcondition 6 hard gate: mandatory content-preservation and
