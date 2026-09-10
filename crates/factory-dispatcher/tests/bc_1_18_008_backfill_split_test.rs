@@ -3823,3 +3823,198 @@ fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_write_receives_disk_read_ba
          correct manifest-verified final content"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
+// happy-path canonical-truncate write", Invariant 5, EC-013): local
+// adversarial pass-8 finding F-C3-P8-002. Postcondition 5 step (ii)'s
+// ORDINARY, first-time/uninterrupted completion of the canonical-truncate
+// write is a destructive, source-overwriting write structurally identical
+// in kind to the DANGEROUS-window heal write the F-C3-P7-001 extension above
+// already governs -- but as of this writing `run_mechanism_a_backfill_split`
+// (`shard_manager.rs`) issues its `write_atomic_bytes(canonical_path,
+// &current_partition.bytes, ...)` call and immediately returns
+// `Ok(Migrated { .. })` with NO subsequent disk read-back at all, unlike its
+// sibling `heal_or_confirm_already_migrated` entry point. A write that
+// silently truncates, partially flushes, or otherwise lands corrupted bytes
+// on disk during this ordinary completion is therefore currently
+// undetectable at migration time.
+//
+// The two tests below reuse the EXACT SAME real, non-simulated disk race
+// (`spawn_temp_file_corruptor`, defined above for the F-C3-P6-002 sealed-shard
+// tests) against `canonical_path` -- but this time on the FIRST,
+// never-before-migrated invocation, so the race lands on Postcondition 5
+// step (ii)'s ordinary write rather than on `heal_or_confirm_already_migrated`'s
+// recovery write. This is reachable at the public `run_mechanism_a_backfill_split`
+// entry point with no source change: a fresh fixture with no pre-existing
+// shard-index takes the happy path by construction.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_008_FC3P8002_EC013_run_backfill_split_happy_path_canonical_write_clean_positive_control_succeeds()
+ {
+    // Positive control (Canonical Test Vectors, EC-013 row): a genuinely
+    // uncorrupted, uninterrupted happy-path migration over the EXACT CTV
+    // fixture (`A + A + "more\n"`, `shard_cap_bytes = 16`) must succeed and
+    // leave the canonical file holding exactly the manifest-verified final
+    // partition. This guards against the read-back gate the sibling
+    // fault-injection test below demands ever becoming an OVER-eager check
+    // that falsely rejects a genuinely correct write.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n"); // 37 bytes total
+
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    std::fs::write(&canonical_path, &original_content).unwrap();
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("an uncorrupted, uninterrupted happy-path migration must succeed");
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 1,
+            archived_count: 0
+        }
+    );
+
+    let expected_final = original_content[16..].to_vec(); // "A" + "more\n", 21 bytes
+    let on_disk = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        on_disk, expected_final,
+        "the happy-path canonical-truncate write's mandatory post-hoc read-back (BC-1.18.008 \
+         v1.8, F-C3-P8-002) must confirm success without falsely rejecting a genuinely correct \
+         write -- the canonical file must hold exactly the manifest-verified final partition"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P8002_EC013_run_backfill_split_happy_path_canonical_write_aborts_e_shd_013_on_disk_corruption_race()
+ {
+    // Load-bearing fault-injection test for local adversarial pass-8 finding
+    // F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
+    // happy-path canonical-truncate write", Invariant 5, EC-013). This test
+    // MUST fail today: `run_mechanism_a_backfill_split`'s happy-path
+    // `write_atomic_bytes(canonical_path, &current_partition.bytes, ..)`
+    // call (Postcondition 5 step (ii)) has no post-hoc disk read-back at
+    // all, so it reports `Ok(Migrated { .. })` unconditionally, even when
+    // the race below lands corrupted bytes on disk before the rename. It
+    // would also fail if the read-back step were ever removed or downgraded
+    // back to an in-memory-only check once added -- it genuinely
+    // distinguishes "read-back verified" from "no read-back," not merely a
+    // renamed/asserted-only paper-fix.
+    let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
+    let mut original_content = a.clone();
+    original_content.extend_from_slice(&a);
+    original_content.extend_from_slice(b"more\n"); // 37 bytes total
+
+    let boundaries = mechanism_a_record_boundary_offsets("session-checkpoints", &original_content);
+    let entry = flat_entry("session-checkpoints", 16);
+
+    let expected_final = original_content[16..].to_vec(); // "A" + "more\n", 21 bytes
+    let corrupt = b"CORRUPTED-DURING-HAPPY-PATH-CANONICAL-WRITE-DIFF-LEN".to_vec();
+
+    let mut caught = None;
+    for _attempt in 0..20 {
+        // Fresh fixture per attempt -- a never-before-migrated artifact, so
+        // this invocation takes the happy path, not the heal path.
+        let dir = tempfile::tempdir().unwrap();
+        let canonical_path = dir.path().join("session-checkpoints.md");
+        std::fs::write(&canonical_path, &original_content).unwrap();
+
+        let (stop, handle) = spawn_temp_file_corruptor(&canonical_path, corrupt.clone());
+
+        let result = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        handle.join().expect("corrupting thread must not panic");
+
+        let on_disk = std::fs::read(&canonical_path).unwrap();
+        if on_disk != expected_final {
+            // The race landed corrupted bytes on disk before the rename --
+            // a real, filesystem-level divergence, independent of whether
+            // this (possibly still-defective) implementation caught it.
+            caught = Some((result, on_disk, dir));
+            break;
+        }
+        // This attempt's corrupting write didn't land before the rename (a
+        // transient scheduling miss, not a code defect) -- retry with a
+        // fresh attempt. `dir` (and its temp files) drop here.
+    }
+
+    let (result, on_disk, dir) = caught.expect(
+        "F-C3-P8-002: the happy-path canonical-write disk-corruption race never landed a \
+         mismatch in 20 attempts -- re-run with --nocapture and inspect \
+         `run_mechanism_a_backfill_split`'s Postcondition 5 step (ii) write if this reproduces \
+         (the sibling F-C3-P6-002/F-C3-P7-001 races above are empirically reliable across 200/20 \
+         local trials against the same `write_atomic` primitive).",
+    );
+
+    assert!(
+        result.is_err(),
+        "Postcondition 6(c)'s F-C3-P8-002 extension / Invariant 5: the happy-path, \
+         non-recovery completion of Postcondition 5 step (ii)'s canonical-truncate write MUST \
+         receive a FRESH post-hoc disk read-back confirming `(length, SHA-256) == (final_bytes, \
+         final_sha256)` before reporting the migration complete -- an in-memory-only confidence \
+         in `write_atomic`'s own return value (the current gap this test pins) cannot detect a \
+         write that landed corrupted bytes on disk. Got Ok(_) over on-disk bytes that do NOT \
+         match the manifest-verified final content ({} bytes, expected {}): {:?}",
+        on_disk.len(),
+        expected_final.len(),
+        on_disk
+    );
+    let err_message = result.unwrap_err().to_string();
+    assert!(
+        err_message.contains("E-SHD-013"),
+        "EC-013: the happy-path canonical-write read-back mismatch must surface the NEW \
+         `E-SHD-013` error code -- distinct from `E-SHD-012` (the DANGEROUS-window HEAL write's \
+         own read-back mismatch, F-C3-P7-001) and from `E-SHD-011` (a top-level AMBIGUOUS \
+         recovery-confirmation match to neither manifest pair) -- because this fires on the \
+         ORDINARY, non-recovery completion path, not during crash-recovery: {err_message}"
+    );
+    assert_ne!(
+        on_disk, expected_final,
+        "sanity: the corrupting race must have genuinely landed corrupted bytes on disk, not the \
+         correct manifest-verified final content"
+    );
+
+    // EC-013's own CTV row note: a follow-on re-invocation against the
+    // now-corrupted canonical file must resolve to the AMBIGUOUS `E-SHD-011`
+    // disposition (matching NEITHER the Manifest's `original_bytes`/
+    // `original_sha256` NOR its `final_bytes`/`final_sha256`, since the
+    // corrupting race's replacement bytes match neither the pre-split
+    // original content nor the intended final partition) rather than
+    // silently accepting the corruption as migrated. This is reachable at
+    // the public entry point with no source change: the shard-index and
+    // Backfill Recovery Manifest were already durably published in
+    // Postcondition 5 step (i), strictly BEFORE the corrupted step (ii)
+    // write above, so `mechanism_a_backfill_already_migrated` finds them
+    // intact and a re-invocation runs the SAME recovery-confirmation logic
+    // the EC-010/EC-011 tests above already exercise.
+    let canonical_path = dir.path().join("session-checkpoints.md");
+    let retry = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+    assert!(
+        retry.is_err(),
+        "EC-013: a follow-on invocation over the E-SHD-013-corrupted canonical file must fail \
+         loud (never silently report the corrupted content as migrated or re-migrate it). Got: \
+         {retry:?}"
+    );
+    let retry_err = retry.unwrap_err().to_string();
+    assert!(
+        retry_err.contains("E-SHD-011"),
+        "EC-013: the follow-on re-invocation must resolve AMBIGUOUS (`E-SHD-011`) -- the \
+         corrupted on-disk bytes match neither the Manifest's `original_bytes`/`original_sha256` \
+         nor its `final_bytes`/`final_sha256` -- never silently accept the corruption as a valid \
+         SAFE or DANGEROUS disposition: {retry_err}"
+    );
+    let canonical_after_retry = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        canonical_after_retry, on_disk,
+        "an AMBIGUOUS disposition MUST NOT write anything to the canonical file -- it must \
+         remain exactly as the corruption race left it, pending operator investigation"
+    );
+}
