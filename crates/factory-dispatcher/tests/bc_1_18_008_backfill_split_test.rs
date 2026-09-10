@@ -10,10 +10,10 @@
 //! (`mechanism_a_record_boundary_offsets`, `mechanism_a_partition_for_backfill`,
 //! `mechanism_a_verify_backfill_content_preserved`,
 //! `mechanism_a_verify_backfill_per_shard_cap_preserved` (BC-1.18.008 v1.4's
-//! new Postcondition 6(c)/Invariant 4 hard gate — this file's own test
-//! authorship defines this function's expected name/signature; it does not
-//! yet exist in `shard_manager.rs` as of this amendment, and its absence is
-//! itself part of this file's RED surface until the implementer adds it),
+//! Postcondition 6(c)/Invariant 4 per-shard-cap hard gate — this file's tests
+//! pin its `true` outcome for a partition that respects `shard_cap_bytes` and
+//! its `false` outcome for one that violates it, at both the unit level and
+//! end-to-end through `run_mechanism_a_backfill_split`),
 //! `mechanism_a_verify_backfill_record_counts_preserved`,
 //! `mechanism_a_backfill_already_migrated`, `run_mechanism_a_backfill_split`)
 //! is a real, fully implemented body (no `todo!()` stubs) once GREEN. This file's tests
@@ -275,10 +275,9 @@ fn test_BC_1_18_008_PC2_MT_record_boundary_offsets_decision_log_ignores_appendix
     // discipline-pass-1/decision-log.md` lines 158/170/182/194/206, e.g.
     // `### D-440 (F5 pass-60 codification block; META-LEVEL-15 CANDIDATE
     // CONFIRMED)`) — these are secondary atomic units tied to their D-NNN
-    // row, never themselves a primary shard-boundary. This test is NOT
-    // expected to fail against the current implementation (its `| D-`
-    // marker already never matches a `### ` or `## Appendix` line); it
-    // exists as permanent regression coverage for the marker table's
+    // row, never themselves a primary shard-boundary. This test pins that
+    // exclusion (the `| D-` marker must never match a `### ` or `## Appendix`
+    // line) as permanent regression coverage for the marker table's
     // decision-log row.
     let row_439 = "| D-439 | decided something | author |\n";
     let row_440 = "| D-440 | decided something else | author |\n";
