@@ -4707,6 +4707,25 @@ fn heading_line(content: &[u8], marker_offset: usize, marker_len: usize) -> &[u8
 /// its h2 primary-form records ([`is_lesson_h2_record_heading`]). Factored
 /// out so both callers apply the identical tag-detection rule rather than
 /// two independently-drifting copies (TD-VSDD-060).
+///
+/// F-C3-P6-003 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, BC-1.18.008 v1.6 Record-Boundary Marker
+/// Table's `^L-<tag>-[0-9]+\b` shape): the marker's own regex requires a
+/// `\b` WORD BOUNDARY immediately after the numeric id run — the character
+/// following the digits (if any) must be a non-word character (whitespace,
+/// punctuation, or end-of-string), never another word character continuing
+/// the SAME token. A prior implementation only checked that the byte right
+/// after the tag's trailing `-` was a digit, then declared a match without
+/// ever inspecting what follows the digit RUN — so `"L-EDP1-050details"`
+/// (another letter), `"L-EDP1-050_extra"` (underscore, a word character in
+/// `\b` terms), and `"L-EDP1-050x"` (another alnum char) all misdetected as
+/// genuine `L-EDP1-050` records, even though each merely SHARES that id as
+/// a PREFIX of its own, unrelated heading text — prose inside the real
+/// `L-EDP1-050` record's own body, not a new record. Consuming the FULL
+/// digit run and requiring a word boundary immediately after it (mirrors
+/// [`is_pass_fix_burst_heading`]'s own `\b`-after-"Burst" check, P3-003's
+/// sibling fix for burst-log.md) closes this gap for both lessons.md marker
+/// forms identically, since they share this one predicate (TD-VSDD-060).
 fn is_id_tagged_lesson_heading(heading: &str) -> bool {
     let Some(rest) = heading.strip_prefix("L-") else {
         return false;
@@ -4717,9 +4736,19 @@ fn is_id_tagged_lesson_heading(heading: &str) -> bool {
     if tag_len == 0 {
         return false;
     }
-    rest[tag_len..]
-        .strip_prefix('-')
-        .is_some_and(|after_dash| after_dash.starts_with(|c: char| c.is_ascii_digit()))
+    let Some(after_dash) = rest[tag_len..].strip_prefix('-') else {
+        return false;
+    };
+    let digit_len = after_dash
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after_dash.len());
+    if digit_len == 0 {
+        return false;
+    }
+    after_dash[digit_len..]
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
 }
 
 /// PC2 Record-Boundary Marker Table (`lessons.md` row), CONFIRMED EXCEPTION
