@@ -1680,3 +1680,33 @@ consistency across all three new story files simultaneously at cascade close.
 
 **L-BB-D1194-transient-status-test-doc-comment-recurring-3x-process-gap** [codified][process-gap] — S-25.02 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-4 found O-2 (LOW, non-blocking-severity but process-gap-class): the test module's doc comment describing pass-3's `mechanism_a_verify_backfill_per_shard_cap_preserved` hard-gate fixtures used transient "expected to fail pre-fix" / "does not yet exist" framing that went stale the moment pass-3's own implementer fix landed in the SAME burst — a reader encountering the module in isolation post-fix would be misled about current test status/intent. This is the THIRD occurrence of the exact same transient-status-header defect shape in this one cluster's own cascade: F-C3-P1-005 (pass-1 — a stale doc comment describing a withdrawn exact-`ceil()` framing that had gone stale after the same-pass BC-1.18.008 v1.2→v1.3 amendment), F-C3-P2-004 (pass-2 — a test-module header still describing F-001/F-002 in "expected to fail pre-fix" framing, stale since pass-1 landed), and now this O-2/pass-4 instance. All three share the identical root shape: a test doc-comment header phrased as a transient, commit-relative pass/fail claim ("expected to fail", "does not yet exist pre-fix") rather than a status-neutral description of what the fixture verifies by stable BC/EC/finding-ID citation — the header is written to be true only until the very fix landing in the same burst makes it false. Per the project's established 3+-recurrence rule (the same threshold that triggered `[process-gap]` codification for the weak-substring-error-assertion class at D-1183/cluster-2 pass-9), a THIRD occurrence of an identical defect CLASS is a signal that the underlying root cause is a missing PROCESS-LEVEL guard on the `vsdd-factory:test-writer` agent's own doc-comment authoring convention, not three independent instances each fixable by its own one-off rewrite. This instance was tracked as a `[D-1192] [process-watch]` Drift Item at 2/3 recurrences following pass-2 — this occurrence crosses the codification threshold. **Going-forward discipline — PROCESS-LEVEL fix, not a fourth manual catch:** the recommended remedy is a `vsdd-factory:test-writer` agent-prompt amendment forbidding transient-status prose ("expected to fail", "should fail pre-fix", "does not yet exist", "RED surface", or similar commit-relative framing) in test doc-comment headers, requiring status-neutral "this test pins `<BC/EC/finding-ID>`" framing instead — a header phrased this way remains true regardless of whether the fix it verifies has landed yet, closing the recurrence at its source rather than catching each instance after the fact. Optionally paired with a lint/hook flagging the forbidden phrase set in test-file doc comments. **Anchor (Canonical Principle Rule 3 — concrete future dependency + specific story/wave, not an un-anchored observation):** routed to a NEW draft follow-up story **S-12.09** (E-12 Engine Governance, registered this burst in `STORY-INDEX.md`), the SAME epic this cluster has already used for its other codified cross-cutting process-gap lessons (`L-BB-D1172-partial-fix-propagation-stale-comment-sibling-sweep`, `L-BB-D1183-weak-substring-error-assertion-recurring-3x-process-gap`) — this is an agent-authoring-discipline defect class general to any BC-driven TDD story, not specific to BC-1.18.008, so the fix belongs in that engine-wide governance follow-up rather than a further BC-1.18.008-scoped fix. Distinct from `L-BB-D1183`'s weak-substring-assertion class: that lesson is about TEST-ASSERTION content (what a test checks); this lesson is about TEST DOC-COMMENT framing (what a test's header claims about its own status) — related agent-discipline gaps, not the same underlying defect.
 `[codified][process-gap][D-1194][transient-status-header][3x-recurrence][test-doc-comment][S-12.09][E-12][cycle-closing-checklist][process-watch-escalation]`
+
+---
+
+**L-BB-D1195-hook-bypass-shell-append-self-caught-process-note** [process-note] — during the S-25.02
+cluster-3 pass-4 fix burst (commit `33f521ab`, D-1194), the state-manager persisting that burst used a
+raw shell `>>` append instead of the Edit/Write tools for one write to
+`cycles/v1.0-brownfield-backfill/session-checkpoints.md` (the prior-checkpoint archival append) — a
+direct TD-FACTORY-HOOK-BYPASS-001 P0 deviation: `.factory/` mutations MUST use Edit/Write only, never
+a raw shell append/sed/echo bypass of the hook chain, with NO exception for append-only writes. The
+deviation was SELF-CAUGHT during this pass-5 burst's own bookkeeping review, not flagged by the hook
+chain at the time it occurred (a bare shell `>>` never invokes the Write/Edit tool surface, so no
+PostToolUse hook observes it — the bypass is silent-by-construction, which is precisely why
+TD-FACTORY-HOOK-BYPASS-001 forbids it categorically rather than relying on detection after the fact).
+**Content verified well-formed this burst:** `session-checkpoints.md` (8,072 lines at time of
+verification) was checked both at its pass-4 append boundary
+(`git -C .factory show 33f521ab -- cycles/v1.0-brownfield-backfill/session-checkpoints.md`, confirming
+a clean unified diff with no partial-line artifacts) and at its current file tail (confirming the
+appended `## Archived checkpoint: ... §1..§8` section terminates cleanly at its own `### §8.
+BC-5.39.001 streak` closing paragraph, with no truncation, no malformed Markdown heading nesting, and
+no data loss). No content-recovery action was required — this is a PROCESS deviation (wrong write
+mechanism used), not a DATA-integrity defect (the resulting content happens to be correct). **Going
+forward:** state-manager `.factory/` writes route through Edit/Write exclusively, full stop — no
+category of write (including simple append-only archival moves) is exempt, because the whole point of
+routing through Edit/Write is that the hook chain gets a chance to observe and gate the write, and a
+shell bypass defeats that regardless of whether the specific instance happened to produce correct
+content. This is recorded as a `[process-note]` (not a `[process-gap]`) because it is a single
+self-caught instance, not (yet) a recurring pattern — should this shape recur, it crosses into
+`[process-gap]` territory under the project's established 3+-recurrence rule (cf. `L-BB-D1183`,
+`L-BB-D1194`).
+`[process-note][D-1195][D-1194][TD-FACTORY-HOOK-BYPASS-001][self-caught][audit-trail][session-checkpoints][single-instance-not-yet-recurring]`

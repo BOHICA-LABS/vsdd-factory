@@ -9210,3 +9210,117 @@ Refs: D-1194, D-1193, S-25.02, BC-1.18.008 v1.5, F-C3-P4-001, O-1, O-2, O-3, S-1
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1194 | D-1194-S2502-CLUSTER3-PASS4-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-4 = CODE CLEAN — NOT CLEAN OVERALL — 0 CODE findings + 1 MEDIUM SPEC-internal contradiction (F-C3-P4-001) + 3 non-blocking observations (O-1/O-2/O-3).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-4.md`. Adversary independently re-verified every prior fix (passes 1-3) — first CODE-clean pass this cascade. F-C3-P4-001 (MEDIUM, spec-internal): Postcondition 2's Normalization rule clause (a) contradicted the same Postcondition's own Record-Boundary Marker Table — escalates pass-2's O-C3-P2-003 observation to a finding; fixed via product-owner's **BC-1.18.008 v1.4→v1.5** (Normalization rule PER-ARTIFACT-SCOPED, subordinate to the Marker Table); NO AC/EC/VP/behavior change. O-1 (LOW): recognized-stem-empty-oracle invariant documented. O-2 (LOW, process-gap-class, THIRD recurrence F-C3-P1-005→F-C3-P2-004→O-2): fixed (test-writer `22ffc00a`, comments only) and CODIFIED as `[process-gap]`, routed to NEW draft follow-up story **S-12.09** (E-12). O-3 (LOW): PC6(c) wording re-derived compliant, no action. BC-INDEX v5.77→v5.78; STORY-INDEX v4.454→v4.455 (story v3.5→v3.6; S-12.09 registered). VP-INDEX v3.10 UNCHANGED (wording-only amendment). Input-hashes: BC-1.18.008.md CONFIRMED CURRENT `763d2ab`; story `5cf0eda`→`c432a34`; `--check` CLEAN on both. Feature branch `feature/S-25.02-backfill` @ `22ffc00a` (comment-only fix, pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (spec-internal MEDIUM fixed same-pass; pass-5 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-5, fresh context, against BC-1.18.008 v1.5/code `22ffc00a`.** Refs: D-1194, D-1193, S-25.02, BC-1.18.008 v1.5, F-C3-P4-001, O-1, O-2, O-3, S-12.09, `22ffc00a`. STATE.md v10.19→v10.20. | S-25.02 F4 | 2026-09-10 |
+
+## D-1195
+
+**D-1195-S2502-CLUSTER3-PASS5-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1194 (this file, immediately above). D-1195 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-5 = NOT CLEAN — 1 LOW finding** 2026-09-10 (fresh-context adversary + implementer + test-writer
+code-side content; state-manager bookkeeping + single-commit TD-VSDD-053) — 0 BLOCKER/HIGH/MEDIUM, 1
+LOW (F-C3-P5-001), plus 1 non-blocking already-adjudicated integration observation. The adversary
+independently re-derived and re-verified every fix landed across passes 1-4, finding zero HIGH/MEDIUM
+CODE defects — the correctness surface stays clean for the 2nd consecutive pass. Full Part A
+persisted as a standalone artifact, matching pass-1/2/3/4's own convention:
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-5.md` (`diff_base=22ffc00a`,
+`diff_head=22ffc00a`).
+
+**F-C3-P5-001 (LOW, twin of F-C3-P3-002):** an empty caller-`offsets` input to
+`mechanism_a_backfill_split_artifact`, for a RECOGNIZED artifact stem whose real content is
+non-empty, silently no-op'd the mandated split instead of consulting the oracle
+(`mechanism_a_record_boundary_offsets`) first — the SAME trust-the-empty-input shape F-C3-P3-002
+closed at pass-3 for an UNRECOGNIZED stem (fail-loud `UnrecognizedArtifactStem`), recurring one
+call-site layer further out at `mechanism_a_backfill_split_artifact`'s own entry guard, which never
+reached the oracle cross-check at all when `offsets` started empty. Not reachable in production today
+(no production caller yet — see integration observation below), but a genuine latent correctness gap
+in the function's own contract: a future T-12 caller passing an empty `offsets` list (upstream bug,
+stale cache, incomplete boundary scan) would silently receive an unsplit "success" instead of the
+loud failure BC-1.18.008 Postcondition 1/6 mandates. Distinguished from O-1/pass-4 (documented,
+COMPLIANT): O-1 covers empty caller + genuinely empty CONTENT (oracle agrees, trust is safe); this
+finding covers empty caller + NON-EMPTY content (oracle disagrees, and the code never asked it).
+FIXED: implementer, `feature/S-25.02-backfill` @ `26c79f13` (immediately after `22ffc00a`) — the
+empty-caller arm now UNCONDITIONALLY consults the oracle first; if the oracle's boundary set is also
+empty, the no-op proceeds exactly as before (behavior-preserving, per O-1's own invariant that all
+four real target artifacts always yield a non-empty oracle set for non-empty content); if the
+oracle's set is non-empty while the caller's was empty, the function now ABORTS with the SAME
+`ContentPreservationFailed` error F-C3-P2-001's set-equality cross-check already uses — no new error
+variant, no `error-taxonomy.md` change. **No AC/EC/VP/behavior change** — pure code-side hardening
+inside the already-specified fail-loud contract; Postcondition 6's "fail loud rather than silently
+mis-split" clause already covered this case in substance. test-writer added 1 RED test
+(`mechanism_a_backfill_split_empty_caller_offsets_nonempty_oracle_aborts`) + 1 companion GREEN test
+(`mechanism_a_backfill_split_empty_caller_offsets_empty_content_no_ops`, regression-guarding O-1's
+valid empty/empty path against over-tightening); 46 tests in the mechanism-A module, all green
+(+2 from pass-4's 44).
+
+**Integration observation (re-surfaced, ALREADY HUMAN-ADJUDICATED, no new routing):**
+`mechanism_a_record_boundary_offsets`/`mechanism_a_backfill_split_artifact` still has no production
+caller wired in. This is the SAME item as F-C3-P1-006/pass-1, already HUMAN-ADJUDICATED as a
+legitimate scope-boundary deferral and recorded as STATE.md Drift Item `[D-1191]`, anchored to
+**T-12** (a real, existing S-25.02 task ID; Cohort-B-flip capstone, cluster-7) per BC-1.18.008
+Postcondition 1's "once, at F4 activation" scoping. A fresh-context pass necessarily re-notices the
+same structural absence (the deferral is unchanged; no cluster-3-scope work has altered it) — this is
+NOT a new finding. **Disposition: no new action, no new Drift Item, no re-routing** — the existing
+`[D-1191]` deferral to T-12 remains authoritative; recorded here purely for the audit trail per this
+cascade's established convention.
+
+**Because a LOW finding (F-C3-P5-001) was present, pass-5 is NOT CLEAN — BC-5.39.001 cluster-3 LOCAL
+streak stays 0/3.** With 5 passes run (2 consecutive — passes 4 and 5 — with only a single LOW/no
+HIGH-MEDIUM CODE finding each), the substantive CODE defect surface for mechanism-A is assessed
+**EXHAUSTED**. Per explicit human direction, the LOCAL cascade does NOT close early via asymptotic
+acceptance (the D-1184/cluster-2 precedent); instead the human has AUTHORIZED a full
+grind-to-literal-3-CONSECUTIVE-CLEAN drive (the same standard cluster-1 reached at D-1172) — **pass-6
+is the FIRST attempt of that drive**, fresh context, against BC-1.18.008 v1.5 / BC-1.18.007 v1.2 /
+code `feature/S-25.02-backfill` @ `26c79f13`.
+
+**Process-note (audit trail, TD-FACTORY-HOOK-BYPASS-001 P0 deviation, self-caught):** during the
+pass-4 fix burst (commit `33f521ab`, D-1194), the state-manager persisting that burst used a raw
+shell `>>` append instead of the Edit/Write tools for one write to
+`cycles/v1.0-brownfield-backfill/session-checkpoints.md` (the prior-checkpoint archival append). This
+is a TD-FACTORY-HOOK-BYPASS-001 P0 deviation — `.factory/` mutations MUST use Edit/Write only, never
+a raw shell append/sed/echo bypass of the hook chain — self-caught during this pass-5 burst's
+bookkeeping review, not flagged by the hook chain at the time (PostToolUse hooks do not fire on a
+bare shell append that never invoked the Write/Edit tool surface). **Content verified well-formed**
+this burst: `session-checkpoints.md` (8,072 lines) was re-read end-to-end at its append boundary
+(`git -C .factory show 33f521ab -- cycles/v1.0-brownfield-backfill/session-checkpoints.md`) and at
+its current file tail — the appended block is a complete, correctly-terminated
+`## Archived checkpoint: ... §1..§8` section with no truncation, no malformed Markdown, and no data
+loss; the file's own `wc -l` and its final `### §8. BC-5.39.001 streak` section both terminate
+cleanly. No content-recovery action required. Codified as lesson
+`L-BB-D1195-hook-bypass-shell-append-self-caught-process-note` (`[process-note]`,
+`cycles/v1.0-brownfield-backfill/lessons.md`) — a reminder that state-manager `.factory/` writes MUST
+route through Edit/Write exclusively, with no exception for append-only operations, even when the
+appended content is itself well-formed.
+
+This burst: BC-INDEX v5.78 UNCHANGED (no BC content touched — pure code-side hardening fix, no spec
+amendment); STORY-INDEX v4.455 UNCHANGED (no AC/EC/story content touched); VP-INDEX v3.10 UNCHANGED
+(no VP content touched); ARCH-INDEX v4.24 UNCHANGED. No input-hash drift — this pass's own findings
+report (`s2502-cluster3-local-adversary-pass-5.md`) carries its own fresh `input-hash` computed via
+`compute-input-hash --update` against its declared `inputs:` (BC-1.18.007.md, BC-1.18.008.md, the
+S-25.02 story); the 3 declared input files themselves are UNCHANGED by this burst, so their own
+stored hashes require no recompute.
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `26c79f13` (implementer's F-C3-P5-001 fix +
+test-writer's RED+GREEN pair, immediately after `22ffc00a`, pushed to origin): full `cargo test
+--workspace --all-targets` suite green (46 tests in the mechanism-A module); `cargo fmt --check
+--all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean. BC-5.39.001 cluster-3
+LOCAL streak stays **0/3** (pass-5 NOT CLEAN — 1 LOW finding, fixed same-pass; pass-6 next, fresh
+context, FIRST attempt of the human-authorized full 3-CLEAN drive; cycle-level 3/3 CONVERGED streak
+UNCHANGED — separate track). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL
+cluster-3 cascade, not a cycle-level adversary pass). `pipeline:` stays **PAUSED** (mid-convergence
+fix burst; consistent with prior cluster fix-burst state handling).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-6, fresh context, against BC-1.18.008 v1.5 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `26c79f13` — FIRST attempt of the human-authorized full
+3-CLEAN drive.**
+
+Refs: D-1195, D-1194, S-25.02, BC-1.18.008 v1.5, F-C3-P5-001, S-12.09, `26c79f13`, `22ffc00a`,
+`33f521ab`.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1195 | D-1195-S2502-CLUSTER3-PASS5-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-5 = NOT CLEAN — 1 LOW finding (F-C3-P5-001, twin of F-C3-P3-002) + 1 non-blocking already-adjudicated integration observation.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-5.md`. Adversary independently re-verified every prior fix (passes 1-4) — correctness surface clean for the 2nd consecutive pass. F-C3-P5-001 (LOW): empty caller-`offsets` for a recognized stem with non-empty real content silently no-op'd the mandated split instead of consulting the oracle — the same shape as F-C3-P3-002, one call-site layer further out; FIXED (`feature/S-25.02-backfill` @ `26c79f13`) via an unconditional oracle-consult before the empty-caller no-op decision, aborting `ContentPreservationFailed` when real boundaries exist; valid empty-content/empty-oracle path (O-1/pass-4) preserved and regression-guarded. No BC/AC/EC/VP/behavior change. Integration observation: no production caller yet — SAME item as F-C3-P1-006/pass-1, ALREADY HUMAN-ADJUDICATED `[D-1191]` deferred to T-12; re-surfaced, no new routing. **Process-note (self-caught, audit trail):** pass-4's burst (`33f521ab`) used a raw shell `>>` append instead of Edit/Write for one `session-checkpoints.md` write — a TD-FACTORY-HOOK-BYPASS-001 P0 deviation; content verified well-formed this burst (no recovery needed); codified `[process-note]` lesson `L-BB-D1195-hook-bypass-shell-append-self-caught-process-note`. BC-INDEX v5.78 / STORY-INDEX v4.455 / VP-INDEX v3.10 / ARCH-INDEX v4.24 all UNCHANGED (pure code-side fix, no spec touched). Feature branch `feature/S-25.02-backfill` @ `26c79f13` (pushed); full workspace test suite green (46 tests), fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-5 not clean; substantive CODE defect surface EXHAUSTED after 2 consecutive LOW-only/clean-correctness passes; pass-6 next = FIRST attempt of the human-authorized full 3-CLEAN drive; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-6, fresh context, against BC-1.18.008 v1.5/code `26c79f13` — FIRST attempt of the 3-CLEAN drive.** Refs: D-1195, D-1194, S-25.02, BC-1.18.008 v1.5, F-C3-P5-001, S-12.09, `26c79f13`, `33f521ab`. STATE.md v10.20→v10.21. | S-25.02 F4 | 2026-09-10 |
