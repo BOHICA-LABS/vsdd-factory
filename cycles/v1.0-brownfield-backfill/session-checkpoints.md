@@ -7862,3 +7862,54 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 ### §8. BC-5.39.001 streak
 
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184) — fully retired following PR #824's merge (D-1186), UNCHANGED this burst. NEXT = cluster-3's own fresh LOCAL BC-5.39.001 cascade starts at 0/3 once its F2/F3 spec-evolution finalizes and F4 TDD implementation begins.
+
+## Archived checkpoint: SESSION-WRAP-PAUSE-2026-09-10 (D-1189) — superseded 2026-09-10 by S2502-CLUSTER3-PASS1-FIX-BURST (D-1191)
+
+## Session Resume Checkpoint (2026-09-10 — SESSION-WRAP-PAUSE-2026-09-10; develop 0959e34b (PR #824 merged); main 51023185; merged_count 120; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on `feature/S-25.02-backfill` @ `bd4a85f3` (pushed to origin). LOCAL BC-5.39.001 3-CLEAN streak RESET to 0/3 — a fresh adversary pass found 1 BLOCKER + 1 HIGH + 3 MEDIUM against the WIP mechanism-A record-boundary detection. product-owner amended BC-1.18.008 v1.1→v1.2 (`91e65c0b`) this session, reconciling a PC2/PC6(b) burst-log record-boundary contradiction. `pipeline:` stays **PAUSED**. NEXT = dispatch `vsdd-factory:implementer` to rewrite record-boundary detection.
+> Prior checkpoint (RESUME-HOUSEKEEPING-WAVE-STATE-DRIFT-2026-09-09, D-1188) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-10. Cycle v1.0-brownfield-backfill. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on branch `feature/S-25.02-backfill`. NEXT = dispatch `vsdd-factory:implementer` to rewrite record-boundary detection.
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL 3-CLEAN streak = **0/3** (reset by a fresh adversary pass that found 1 BLOCKER + 1 HIGH + 3 MEDIUM). First clean pass not yet achieved.
+
+### §3. In-flight (c)
+
+- `feature/S-25.02-backfill` @ `bd4a85f3` (PUSHED to origin). Contains: cluster-3 implementation (`323d36f5`, `be8a34aa`), pass-1 fixes BLOCKER-1/HIGH-2/MED-3 (`838bea36`, `3dbc6f5e`, `3d6a38ea`), pass-1 RED fixtures (`1e16dfe4`), and WIP-committed re-grounded PC2_MT boundary fixtures (`bd4a85f3`). Two tests intentionally RED: burst-log + lessons pattern-based boundary detection — awaiting implementer.
+- RESUME STEP 1 = dispatch `vsdd-factory:implementer` to: rewrite `mechanism_a_record_boundary_offsets` (`crates/factory-dispatcher/src/shard_manager.rs`) to PATTERN-based detection per BC-1.18.008 v1.2 Record-Boundary Marker Table (detect h3-exception records `### Pass-39/40 Fix Burst`, `### L-EDP1-050/051`; EXCLUDE nested `### Block N:`; handle `## LESSON (D-NNNN)`/`## RECURRENCE NOTE` forms); make the PC6(b) record-count gate load-bearing (MED-C — currently tautological, both sides derive from `offsets.len()`); fix MED-E stale "STUB ONLY/`todo!()`" doc comments in `shard_manager.rs` (lines ~4040, ~4390). Then green `cargo test --workspace`, commit, and re-run a FRESH adversary (pass 1 of new streak).
+- Abandoned: stalled adversary teammate `adv-cluster3-p1` (`shutdown_request` did not take) — ignore on resume.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+None open. The two mechanical state-manager items owed as the FIRST resume action (see Drift Items [D-1189] rows) are now DONE (closed at D-1190, this burst): (1) BC-INDEX.md version-cell propagation for BC-1.18.008 v1.1→v1.2 (POLICY 8) — BC-INDEX v5.74→v5.75; (2) `bin/compute-input-hash .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md --update` — input-hash `d7ab601`→`a68be55`, `--check` CLEAN.
+
+### §5. WIP branches (e)
+
+`feature/S-25.02-backfill` @ `bd4a85f3` (pushed origin). `factory-artifacts` carries product-owner commit `91e65c0b` (BC-1.18.008 v1.1→v1.2) + this pause commit.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active** (POL-14 promoted at D-1186, UNCHANGED this burst) + BC-1.18.007 v1.2/**008 v1.2**/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 and cluster-2's BC-1.18.006 are the 2 ACTIVE ones of the 9 (7 remain draft, clusters 3-7 not yet shipped; BC-1.18.008 amended v1.1→v1.2 at `91e65c0b`, BC-INDEX version-cell propagated THIS BURST per D-1190). BC-INDEX v5.75 (2,006 BCs; BC-1.18.008 version-cell now `v1.0 \| v1.1 \| v1.2`, propagated this burst per POLICY 8). VP-INDEX v3.09 (141 VPs, UNCHANGED this burst). STORY-INDEX v4.452 (176 stories; 25 epics; S-25.02 v3.3, UNCHANGED this burst, status ready, cluster-1 + cluster-2 DELIVERED/MERGED, cluster-3 IN PROGRESS; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md **v1.8** (UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`0959e34b29a41a1b064ff1c7ec62096e94a31c7e`** (PR #824 squash-merged, base `fff5e4cc`). merged_count **120**. UNCHANGED this burst.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED this burst.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD. Carries the SESSION-WRAP-PAUSE-2026-09-10 commit (product-owner's `91e65c0b` BC-1.18.008 v1.1→v1.2 + pause bookkeeping) plus this D-1190 resume-action commit (BC-INDEX v5.74→v5.75 propagation + BC-1.18.008.md input-hash refresh), both now on the branch.
+- `feature/S-25.02-backfill`: **IN PROGRESS, PUSHED** @ `bd4a85f3` (cluster-3, mechanism-A backfill). 2 tests intentionally RED, awaiting implementer.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: RESET to 0/3 this session** — a fresh pass found 1 BLOCKER + 1 HIGH + 3 MEDIUM against the WIP mechanism-A implementation. NEXT = implementer fix, then pass 1 of a new streak.

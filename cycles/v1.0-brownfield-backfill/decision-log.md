@@ -8603,3 +8603,290 @@ F-C2-P10-004.
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1184 | D-1184-S2502-CLUSTER2-PASS10-CONVERGENCE-TO-PR-ASYMPTOTIC-ACCEPTANCE | **S-25.02 Phase F4 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-10 = NOT CLEAN — 0 BLOCKER/MAJOR/MEDIUM, 1 MINOR (F-C2-P10-001), 3 ADVISORY (F-C2-P10-002, F-C2-P10-003, F-C2-P10-004). **Correctness surface CLEAN for the 2nd consecutive pass (9 and 10).** F-C2-P10-001 (MINOR): `error-taxonomy.md`'s `E-SHD-001` Message Format cell drift corrected; EXHAUSTIVE E-SHD-001..009 sweep performed (all other rows already verbatim). F-C2-P10-002 (ADVISORY): Postcondition 8's 0-byte-reclaim race wording NARROWED to precisely describe both sub-windows (`unlink()`-to-retry fails loud; `stat()`-to-`unlink()` is a silent-loss accepted residual risk); `O_EXCL` hardening + fault-injection test OWED to Phase F6. F-C2-P10-003 (ADVISORY, [process-gap]): EC-025 concurrent-race arm remains untested (no injection seam); OWED to Phase F6. F-C2-P10-004 (ADVISORY): Postcondition 7 catch point (ii)'s abbreviated `E-SHD-008` gloss (deferred at pass-9) RESOLVED via split treatment (narrative annotated, CTV reconciled to verbatim text). BC-1.18.006 v1.10→v1.11; error-taxonomy.md v1.7→v1.8; story stays v3.3; BC-INDEX v5.72→v5.73; STORY-INDEX/VP-INDEX UNCHANGED. **THE CONVERGENCE DECISION: the human EXPLICITLY AUTHORIZED converging the cluster-2 LOCAL BC-5.39.001 cascade to PR via asymptotic acceptance (D-386 Option C), after 10 not-clean passes with the correctness surface clean for the last 2 passes and only asymptotic minor/advisory findings remaining. Cluster-2 LOCAL cascade CLOSED at streak 0/3 — did NOT reach literal 3/3 — distinct from cluster-1, which reached literal 3/3.** PR-LEVEL adversarial review (pr-reviewer within pr-manager's 9-step) still applies as the next review layer. OWED §4.2 (convergence-economics) RESOLVED: converge-to-PR. 2 new F6-owed items recorded (P10-002 `O_EXCL` reclaim hardening; P10-003 EC-025 concurrent-race fault-injection test), both human-authorized deferrals anchored to Phase F6. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-2 cascade, not a cycle-level pass). Code branch `feature/S-25.02-roll` @ `39369cc6` (unchanged this burst — spec-text-only pass) — NOT YET PUSHED (state-manager does not push code). `pipeline:` stays in_progress. **NEXT = cluster-2 per-story-delivery: demo-recorder → push → pr-manager 9-step PR → merge → post-merge burst, then cluster-3.** Refs: D-1184, D-1183, S-25.02, BC-1.18.006 v1.11, F-C2-P10-001, F-C2-P10-002, F-C2-P10-003, F-C2-P10-004. STATE.md v10.09→v10.10. | D-1184 | 2026-09-08 |
+
+## D-1185
+
+**D-1185-SESSION-WRAP-PAUSE-2026-09-08**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1184 (this cycle's own decision-log.md, previous entry above). D-1185 allocated cleanly above
+the true max.
+
+**BACKFILL NOTE (D-1191):** this entry was recorded in real time ONLY in STATE.md's own Decisions
+Log table (never individually appended to this file's SoT until now) — closing the gap flagged as
+a Drift Item at D-1190 and formalized as a table row at D-1191. Content below is reproduced
+verbatim from the STATE.md Decisions Log row.
+
+**Summary:** SESSION-WRAP-PAUSE 2026-09-08 (second wrap this day) — S-25.02 F4 cluster-2 (roll,
+BC-1.18.006 v1.11) LOCAL BC-5.39.001 cascade CLOSED (asymptotic acceptance, D-1184); cluster-2 now
+in PER-STORY-DELIVERY, PR #824 OPEN, NOT merged. Demo evidence recorded (`b27f0a0a`); branch
+`feature/S-25.02-roll` pushed to origin @ `8d17ffc4` (worktree CLEAN); PR #824 OPEN
+(`feature/S-25.02-roll` → `develop`). 6 security/hardening fixes committed+pushed on the branch:
+`e67eb7ad` SEC-001 (0-byte reclaim uses `lstat` not `stat`), `002962ce` SEC-002 (reject
+path-traversal in `artifact_stem`), `5e025366` SEC-003 (reject `ParentDir` components), `0f56530d`
+FIX-HIGH-1 (`write_exclusive` temp uses `O_EXCL`, no symlink follow), `0ea79c2c` FIX-MED-1
+(re-verify 0-byte reclaim via open handle before unlink), `8d17ffc4` FIX-MED-2 (refuse symlinked
+canonical across roll read sites). pr-reviewer cycle-1 verdict REQUEST_CHANGES — 10 findings: 1
+EXTERNAL BLOCKING (#1, CI red on both runners — pre-existing STATE.md banner staleness, mechanical
+merge-gate, state-manager-owned, MUST resolve before merge), 2 MAJOR (#2 `write_exclusive`
+temp-path collision misreported as `E-SHD-009` and deletes a reclaimable 0-byte destination on a
+failed op, reproduced empirically; #3 `E-SHD-010` symlink guard missing + untested on the
+`Edit`/`MultiEdit` arms, only `Write` guarded), 5 MINOR (#4 FIFO hang in
+`reclaim_identity_still_safe`; #5 orphaned commit SHA in PR body; #6 stale demo README prose,
+0-byte reclaim description now stale post-SEC-001; #7 missing `E-SHD-010` taxonomy entry +
+deferral anchor; #8 FIX-MED-1 tested only at helper level), 2 NIT (#9 `next_seal_seq` u32
+overflow; #10 diff size) — NONE of the 9 non-external findings fixed this burst; implementer
+(`a4e643aa`, reading/reproducing #2/#3 only, no edits) and demo-recorder (`aaa445e0`, re-recording
+stale README #6, no commit) both abandoned mid-step by this wrap. pr-review.md persisted at
+`.factory/code-delivery/S-25.02/pr-review.md` (committed this burst as-is, content NOT rewritten
+by state-manager). Formal review posted to GitHub as COMMENTED, not a blocking review — GitHub
+rejected `--request-changes` because the authenticated account is the PR author; a human/second
+account must convert it to a blocking review for branch-protection enforcement. Human invoked
+`/vsdd-factory:wrap`. Ambient telemetry churn (`regression-state.json`, `sidecar-learning.md`) +
+already-uncommitted `code-delivery/S-25.02/pr-review.md` folded into this same single commit
+(TD-VSDD-053). No BC/story/VP/index content changed this burst — all 4 indexes UNCHANGED
+(BC-INDEX v5.73 / STORY-INDEX v4.452 / VP-INDEX v3.09 / ARCH-INDEX v4.24). `pipeline:`
+in_progress→PAUSED. BC-5.39.001 cluster-2 LOCAL cascade stays CLOSED (0/3, asymptotic, D-1184,
+UNCHANGED). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (not an adversary pass). NEXT
+ON RESUME: resume PR #824 review convergence (fix 2 MAJOR + 5 MINOR + 2 NIT findings → re-review →
+resolve CI (#1) → merge → post-merge burst, BC-1.18.006 draft→active POL-14), then cluster-3.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1185 | D-1185-SESSION-WRAP-PAUSE-2026-09-08 | **SESSION-WRAP-PAUSE 2026-09-08 (second wrap this day) — S-25.02 F4 cluster-2 (roll, BC-1.18.006 v1.11) LOCAL BC-5.39.001 cascade CLOSED (asymptotic acceptance, D-1184); cluster-2 now in PER-STORY-DELIVERY, PR #824 OPEN, NOT merged.** Demo evidence recorded (`b27f0a0a`); branch `feature/S-25.02-roll` pushed to origin @ `8d17ffc4` (worktree CLEAN); **PR #824 OPEN** (`feature/S-25.02-roll` → `develop`). pr-reviewer cycle-1 verdict **REQUEST_CHANGES** (10 findings: 1 EXTERNAL BLOCKING CI-red, 2 MAJOR, 5 MINOR, 2 NIT) — NONE fixed this burst (abandoned mid-step by the wrap). `pipeline:` in_progress→**PAUSED**. Refs: D-1185, D-1184, S-25.02, BC-1.18.006 v1.11, PR #824. STATE.md v10.10→v10.11. | D-1185 | 2026-09-08 |
+
+## D-1186
+
+**D-1186-S2502-CLUSTER2-DELIVERY-MERGE-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1185 (this file, previous entry above). D-1186 allocated cleanly above the true max.
+
+**BACKFILL NOTE (D-1191):** see D-1185's backfill note above — same gap, same closure.
+
+**Summary:** S-25.02 Phase F4 cluster-2 (roll, BC-1.18.006) DELIVERED — PR #824 squash-merged into
+develop as `0959e34b29a41a1b064ff1c7ec62096e94a31c7e` (base `fff5e4cc`); feature branch
+`feature/S-25.02-roll` deleted. PR #824's own 6-cycle pr-reviewer review-convergence: cycle-1
+REQUEST_CHANGES (10 findings) → cycle-2 fixed 7 (N-1..N-7) → cycle-3 fixed 3 MAJOR (incl. ADR-051
+§Decision 17 gate-hoist, BC-1.18.006 v1.11→v1.12 + BC-1.18.005 v1.14→v1.15 citation refresh) plus
+12 MINOR/NIT → cycle-4 APPROVE + 1 MINOR (N1) fixed → cycles 5/6/7 delta APPROVEs, no further
+findings. BC-1.18.006 `status`/`lifecycle_status`: draft→active per POL-14 auto-promotion-at-merge;
+BC-INDEX v5.73→v5.74 (status-cell flip; version-cell CONFIRMED CURRENT v1.12; `total_bcs`
+UNCHANGED 2,006). `merged_count` 119→120; develop HEAD `fff5e4cc`→`0959e34b`. Committed the 5
+uncommitted PR-review-cascade artifacts (`pr-review-cycle-4.md` through `pr-review-cycle-7.md`,
+`windows-path-semantics-research.md`) plus ambient telemetry churn. Mandatory 5-file
+`last-amended-migrate --check` pre-push guard found VP-INDEX.md's pre-existing PriorChainSplit
+drift (OPEN since D-1170) — SPLIT via the sanctioned full-recovery tool (BC-10.13.001 PC7);
+`--check` now CLEAN on all 5 governed files; Blocking Issues row `[D-1170]` RESOLVED. 3 new Drift
+Items recorded: (1) `[process-gap]` `pr-manager-completion-guard` SubagentStop hook defect; (2)
+`[process-gap]` `precompact-routing.bats` TC-AC004/TC-EC001 flake root-caused to
+`legacy-bash-adapter.wasm` `exec_subprocess`; (3) VP-count discrepancy CONFIRMED as the
+pre-existing `[D-1138]` drift, RE-CONFIRMED not duplicated, not fixed. `pipeline:` PAUSED→
+in_progress. NEXT = cluster-3 (mechanism-A backfill, BC-1.18.007+008) per D-1170's sequencing.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1186 | D-1186-S2502-CLUSTER2-DELIVERY-MERGE-BURST | **S-25.02 Phase F4 cluster-2 (roll, BC-1.18.006) DELIVERED — PR #824 squash-merged into develop as `0959e34b29a41a1b064ff1c7ec62096e94a31c7e` (base `fff5e4cc`); feature branch `feature/S-25.02-roll` deleted.** PR #824's own 6-cycle pr-reviewer review-convergence: cycle-1 REQUEST_CHANGES (10 findings: 1 EXTERNAL BLOCKING CI-red #1, 2 MAJOR #2/#3, 5 MINOR #4-#8, 2 NIT #9/#10); cycle-2 fixed 7 findings (N-1..N-7); cycle-3 fixed 3 MAJOR (incl. ADR-051 §Decision 17 gate-hoist, BC-1.18.006 v1.11→v1.12 + BC-1.18.005 v1.14→v1.15 citation refresh) plus 12 MINOR/NIT; cycle-4 APPROVE + 1 MINOR (N1) fixed; cycles 5/6/7 delta APPROVEs, no further findings. BC-1.18.006 `status`/`lifecycle_status`: `draft`→`active` per POL-14 auto-promotion-at-merge; BC-INDEX v5.73→v5.74 (status-cell flip; version-cell CONFIRMED CURRENT v1.12; `total_bcs` UNCHANGED 2,006). `merged_count` 119→120; develop HEAD `fff5e4cc`→`0959e34b`. Committed the 5 uncommitted PR-review-cascade artifacts (`pr-review-cycle-4.md` through `pr-review-cycle-7.md`, `windows-path-semantics-research.md`) plus ambient telemetry churn. Mandatory 5-file `last-amended-migrate --check` pre-push guard found VP-INDEX.md's pre-existing PriorChainSplit drift (OPEN since D-1170) — SPLIT via the sanctioned full-recovery tool (BC-10.13.001 PC7); `--check` now CLEAN on all 5 governed files; Blocking Issues row `[D-1170]` RESOLVED. 3 new Drift Items recorded: (1) `[process-gap]` `pr-manager-completion-guard` SubagentStop hook defect (no terminal state for a scoped NON-merge dispatch, uncapped step-increment past the 9-step boundary, caused a session stop-loop); (2) `[process-gap]` `precompact-routing.bats` TC-AC004/TC-EC001 flake root-caused to `legacy-bash-adapter.wasm` `exec_subprocess` wrong exit code under CPU contention (extends the D-1173 flake note with a root cause); (3) VP-count discrepancy (ARCH-INDEX `106 VPs` vs STATE.md `26 VPs`) CONFIRMED as the pre-existing `[D-1138]` drift, RE-CONFIRMED not duplicated, not fixed (architect-owned, value not guessed). `pipeline:` PAUSED→in_progress. **NEXT = cluster-3 (mechanism-A backfill, BC-1.18.007+008) per D-1170's sequencing.** | S-25.02 F4 | 2026-09-09 |
+
+## D-1187
+
+**D-1187-SESSION-WRAP-PAUSE-2026-09-09**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1186 (this file, previous entry above). D-1187 allocated cleanly above the true max.
+
+**BACKFILL NOTE (D-1191):** see D-1185's backfill note above — same gap, same closure.
+
+**Summary:** SESSION-WRAP-PAUSE 2026-09-09 — human invoked `/vsdd-factory:wrap`. S-25.02 F4
+cluster-2 (roll, BC-1.18.006 v1.12) DELIVERED/MERGED (PR #824 @ `0959e34b`, base `fff5e4cc`,
+D-1186); feature branch deleted; BC-1.18.006 draft→active (POL-14, D-1186), UNCHANGED this burst.
+Cluster-2 fully closed out — no further LOCAL or PR-level review pending. No BC/story/VP/index
+content changed this burst — all 4 indexes UNCHANGED (BC-INDEX v5.74 / STORY-INDEX v4.452 /
+VP-INDEX v3.09 / ARCH-INDEX v4.24). Oldest Current Phase Steps row
+(S2502-CLUSTER2-PASS8-SEAL-RECONCILE-ZEROBYTE-RECLAIM-B2-TEMPLATE) evicted, keeping the last-5
+window. Orphaned-but-CLEAN worktree `.worktrees/S-25.02-roll` (branch `feature/S-25.02-roll`
+[gone]) flagged for `worktree remove` cleanup at resume — no work at risk. 3 open Drift Items
+carried from D-1186. OPERATIONAL NOTE recorded for resume: agent-initiated PR merges were blocked
+by the Claude Code permission classifier this session — merges must be executed by the human (or
+with an explicit permission grant) via `plugins/vsdd-factory/bin/enforce-merge-strategy.sh` gated
+by `check-stale-verdict.sh`, NOT a direct `gh pr merge`. Minor governance drift flagged (not
+rewritten): commit `7c71b193` carried a `Claude-Session:` trailer on a `.factory` commit, a
+recurrence of the D-1181-forbidden AI-attribution pattern. `pipeline:` in_progress→PAUSED. No
+trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. NEXT ON RESUME: cluster-3 (mechanism-A
+backfill, BC-1.18.007+008) per D-1170's sequencing.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1187 | D-1187-SESSION-WRAP-PAUSE-2026-09-09 | **SESSION-WRAP-PAUSE 2026-09-09 — human invoked `/vsdd-factory:wrap`. S-25.02 F4 cluster-2 (roll, BC-1.18.006 v1.12) DELIVERED/MERGED (PR #824 @ `0959e34b`, base `fff5e4cc`, D-1186); feature branch deleted; BC-1.18.006 draft→active (POL-14, D-1186), UNCHANGED this burst.** Cluster-2 fully closed out — no further LOCAL or PR-level review pending. No BC/story/VP/index content changed this burst — all 4 indexes UNCHANGED (BC-INDEX v5.74 / STORY-INDEX v4.452 / VP-INDEX v3.09 / ARCH-INDEX v4.24). Session Resume Checkpoint replaced. Oldest Current Phase Steps row (S2502-CLUSTER2-PASS8-SEAL-RECONCILE-ZEROBYTE-RECLAIM-B2-TEMPLATE) evicted, keeping the last-5 window (content preserved in `cycles/v1.0-brownfield-backfill/burst-log.md`). Orphaned-but-CLEAN worktree `.worktrees/S-25.02-roll` (branch `feature/S-25.02-roll` [gone]) flagged for `worktree remove` cleanup at resume — no work at risk. 3 open Drift Items carried from D-1186 (`pr-manager-completion-guard` SubagentStop hook defect; `precompact-routing.bats`/`legacy-bash-adapter` exec_subprocess exit-code flake; VP-count drift = pre-existing D-1138, architect-owned). OPERATIONAL NOTE recorded for resume: agent-initiated PR merges were blocked by the Claude Code permission classifier this session — merges must be executed by the human (or with an explicit permission grant) via `plugins/vsdd-factory/bin/enforce-merge-strategy.sh` gated by `check-stale-verdict.sh`, NOT a direct `gh pr merge`. Minor governance drift flagged (not rewritten): commit `7c71b193` carried a `Claude-Session:` trailer on a `.factory` commit, a recurrence of the D-1181-forbidden AI-attribution pattern. `pipeline:` in_progress→**PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT ON RESUME: `/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step` — cluster-3 (mechanism-A backfill, BC-1.18.007+008) per D-1170's sequencing.** Refs: D-1187, D-1186, S-25.02, BC-1.18.006 v1.12, PR #824, 0959e34b. STATE.md v10.12→v10.13. | D-1187 | 2026-09-09 |
+
+## D-1188
+
+**D-1188-RESUME-HOUSEKEEPING-WAVE-STATE-DRIFT-2026-09-09**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1187 (this file, previous entry above). D-1188 allocated cleanly above the true max.
+
+**BACKFILL NOTE (D-1191):** see D-1185's backfill note above — same gap, same closure.
+
+**Summary:** Resume-housekeeping burst 2026-09-09 (single-commit TD-VSDD-053) — `.factory/
+wave-state.yaml` found silently STALE at `/vsdd-factory:rehydrate-wave` resume (still
+`wave: W1 (E-19)`/S-19.01-03, despite S-25.02 F4 cluster-1 PR #818 and cluster-2 PR #824 @
+`0959e34b` having since delivered/merged). Human confirmed true resume target = S-25.02 cluster-3
+(mechanism-A backfill, BC-1.18.007+008) per STATE.md v10.13/D-1187 and D-1170's sequencing;
+STATE.md (authority #1, CLAUDE.md) governs over the stale wave-state.yaml. ROOT CAUSE: D-1170 F4
+BC-cluster delivery proceeds via per-story/feature sub-cycles that never invoke
+`/vsdd-factory:wave-handoff` (the sole writer of `wave-state.yaml`), so the manifest is not
+regenerated after the last true wave handoff (E-19). IMMEDIATE REMEDIATION: `wave-state.yaml`
+regenerated to cluster-3 scope this burst (paths verified present on disk). SYSTEMIC FOLLOW-UP
+recorded as a new `[D-1188] [process-gap]` Drift Item — reconcile the rehydrate-wave manifest
+lifecycle with F4 cluster delivery — anchored pending an E-12 Engine Governance follow-up story (no
+ID allocated yet). Orphaned worktree `.worktrees/S-25.02-roll` (flagged D-1187) CONFIRMED REMOVED
+at resume. No BC/VP/STORY/ARCH content changed — all 4 indexes UNCHANGED (BC-INDEX v5.74 /
+VP-INDEX v3.09 / STORY-INDEX v4.452 / ARCH-INDEX v4.24). `pipeline:` stays PAUSED; this burst does
+NOT advance the phase. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1188 | D-1188-RESUME-HOUSEKEEPING-WAVE-STATE-DRIFT-2026-09-09 | **Resume-housekeeping burst 2026-09-09 (single-commit TD-VSDD-053) — `.factory/wave-state.yaml` found silently STALE at `/vsdd-factory:rehydrate-wave` resume (still `wave: W1 (E-19)`/S-19.01-03, despite S-25.02 F4 cluster-1 PR #818 and cluster-2 PR #824 @ `0959e34b` having since delivered/merged).** Human confirmed true resume target = S-25.02 cluster-3 (mechanism-A backfill, BC-1.18.007+008) per STATE.md v10.13/D-1187 and D-1170's sequencing; STATE.md (authority #1, CLAUDE.md) governs over the stale wave-state.yaml. ROOT CAUSE: D-1170 F4 BC-cluster delivery proceeds via per-story/feature sub-cycles that never invoke `/vsdd-factory:wave-handoff` (the sole writer of `wave-state.yaml`), so the manifest is not regenerated after the last true wave handoff (E-19). IMMEDIATE REMEDIATION: `wave-state.yaml` regenerated to cluster-3 scope this burst (paths verified present on disk). SYSTEMIC FOLLOW-UP recorded as a new `[D-1188] [process-gap]` Drift Item — reconcile the rehydrate-wave manifest lifecycle with F4 cluster delivery (auto-regenerate on cluster-merge, or have `/vsdd-factory:wrap` regenerate at pause) — anchored pending an E-12 Engine Governance follow-up story (no ID allocated yet), per Canonical Principle Rule 3 (no fabricated story ID). Orphaned worktree `.worktrees/S-25.02-roll` (flagged D-1187) CONFIRMED REMOVED at resume — closed out in Session Resume Checkpoint §3/§4. No BC/VP/STORY/ARCH content changed — all 4 indexes UNCHANGED (BC-INDEX v5.74 / VP-INDEX v3.09 / STORY-INDEX v4.452 / ARCH-INDEX v4.24), per explicit instruction not to bump them. `pipeline:` stays **PAUSED** — this burst does NOT advance the phase; NEXT remains cluster-3 per D-1170/D-1187, unchanged. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. Refs: D-1188, D-1187, S-25.02, wave-state.yaml. STATE.md v10.13→v10.14. | S-25.02 F4 | 2026-09-09 |
+
+## D-1189
+
+**D-1189-SESSION-WRAP-PAUSE-2026-09-10**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1188 (this file, previous entry above). D-1189 allocated cleanly above the true max.
+
+**BACKFILL NOTE (D-1191):** see D-1185's backfill note above — same gap, same closure. This is the
+final entry in the D-1185..D-1189 backfill range; D-1190 remains STATE.md-only per established
+convention (bookkeeping/resume-action burst), and D-1191 (this same burst) is authored directly
+into this SoT below, not backfilled.
+
+**Summary:** SESSION-WRAP-PAUSE 2026-09-10 — human invoked `/vsdd-factory:wrap`. S-25.02 F4
+cluster-3 (mechanism-A backfill, BC-1.18.007+008) delivery IN PROGRESS on `feature/S-25.02-backfill`
+@ `bd4a85f3` (pushed). LOCAL BC-5.39.001 3-CLEAN streak RESET to 0/3 — a fresh adversary pass found
+1 BLOCKER + 1 HIGH + 3 MEDIUM against the WIP mechanism-A implementation. product-owner amended
+BC-1.18.008 v1.1→v1.2 (`91e65c0b`, was unpushed at pause start, carried by this burst's push)
+reconciling a Precondition-2/Postcondition-6(b) burst-log record-boundary contradiction (h3-exception
+records, nested `### Block N:` exclusion, `## LESSON`/`## RECURRENCE NOTE` forms). Two mechanical
+state-manager items COULD NOT be executed this burst per INV-3 (no extra bursts beyond the single
+pause commit) — recorded as new Drift Items for the FIRST resume action: (1) BC-INDEX.md
+version-cell propagation BC-1.18.008 v1.1→v1.2 (POLICY 8); (2) `compute-input-hash --update` on
+BC-1.18.008.md (stored `d7ab601` drifted post-amendment). Abandoned adversary teammate
+`adv-cluster3-p1` (`shutdown_request` did not take) — ignore on resume, no work at risk. No
+BC/VP/STORY/ARCH index content changed this burst — all 4 indexes UNCHANGED (BC-INDEX v5.74 /
+VP-INDEX v3.09 / STORY-INDEX v4.452 / ARCH-INDEX v4.24). `pipeline:` stays PAUSED. No
+trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. RESUME STEP 1 = dispatch
+`vsdd-factory:implementer` to rewrite `mechanism_a_record_boundary_offsets`
+(`crates/factory-dispatcher/src/shard_manager.rs`) to pattern-based record-boundary detection per
+BC-1.18.008 v1.2's Record-Boundary Marker Table; make the PC6(b) record-count gate load-bearing
+(MED-C); fix stale STUB-ONLY doc comments (MED-E) — then green `cargo test --workspace`, commit,
+and run a fresh adversary pass (pass 1 of a new streak).
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1189 | D-1189-SESSION-WRAP-PAUSE-2026-09-10 | **SESSION-WRAP-PAUSE 2026-09-10 — human invoked `/vsdd-factory:wrap`. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) delivery IN PROGRESS on `feature/S-25.02-backfill` @ `bd4a85f3` (pushed).** LOCAL BC-5.39.001 3-CLEAN streak RESET to 0/3 — a fresh adversary pass found 1 BLOCKER + 1 HIGH + 3 MEDIUM against the WIP mechanism-A implementation. product-owner amended BC-1.18.008 v1.1→v1.2 (`91e65c0b`, was unpushed at pause start, carried by this burst's push) reconciling a Precondition-2/Postcondition-6(b) burst-log record-boundary contradiction (h3-exception records, nested `### Block N:` exclusion, `## LESSON`/`## RECURRENCE NOTE` forms). Two mechanical state-manager items COULD NOT be executed this burst per INV-3 (no extra bursts beyond the single pause commit) — recorded as new Drift Items for the FIRST resume action: (1) BC-INDEX.md version-cell propagation BC-1.18.008 v1.1→v1.2 (POLICY 8); (2) `compute-input-hash --update` on BC-1.18.008.md (stored `d7ab601` drifted post-amendment). Abandoned adversary teammate `adv-cluster3-p1` (`shutdown_request` did not take) — ignore on resume, no work at risk. No BC/VP/STORY/ARCH index content changed this burst — all 4 indexes UNCHANGED (BC-INDEX v5.74 / VP-INDEX v3.09 / STORY-INDEX v4.452 / ARCH-INDEX v4.24). `pipeline:` stays **PAUSED** (was already PAUSED at session start; this burst does not flip it). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (bookkeeping/pause burst, no cycle-level adversary pass ran). RESUME STEP 1 = dispatch `vsdd-factory:implementer` to rewrite `mechanism_a_record_boundary_offsets` (`crates/factory-dispatcher/src/shard_manager.rs`) to pattern-based record-boundary detection per BC-1.18.008 v1.2's Record-Boundary Marker Table; make the PC6(b) record-count gate load-bearing (MED-C); fix stale STUB-ONLY doc comments (MED-E) — then green `cargo test --workspace`, commit, and run a fresh adversary pass (pass 1 of a new streak). Refs: D-1189, D-1188, S-25.02, BC-1.18.008 v1.2, feature/S-25.02-backfill, `91e65c0b`. STATE.md v10.14→v10.15. | S-25.02 F4 | 2026-09-10 |
+
+## D-1191
+
+**D-1191-S2502-CLUSTER3-PASS1-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1190 (STATE.md Decisions Log table only — the D-1189-closure resume-action burst; not yet
+individually backfilled into this file, per established convention for bookkeeping/resume-action
+bursts, and out of THIS burst's own single-commit scope). D-1191 allocated cleanly above the true
+max, continuing the global sequence past D-1190.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-1 = NOT CLEAN** 2026-09-10 (implementer + test-writer + product-owner code/spec-side content;
+state-manager bookkeeping + single-commit TD-VSDD-053) — 1 BLOCKER (F-C3-P1-001) + 1 HIGH
+(F-C3-P1-002) + 3 MEDIUM (F-C3-P1-003, F-C3-P1-004, F-C3-P1-005) + 1 additional MEDIUM-labeled
+scope-boundary item (F-C3-P1-006) + 1 MINOR (F-C3-P1-007) + 1 ADVISORY (F-C3-P1-008, folded into
+F-C3-P1-002). Full Part A finding set persisted as a standalone artifact —
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-1.md` — closing the gap that
+lost the immediately-prior, unpersisted `adv-cluster3-p1` attempt referenced at D-1189.
+
+**F-C3-P1-001 (BLOCKER):** the PC6(b) record-count content-preservation gate added by RESUME STEP
+1's `cdd8457b` fix was tautological — both sides of the equality check derived from the same
+`mechanism_a_record_boundary_offsets` output, so it could never catch a genuine content-loss
+defect. FIXED (implementer, `feature/S-25.02-backfill` @ `41c81fc4`): the gate now performs an
+INDEPENDENT byte-identity re-concatenation-and-compare against the original pre-split content, per
+BC-1.18.008 Postcondition 6's actual intent.
+
+**F-C3-P1-002 (HIGH):** `is_checkpoint_record_heading`'s `starts_with("Archived") ||
+contains("Checkpoint")` heuristic is case-sensitive-broken against real content — it misses the
+genuine record `## ARCHIVED CHECKPOINT: 2026-08-27 — pass-60 CLEAN D-1117...` (all-caps, matches
+neither arm). Direct inspection of both real `session-checkpoints.md` files (v1.0-brownfield-
+backfill: 182 h2 records; v1.0-feature-engine-discipline-pass-1: 12 h2 records) confirms every h2
+heading in both is a genuine checkpoint record. ADJUDICATED by product-owner as
+**REVERT-TO-ANY-H2, no BC-1.18.008 spec change** — the BC's existing marker-table row was already
+correct; the code-side heuristic was the defective party. FIXED (implementer, `41c81fc4`):
+`is_checkpoint_record_heading` DELETED, reverted to the BC's already-correct any-`^## `-boundary
+rule.
+
+**F-C3-P1-003 (MEDIUM):** missing panic guard on malformed record-boundary input (an out-of-range
+byte offset could reach a slicing operation unchecked). FIXED (implementer, `41c81fc4`): explicit
+bounds validation, returning `E-SHD-003` instead of panicking.
+
+**F-C3-P1-004 (MEDIUM):** BC-1.18.008 Postcondition 2's `ceil(current_bytes / shard_cap_bytes)`
+shard-count formula is jointly unsatisfiable with "preserving record boundaries" for non-uniform
+record sizes (counterexample: five 40-byte records/70-byte cap — `ceil(200/70)=3` but
+boundary-preserving packing yields 5), yet the Canonical Test Vectors asserted the `ceil()` value
+as an EXACT expected shard count. ADJUDICATED by product-owner — **BC-1.18.008 v1.2 → v1.3**
+(factory-artifacts `03b9c1bc`): Postcondition 2 now documents `ceil()` as a LOWER BOUND only,
+specifies the actual deterministic greedy boundary-preserving packing procedure as the real
+split-point rule (`actual_count >= ceil(...)`, equality only when records pack without slack);
+Postcondition 4's retention-composition math reworded to an explicit lower-bound inequality. Three
+Canonical Test Vector rows marked NEEDS-UPDATE, filled in by test-writer (`08c3c131`) with the
+actual measured packed-shard counts. No new `E-SHD-NNN` code warranted — `E-SHD-003` already
+covers the actual failure mode.
+
+**F-C3-P1-005 (MEDIUM):** stale test-suite doc comment describing the withdrawn exact-`ceil()`
+framing. FIXED (test-writer, `08c3c131`): corrected to describe `ceil()` as a lower bound and cite
+the greedy packing procedure.
+
+**F-C3-P1-006 (MEDIUM):** `mechanism_a_record_boundary_offsets` / the backfill-split orchestration
+it feeds has no production caller — fully implemented and unit-tested, but no PreToolUse/
+PostToolUse hook, CLI entry point, or scheduled job actually invokes the one-time migration.
+**HUMAN-ADJUDICATED as a legitimate scope-boundary DEFERRAL, NOT an in-scope fix** — BC-1.18.008
+Postcondition 1 is explicit that the migration fires "once, at F4 activation," which for
+mechanism-A backfill is the Cohort-B flip (cluster-7, CAPSTONE per D-1170's sequencing), gated on
+cluster-3 (this cluster) being merged plus the F4 calibration harness locking cap constants; wiring
+the invocation here would fire an unactivated migration against production content prematurely.
+Recorded as a Drift Item anchored to **T-12** (a real, existing S-25.02 task ID — not a fabricated
+placeholder), per CLAUDE.md Canonical Principle Rule 3.
+
+**F-C3-P1-007 (MINOR):** stray `\| D-` marker left over from an earlier edit pass in
+`shard_manager.rs`. FIXED (implementer, `41c81fc4`): removed.
+
+**F-C3-P1-008 (ADVISORY):** folded into F-C3-P1-002's resolution — no standalone action.
+
+**This burst also closes the decision-log.md SoT gap** (D-1185 through D-1189, backfilled
+immediately above, per the Drift Item surfaced at D-1190) and formalizes it as a proper Drift Items
+table row (STATE.md), retroactively — the gap had previously existed only as narrative prose, not
+an actual table row, itself a recurrence of the same "claimed-but-not-executed" bookkeeping pattern
+this project has flagged before (D-1156, D-1173, D-1177).
+
+Full code gate GREEN on `feature/S-25.02-backfill` @ `41c81fc4` (pushed to origin): `bc_1_18_008`
+suite 30/30 passed; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D
+warnings` clean. BC-1.18.008 v1.2→v1.3 (`03b9c1bc`); BC-INDEX v5.75→v5.76; STORY-INDEX v4.452→
+v4.453 (S-25.02 story v3.3→v3.4, story-writer's own AC-013 propagation); input-hashes reconciled
+(BC-1.18.008.md CONFIRMED CURRENT `a68be55`; story `3619d63`→`e47d034`); `--check` CLEAN on both.
+VP-INDEX v3.09 / ARCH-INDEX v4.24 UNCHANGED (no new Postcondition/Invariant/EC semantics beyond
+BC-1.18.008's own PC2/PC4 reframing, already covered by existing VP anchors). BC-5.39.001
+cluster-3 LOCAL streak stays **0/3** (pass-1 not clean; pass-2 next, fresh context; cycle-level
+3/3 CONVERGED streak UNCHANGED — separate track). No trajectory-tail drift — unchanged
+→0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass). `pipeline:` stays
+**PAUSED** (mid-convergence fix burst; consistent with prior cluster fix-burst state handling —
+pipeline does not flip to in_progress mid-LOCAL-cascade).
+
+### Next Steps
+
+**NEXT = cluster-3 LOCAL adversary pass-2, fresh context, against BC-1.18.008 v1.3 / BC-1.18.007
+v1.2 / code `feature/S-25.02-backfill` @ `41c81fc4`.**
+
+Refs: D-1191, D-1190, D-1189, S-25.02, BC-1.18.008 v1.3, F-C3-P1-001..008, `03b9c1bc`, `41c81fc4`,
+BC-INDEX v5.76, STORY-INDEX v4.453.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1191 | D-1191-S2502-CLUSTER3-PASS1-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-1 = NOT CLEAN — 1 BLOCKER (F-C3-P1-001) + 1 HIGH (F-C3-P1-002) + 3 MEDIUM (F-C3-P1-003/004/005) + 1 additional MEDIUM-labeled scope-boundary item (F-C3-P1-006) + 1 MINOR (F-C3-P1-007) + 1 ADVISORY (F-C3-P1-008).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-1.md` (standalone artifact, closing the gap that lost the prior unpersisted `adv-cluster3-p1` attempt). F-C3-P1-001 (BLOCKER): PC6(b) tautological content-preservation gate replaced with an independent byte-identity check. F-C3-P1-002 (HIGH): `is_checkpoint_record_heading` case-sensitive-broken heuristic DELETED — product-owner ADJUDICATED REVERT-TO-ANY-H2 (no spec change, the BC's marker-table row was already correct). F-C3-P1-003 (MEDIUM): panic guard added (`E-SHD-003`). F-C3-P1-004 (MEDIUM): BC-1.18.008 **v1.2→v1.3** (`03b9c1bc`) — PC2's `ceil()` reframed as a LOWER BOUND, deterministic greedy boundary-preserving packing procedure specified, PC4 reworded to a lower-bound inequality, 3 CTVs corrected. F-C3-P1-005 (MEDIUM): stale test doc comment fixed. F-C3-P1-006 (MEDIUM): no production caller for the backfill-split — HUMAN-ADJUDICATED DEFERRED to **T-12** (Cohort-B-flip capstone), not an in-scope fix, recorded as a Drift Item. F-C3-P1-007 (MINOR): stray marker removed. F-C3-P1-008 (ADVISORY): folded into F-C3-P1-002. This burst ALSO closes the decision-log.md SoT gap (D-1185..D-1189 backfilled immediately above) and formalizes it as a Drift Items table row. Feature branch `feature/S-25.02-backfill` @ `41c81fc4` (pushed); `bc_1_18_008` 30/30 green, fmt+clippy clean. BC-INDEX v5.75→v5.76; STORY-INDEX v4.452→v4.453 (story v3.3→v3.4); input-hashes CLEAN (story `3619d63`→`e47d034`; BC-1.18.008.md CONFIRMED CURRENT). BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-1 not clean; pass-2 next, fresh context; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-2, fresh context, against BC-1.18.008 v1.3/code `41c81fc4`.** Refs: D-1191, D-1190, D-1189, S-25.02, BC-1.18.008 v1.3, F-C3-P1-001..008, `03b9c1bc`, `41c81fc4`. STATE.md v10.16→v10.17. | S-25.02 F4 | 2026-09-10 |

@@ -732,6 +732,29 @@ Full narrative: `decision-log.md` D-1175..D-1184 (exhaustive). **NEXT:
 cluster-2 per-story-delivery (demo-recorder per-AC → push → pr-manager 9-step PR → merge →
 post-merge burst, BC-1.18.006 draft→active POL-14), then cluster-3.**
 
+## S-25.02 F4 Cluster-3 Adversarial Reviews (mechanism-A backfill, BC-1.18.007+008 — LOCAL cascade)
+
+> **Gate:** local-equivalent convergence track for S-25.02 Feature Mode Phase F4 (delta-
+> implementation) cluster-3 (mechanism-A backfill, BC-1.18.007 retention/compaction + BC-1.18.008
+> one-time backfill-split), same convention as clusters 1/2's LOCAL BC-5.39.001 cascades — NOT the
+> cycle-level gate (cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED throughout this
+> table). Unlike cluster-2, this pass's FULL Part A finding set is persisted as a standalone
+> artifact (`s2502-cluster3-local-adversary-pass-1.md`) rather than narrative-only, closing the
+> gap that lost the immediately-prior (abandoned, unpersisted) `adv-cluster3-p1` attempt referenced
+> at D-1189.
+
+| Pass | Verdict | Findings | Streak | Notes |
+|------|---------|----------|--------|-------|
+| **1** | **NOT CLEAN** | 1 BLOCKER + 1 HIGH + 3 MEDIUM + 1 MINOR + 1 ADVISORY (F-C3-P1-001..008; see `s2502-cluster3-local-adversary-pass-1.md` for the full Part A) | 0/3 | Run against the completed mechanism-A implementation (post RESUME STEP 1: pattern-based record-boundary rewrite, PC6(b) gate, stale-doc fixes). F-C3-P1-001 (BLOCKER): PC6(b) content-preservation gate was tautological (both sides derived from the same `offsets` value) — fixed via an independent byte-identity check. F-C3-P1-002 (HIGH): `is_checkpoint_record_heading` case-sensitive-broken against real `session-checkpoints.md` content (misses the genuine all-caps `## ARCHIVED CHECKPOINT:` record); product-owner ADJUDICATED REVERT-TO-ANY-H2 (no BC-1.18.008 spec change — the BC's own marker-table row was already correct); heuristic deleted. F-C3-P1-003 (MEDIUM): missing panic guard on malformed record-boundary input, fixed with an `E-SHD-003` bounds check. F-C3-P1-004 (MEDIUM): PC2's `ceil()` shard-count formula jointly unsatisfiable with boundary-preservation for non-uniform record sizes (counterexample: five 40-byte records/70-byte cap — `ceil(200/70)=3` but boundary-preserving packing yields 5) — product-owner AMENDED BC-1.18.008 v1.2→v1.3 (`03b9c1bc`): `ceil()` reframed as a documented LOWER BOUND, deterministic greedy boundary-preserving packing procedure specified as the actual split-point rule, 3 Canonical Test Vectors corrected. F-C3-P1-005 (MEDIUM): stale test doc comment describing the withdrawn exact-`ceil()` framing, fixed. F-C3-P1-006 (MEDIUM): `mechanism_a_record_boundary_offsets`/backfill-split has no production caller yet — HUMAN-ADJUDICATED as a legitimate scope-boundary DEFERRAL (BC-1.18.008 Postcondition 1's "once, at F4 activation" is the Cohort-B-flip capstone, cluster-7/T-12, not cluster-3's own TDD delivery scope), recorded as a Drift Item anchored to T-12 (a real S-25.02 task ID). F-C3-P1-007 (MINOR): stray `\| D-` marker removed. F-C3-P1-008 (ADVISORY): folded into F-C3-P1-002's resolution. Feature branch HEAD `feature/S-25.02-backfill` @ `41c81fc4` (pushed); `bc_1_18_008` suite 30/30 green, `cargo fmt --check`/`clippy -D warnings` clean. Fixed same-burst (D-1191). |
+
+**Convergence Status (S-25.02 F4 cluster-3 LOCAL cascade): NOT CLEAN — pass-1 CLOSED-AND-FIXED
+2026-09-10 (D-1191), streak 0/3 (7 of 8 items fixed same-pass; 1 item, F-C3-P1-006, human-adjudicated
+DEFERRED to T-12, not a defect).** Cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED
+(separate track — this is a LOCAL cluster cascade, not a cycle-level adversary pass). Full Part A:
+`s2502-cluster3-local-adversary-pass-1.md`. Full narrative: `decision-log.md` D-1191. **NEXT:
+cluster-3 LOCAL adversary pass-2, fresh context, against BC-1.18.008 v1.3 / BC-1.18.007 v1.2 / code
+`feature/S-25.02-backfill` @ `41c81fc4`.**
+
 ## Artifact Size Budgets (IP-003 / D-835)
 
 | Artifact | Soft Cap | Hard Cap | Current Lines | Compaction Destination | Codified |
