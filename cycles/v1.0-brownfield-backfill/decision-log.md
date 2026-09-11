@@ -9830,3 +9830,98 @@ error-taxonomy.md v1.13.
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1199 | D-1199-S2502-CLUSTER3-PASS9-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-9 = NOT CLEAN — 2 MEDIUM findings, both taxonomy doc-drift; CODE independently re-verified spec-conformant.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-9.md`. F-C3-P9-001 (MEDIUM): `E-SHD-011` form (b) (`MissingBackfillManifest`) diverged from the shipped `Display` in 3 places — FIXED via product-owner's corrected cell, shipped text reproduced verbatim. F-C3-P9-002 (MEDIUM): `E-SHD-003` documented only `ContentPreservationFailed`'s emission, missing the code prefix/quoting convention; `Io`'s real emission was undocumented — FIXED via product-owner's corrected row documenting both forms verbatim. Companion sweep (beyond the 2 named findings, human-directed full mechanical re-diff of all 13 `E-SHD-NNN` codes / 17 emissions across `ShardRollError`+`MechanismABackfillError`+`ShardRetentionError`) surfaced and fixed a THIRD drift instance, `E-SHD-002` (`ShardRetentionError`, both forms). No BC change required — shipped code Displays were already correct in every case. `error-taxonomy.md` v1.12→v1.13. STORY-INDEX v4.458→v4.459 (row addition only — NEW draft follow-up story S-12.11 registered, E-12 Engine Governance). `[codified][process-gap]` lesson `L-BB-D1199-taxonomy-display-drift-recurring-6x-process-gap` (6+ recurrences of the class) anchored to S-12.11 — a lint hook diffing every `E-SHD`-emitting Rust source's Displays against this table's Message Format column, CI/pre-commit gated. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `8e2a37f4` (doc-only fix, no code change); full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-9 not clean; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-10, the VSDD 10-pass guardrail — orchestrator assesses cluster-3's 3-CLEAN convergence status WITH THE HUMAN, no further automatic adversary dispatch.** Refs: D-1199, D-1198, S-25.02, BC-1.18.008 v1.8, F-C3-P9-001, F-C3-P9-002, S-12.11, `8e2a37f4`. STATE.md v10.24→v10.25. | S-25.02 F4 | 2026-09-10 |
+
+## D-1200
+
+**D-1200-S2502-CLUSTER3-PASS10-CLEAN-BOOKKEEPING**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1199 (this file, immediately above). D-1200 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-10 = CLEAN — FIRST CLEAN PASS, zero blocking findings** 2026-09-10 (LOCAL Claude adversary +
+state-manager; single-commit TD-VSDD-053; LIGHT bookkeeping burst — NO code/spec/story change).
+Fresh pass-10 (against pass-9's fix-burst, `feature/S-25.02-backfill` @ `8e2a37f4`) independently
+re-verified the full v1.8 contract end to end — recovery/heal/manifest correctness, all 3
+destructive-write read-backs (sealed-shard/DANGEROUS-window-heal/happy-path-canonical), the
+`decision-log.md` marker-table regex, boundary detection/oracle set-equality, per-shard-cap
+accounting, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17
+real emissions across all three error enums (confirming pass-9's fix burst introduced no new drift),
+spec-internal consistency between BC-1.18.007 and BC-1.18.008, and POLICY-11 test integrity — and
+found the shipped code spec-conformant across every dimension checked. Full Part A persisted as a
+standalone artifact — `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-10.md`,
+matching pass-1..9's own convention.
+
+**Findings:** zero blocking findings. Two LOW non-blocking observations recorded:
+
+**O-C3-P10-001 (LOW, `[process-gap]`):** the 3 disk-read-back fault-injection tests
+(`FC3P6002`/`FC3P7001`/`FC3P8002`, covering the sealed-shard, DANGEROUS-window heal, and happy-path
+canonical write-and-read-back sites respectively — the class of tests progressively built across
+passes 6-8) each spawn a `spawn_temp_file_corruptor` background thread racing the production write
+path to corrupt the just-written temp file before the read-back verification runs, bounded to 20
+retries and hard-failing the test if the race never lands within that bound. Correct and
+non-tautological — genuinely exercises the read-back-catches-corruption path — but the race-based
+construction carries a non-zero risk of a rare spurious FALSE-FAIL on a heavily-loaded CI runner.
+Suggested (not required) improvement: a deterministic `#[cfg(test)]` fault-injection seam, mirroring
+the existing `FORCE_STAGE_FAILURE` thread-local pattern already used elsewhere in `shard_manager.rs`,
+that deterministically corrupts the target file at the read-back checkpoint instead of racing a
+background thread — removes the flakiness risk without weakening coverage.
+
+**O-C3-P10-002 (LOW):** a PC4 archival-move failure (`ShardRetentionError::ArchivalMoveFailed`,
+`E-SHD-002`) is wrapped, at the one call site where mechanism-A's backfill retry surfaces it, as
+`MechanismABackfillError::Io` (`E-SHD-003`) — so a diagnostic message carrying the literal
+`E-SHD-002:` prefix nests inside the `{source}` slot of an `E-SHD-003:`-prefixed outer message.
+Defensible, not a taxonomy-parity violation: `E-SHD-003`'s own Message Format cell documents a
+generic `<io-error>` placeholder in its `{source}` position specifically to permit wrapping arbitrary
+I/O-shaped failures, and the wrapping correctly signals abort-original-untouched-rerunnable semantics
+(the `E-SHD-003` contract) rather than misrepresenting the failure as directly retention-layer-caused.
+Diagnostic-clarity noise only.
+
+**Disposition:** both LOW, both non-blocking — per BC-5.39.001, a LOW/non-blocking-only observation
+does NOT reset the streak. BOTH DEFERRED — NOT fixed in-scope this burst — per the human's explicit
+convergence-discipline direction: the remaining 2 passes needed to reach literal 3-CLEAN (11 and 12)
+must run against the SAME frozen code (`8e2a37f4`) as this clean pass, so no code change is made this
+burst. DEFERRED to a NEW draft follow-up story **S-12.12** (E-12 Engine Governance): "Deterministic
+`#[cfg(test)]` fault-injection seam for cluster-3 disk-read-back tests (replaces
+`spawn_temp_file_corruptor` race)" — O-C3-P10-001 is the story's primary scope; O-C3-P10-002 is
+folded into the same story's scope as a secondary diagnostic-clarity note (no dedicated Drift Item
+needed given the LOW severity and the concrete story anchor, satisfying CLAUDE.md Canonical
+Principle Rule 3's three deferral preconditions: explicit human direction to keep code frozen through
+pass-12, a concrete future dependency — the fault-injection-seam work itself — and attachment to a
+specific new story ID, S-12.12).
+
+**Artifact changes:** NONE to BC/AC/EC/VP/story/code content this burst — this is a LIGHT
+bookkeeping burst. `error-taxonomy.md` stays v1.13 UNCHANGED (re-verified, not amended). BC-1.18.007
+stays v1.2 UNCHANGED; BC-1.18.008 stays v1.8 UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX
+v4.24 all UNCHANGED. STORY-INDEX v4.459→v4.460 (row addition only — NEW draft follow-up story
+**S-12.12** registered, E-12 Engine Governance; no existing story content changed). Feature branch
+`feature/S-25.02-backfill` stays UNCHANGED at `8e2a37f4` (no code change this burst; full
+`cargo test --workspace --all-targets` / `cargo fmt --check --all` / `cargo clippy --workspace
+--all-targets -- -D warnings` re-confirmed green/clean at the existing HEAD, no new commit required).
+
+**No `[codified]` lesson this burst** — the 2 LOW observations are routed directly to a concrete
+follow-up story (S-12.12) rather than accumulating a separate `lessons.md` entry; per state-manager
+content-routing discipline, a Drift-Item-or-story-anchor-level deferral suffices for LOW-severity,
+non-recurring observations and avoids over-documenting a light bookkeeping burst. A new Drift Item is
+recorded in STATE.md anchoring both observations to S-12.12.
+
+Because zero blocking findings were present, pass-10 is CLEAN — **BC-5.39.001 cluster-3 LOCAL
+streak: 0/3 → 1/3, FIRST CLEAN PASS** (cycle-level 3/3 CONVERGED streak UNCHANGED, separate track).
+`pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL
+cluster-3 cascade, not a cycle-level adversary pass).
+
+### Next Steps
+
+**NEXT = pass-11, fresh context, against the SAME frozen `8e2a37f4` code.** Per convergence
+discipline, code stays frozen through pass-12 so that a legitimate 3 consecutive CLEAN streak is
+reached on stable code, not a moving target — the 2 LOW observations from this pass are deferred
+rather than fixed in-scope specifically to preserve that stability. If pass-11 is also CLEAN, streak
+advances to 2/3; a third consecutive CLEAN pass (12) would reach literal BC-5.39.001 3-CLEAN
+convergence for cluster-3.
+
+Refs: D-1200, D-1199, S-25.02, BC-1.18.008 v1.8, BC-1.18.007 v1.2, O-C3-P10-001, O-C3-P10-002,
+S-12.12, `8e2a37f4`, error-taxonomy.md v1.13.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1200 | D-1200-S2502-CLUSTER3-PASS10-CLEAN-BOOKKEEPING | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-10 = CLEAN — FIRST CLEAN PASS, zero blocking findings.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-10.md`. Adversary independently re-verified the full v1.8 contract (recovery/heal/manifest, all 3 destructive-write read-backs, decision-log regex, boundary detection, preamble/per-shard-cap accounting, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 emissions, spec-internal consistency, POLICY-11 test integrity) as spec-conformant end to end. 2 LOW non-blocking observations recorded — O-C3-P10-001 (`[process-gap]`, non-deterministic `spawn_temp_file_corruptor` thread-race in the 3 disk-read-back fault-injection tests, rare spurious-FALSE-FAIL risk, suggested deterministic `#[cfg(test)]` seam remedy) and O-C3-P10-002 (`E-SHD-002`/`E-SHD-003` diagnostic-clarity nesting, defensible, not a parity violation) — BOTH deferred (not fixed in-scope) to NEW draft follow-up story **S-12.12** (E-12 Engine Governance), per human direction to keep code frozen through pass-12. Because both observations are LOW/non-blocking, the streak is NOT reset. No BC/AC/EC/VP/code change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 all UNCHANGED. STORY-INDEX v4.459→v4.460 (row addition only — NEW draft follow-up story S-12.12 registered). Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `8e2a37f4`; full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). **BC-5.39.001 cluster-3 LOCAL streak: 0/3 → 1/3 — FIRST CLEAN PASS** (cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-11, fresh context, against the SAME frozen `8e2a37f4` code — code stays frozen through pass-12 to legitimately reach 3/3 on stable code.** Refs: D-1200, D-1199, S-25.02, BC-1.18.008 v1.8, O-C3-P10-001, O-C3-P10-002, S-12.12, `8e2a37f4`. STATE.md v10.25→v10.26. | S-25.02 F4 | 2026-09-10 |
