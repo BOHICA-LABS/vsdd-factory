@@ -1090,16 +1090,24 @@ fn format_block_if_marker_crash_reason(fields: Option<&MarkerFields>) -> String 
 fn extract_reason_from_outcome(result: &PluginResult) -> Option<String> {
     match result {
         PluginResult::Ok { stdout, .. } => {
-            // Fast-path: only attempt JSON parsing when the block marker is present.
-            if !stdout.contains(r#""outcome":"block""#) {
+            if stdout.contains(r#""outcome":"block""#) {
+                // Advisory block: parse the `reason` field.
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
+            } else if stdout.contains(r#""outcome":"error""#) {
+                // Gate fail-loud (e.g. shard_gate_error_outcome / VP-131
+                // E-SHD-004): parse the `message` field so operator-facing
+                // block_reason carries the diagnostic text rather than being
+                // silently empty (WASI-exit-code block without `"reason"` key).
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+            } else {
                 // WASI-exit-code block without advisory stdout JSON:
                 // no reason available from plugin stdout.
-                return None;
+                None
             }
-            // Parse the reason field from the JSON payload.
-            serde_json::from_str::<serde_json::Value>(stdout)
-                .ok()
-                .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
         }
         // Fail-closed crash/timeout: sentinel reasons distinguished by cause so
         // operators can choose the right remedy without opening the internal log.

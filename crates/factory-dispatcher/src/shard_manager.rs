@@ -44,7 +44,8 @@
 //! genuine staleness-risk surface for zero measurable benefit under this
 //! process model.
 //!
-//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger"; UPDATED by cluster-2)
+//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger"; UPDATED by cluster-2,
+//! UPDATED by cluster-4)
 //!
 //! This module originally implemented BC-1.18.005 ONLY (tasks T-1/T-2/T-3;
 //! AC-001..AC-005) — fully, not as a stub; see the "BC-5.38.001 Red Gate
@@ -52,27 +53,29 @@
 //! BC-1.18.006 (the observable roll/block outcome once the `"flat"` shape's
 //! trigger fires) is now ALSO implemented in this module — it is no longer
 //! out of scope; see the "BC-1.18.006 — Roll-Before-Write..." section
-//! further below for its full implementation. BC-1.18.009 (the observable
-//! rotate/block-and-retry outcome once the item-count trigger fires) and
-//! BC-1.18.012 (the one-time changelog backfill migration) remain LATER
-//! clusters and are still explicitly OUT OF SCOPE here — the
-//! `"frontmatter-changelog-array"` shape's trigger-fired branch still only
-//! owns the trigger-boundary decision and hand-off point for THOSE two BCs,
-//! per Postcondition 8's "Ownership" bullet.
+//! further below for its full implementation. **UPDATE (S-25.02 cluster-4,
+//! "B1 rotation"):** BC-1.18.009 (the observable rotate/block-and-retry
+//! outcome once the item-count trigger fires) is now IN SCOPE for cluster-4 —
+//! the `"frontmatter-changelog-array"` shape's trigger-fired branch below
+//! carries a `todo!()` stub awaiting the cluster-4 implementer pass. BC-1.18.012
+//! (the one-time changelog backfill migration) remains a LATER cluster and is
+//! still explicitly OUT OF SCOPE here.
 //!
 //! # BC-5.38.001 Red Gate discipline — implemented (S-25.02 F4 BC-cluster 1;
-//! EXTENDED by cluster-2)
+//! EXTENDED by cluster-2; EXTENDED by cluster-4)
 //!
 //! Every function in this module now carries a real implementation driving
-//! the test-writer's Red Gate suites green (both BC-1.18.005's cluster-1
-//! suite and BC-1.18.006's cluster-2 suite). A fired `"flat"`-shape trigger
-//! now DOES construct an observable `HookResult::Block`/`HookResult::Error`
-//! outcome via `execute_roll` (BC-1.18.006's roll-before-write mechanism,
-//! implemented below) — the withdrawn cluster-1 posture (a non-fatal
-//! `tracing::warn!` advisory followed by `Continue`) applies ONLY to the
-//! `"frontmatter-changelog-array"` shape's item-count trigger now, whose
-//! observable rotate-and-retry outcome remains owned by the still-pending
-//! BC-1.18.009 cluster.
+//! the test-writer's Red Gate suites green (BC-1.18.005's cluster-1 suite,
+//! BC-1.18.006's cluster-2 suite, and BC-1.18.009's cluster-4 suite). A
+//! fired `"flat"`-shape trigger constructs an observable
+//! `HookResult::Block`/`HookResult::Error` outcome via `execute_roll`
+//! (BC-1.18.006's roll-before-write mechanism). A fired
+//! `"frontmatter-changelog-array"`-shape trigger now ALSO constructs an
+//! observable `HookResult::Block`/`HookResult::Error` outcome via
+//! `rotate_changelog_at` + `build_b1_block_reason` (BC-1.18.009's
+//! rotate-and-retry mechanism, cluster-4 implementer pass). The withdrawn
+//! cluster-1 posture (a non-fatal `tracing::warn!` advisory followed by
+//! `Continue`) is no longer applicable to either shape arm.
 //!
 //! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" —
 //! IMPLEMENTED, BC-5.38.001 Red Gate discipline)
@@ -2112,27 +2115,44 @@ pub fn shard_cap_gate_check(
             };
 
             if item_count_trigger_fires(current_item_count, n) {
-                // Ownership bullet (Postcondition 8): BC-1.18.009 owns the
-                // observable rotate-then-block-and-retry outcome once this
-                // trigger fires — still out of scope for this cluster (see
-                // this module's own "Scope note" — UPDATED by cluster-2:
-                // BC-1.18.006's "flat"-shape roll IS now implemented above,
-                // but BC-1.18.009's item-count rotate remains pending). This
-                // arm keeps the non-Block, honest hand-off posture
-                // (`tracing::warn!` + `Continue`) the "flat" shape's
-                // trigger-fired branch above has since WITHDRAWN in favor of
-                // a real `execute_roll`-backed outcome.
-                tracing::warn!(
-                    artifact_stem = %entry.artifact_stem,
-                    current_item_count,
-                    n,
-                    "BC-1.18.005: item-count shard-cap trigger fired; rotate/block outcome is \
-                     owned by BC-1.18.009 (not yet implemented in this cluster) — allowing \
-                     the call to proceed"
-                );
+                // BC-1.18.009 Postcondition 2: rotate-then-block-and-retry.
+                //
+                // The archive path for BC-INDEX artifacts is a fixed,
+                // non-cycle, BC-INDEX-sibling path (F1 delta analysis §3.1):
+                //   <parent-of-target>/BC-INDEX-changelog-archive.md
+                // `rotate_changelog_at` receives this path directly — callers
+                // that supply an explicit archive path bypass the
+                // `resolve_archive_path(path, cycle_name)` indirection that
+                // `rotate_changelog` uses for cycle-log rotation.
+                let archive_path = target_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join("BC-INDEX-changelog-archive.md");
+                let keep_recent = resolved_low_water_mark(n, entry.low_water_mark) as usize;
+                match last_amended_migrate::rotate::rotate_changelog_at(
+                    target_path,
+                    &archive_path,
+                    keep_recent,
+                    last_amended_migrate::MigrationMode::Apply,
+                ) {
+                    Ok(_report) => HookResult::Block {
+                        reason: build_b1_block_reason(
+                            &entry.artifact_stem,
+                            &archive_path,
+                            keep_recent,
+                        ),
+                    },
+                    Err(e) => HookResult::Error {
+                        message: format!(
+                            "E-SHD-004: rotate_changelog invocation failed for \
+                             \"{}\": {e}",
+                            entry.artifact_stem
+                        ),
+                    },
+                }
+            } else {
+                HookResult::Continue
             }
-
-            HookResult::Continue
         }
     }
 }
@@ -3615,6 +3635,52 @@ fn build_empty_roll_retry_block_reason(
              to rotate away; the shard remains exactly as it was before this call."
         )
     }
+}
+
+/// Retry-instruction `Block` message for the BC-1.18.009 B1 rotate-and-retry
+/// outcome. Emitted after a successful `rotate_changelog_at` invocation to
+/// tell the originating agent to re-read the post-rotation file before
+/// reissuing its prepend (BC-1.18.009 Postcondition 2 step 3).
+///
+/// `artifact_stem` — the matched `[[shard]]` config entry's stem (e.g.
+/// `BC-INDEX`).
+/// `archive_path` — the fixed, non-cycle sibling path the rotate call wrote
+/// the overflow tail to (e.g.
+/// `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md`).
+/// `keep_recent` — the `low_water_mark` item count the live sequence was
+/// trimmed to; named in the retry instruction so the agent knows the current
+/// state of the file before retrying.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// Zero branching, no I/O, no non-trivial helpers, body ≤ 3 lines (one
+/// `format!` expression). The test for this function's message format
+/// passes against this stub immediately — expected per BC-5.38.002. The
+/// test-writer MUST still write a test verifying the prescribed text
+/// (BC-1.18.009 Postcondition 2 step 3) to lock the template.
+///
+/// **Self-Check (BC-5.38.005):** "If I include this real implementation, will
+/// the test for this function pass trivially without any implementer work?"
+/// Yes — and it is GREEN-BY-DESIGN per the F1 delta analysis §5.4 explicit
+/// exception (inheriting the cluster-2 `build_roll_retry_block_reason`
+/// precedent). All four GREEN-BY-DESIGN criteria hold: zero branching, no I/O,
+/// no non-trivial helpers, single `format!` expression.
+pub fn build_b1_block_reason(
+    artifact_stem: &str,
+    archive_path: &Path,
+    keep_recent: usize,
+) -> String {
+    format!(
+        "`{artifact_stem}`'s `changelog:` sequence was rotated to make room \
+         (oldest item(s) appended to `{}`); the frontmatter now has {keep_recent} items. \
+         Retry your write: if you used `Edit`, reissue as a fresh `Write` or a fresh \
+         `Edit` re-read against the current (post-rotation) file, since your original \
+         `old_string`/`new_string` pair may no longer match; if you used `Write`, \
+         recompute your `content` payload against the current (post-rotation) file before \
+         retrying — do not resubmit your original payload unchanged, since it reflects \
+         pre-rotation state.",
+        archive_path.display()
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -47,4 +47,4 @@ pub use migrate::{
     FileMigrationReport, MigrationMode, MigrationOptions, MigrationReport, migrate_all,
     migrate_file,
 };
-pub use rotate::{RotationReport, rotate_changelog};
+pub use rotate::{RotationReport, rotate_changelog, rotate_changelog_at};

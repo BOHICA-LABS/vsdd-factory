@@ -122,33 +122,36 @@ fn rewrite_source_after_rotation(
     Ok(result)
 }
 
-/// Rotate `path`'s `changelog:` sequence: move the oldest items past
-/// `keep_recent` verbatim into
-/// `.factory/cycles/<cycle_name>/<file-basename>-changelog-archive.md`,
-/// removing exactly those items from `path` and leaving a discoverability
-/// pointer (BC-10.13.001 PC5).
+/// Rotate `path`'s `changelog:` sequence using a caller-supplied,
+/// pre-resolved `archive_path` directly — for callers that cannot derive an
+/// archive path from a `cycle_name` (e.g. `BC-INDEX.md`, which is a catalog
+/// artifact, not a cycle-scoped log file).
 ///
-/// No-op (EC-004) when the sequence does not exceed `keep_recent`. Creates
-/// `.factory/cycles/<cycle_name>/` if it does not already exist (EC-005).
-/// Every `changelog:` item's `date:`/`summary:` text is preserved verbatim —
-/// only its location (source vs. archive) changes (PC5). Re-running rotation
-/// immediately after a successful rotation, before the threshold is
-/// exceeded again, is a verified-clean no-op (Invariant 2).
-pub fn rotate_changelog(
+/// Identical behaviour to [`rotate_changelog`] in all other respects: moves
+/// the oldest items past `keep_recent` verbatim into `archive_path`, removes
+/// exactly those items from `path`, and leaves a `changelog_archive:`
+/// discoverability pointer (BC-10.13.001 PC5). No-op (EC-004) when the
+/// sequence does not exceed `keep_recent`. Creates `archive_path`'s parent
+/// directory if it does not already exist (EC-005 precedent).
+///
+/// BC-1.18.009 Architecture Anchors: "a small, NAMED, bounded extension to
+/// the primitive's path-resolution surface — a generalized `archive_path:
+/// &Path` parameter... pre-computed by the dispatcher's B1 handler as the
+/// FIXED, non-cycle, BC-INDEX-sibling path."
+pub fn rotate_changelog_at(
     path: &Path,
-    cycle_name: &str,
+    archive_path: &Path,
     keep_recent: usize,
     mode: MigrationMode,
 ) -> Result<RotationReport, MigrateError> {
     let doc = crate::frontmatter::parse_frontmatter(path)?;
-    let archive_path = resolve_archive_path(path, cycle_name)?;
     let total = doc.changelog_items_raw.len();
 
     if total <= keep_recent {
         // EC-004: below-threshold no-op.
         return Ok(RotationReport {
             path: path.to_path_buf(),
-            archive_path,
+            archive_path: archive_path.to_path_buf(),
             items_moved: 0,
             mutated: false,
         });
@@ -162,7 +165,7 @@ pub fn rotate_changelog(
     if mode == MigrationMode::Check {
         return Ok(RotationReport {
             path: path.to_path_buf(),
-            archive_path,
+            archive_path: archive_path.to_path_buf(),
             items_moved,
             mutated: false,
         });
@@ -176,23 +179,40 @@ pub fn rotate_changelog(
     }
 
     let mut archive_content = if archive_path.exists() {
-        std::fs::read_to_string(&archive_path).map_err(|source| MigrateError::Io {
-            path: archive_path.clone(),
+        std::fs::read_to_string(archive_path).map_err(|source| MigrateError::Io {
+            path: archive_path.to_path_buf(),
             source,
         })?
     } else {
         String::new()
     };
+    // Boundary normalization: the last `changelog:` item in a frontmatter
+    // document is captured verbatim by `changelog_items_raw`, and because
+    // `frontmatter_bounds` sets `fm_end` at the `\n` character that immediately
+    // precedes the closing `---` fence, that terminal newline is NOT included
+    // in the last item's raw text. This means that if the existing archive is
+    // non-empty (i.e., a prior rotation already appended items to it), the
+    // last byte of the archive content may be a non-newline character such as
+    // `"`. Appending the next rotation's first `  - ` item directly would
+    // concatenate it mid-line, creating an invalid YAML block sequence entry
+    // ("block sequence entries are not allowed in this context"). Ensuring a
+    // separator newline before appending is the correct fix: it is a no-op when
+    // the archive already ends with `\n` (all non-last items, and files where
+    // the source sequence DID have a trailing blank line before `---`), and it
+    // repairs the boundary only when needed.
+    if !archive_content.is_empty() && !archive_content.ends_with('\n') {
+        archive_content.push('\n');
+    }
     for item in move_items {
         archive_content.push_str(item);
     }
     // S-15.03 SEC-001 (BC-10.13.001 Invariant 4): validate the archive's
     // relocated `changelog:` sequence content parses cleanly before writing.
-    crate::yaml_guard::validate_changelog_sequence_yaml(&archive_path, &archive_content)?;
+    crate::yaml_guard::validate_changelog_sequence_yaml(archive_path, &archive_content)?;
     // S-15.03 SEC-003: write-then-rename, not a direct in-place write.
-    crate::atomic_write::write_atomic(&archive_path, &archive_content)?;
+    crate::atomic_write::write_atomic(archive_path, &archive_content)?;
 
-    let new_raw = rewrite_source_after_rotation(path, &doc.raw, keep_items, &archive_path)?;
+    let new_raw = rewrite_source_after_rotation(path, &doc.raw, keep_items, archive_path)?;
     // S-15.03 SEC-001: validate the rewritten source file's frontmatter
     // before writing it back.
     crate::yaml_guard::validate_frontmatter_yaml(path, &new_raw)?;
@@ -201,8 +221,35 @@ pub fn rotate_changelog(
 
     Ok(RotationReport {
         path: path.to_path_buf(),
-        archive_path,
+        archive_path: archive_path.to_path_buf(),
         items_moved,
         mutated: true,
     })
+}
+
+/// Rotate `path`'s `changelog:` sequence: move the oldest items past
+/// `keep_recent` verbatim into
+/// `.factory/cycles/<cycle_name>/<file-basename>-changelog-archive.md`,
+/// removing exactly those items from `path` and leaving a discoverability
+/// pointer (BC-10.13.001 PC5).
+///
+/// No-op (EC-004) when the sequence does not exceed `keep_recent`. Creates
+/// `.factory/cycles/<cycle_name>/` if it does not already exist (EC-005).
+/// Every `changelog:` item's `date:`/`summary:` text is preserved verbatim —
+/// only its location (source vs. archive) changes (PC5). Re-running rotation
+/// immediately after a successful rotation, before the threshold is
+/// exceeded again, is a verified-clean no-op (Invariant 2).
+///
+/// This is a thin wrapper around [`rotate_changelog_at`] that derives the
+/// archive path from `cycle_name` using `resolve_archive_path`. Callers that
+/// supply an explicit archive path (e.g. the BC-1.18.009 B1 gate in
+/// `shard_manager.rs`) should call [`rotate_changelog_at`] directly.
+pub fn rotate_changelog(
+    path: &Path,
+    cycle_name: &str,
+    keep_recent: usize,
+    mode: MigrationMode,
+) -> Result<RotationReport, MigrateError> {
+    let archive_path = resolve_archive_path(path, cycle_name)?;
+    rotate_changelog_at(path, &archive_path, keep_recent, mode)
 }

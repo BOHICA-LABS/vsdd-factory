@@ -468,8 +468,45 @@ pub fn shard_cap_precheck(
 /// suggestion to exclude this outcome from the count: doing so would
 /// actually be the INCONSISTENT choice, singling out this one native check
 /// while leaving the other three sentinel-outcome sites uncorrected.)
-fn shard_gate_block_outcome(message: String, plugin_version: String) -> PluginOutcome {
-    let stdout = serde_json::json!({ "outcome": "block", "reason": message }).to_string();
+fn shard_gate_block_outcome(reason: String, plugin_version: String) -> PluginOutcome {
+    let stdout = serde_json::json!({ "outcome": "block", "reason": reason }).to_string();
+    PluginOutcome {
+        plugin_name: "shard-cap-gate".to_string(),
+        plugin_version,
+        on_error: OnError::Block,
+        result: PluginResult::Ok {
+            exit_code: 2,
+            stdout,
+            stderr: String::new(),
+            elapsed_ms: 0,
+            fuel_consumed: 0,
+        },
+        block_if_marker_fired: false,
+        block_if_marker_fields: None,
+    }
+}
+
+/// Synthesize a `PluginOutcome` for a gate fail-loud `HookResult::Error`
+/// verdict — the FAIL-LOUD path distinct from `shard_gate_block_outcome`'s
+/// successful-rotation Block path.
+///
+/// BC-1.18.009 cluster-4 added a genuine distinction between two gate outcomes:
+///
+/// - `HookResult::Block` — rotate_changelog_at SUCCEEDED; gate returns the
+///   block-and-retry instruction (Postcondition 2). Serialized by
+///   [`shard_gate_block_outcome`] as `{"outcome":"block","reason":"..."}`.
+///
+/// - `HookResult::Error` — rotate_changelog_at FAILED or a config validation
+///   error fired (ShardConfigError, E-SHD-004, etc.); gate returns fail-loud.
+///   Serialized here as `{"outcome":"error","message":"..."}` so observers (VP-131
+///   test, main.rs `extract_reason_from_outcome`, operator stderr) can
+///   distinguish a genuine gate failure from a successful rotation's retry
+///   instruction. `exit_code: 2` ensures `extract_block_info`'s
+///   `wasi_block = exit_code == 2 && on_error == Block` path still marks this
+///   outcome as blocking; `block_intent = true` is set independently in
+///   `shard_gate_verdict_outcomes` for the same reason (belt-and-suspenders).
+fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOutcome {
+    let stdout = serde_json::json!({ "outcome": "error", "message": message }).to_string();
     PluginOutcome {
         plugin_name: "shard-cap-gate".to_string(),
         plugin_version,
@@ -561,10 +598,18 @@ pub fn shard_gate_verdict_outcomes(
     let mut block_intent = false;
     if let Some(shard_gate_result) = verdict {
         match shard_gate_result {
+            // Gate fail-loud: config validation error (EC-009/EC-011/EC-013)
+            // or rotate_changelog_at failure (E-SHD-004, BC-1.18.009 PC6).
+            // Serialized as {"outcome":"error","message":"..."} so VP-131's test
+            // and extract_reason_from_outcome can distinguish a genuine gate
+            // failure from a successful rotation's block-and-retry outcome.
             vsdd_hook_sdk::HookResult::Error { message } => {
                 block_intent = true;
-                outcomes.push(shard_gate_block_outcome(message, plugin_version));
+                outcomes.push(shard_gate_error_outcome(message, plugin_version));
             }
+            // Successful rotate_changelog_at (BC-1.18.009 PC2) OR successful
+            // execute_roll (BC-1.18.006 PC1): gate returns the retry instruction.
+            // Serialized as {"outcome":"block","reason":"..."}.
             vsdd_hook_sdk::HookResult::Block { reason } => {
                 block_intent = true;
                 outcomes.push(shard_gate_block_outcome(reason, plugin_version));
