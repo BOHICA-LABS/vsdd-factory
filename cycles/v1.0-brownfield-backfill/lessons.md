@@ -1838,3 +1838,41 @@ engine-wide governance follow-up rather than a further BC-1.18.008-scoped fix. D
 lesson is about SPEC-ARTIFACT-vs-SHIPPED-CODE TEXT fidelity specifically for the error taxonomy
 table, a narrower and more mechanically-checkable surface than either prior class.
 `[codified][process-gap][D-1199][taxonomy-drift][error-taxonomy][E-SHD][6x-recurrence][S-12.11][E-12][lint-hook][mechanical-diff]`
+
+**L-BB-D1201-transient-status-test-doc-comment-recurring-4x-escalation** [codified][process-gap] —
+S-25.02 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-11 found F-C3-P11-001
+(MEDIUM, doc-staleness): `bc_1_18_008_backfill_split_test.rs` still carried transient-status test
+doc comments ("MUST fail today", "no post-hoc read-back at all yet", and a comment naming the
+non-existent `write_atomic_bytes` primitive rather than the real `write_and_read_back` helper) that
+contradicted the shipped fixes landed since pass-8. This is the **4th recurrence** of the exact same
+defect shape already codified at `L-BB-D1194-transient-status-test-doc-comment-recurring-3x-process
+-gap` (D-1192/D-1194): F-C3-P1-005 (pass-1), F-C3-P2-004 (pass-2), O-2/pass-4, and now
+F-C3-P11-001/pass-11. **The standing risk this occurrence confirms:** `L-BB-D1194`'s codification —
+a prose lesson entry plus a draft follow-up story (S-12.09, "test-writer agent-prompt amendment —
+forbid transient-status test doc-comment framing") — has NOT closed the recurrence. S-12.09 remains
+an unimplemented draft stub: no BC has been authored against it, and no `vsdd-factory:test-writer`
+agent-prompt amendment has actually landed. Prose codification alone, without the mechanism it
+describes being implemented, does not prevent the same agent from reintroducing the same defect
+shape on its next TDD pass over the same file — the recurrence count (1→2→3→4) climbing steadily
+across the cluster's own cascade, unaffected by the D-1194 codification event itself, is direct
+evidence of this. **Remediation this burst:** test-writer performed an EXHAUSTIVE sweep of the file
+rather than a targeted 1-comment fix — 8 stale-comment sites converted to past-tense, status-neutral
+historical narrative (comment-only, `feature/S-25.02-backfill` `8e2a37f4`→`2dd39bbb`, 59 tests still
+green) — closing every currently-stale comment in the file at once rather than leaving siblings for
+a 5th recurrence to catch. **Escalation (this lesson's actual contribution beyond restating
+`L-BB-D1194`):** a 4th recurrence of an identical defect class, after the class was already
+`[codified]` and routed to a concrete follow-up story, means the routing itself was insufficient —
+S-12.09 needs to be PRIORITIZED (moved ahead of lower-priority E-12 Engine Governance backlog items,
+still draft pending BC authorship) rather than left at its original P2 queue position, because the
+cost of NOT landing the agent-prompt amendment is now measurably recurring once per pass on this
+file family. Until S-12.09 lands, every future pass against a `bc_1_18_008_*` (or sibling) test file
+touched by test-writer carries a live risk of reintroducing this same defect shape. **Anchor
+(Canonical Principle Rule 3):** routed to the SAME follow-up story `L-BB-D1194` already anchored,
+**S-12.09** (E-12 Engine Governance) — no new story allocated; this lesson escalates S-12.09's
+priority rather than opening a parallel item, since the concrete future dependency and story anchor
+were already established at D-1194 and remain valid. Distinct from `L-BB-D1194` itself: that lesson
+CODIFIED the class at its 3rd recurrence; this lesson documents its 4th recurrence as evidence the
+codification's chosen remedy (routing to a draft story) is, on its own and without implementation,
+an insufficient closure mechanism for a defect class an agent can reintroduce every time it touches
+the file.
+`[codified][process-gap][D-1201][transient-status-header][4x-recurrence][test-doc-comment][S-12.09][E-12][priority-escalation][exhaustive-sweep]`
