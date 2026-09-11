@@ -186,62 +186,31 @@ pub fn rotate_changelog_at(
     } else {
         String::new()
     };
-
-    // Inv-6 crash-recovery sentinel: a dotfile sibling of `archive_path`
-    // written AFTER both the archive write and the source write succeed.
-    // Its presence on a subsequent call with the same `archive_path` marks
-    // the prior rotation as fully committed — meaning any tail-match is a
-    // coincidental byte-identical second rotation (VP-125 scenario), not
-    // a crash recovery. Its absence means the prior rotation never completed
-    // (archive written, source write crashed) — crash-recovery dedup fires.
-    let file_name = archive_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("archive");
-    let sentinel_path = archive_path.with_file_name(format!(".{file_name}.written"));
-
-    // Inv-6 crash-recovery tail-match dedup (BC-1.18.009 Invariant 6 /
-    // ADR-051 §Decision 7 self-heal bullet): detect the crash scenario where a
-    // prior rotation attempt completed the archive write but failed on the
-    // source rewrite. On retry, `move_items` is byte-identical to the content
-    // already present at the archive's tail. A tail-anchored `ends_with` suffix
-    // comparison (NEVER `String::contains` — L-BB-D1179) combined with a
-    // sentinel-absent check detects this and skips the redundant archive write,
-    // preventing the 25→50 item doubling. The source rewrite still proceeds
-    // so `mutated=true` is returned.
-    //
-    // The sentinel distinguishes crash recovery (sentinel absent) from a
-    // normal second rotation that coincidentally produces byte-identical
-    // `move_items` (sentinel present from completed prior rotation).
-    let to_append: String = move_items.concat();
-    let skip_archive_write = !archive_content.is_empty()
-        && archive_content.ends_with(&to_append)
-        && !sentinel_path.exists();
-
-    if !skip_archive_write {
-        // Boundary normalization: the last `changelog:` item in a frontmatter
-        // document is captured verbatim by `changelog_items_raw`, and because
-        // `frontmatter_bounds` sets `fm_end` at the `\n` character that
-        // immediately precedes the closing `---` fence, that terminal newline
-        // is NOT included in the last item's raw text. This means that if the
-        // existing archive is non-empty (i.e., a prior rotation already
-        // appended items to it), the last byte of the archive content may be a
-        // non-newline character such as `"`. Appending the next rotation's
-        // first `  - ` item directly would concatenate it mid-line, creating
-        // an invalid YAML block sequence entry ("block sequence entries are not
-        // allowed in this context"). Ensuring a separator newline before
-        // appending is the correct fix: it is a no-op when the archive already
-        // ends with `\n`, and it repairs the boundary only when needed.
-        if !archive_content.is_empty() && !archive_content.ends_with('\n') {
-            archive_content.push('\n');
-        }
-        archive_content.push_str(&to_append);
-        // S-15.03 SEC-001 (BC-10.13.001 Invariant 4): validate the archive's
-        // relocated `changelog:` sequence content parses cleanly before writing.
-        crate::yaml_guard::validate_changelog_sequence_yaml(archive_path, &archive_content)?;
-        // S-15.03 SEC-003: write-then-rename, not a direct in-place write.
-        crate::atomic_write::write_atomic(archive_path, &archive_content)?;
+    // Boundary normalization: the last `changelog:` item in a frontmatter
+    // document is captured verbatim by `changelog_items_raw`, and because
+    // `frontmatter_bounds` sets `fm_end` at the `\n` character that immediately
+    // precedes the closing `---` fence, that terminal newline is NOT included
+    // in the last item's raw text. This means that if the existing archive is
+    // non-empty (i.e., a prior rotation already appended items to it), the
+    // last byte of the archive content may be a non-newline character such as
+    // `"`. Appending the next rotation's first `  - ` item directly would
+    // concatenate it mid-line, creating an invalid YAML block sequence entry
+    // ("block sequence entries are not allowed in this context"). Ensuring a
+    // separator newline before appending is the correct fix: it is a no-op when
+    // the archive already ends with `\n` (all non-last items, and files where
+    // the source sequence DID have a trailing blank line before `---`), and it
+    // repairs the boundary only when needed.
+    if !archive_content.is_empty() && !archive_content.ends_with('\n') {
+        archive_content.push('\n');
     }
+    for item in move_items {
+        archive_content.push_str(item);
+    }
+    // S-15.03 SEC-001 (BC-10.13.001 Invariant 4): validate the archive's
+    // relocated `changelog:` sequence content parses cleanly before writing.
+    crate::yaml_guard::validate_changelog_sequence_yaml(archive_path, &archive_content)?;
+    // S-15.03 SEC-003: write-then-rename, not a direct in-place write.
+    crate::atomic_write::write_atomic(archive_path, &archive_content)?;
 
     let new_raw = rewrite_source_after_rotation(path, &doc.raw, keep_items, archive_path)?;
     // S-15.03 SEC-001: validate the rewritten source file's frontmatter
@@ -249,11 +218,6 @@ pub fn rotate_changelog_at(
     crate::yaml_guard::validate_frontmatter_yaml(path, &new_raw)?;
     // S-15.03 SEC-003: write-then-rename for the source rewrite too.
     crate::atomic_write::write_atomic(path, &new_raw)?;
-
-    // Mark this rotation as fully committed. The sentinel's presence prevents
-    // the next call's crash-recovery dedup from incorrectly classifying a
-    // coincidental byte-identical second rotation as a crash recovery.
-    crate::atomic_write::write_atomic(&sentinel_path, "")?;
 
     Ok(RotationReport {
         path: path.to_path_buf(),
