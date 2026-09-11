@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5"
+version: "1.6"
 status: draft
 producer: product-owner
 timestamp: 2026-09-06T00:00:00Z
@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.005.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
-input-hash: "f618201"
+input-hash: "bccc10a"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -22,7 +22,8 @@ subsystem: "SS-01"
 capability: "CAP-043"
 lifecycle_status: draft
 introduced: v1.0-brownfield-backfill
-modified: []
+modified:
+  - "2026-09-11 (v1.6)"
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -198,6 +199,9 @@ write, no exception carved out for B1.
    sits entirely outside Layer 2's own bounded-artifact concern; and (c) if it later becomes large
    enough to be a new forensic contributor in its own right, that is a follow-up
    Layer-2-on-Layer-2 story, not a defect of this design.
+   **The archive NEVER contains duplicate items across rotation cycles; a partial rotation
+   cycle (archive written, source-write failed) is detected and resolved idempotently on the
+   next invocation (see Invariant Inv-6).**
 
 6. **CORRECTED (fix-burst, F-S2502-F2-001, BLOCKER; error-code citation further CORRECTED
    fix-burst pass-3, F-P3-001, HIGH) — the block-and-retry observable outcome
@@ -220,6 +224,16 @@ write, no exception carved out for B1.
    assertion is WITHDRAWN.** B1's block-and-retry wording differs from mechanism A's only in the
    artifact-name and rotation-mechanism details (Postcondition 2 step 3's exact text), never in the
    actor-ownership shape.
+   **Additionally, the fail-loud contract covers the `mutated=false` outcome (EC-008): when
+   `rotate_changelog_at` returns `Ok(report)` with `report.mutated == false` after the trigger
+   fired, the gate returns `HookResult::Error(E-SHD-014)` — the `Error` VARIANT, never the `Block`
+   VARIANT — making EC-008's `Error` the third fail-loud outcome of the rotation step, alongside
+   `E-SHD-004` (the Err arm `rotate_changelog_at` invocation failure). `E-SHD-014` is a BLOCKING
+   fail-loud Error (`block_intent=true`, `exit_code=2`, dispatched with the same `on_error=Block`
+   treatment as `E-SHD-004`); "never `Block`" refers to the `HookResult::Block` variant (the
+   rotation-succeeded retry instruction), NOT to dispatch-blocking. The unrotatable over-N write
+   is BLOCKED and MUST NOT proceed; a non-blocking/advisory `E-SHD-014` that lets the write
+   proceed is NON-COMPLIANT.**
 
 ## Invariants
 
@@ -260,6 +274,50 @@ write, no exception carved out for B1.
    This invariant makes BC-1.18.009 a structural mirror of BC-1.18.006 Invariant 1's "the gate
    returns `Block` on every over-cap/over-N-item write, never `Continue`" contract.
 
+5. **`Ok(report)` with `report.mutated == false` after a fired trigger → `Error(E-SHD-014)`,
+   never `Block` (EC-008 counter-divergence guard).** "Never `Block`" means never the
+   `HookResult::Block` VARIANT (the rotation-succeeded retry instruction) — NOT "never block the
+   dispatch." `E-SHD-014` is a BLOCKING fail-loud Error (`block_intent=true`, `exit_code=2`,
+   `on_error=Block` — the same blocking treatment as `E-SHD-004`). The unrotatable over-N write
+   MUST be blocked and MUST NOT proceed; an implementation that returns a non-blocking/advisory
+   `E-SHD-014` (`block_intent=false`, `exit_code=1`, `on_error=Continue`) and allows the write
+   to proceed is NON-COMPLIANT with this invariant.
+   When `rotate_changelog_at` returns `Ok(report)` after the item-count trigger fires, the gate
+   MUST inspect `report.mutated`. If `report.mutated == false`, the gate MUST return
+   `HookResult::Error` (`E-SHD-014`), never `HookResult::Block`. Emitting `Block` on a
+   `mutated=false` report would falsely claim rotation occurred, sending the retrying agent into
+   an infinite block+retry loop (self-DoS) for the duration of the session on `BC-INDEX.md`: the
+   item-count trigger re-fires on every subsequent dispatch (source is unchanged) and the gate
+   would again return `Block` claiming rotation — permanently. Using `Error` (not `Block`) breaks
+   the retry loop because `Error` carries NO retry instruction, while still failing loud and
+   blocking the write (fail-closed). This is the correct fail-closed behavior for a
+   "should never happen" counter-divergence; the taxonomy message already says "manual inspection
+   required."
+   This invariant gives the `RotationReport.mutated` field its first load-bearing use in
+   BC-1.18.009's gate; the field has been present since BC-10.13.001/`rotate.rs` shipped.
+   This is distinct from Invariant 4 (which governs the `mutated=true` `Ok` case) — both apply
+   to the `Ok` arm, with different guard conditions.
+
+6. **The B1 rotation is crash-idempotent at the archive boundary — the archive NEVER accumulates
+   duplicate items even under an archive-write-success + source-write-failure double-fault + retry
+   (Obs B crash-recovery).** `rotate_changelog_at`'s write sequence is archive-first, source-second
+   (write ordering is load-bearing: reversing to source-first would cause data loss if the archive
+   write then failed). If the process crashes or the source rewrite fails AFTER the archive write
+   succeeds, the source is unchanged (`write_atomic`'s temp-file-rename failure leaves the original
+   intact — no partial write). The item-count trigger re-fires on the next dispatch. The subsequent
+   `rotate_changelog_at` invocation self-heals: its idempotent-append logic detects that the
+   overflow items (`move_items`) are already present at the archive's tail via a byte-level
+   tail-match check (the combined `move_items` string is compared against the normalized trailing
+   bytes of the existing archive content, stripped of trailing `\n` on both sides — tail-anchored,
+   never `String::contains`, to prevent false positives from recurrent content) and skips the
+   archive write, proceeding only with the source rewrite. `RotationReport.mutated` is `true` when
+   the source was rewritten, even if the archive write was skipped (the source WAS mutated);
+   `items_moved` reflects the semantic count (items logically moved), not whether the archive write
+   was physically performed. This invariant is the B1 analogue of ADR-051 Decision 11's mechanism-A
+   `E-SHD-006` self-healing recovery for the "sealed shard published, canonical-file truncate not
+   yet complete" crash point — the same "detection-and-resume, not rollback" recovery philosophy
+   applied to B1's archive-append-then-source-trim two-write sequence.
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
@@ -271,6 +329,7 @@ write, no exception carved out for B1.
 | EC-005 | Two concurrent sessions both attempt to prepend a `changelog:` item near the N-item boundary | TD-VSDD-053 single-commit-per-burst and the project's factory-lock discipline (ADR-025) prevent concurrent factory-artifacts commits from landing interleaved; the second session's dispatch re-reads the (now-rotated) frontmatter state before its own prepend is evaluated |
 | EC-006 (fix-burst, F-S2502-F2-001) | An implementer mistakenly has the gate call `prepend_changelog_item` after a successful `rotate_changelog`, then returns `Continue` | This is the withdrawn v1.0 design and a direct violation of Postcondition 2/6 and Invariant 1/4 — a static-analysis check (VP-126) MUST detect any `prepend_changelog_item` call site inside `shard_manager.rs`'s B1 handler as a defect, not a valid implementation choice |
 | EC-007 (NEW, fix-burst pass-3, F-P3-005) | `current_item_count` reaches `N` again after a prior rotation (the normal, expected steady-state re-trigger boundary post-fix, occurring once per `N - low_water_mark` writes) | This is NOT a defect — the SAME single-actor block-and-retry contract (Postconditions 2/3/4/6) applies identically to this re-trigger as to the first-ever rotation; the amortized cadence is the intended behavior of the `low_water_mark` correction, not a regression to the withdrawn every-write rotation pathology |
+| EC-008 (NEW — cluster-4 hardening, counter-divergence guard) | Item-count trigger fires (`read_changelog_item_count` serde count `>= N`) but `rotate_changelog_at` returns `Ok(report)` where `report.mutated == false` (its line-scan `parse_frontmatter` count `total <= keep_recent` — counter-method divergence between the B1 handler's serde deserialization trigger path and `rotate_changelog_at`'s own `parse_frontmatter` line-scan path; provably latent on canonical `  - date:` format today because the two counters agree exactly, but an architectural coupling with no load-bearing gate preventing divergence) | `HookResult::Error` with `E-SHD-014` message naming the artifact and describing counter-method divergence; frontmatter `changelog:` unchanged from pre-attempt state; the self-DoS retry loop (infinite `Block`+retry on `BC-INDEX.md` for the session duration) is structurally prevented — the `Ok(report) if !report.mutated => Error(E-SHD-014)` guard intercepts it before `Block` is emitted (Invariant Inv-5); `E-SHD-014` is a BLOCKING Error (`block_intent=true`, `exit_code=2`, `on_error=Block`) — the over-N write is BLOCKED, not allowed to proceed; "never Block" refers to the `HookResult::Block` variant (the retry instruction), NOT to dispatch-blocking; a non-blocking/advisory `E-SHD-014` that allows the write to proceed is NON-COMPLIANT |
 
 ## Canonical Test Vectors
 
@@ -283,14 +342,17 @@ write, no exception carved out for B1.
 | Agent retries a blocked `Write` WITHOUT recomputing its payload against the post-rotation file (resubmits stale pre-rotation content) | The stale `Write` either fails at the tool layer (content mismatch with a validator expecting post-rotation shape) or, if it lands, re-introduces the just-rotated tail item — this is a caller-compliance failure, not a gate defect; the gate's own retry-instruction text (Postcondition 2 step 3) explicitly warns against this | error |
 | **CORRECTED (fix-burst pass-2, F-P2-001).** Reading full changelog history: evergreen archive `BC-INDEX-changelog-archive.md` + current frontmatter `changelog:` sequence | Concatenation (archive file content in append order, oldest-to-newest, followed by current frontmatter sequence, newest-first per existing convention) reproduces full history with no gaps or duplicates — NEVER a multi-shard-directory glob (the withdrawn v1.1 model), since the archive is a single file | edge-case |
 | Static scan of `shard_manager.rs`'s B1 handler for `prepend_changelog_item` call sites | ZERO call sites found (Invariant 1) — the function is imported/used ONLY by agent-side tooling, never by the gate | happy-path |
+| **NEW (cluster-4 hardening, Obs A, EC-008).** Fixture: serde `read_changelog_item_count` returns count `>= N` (trigger fires) but `rotate_changelog_at` stub returns `Ok(RotationReport { mutated: false, items_moved: 0 })` (inject a fixture where `changelog_items_raw.len() <= keep_recent` in `parse_frontmatter` — the counter-divergence scenario) | `HookResult::Error` with `E-SHD-014` message naming the artifact and the counter-method divergence; frontmatter `changelog:` byte-identical to pre-attempt state; outcome is a BLOCKING Error (`block_intent=true`, `exit_code=2`) — the write is BLOCKED, not advisory/non-blocking; `HookResult::Block` variant is NOT returned (the Error variant breaks the self-DoS loop because it carries no retry instruction, while still blocking the write — Invariant Inv-5); distinguish the outcome by variant (`HookResult::Error` vs `HookResult::Block`) and by message (E-SHD-014 counter-divergence text), NOT by block_intent alone (both variants block the dispatch when configured with `on_error=Block`) | error (counter-divergence guard) |
+| **NEW (cluster-4 hardening, Obs B, crash-recovery).** Fixture: prior execution completed the archive write (overflow tail appended to `BC-INDEX-changelog-archive.md`) but failed the source rewrite (simulated `write_atomic` failure leaves source unchanged at N items); next dispatch re-fires the trigger | `rotate_changelog_at` self-heals: detects overflow `move_items` already present at archive tail via byte-level tail-match (normalized for boundary `\n`); archive write skipped; source `changelog:` rewrite completes normally; `HookResult::Block` returned with retry instruction; `RotationReport { mutated: true }`; archive contains the overflow items ONCE, not twice; Invariant Inv-6 no-duplicate guarantee satisfied | edge-case (crash-recovery) |
 
 ## Verification Properties
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-126 | No-reimplementation-and-no-gate-side-prepend invariant — `shard_manager.rs`'s B1 handler contains no changelog-rotation logic other than a call into `rotate_changelog`, and contains ZERO call sites for `prepend_changelog_item` (fix-burst-strengthened per F-S2502-F2-001) | code-review / static-analysis check (grep for duplicated rotation logic AND for any `prepend_changelog_item` call site inside the B1 handler) |
+| VP-126 | No-reimplementation-and-no-gate-side-prepend invariant — `shard_manager.rs`'s B1 handler contains no changelog-rotation logic other than a call into `rotate_changelog`, and contains ZERO call sites for `prepend_changelog_item` (fix-burst-strengthened per F-S2502-F2-001); **cluster-4 hardening extension: guard-arm-presence facet (EC-008, Invariant Inv-5)** — static analysis must additionally confirm the `Ok(report) if !report.mutated => Error(E-SHD-014)` guard arm is present in the B1 `Ok` match arm and routes to `HookResult::Error`, never `HookResult::Block` | code-review / static-analysis check (grep for duplicated rotation logic AND for any `prepend_changelog_item` call site inside the B1 handler; additionally: presence of `if !report.mutated` guard arm routing to `Error` variant confirmed; `Block` on `mutated=false` confirmed absent) |
 | VP-125 | Bounded-live-sequence invariant (after any sequence of prepends, the live frontmatter `changelog:` sequence never exceeds N items, and the post-rotation floor is `low_water_mark` — a config-varied value, NEVER a hardcoded `N-1` — per fix-burst pass-3, F-P3-005); No-history-loss invariant (every `changelog:` item ever prepended remains recoverable, live in the frontmatter or appended to the single evergreen archive file) | proptest — two facets, arbitrary prepend sequences: `len(changelog) <= N` after every operation AND the post-rotation trim floor equals the configured `low_water_mark`; total recoverable item count is monotonically non-decreasing and equals the total prepend count |
-| VP-131 | Fail-loud rotate_changelog-failure invariant — a `rotate_changelog` invocation failure returns `HookResult::Error` (`E-SHD-004`), never `Block`/`Continue`, and leaves the live `changelog:` sequence byte-identical to its pre-rotation state (EC-003, Postcondition 6) | unit test (injected `rotate_changelog`-failure FS — disk-full/permission; assert `Error` variant naming artifact + failing op, and pre-rotation state preserved) |
+| VP-131 | **Two-facet fail-loud invariant (cluster-4 hardening extension):** (a) **Err-arm** — a `rotate_changelog` invocation failure (`Err`) returns `HookResult::Error` (`E-SHD-004`), never `Block`/`Continue`, and leaves the live `changelog:` sequence byte-identical to its pre-rotation state (EC-003, Postcondition 6); (b) **Ok-arm** — `rotate_changelog_at` returning `Ok(report)` with `report.mutated == false` after the trigger fired returns `HookResult::Error` (`E-SHD-014`), never `Block` — the Ok-arm sibling of the Err-arm `E-SHD-004` leg (EC-008, Invariant Inv-5) | unit test — two cases: (a) injected `rotate_changelog`-failure FS (disk-full/permission); assert `Error(E-SHD-004)` naming artifact + failing op, pre-rotation state preserved; (b) injected `Ok(mutated=false)` stub after trigger fires; assert `Error(E-SHD-014)`, `Block` NOT returned, pre-rotation state byte-identical |
+| VP-112 | **Cluster-4 hardening: crash-idempotent archive boundary (Invariant Inv-6)** — the `rotate_changelog_at` primitive's idempotent-append tail-match dedup ensures the archive NEVER accumulates duplicate items across a partial rotation cycle (archive-write-success + source-write-failure crash + retry); discharges BC-1.18.009 Invariant Inv-6 via the shared `rotate_changelog_at` implementation in `crates/last-amended-migrate/src/rotate.rs` — see BC-10.13.001 VP-112 for the shared primitive's primary losslessness property; this BC's citation covers the crash-recovery no-duplicate facet as applied to the B1 gate's archive path | unit-test: crash-recovery fixture in `crates/last-amended-migrate/tests/bc_10_13_001_pc5_rotation_test.rs` (new fixture, cluster-4 hardening) — archive write succeeds, source write fails (injected), retry invocation detects already-archived tail via byte-level tail-match, skips archive write, completes source rewrite; archive contains overflow items once not twice |
 
 **Fix-burst note (F-S2502-F2-001):** formal-verifier should review VP-125/VP-126 against this BC's
 corrected contract — the "bounded-live-sequence" and "no-history-loss" properties still hold
@@ -388,7 +450,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 ## VP Anchors
 
-- VP-125, VP-126, VP-131 — allocated by formal-verifier (VP-125/126: S-25.02 F2 verification-property extension burst, VP-INDEX v3.02; VP-131: S-25.02 F2 verification-property fix-burst, VP-INDEX v3.03, F-S2502-F2-004). VP-125 (proptest; bounded live changelog: sequence + no-history-loss against the SINGLE evergreen archive model), VP-126 (static-check; rotate_changelog reuse — no reimplemented rotation logic, and post-fix-burst, no gate-side `prepend_changelog_item` call site), VP-131 (unit-test; EC-003/Postcondition 6 fail-loud rotate_changelog failure, `E-SHD-004` — symmetric with VP-120/VP-122/VP-124's mechanism-A fail-loud legs). VP-125/126/131 bodies flagged for formal-verifier re-review against this BC's v1.2 corrected archive-path contract (F-P2-001) in addition to the v1.1 single-actor contract — neither re-review has been actioned in this burst (VP body edits are formal-verifier's domain).
+- VP-125, VP-126, VP-131 — allocated by formal-verifier (VP-125/126: S-25.02 F2 verification-property extension burst, VP-INDEX v3.02; VP-131: S-25.02 F2 verification-property fix-burst, VP-INDEX v3.03, F-S2502-F2-004). VP-125 (proptest; bounded live changelog: sequence + no-history-loss against the SINGLE evergreen archive model), VP-126 (static-check; rotate_changelog reuse — no reimplemented rotation logic, and post-fix-burst, no gate-side `prepend_changelog_item` call site; **cluster-4 hardening extension: guard-arm-presence facet for `Ok(mutated=false) => Error(E-SHD-014)` guard**), VP-131 (unit-test; **two-facet fail-loud, cluster-4 hardening**: Err-arm EC-003/Postcondition 6 `E-SHD-004` leg + Ok-arm EC-008/Invariant Inv-5 `E-SHD-014` leg — symmetric with VP-120/VP-122/VP-124's mechanism-A fail-loud legs). VP-125/126/131 bodies updated by formal-verifier (cluster-4 hardening burst, same commit as BC v1.6). **VP-112 (shared primitive's crash-recovery no-duplicate facet)** — discharges Invariant Inv-6 (crash-idempotent archive boundary) via the shared `rotate_changelog_at` implementation; primary registration is BC-10.13.001 VP-112 (PC5 losslessness + PC8 crash-recovery); this BC cites it for the Inv-6 facet specifically (see §Verification Properties VP-112 row above).
 
 ## Traceability
 
@@ -407,6 +469,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.6 | 2026-09-11 | product-owner | Cluster-4 hardening amendments (S-25.02 mechanism B1, observations A and B per `s2502-cluster4-hardening-design.md`). **Obs A (counter-divergence guard):** Added EC-008 (item-count trigger fires but `rotate_changelog_at` returns `Ok(mutated=false)` — counter-method divergence between the B1 handler's serde `read_changelog_item_count` trigger path and `rotate_changelog_at`'s `parse_frontmatter` line-scan; provably latent on canonical `  - date:` format today but unguarded — `HookResult::Error(E-SHD-014)` structurally prevents the infinite block+retry self-DoS on `BC-INDEX.md`); added Invariant Inv-5 (`Ok(report)` with `!report.mutated` after fired trigger → `Error(E-SHD-014)`, never `Block` — first load-bearing use of `RotationReport.mutated` in this gate); added PC6 addendum (the `mutated=false` Error is the third fail-loud outcome of the rotation step, alongside `E-SHD-004` Err arm); added canonical test vector for EC-008. **Obs B (crash-idempotent archive boundary):** Added Invariant Inv-6 (crash-idempotent at archive boundary — archive NEVER accumulates duplicate items under archive-write-success + source-write-failure double-fault + retry; `rotate_changelog_at`'s idempotent-append tail-match dedup detects already-archived overflow items and skips archive write on retry; `RotationReport.mutated` remains `true` when source was rewritten even if archive write skipped; B1 analogue of ADR-051 D11 `E-SHD-006` mechanism-A self-heal, same "detection-and-resume, not rollback" philosophy); added PC5 addendum (no-duplicate guarantee explicit, cross-references Inv-6); added canonical test vector for crash-recovery no-duplicate case. **Error code note:** the hardening design doc (`s2502-cluster4-hardening-design.md`) cited `E-SHD-008` as the "next free slot"; however, `E-SHD-008` through `E-SHD-013` are already allocated in `error-taxonomy.md` v1.14 (`E-SHD-008` = `BackstopProbeFailed` BC-1.18.006 EC-019, allocated at taxonomy v1.3; codes run through `E-SHD-013` = `CanonicalWriteVerificationFailed`). Actual next free slot assigned: **`E-SHD-014`** (counter-method divergence guard). **VP reconciliation (same burst, formal-verifier):** §Verification Properties table updated: VP-126 extended with guard-arm-presence facet (EC-008/Inv-5 `mutated=false` guard arm); VP-131 extended to two-facet (Err-arm `E-SHD-004` + Ok-arm `E-SHD-014`); VP-112 added (crash-idempotent archive boundary, Inv-6, shared primitive). §VP Anchors updated to name all four VPs. **E-SHD-014 block-semantics clarification (same burst, coordinator):** Inv-5, EC-008, PC6, and EC-008 CTV clarified to state explicitly that `E-SHD-014` is a BLOCKING fail-loud Error (`block_intent=true`, `exit_code=2`, `on_error=Block`) and that "never `Block`" refers to the `HookResult::Block` VARIANT (retry instruction), NOT to dispatch-blocking; an implementation returning non-blocking/advisory `E-SHD-014` that allows the write to proceed is NON-COMPLIANT; the over-N write MUST be blocked. |
 | 1.5 | 2026-09-06 | product-owner | Surgical residual-sweep fix-burst (adversary pass-7 finding F-P7-001, LOW — the last live N-1 straggler): Precondition 4's parenthetical describing `rotate_changelog`'s pure-trim retention as "the retained N-1 most-recent items" was a STALE descriptor of the WITHDRAWN v1.0/pass-2 trim target, contradicting this BC's own Postcondition 1/2 ("NEVER to N-1"; trims to the configured `low_water_mark`, BC-1.18.005 Postcondition 8's rotation-target config). CORRECTED to "the caller-supplied `keep_recent` most-recent items — for B1, the configured `low_water_mark`" — a generic, correct characterization matching Postcondition 1/2. No postcondition, invariant, or contract-behavior change; wording reconciliation only. Sibling-sweep (POLICY 5) confirmed no other positive (non-negated, non-changelog) `N-1`-as-trim-floor descriptor remains anywhere in this BC's live contract text. |
 | 1.4 | 2026-09-05 | product-owner | Fix-burst amendment (adversary pass-3 findings F-P3-001 HIGH + F-P3-005 MEDIUM + F-P3-006 LOW, ADR-051 v1.3 Decision 14): **(F-P3-001)** CORRECTED Postcondition 6 and EC-003's error-code citation from `E-SHD-001` (BC-1.18.006's DIFFERENT mechanism-A shard-seal-write-failure code) to `E-SHD-004` (this BC's OWN `rotate_changelog`-invocation-failure code, per `error-taxonomy.md`'s Error Catalog and VP-INDEX's authoritative `004→VP-131` mapping — the v1.3 residual-cleanup micro-burst had mistakenly "corrected" this citation to the wrong sibling code). **(F-P3-005)** REWROTE Postcondition 1 (the sequence never exceeds N but is NOT capped at exactly N-1/N — rotation trims to the `low_water_mark` floor, BC-1.18.005 Postcondition 8's new rotation-target config, default `floor(N/2)`, never a hardcoded `N-1`) and Postcondition 2's opening sentence/step 3/step 4 (retry-instruction text and post-retry item count corrected from `N-1`/`N-1+1=N` to `low_water_mark`/`low_water_mark+1`); no change to the single-actor block-and-retry contract itself (Postconditions 3/4, Invariants 2-4 unchanged). Corrected EC-001's rotation-target wording; added EC-007 (the normal, amortized re-trigger boundary is not a defect) and a matching Canonical Test Vector demonstrating the amortized cadence; corrected the existing rotation Canonical Test Vector's numbers to `low_water_mark=25`. **(F-P3-006)** Collapsed the §Verification Properties table's two separate VP-125 rows into one multi-facet row (folding in the new `low_water_mark`-floor assertion); no coverage change beyond the genuinely new facet, presentation-only for the rest. |
 | 1.3 | 2026-09-05 | product-owner | Residual-cleanup micro-burst (S-25.02 F2, formal-verifier-flagged gap ahead of the re-run adversary; no ADR/postcondition/invariant-set change — surgical wording reconciliation only). Invariant 2 and EC-001 still described the B1 rotation destination as "a sealed shard file" / "a new sealed shard" — a withdrawn per-`seq` shape v1.2 had already corrected everywhere else; both now read "the single evergreen archive file (`BC-INDEX-changelog-archive.md`)" to match Postcondition 2/5's v1.2 corrected mechanics. Postcondition 6 and EC-003's cross-reference to BC-1.18.006's EC-003 corrected from the withdrawn "seal-rename-failure" label to the current `E-SHD-001` "shard-seal-write failure" label (BC-1.18.006 v1.2's copy+atomic-truncate mechanism has no rename step). No behavior, postcondition-count, or invariant-count change — pure terminology reconciliation. |

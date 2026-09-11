@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-11T12:41:43Z","command":"cargo test -p factory-dispatcher 2>&1 | grep -E \"^test result\" | awk -F'[ ;]' '{s+=$4} END {print \"TOTAL PASSED:\", s}'; echo \"--- failures ---\"; cargo test -p factory-dispatcher 2>&1 | grep -cE \"FAILED|panicked\""}
+{"status":"pass","timestamp":"2026-09-11T19:16:25Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b1-rotation && cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -5 && cargo test --workspace --all-targets 2>&1 | grep \"FAILED\""}
