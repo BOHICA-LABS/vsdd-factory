@@ -448,11 +448,10 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
         }
 
         let plugin_version = env!("CARGO_PKG_VERSION").to_string();
-        let (outcomes, block_intent, non_blocking_error_fired) =
-            factory_dispatcher::executor::shard_gate_verdict_outcomes(
-                shard_gate_precheck_result,
-                plugin_version,
-            );
+        let (outcomes, block_intent) = factory_dispatcher::executor::shard_gate_verdict_outcomes(
+            shard_gate_precheck_result,
+            plugin_version,
+        );
 
         // BC-1.15.001 PC2: PostCompact is advisory-only regardless of
         // native-gate verdict — same suppression this function's normal
@@ -464,9 +463,6 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
             0
         } else if block_intent {
             2
-        } else if non_blocking_error_fired {
-            // E-SHD-014 non-blocking error: non-zero but not blocking (Inv-5).
-            1
         } else {
             0
         };

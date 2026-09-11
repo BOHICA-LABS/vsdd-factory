@@ -962,10 +962,16 @@ fn write_bc_index_inline_seq_fixture(path: &std::path::Path, n_items: usize) {
 /// `rotate_changelog_at` returns `Ok(report)` with `report.mutated == false`
 /// (counter-method divergence: `parse_frontmatter`'s line-scan counts 0 items
 /// in the YAML-inline-sequence fixture). The gate MUST return
-/// `HookResult::Error` with a message beginning `"E-SHD-014:"` — NEVER
-/// `HookResult::Block`. Emitting Block on a `mutated=false` report would send
-/// the retrying agent into a permanent self-DoS block+retry loop on
-/// `BC-INDEX.md` for the session (BC-1.18.009 v1.6 Invariant 5).
+/// `HookResult::Error` (a BLOCKING fail-loud error with block_intent=true,
+/// exit_code=2, on_error=Block) carrying a message beginning `"E-SHD-014:"`.
+/// It MUST NEVER return `HookResult::Block` (the retry-instruction variant).
+///
+/// "Never Block" (BC-1.18.009 v1.6 Invariant 5) means never the
+/// `HookResult::Block` VARIANT (the retry instruction), NOT "never blocks the
+/// dispatch." E-SHD-014 IS blocking — block_intent=true — but via the Error
+/// variant, not the Block variant. Emitting the Block variant on a
+/// `mutated=false` report would send the retrying agent into a permanent
+/// self-DoS block+retry loop on `BC-INDEX.md` for the session.
 ///
 /// The frontmatter must be byte-identical to the pre-attempt state (no partial
 /// rotation was written).
@@ -974,13 +980,16 @@ fn write_bc_index_inline_seq_fixture(path: &std::path::Path, n_items: usize) {
 /// YAML-inline-sequence fixture format (counter method difference between
 /// serde_norway deserialization and the `  - date:` line-scan in
 /// `changelog_sequence_bounds`). The implementer MUST add an explicit
-/// `if !report.mutated { return HookResult::Error(E-SHD-014...) }` check
-/// inside the FrontmatterChangelogArray trigger-fired branch in
-/// `shard_manager.rs` — the current `todo!()` stub has no such check.
+/// `if !report.mutated { return HookResult::Error { message: "E-SHD-014:..." } }`
+/// check inside the FrontmatterChangelogArray trigger-fired branch in
+/// `shard_manager.rs`.
 ///
-/// RED NOW: `todo!()` stub panics at `shard_manager.rs` before any check runs.
+/// RED NOW: current shard_manager.rs B1 branch returns HookResult::Block
+/// (ignoring mutated=false), so block_intent=false AND outcome="block" —
+/// both wrong per this test.
 #[tokio::test(flavor = "current_thread")]
-async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_not_block() {
+async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_error_variant_still_blocking()
+{
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("BC-INDEX.md");
 
@@ -1001,18 +1010,20 @@ async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_not_block()
     )
     .await;
 
-    // EC-008 / Invariant 5: the gate MUST NOT return Block when rotate_changelog_at
-    // returns mutated=false — it must return Error(E-SHD-014).
-    assert_ne!(
-        summary.exit_code, 0,
-        "EC-008/Inv-5: a mutated=false result after the trigger fires must produce \
-         a non-zero exit_code (Error outcome)"
+    // EC-008 / Invariant 5: the gate MUST return Error(E-SHD-014) — BLOCKING
+    // (block_intent=true, exit_code=2) — when rotate_changelog_at returns
+    // mutated=false. MUST NOT return HookResult::Block (the retry variant).
+    assert_eq!(
+        summary.exit_code, 2,
+        "EC-008/Inv-5: E-SHD-014 is a BLOCKING fail-loud Error — exit_code must be 2 \
+         (same blocking treatment as E-SHD-004; on_error=Block)"
     );
     assert!(
-        !summary.block_intent,
-        "EC-008/Inv-5: block_intent must NOT be set when the outcome is Error(E-SHD-014) — \
-         only Block outcomes set block_intent; this is an Error, never a Block \
-         (Invariant Inv-5: Block on mutated=false is the self-DoS loop)"
+        summary.block_intent,
+        "EC-008/Inv-5: E-SHD-014 is a BLOCKING fail-loud Error (block_intent=true, \
+         on_error=Block) — 'never Block' (BC-1.18.009 v1.6 Inv-5) means never the \
+         HookResult::Block VARIANT (the retry instruction), NOT 'never blocks the \
+         dispatch.' The Error variant with on_error=Block also sets block_intent=true."
     );
 
     // Verify an Error outcome (not a Block outcome) is reported.
