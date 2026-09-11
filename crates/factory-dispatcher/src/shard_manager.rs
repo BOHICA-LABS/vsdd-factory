@@ -2261,6 +2261,29 @@ pub struct ShardIndex {
     /// additive-field precedent above).
     #[serde(default = "default_retention_count")]
     pub retention_count: u32,
+    /// BC-1.18.008 v1.9 Postcondition 3's **Schema-location correction**
+    /// (F-C3-P9-004, BLOCKING): the Backfill Recovery Manifest is an
+    /// ADDITIVE FIELD of this shared struct itself — never a side-channel
+    /// `[backfill_manifest]` TOML table maintained by an independent
+    /// read/write path outside it. Every function that loads, mutates, and
+    /// re-serializes a `ShardIndex` as a whole
+    /// ([`publish_shard_index_update`]'s ongoing per-write roll,
+    /// [`self_heal_resume_from_truncate`], and
+    /// [`self_heal_reconcile_missing_index_entries`]) now carries this field
+    /// through automatically via ordinary struct-field (de)serialization —
+    /// no special-case preservation code is required, or permitted, at any
+    /// of those sites. `#[serde(default, skip_serializing_if =
+    /// "Option::is_none")]` mirrors `retention_count`'s own additive-field
+    /// precedent immediately above (BC-1.18.007 Postcondition 1) and
+    /// `ShardIndexEntry`'s `sealed_retroactively`/`oversized_record`/
+    /// `is_preamble_shard` precedents: backward compatible with every
+    /// pre-v1.9 shard-index TOML file (deserializes to `None`), and omitted
+    /// from the serialized TOML entirely when `None` — matching the retired
+    /// side-channel design's own "no `[backfill_manifest]` table when no
+    /// backfill has run" shape, just via `skip_serializing_if` instead of a
+    /// separate write path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backfill_manifest: Option<BackfillManifest>,
     #[serde(default, rename = "shard")]
     pub shards: Vec<ShardIndexEntry>,
 }
@@ -3376,6 +3399,14 @@ pub fn publish_shard_index_update(
             // per-call value this narrow constructor has no other source
             // for. No behavior change to BC-1.18.006's own roll sequence.
             retention_count: default_retention_count(),
+            // BC-1.18.008 v1.9 Postcondition 3 (S-25.02 cluster-3,
+            // sibling-site sweep accompanying the new
+            // `ShardIndex::backfill_manifest` field): a freshly-synthesized
+            // index (first-ever seal for this artifact) has never had a
+            // mechanism-A backfill-split run against it, so it starts with
+            // no Manifest — mirrors `retention_count`'s own default-value
+            // sibling-sweep immediately above.
+            backfill_manifest: None,
             shards: Vec::new(),
         });
 
@@ -4571,18 +4602,27 @@ pub enum MechanismABackfillError {
         final_sha256: String,
     },
 
-    /// F-C3-P6-001 companion: the shard-index already exists (so
-    /// [`mechanism_a_backfill_already_migrated`] reported this artifact as
-    /// migrated) and has at least one sealed shard, but carries NO Backfill
-    /// Recovery Manifest at all (Postcondition 3) — Postcondition 5's
+    /// BC-1.18.008 v1.9 Invariant 3's **Residual `MissingBackfillManifest`
+    /// disposition** (F-C3-P9-004, BLOCKING — narrowed from the prior
+    /// F-C3-P6-001 reading). This now fires ONLY in the genuinely residual
+    /// case: [`mechanism_a_backfill_already_migrated`]'s upfront load
+    /// already confirmed `backfill_manifest.is_some()` for this artifact
+    /// (routing execution into [`heal_or_confirm_already_migrated`]), but
+    /// THAT function's own independent re-read of the SAME index file then
+    /// finds `backfill_manifest` absent — a genuine TOCTOU race (the index
+    /// was concurrently rewritten between the two reads) or on-disk
+    /// corruption of the `backfill_manifest` field specifically. It is
+    /// **NO LONGER** the ordinary "index exists with sealed shards, no
+    /// Manifest yet" case (the roll-before-backfill ordering, EC-015): the
+    /// corrected Invariant 3 idempotency check now recognizes that shape as
+    /// "not yet migrated" and routes it to a genuine first-ever backfill run
+    /// instead, never reaching this variant at all. Postcondition 5's
     /// Recovery-Confirmation Rule is the SOLE authoritative basis for the
     /// SAFE/DANGEROUS/AMBIGUOUS determination and literally cannot be
-    /// applied without it. Rather than falling back to the byte-prefix
-    /// heuristic this same finding retires (which is exactly the defect
-    /// class F-C3-P6-001 corrects), this also fails loud under the `E-SHD-011`
-    /// code — a missing manifest is just as unable to support a safe
-    /// disposition as a manifest whose values match neither the canonical
-    /// file's original nor final state.
+    /// applied without a Manifest to compare against — so this also fails
+    /// loud under the same `E-SHD-011` code rather than falling back to the
+    /// byte-prefix heuristic F-C3-P6-001 already retired for the same
+    /// reason.
     #[error(
         "E-SHD-011: backfill recovery-confirmation ambiguous for artifact_stem \
          \"{artifact_stem}\" — the published shard-index has no Backfill Recovery Manifest \
@@ -4705,72 +4745,34 @@ pub struct MechanismABackfillPartition {
     pub oversized_record: bool,
 }
 
-/// BC-1.18.008 v1.6 Postcondition 3's **Backfill Recovery Manifest**
-/// (F-C3-P6-001): four fields, each computed exactly once, at split time,
-/// from the SAME `original_content` buffer that drives Postcondition 2's
-/// partitioning — `original_bytes`/`original_sha256` (the pre-split
-/// monolithic file's own exact length + SHA-256 content hash) and
-/// `final_bytes`/`final_sha256` (the intended LAST partition's own exact
-/// length + SHA-256 content hash, i.e. the content the canonical file is
-/// intended to hold once Postcondition 5's canonical-truncate step
-/// completes). Postcondition 5's Recovery-Confirmation Rule is the SOLE
-/// authoritative basis for the later SAFE/DANGEROUS/AMBIGUOUS
-/// recovery-confirmation determination in [`heal_or_confirm_already_migrated`]
-/// — an exact whole-file `(length, SHA-256)` comparison against these two
-/// recorded pairs, NEVER a structural byte-prefix comparison against a
-/// re-concatenation of already-sealed shards (Invariant 3).
+/// BC-1.18.008 v1.9 Postcondition 3's **Backfill Recovery Manifest**
+/// (F-C3-P6-001; promoted to an ordinary [`ShardIndex`] field by v1.9's
+/// Schema-location correction, F-C3-P9-004): four fields, each computed
+/// exactly once, at split time, from the SAME `original_content` buffer
+/// that drives Postcondition 2's partitioning — `original_bytes`/
+/// `original_sha256` (the pre-split monolithic file's own exact length +
+/// SHA-256 content hash) and `final_bytes`/`final_sha256` (the intended LAST
+/// partition's own exact length + SHA-256 content hash, i.e. the content the
+/// canonical file is intended to hold once Postcondition 5's
+/// canonical-truncate step completes). Postcondition 5's
+/// Recovery-Confirmation Rule is the SOLE authoritative basis for the later
+/// SAFE/DANGEROUS/AMBIGUOUS recovery-confirmation determination in
+/// [`heal_or_confirm_already_migrated`] — an exact whole-file `(length,
+/// SHA-256)` comparison against these two recorded pairs, NEVER a structural
+/// byte-prefix comparison against a re-concatenation of already-sealed
+/// shards (Invariant 3).
 ///
-/// Deliberately NOT a field of [`ShardIndex`] itself: `ShardIndex` is
-/// constructed via exhaustive struct-literal syntax at multiple pre-existing
-/// call sites this burst's scope does not touch (this module's own
-/// `bc_1_18_006_roll_tests` unit-test module, and the separate
-/// `bc_1_18_007_retention_test.rs`/`bc_1_18_008_backfill_split_test.rs`
-/// integration test files, none of which construct a
-/// `backfill_manifest` field) — adding a new required struct field there
-/// would be a breaking sibling-site change this burst is explicitly scoped
-/// not to make (test files are out of bounds; the pre-existing production
-/// literals would need updating for a benefit the manifest itself doesn't
-/// need, since it is meaningful ONLY for mechanism-A backfill-split
-/// indices, never for the ongoing per-write roll/retention indices those
-/// call sites build). Instead, [`write_shard_index_for_backfill`] appends
-/// this manifest as an independent `[backfill_manifest]` TOML table in the
-/// SAME atomic write as the `ShardIndex`'s own serialized text (valid TOML:
-/// a new table header may always follow a preceding `[[shard]]`
-/// array-of-tables' final entry), and [`read_backfill_manifest`] parses it
-/// back out of the SAME file independently of [`load_shard_index`] — which
-/// harmlessly ignores the trailing table as an unrecognized key, exactly
-/// like any other forward-compatible additive TOML field this module's own
-/// additive-field precedents (`sealed_retroactively`, `oversized_record`,
-/// `is_preamble_shard`) already establish for `ShardIndexEntry`.
+/// `pub` (and `pub` fields): this module's own [`ShardIndex::backfill_manifest`]
+/// field is `pub`, and BC-1.18.008's cluster-3 integration test file
+/// constructs `BackfillManifest` values directly (the roll-then-backfill and
+/// backfill-then-roll-then-backfill EC-014/EC-015 regression coverage) from
+/// outside this crate's `shard_manager` module.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-struct BackfillManifest {
-    original_bytes: u64,
-    original_sha256: String,
-    final_bytes: u64,
-    final_sha256: String,
-}
-
-/// Serialization-only wrapper producing a `[backfill_manifest]` TOML table
-/// header around [`BackfillManifest`]'s own scalar fields — a bare
-/// `toml::to_string(&manifest)` call would instead emit its fields as
-/// top-level (headerless) keys, which is invalid to append after the
-/// `ShardIndex`'s own already-emitted `[[shard]]` array-of-tables.
-#[derive(Serialize)]
-struct BackfillManifestWrapper<'a> {
-    backfill_manifest: &'a BackfillManifest,
-}
-
-/// Deserialization-only counterpart to [`BackfillManifestWrapper`]: parses
-/// JUST the `[backfill_manifest]` table back out of a
-/// `<artifact-stem>.shard-index.toml` file's raw text, ignoring every other
-/// key (`schema_version`, `[[shard]]`, ...) the same file also carries —
-/// `#[serde(default)]` so a file with no `[backfill_manifest]` table at all
-/// (e.g. a genuinely corrupted or hand-edited index) deserializes to `None`
-/// rather than failing to parse.
-#[derive(Debug, Clone, Deserialize)]
-struct BackfillManifestDocument {
-    #[serde(default)]
-    backfill_manifest: Option<BackfillManifest>,
+pub struct BackfillManifest {
+    pub original_bytes: u64,
+    pub original_sha256: String,
+    pub final_bytes: u64,
+    pub final_sha256: String,
 }
 
 /// SHA-256 content hash of `bytes`, hex-encoded (lowercase, no separator) —
@@ -4783,17 +4785,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-/// Reads back the [`BackfillManifest`] published at `index_path`'s own
-/// `[backfill_manifest]` TOML table (see [`BackfillManifestWrapper`]'s doc
-/// comment for why this is a standalone parse rather than a `ShardIndex`
-/// field), or `Ok(None)` if the file carries no such table at all.
-fn read_backfill_manifest(index_path: &Path) -> io::Result<Option<BackfillManifest>> {
-    let text = std::fs::read_to_string(index_path)?;
-    let doc: BackfillManifestDocument =
-        toml::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    Ok(doc.backfill_manifest)
 }
 
 /// BC-1.18.008 Postcondition 2/Invariant 2 (v1.2's Record-Boundary Marker
@@ -5451,11 +5442,31 @@ fn record_boundary_offsets_are_well_formed(content_len: usize, offsets: &[usize]
         && offsets.last().is_some_and(|&last| last < content_len)
 }
 
-/// BC-1.18.008 Invariant 3 (AC-014): `true` iff a mechanism-A backfill-split
-/// has ALREADY completed for this artifact — a shard-index already exists
-/// at this artifact's `<artifact-stem>.shard-index.toml` sibling path and
-/// already fully accounts for the artifact's pre-existing history. The
-/// idempotency short-circuit [`run_mechanism_a_backfill_split`] MUST
+/// BC-1.18.008 v1.9 Invariant 3 (AC-014, F-C3-P9-004, BLOCKING): `true` iff
+/// this artifact's shard-index (if any) carries a POPULATED
+/// `backfill_manifest` field — the SOLE evidence a mechanism-A backfill-split
+/// has ALREADY run for this artifact. Bare shard-index-FILE existence, or a
+/// non-empty `[[shard]]` array by itself, is NEVER sufficient: an index may
+/// exist, with real sealed shards, purely because BC-1.18.006's ordinary
+/// per-write roll mechanism sealed it (Postcondition 3's Composability
+/// clause, the roll-before-backfill ordering, EC-015) — the mandatory
+/// one-time backfill-split for that artifact may never have run at all. This
+/// function therefore LOADS the shard-index (never merely `stat()`s the
+/// file) and tests `index.backfill_manifest.is_some()`:
+///
+/// - No index file at all ⇒ `false` (genuinely fresh, no roll and no
+///   backfill have ever run).
+/// - Index present, `backfill_manifest: None` ⇒ `false` (the roll-before-
+///   backfill case, EC-015 — routes [`run_mechanism_a_backfill_split`] to a
+///   genuine first-ever backfill run that APPENDS its own shards after the
+///   pre-existing rolled entries, never to `heal_or_confirm_already_migrated`
+///   and never to an `E-SHD-011`/`E-SHD-012` disposition).
+/// - Index present, `backfill_manifest: Some(..)` ⇒ `true` (a Manifest-
+///   confirmed backfill has already run for this artifact at least once —
+///   routes to `heal_or_confirm_already_migrated`'s recovery-confirmation
+///   determination).
+///
+/// The idempotency short-circuit [`run_mechanism_a_backfill_split`] MUST
 /// consult before doing any split work: re-running the backfill against an
 /// already-migrated artifact must never double-split it into redundant
 /// shards.
@@ -5464,10 +5475,9 @@ pub fn mechanism_a_backfill_already_migrated(
     artifact_stem: &str,
 ) -> io::Result<bool> {
     let index_path = shard_index_path_for(canonical_path, artifact_stem);
-    match std::fs::metadata(&index_path) {
-        Ok(_) => Ok(true),
-        Err(e) if is_genuinely_missing(&e, &index_path) => Ok(false),
-        Err(e) => Err(e),
+    match load_shard_index(&index_path)? {
+        Some(index) => Ok(index.backfill_manifest.is_some()),
+        None => Ok(false),
     }
 }
 
@@ -5554,6 +5564,33 @@ pub fn run_mechanism_a_backfill_split(
         return heal_or_confirm_already_migrated(entry, canonical_path, &index_path);
     }
 
+    // BC-1.18.008 v1.9 Postcondition 3's Composability clause (F-C3-P9-004,
+    // BLOCKING, EC-015): `already_migrated == false` means no Manifest is
+    // present — but a non-empty `[[shard]]` array MAY already exist from an
+    // ordinary BC-1.18.006 roll that fired against this artifact BEFORE this
+    // mandatory one-time backfill ever ran (the roll-before-backfill
+    // ordering, expected in practice for exactly the four mandatory
+    // artifacts this BC exists to shrink). Those pre-existing rolled entries
+    // remain exactly as the roll mechanism published them — append-only,
+    // never renumbered, duplicated, or otherwise disturbed — so this
+    // backfill's own newly-sealed shards must continue `seq` numbering from
+    // `existing_max_seq + 1`, never restart at 1.
+    let existing_shards: Vec<ShardIndexEntry> = load_shard_index(&index_path)
+        .map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?
+        .map(|idx| idx.shards)
+        .unwrap_or_default();
+    let existing_max_seq: u32 = existing_shards.iter().map(|s| s.seq).max().unwrap_or(0);
+
+    // Postcondition 3's Composability clause point 1: `original_bytes`/
+    // `original_sha256` are always computed from the canonical file's
+    // CURRENT on-disk content at the moment this function is invoked — never
+    // from a reconstructed notion of "the full historical monolithic file"
+    // the artifact once held. Content a prior ordinary roll already sealed
+    // off is durably preserved in ITS OWN pre-existing `[[shard]]` entries
+    // (`existing_shards`, above), entirely outside this Manifest's scope.
     let original_content =
         std::fs::read(canonical_path).map_err(|source| MechanismABackfillError::Io {
             artifact_stem: entry.artifact_stem.clone(),
@@ -5743,29 +5780,34 @@ pub fn run_mechanism_a_backfill_split(
 
     // EC-016: content already fits within a single partition -- no sealing
     // is structurally necessary. The canonical file is left COMPLETELY
-    // UNCHANGED; a shard-index is still created and registered, with zero
-    // [[shard]] entries.
+    // UNCHANGED; a shard-index is still created (or, per the Composability
+    // clause, re-published carrying forward any pre-existing rolled
+    // `existing_shards` entries UNCHANGED) and registered with a populated
+    // Manifest.
     if partitions.len() <= 1 {
-        let index = fresh_backfill_shard_index(entry, retention_count, Vec::new());
+        let mut index = fresh_backfill_shard_index(entry, retention_count, existing_shards);
         // Postcondition 3's Backfill Recovery Manifest: even in the
         // no-split EC-001 case, the manifest is populated from the SAME
         // `original_content` buffer already read above -- with `final_*`
         // equal to `original_*` (the canonical file is left COMPLETELY
         // UNCHANGED, so what it will hold once "done" IS the original
         // content). This artifact will always short-circuit at
-        // `mechanism_a_backfill_already_migrated`'s zero-shard branch on
-        // any later re-invocation (`heal_or_confirm_already_migrated`'s own
-        // `index.shards.is_empty()` guard, below), so the manifest is not
-        // load-bearing for THIS artifact's own recovery -- it is populated
-        // anyway for consistency with the "computed once, at split time"
-        // contract Postcondition 3 states unconditionally.
+        // `mechanism_a_backfill_already_migrated`'s Manifest-populated
+        // branch on any later re-invocation (routing to
+        // `heal_or_confirm_already_migrated`'s own `index.shards.is_empty()`
+        // guard, below, when no pre-existing rolled shards carried forward),
+        // so the manifest is not load-bearing for THIS artifact's own
+        // recovery in that case -- it is populated anyway for consistency
+        // with the "computed once, at split time" contract Postcondition 3
+        // states unconditionally.
         let manifest = BackfillManifest {
             original_bytes: original_content.len() as u64,
             original_sha256: sha256_hex(&original_content),
             final_bytes: original_content.len() as u64,
             final_sha256: sha256_hex(&original_content),
         };
-        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem, Some(&manifest))?;
+        index.backfill_manifest = Some(manifest);
+        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
         return Ok(MechanismABackfillOutcome::Migrated {
             sealed_count: 0,
             archived_count: 0,
@@ -5774,7 +5816,9 @@ pub fn run_mechanism_a_backfill_split(
 
     // Postcondition 2: every partition before the last is sealed, in
     // chronological (original-file) order, with sequential `seq` numbers
-    // starting at 1; the LAST partition becomes the fresh current file.
+    // continuing from `existing_max_seq + 1` (Composability clause point 2)
+    // -- starting at 1 when no pre-existing rolled shards exist; the LAST
+    // partition becomes the fresh current file.
     //
     // Deliberately reuses `write_atomic` (rename-based, unconditionally
     // overwriting) rather than `publish_sealed_shard`'s `write_exclusive`
@@ -5792,7 +5836,10 @@ pub fn run_mechanism_a_backfill_split(
 
     let mut shard_entries = Vec::with_capacity(sealed_partitions.len());
     for (i, partition) in sealed_partitions.iter().enumerate() {
-        let seq = (i + 1) as u32;
+        // Composability clause point 2: continue `seq` numbering from
+        // `existing_max_seq + 1` -- never restart at 1 when this artifact
+        // already carries pre-existing rolled shard entries.
+        let seq = existing_max_seq + (i as u32) + 1;
         let sealed_filename = format!("{}.{seq:04}.md", entry.artifact_stem);
         let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
         mechanism_a_write_and_verify_sealed_shard(
@@ -5827,7 +5874,14 @@ pub fn run_mechanism_a_backfill_split(
         });
     }
 
-    let mut index = fresh_backfill_shard_index(entry, retention_count, shard_entries);
+    // Composability clause point 2: this backfill's own newly-sealed shard
+    // entries are APPENDED to the pre-existing `[[shard]]` array -- never
+    // renumbering, duplicating, or otherwise disturbing the pre-existing
+    // rolled entries, which remain exactly as BC-1.18.006's roll mechanism
+    // published them (append-only, POLICY-1 consistent).
+    let mut all_shards = existing_shards;
+    all_shards.extend(shard_entries);
+    let mut index = fresh_backfill_shard_index(entry, retention_count, all_shards);
 
     // Postcondition 4: compose immediately with BC-1.18.007's retention
     // policy in this SAME operation when the backfill already produced more
@@ -5872,12 +5926,8 @@ pub fn run_mechanism_a_backfill_split(
         final_bytes: current_partition.bytes.len() as u64,
         final_sha256: sha256_hex(&current_partition.bytes),
     };
-    write_shard_index_for_backfill(
-        &index_path,
-        &index,
-        &entry.artifact_stem,
-        Some(&backfill_manifest),
-    )?;
+    index.backfill_manifest = Some(backfill_manifest.clone());
+    write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
 
     // F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
     // happy-path canonical-truncate write", Invariant 5, EC-013): this is
@@ -5952,8 +6002,10 @@ pub fn run_mechanism_a_backfill_split(
 /// The determination now reads the canonical file's CURRENT on-disk bytes
 /// exactly once and computes their exact whole-file `(length, SHA-256)`,
 /// then compares that pair against the Backfill Recovery Manifest's two
-/// recorded pairs ([`read_backfill_manifest`]) — the SOLE authoritative
-/// basis for this determination (Invariant 3):
+/// recorded pairs (read directly off `index.backfill_manifest`, now an
+/// ordinary [`ShardIndex`] field — v1.9's Schema-location correction,
+/// F-C3-P9-004) — the SOLE authoritative basis for this determination
+/// (Invariant 3):
 ///   - matches `(final_bytes, final_sha256)` exactly ⇒ SAFE: the prior
 ///     run's canonical-truncate write already completed; no action.
 ///   - matches `(original_bytes, original_sha256)` exactly ⇒ DANGEROUS,
@@ -6014,11 +6066,22 @@ fn heal_or_confirm_already_migrated(
     // all cannot support ANY safe disposition, so this fails loud under the
     // SAME `E-SHD-011` code rather than falling back to a structural
     // heuristic.
-    let manifest = read_backfill_manifest(index_path)
-        .map_err(io_err)?
-        .ok_or_else(|| MechanismABackfillError::MissingBackfillManifest {
+    //
+    // BC-1.18.008 v1.9 Invariant 3's Residual `MissingBackfillManifest`
+    // disposition (F-C3-P9-004): `mechanism_a_backfill_already_migrated`
+    // (this function's only caller) already confirmed
+    // `backfill_manifest.is_some()` on ITS OWN load of this same index file
+    // before routing here -- a `None` on THIS independent re-read is
+    // therefore a genuine TOCTOU race (the index was concurrently rewritten
+    // between the two reads) or on-disk corruption of the
+    // `backfill_manifest` field specifically, never the ordinary
+    // roll-before-backfill case (that case is now caught upstream by the
+    // corrected idempotency check and never reaches this function at all).
+    let manifest = index.backfill_manifest.clone().ok_or_else(|| {
+        MechanismABackfillError::MissingBackfillManifest {
             artifact_stem: entry.artifact_stem.clone(),
-        })?;
+        }
+    })?;
 
     let canonical_bytes = std::fs::read(canonical_path).map_err(io_err)?;
     let canonical_len = canonical_bytes.len() as u64;
@@ -6150,6 +6213,13 @@ fn heal_or_confirm_already_migrated(
 /// `entry`'s own cap-formula inputs, threading `retention_count` explicitly
 /// (no pre-existing shard-index exists yet for an artifact that has never
 /// been backfilled, so there is no `ShardIndex::retention_count` to reuse).
+/// `shards` MAY already carry pre-existing rolled entries from an ordinary
+/// BC-1.18.006 roll that ran before this backfill (Postcondition 3's
+/// Composability clause, EC-015) — this constructor does not itself
+/// distinguish that case; its caller supplies the correct combined list.
+/// `backfill_manifest` always starts `None` here — every caller sets it
+/// explicitly, immediately after construction, once the Manifest's own
+/// values are computed from the original content buffer.
 fn fresh_backfill_shard_index(
     entry: &ShardEntry,
     retention_count: u32,
@@ -6165,6 +6235,7 @@ fn fresh_backfill_shard_index(
         practical_fuel_ceiling: entry.practical_fuel_ceiling,
         worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
         retention_count,
+        backfill_manifest: None,
         shards,
     }
 }
@@ -6174,31 +6245,29 @@ fn fresh_backfill_shard_index(
 /// (Invariant 1: caller of BC-1.18.006's atomic-write primitives, not a
 /// reimplementation).
 ///
-/// F-C3-P6-001 (BC-1.18.008 v1.6 Postcondition 3): when `backfill_manifest`
-/// is `Some`, its own `[backfill_manifest]` TOML table ([`BackfillManifestWrapper`])
-/// is appended to `index`'s own serialized text and the COMBINED text is
-/// published in this ONE `write_atomic` call -- satisfying Postcondition
-/// 3's "populated in the SAME atomic index-publish write as the `[[shard]]`
-/// entries themselves" requirement exactly (one durable write, not two).
+/// BC-1.18.008 v1.9 Postcondition 3's Schema-location correction
+/// (F-C3-P9-004, BLOCKING): `index.backfill_manifest`, when `Some`, is now
+/// an ordinary field of `index` itself and round-trips through this
+/// function's single `toml::to_string(index)` call like every other
+/// `ShardIndex` field -- no separate `[backfill_manifest]` table append, and
+/// no special-case plumbing, is needed or permitted here. Callers set
+/// `index.backfill_manifest` before calling this function. Satisfies
+/// Postcondition 3's "populated in the SAME atomic index-publish write as
+/// the `[[shard]]` entries themselves" requirement exactly (one durable
+/// write, not two) -- and, unlike the retired side-channel design, this
+/// Manifest now ALSO survives every subsequent `publish_shard_index_update`
+/// call (BC-1.18.006's ongoing per-write roll) and both self-heal paths,
+/// since they load, mutate, and re-serialize the SAME struct.
 fn write_shard_index_for_backfill(
     index_path: &Path,
     index: &ShardIndex,
     artifact_stem: &str,
-    backfill_manifest: Option<&BackfillManifest>,
 ) -> Result<(), MechanismABackfillError> {
     let to_err = |e: toml::ser::Error| MechanismABackfillError::Io {
         artifact_stem: artifact_stem.to_string(),
         source: io::Error::other(e.to_string()),
     };
-    let mut serialized = toml::to_string(index).map_err(to_err)?;
-    if let Some(manifest) = backfill_manifest {
-        let manifest_toml = toml::to_string(&BackfillManifestWrapper {
-            backfill_manifest: manifest,
-        })
-        .map_err(to_err)?;
-        serialized.push('\n');
-        serialized.push_str(&manifest_toml);
-    }
+    let serialized = toml::to_string(index).map_err(to_err)?;
     last_amended_migrate::atomic_write::write_atomic(index_path, &serialized).map_err(|e| {
         MechanismABackfillError::Io {
             artifact_stem: artifact_stem.to_string(),
@@ -10424,6 +10493,11 @@ mod bc_1_18_006_roll_tests {
             // existing (cluster-1/2) test is unconcerned with retention and
             // is otherwise unchanged.
             retention_count: default_retention_count(),
+            // Sibling-site sweep (BC-1.18.008 v1.9, F-C3-P9-004): new
+            // `ShardIndex::backfill_manifest` field — this existing
+            // (cluster-1/2) test is unconcerned with mechanism-A backfill
+            // and is otherwise unchanged.
+            backfill_manifest: None,
             shards: vec![ShardIndexEntry {
                 seq: u32::MAX,
                 path: "decision-log.4294967295.md".to_string(),
