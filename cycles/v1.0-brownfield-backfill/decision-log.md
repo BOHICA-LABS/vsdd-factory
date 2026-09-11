@@ -10082,3 +10082,144 @@ O-C3-P13-002, S-12.12, `2dd39bbb`, error-taxonomy.md v1.13.
 
 | D-1203 | D-1203-S2502-CLUSTER3-PASS13-CLEAN-BOOKKEEPING | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-13 = CLEAN — zero blocking findings (2nd consecutive clean pass of the restarted streak, 3rd clean pass overall).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-13.md`. Adversary independently re-verified the full v1.8 contract (recovery three-way classification, manifest-authoritative slice-and-verify, all 3 destructive-write read-backs, `[backfill_manifest]` persistence, decision-log regex + boundary fidelity, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 emissions, spec-internal consistency, POLICY-11 test integrity) as spec-conformant end to end. 2 LOW non-blocking observations recorded — O-C3-P13-001 (`MechanismABackfillError::MissingBackfillManifest`/`E-SHD-011` form (b) fail-loud path untested; same gap as pass-12's O-C3-P12-001, CONFIRMED already anchored to S-12.12) and O-C3-P13-002 (NEW — `archive_overflow_shards` `.expect()` on a provably-unreachable `position()` lookup, pre-existing BC-1.18.007 retention code adjacent to the backfill logic, style note only, folded into S-12.12) — BOTH deferred (not fixed in-scope), per human direction to keep code frozen through the pass(es) remaining toward literal 3-CLEAN. Because both observations are LOW/non-blocking, the streak is NOT reset. No BC/AC/EC/VP/code/story change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `2dd39bbb`; full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). **BC-5.39.001 cluster-3 LOCAL streak: 1/3 → 2/3 — 2ND CONSECUTIVE CLEAN PASS OF THE RESTARTED STREAK** (cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-14, fresh context, against the SAME frozen `2dd39bbb` code — a third consecutive CLEAN pass reaches literal 3/3 convergence for cluster-3.** Refs: D-1203, D-1202, D-1201, O-C3-P13-001, O-C3-P13-002, S-25.02, BC-1.18.008 v1.8, S-12.12, `2dd39bbb`. STATE.md v10.28→v10.29. | S-25.02 F4 | 2026-09-10 |
 
+## D-1204
+
+**D-1204-S2502-CLUSTER3-LOCAL-3CLEAN-CONVERGENCE**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1203 (this file, immediately above). D-1204 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention/compaction +
+BC-1.18.008 one-time backfill-split) **achieved BC-5.39.001 3-CLEAN convergence at passes 12/13/14 on
+frozen code `2dd39bbb`** 2026-09-10 (LOCAL Claude adversary + state-manager; single-commit
+TD-VSDD-053; LIGHT bookkeeping burst — NO code/spec/story change). Fresh pass-14 (run against the
+SAME frozen `2dd39bbb` code passes 12 and 13 left in place) independently re-verified the full v1.8
+contract end to end — recovery three-way classification, manifest-authoritative slice-and-verify, all
+3 destructive-write read-backs, `[backfill_manifest]` persistence, `decision-log.md` marker-table
+regex + boundary fidelity, a full independent re-sweep of `error-taxonomy.md` v1.13's 13
+`E-SHD-NNN` codes / 17 real emissions, spec-internal consistency between BC-1.18.007 and BC-1.18.008,
+and POLICY-11 test integrity — and found the shipped code spec-conformant across every dimension
+checked, zero blocking findings. This is the **3rd CONSECUTIVE CLEAN pass of the restarted streak**
+(after passes 12 and 13; 4th clean pass overall this cascade, after pass-10, pass-12, and pass-13),
+reaching **literal BC-5.39.001 3-CLEAN convergence**. Full Part A persisted as a standalone artifact —
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-14.md`, matching pass-1..13's own
+convention.
+
+**Findings:** zero blocking findings. One LOW non-blocking observation recorded:
+
+**O-C3-P14-001 (LOW).** An `archive_overflow_shards` failure (`ShardRetentionError::ArchivalMoveFailed`,
+`E-SHD-002`) is re-coded as `MechanismABackfillError::Io`/`E-SHD-003` when surfaced in the backfill
+context, flattening the `#[source]` chain by one level — the same nesting shape independently observed
+at pass-10 as O-C3-P10-002, re-confirmed unchanged at pass-14. Both codes still appear in the surfaced
+text (the `E-SHD-003` `Display`'s documented `<io-error>` placeholder carries the `E-SHD-002` inner
+message verbatim); fail-loud disposition + canonical-untouched guarantee fully satisfied per
+PC5/EC-003. Defensible uniform-treatment choice; flagged for OPTIONAL product-owner adjudication —
+whether a dedicated `MechanismABackfillError` variant preserving the `E-SHD-002` code and `#[source]`
+chain one level deeper is preferable. Not a defect; no fix warranted this burst.
+
+Because zero blocking findings were present, pass-14 is CLEAN — **BC-5.39.001 cluster-3 LOCAL
+streak: 2/3 → 3/3, CONVERGED** (3rd consecutive clean pass of the restarted streak, 4th clean pass
+overall this cascade, after pass-10, pass-12, and pass-13; cycle-level 3/3 CONVERGED streak
+UNCHANGED, separate track). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged
+→0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level adversary pass).
+
+### 14-Pass Trajectory Summary
+
+The cluster-3 LOCAL adversarial cascade ran 14 passes to reach literal 3-CLEAN convergence:
+
+- **Passes 1-5 (substantive BLOCKER/HIGH-class defects):** pass-1 (D-1191) 1 BLOCKER + 1 HIGH +
+  3 MEDIUM + 1 MINOR + 1 ADVISORY — the PC6(b) tautological content-preservation gate, a
+  case-sensitivity heuristic bug, a missing panic guard, and the `ceil()` shard-count formula's
+  non-uniform-record counterexample (BC-1.18.008 v1.2→v1.3). Pass-2 (D-1192) 2 HIGH + 2 MEDIUM —
+  oracle set-equality cross-check, a silently-dropped `oversized_record` flag, preamble-bytes cap
+  accounting. Pass-3 (D-1193) 1 HIGH + 1 MEDIUM + 1 MINOR — the Leading-Preamble Handling Rule
+  (BC-1.18.008 v1.3→v1.4) and the empty-oracle-fallback trust gap. Pass-4 (D-1194) CODE CLEAN but 1
+  MEDIUM spec-internal contradiction (Normalization rule scoping, BC-1.18.008 v1.4→v1.5) — first
+  CODE-clean pass. Pass-5 (D-1195) 1 LOW (empty-caller-offsets oracle-consultation gap) — substantive
+  CODE defect surface assessed exhausted after 2 consecutive low-severity passes; human authorized the
+  grind-to-literal-3-CLEAN drive starting pass-6.
+- **Passes 6-8 (recovery-subsystem completeness):** pass-6 (D-1196), the **FIRST CROSS-VENDOR pass**
+  (OpenAI Codex), found 2 HIGH + 1 MEDIUM — including the cross-vendor Codex-discovered
+  **data-loss finding** (F-C3-P6-001: a structural byte-prefix recovery heuristic false-positived on
+  repeated-prefix content and silently overwrote an intact record), plus the PC6(c)/Invariant-4 missing
+  disk-read-back gap and an `\b`-boundary marker-heading bug (BC-1.18.008 v1.5→v1.6, new Backfill
+  Recovery Manifest + Recovery-Confirmation Rule, `E-SHD-011`). This cross-vendor finding reopened the
+  "defect surface exhausted" assessment reached after passes 4/5 and promoted a cross-vendor pass from
+  optional to REQUIRED in the BC-5.39.001 protocol (routed to new follow-up story, became **S-12.10**).
+  Pass-7 (D-1197) 1 HIGH + 1 MEDIUM — the DANGEROUS-window heal's unverified Manifest-independent slice
+  offset (Manifest-Authoritative Slice-and-Verify Rule, BC-1.18.008 v1.6→v1.7, `E-SHD-012`) and the
+  decision-log marker regex's sub-clause blind spot. Pass-8 (D-1198) 2 MEDIUM — a taxonomy Message
+  Format/`Display` drift and the happy-path canonical-write's missing read-back (BC-1.18.008 v1.7→v1.8,
+  new Invariant 5 generalizing read-back-verification across all 3 destructive write sites,
+  `E-SHD-013`) — completing the write-verification class passes 6-8 progressively closed.
+- **Passes 9-11 (doc-parity / process-gaps):** pass-9 (D-1199) 2 MEDIUM, both taxonomy doc-drift
+  (`E-SHD-011`/`E-SHD-003` `Display` mismatches), plus a human-directed companion sweep surfacing a
+  THIRD drift instance (`E-SHD-002`) — `error-taxonomy.md` v1.12→v1.13; the 6th+ recurrence of the
+  taxonomy-drift-vs-shipped-Display class was `[codified][process-gap]` and routed to new follow-up
+  story **S-12.11** (lint hook diffing every `E-SHD`-emitting source's `Display` against the taxonomy
+  table). Pass-10 (D-1200) reached the cascade's **FIRST CLEAN PASS** (0/3→1/3) with 2 LOW
+  observations (O-C3-P10-001 non-deterministic fault-injection test seam; O-C3-P10-002 the
+  `E-SHD-002`/`E-SHD-003` source-chain nesting), both deferred to new follow-up story **S-12.12**.
+  Pass-11 (D-1201) was BEHAVIORAL CLEAN but NOT CLEAN OVERALL — 1 MEDIUM doc-staleness finding, the
+  **4th recurrence** of the stale-transient-status-test-header class first codified at D-1192/D-1194
+  with follow-up story **S-12.09** (S-12.09 had NOT prevented recurrence, still a draft stub) —
+  **streak RESET to 0/3**, fixed same-burst via an 8-site exhaustive comment sweep, and S-12.09
+  escalated/PRIORITIZED.
+- **Passes 12-14 (3-CLEAN):** pass-12 (D-1202) CLEAN, 1 LOW observation (O-C3-P12-001, the same
+  `E-SHD-011` form (b) coverage gap) deferred to the existing S-12.12 — streak 0/3→1/3, first clean
+  pass of the restarted streak. Pass-13 (D-1203) CLEAN, 2 LOW observations (O-C3-P13-001 confirming
+  O-C3-P12-001's anchor; O-C3-P13-002 NEW, an `archive_overflow_shards` `.expect()` style note) both
+  folded into S-12.12 — streak 1/3→2/3. **Pass-14 (this decision, D-1204) CLEAN, 1 LOW observation
+  (O-C3-P14-001, confirming the O-C3-P10-002 `E-SHD-002`/`E-SHD-003` nesting family) folded into
+  S-12.12 — streak 2/3→3/3, literal 3-CLEAN CONVERGENCE reached.** The LOCAL adversarial cascade for
+  cluster-3 is now **CLOSED**.
+
+**Deferred LOW items (all anchored to follow-up story S-12.12, E-12 Engine Governance, none fixed
+in-scope per human direction to keep code frozen through convergence):**
+
+- **O-C3-P10-001** — non-deterministic `spawn_temp_file_corruptor` thread-race test seam in the 3
+  disk-read-back fault-injection tests; suggested remedy a deterministic `#[cfg(test)]` fault-injection
+  seam mirroring `FORCE_STAGE_FAILURE`.
+- **O-C3-P12-001 / O-C3-P13-001** — `MechanismABackfillError::MissingBackfillManifest`/`E-SHD-011`
+  form (b) fail-loud path UNTESTED (code verified correct on inspection; the manifest-less state cannot
+  arise in this one-time F4 migration); same gap independently re-surfaced at both passes, single
+  coverage-gap item.
+- **O-C3-P13-002** — `archive_overflow_shards`'s `.expect()` on a provably-unreachable `position()`
+  lookup; style note only, pre-existing BC-1.18.007 retention code.
+- **O-C3-P14-001** — the `E-SHD-002`/`E-SHD-003` source-chain-flattening uniform-treatment choice
+  (same family as O-C3-P10-002); flagged for OPTIONAL product-owner adjudication, not a defect.
+
+**3 codified process-gap follow-up stories opened this cascade (E-12 Engine Governance, all draft
+stubs, no BC authored yet):**
+
+- **S-12.09** — test-writer status-neutral test-module headers (agent-prompt amendment to prevent the
+  stale-transient-status-comment class; 4th recurrence at pass-11 escalated/PRIORITIZED this cascade).
+- **S-12.10** — cross-vendor adversary pass promoted from optional to a REQUIRED step in the
+  BC-5.39.001 convergence protocol (codified after pass-6's cross-vendor-only data-loss finding).
+- **S-12.11** — a lint hook diffing every `E-SHD`-emitting Rust source's `Display` output against
+  `error-taxonomy.md`'s Message Format column, CI/pre-commit gated (codified after pass-9's 6th+
+  recurrence of the taxonomy-drift-vs-shipped-Display class).
+
+No BC/AC/EC/VP/code/story change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays
+v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 /
+STORY-INDEX v4.461 all UNCHANGED (the S-12.12 anchor extension is recorded via a STATE.md Drift Items
+row, not a STORY-INDEX row edit, for O-C3-P14-001). Feature branch `feature/S-25.02-backfill` stays
+UNCHANGED at `2dd39bbb` (CLEAN pass, no findings to fix; full `cargo test --workspace --all-targets` /
+fmt/clippy re-confirmed green/clean at the existing HEAD, no new commit required).
+
+### Next Steps
+
+**Cluster-3 code is CONVERGED @ `2dd39bbb`, ready for per-story delivery** (demo-recorder per-AC →
+push → pr-manager 9-step PR cycle → merge), pending human GO to proceed with delivery OR a decision to
+pause. The LOCAL adversarial cascade for cluster-3 is CLOSED — no further adversary passes are
+scheduled for this cluster absent a future code change.
+
+Refs: D-1204, D-1203, D-1202, D-1201, D-1200, D-1199, D-1198, D-1197, D-1196, D-1195, D-1194, D-1193,
+D-1192, D-1191, S-25.02, BC-1.18.008 v1.8, BC-1.18.007 v1.2, O-C3-P10-001, O-C3-P10-002, O-C3-P12-001,
+O-C3-P13-001, O-C3-P13-002, O-C3-P14-001, S-12.09, S-12.10, S-12.11, S-12.12, `2dd39bbb`,
+error-taxonomy.md v1.13.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1204 | D-1204-S2502-CLUSTER3-LOCAL-3CLEAN-CONVERGENCE | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) achieved BC-5.39.001 3-CLEAN convergence at passes 12/13/14 on frozen code `2dd39bbb` — LOCAL adversarial cascade CLOSED.** Full Part A (pass-14): `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-14.md`. Pass-14 independently re-verified the full v1.8 contract (recovery three-way classification, manifest-authoritative slice-and-verify, all 3 destructive-write read-backs, `[backfill_manifest]` persistence, decision-log regex + boundary fidelity, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 emissions, spec-internal consistency, POLICY-11 test integrity) as spec-conformant end to end, zero blocking findings — the 3rd consecutive clean pass of the restarted streak (4th clean pass overall, after pass-10/12/13). **14-pass trajectory:** BLOCKER/HIGH-class defects passes 1-5 (BC-1.18.008 v1.2→v1.5, PC6(b) gate/ceil()-formula/preamble-handling/Normalization-scoping fixes) → recovery-subsystem completeness passes 6-8 (BC-1.18.008 v1.5→v1.8, incl. the cross-vendor Codex pass-6 data-loss finding on the byte-prefix recovery heuristic, Manifest-Authoritative Slice-and-Verify Rule, universal destructive-write read-back Invariant 5) → doc-parity/process-gap passes 9-11 (`error-taxonomy.md` v1.12→v1.13, first CLEAN pass-10, streak RESET at pass-11 on a 4th-recurrence doc-staleness finding) → 3-CLEAN passes 12-14. 1 LOW non-blocking observation this pass — O-C3-P14-001 (`archive_overflow_shards`/`E-SHD-002` re-coded as `E-SHD-003` in the backfill context, flattening `#[source]` by one level; same family as pass-10's O-C3-P10-002; OPTIONAL product-owner adjudication flagged, not a defect) — deferred, streak NOT reset. All deferred LOW items (O-C3-P10-001 test seam, O-C3-P12-001/O-C3-P13-001 `E-SHD-011` coverage, O-C3-P13-002 `.expect()`, O-C3-P14-001 `E-SHD-002`/`E-SHD-003` coding) anchored to follow-up story **S-12.12**; 3 codified process-gaps opened this cascade — **S-12.09** (test-writer status-neutral headers, 4x recurrence), **S-12.10** (cross-vendor pass promoted to REQUIRED in the BC-5.39.001 protocol), **S-12.11** (taxonomy-Display lint hook). No BC/AC/EC/VP/code/story change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `2dd39bbb`; full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). **BC-5.39.001 cluster-3 LOCAL streak: 2/3 → 3/3 — CONVERGED, CASCADE CLOSED** (cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 code CONVERGED @ `2dd39bbb`, ready for per-story delivery (demo-recorder → push → pr-manager PR cycle → merge), pending human GO for delivery OR pause.** Refs: D-1204, D-1203, D-1202, D-1201, D-1200, D-1199, O-C3-P14-001, S-25.02, BC-1.18.008 v1.8, S-12.09, S-12.10, S-12.11, S-12.12, `2dd39bbb`. STATE.md v10.29→v10.30. | S-25.02 F4 | 2026-09-10 |
+
