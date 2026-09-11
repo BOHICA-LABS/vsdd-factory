@@ -8419,3 +8419,52 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 ### §8. BC-5.39.001 streak
 
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-10 = CLEAN, streak 0/3 → 1/3 — FIRST CLEAN PASS** — zero blocking findings this burst; 2 LOW observations deferred (streak not reset) to NEW draft follow-up story S-12.12. Human directed drive-to-true-3-CLEAN past the 10-pass guardrail continues, LOCAL adversary only. **NEXT = fresh cluster-3 LOCAL adversary pass-11, fresh context, against the SAME frozen `8e2a37f4` code — code stays frozen through pass-12 so the streak legitimately reaches 3/3 on stable code. If pass-11 is also CLEAN, streak advances to 2/3.**
+
+## Session Resume Checkpoint (2026-09-10 — S2502-CLUSTER3-PASS11-STREAK-RESET; develop 0959e34b (PR #824 merged); main 51023185; merged_count 120; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on `feature/S-25.02-backfill` @ `2dd39bbb` (ADVANCED from `8e2a37f4`, comment-only fix). LOCAL BC-5.39.001 pass-11 = **BEHAVIORAL CLEAN — NOT CLEAN OVERALL, streak RESET**, 1 MEDIUM doc-staleness finding (F-C3-P11-001, 4th recurrence of the stale-transient-status-test-header class), LOCAL Claude adversary; FIXED same-burst via test-writer's exhaustive 8-site comment sweep. 2 LOW non-blocking observations (O-1/O-2) recorded, neither resets the streak alone. Streak **1/3 → 0/3, RESET**. S-12.09 (E-12 Engine Governance) escalated/PRIORITIZED per the 4th recurrence — still draft, no BC authored, no agent-prompt amendment landed. `pipeline:` stays **PAUSED**. **NEXT = fresh LOCAL adversary pass-12, fresh context, against the NEW frozen `2dd39bbb` code — the comment-fixed code is this restarted streak's new baseline, per the human's directive to drive to true 3-CLEAN, LOCAL adversary only.**
+> Prior checkpoint (S2502-CLUSTER3-PASS10-CLEAN-BOOKKEEPING, D-1200) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-10. Cycle v1.0-brownfield-backfill. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on branch `feature/S-25.02-backfill`, SHA ADVANCED `8e2a37f4`→`2dd39bbb`. LOCAL adversary pass-11 burst COMPLETE (D-1201) — LOCAL Claude adversary; ZERO behavioral/code defects, ONE MEDIUM doc-staleness finding (F-C3-P11-001). Adversary independently re-verified the full v1.8 behavioral contract end to end (recovery/heal/manifest, all 3 destructive-write read-backs, decision-log regex, boundary detection, preamble/per-shard-cap accounting, error-taxonomy parity, spec-internal consistency, POLICY-11 test integrity) — ALL conformant. F-C3-P11-001 is the 4th recurrence of the stale-transient-status-test-header class (D-1192/D-1194, S-12.09); FIXED same-burst via test-writer's exhaustive 8-site comment sweep (comment-only, 59 tests green). NO BC/spec content change; STORY-INDEX S-12.09 row note updated. NEXT = fresh LOCAL adversary pass-12 toward streak 1/3, on the NEW frozen `2dd39bbb` code.
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL cluster-3 streak = **0/3 — RESET** (pass-1 not clean, all 7 in-scope findings fixed; pass-2 not clean, all 4 in-scope findings fixed; pass-3 not clean, all 3 in-scope findings fixed; pass-4 CODE CLEAN but NOT CLEAN OVERALL, 1 spec-internal MEDIUM fixed; pass-5 NOT CLEAN, 1 LOW finding fixed; pass-6 NOT CLEAN, 2 HIGH + 1 MEDIUM fixed, FIRST CROSS-VENDOR pass; pass-7 NOT CLEAN, 1 HIGH + 1 MEDIUM fixed, LOCAL Claude adversary; pass-8 NOT CLEAN, 2 MEDIUM fixed, LOCAL Claude adversary; pass-9 NOT CLEAN, 2 MEDIUM fixed, LOCAL Claude adversary, both doc-only; pass-10 CLEAN, zero blocking findings, FIRST CLEAN PASS, streak 0/3 → 1/3; pass-11 **BEHAVIORAL CLEAN, NOT CLEAN OVERALL** — 1 MEDIUM doc-staleness finding (F-C3-P11-001), FIXED same-burst — **streak 1/3 → 0/3, RESET**, pass-10's clean result voided). Per BC-5.39.001, any non-LOW finding resets the streak regardless of behavioral cleanliness. The restarted streak's new frozen baseline is `2dd39bbb` (the comment-fixed code) — passes 12-14 must run against this SAME code for the streak to legitimately reach literal 3/3. Cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED (separate track).
+
+### §3. In-flight (c)
+
+- `feature/S-25.02-backfill` @ `2dd39bbb` (PUSHED to origin) — **NEW FROZEN BASELINE, do not change until 3/3** (comment-only fix landed this burst; behavioral code unchanged and re-verified clean by passes 10+11). Full `cargo test --workspace --all-targets` green (59 `bc_1_18_008` tests); `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- NEXT = fresh LOCAL adversary pass-12, fresh context, against the NEW frozen `2dd39bbb` code.
+- No abandoned/stalled agents this burst.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+None NEW this burst — the streak reset is doc-hygiene only (behavioral code verified clean by both passes 10 and 11); no human convergence-disposition decision is needed, the cascade continues its human-authorized drive-to-3-CLEAN on the new baseline. One escalation note (not a blocker): S-12.09 (E-12 Engine Governance) should be prioritized given this is its 4th recurrence — see STATE.md Drift Items table, `[D-1201]`.
+
+### §5. WIP branches (e)
+
+`feature/S-25.02-backfill` @ `2dd39bbb` (pushed origin, ADVANCED this burst from `8e2a37f4` — comment-only, new FROZEN baseline through pass-14). `factory-artifacts` carries this burst's commit (standalone pass-11 report, INDEX.md pass-11 row + Convergence Status reset, decision-log.md D-1201, lessons.md `L-BB-D1201-...-4x-escalation`, STORY-INDEX S-12.09 row note update + version-sync, STATE.md advance, Drift Item) — STORY-INDEX v4.460→v4.461 changed this burst (row note update only); BC-INDEX / VP-INDEX / ARCH-INDEX all UNCHANGED.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active** (POL-14 promoted at D-1186, UNCHANGED this burst) + BC-1.18.007 v1.2/**008 v1.8**/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 and cluster-2's BC-1.18.006 are the 2 ACTIVE ones of the 9 (7 remain draft, clusters 3-7 not yet shipped; BC-1.18.008 stays v1.8, UNCHANGED this burst — behavioral-clean pass, no BC amendment). BC-INDEX **v5.81** (2,006 BCs, UNCHANGED this burst). VP-INDEX v3.13 (141 VPs, UNCHANGED this burst). STORY-INDEX **v4.461** (S-12.09 row note update only — 4th recurrence + priority-bump flag; 25 epics; S-25.02 v3.9 UNCHANGED; status ready, cluster-1 + cluster-2 DELIVERED/MERGED, cluster-3 IN PROGRESS; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; S-12.09 draft, PRIORITIZED; S-12.10 + S-12.11 + S-12.12 draft stubs, E-12, no BC authored yet). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md v1.13 (UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`0959e34b29a41a1b064ff1c7ec62096e94a31c7e`** (PR #824 squash-merged, base `fff5e4cc`). merged_count **120**. UNCHANGED this burst.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED this burst.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD. Carries this D-1201 commit (standalone pass-11 report, INDEX.md cluster-3 pass-11 row, decision-log.md D-1201, lessons.md entry, STORY-INDEX row note update, STATE.md advance), now on the branch.
+- `feature/S-25.02-backfill`: **IN PROGRESS, PUSHED** @ `2dd39bbb` (cluster-3, mechanism-A backfill) — **NEW FROZEN baseline this burst, through pass-14** (comment-only fix, behavioral code unchanged). Full code gate GREEN; 0 tests RED.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-11 = BEHAVIORAL CLEAN, NOT CLEAN OVERALL, streak 1/3 → 0/3 — RESET** — 1 MEDIUM doc-staleness finding this burst (F-C3-P11-001, 4th recurrence), FIXED same-burst via an exhaustive comment sweep; behavioral code independently re-verified clean by both passes 10 and 11. Human directed drive-to-true-3-CLEAN past the 10-pass guardrail continues on the new `2dd39bbb` baseline, LOCAL adversary only, guardrail waived. **NEXT = fresh cluster-3 LOCAL adversary pass-12, fresh context, against the NEW frozen `2dd39bbb` code — code stays frozen through pass-14 so the restarted streak legitimately reaches 3/3 on stable code. If pass-12 is CLEAN, streak advances to 1/3.**
