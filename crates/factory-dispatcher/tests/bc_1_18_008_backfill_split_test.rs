@@ -2554,15 +2554,20 @@ fn test_BC_1_18_008_P3002_run_backfill_split_aborts_when_artifact_stem_unrecogni
 
 // ---------------------------------------------------------------------------
 // P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): predicate
-// over-match decoys. `is_lesson_h2_record_heading`'s `"LESSON (D-"` /
-// `"RECURRENCE NOTE (D-"` branches and `is_pass_fix_burst_heading`'s
-// `" Fix Burst"` suffix check both currently use a bare
-// `starts_with`/prefix match rather than the Record-Boundary Marker
-// Table's own full regex (`^## LESSON \(D-[0-9]+\)` /
-// `^### Pass-[0-9]+ Fix Burst\b`) -- neither requires digits to actually
+// over-match decoys. A fresh-context adversarial pass-3 review found
+// `is_lesson_h2_record_heading`'s `"LESSON (D-"` / `"RECURRENCE NOTE (D-"`
+// branches and `is_pass_fix_burst_heading`'s `" Fix Burst"` suffix check
+// both used a bare `starts_with`/prefix match rather than the
+// Record-Boundary Marker Table's own full regex (`^## LESSON \(D-[0-9]+\)` /
+// `^### Pass-[0-9]+ Fix Burst\b`) -- neither required digits to actually
 // follow `D-`, nor a word boundary immediately after `Burst`, so a heading
-// that merely SHARES the marker's own leading substring (without matching
-// its full documented shape) is misdetected as a genuine record boundary.
+// that merely SHARED the marker's own leading substring (without matching
+// its full documented shape) was misdetected as a genuine record boundary.
+// The fix: `is_lesson_h2_record_heading` now delegates its paren-marker
+// branches to `is_digit_tagged_paren_marker`, which requires one-or-more
+// ASCII digits between the prefix and the closing `)`; `is_pass_fix_burst_heading`
+// now checks that the character immediately after `"Burst"` (if any) is a
+// non-word character, enforcing the regex's `\b` word boundary.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -2570,8 +2575,9 @@ fn test_BC_1_18_008_P3003_record_boundary_offsets_lessons_rejects_lesson_marker_
     // Marker table regex: `^## LESSON \(D-[0-9]+\)` -- REQUIRES one-or-more
     // ASCII digits immediately after `D-`. `## LESSON (D-foo)` (non-digit
     // suffix) and `## LESSON (D-)` (no suffix at all) both share the bare
-    // `"LESSON (D-"` prefix the current implementation checks via
-    // `starts_with`, but neither is a genuine `D-NNN`-tagged lesson record.
+    // `"LESSON (D-"` prefix, but neither is a genuine `D-NNN`-tagged lesson
+    // record, so `is_digit_tagged_paren_marker`'s digit-length check must
+    // reject both.
     let real_lesson = "## LESSON (D-1065) — a genuine, digit-tagged lesson record\n";
     let decoy_non_digit = "## LESSON (D-foo) — not a real D-NNN ID, must not be a boundary\n";
     let decoy_empty = "## LESSON (D-) — no digits at all, must not be a boundary\n";
@@ -2799,9 +2805,12 @@ fn test_BC_1_18_008_P5001_run_backfill_split_empty_content_and_empty_offsets_sti
 // The three tests below drive the BC's own verified counterexample
 // (`A = "## Checkpoint\nx\n"`, 16 bytes; `shard_cap_bytes = 16`) end-to-end
 // through the real, public `run_mechanism_a_backfill_split` entry point --
-// no internal struct is hand-constructed, since `ShardIndex` does not yet
-// expose a typed `backfill_manifest` field; the manifest's own presence is
-// pinned separately below at the raw-TOML level. This file's own doc
+// no internal struct is hand-constructed: `ShardIndex` itself carries no
+// typed `backfill_manifest` field, since the manifest is instead published
+// as its own independent `[backfill_manifest]` TOML table
+// ([`read_backfill_manifest`]/`BackfillManifestWrapper` in `shard_manager.rs`);
+// the manifest's own presence is pinned separately below at the raw-TOML
+// level. This file's own doc
 // comment (top of file) governs the discipline followed here: each test
 // names the BC clause it pins and the real-world shape that motivated it,
 // never a live claim about its own current pass/fail status.
@@ -3729,9 +3738,10 @@ fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_write_receives_disk_read_ba
     // tests above establish against `write_atomic`'s own deterministic
     // sibling temp-file naming convention -- this time targeting
     // `canonical_path` itself, since `heal_or_confirm_already_migrated`'s
-    // own write is a `write_atomic_bytes(canonical_path, ...)` call using
-    // the EXACT SAME underlying `write_atomic` primitive as sealed shard
-    // writes. This IS reachable at the public `run_mechanism_a_backfill_split`
+    // own write is a `write_and_read_back(canonical_path, ...)` call, whose
+    // write half goes through the EXACT SAME underlying `write_atomic`
+    // primitive as sealed shard writes. This IS reachable at the public
+    // `run_mechanism_a_backfill_split`
     // entry point with no source change: re-invoking it against a confirmed
     // DANGEROUS window exercises the heal path (and therefore the heal's own
     // write) automatically.
@@ -3801,10 +3811,10 @@ fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_write_receives_disk_read_ba
         "Postcondition 6(c)/Invariant 4's F-C3-P7-001 extension: the heal's own destructive write \
          to the canonical file MUST receive a FRESH post-hoc disk read-back confirming \
          `(length, SHA-256) == (final_bytes, final_sha256)` before reporting the heal complete -- \
-         an in-memory-only confidence in `write_atomic`'s own return value (the current gap this \
-         test pins) cannot detect a write that landed corrupted bytes on disk. Got Ok(_) over \
-         on-disk bytes that do NOT match the manifest-verified final content ({} bytes, expected \
-         {}): {:?}",
+         an in-memory-only confidence in `write_atomic`'s own return value (insufficient on its \
+         own; this is the class of gap this test pins) cannot detect a write that landed \
+         corrupted bytes on disk. Got Ok(_) over on-disk bytes that do NOT match the \
+         manifest-verified final content ({} bytes, expected {}): {:?}",
         on_disk.len(),
         expected_final.len(),
         on_disk
@@ -3831,14 +3841,18 @@ fn test_BC_1_18_008_FC3P7001_run_backfill_split_heal_write_receives_disk_read_ba
 // ORDINARY, first-time/uninterrupted completion of the canonical-truncate
 // write is a destructive, source-overwriting write structurally identical
 // in kind to the DANGEROUS-window heal write the F-C3-P7-001 extension above
-// already governs -- but as of this writing `run_mechanism_a_backfill_split`
-// (`shard_manager.rs`) issues its `write_atomic_bytes(canonical_path,
-// &current_partition.bytes, ...)` call and immediately returns
-// `Ok(Migrated { .. })` with NO subsequent disk read-back at all, unlike its
-// sibling `heal_or_confirm_already_migrated` entry point. A write that
-// silently truncates, partially flushes, or otherwise lands corrupted bytes
-// on disk during this ordinary completion is therefore currently
-// undetectable at migration time.
+// already governs. The finding: at the time it was raised,
+// `run_mechanism_a_backfill_split` (`shard_manager.rs`) issued a bare
+// `write_atomic_bytes(canonical_path, &current_partition.bytes, ...)` call
+// and immediately returned `Ok(Migrated { .. })` with NO subsequent disk
+// read-back at all, unlike its sibling `heal_or_confirm_already_migrated`
+// entry point -- a write that silently truncated, partially flushed, or
+// otherwise landed corrupted bytes on disk during this ordinary completion
+// was therefore undetectable at migration time. BC-1.18.008 v1.8 closed this
+// gap: the happy-path write now routes through the SAME shared
+// `write_and_read_back` primitive `heal_or_confirm_already_migrated` uses,
+// verified against the Backfill Recovery Manifest's `(final_bytes,
+// final_sha256)` pair, returning `E-SHD-013` on any read-back mismatch.
 //
 // The two tests below reuse the EXACT SAME real, non-simulated disk race
 // (`spawn_temp_file_corruptor`, defined above for the F-C3-P6-002 sealed-shard
@@ -3898,15 +3912,16 @@ fn test_BC_1_18_008_FC3P8002_EC013_run_backfill_split_happy_path_canonical_write
     // Load-bearing fault-injection test for local adversarial pass-8 finding
     // F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
     // happy-path canonical-truncate write", Invariant 5, EC-013). This test
-    // MUST fail today: `run_mechanism_a_backfill_split`'s happy-path
-    // `write_atomic_bytes(canonical_path, &current_partition.bytes, ..)`
-    // call (Postcondition 5 step (ii)) has no post-hoc disk read-back at
-    // all, so it reports `Ok(Migrated { .. })` unconditionally, even when
-    // the race below lands corrupted bytes on disk before the rename. It
-    // would also fail if the read-back step were ever removed or downgraded
-    // back to an in-memory-only check once added -- it genuinely
-    // distinguishes "read-back verified" from "no read-back," not merely a
-    // renamed/asserted-only paper-fix.
+    // pins the fix: `run_mechanism_a_backfill_split`'s happy-path write
+    // (Postcondition 5 step (ii)) routes through the shared
+    // `write_and_read_back` primitive, so a FRESH post-hoc disk read-back
+    // against the Backfill Recovery Manifest's `(final_bytes, final_sha256)`
+    // pair must catch the race below landing corrupted bytes on disk before
+    // the rename and abort with `E-SHD-013`, rather than reporting
+    // `Ok(Migrated { .. })` unconditionally. It would fail if the read-back
+    // step were ever removed or downgraded back to an in-memory-only check
+    // -- it genuinely distinguishes "read-back verified" from "no
+    // read-back," not merely a renamed/asserted-only paper-fix.
     let a = b"## Checkpoint\nx\n".to_vec(); // 16 bytes
     let mut original_content = a.clone();
     original_content.extend_from_slice(&a);
@@ -3960,9 +3975,10 @@ fn test_BC_1_18_008_FC3P8002_EC013_run_backfill_split_happy_path_canonical_write
          non-recovery completion of Postcondition 5 step (ii)'s canonical-truncate write MUST \
          receive a FRESH post-hoc disk read-back confirming `(length, SHA-256) == (final_bytes, \
          final_sha256)` before reporting the migration complete -- an in-memory-only confidence \
-         in `write_atomic`'s own return value (the current gap this test pins) cannot detect a \
-         write that landed corrupted bytes on disk. Got Ok(_) over on-disk bytes that do NOT \
-         match the manifest-verified final content ({} bytes, expected {}): {:?}",
+         in `write_atomic`'s own return value (insufficient on its own; this is the class of gap \
+         this test pins) cannot detect a write that landed corrupted bytes on disk. Got Ok(_) \
+         over on-disk bytes that do NOT match the manifest-verified final content ({} bytes, \
+         expected {}): {:?}",
         on_disk.len(),
         expected_final.len(),
         on_disk
