@@ -10,21 +10,21 @@
 //!
 //! The `FrontmatterChangelogArray` trigger-fired branch in `shard_manager.rs`
 //! and `rotate_changelog_at` in `last-amended-migrate/src/rotate.rs` are both
-//! fully implemented. All tests in this file pass GREEN against the current
-//! implementation, with the single exception noted in EC-008 below.
+//! fully implemented. All 10 tests in this file pass GREEN against the current
+//! implementation.
 //!
-//! # Static / always-GREEN tests
+//! # Always-passing tests (below-threshold and pure-logic paths)
 //!
-//! Two tests were GREEN-by-design even during the Red Gate phase and remain
-//! GREEN post-implementation:
+//! Two tests exercise paths that never enter the rotation branch and therefore
+//! pass regardless of rotation-logic changes:
 //!
 //! * `test_BC_1_18_009_AC015_EC002_CTV3_below_n_continues_without_rotation`:
-//!   tests the below-threshold `Continue` path — never reaches the rotation
-//!   branch. Correct before and after implementation.
+//!   tests the below-threshold `Continue` path (item count < N=50); the
+//!   rotation branch is not taken.
 //!
 //! * `test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim`:
-//!   tests the pure string-template `build_b1_block_reason` helper. Correct
-//!   before and after implementation.
+//!   tests the pure string-template `build_b1_block_reason` helper — zero
+//!   branching, no I/O.
 //!
 //! # BC ambiguity / Postcondition 2 step 3 verbatim text
 //!
@@ -409,19 +409,14 @@ async fn test_BC_1_18_009_AC015_CTV1_over_n_write_dispatch_rotates_and_blocks() 
 
 // ---------------------------------------------------------------------------
 // AC-015 / EC-002 / CTV #3 — Below-threshold Continue
-// GREEN-BY-DESIGN: the existing stub already returns Continue for item counts
-// below N=50 (the todo!() is inside the `if item_count_trigger_fires` branch
-// which is NOT taken for below-threshold dispatches).
+// The gate returns Continue when item count < N=50; the rotation branch is
+// never taken for below-threshold dispatches.
 // ---------------------------------------------------------------------------
 
 /// AC-015, EC-002, CTV #3: `BC-INDEX.md` at 10 items, N=50. The item-count
 /// trigger does NOT fire (`10 + 1 = 11 <= 50`). The gate returns `Continue`
 /// and the agent's own original call is allowed to proceed unmodified.
 /// No rotation takes place; the archive file is NOT created.
-///
-/// GREEN-BY-DESIGN: tests the existing Continue fallthrough that is NOT behind
-/// the todo!() stub (the stub is only reached when the trigger fires). This
-/// test must remain GREEN after implementation.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC015_EC002_CTV3_below_n_continues_without_rotation() {
     let dir = tempfile::tempdir().unwrap();
@@ -680,8 +675,8 @@ async fn test_BC_1_18_009_AC015_EC007_CTV2_amortized_cadence_24_continues_then_r
 /// payload). This test validates the CORRECT retry path; the stale-payload
 /// hazard is outside the gate's responsibility.
 ///
-/// GREEN-BY-DESIGN: the gate sees 26 items (< N=50) and returns Continue
-/// without hitting the todo!() stub.
+/// The gate sees 26 items (< N=50) and returns `Continue` — the rotation
+/// branch is not taken for below-threshold item counts.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC015_CTV5_post_rotation_correct_retry_continues() {
     let dir = tempfile::tempdir().unwrap();
@@ -813,10 +808,10 @@ async fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_no_history_loss()
 /// exclusively agent-side tooling (per ADR-049 §Decision 2), never called by
 /// the gate itself. This is a load-bearing, CI-enforceable static check.
 ///
-/// GREEN-BY-DESIGN: the static check passes regardless of the `todo!()` stub
-/// state, because `prepend_changelog_item` was never referenced in
-/// `shard_manager.rs` in the first place (confirmed by the F1 delta analysis
-/// §A Verified-Current-State Greps). Must remain GREEN after implementation.
+/// `prepend_changelog_item` has never appeared in `shard_manager.rs`
+/// (confirmed by the F1 delta analysis §A Verified-Current-State Greps and
+/// by the fully-implemented B1 handler). This static scan enforces that
+/// invariant stays true as the codebase evolves.
 ///
 /// Note: VP-126 also requires "no reimplemented rotation/trim/validate/write
 /// logic other than a call into `rotate_changelog_at`" in the B1 handler.
@@ -845,7 +840,7 @@ fn test_BC_1_18_009_AC015_INV1_VP126_zero_prepend_changelog_item_callsites_in_sh
 
 // ---------------------------------------------------------------------------
 // AC-015 — `build_b1_block_reason` message format pinned verbatim
-// GREEN-BY-DESIGN (pure string template, zero branching)
+// Pure string template, zero branching — tests the exact BC-prescribed text.
 // ---------------------------------------------------------------------------
 
 /// AC-015: Pins `build_b1_block_reason`'s output byte-for-byte against
@@ -857,9 +852,7 @@ fn test_BC_1_18_009_AC015_INV1_VP126_zero_prepend_changelog_item_callsites_in_sh
 /// divergence, F-C2-P5-002/F-C2-P6-002): asserts the FULL string verbatim, not
 /// just individual substrings.
 ///
-/// GREEN-BY-DESIGN: `build_b1_block_reason` is a pure, zero-branching string
-/// template function with a real implementation provided directly by the
-/// stub-architect. Must remain GREEN after implementation.
+/// `build_b1_block_reason` is a pure, zero-branching string template function.
 #[test]
 fn test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim() {
     // Use a canonical archive path matching the gate's expected sibling path
