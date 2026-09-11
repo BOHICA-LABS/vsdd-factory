@@ -55,10 +55,10 @@
 //! EC-016/EC-017/idempotency/crash-atomicity.
 
 use factory_dispatcher::shard_manager::{
-    MechanismABackfillError, MechanismABackfillOutcome, MechanismABackfillPartition, ShardEntry,
-    ShardIndex, ShardShape, mechanism_a_backfill_already_migrated,
-    mechanism_a_partition_for_backfill, mechanism_a_record_boundary_offsets,
-    mechanism_a_verify_backfill_content_preserved,
+    BackfillManifest, MechanismABackfillError, MechanismABackfillOutcome,
+    MechanismABackfillPartition, ShardEntry, ShardIndex, ShardIndexEntry, ShardShape, execute_roll,
+    mechanism_a_backfill_already_migrated, mechanism_a_partition_for_backfill,
+    mechanism_a_record_boundary_offsets, mechanism_a_verify_backfill_content_preserved,
     mechanism_a_verify_backfill_per_shard_cap_preserved,
     mechanism_a_verify_backfill_record_counts_preserved, mechanism_a_write_and_verify_sealed_shard,
     run_mechanism_a_backfill_split,
@@ -575,12 +575,33 @@ fn test_BC_1_18_008_INV3_backfill_already_migrated_true_when_shard_index_already
     let dir = tempfile::tempdir().unwrap();
     let canonical_path = dir.path().join("decision-log.md");
     std::fs::write(&canonical_path, "post-backfill current content").unwrap();
-    // A shard-index already exists (EC-016's own "shard-index IS still
-    // created, even with zero [[shard]] entries" registered state counts as
-    // migrated too).
+    // BC-1.18.008 v1.9 Invariant 3 (F-C3-P9-004, BLOCKING): bare shard-index-
+    // FILE existence is NEVER sufficient evidence of a completed backfill —
+    // only a POPULATED `backfill_manifest` field is. A well-formed
+    // shard-index (EC-016's own "shard-index IS still created, even with
+    // zero [[shard]] entries" registered state) with its Manifest populated
+    // is the genuine "already migrated" shape this test now pins.
+    let index = ShardIndex {
+        schema_version: 1,
+        artifact_stem: "decision-log".to_string(),
+        current_shard: "decision-log.md".to_string(),
+        shard_cap_bytes: 49_152,
+        max_single_record_bytes: 16_384,
+        safety_margin_bytes: 8_192,
+        practical_fuel_ceiling: 8_000_000,
+        worst_case_fuel_per_byte: 106.36,
+        retention_count: 10,
+        backfill_manifest: Some(BackfillManifest {
+            original_bytes: 30,
+            original_sha256: "0".repeat(64),
+            final_bytes: 30,
+            final_sha256: "0".repeat(64),
+        }),
+        shards: Vec::new(),
+    };
     std::fs::write(
         dir.path().join("decision-log.shard-index.toml"),
-        "schema_version = 1\n",
+        toml::to_string(&index).expect("the fixture ShardIndex must serialize"),
     )
     .unwrap();
 
@@ -589,8 +610,62 @@ fn test_BC_1_18_008_INV3_backfill_already_migrated_true_when_shard_index_already
 
     assert!(
         result,
-        "Invariant 3: a pre-existing shard-index for this artifact means the backfill-split has \
-         already run — the idempotency short-circuit must detect this"
+        "Invariant 3: a pre-existing shard-index whose backfill_manifest field is POPULATED for \
+         this artifact means the backfill-split has already run — the idempotency short-circuit \
+         must detect this"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_INV3_backfill_already_migrated_false_when_shard_index_exists_without_manifest()
+{
+    // BC-1.18.008 v1.9 Invariant 3's Composability clause (F-C3-P9-004,
+    // BLOCKING, EC-015): a shard-index may exist, with real sealed shards,
+    // purely because BC-1.18.006's ordinary per-write roll mechanism sealed
+    // it — the mandatory one-time backfill-split for this artifact may
+    // never have run at all. Bare index/shard existence must NOT be
+    // mistaken for "already migrated" when no Manifest is present.
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    std::fs::write(&canonical_path, "content since the last roll").unwrap();
+    let index = ShardIndex {
+        schema_version: 1,
+        artifact_stem: "decision-log".to_string(),
+        current_shard: "decision-log.md".to_string(),
+        shard_cap_bytes: 49_152,
+        max_single_record_bytes: 16_384,
+        safety_margin_bytes: 8_192,
+        practical_fuel_ceiling: 8_000_000,
+        worst_case_fuel_per_byte: 106.36,
+        retention_count: 10,
+        backfill_manifest: None,
+        shards: vec![ShardIndexEntry {
+            seq: 1,
+            path: "decision-log.0001.md".to_string(),
+            sealed_at: "2026-01-01T00:00:00Z".to_string(),
+            bytes_at_seal: 50_000,
+            sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
+        }],
+    };
+    std::fs::write(
+        dir.path().join("decision-log.shard-index.toml"),
+        toml::to_string(&index).expect("the fixture ShardIndex must serialize"),
+    )
+    .unwrap();
+
+    let result = mechanism_a_backfill_already_migrated(&canonical_path, "decision-log").expect(
+        "checking migration state against a rolled-but-not-yet-backfilled artifact must \
+                 not error",
+    );
+
+    assert!(
+        !result,
+        "Invariant 3/Composability clause (EC-015): an index with real sealed shards but NO \
+         backfill_manifest means only an ordinary roll has occurred, never the mandatory backfill \
+         — this must report NOT already migrated"
     );
 }
 
@@ -4032,5 +4107,295 @@ fn test_BC_1_18_008_FC3P8002_EC013_run_backfill_split_happy_path_canonical_write
         canonical_after_retry, on_disk,
         "an AMBIGUOUS disposition MUST NOT write anything to the canonical file -- it must \
          remain exactly as the corruption race left it, pending operator investigation"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// BC-1.18.008 v1.9 Postcondition 3's Composability clause (F-C3-P9-004,
+// BLOCKING) -- EC-014/EC-015: a mandatory one-time backfill-split composing
+// with BC-1.18.006's ordinary per-write roll mechanism, in BOTH possible
+// orderings. Fresh-eyes PR review on PR #831 (BLOCKING-1) found the
+// Backfill Recovery Manifest was originally a side-channel `[backfill_manifest]`
+// TOML table maintained outside the shared `ShardIndex` struct -- every
+// function that loads, mutates, and re-serializes a `ShardIndex` as a whole
+// (`publish_shard_index_update`'s ongoing roll, both self-heal paths)
+// silently dropped that table on its first write after a backfill, and a
+// roll-before-backfill index (real sealed shards, no Manifest) was
+// misread as "already migrated" by the old bare-existence idempotency
+// check, permanently failing loud with `E-SHD-011` for an artifact that
+// was never actually corrupted. Both defects are structurally closed by
+// promoting `backfill_manifest` to an ordinary `ShardIndex` field
+// (Postcondition 3's Schema-location correction) and by keying Invariant
+// 3's idempotency check on `backfill_manifest.is_some()` rather than bare
+// index/shard existence.
+// ---------------------------------------------------------------------------
+
+/// SHA-256 content hash of `bytes`, hex-encoded -- a local, test-file-only
+/// mirror of `shard_manager`'s own private `sha256_hex` helper (not part of
+/// this crate's public API), used here only to compute the SAME encoding
+/// the published `BackfillManifest`'s `original_sha256`/`final_sha256`
+/// fields carry, so this file's EC-014/EC-015 tests can assert on them
+/// directly without depending on a private production helper.
+fn test_sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P9004_EC015_run_backfill_split_after_prior_roll_appends_shards_and_publishes_manifest()
+ {
+    // EC-015: "BC-1.18.006's ordinary per-write roll seals content for one
+    // of the four mandatory backfill artifacts BEFORE the mandatory
+    // one-time backfill-split has ever run for that artifact (the
+    // roll-before-backfill ordering -- expected in practice)." Simulated
+    // here by calling `execute_roll` directly against the canonical file
+    // BEFORE any backfill invocation, exactly as BC-1.18.006's own reactive
+    // roll mechanism would have done against real over-cap content.
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    let entry = flat_entry("decision-log", 70);
+
+    // Step 1: an ORDINARY roll fires against this artifact first -- the
+    // mandatory backfill has never run yet, so the resulting shard-index
+    // carries real sealed shards but NO `backfill_manifest`.
+    let pre_backfill_roll_content = synthetic_record(9); // 30 bytes, all '9'.
+    std::fs::write(&canonical_path, &pre_backfill_roll_content).unwrap();
+    let rolled_entry = execute_roll(&entry, &canonical_path, false)
+        .expect("the precondition roll must succeed")
+        .expect("the precondition roll must actually seal (non-empty canonical)");
+    assert_eq!(
+        rolled_entry.seq, 1,
+        "precondition: the roll must seal at seq=1 (first-ever seal for this artifact)"
+    );
+    assert!(
+        canonical_path
+            .parent()
+            .unwrap()
+            .join("decision-log.shard-index.toml")
+            .exists(),
+        "precondition: the roll must have published a shard-index"
+    );
+
+    // Step 2: the mandatory one-time backfill-split now runs for the FIRST
+    // time, against whatever content has accumulated in the canonical file
+    // SINCE the roll (Composability clause point 1) -- never against a
+    // reconstructed notion of "the full historical monolithic file".
+    let backfill_content = concat_records(&[1, 2, 3, 4, 5]); // 150 bytes.
+    std::fs::write(&canonical_path, &backfill_content).unwrap();
+    let boundaries = [0, 30, 60, 90, 120];
+
+    let outcome = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10).expect(
+        "EC-015: the backfill-split must succeed as a genuine first-ever run, never \
+                 misread the pre-existing rolled index as already migrated",
+    );
+    assert_eq!(
+        outcome,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 2,
+            archived_count: 0
+        },
+        "EC-015: the backfill must genuinely split the post-roll content (2 sealed shards + 1 \
+         fresh current file, same shape as an from-scratch run against this fixture)"
+    );
+
+    // The roll's OWN shard (seq=1) must be completely untouched.
+    let rolled_shard_bytes =
+        std::fs::read(dir.path().join("decision-log.0001.md")).expect("seq=1 must still exist");
+    assert_eq!(
+        rolled_shard_bytes, pre_backfill_roll_content,
+        "EC-015/Composability clause point 2: the pre-existing rolled shard entry must remain \
+         EXACTLY as BC-1.18.006's roll mechanism published it -- never renumbered, duplicated, or \
+         otherwise disturbed by the backfill that runs after it"
+    );
+
+    // The backfill's own newly-sealed shards must continue `seq` numbering
+    // from `existing_max_seq + 1 = 2`, never restart at 1 and collide with
+    // the roll's own seq=1 entry.
+    assert!(
+        dir.path().join("decision-log.0002.md").exists(),
+        "EC-015/Composability clause point 2: the backfill's first new sealed shard must be \
+         seq=2, continuing from the roll's existing_max_seq=1"
+    );
+    assert!(
+        dir.path().join("decision-log.0003.md").exists(),
+        "EC-015: the backfill's second new sealed shard must be seq=3"
+    );
+
+    let index_toml =
+        std::fs::read_to_string(dir.path().join("decision-log.shard-index.toml")).unwrap();
+    let index: ShardIndex = toml::from_str(&index_toml)
+        .expect("the published shard-index must deserialize as a well-formed ShardIndex");
+    assert_eq!(
+        index.shards.len(),
+        3,
+        "EC-015: the published index must carry the roll's own 1 pre-existing entry PLUS the \
+         backfill's 2 newly-sealed entries -- 3 total, none dropped or renumbered"
+    );
+    let seqs: Vec<u32> = index.shards.iter().map(|s| s.seq).collect();
+    assert_eq!(
+        seqs,
+        vec![1, 2, 3],
+        "EC-015: seq numbering must be contiguous across the roll-then-backfill boundary, with \
+         the roll's entry first (chronologically oldest) and the backfill's own entries \
+         continuing from existing_max_seq + 1"
+    );
+    assert_eq!(
+        index.shards[0].path, "decision-log.0001.md",
+        "EC-015: the roll's own entry's path must be preserved verbatim"
+    );
+
+    let manifest = index.backfill_manifest.expect(
+        "EC-015: the backfill-split must publish a Backfill Recovery Manifest on this genuine \
+         first-ever run, exactly as it would for an artifact with no prior roll at all",
+    );
+    assert_eq!(
+        manifest.original_bytes,
+        backfill_content.len() as u64,
+        "EC-015/Composability clause point 1: original_bytes must be computed from the canonical \
+         file's CURRENT content at invocation time (the post-roll backfill_content, 150 bytes) -- \
+         never from a reconstructed notion including the content the roll already sealed away"
+    );
+    assert_eq!(
+        manifest.original_sha256,
+        test_sha256_hex(&backfill_content),
+        "EC-015: original_sha256 must hash the SAME post-roll current content"
+    );
+    let final_partition = synthetic_record(5); // record 5 alone, 30 bytes.
+    assert_eq!(
+        manifest.final_bytes,
+        final_partition.len() as u64,
+        "EC-015: final_bytes must be the intended last partition's own length"
+    );
+    assert_eq!(
+        manifest.final_sha256,
+        test_sha256_hex(&final_partition),
+        "EC-015: final_sha256 must hash the intended last partition's own content"
+    );
+
+    let canonical_after = std::fs::read(&canonical_path).unwrap();
+    assert_eq!(
+        canonical_after, final_partition,
+        "EC-015: the canonical file must hold exactly the final partition's content after the \
+         backfill completes"
+    );
+}
+
+#[test]
+fn test_BC_1_18_008_FC3P9004_EC014_backfill_then_roll_then_backfill_manifest_survives_roll() {
+    // EC-014: "A successful backfill-split (Manifest published) is followed
+    // by an ORDINARY BC-1.18.006 per-write roll against the artifact's
+    // fresh post-backfill 'current' file." This test pins ONLY whether the
+    // Manifest field itself survives that intervening roll (it now
+    // unconditionally does, since `publish_shard_index_update` loads,
+    // mutates, and re-serializes the WHOLE `ShardIndex` struct of which
+    // `backfill_manifest` is an ordinary field) -- and that a SECOND
+    // backfill-split invocation afterward never regresses to the retired
+    // `MissingBackfillManifest` (`E-SHD-011` form (b)) failure mode, even
+    // though the canonical file has since moved on past the Manifest's own
+    // recorded `final_bytes`/`final_sha256` (an expected, correct AMBIGUOUS
+    // disposition once further rolls occur -- not a defect this test
+    // concerns).
+    let dir = tempfile::tempdir().unwrap();
+    let canonical_path = dir.path().join("decision-log.md");
+    let entry = flat_entry("decision-log", 70);
+
+    // Step 1: a genuine first-ever backfill-split, identical in shape to
+    // the already-covered INV3 idempotency fixture.
+    let original_content = concat_records(&[1, 2, 3, 4, 5]); // 150 bytes.
+    std::fs::write(&canonical_path, &original_content).unwrap();
+    let boundaries = [0, 30, 60, 90, 120];
+    let first = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10)
+        .expect("the first backfill run must succeed");
+    assert_eq!(
+        first,
+        MechanismABackfillOutcome::Migrated {
+            sealed_count: 2,
+            archived_count: 0
+        },
+        "precondition: the first run must actually migrate"
+    );
+
+    let index_path = dir.path().join("decision-log.shard-index.toml");
+    let manifest_before_roll: ShardIndex =
+        toml::from_str(&std::fs::read_to_string(&index_path).unwrap())
+            .expect("the post-backfill index must deserialize");
+    let manifest_before_roll = manifest_before_roll
+        .backfill_manifest
+        .expect("precondition: the first backfill run must publish a Manifest");
+
+    // Step 2: an ORDINARY roll fires against the fresh post-backfill
+    // "current" file (whatever content it holds right now -- the final
+    // partition the backfill just left there).
+    let rolled_entry = execute_roll(&entry, &canonical_path, false)
+        .expect("the intervening roll must succeed")
+        .expect("the intervening roll must actually seal (non-empty post-backfill canonical)");
+    assert_eq!(
+        rolled_entry.seq, 3,
+        "the intervening roll must continue seq numbering from the backfill's own existing_max_seq \
+         (2) -- landing at seq=3"
+    );
+
+    // The Manifest MUST survive this roll, byte-for-byte unchanged -- the
+    // defect this EC pins directly (F-C3-P9-004, BLOCKING).
+    let index_after_roll: ShardIndex =
+        toml::from_str(&std::fs::read_to_string(&index_path).unwrap())
+            .expect("the post-roll index must deserialize");
+    let manifest_after_roll = index_after_roll.backfill_manifest.expect(
+        "EC-014: the Backfill Recovery Manifest must survive an intervening ordinary roll -- \
+         pre-v1.9, the side-channel `[backfill_manifest]` table would be silently DROPPED by \
+         `publish_shard_index_update`'s re-serialization of the `ShardIndex` struct alone",
+    );
+    assert_eq!(
+        manifest_after_roll, manifest_before_roll,
+        "EC-014: the re-published shard-index's backfill_manifest field must read back \
+         byte-for-byte identical to what the original backfill published -- \
+         publish_shard_index_update loaded, mutated, and re-serialized the WHOLE ShardIndex \
+         struct, of which backfill_manifest is now an ordinary field"
+    );
+    assert_eq!(
+        index_after_roll.shards.len(),
+        3,
+        "EC-014: the roll must have appended its own new shard entry (seq=3) alongside the \
+         backfill's 2 pre-existing entries -- 3 total"
+    );
+
+    // Step 3: a SECOND backfill-split invocation must never regress to the
+    // retired `MissingBackfillManifest` failure -- the Manifest is present
+    // (just confirmed above), so `mechanism_a_backfill_already_migrated`
+    // correctly routes to `heal_or_confirm_already_migrated`'s own
+    // recovery-confirmation determination, which resolves to WHATEVER
+    // disposition the canonical file's current (post-roll) bytes actually
+    // support -- here, AMBIGUOUS, since the roll truncated the canonical
+    // file to empty, matching NEITHER the Manifest's `original_bytes`/
+    // `original_sha256` (150 bytes) NOR its `final_bytes`/`final_sha256`
+    // (30 bytes) -- itself the CORRECT, expected disposition once further
+    // rolls occur, per EC-014's own text, never a spurious
+    // `MissingBackfillManifest`.
+    let second = run_mechanism_a_backfill_split(&entry, &canonical_path, &boundaries, 10);
+    assert!(
+        second.is_err(),
+        "EC-014: the canonical file's post-roll content (now empty) matches neither manifest \
+         pair, so the second invocation must fail loud rather than silently re-migrate or report \
+         success. Got: {second:?}"
+    );
+    let err = second.unwrap_err();
+    assert!(
+        !matches!(err, MechanismABackfillError::MissingBackfillManifest { .. }),
+        "EC-014: pins the fix directly -- pre-amendment, the side-channel manifest would have \
+         been silently dropped by the intervening roll's re-serialization, and this SAME second \
+         invocation would have permanently failed loud with MissingBackfillManifest \
+         (`E-SHD-011` form (b)) for an artifact that was, in fact, correctly and completely \
+         migrated. Got: {err}"
+    );
+    let err_message = err.to_string();
+    assert!(
+        err_message.contains("E-SHD-011"),
+        "EC-014: the correct disposition here is the top-level AMBIGUOUS determination (the \
+         post-roll canonical file's (length, hash) matches neither recorded manifest pair) -- \
+         still E-SHD-011, but via Postcondition 5's ordinary three-way disposition list, never \
+         the residual MissingBackfillManifest sub-case: {err_message}"
     );
 }

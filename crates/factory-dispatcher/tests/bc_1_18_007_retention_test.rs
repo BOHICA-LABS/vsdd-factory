@@ -68,6 +68,11 @@ fn sample_index(
         practical_fuel_ceiling: 8_000_000,
         worst_case_fuel_per_byte: 106.36,
         retention_count,
+        // Sibling-site sweep (BC-1.18.008 v1.9, F-C3-P9-004): new
+        // `ShardIndex::backfill_manifest` field — this file's own fixtures
+        // are unconcerned with mechanism-A backfill and are otherwise
+        // unchanged.
+        backfill_manifest: None,
         shards,
     }
 }
