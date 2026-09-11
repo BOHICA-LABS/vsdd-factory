@@ -1,10 +1,9 @@
-wave: S-25.02-F4-C3 (E-25 mechanism-A backfill)
+wave: S-25.02-F4-C4 (E-25 mechanism-B1 rotation)
 stories:
   - id: S-25.02
     spec_files:
       - .factory/stories/S-25.02-artifact-sharding-layer2.md
-      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.007.md
-      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md
+      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.009.md
 arch_files:
   - .factory/stories/epics/E-25-validation-integrity.md
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md

@@ -13,7 +13,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
-input-hash: "25eab0a"
+input-hash: "76a3649"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null

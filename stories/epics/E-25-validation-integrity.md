@@ -26,7 +26,7 @@ inputs:
   - .factory/stories/S-25.01-dispatcher-indeterminate-outcome-layer1.md
   - .factory/stories/S-25.02-artifact-sharding-layer2.md
   - .factory/stories/S-25.03-bounded-validator-windows-layer3.md
-input-hash: "b8e3f20"
+input-hash: "96e621e"
 last_amended: "2026-08-30 (v1.0) — Initial authoring (story-writer; F3 story-decomposition burst, Feature Mode validation-integrity-layer1). E-25 HOLDING EPIC; 3 stories registered (S-25.01 active, S-25.02 backlog, S-25.03 backlog); CAP-041; ADR-047; BC-1.18.001–004 + BC-3.08.001 amendment."
 modified:
   - "v1.0 2026-08-30: Initial authoring"

@@ -1,201 +1,205 @@
-# PR #824 — Fresh-Eyes Review (S-25.02 cluster-2 "roll", BC-1.18.006 v1.11)
+# PR Review — #831 (S-25.02 cluster-3, mechanism-A backfill-split)
 
-**PR:** #824 — `S-25.02 cluster-2: artifact-sharding roll (BC-1.18.006 v1.11)`
-**Branch:** `feature/S-25.02-roll` → `develop`
-**Head reviewed:** `8d17ffc44f155763832d3afec142f8b0df0c7a44` (merge-base `fff5e4cc`)
-**Verdict:** **REQUEST_CHANGES** — 1 BLOCKING (external), 1 MAJOR, 5 MINOR, 2 NIT
-
-> Supersedes the cluster-1 (PR #818) review previously at this path; that review's full text is
-> preserved in this file's git history on `factory-artifacts` (commit `97e3c872`), matching the
-> per-story pr-review.md convention cluster-1 itself established. This review is for cluster-2
-> (PR #824), a distinct PR under the same story S-25.02.
-
-Reviewed against the actual current diff at the head SHA (`gh pr diff 824`, `git show <sha>:<path>`),
-including the 6 post-PR security-fix commits (`e67eb7ad`..`8d17ffc4`) — not against the fix-burst
-narrative or any prior review's claims. Finding #2 was reproduced empirically with throwaway probes
-(added, run, reverted; working tree confirmed clean). Posted to GitHub as a COMMENTED review plus a
-test-coverage addendum, because GitHub refuses `--request-changes` on the author's own PR ("Can not
-request changes on your own pull request"); the REQUEST_CHANGES verdict is stated in the body and
-needs a human/second account to convert into a formal blocking review if branch protection is to
-enforce it.
-
-**Scope reviewed:** 6 code/config files + 16 demo-evidence files. `crates/factory-dispatcher/`:
-`shard_manager.rs` (+6,012/−2,222; ~1,693 new production lines), `invoke.rs` (+227), `main.rs`
-(+86/−21), `executor.rs` (+23/−10), `Cargo.toml` (+10), new `tests/bc_1_18_006_roll_test.rs`
-(+2,108), plus `Cargo.lock` (+1). Test-to-production ratio ≈ 3:1.
+**Reviewer:** pr-reviewer (fresh-eyes, final pre-merge gate)
+**Head SHA reviewed:** `a5a801038f48850c1f89f19532a80d3ccff1364e`
+**Base:** `develop` | **Branch:** `feature/S-25.02-backfill`
+**Verdict: APPROVE** — 0 BLOCKING, 2 SUGGESTION, 3 NIT
 
 ---
 
-## Summary
+## What I verified (independently, not taken on trust)
 
-| # | Severity | Category | Finding |
-|---|---|---|---|
-| 1 | BLOCKING | dependency / CI | `cargo-host` red on both runners — merge gate unmet (root cause outside this diff) |
-| 2 | MAJOR | correctness | `write_exclusive` temp-path collision misreported as `E-SHD-009`; destroys a reclaimable 0-byte destination |
-| 3 | MAJOR | correctness / coverage | E-SHD-010 symlink guard absent AND untested on the Edit (~L1678) and MultiEdit (~L1748) arms |
-| 4 | MINOR | correctness | `reclaim_identity_still_safe`'s `File::open` can block indefinitely on a FIFO |
-| 5 | MINOR | description | PR body cites an orphaned commit SHA (`6cccf3a3`) not in HEAD (real one is `0ea79c2c`) |
-| 6 | MINOR | description | Demo README's 0-byte-reclaim prose is stale after SEC-001 + FIX-MED-1 |
-| 7 | MINOR | missing | `E-SHD-010` ships without an `error-taxonomy.md` entry and without a story anchor for the deferral |
-| 8 | MINOR | coverage | FIX-MED-1 TOCTOU re-check tested only at helper level, never through `publish_sealed_shard` |
-| 9 | NIT | correctness | `next_seal_seq`'s `max + 1` can overflow `u32` |
-| 10 | NIT | size | 8,847 / 2,253 diff, far over the 500-line guideline (mitigated by 3:1 test ratio) |
+This review re-derives its conclusions from the diff, the PR body, and locally executed
+evidence — not from the prior review cycle's records.
+
+**Build/test gates, executed locally at this HEAD:**
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Full crate suite | `cargo test -p factory-dispatcher` | **941 passed, 0 failed** |
+| Cluster-3 suites | `cargo test -p factory-dispatcher --test bc_1_18_008_backfill_split_test --test bc_1_18_007_retention_test` | **62 + 24 passed, 0 failed** |
+| Format | `cargo fmt --check --all` | clean (exit 0) |
+| Lint | `cargo clippy -p factory-dispatcher --all-targets -- -D warnings` | clean |
+| CI rollup | `gh pr view 831 --json statusCheckRollup` | 19 SUCCESS, 2 SKIPPED (release-branch guardrail, expected for a non-release branch) |
+
+**Checklist (8 items):**
+
+1. **Diff coherence — PASS.** All 43 files belong to S-25.02 cluster-3: two production manifests
+   (`sha2` workspace dep), `shard_manager.rs`, two new test files, and the per-AC demo-evidence
+   directory. No unrelated changes.
+2. **Description accuracy — PASS with a NIT** (see NIT-1: the Test Evidence table carries
+   pre-EC-014/EC-015 counts).
+3. **Test coverage — PASS.** Every new production function is reachable from at least one named
+   test. I spot-verified that the highest-risk paths are covered by *load-bearing* assertions, not
+   tautologies — see "Deep-dive" below.
+4. **Demo evidence — PASS.** `docs/demo-evidence/S-25.02/cluster-3-backfill-split/` contains 12
+   per-AC clips as real `.gif` + `.webm` pairs (280 KB–2.5 MB each, not `.txt` placeholders) plus
+   `.tape` sources, a 227-line `README.md` with the AC/EC → clip map and reproduction commands, and
+   a `suite-all-green` baseline. Error paths are recorded, not just happy paths: `E-SHD-011`
+   (AMBIGUOUS), `E-SHD-013` (post-write read-back failure), crash-atomicity restart, and the
+   per-shard-cap gate.
+5. **Commit quality — PASS.** Conventional format, `S-25.02` scope on every commit. The `wip(...)`
+   subjects in the middle of the chain are acceptable given this PR is squash-merged.
+6. **Diff size — NOTED (not a finding).** 8,268 additions is far over the 500-line flag threshold,
+   but 5,043 of those are tests, ~700 are demo tapes/README, and the 2,429-line production delta is
+   dominated by doc comments (this file's established convention). The genuine new logic is roughly
+   600 lines. Reviewed in full.
+7. **Missing changes — PASS.** AC-013 (mandatory one-time split, greedy boundary-preserving packing,
+   preamble handling, retention composition) and AC-014 (content preservation, record-count
+   preservation, per-shard-cap gate, crash atomicity, idempotency, DANGEROUS heal, read-back
+   verification) are each backed by named tests I observed passing.
+8. **Dependency status — PASS.** `#818` and `#824` are both MERGED, and `git log origin/develop`
+   confirms `fff5e4cc` (cluster-1) and `0959e34b` (cluster-2) are ancestors of this PR's base.
 
 ---
 
-## 1. [BLOCKING] CI is red on both runners — the PR's own "CI green" gate is unmet
+## Deep-dive on the highest-risk logic
 
-`gh pr checks 824` reports `cargo-host (ubuntu-latest)` and `cargo-host (macos-latest)` both **fail**,
-same step (`cargo test (workspace, all targets)`), same two tests:
+This is a *destructive, one-time, source-overwriting migration*. I concentrated on the paths where a
+defect is unrecoverable.
 
+**The prior cycle's BLOCKING finding is structurally closed, not paper-fixed.**
+`backfill_manifest: Option<BackfillManifest>` is now a real `ShardIndex` field. I confirmed the fix
+is structural by reading `publish_shard_index_update`: it does
+`load_shard_index(...).unwrap_or_else(|| ShardIndex { ... })`, mutates `index.shards`, and
+re-serializes the whole struct — so the Manifest survives every roll and both self-heal paths with
+no special-case preservation code. `test_BC_1_18_008_FC3P9004_EC014_backfill_then_roll_then_backfill_manifest_survives_roll`
+pins this against a real `execute_roll` and a real on-disk TOML round trip, and would fail under the
+retired side-channel design. `EC015` pins the composability direction (roll-before-backfill appends
+from `existing_max_seq + 1` and never misreads a manifest-less index as migrated).
+
+**TOML field ordering is safe.** All scalar `ShardIndex` fields are declared before the
+`backfill_manifest` table and the `[[shard]]` array-of-tables, so `toml::to_string` cannot hit the
+"values must be emitted before tables" failure. `skip_serializing_if = "Option::is_none"` preserves
+the pre-v1.9 on-disk shape when no backfill has run; `serde(default)` on the three new
+`ShardIndexEntry` fields keeps older indexes loading unchanged.
+
+**Partitioner (`mechanism_a_partition_for_backfill`) — content preservation holds by construction.**
+I traced every branch: the three preamble dispositions (fold / EC-007 overflow / EC-008 degenerate),
+the EC-002 oversized-record flush, the greedy cap flush, and the trailing flush. Every push is
+contiguous with `partition_start`, and `partition_start` advances monotonically from 0 to
+`content.len()`, so concatenation reproduces the original exactly. I checked the two subtractions
+that could underflow (`rec_end - rec_start`, `first_record_end - offsets[0]`) and both are guarded by
+`record_boundary_offsets_are_well_formed`, which is enforced on *both* entry paths (the `pub` fn's
+own F-003 guard and `run_mechanism_a_backfill_split`'s upfront MED-C check).
+
+**The `is_preamble_shard: partition.record_count == 0` discriminator is sound.** I verified that a
+zero-record partition can only be produced at `i == 0` (after an oversized-record flush,
+`partition_start == rec_start` on the next iteration, so the `partition_start < rec_start` guard
+suppresses an empty push). No mid-file zero-record partition is reachable.
+
+**The oracle cross-check is genuinely load-bearing.** The set-equality comparison against
+`mechanism_a_record_boundary_offsets` (rather than a union or a cardinality check) is the right fix
+for the tautology it replaces: under a union, an over-detecting caller list satisfies
+`|caller ∪ oracle| == |caller|` and both sides of the PC6(b) comparison stay equal while a spurious
+offset physically splits a record. The three disposition arms (empty-caller, unknown-stem,
+recognized-stem-no-markers) are each distinguished correctly and each fail loud where they should.
+
+**The DANGEROUS-window heal is safe.** The slice offset is derived solely from the Manifest
+(`original_bytes - final_bytes`), never from summing `bytes_at_seal`, and the slice is verified
+against `(final_bytes, final_sha256)` *before* any write and again by a fresh disk read-back
+*after*. `checked_sub`, `usize::try_from`, and `get(offset..)` all fail loud rather than panic. The
+SAFE check is evaluated before the DANGEROUS check, which correctly short-circuits the EC-016 case
+where `final_* == original_*` and avoids a spurious heal.
+
+**Error handling meets the project's production-grade bar.** I grepped the entire production delta:
+zero `unwrap()`, `expect()`, `panic!`, `todo!`, or `println!` outside doc comments. The SEC-831-02
+remediation is visible as the typed `ShardRetentionError::ArchivalIndexEntryVanished` variant
+replacing an invariant `.expect()`. `write_atomic_bytes` fails loud on non-UTF-8 rather than
+lossily substituting, which is the correct choice given PC6(a)'s byte-for-byte guarantee.
+
+---
+
+## Findings
+
+### SUGGESTION-1 — `retention_count` is silently reset in the roll-before-backfill path
+
+| Field | Value |
+|-------|-------|
+| Severity | suggestion |
+| Category | coherence |
+| Location | `crates/factory-dispatcher/src/shard_manager.rs`, `fresh_backfill_shard_index` / `run_mechanism_a_backfill_split` |
+
+In the EC-015 composability path, an index already exists (published by a prior BC-1.18.006 roll) and
+therefore already carries its own `retention_count`. `run_mechanism_a_backfill_split` reads
+`existing_shards` off that index but then rebuilds the whole index via
+`fresh_backfill_shard_index(entry, retention_count, all_shards)`, overwriting the persisted value
+with the caller-supplied parameter. BC-1.18.007 Invariant 2 makes `retention_count` the artifact's
+own independent value, never a global constant, so an operator who had lowered it for this artifact
+would see it silently reverted by the backfill.
+
+Suggested fix — carry the existing value forward when one is present:
+
+```rust
+let existing_index = load_shard_index(&index_path)...;
+let effective_retention = existing_index
+    .as_ref()
+    .map(|idx| idx.retention_count)
+    .unwrap_or(retention_count);
 ```
-panicked at crates/hook-plugins/validate-state-structure/src/lib.rs:2557:9:
-assertion `left == right` failed: real STATE.md banner claims 386 lines but actual count is 395
-```
 
-**Not caused by this PR's diff.** Verified: locally on this branch `cargo test --workspace
---all-targets` is 3091 passed / 0 failed (the two failing tests read the CI-mounted `.factory/`
-worktree, absent in my checkout). `develop`'s CI has been red for the last 5 consecutive runs
-(2026-09-05 → 2026-09-07), including at merge-base `fff5e4cc`. Root cause: `validate-state-structure`
-asserts against the live `.factory/STATE.md` banner `wc -l`, which is stale (386 vs 395).
+Not blocking: this mechanism has no production caller on this branch (activation is scoped to T-12),
+so no live index can be affected before that wiring lands.
 
-Flagged BLOCKING because the PR's Pre-Merge Checklist lists "CI green" and that gate is objectively
-unmet — not because the author introduced it. Route: `state-manager` (STATE.md banner reconcile on
-`factory-artifacts`). Worth escalating separately: `develop` has merged with a non-functional
-workspace-test gate for 3+ days, and coupling PR CI to a mutable external branch's content makes the
-signal non-hermetic.
+### SUGGESTION-2 — partial archival-move failure can orphan shard copies under `archive/`
 
-## 2. [MAJOR] `write_exclusive`'s temp-path collision is indistinguishable from a real sealed-shard collision
+| Field | Value |
+|-------|-------|
+| Severity | suggestion |
+| Category | coherence |
+| Location | `crates/factory-dispatcher/src/shard_manager.rs`, `archive_overflow_shards` (called from `run_mechanism_a_backfill_split` before the index publish) |
 
-**File:** `shard_manager.rs`, `write_exclusive` (~L2435) and `publish_sealed_shard` (~L2495).
+The archival loop performs `std::fs::rename` per shard and returns on the first failure. Because the
+index publish happens *after* the loop, a mid-loop failure leaves the already-renamed shards sitting
+under `archive/<stem>/` with no index entry describing them. A re-run then re-seals fresh shards at
+the same `seq` filenames at the cycle root, and a subsequent `WholeCorpusGlobScope::ArchiveInclusive`
+scan (POLICY-1's mandatory carve-out) would see both copies — double-counting IDs for append-only /
+uniqueness auditing.
 
-`write_exclusive` creates its temp file at a fully deterministic path `.{basename}.tmp-{pid}` with
-`create_new(true)` (O_EXCL). It returns a bare `io::Result<()>`, so `publish_sealed_shard` cannot
-tell "the temp path was occupied" from "the sealed destination was occupied" — and it assumes the
-latter, routing any `AlreadyExists` into the destination-collision / 0-byte-reclaim path.
+Suggested fix: on `ArchivalMoveFailed`, roll back the moves already performed in this pass (rename
+back to the sibling location) before returning, or sweep stale `archive/<stem>/` entries that the
+loaded index does not reference at the start of a backfill run.
 
-Reproduced with two throwaway probes (reverted; tree clean):
+Not blocking: this needs an I/O failure partway through the archival loop, and it falls in the same
+crash-recovery-robustness class as the SUGGESTION-2/3/4 items already adjudicated to T-12 on the
+grounds that the mechanism has no production caller yet. Flagging it so T-12 inherits it explicitly
+rather than rediscovering it.
 
-- **Probe A** — stale/planted temp file, no sealed shard on disk → `E-SHD-009: ... this seq already
-  has durable content on disk`, while `sealed exists = false`. Factually false, and self-perpetuating
-  (nothing removes the temp file).
-- **Probe B** — legitimately reclaimable 0-byte destination + stale temp file → the reclaim path
-  lstat'd the destination, passed `reclaim_identity_still_safe`, **unlinked the destination**, retried
-  `write_exclusive`, hit the same temp file, and failed. A failed op that nonetheless deleted a file —
-  contradicting the function's own "leave it byte-identical and untouched" contract.
+### NIT-1 — PR body's Test Evidence table carries stale counts
 
-No attacker required: `write_exclusive`'s cleanup line sits after two `?` operators
-(`write_all`/`sync_all`), so any `ENOSPC`/`EIO` leaks the temp file permanently. **Fix:** random
-nonce in the temp path (crate already uses `tempfile` in tests) and/or a typed error distinguishing
-temp-path-occupied from destination-exists; scope-guard the temp file so it is removed on every
-early return.
+The Test Evidence table states `59/59` for the cluster-3 test file and `938/938` for the full crate
+suite. Actual at this HEAD: **62** and **941** (the EC-014/EC-015 additions). The PR body's own
+opening paragraph already says "941/941 tests green", so the body is internally inconsistent.
+Worth a one-line edit before merge so the merged description matches reality.
 
-## 3. [MAJOR] E-SHD-010 symlink guard absent AND untested on the Edit/MultiEdit arms
+### NIT-2 — demo-evidence README baseline predates EC-014/EC-015
 
-**File:** `shard_manager.rs`, `shard_cap_gate_check`.
+`docs/demo-evidence/S-25.02/cluster-3-backfill-split/README.md` says "all 59" and
+"`59 passed; 0 failed`" for the `suite-all-green` baseline. The clips were recorded at `a1328c3f`,
+before the two regression tests landed at `1cce59b7`/`a5a80103`, so the README is accurate
+*as-recorded* but stale relative to HEAD. Either re-record the baseline clip or add a one-line note
+that it predates the EC-014/EC-015 additions. Per-AC coverage itself is complete and unaffected.
 
-The PR body says FIX-MED-2 was applied "at all 4 sites" — confirmed four `reject_canonical_symlink`
-callsites (Write ~L1645, `execute_roll` ~L2731, `self_heal_resume_from_truncate` ~L3061,
-`reconcile_post_write_replace_all_overcap` ~L3325). But the **Edit** arm (~L1678) and **MultiEdit**
-arm (~L1748) call `current_shard_bytes_flat(target_path)` — which uses `std::fs::metadata` (follows
-symlinks) — with no preceding guard. So two of three mutation-tool arms `stat()` through a symlinked
-canonical while only Write is guarded. `read_changelog_item_count`'s `File::open` (~L1244) is likewise
-unguarded and reads content.
+### NIT-3 — `sha256_hex` allocates a `String` per byte
 
-This path has **zero test coverage**: `test_FIXMED2_..._e_shd_010` (~L7846) exercises only the
-Write-arm backstop; there is no Edit or MultiEdit variant, so the asymmetry would not regress-fail.
-This is the missed-sibling-callsite pattern TD-VSDD-060 exists to catch, shipped without a pinning
-test — hence MAJOR rather than MINOR.
-
-Impact is bounded (if the leaked size trips the trigger, `execute_roll`'s guard at ~L2731 refuses
-loud, so no symlink-target bytes are ever sealed) — residual is info-exposure + guard asymmetry, not
-data loss. **Route:** implementer adds `reject_canonical_symlink` at ~L1678/~L1748 (or hoist it above
-the `match tool_kind` so all three arms inherit it); test-writer adds Edit + MultiEdit variants of
-the ~L7846 test.
-
-## 4. [MINOR] `reclaim_identity_still_safe` can block indefinitely on a FIFO
-
-**File:** `shard_manager.rs` (~L2633). `std::fs::File::open(path)` on a FIFO with no writer blocks
-forever, hanging the PreToolUse gate. Window is narrow (swap a FIFO between the `symlink_metadata`
-probe and this call), but the consequence is a stalled dispatch. **Fix:** on Unix, open with
-`O_NONBLOCK | O_NOFOLLOW` via `OpenOptionsExt::custom_flags` — also closes the residual symlink case
-the doc comment currently documents as unclosable. No new dependency.
-
-## 5. [MINOR] PR body cites a commit not in this PR
-
-"Deferred to F6" cites `6cccf3a3` as "this PR's own FIX-MED-1 commit"; it is **not an ancestor of
-HEAD** (`git merge-base --is-ancestor` → NO; parent `f874cd1e`). The in-HEAD FIX-MED-1 is `0ea79c2c`
-(parent `0f56530d`), identical subject line — `6cccf3a3` is an orphaned artifact of a discarded
-branch state. The Security Review table cites the correct SHA; the deferrals section should too.
-
-## 6. [MINOR] Demo README describes pre-security-fix behavior
-
-`docs/demo-evidence/S-25.02/cluster-2-roll/README.md`, EC-025 row, says the reclaim `"stat()`s
-once"`. As of SEC-001 the probe is `lstat` (non-dereferencing) and FIX-MED-1 adds an open-handle
-re-check before unlink. The recording is still valid (test unchanged, still passes); the prose
-describes the pre-fix mechanism. One-line update.
-
-## 7. [MINOR] `E-SHD-010` ships without a taxonomy entry or a deferral anchor
-
-Correctly routed to product-owner per the Agent Routing Table, but recorded as "flagged for a
-follow-up documentary pass" with **no story/wave anchor** — Canonical Principle Rule 3 requires a
-named future story so the deferral cannot get lost. Attach a real story ID, or have product-owner add
-the single table row in-scope.
-
-## 8. [MINOR] FIX-MED-1 TOCTOU re-check tested only at helper level
-
-Both tests (~L7973, ~L8008) call `reclaim_identity_still_safe` directly; no test drives the
-probe → concurrent-write → re-check → unlink path through `publish_sealed_shard` itself. The
-integration guarantee rests on inspection of the callsite (~L2564), not a test. This intersects
-Finding #2 — an integration-level test through `publish_sealed_shard` would likely have surfaced the
-temp-path-collision misattribution.
-
-## 9. [NIT] `next_seal_seq` arithmetic can overflow
-
-`...max().unwrap_or(0) + 1` on `seq: u32` panics in debug / wraps in release at `u32::MAX`.
-Practically unreachable; `checked_add(1)` → fail-loud error is one line and matches the module's
-discipline.
-
-## 10. [NIT] Diff size
-
-8,847 / 2,253 far over the 500-line guideline, but ≈3:1 test-to-production on a data-integrity path
-is the right trade. Noted so size is not mistaken for scope creep.
+`sha256_hex` builds the hex encoding via `.map(|byte| format!("{byte:02x}")).collect()`, allocating
+32 short `String`s per call. `write!` into a `String::with_capacity(64)` avoids that. Irrelevant to
+correctness and to any realistic hot path here; noted only because the helper is mirrored verbatim
+into the test file and will likely be copied again.
 
 ---
 
-## Verified clean (no rubber-stamp)
+## Why this is APPROVE and not REQUEST_CHANGES
 
-- **Diff coherence:** every changed file within `crates/factory-dispatcher/`,
-  `docs/demo-evidence/S-25.02/`, or `Cargo.lock`. No unrelated changes.
-- **Commit quality:** all 42 commits Conventional-Commits format, all carry the story ID, **no AI
-  attribution** in any commit body.
-- **Forbidden patterns:** no `println!`/`eprintln!`/`dbg!` in production code; no
-  `unwrap`/`expect`/`panic!`/`todo!`/`unimplemented!` in the non-test half of `shard_manager.rs`
-  (matches are inside comments only).
-- **Dependencies:** single new dep `last-amended-migrate` is workspace-internal, path-pinned,
-  justified inline vs ADR-051 §8 acyclicity. `Cargo.lock` gains one line, no new third-party packages.
-- **`main.rs` refactor:** `resolve_project_cwd` is a faithful extract of the pre-existing
-  `base_host_ctx.cwd` logic (same env var, empty-filter, canonicalize-with-fallback, `current_dir`
-  fallback); `SEC-004 TOCTOU ACCEPTED` rationale preserved. No behavior change for other plugins.
-- **Path resolution:** `invoke.rs` uses raw `file_path` for target + `cwd` join for config —
-  consistent with `executor.rs` and the harness's absolute-`file_path` invariant. Not a bug.
-- **Catch-point (i) disposition:** `reconcile_replace_all_overcap_if_qualifying` only
-  `tracing::warn!`s on failure — correct for a PostToolUse janitor that cannot block; catch point (ii)
-  fails loud on the next dispatch, so the condition is recoverable, not swallowed.
-- **Demo evidence:** 5 `.gif` + 5 `.webm` + 5 `.tape` + README, ≥1 per AC (AC-006 ×3, AC-007 ×2),
-  success and error paths both recorded, each `.tape` invokes a real `cargo test ... --exact
-  --nocapture`, all five named tests exist. Genuine recordings, not `.txt` placeholders.
-- **Security-fix coverage:** FIX-HIGH-1 → ~L7909, SEC-001 → ~L6645, SEC-002 → ~L3949/~L3982,
-  SEC-003 → ~L3809/~L3827, FIX-MED-2's four guarded sites → ~L7846/~L8026/~L8070/~L8104. No
-  `#[ignore]`, no `should_panic`, no tautological/over-mocked tests.
-- **Dependency PR:** cluster-1 (BC-1.18.005, PR #818) merged to develop, as claimed.
+The one mechanism that could cause irreversible data loss — the destructive canonical-truncate and
+its crash-recovery heal — is guarded at every destructive write site by a fresh post-hoc disk
+read-back verified against a durably-published, content-addressed Manifest, with a fail-loud
+AMBIGUOUS disposition that refuses to guess. The previously-found cross-mechanism defect is closed
+structurally (a real struct field carried by ordinary serde round-tripping) rather than by
+special-case preservation code, and is pinned by a regression test that exercises the real roll
+mechanism end-to-end on disk. The two SUGGESTIONs are narrow, both live behind the same
+no-production-caller boundary already adjudicated to T-12, and neither can affect a live artifact
+before that activation lands. The three NITs are documentation staleness and one cosmetic
+allocation.
 
----
-
-## Verdict
-
-**REQUEST_CHANGES.** Finding #2 (reproducible false `E-SHD-009` + destination deletion on a failed
-op) and Finding #3 (unguarded, untested symlink `stat()` on Edit/MultiEdit) are the substantive
-ones and should be fixed in-scope per the production-grade default. Finding #1 blocks merge
-mechanically but belongs to `state-manager`, independent of this branch. #4–#8 are worth closing
-in-scope; #9–#10 optional.
+**covered_sha:** `a5a801038f48850c1f89f19532a80d3ccff1364e`

@@ -2,7 +2,7 @@
 document_type: behavioral-contract
 level: L3
 version: "1.2"
-status: draft
+status: active
 producer: product-owner
 timestamp: 2026-09-06T00:00:00Z
 phase: F2
@@ -11,13 +11,13 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/architecture/decisions/ADR-047-indeterminate-outcome-model-durable-mutation-marker-next-advance-gate.md
   - .factory/specs/domain-spec/capabilities.md
-input-hash: "8721ef8"
+input-hash: "63e1688"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
 subsystem: "SS-01"
 capability: "CAP-043"
-lifecycle_status: draft
+lifecycle_status: active
 introduced: v1.0-brownfield-backfill
 modified: []
 deprecated: null

@@ -346,7 +346,7 @@ stories:
   - id: S-21.23
     status: draft
   - id: S-25.02
-    status: draft
+    status: partial
   - id: S-25.04
     status: draft
   - id: S-10.06

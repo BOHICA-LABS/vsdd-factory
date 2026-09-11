@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-11T01:14:34Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-backfill && cargo test -p factory-dispatcher --test bc_1_18_008_backfill_split_test 2>&1 | tail -60"}
+{"status":"pass","timestamp":"2026-09-11T12:41:43Z","command":"cargo test -p factory-dispatcher 2>&1 | grep -E \"^test result\" | awk -F'[ ;]' '{s+=$4} END {print \"TOTAL PASSED:\", s}'; echo \"--- failures ---\"; cargo test -p factory-dispatcher 2>&1 | grep -cE \"FAILED|panicked\""}
