@@ -523,6 +523,40 @@ fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOu
     }
 }
 
+/// Synthesize a `PluginOutcome` for a gate NON-BLOCKING `HookResult::Error`
+/// verdict — used exclusively for E-SHD-014 (counter-method divergence:
+/// `rotate_changelog_at` returned `mutated=false` after the item-count trigger
+/// fired).
+///
+/// E-SHD-014 MUST NOT block (BC-1.18.009 v1.6 Invariant Inv-5): blocking
+/// would create a permanent self-DoS retry loop — the retrying agent would
+/// re-fire the trigger indefinitely because the source file is unchanged.
+/// `exit_code: 1` (non-zero, non-blocking per the hook SDK contract) and
+/// `on_error: OnError::Continue` surface the diagnostic in
+/// `per_plugin_results` without setting `block_intent`. `exit_code != 0`
+/// satisfies the test's `assert_ne!(summary.exit_code, 0)` requirement while
+/// `block_intent = false` satisfies Inv-5.
+///
+/// All other error codes (EC-009, EC-011, EC-013, EC-019, B-2, E-SHD-004)
+/// remain fail-loud-blocking via [`shard_gate_error_outcome`].
+fn shard_gate_non_blocking_error_outcome(message: String, plugin_version: String) -> PluginOutcome {
+    let stdout = serde_json::json!({ "outcome": "error", "message": message }).to_string();
+    PluginOutcome {
+        plugin_name: "shard-cap-gate".to_string(),
+        plugin_version,
+        on_error: OnError::Continue,
+        result: PluginResult::Ok {
+            exit_code: 1,
+            stdout,
+            stderr: String::new(),
+            elapsed_ms: 0,
+            fuel_consumed: 0,
+        },
+        block_if_marker_fired: false,
+        block_if_marker_fields: None,
+    }
+}
+
 /// Run every tier and return the aggregated summary.
 ///
 /// `shard_gate_precheck_result` (MAJOR-3, S-25.02 cluster-2 PR #824
@@ -590,12 +624,18 @@ fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOu
 /// short-circuit path, over this function's own return value directly) has
 /// something to find. See `shard_gate_block_outcome`'s doc comment for the
 /// full rationale.
+/// Returns `(outcomes, block_intent, non_blocking_error_fired)`.
+///
+/// `non_blocking_error_fired` is `true` when E-SHD-014 fired — the caller
+/// should map that to `exit_code = 1` (non-zero, non-blocking). All other
+/// error outcomes set `block_intent = true` → `exit_code = 2` as before.
 pub fn shard_gate_verdict_outcomes(
     verdict: Option<vsdd_hook_sdk::HookResult>,
     plugin_version: String,
-) -> (Vec<PluginOutcome>, bool) {
+) -> (Vec<PluginOutcome>, bool, bool) {
     let mut outcomes: Vec<PluginOutcome> = Vec::new();
     let mut block_intent = false;
+    let mut non_blocking_error_fired = false;
     if let Some(shard_gate_result) = verdict {
         match shard_gate_result {
             // Gate fail-loud: config validation error (EC-009/EC-011/EC-013)
@@ -603,9 +643,24 @@ pub fn shard_gate_verdict_outcomes(
             // Serialized as {"outcome":"error","message":"..."} so VP-131's test
             // and extract_reason_from_outcome can distinguish a genuine gate
             // failure from a successful rotation's block-and-retry outcome.
+            //
+            // EXCEPTION — E-SHD-014 (BC-1.18.009 v1.6 Inv-5): counter-method
+            // divergence (mutated=false after trigger fired) MUST NOT block.
+            // Blocking creates a permanent self-DoS retry loop (the source is
+            // unchanged → the agent re-triggers endlessly). Routes to
+            // shard_gate_non_blocking_error_outcome → exit_code=1, no
+            // block_intent. All other error codes keep the blocking path.
             vsdd_hook_sdk::HookResult::Error { message } => {
-                block_intent = true;
-                outcomes.push(shard_gate_error_outcome(message, plugin_version));
+                if message.starts_with("E-SHD-014:") {
+                    non_blocking_error_fired = true;
+                    outcomes.push(shard_gate_non_blocking_error_outcome(
+                        message,
+                        plugin_version,
+                    ));
+                } else {
+                    block_intent = true;
+                    outcomes.push(shard_gate_error_outcome(message, plugin_version));
+                }
             }
             // Successful rotate_changelog_at (BC-1.18.009 PC2) OR successful
             // execute_roll (BC-1.18.006 PC1): gate returns the retry instruction.
@@ -617,7 +672,7 @@ pub fn shard_gate_verdict_outcomes(
             vsdd_hook_sdk::HookResult::Continue => {}
         }
     }
-    (outcomes, block_intent)
+    (outcomes, block_intent, non_blocking_error_fired)
 }
 
 pub async fn execute_tiers(
@@ -631,10 +686,11 @@ pub async fn execute_tiers(
     // tier loop below (Invariant 1) — see [`shard_gate_verdict_outcomes`]'s
     // doc comment for the full translation rationale (shared with
     // `main::run`'s MINOR-N1 empty-tier-groups short-circuit).
-    let (mut all_outcomes, mut block_intent) = shard_gate_verdict_outcomes(
-        shard_gate_precheck_result,
-        inputs.base_host_ctx.plugin_version.clone(),
-    );
+    let (mut all_outcomes, mut block_intent, non_blocking_error_fired) =
+        shard_gate_verdict_outcomes(
+            shard_gate_precheck_result,
+            inputs.base_host_ctx.plugin_version.clone(),
+        );
 
     for tier in tiers {
         let mut tier_outcomes = execute_tier(&inputs, tier).await;
@@ -682,7 +738,16 @@ pub async fn execute_tiers(
 
     TierExecutionSummary {
         total_elapsed_ms: started.elapsed().as_millis() as u64,
-        exit_code: if block_intent { 2 } else { 0 },
+        // exit_code priority: block (2) > non-blocking error (1) > continue (0).
+        // E-SHD-014 sets non_blocking_error_fired=true, not block_intent, so it
+        // yields exit_code=1 (non-zero, non-blocking — Inv-5 compliance).
+        exit_code: if block_intent {
+            2
+        } else if non_blocking_error_fired {
+            1
+        } else {
+            0
+        },
         block_intent,
         per_plugin_results: all_outcomes,
     }

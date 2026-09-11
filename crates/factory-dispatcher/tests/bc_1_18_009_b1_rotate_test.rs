@@ -916,3 +916,161 @@ fn test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim() {
          green, F-C2-P5-002/F-C2-P6-002; this pins the FULL string)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// EC-008 / Invariant 5 (v1.6 hardening) — counter-divergence guard:
+// trigger fires but rotate_changelog_at returns mutated=false → Error(E-SHD-014)
+// ---------------------------------------------------------------------------
+
+/// Write `BC-INDEX.md` at `path` with `n_items` items in YAML INLINE (flow)
+/// sequence form: `changelog: [1, 2, 3, ..., n_items]`.
+///
+/// This deliberately diverges from canonical `  - date: / change:` block form
+/// to exercise EC-008's counter-divergence scenario:
+///
+/// * `read_changelog_item_count` (serde_norway path): sees a valid YAML
+///   `Vec<Value>` with `n_items` elements → count = `n_items` → trigger fires
+///   when `n_items >= N`.
+/// * `parse_frontmatter`'s line-scan path (`changelog_sequence_bounds`):
+///   requires `line == "changelog:\n"` (exact match with NO inline value) —
+///   `"changelog: [1, 2, ...]\n"` does NOT match → `None` → `extract_changelog`
+///   falls through to `(true, Vec::new())` → `changelog_items_raw.len() = 0`.
+/// * After implementation: `rotate_changelog_at` calls `parse_frontmatter`,
+///   gets `total = 0 <= keep_recent = 25` → returns `RotationReport {
+///   mutated: false, items_moved: 0 }`.
+/// * EC-008 guard: gate MUST return `Error(E-SHD-014)`, never `Block`.
+fn write_bc_index_inline_seq_fixture(path: &std::path::Path, n_items: usize) {
+    let items: Vec<String> = (1..=n_items).map(|i| i.to_string()).collect();
+    let inline = items.join(", ");
+    let content = format!(
+        "---\n\
+         document_type: behavioral-contract-index\n\
+         version: \"1.0\"\n\
+         last_amended: \"2026-09-01 (v1.0) — test fixture\"\n\
+         changelog: [{inline}]\n\
+         ---\n\n\
+         # BC-INDEX Inline-Sequence Test Fixture (EC-008 counter-divergence)\n"
+    );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("create inline fixture parent");
+    }
+    std::fs::write(path, &content).expect("write inline-sequence fixture");
+}
+
+/// EC-008, Invariant 5 (v1.6 hardening): the item-count trigger fires
+/// (`read_changelog_item_count` serde count = 50 >= N = 50) but
+/// `rotate_changelog_at` returns `Ok(report)` with `report.mutated == false`
+/// (counter-method divergence: `parse_frontmatter`'s line-scan counts 0 items
+/// in the YAML-inline-sequence fixture). The gate MUST return
+/// `HookResult::Error` with a message beginning `"E-SHD-014:"` — NEVER
+/// `HookResult::Block`. Emitting Block on a `mutated=false` report would send
+/// the retrying agent into a permanent self-DoS block+retry loop on
+/// `BC-INDEX.md` for the session (BC-1.18.009 v1.6 Invariant 5).
+///
+/// The frontmatter must be byte-identical to the pre-attempt state (no partial
+/// rotation was written).
+///
+/// No test seam is required: the divergence is induced naturally by the
+/// YAML-inline-sequence fixture format (counter method difference between
+/// serde_norway deserialization and the `  - date:` line-scan in
+/// `changelog_sequence_bounds`). The implementer MUST add an explicit
+/// `if !report.mutated { return HookResult::Error(E-SHD-014...) }` check
+/// inside the FrontmatterChangelogArray trigger-fired branch in
+/// `shard_manager.rs` — the current `todo!()` stub has no such check.
+///
+/// RED NOW: `todo!()` stub panics at `shard_manager.rs` before any check runs.
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_not_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("BC-INDEX.md");
+
+    // Inline-sequence fixture: serde counts N=50 items (trigger fires);
+    // line-scan counts 0 (changelog_sequence_bounds exact-match fails for
+    // inline form) → rotate_changelog_at returns mutated=false after
+    // implementation.
+    write_bc_index_inline_seq_fixture(&target, N_CAP as usize);
+
+    let pre_attempt_content =
+        std::fs::read_to_string(&target).expect("EC-008: read pre-attempt fixture content");
+
+    let summary = run_b1_gate(
+        dir.path(),
+        &target,
+        "Edit",
+        serde_json::json!({"old_string": "test", "new_string": "test-new"}),
+    )
+    .await;
+
+    // EC-008 / Invariant 5: the gate MUST NOT return Block when rotate_changelog_at
+    // returns mutated=false — it must return Error(E-SHD-014).
+    assert_ne!(
+        summary.exit_code, 0,
+        "EC-008/Inv-5: a mutated=false result after the trigger fires must produce \
+         a non-zero exit_code (Error outcome)"
+    );
+    assert!(
+        !summary.block_intent,
+        "EC-008/Inv-5: block_intent must NOT be set when the outcome is Error(E-SHD-014) — \
+         only Block outcomes set block_intent; this is an Error, never a Block \
+         (Invariant Inv-5: Block on mutated=false is the self-DoS loop)"
+    );
+
+    // Verify an Error outcome (not a Block outcome) is reported.
+    let mut found_error = false;
+    let mut error_message = String::new();
+    for outcome in &summary.per_plugin_results {
+        if let PluginResult::Ok { stdout, .. } = &outcome.result {
+            if stdout.contains(r#""outcome":"error""#) {
+                found_error = true;
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout)
+                    && let Some(msg) = value.get("message").and_then(|m| m.as_str())
+                {
+                    error_message = msg.to_string();
+                }
+            }
+            // Explicitly assert no Block outcome was emitted
+            assert!(
+                !stdout.contains(r#""outcome":"block""#),
+                "EC-008/Inv-5: a Block outcome MUST NOT be emitted when rotate_changelog_at \
+                 returns mutated=false — emitting Block would send the retrying agent into a \
+                 permanent self-DoS retry loop (BC-1.18.009 v1.6 Invariant Inv-5)"
+            );
+        }
+    }
+    assert!(
+        found_error,
+        "EC-008/Inv-5: an Error outcome (\"outcome\":\"error\") MUST be present in \
+         per_plugin_results when rotate_changelog_at returns mutated=false. Got: {:?}",
+        summary.per_plugin_results
+    );
+
+    // BC-1.18.009 v1.6 Postcondition 6 + Invariant 5: error code must be
+    // E-SHD-014 (NOT E-SHD-004 which is the rotate_changelog Err-arm failure;
+    // NOT E-SHD-001 which belongs to BC-1.18.006's mechanism-A).
+    assert!(
+        error_message.starts_with("E-SHD-014:"),
+        "EC-008/Inv-5: error message must start with \"E-SHD-014:\" — the counter-divergence \
+         guard uses BC-1.18.009 v1.6's own distinct error code; NEVER E-SHD-004 (the Err-arm \
+         rotate_changelog invocation failure code) or E-SHD-001 (BC-1.18.006 mechanism-A code). \
+         Got: {error_message}"
+    );
+
+    // Frontmatter byte-identity: the inline-sequence content is unchanged
+    // (no partial rotation wrote to disk — the guard fires before any mutation).
+    let post_attempt_content =
+        std::fs::read_to_string(&target).expect("EC-008: read post-attempt fixture content");
+    assert_eq!(
+        post_attempt_content, pre_attempt_content,
+        "EC-008/Inv-5: the frontmatter must be byte-identical to the pre-attempt state — \
+         no partial rotation was written to disk (the Error(E-SHD-014) guard fires before \
+         any file mutation)"
+    );
+
+    // No archive file must have been created.
+    let archive_path = dir.path().join("BC-INDEX-changelog-archive.md");
+    assert!(
+        !archive_path.exists(),
+        "EC-008/Inv-5: the archive file must NOT be created when the guard fires \
+         (mutated=false means no rotation happened)"
+    );
+}

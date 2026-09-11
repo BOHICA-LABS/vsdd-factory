@@ -2135,6 +2135,31 @@ pub fn shard_cap_gate_check(
                     keep_recent,
                     last_amended_migrate::MigrationMode::Apply,
                 ) {
+                    // BC-1.18.009 EC-008 / Invariant Inv-5 counter-divergence
+                    // guard (E-SHD-014): the item-count trigger uses serde
+                    // `read_changelog_item_count` to decide whether to fire;
+                    // `rotate_changelog_at` uses `parse_frontmatter` line-scan
+                    // internally to count items and decide whether to actually
+                    // rotate. If the two methods disagree (e.g. inline-sequence
+                    // vs. block-sequence YAML form), the trigger fires but
+                    // `rotate_changelog_at` returns `mutated=false`. Returning
+                    // `HookResult::Block` in that case would send the retrying
+                    // agent into a permanent self-DoS loop — `Error(E-SHD-014)`
+                    // breaks the loop and asks for manual inspection.
+                    // This arm MUST precede `Ok(_report) => Block`.
+                    Ok(report) if !report.mutated => HookResult::Error {
+                        message: format!(
+                            "E-SHD-014: rotate_changelog_at returned \
+                             Ok(mutated=false) after item-count trigger fired \
+                             for \"{}\": trigger (serde \
+                             read_changelog_item_count) counts >= N but \
+                             rotate_changelog_at line-scan (parse_frontmatter) \
+                             found total <= keep_recent — counter-method \
+                             divergence; manual inspection of {} required",
+                            entry.artifact_stem,
+                            target_path.display()
+                        ),
+                    },
                     Ok(_report) => HookResult::Block {
                         reason: build_b1_block_reason(
                             &entry.artifact_stem,
