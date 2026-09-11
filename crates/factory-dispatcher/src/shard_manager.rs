@@ -4240,6 +4240,21 @@ pub enum ShardRetentionError {
         #[source]
         source: io::Error,
     },
+
+    /// Invariant guard for [`archive_overflow_shards`]: a `seq` collected
+    /// from `index.shards` at the start of the archival pass was no longer
+    /// present in `index.shards` when this pass went to look it back up by
+    /// position. The loop body only mutates matched entries in place (never
+    /// removes them) between the collection step and this lookup, so this
+    /// is provably unreachable today — but the production-grade default
+    /// requires failing loud via a typed error rather than panicking via
+    /// `.expect()` on an invariant a future refactor could silently break.
+    #[error(
+        "E-SHD-002: shard archival invariant violated for artifact_stem \"{artifact_stem}\" — \
+         shard seq {seq} was collected from index.shards at the start of this archival pass but \
+         is no longer present in index.shards"
+    )]
+    ArchivalIndexEntryVanished { artifact_stem: String, seq: u32 },
 }
 
 /// Fail-loud retention/compaction errors surface to the dispatcher's
@@ -4352,7 +4367,10 @@ pub fn archive_overflow_shards(
             .shards
             .iter()
             .position(|entry| entry.seq == seq)
-            .expect("seq collected from index.shards must still be present in index.shards");
+            .ok_or_else(|| ShardRetentionError::ArchivalIndexEntryVanished {
+                artifact_stem: index.artifact_stem.clone(),
+                seq,
+            })?;
         let sealed_filename = index.shards[idx].path.clone();
         let old_path = shard_sibling_path(canonical_path, &sealed_filename);
         let new_path = archived_shard_path(cycle_root, &index.artifact_stem, &sealed_filename);
