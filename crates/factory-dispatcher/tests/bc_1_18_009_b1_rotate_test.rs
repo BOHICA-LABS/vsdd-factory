@@ -6,34 +6,25 @@
 //! `shard_cap_precheck` -> `shard_cap_gate_check` wiring identical to the one
 //! `bc_1_18_006_roll_test.rs` uses for the `Flat` shape.
 //!
-//! # BC-5.38.001 Red Gate discipline — RED (tests fail against todo!() stubs)
+//! # Implementation state — GREEN
 //!
 //! The `FrontmatterChangelogArray` trigger-fired branch in `shard_manager.rs`
-//! is a `todo!()` stub as of the stub-architect's cluster-4 burst.
-//! `rotate_changelog_at` in `last-amended-migrate/src/rotate.rs` is likewise
-//! a `todo!()` stub. Every test below that dispatches on a file with >= N=50
-//! `changelog:` items panics at the `todo!()` call site and fails. This is
-//! the expected Red Gate state: tests assert the REAL, post-implementation
-//! expected outcome (never `#[should_panic]`) and will pass GREEN only once
-//! the implementer replaces those stubs with real logic.
+//! and `rotate_changelog_at` in `last-amended-migrate/src/rotate.rs` are both
+//! fully implemented. All tests in this file pass GREEN against the current
+//! implementation, with the single exception noted in EC-008 below.
 //!
-//! # GREEN-BY-DESIGN exceptions
+//! # Static / always-GREEN tests
 //!
-//! Two tests in this file are GREEN in the Red Gate phase (expected and
-//! documented per the F1 delta analysis §5.4 GREEN-BY-DESIGN exception):
+//! Two tests were GREEN-by-design even during the Red Gate phase and remain
+//! GREEN post-implementation:
 //!
 //! * `test_BC_1_18_009_AC015_EC002_CTV3_below_n_continues_without_rotation`:
-//!   tests that a dispatch on a file with < N=50 items returns `Continue`. The
-//!   existing stub already reaches `HookResult::Continue` via the fallthrough
-//!   at the bottom of the `FrontmatterChangelogArray` arm (the `todo!()` is
-//!   inside the `if item_count_trigger_fires` branch which is NOT taken for
-//!   below-threshold calls). This is correct, pre-existing behavior.
+//!   tests the below-threshold `Continue` path — never reaches the rotation
+//!   branch. Correct before and after implementation.
 //!
 //! * `test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim`:
-//!   tests the `build_b1_block_reason` helper (a pure string template with
-//!   zero branching, real implementation provided directly by the stub-architect
-//!   per BC-5.38.002 GREEN-BY-DESIGN criteria). GREEN now; must remain GREEN
-//!   post-implementation.
+//!   tests the pure string-template `build_b1_block_reason` helper. Correct
+//!   before and after implementation.
 //!
 //! # BC ambiguity / Postcondition 2 step 3 verbatim text
 //!
@@ -294,10 +285,6 @@ fn exact_block_reason(summary: &factory_dispatcher::executor::TierExecutionSumma
 /// items and appends the 25 overflow items to the SINGLE evergreen archive
 /// `BC-INDEX-changelog-archive.md`, then the gate returns `HookResult::Block`
 /// with the Postcondition 2 step-3 retry instruction.
-///
-/// RED NOW: `shard_manager.rs`'s `FrontmatterChangelogArray` trigger-fired
-/// branch is `todo!()` — panics at `shard_cap_precheck` call site before any
-/// assertions are reached.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC015_CTV1_over_n_edit_dispatch_rotates_and_blocks() {
     let dir = tempfile::tempdir().unwrap();
@@ -382,8 +369,6 @@ async fn test_BC_1_18_009_AC015_CTV1_over_n_edit_dispatch_rotates_and_blocks() {
 /// AC-015, CTV #1 (Write variant): same contract as the Edit variant above but
 /// for a `Write` tool call — BC-1.18.009 Postcondition 2 applies identically
 /// regardless of whether the originating call is an `Edit` or `Write`.
-///
-/// RED NOW: same `todo!()` panic as the Edit variant.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC015_CTV1_over_n_write_dispatch_rotates_and_blocks() {
     let dir = tempfile::tempdir().unwrap();
@@ -491,9 +476,6 @@ async fn test_BC_1_18_009_AC015_EC002_CTV3_below_n_continues_without_rotation() 
 /// NEVER `E-SHD-001` (which is BC-1.18.006's distinct mechanism-A error code,
 /// Postcondition 6 CORRECTED fix-burst pass-3 F-P3-001). The frontmatter's
 /// `changelog:` sequence must be left byte-identical to its pre-rotation state.
-///
-/// RED NOW: `todo!()` stub panics before the rotation attempt reaches any
-/// real error-handling path.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC016_VP131_CTV4_rotation_failure_returns_e_shd_004_state_preserved() {
     let dir = tempfile::tempdir().unwrap();
@@ -604,8 +586,6 @@ async fn test_BC_1_18_009_AC016_VP131_CTV4_rotation_failure_returns_e_shd_004_st
 /// EC-007 explicitly states this re-trigger is "NOT a defect — the SAME
 /// single-actor block-and-retry contract applies identically to this
 /// re-trigger as to the first-ever rotation."
-///
-/// RED NOW: step 1 panics at `todo!()`.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC015_EC007_CTV2_amortized_cadence_24_continues_then_retriggers() {
     let dir = tempfile::tempdir().unwrap();
@@ -750,8 +730,6 @@ async fn test_BC_1_18_009_AC015_CTV5_post_rotation_correct_retry_continues() {
 /// invocation APPENDS to the SAME single destination file — no prior appended
 /// content is ever overwritten, truncated, or deleted by a subsequent
 /// rotation."
-///
-/// RED NOW: first `run_b1_gate` call (at N=50 items) panics at `todo!()`.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_no_history_loss() {
     let dir = tempfile::tempdir().unwrap();
@@ -979,14 +957,10 @@ fn write_bc_index_inline_seq_fixture(path: &std::path::Path, n_items: usize) {
 /// No test seam is required: the divergence is induced naturally by the
 /// YAML-inline-sequence fixture format (counter method difference between
 /// serde_norway deserialization and the `  - date:` line-scan in
-/// `changelog_sequence_bounds`). The implementer MUST add an explicit
-/// `if !report.mutated { return HookResult::Error { message: "E-SHD-014:..." } }`
-/// check inside the FrontmatterChangelogArray trigger-fired branch in
-/// `shard_manager.rs`.
-///
-/// RED NOW: current shard_manager.rs B1 branch returns HookResult::Block
-/// (ignoring mutated=false), so block_intent=false AND outcome="block" —
-/// both wrong per this test.
+/// `changelog_sequence_bounds`). The `FrontmatterChangelogArray` trigger-fired
+/// branch in `shard_manager.rs` returns a BLOCKING
+/// `HookResult::Error { message: "E-SHD-014: ..." }` (on_error=Block →
+/// exit_code=2, block_intent=true) when `report.mutated == false`.
 #[tokio::test(flavor = "current_thread")]
 async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_error_variant_still_blocking()
 {

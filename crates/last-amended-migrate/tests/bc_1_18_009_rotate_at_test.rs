@@ -7,11 +7,10 @@
 //! These tests call `rotate_changelog_at` directly (not through the gate) to
 //! verify the thin-wrapper contract in isolation from the dispatcher layer.
 //!
-//! # BC-5.38.001 Red Gate discipline — RED
+//! # Implementation state — GREEN
 //!
-//! `rotate_changelog_at` is a `todo!()` stub. Both tests below will panic at
-//! the `todo!()` call site before any assertion is reached. This is the
-//! expected Red Gate state.
+//! `rotate_changelog_at` is fully implemented. Both tests below pass GREEN
+//! against the current implementation.
 //!
 //! # What these tests verify
 //!
@@ -110,8 +109,6 @@ fn count_items_in_file(path: &Path) -> usize {
 /// `archive_path` parameter and falls through to `resolve_archive_path`
 /// instead (BC-1.18.009 Architecture Anchor: "the dispatcher's B1 handler
 /// pre-computes the FIXED, non-cycle, BC-INDEX-sibling path").
-///
-/// RED NOW: `todo!()` stub panics.
 #[test]
 fn test_BC_1_18_009_rotate_changelog_at_uses_explicit_archive_path_not_cycle_derived() {
     let dir = tempfile::tempdir().unwrap();
@@ -200,8 +197,6 @@ fn test_BC_1_18_009_rotate_changelog_at_uses_explicit_archive_path_not_cycle_der
 /// `test_BC_1_18_009_AC016_VP125_single_evergreen_archive_no_history_loss` in
 /// `bc_1_18_009_b1_rotate_test.rs`. Both must pass for VP-125 to be fully
 /// covered.
-///
-/// RED NOW: first `rotate_changelog_at` call panics at `todo!()`.
 #[test]
 fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_accumulates_across_rotations() {
     let dir = tempfile::tempdir().unwrap();
