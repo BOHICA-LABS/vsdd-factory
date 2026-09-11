@@ -10005,3 +10005,80 @@ Refs: D-1202, D-1201, D-1200, S-25.02, BC-1.18.008 v1.8, BC-1.18.007 v1.2, O-C3-
 
 | D-1202 | D-1202-S2502-CLUSTER3-PASS12-CLEAN-BOOKKEEPING | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-12 = CLEAN — zero blocking findings (streak restart, 2nd clean pass overall).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-12.md`. Adversary independently re-verified the full v1.8 contract (recovery three-way classification, manifest-authoritative slice-and-verify, all 3 destructive-write read-backs, `[backfill_manifest]` persistence, decision-log regex + boundary fidelity, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 emissions, spec-internal consistency, POLICY-11 test integrity) as spec-conformant end to end. 1 LOW non-blocking observation recorded — O-C3-P12-001 (`MechanismABackfillError::MissingBackfillManifest`/`E-SHD-011` form (b) fail-loud path untested; code verified correct on inspection; manifest-less state cannot arise in this one-time migration) — deferred (not fixed in-scope) to the EXISTING follow-up story **S-12.12** (E-12 Engine Governance) as an additional coverage-gap sub-item, per human direction to keep code frozen through pass-14. Because the observation is LOW/non-blocking, the streak is NOT reset. No BC/AC/EC/VP/code/story change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `2dd39bbb`; full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). **BC-5.39.001 cluster-3 LOCAL streak: 0/3 → 1/3 — FIRST CLEAN PASS OF THE RESTARTED STREAK** (cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-13, fresh context, against the SAME frozen `2dd39bbb` code — code stays frozen through pass-14 to legitimately reach 3/3 on stable code.** Refs: D-1202, D-1201, D-1200, S-25.02, BC-1.18.008 v1.8, O-C3-P12-001, S-12.12, `2dd39bbb`. STATE.md v10.27→v10.28. | S-25.02 F4 | 2026-09-10 |
 
+## D-1203
+
+**D-1203-S2502-CLUSTER3-PASS13-CLEAN-BOOKKEEPING**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1202 (this file, immediately above). D-1203 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-13 = CLEAN — zero blocking findings** 2026-09-10 (LOCAL Claude adversary + state-manager;
+single-commit TD-VSDD-053; LIGHT bookkeeping burst — NO code/spec/story change). Fresh pass-13 (run
+against the SAME frozen `2dd39bbb` code pass-12 left in place) independently re-verified the full
+v1.8 contract end to end — recovery three-way classification (not-started / in-progress-recoverable /
+already-migrated), manifest-authoritative slice-and-verify, all 3 destructive-write read-backs
+(sealed-shard/DANGEROUS-window-heal/happy-path-canonical), `[backfill_manifest]` persistence,
+`decision-log.md` marker-table regex + boundary detection/oracle set-equality fidelity, a full
+independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 real emissions
+(confirming passes 11/12's comment-only fixes introduced no taxonomy drift), spec-internal consistency
+between BC-1.18.007 and BC-1.18.008, and POLICY-11 test integrity — and found the shipped code
+spec-conformant across every dimension checked. This is the **2nd consecutive CLEAN pass of the
+restarted streak** (after pass-12; 3rd clean pass overall this cascade, after pass-10 and pass-12).
+Full Part A persisted as a standalone artifact —
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-13.md`, matching pass-1..12's own
+convention.
+
+**Findings:** zero blocking findings. Two LOW non-blocking observations recorded:
+
+**O-C3-P13-001 (LOW).** The `MechanismABackfillError::MissingBackfillManifest` / `E-SHD-011` form (b)
+fail-loud path (a shard index present with `[[shard]]` entries but no `[backfill_manifest]` table) is
+UNTESTED — the identical coverage gap independently re-surfaced by pass-12 as O-C3-P12-001. Code path
+re-verified CORRECT on inspection against BC-1.18.008 v1.8's Postcondition 3/5 text and the shipped
+`Display`; the manifest-less state cannot arise in the normal course of this one-time F4 migration.
+CONFIRMED already anchored to the EXISTING follow-up story **S-12.12** (D-1200/D-1202) — no new
+routing action, no new story allocated.
+
+**O-C3-P13-002 (LOW, informational, NEW this pass).** `archive_overflow_shards` (BC-1.18.007
+retention/compaction code, adjacent to — not part of — the mechanism-A backfill logic) uses
+`.expect()` on a `position()` lookup into a `Vec` of retained-shard entries; the lookup's `seq` value
+is collected from the same `Vec` earlier in the same function with no intervening structural mutation,
+so the entry is provably present at lookup time (unreachable-panic by construction). Style note only —
+pre-existing BC-1.18.007 retention code, out of the backfill (BC-1.18.008) delivery scope this cluster
+is converging; no behavior change warranted.
+
+Because zero blocking findings were present, pass-13 is CLEAN — **BC-5.39.001 cluster-3 LOCAL
+streak: 1/3 → 2/3, 2nd CONSECUTIVE CLEAN PASS OF THE RESTARTED STREAK** (3rd clean pass overall this
+cascade, after pass-10 and pass-12; cycle-level 3/3 CONVERGED streak UNCHANGED, separate track).
+`pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3
+cascade, not a cycle-level adversary pass).
+
+**Both observations DEFERRED** (not fixed in-scope) to the EXISTING follow-up story **S-12.12** (E-12
+Engine Governance, registered at D-1200, extended at D-1202) — O-C3-P13-001 CONFIRMS the existing
+anchor; O-C3-P13-002 is a NEW sub-item folded into the same story's retention-adjacent coverage-and-
+hygiene scope, no new story allocated. Per human direction, code stays frozen at `2dd39bbb` through
+the remaining pass(es) toward literal 3-CLEAN, so neither observation is fixed this burst. **No
+`[codified]` lesson this burst** — both observations are routed directly to the existing S-12.12
+anchor rather than accumulating a separate `lessons.md` entry, per state-manager content-routing
+discipline and the same precedent set at D-1200/D-1202. No BC/AC/EC/VP/story content changed this
+burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all
+UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED (the
+S-12.12 anchor extension is recorded via a STATE.md Drift Items row, not a STORY-INDEX row edit, for
+these 2 LOW observations). Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `2dd39bbb`
+(CLEAN pass, no findings to fix; full `cargo test --workspace --all-targets` / fmt/clippy re-confirmed
+green/clean at the existing HEAD, no new commit required).
+
+### Next Steps
+
+**NEXT = pass-14, fresh context, against the SAME frozen `2dd39bbb` code.** A third consecutive CLEAN
+pass would reach literal BC-5.39.001 3-CLEAN convergence for cluster-3. Per convergence discipline,
+code stays frozen until that literal 3/3 is reached on stable code — this is the reason both
+observations this pass were deferred rather than fixed in-scope.
+
+Refs: D-1203, D-1202, D-1201, D-1200, S-25.02, BC-1.18.008 v1.8, BC-1.18.007 v1.2, O-C3-P13-001,
+O-C3-P13-002, S-12.12, `2dd39bbb`, error-taxonomy.md v1.13.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1203 | D-1203-S2502-CLUSTER3-PASS13-CLEAN-BOOKKEEPING | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-13 = CLEAN — zero blocking findings (2nd consecutive clean pass of the restarted streak, 3rd clean pass overall).** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-13.md`. Adversary independently re-verified the full v1.8 contract (recovery three-way classification, manifest-authoritative slice-and-verify, all 3 destructive-write read-backs, `[backfill_manifest]` persistence, decision-log regex + boundary fidelity, a full independent re-sweep of `error-taxonomy.md` v1.13's 13 `E-SHD-NNN` codes / 17 emissions, spec-internal consistency, POLICY-11 test integrity) as spec-conformant end to end. 2 LOW non-blocking observations recorded — O-C3-P13-001 (`MechanismABackfillError::MissingBackfillManifest`/`E-SHD-011` form (b) fail-loud path untested; same gap as pass-12's O-C3-P12-001, CONFIRMED already anchored to S-12.12) and O-C3-P13-002 (NEW — `archive_overflow_shards` `.expect()` on a provably-unreachable `position()` lookup, pre-existing BC-1.18.007 retention code adjacent to the backfill logic, style note only, folded into S-12.12) — BOTH deferred (not fixed in-scope), per human direction to keep code frozen through the pass(es) remaining toward literal 3-CLEAN. Because both observations are LOW/non-blocking, the streak is NOT reset. No BC/AC/EC/VP/code/story change this burst — `error-taxonomy.md` stays v1.13, BC-1.18.007 stays v1.2, BC-1.18.008 stays v1.8, all UNCHANGED. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `2dd39bbb`; full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). **BC-5.39.001 cluster-3 LOCAL streak: 1/3 → 2/3 — 2ND CONSECUTIVE CLEAN PASS OF THE RESTARTED STREAK** (cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-14, fresh context, against the SAME frozen `2dd39bbb` code — a third consecutive CLEAN pass reaches literal 3/3 convergence for cluster-3.** Refs: D-1203, D-1202, D-1201, O-C3-P13-001, O-C3-P13-002, S-25.02, BC-1.18.008 v1.8, S-12.12, `2dd39bbb`. STATE.md v10.28→v10.29. | S-25.02 F4 | 2026-09-10 |
+
