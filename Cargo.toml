@@ -110,6 +110,16 @@ reqwest = { version = "0.12", features = ["json"] }
 httpmock = "0.8.3"
 proptest = "1.6"
 wasmparser = "0.248"
+# S-25.02 BC-1.18.008 v1.6 F-C3-P6-001: `shard_manager`'s Backfill Recovery
+# Manifest (Postcondition 3) computes SHA-256 content hashes of the
+# pre-split monolithic file and the intended final partition, used by the
+# Postcondition 5 Recovery-Confirmation Rule's exact whole-file
+# `(length, SHA-256)` comparison. Pinned patch version per this workspace's
+# "pinned" dependency convention (mirrors `anyhow = "1.0.104"`); RustCrypto's
+# `sha2` is the de-facto standard pure-Rust SHA-2 implementation, already
+# transitively present in the dependency graph via other RustCrypto crates
+# this workspace pulls in, so this is not a novel supply-chain addition.
+sha2 = "0.10.8"
 
 [workspace.lints.rust]
 # VSDD traceability convention uses uppercase BC-N.NN.NNN and TV-NNN ids

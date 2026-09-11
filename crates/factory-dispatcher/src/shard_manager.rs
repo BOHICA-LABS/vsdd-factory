@@ -73,6 +73,39 @@
 //! `"frontmatter-changelog-array"` shape's item-count trigger now, whose
 //! observable rotate-and-retry outcome remains owned by the still-pending
 //! BC-1.18.009 cluster.
+//!
+//! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" —
+//! IMPLEMENTED, BC-5.38.001 Red Gate discipline)
+//!
+//! This cluster adds BC-1.18.007 (Shard Retention/Compaction —
+//! AC-010/AC-011/AC-012) and BC-1.18.008 (Mandatory One-Time Backfill-Split
+//! of the Four Pre-Existing Oversized Cycle Append-Logs — AC-013/AC-014),
+//! landing near the end of this file, after cluster-2's
+//! `reconcile_leading_probe_backstop` and before the test modules.
+//! **UPDATE (S-25.02 F4 cluster-3 implementer burst):** like cluster-1/2's
+//! functions above, every non-trivial cluster-3 function body is now a REAL,
+//! fully implemented body — the stub-architect's original `todo!()`
+//! placeholders have all been replaced per BC-1.18.007's and BC-1.18.008's
+//! own postconditions, driving test-writer's cluster-3 Red Gate suites
+//! (`bc_1_18_007_retention_test.rs`, `bc_1_18_008_backfill_split_test.rs`)
+//! to green — see the "BC-1.18.007 — Shard Retention/Compaction" and
+//! "BC-1.18.008 — Mandatory One-Time Backfill-Split..." section headers
+//! further below for their own per-section implementation notes. Two struct
+//! fields were added to already-shipped cluster-1/2 types to carry
+//! BC-1.18.007's own schema obligation (`ShardIndex::retention_count`,
+//! Postcondition 1) — additive, defaulted, and NOT a behavior change to any
+//! cluster-1/2 function; the two pre-existing `ShardIndex { .. }`
+//! struct-literal call sites (one production, one test) were mechanically
+//! extended with the new field's default value, with no other change to
+//! either site. `ShardIndexEntry` itself was deliberately left UNCHANGED (no
+//! new field) — BC-1.18.007 Invariant 3 explicitly sanctions either "add an
+//! `archived: true` boolean" OR "update the entry's own `path` to reflect
+//! the new archived location" as an implementation detail; this module
+//! adopts the path-mutation form precisely to avoid a multi-site collateral
+//! edit across cluster-1/2's own already-green `ShardIndexEntry { .. }`
+//! literals. BC-1.18.009/BC-1.18.010/BC-1.18.011/BC-1.18.012/BC-7.08.001
+//! (mechanisms B1/B2 and the Cohort B flip) remain explicitly OUT OF SCOPE
+//! for this cluster — later clusters (4-7) own them.
 
 use std::io;
 use std::io::Read as _;
@@ -2155,10 +2188,59 @@ pub struct ShardIndexEntry {
     /// `[[shard]]` index entry produced before Postcondition 7 existed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sealed_retroactively: bool,
+    /// P2-002 (S-25.02 F4 cluster-3 adversarial pass-2, HIGH; BC-1.18.008
+    /// EC-002's own Canonical Test Vector): `true` iff this seal is the
+    /// mechanism-A backfill-split's EC-002 single-oversized-record exception
+    /// -- a record that alone exceeds `shard_cap_bytes`, sealed whole rather
+    /// than split mid-record (`bytes_at_seal` MAY then exceed
+    /// `shard_cap_bytes` for this ONE entry, a documented exception
+    /// distinct from `sealed_retroactively`'s Postcondition 7 exception).
+    /// `#[serde(default)]` -- backward compatible with every `[[shard]]`
+    /// index entry produced before this field existed (mirrors
+    /// `sealed_retroactively`'s own additive-field precedent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oversized_record: bool,
+    /// P3-001 (S-25.02 F4 cluster-3 adversarial pass-3, HIGH; BC-1.18.008
+    /// v1.4's Leading-Preamble Handling Rule, EC-007/EC-008): `true` iff this
+    /// seal is a **preamble shard** — produced by Postcondition 2's Leading-
+    /// Preamble Handling Rule sealing the artifact's leading preamble (YAML
+    /// frontmatter + title/intro, plus — for `decision-log.md` — its table
+    /// header/separator rows) as its own shard, either because
+    /// `preamble_bytes + first_record_bytes > shard_cap_bytes` (EC-007's
+    /// overflow case, `oversized_record: false`) or because the preamble
+    /// ALONE exceeds `shard_cap_bytes` (EC-008's degenerate case,
+    /// `oversized_record: true`). A preamble shard always carries
+    /// `records: 0`. Distinguishes it from an ordinary record-bearing shard
+    /// for downstream readers (Postcondition 3, Postcondition 4's retention
+    /// composition, Postcondition 6(b)'s record-count accounting) without
+    /// those readers having to re-derive record count from file content.
+    /// `#[serde(default)]` -- backward compatible with every `[[shard]]`
+    /// index entry produced before this field existed (mirrors
+    /// `oversized_record`'s own additive-field precedent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_preamble_shard: bool,
+    /// P3-001 (BC-1.18.008 v1.4 Postcondition 3): this shard's own count of
+    /// whole, native-format domain records
+    /// ([`MechanismABackfillPartition::record_count`], surfaced through to
+    /// the published index) — `0` for a preamble shard (Postcondition 2's
+    /// Leading-Preamble Handling Rule) or for a non-mechanism-A entry (the
+    /// BC-1.18.006 ongoing per-write roll mechanism has no record-level
+    /// concept, mirroring `oversized_record`'s own N/A convention there).
+    /// Always serialized (never `skip_serializing_if`) so a preamble shard's
+    /// `records: 0` is distinguishable, on the wire, from the field being
+    /// absent entirely -- Postcondition 3's own text requires a preamble
+    /// shard's PUBLISHED index entry to carry `records: 0` explicitly, not
+    /// merely default-deserialize to it. `#[serde(default)]` keeps every
+    /// `[[shard]]` index entry produced before this field existed loading
+    /// unchanged (mirrors `oversized_record`'s own additive-field
+    /// precedent).
+    #[serde(default)]
+    pub records: u32,
 }
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
-/// Postcondition 5's schema).
+/// Postcondition 5's schema; EXTENDED BC-1.18.007 Postcondition 1 with
+/// `retention_count`, S-25.02 F4 BC-cluster 3, stub-only this burst).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ShardIndex {
     pub schema_version: u32,
@@ -2169,6 +2251,39 @@ pub struct ShardIndex {
     pub safety_margin_bytes: u64,
     pub practical_fuel_ceiling: u64,
     pub worst_case_fuel_per_byte: f64,
+    /// BC-1.18.007 Postcondition 1: how many of this artifact's most-recent
+    /// sealed shards stay ACTIVE (un-archived) — a config value read from
+    /// the index, never hardcoded into this module's compaction logic
+    /// (Postcondition 1's own "never hardcoding 10" requirement).
+    /// `#[serde(default = "default_retention_count")]` keeps every
+    /// `[[shard]]` index produced before BC-1.18.007 existed loading
+    /// unchanged (backward compatible, mirrors `sealed_retroactively`'s own
+    /// additive-field precedent above).
+    #[serde(default = "default_retention_count")]
+    pub retention_count: u32,
+    /// BC-1.18.008 v1.9 Postcondition 3's **Schema-location correction**
+    /// (F-C3-P9-004, BLOCKING): the Backfill Recovery Manifest is an
+    /// ADDITIVE FIELD of this shared struct itself — never a side-channel
+    /// `[backfill_manifest]` TOML table maintained by an independent
+    /// read/write path outside it. Every function that loads, mutates, and
+    /// re-serializes a `ShardIndex` as a whole
+    /// ([`publish_shard_index_update`]'s ongoing per-write roll,
+    /// [`self_heal_resume_from_truncate`], and
+    /// [`self_heal_reconcile_missing_index_entries`]) now carries this field
+    /// through automatically via ordinary struct-field (de)serialization —
+    /// no special-case preservation code is required, or permitted, at any
+    /// of those sites. `#[serde(default, skip_serializing_if =
+    /// "Option::is_none")]` mirrors `retention_count`'s own additive-field
+    /// precedent immediately above (BC-1.18.007 Postcondition 1) and
+    /// `ShardIndexEntry`'s `sealed_retroactively`/`oversized_record`/
+    /// `is_preamble_shard` precedents: backward compatible with every
+    /// pre-v1.9 shard-index TOML file (deserializes to `None`), and omitted
+    /// from the serialized TOML entirely when `None` — matching the retired
+    /// side-channel design's own "no `[backfill_manifest]` table when no
+    /// backfill has run" shape, just via `skip_serializing_if` instead of a
+    /// separate write path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backfill_manifest: Option<BackfillManifest>,
     #[serde(default, rename = "shard")]
     pub shards: Vec<ShardIndexEntry>,
 }
@@ -3277,6 +3392,21 @@ pub fn publish_shard_index_update(
             safety_margin_bytes: entry.safety_margin,
             practical_fuel_ceiling: entry.practical_fuel_ceiling,
             worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            // BC-1.18.007 Postcondition 1 (S-25.02 cluster-3, sibling-site
+            // sweep accompanying the new `ShardIndex::retention_count`
+            // field): a freshly-synthesized index (first-ever seal for this
+            // artifact) starts at the config default — never a bespoke
+            // per-call value this narrow constructor has no other source
+            // for. No behavior change to BC-1.18.006's own roll sequence.
+            retention_count: default_retention_count(),
+            // BC-1.18.008 v1.9 Postcondition 3 (S-25.02 cluster-3,
+            // sibling-site sweep accompanying the new
+            // `ShardIndex::backfill_manifest` field): a freshly-synthesized
+            // index (first-ever seal for this artifact) has never had a
+            // mechanism-A backfill-split run against it, so it starts with
+            // no Manifest — mirrors `retention_count`'s own default-value
+            // sibling-sweep immediately above.
+            backfill_manifest: None,
             shards: Vec::new(),
         });
 
@@ -3374,6 +3504,14 @@ pub fn execute_roll(
         sealed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         bytes_at_seal: content.len() as u64,
         sealed_retroactively,
+        // P2-002/P3-001 sibling-sweep (TD-VSDD-060): the BC-1.18.006 ongoing
+        // per-write roll mechanism has no mechanism-A backfill-split
+        // record-level concept -- `oversized_record`/`is_preamble_shard` are
+        // exclusively mechanism-A backfill-split concepts (see
+        // `run_mechanism_a_backfill_split`).
+        oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     };
 
     // Step (d).
@@ -3756,6 +3894,11 @@ pub fn self_heal_resume_from_truncate(
         // guarantee), so `bytes_at_seal > shard_cap_bytes` is
         // proof-by-construction that this seal was retroactive.
         sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
+        // P2-002/P3-001 sibling-sweep (TD-VSDD-060): not the mechanism-A
+        // backfill-split path -- see the roll-mechanism note above.
+        oversized_record: false,
+        is_preamble_shard: false,
+        records: 0,
     };
 
     publish_shard_index_update(&index_path, entry, new_entry.clone())
@@ -3874,6 +4017,11 @@ pub fn self_heal_reconcile_missing_index_entries(
             // `bytes_at_seal > shard_cap_bytes` is proof-by-construction of
             // retroactivity (EC-018).
             sealed_retroactively: bytes_at_seal > entry.shard_cap_bytes,
+            // P2-002/P3-001 sibling-sweep (TD-VSDD-060): not the mechanism-A
+            // backfill-split path -- see the roll-mechanism note above.
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, entry, new_entry.clone())
             .map_err(|e| reattribute_roll_error(e, &entry.artifact_stem, &path))?;
@@ -3987,6 +4135,2258 @@ pub fn reconcile_leading_probe_backstop(
     canonical_path: &Path,
 ) -> Result<Option<ShardIndexEntry>, ShardRollError> {
     execute_roll(entry, canonical_path, true)
+}
+
+// ===========================================================================
+// BC-1.18.007 — Shard Retention/Compaction (S-25.02 F4 BC-cluster 3
+// "retention+backfill"; AC-010/AC-011/AC-012).
+//
+// # BC-5.38.001 Red Gate discipline — IMPLEMENTED (S-25.02 F4 cluster-3)
+//
+// Every function below is now a REAL, fully implemented body — the
+// stub-architect's original `todo!()` placeholders have all been replaced by
+// implementer per BC-1.18.007's postconditions, driving test-writer's Red
+// Gate suite (`bc_1_18_007_retention_test.rs`'s integration tests) to green.
+// GREEN-BY-DESIGN/WIRING-EXEMPT exceptions (`default_retention_count`,
+// `archived_shard_path`, `archived_shard_index_path_string`,
+// `shard_index_entry_is_archived`, `From<ShardRetentionError> for
+// HookResult`) were real from the stub-architect's own initial burst, per
+// their own doc comments, mirroring cluster-1/2's own precedent
+// (`ShardEntry::cap_formula_inputs`, `From<ShardConfigError> for
+// HookResult`, `build_roll_retry_block_reason`).
+// ===========================================================================
+
+/// BC-1.18.007 Postcondition 1: the config default for
+/// [`ShardIndex::retention_count`] — 10 most-recent shards, a round,
+/// human-adjustable number per ADR-051 Decision 6. This BC's implementation
+/// MUST read `retention_count` from the shard-index; this function exists
+/// ONLY to seed a freshly-synthesized index (first-ever seal) and as the
+/// `#[serde(default = ...)]` value for a pre-BC-1.18.007 index loading
+/// without the field — never called from the ongoing per-write retention
+/// CHECK itself, which always reads the already-loaded `index.retention_count`.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single literal return — zero branching, no I/O, no calls to
+/// non-trivial helpers, one-line body. There is no domain decision here for
+/// a test to exercise non-trivially.
+pub fn default_retention_count() -> u32 {
+    10
+}
+
+/// BC-1.18.007 Postcondition 2: the OS-native filesystem destination for an
+/// archival move — `.factory/cycles/<cycle>/archive/<artifact-stem>/<sealed-
+/// filename>`, expressed relative to `cycle_root` (the sharded artifact's
+/// own cycle directory, i.e. `canonical_path`'s parent).
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// Pure path-segment joining — zero branching, no I/O (no filesystem access;
+/// this function only computes a path value), no calls to non-trivial
+/// helpers, single-expression body. There is no domain decision left for a
+/// test to exercise non-trivially: this is the literal, spec-quoted
+/// directory-naming convention (Postcondition 2), not a choice.
+pub fn archived_shard_path(
+    cycle_root: &Path,
+    artifact_stem: &str,
+    sealed_filename: &str,
+) -> PathBuf {
+    cycle_root
+        .join("archive")
+        .join(artifact_stem)
+        .join(sealed_filename)
+}
+
+/// Portable (always `/`-separated, OS-independent) form of the SAME
+/// archived location [`archived_shard_path`] names as an OS-native
+/// [`PathBuf`] — this is the string this module records into
+/// [`ShardIndexEntry::path`] after archival (BC-1.18.007 Invariant 3's
+/// path-mutation implementation choice; see this module's own cluster-3
+/// scope note). Deliberately NOT reused for the actual filesystem move
+/// (which needs [`archived_shard_path`]'s OS-native form) — TOML-stored
+/// index content is portable text, not an OS path.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single `format!()` expression over a fixed, spec-quoted literal
+/// template — zero branching, no I/O, no calls to non-trivial helpers,
+/// one-line body.
+pub fn archived_shard_index_path_string(artifact_stem: &str, sealed_filename: &str) -> String {
+    format!("archive/{artifact_stem}/{sealed_filename}")
+}
+
+/// `true` iff `entry` has already been archived — i.e. its own
+/// [`ShardIndexEntry::path`] has been rewritten (by
+/// [`archive_overflow_shards`]) to an [`archived_shard_index_path_string`]
+/// form, rather than still naming a bare sealed-shard filename sibling to
+/// the canonical file (BC-1.18.007 Invariant 3).
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// A single `str::starts_with` predicate against a fixed literal prefix —
+/// zero branching (no `if`/`match`/`?`/`unwrap`), no I/O, no calls to
+/// non-trivial helpers, one-line body.
+pub fn shard_index_entry_is_archived(entry: &ShardIndexEntry) -> bool {
+    entry.path.starts_with("archive/")
+}
+
+/// BC-1.18.007 EC-005 (E-SHD-002): the shard-index was missing or corrupt at
+/// the moment a retention check would run, or an archival move itself
+/// failed mid-invocation — either fails the SAME native-gate invocation
+/// loud, never silently. Reuses the E-SHD-002 code error-taxonomy.md
+/// already allocates for "Shard management errors ... shard-index missing
+/// or corrupt" (no new `E-SHD-NNN` code is expected from this story's
+/// implementation, per this story's own File Structure Requirements row).
+#[derive(Debug, Error)]
+pub enum ShardRetentionError {
+    /// EC-005: the retention check's own load of
+    /// `<artifact-stem>.shard-index.toml` failed (missing in an unexpected
+    /// way, or malformed TOML) at the moment a retention/compaction check
+    /// would run — retention/compaction MUST NOT silently skip its check
+    /// and proceed as if no archival were needed.
+    #[error(
+        "E-SHD-002: shard-index missing or corrupt for artifact_stem \"{artifact_stem}\": {source}"
+    )]
+    IndexUnavailable {
+        artifact_stem: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Postcondition 2: the archival move of an already-identified
+    /// overflow shard from the cycle root to `archive/<artifact-stem>/`
+    /// failed. No shard-index change is applied for a failed move (the
+    /// caller's own atomic-write of the updated index only proceeds once
+    /// every archival move this invocation intends to perform has durably
+    /// succeeded — same-invocation-atomicity composition with BC-1.18.006
+    /// Postcondition 4).
+    #[error(
+        "E-SHD-002: shard archival move failed for artifact_stem \"{artifact_stem}\" (shard \
+         \"{sealed_path}\") — retention/compaction aborted, no shard-index change applied: \
+         {source}"
+    )]
+    ArchivalMoveFailed {
+        artifact_stem: String,
+        sealed_path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Invariant guard for [`archive_overflow_shards`]: a `seq` collected
+    /// from `index.shards` at the start of the archival pass was no longer
+    /// present in `index.shards` when this pass went to look it back up by
+    /// position. The loop body only mutates matched entries in place (never
+    /// removes them) between the collection step and this lookup, so this
+    /// is provably unreachable today — but the production-grade default
+    /// requires failing loud via a typed error rather than panicking via
+    /// `.expect()` on an invariant a future refactor could silently break.
+    #[error(
+        "E-SHD-002: shard archival invariant violated for artifact_stem \"{artifact_stem}\" — \
+         shard seq {seq} was collected from index.shards at the start of this archival pass but \
+         is no longer present in index.shards"
+    )]
+    ArchivalIndexEntryVanished { artifact_stem: String, seq: u32 },
+}
+
+/// Fail-loud retention/compaction errors surface to the dispatcher's
+/// handling path as `HookResult::Error` (EC-005's posture).
+///
+/// # WIRING-EXEMPT (BC-5.38.003)
+///
+/// `From<T>` blanket delegation to a single `Display`-forwarding call —
+/// identical in shape to this file's existing, already-shipped
+/// `From<ShardConfigError> for HookResult` / `From<ShardRollError> for
+/// HookResult` impls. No domain decision: `ShardRetentionError`'s own
+/// `Display` impl (via `thiserror`) already carries the full,
+/// artifact-stem-scoped diagnostic text.
+impl From<ShardRetentionError> for HookResult {
+    fn from(err: ShardRetentionError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// BC-1.18.007 EC-005: load `<artifact-stem>.shard-index.toml` for the
+/// retention-check path specifically, failing loud with
+/// [`ShardRetentionError::IndexUnavailable`] when the index is missing (in
+/// a way that is NOT the legitimate "no roll has ever occurred yet"
+/// first-artifact case — see [`load_shard_index`]'s own `Ok(None)`
+/// contract, which this function must NOT silently treat as "no archival
+/// needed" once a real seal is known to have just occurred) or corrupt.
+pub fn load_shard_index_for_retention_check(
+    canonical_path: &Path,
+    artifact_stem: &str,
+) -> Result<ShardIndex, ShardRetentionError> {
+    let index_path = shard_index_path_for(canonical_path, artifact_stem);
+    match load_shard_index(&index_path) {
+        Ok(Some(index)) => Ok(index),
+        // EC-005: a seal is known to have just occurred (Precondition 1), so
+        // an absent index HERE is an anomaly -- never the legitimate
+        // "no roll has ever occurred yet" case `load_shard_index`'s own
+        // `Ok(None)` contract otherwise carves out for a fresh artifact.
+        Ok(None) => Err(ShardRetentionError::IndexUnavailable {
+            artifact_stem: artifact_stem.to_string(),
+            source: io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "shard-index '{}' not found at retention-check time",
+                    index_path.display()
+                ),
+            ),
+        }),
+        Err(source) => Err(ShardRetentionError::IndexUnavailable {
+            artifact_stem: artifact_stem.to_string(),
+            source,
+        }),
+    }
+}
+
+/// BC-1.18.007 Postcondition 1/EC-001/EC-002 (AC-010): how many of
+/// `index`'s ACTIVE (non-archived, per [`shard_index_entry_is_archived`])
+/// shard entries exceed `index.retention_count` right now — the count of
+/// the OLDEST active shards [`archive_overflow_shards`] must relocate in
+/// this SAME invocation to bring the active count back within the
+/// (possibly newly-lowered, EC-002) limit. `0` when the active count is
+/// already `<= retention_count` (no archival needed).
+pub fn retention_overflow_count(index: &ShardIndex) -> usize {
+    let active_count = index
+        .shards
+        .iter()
+        .filter(|entry| !shard_index_entry_is_archived(entry))
+        .count();
+    active_count.saturating_sub(index.retention_count as usize)
+}
+
+/// BC-1.18.007 Postcondition 2/Invariant 1/Invariant 2 (AC-010): archive the
+/// oldest `retention_overflow_count(index)` ACTIVE shard(s) for the artifact
+/// `index` describes, moving each (never deleting — Invariant 1) from its
+/// current sibling location next to `canonical_path` to
+/// [`archived_shard_path`], and rewriting the moved entry's own
+/// [`ShardIndexEntry::path`] to [`archived_shard_index_path_string`]'s form
+/// (Invariant 3's path-mutation choice) IN PLACE within `index` — the SAME
+/// `index` value the caller subsequently persists (composing with
+/// BC-1.18.006 Postcondition 4's same-invocation atomicity guarantee).
+/// `index.retention_count` is this artifact's own, independent value
+/// (Invariant 2 — never a global constant). Returns the archived entries,
+/// oldest-first.
+pub fn archive_overflow_shards(
+    index: &mut ShardIndex,
+    canonical_path: &Path,
+) -> Result<Vec<ShardIndexEntry>, ShardRetentionError> {
+    let overflow = retention_overflow_count(index);
+    if overflow == 0 {
+        return Ok(Vec::new());
+    }
+
+    let cycle_root = canonical_path.parent().unwrap_or_else(|| Path::new(""));
+
+    // Oldest-first (lowest seq first) among the ACTIVE (non-archived)
+    // entries only -- an already-archived sibling never counts toward, nor
+    // is re-selected by, this pass (Invariant 2/3).
+    let mut active_seqs: Vec<u32> = index
+        .shards
+        .iter()
+        .filter(|entry| !shard_index_entry_is_archived(entry))
+        .map(|entry| entry.seq)
+        .collect();
+    active_seqs.sort_unstable();
+
+    let mut archived = Vec::with_capacity(overflow);
+    for seq in active_seqs.into_iter().take(overflow) {
+        let idx = index
+            .shards
+            .iter()
+            .position(|entry| entry.seq == seq)
+            .ok_or_else(|| ShardRetentionError::ArchivalIndexEntryVanished {
+                artifact_stem: index.artifact_stem.clone(),
+                seq,
+            })?;
+        let sealed_filename = index.shards[idx].path.clone();
+        let old_path = shard_sibling_path(canonical_path, &sealed_filename);
+        let new_path = archived_shard_path(cycle_root, &index.artifact_stem, &sealed_filename);
+
+        let to_error = |source: io::Error| ShardRetentionError::ArchivalMoveFailed {
+            artifact_stem: index.artifact_stem.clone(),
+            sealed_path: sealed_filename.clone(),
+            source,
+        };
+
+        if let Some(parent) = new_path.parent() {
+            std::fs::create_dir_all(parent).map_err(to_error)?;
+        }
+
+        // Invariant 1: move, never delete -- `rename` relocates the file's
+        // content byte-for-byte; nothing is read into memory and rewritten.
+        std::fs::rename(&old_path, &new_path).map_err(to_error)?;
+
+        // Invariant 3: the moved entry's own index record is rewritten IN
+        // PLACE (never removed) to reflect the new archived location.
+        index.shards[idx].path =
+            archived_shard_index_path_string(&index.artifact_stem, &sealed_filename);
+        archived.push(index.shards[idx].clone());
+    }
+
+    Ok(archived)
+}
+
+/// Whole-corpus shard-glob scope mode (BC-1.18.007 Postcondition 3/6;
+/// AC-011/AC-012). `DefaultExcluded` is the general default (honest
+/// `O(active shards)` accounting, Postcondition 3/4) — every existing
+/// generic whole-corpus validator. `ArchiveInclusive` is POLICY-1's
+/// (`append_only_numbering`) MANDATORY carve-out (Postcondition 6, EC-006)
+/// — never opt-in for that one audit class (AC-012).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeCorpusGlobScope {
+    DefaultExcluded,
+    ArchiveInclusive,
+}
+
+/// BC-1.18.007 Postcondition 3/4/6 (AC-011/AC-012; VP-122/VP-141):
+/// enumerate the shard file paths a whole-corpus reader should scan for
+/// `artifact_stem` under `cycle_root`, honoring `scope`'s archive-inclusion
+/// policy. `DefaultExcluded` returns only the current file plus active
+/// (non-archived) sealed shards at the cycle root — honestly
+/// `O(active shards)`, bounded by `retention_count`, never
+/// `O(all shards ever)` (AC-011). `ArchiveInclusive` additionally globs
+/// `archive/<artifact_stem>/<artifact_stem>*.md` — POLICY-1's mandatory
+/// carve-out, so an ID whose sole occurrence has aged into the archive
+/// remains visible to append-only/gap/uniqueness detection (AC-012, EC-006).
+pub fn whole_corpus_shard_paths(
+    cycle_root: &Path,
+    artifact_stem: &str,
+    scope: WholeCorpusGlobScope,
+) -> io::Result<Vec<PathBuf>> {
+    let mut paths = collect_shard_files_in_dir(cycle_root, artifact_stem)?;
+
+    if scope == WholeCorpusGlobScope::ArchiveInclusive {
+        let archive_dir = cycle_root.join("archive").join(artifact_stem);
+        match collect_shard_files_in_dir(&archive_dir, artifact_stem) {
+            Ok(mut archived) => paths.append(&mut archived),
+            // AC-011: an artifact that has never exceeded retention_count
+            // has no archive/ directory at all -- not an error, zero
+            // archived shards to include.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    paths.sort();
+    Ok(paths)
+}
+
+/// Enumerate every regular file directly under `dir` whose filename matches
+/// `artifact_stem`'s own shard-naming convention (the bare current filename
+/// `<stem>.md`, or a sealed-shard filename `<stem>.<digits>.md`) -- used by
+/// [`whole_corpus_shard_paths`] against both the cycle root (active shards)
+/// and, under [`WholeCorpusGlobScope::ArchiveInclusive`], the
+/// `archive/<stem>/` subdirectory.
+fn collect_shard_files_in_dir(dir: &Path, artifact_stem: &str) -> io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        if is_shard_file_for_stem(&file_name.to_string_lossy(), artifact_stem) {
+            out.push(entry.path());
+        }
+    }
+    Ok(out)
+}
+
+/// `true` iff `file_name` is either `artifact_stem`'s bare current filename
+/// (`<stem>.md`) or a sealed-shard filename (`<stem>.<digits>.md`) --
+/// deliberately narrow (digits-only middle segment) so an unrelated
+/// same-stem-prefixed file (e.g. `<stem>-old.md`, `<stem>.shard-index.toml`)
+/// is never mistaken for a shard of this artifact.
+fn is_shard_file_for_stem(file_name: &str, artifact_stem: &str) -> bool {
+    if file_name == format!("{artifact_stem}.md") {
+        return true;
+    }
+    let prefix = format!("{artifact_stem}.");
+    match file_name
+        .strip_prefix(prefix.as_str())
+        .and_then(|rest| rest.strip_suffix(".md"))
+    {
+        Some(seq_part) => !seq_part.is_empty() && seq_part.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
+// ===========================================================================
+// BC-1.18.008 — Mandatory One-Time Backfill-Split of the Four Pre-Existing
+// Oversized Cycle Append-Logs (S-25.02 F4 BC-cluster 3 "retention+backfill";
+// AC-013/AC-014). Named `mechanism_a_*`/`MechanismA*` throughout to avoid
+// any future naming collision with BC-1.18.011's (B2) and BC-1.18.012's
+// (B1) own, structurally distinct one-time migrations, which later clusters
+// (6/7) will add to this same module.
+//
+// # BC-5.38.001 Red Gate discipline — IMPLEMENTED (S-25.02 F4 cluster-3)
+//
+// Every function below is now a REAL, fully implemented body — the
+// stub-architect's original `todo!()` placeholders have all been replaced by
+// implementer per BC-1.18.008's postconditions, driving test-writer's Red
+// Gate suite (`bc_1_18_008_backfill_split_test.rs`'s integration and unit
+// tests) to green, including a fresh-context adversarial-review pattern-based
+// rewrite of `mechanism_a_record_boundary_offsets` against BC-1.18.008 v1.2's
+// amended Record-Boundary Marker Table.
+// ===========================================================================
+
+/// BC-1.18.008 EC-004 (E-SHD-003): the mechanism-A backfill-split's mandatory
+/// content-preservation/record-integrity verification gate (Postcondition
+/// 6) failed, or a genuine I/O failure occurred while staging the split.
+/// Either aborts the WHOLE operation; the original monolithic file is left
+/// completely untouched (fail-loud, never partial-and-silent). Reuses the
+/// E-SHD-003 code error-taxonomy.md already allocates for "backfill-split
+/// content-preservation verification failed" (no new `E-SHD-NNN` code
+/// expected from this story's implementation).
+#[derive(Debug, Error)]
+pub enum MechanismABackfillError {
+    /// Postcondition 6(a)/6(b): the staged partitions, concatenated in
+    /// order, do not reproduce the original monolithic file byte-for-byte,
+    /// or a structural record was found duplicated or dropped across the
+    /// staged partitions. `detail` names which of the two checks failed and
+    /// how (e.g. a byte offset, or a record identifier).
+    #[error(
+        "E-SHD-003: backfill-split content-preservation verification failed for artifact_stem \
+         \"{artifact_stem}\": {detail}"
+    )]
+    ContentPreservationFailed {
+        artifact_stem: String,
+        detail: String,
+    },
+
+    /// A genuine I/O failure while staging the split's shard files and
+    /// index (Postcondition 5's stage-then-verify-then-atomically-replace
+    /// sequence) — the original monolithic file is left untouched; the
+    /// operation is safely re-runnable from scratch (Postcondition 5, EC-003).
+    #[error(
+        "E-SHD-003: backfill-split I/O failure for artifact_stem \"{artifact_stem}\": {source}"
+    )]
+    Io {
+        artifact_stem: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// F-C3-P6-001 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+    /// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 5's
+    /// Recovery-Confirmation Rule, Invariant 3, EC-010; `E-SHD-011`,
+    /// `prd-supplements/error-taxonomy.md` v1.10): at recovery-confirmation
+    /// time, the canonical file's exact whole-file `(length, SHA-256)`
+    /// matches NEITHER the Backfill Recovery Manifest's recorded
+    /// `original_bytes`/`original_sha256` pair NOR its
+    /// `final_bytes`/`final_sha256` pair — the on-disk state is AMBIGUOUS
+    /// (modified by something other than this migration's own two-phase
+    /// publish sequence, or corrupted). Fails loud; the canonical file is
+    /// NOT written to under any circumstance; recovery halts for operator
+    /// investigation. Message format matches the error-taxonomy row
+    /// verbatim.
+    #[error(
+        "E-SHD-011: backfill recovery-confirmation ambiguous for artifact_stem \
+         \"{artifact_stem}\" — canonical file bytes ({canonical_bytes} bytes, sha256 \
+         {canonical_sha256}) match NEITHER the pre-split original ({original_bytes} bytes, \
+         sha256 {original_sha256}) NOR the intended final partition ({final_bytes} bytes, sha256 \
+         {final_sha256}) recorded in the Backfill Recovery Manifest — refusing to guess; \
+         canonical file left untouched pending operator investigation"
+    )]
+    AmbiguousRecoveryState {
+        artifact_stem: String,
+        canonical_bytes: u64,
+        canonical_sha256: String,
+        original_bytes: u64,
+        original_sha256: String,
+        final_bytes: u64,
+        final_sha256: String,
+    },
+
+    /// BC-1.18.008 v1.9 Invariant 3's **Residual `MissingBackfillManifest`
+    /// disposition** (F-C3-P9-004, BLOCKING — narrowed from the prior
+    /// F-C3-P6-001 reading). This now fires ONLY in the genuinely residual
+    /// case: [`mechanism_a_backfill_already_migrated`]'s upfront load
+    /// already confirmed `backfill_manifest.is_some()` for this artifact
+    /// (routing execution into [`heal_or_confirm_already_migrated`]), but
+    /// THAT function's own independent re-read of the SAME index file then
+    /// finds `backfill_manifest` absent — a genuine TOCTOU race (the index
+    /// was concurrently rewritten between the two reads) or on-disk
+    /// corruption of the `backfill_manifest` field specifically. It is
+    /// **NO LONGER** the ordinary "index exists with sealed shards, no
+    /// Manifest yet" case (the roll-before-backfill ordering, EC-015): the
+    /// corrected Invariant 3 idempotency check now recognizes that shape as
+    /// "not yet migrated" and routes it to a genuine first-ever backfill run
+    /// instead, never reaching this variant at all. Postcondition 5's
+    /// Recovery-Confirmation Rule is the SOLE authoritative basis for the
+    /// SAFE/DANGEROUS/AMBIGUOUS determination and literally cannot be
+    /// applied without a Manifest to compare against — so this also fails
+    /// loud under the same `E-SHD-011` code rather than falling back to the
+    /// byte-prefix heuristic F-C3-P6-001 already retired for the same
+    /// reason.
+    #[error(
+        "E-SHD-011: backfill recovery-confirmation ambiguous for artifact_stem \
+         \"{artifact_stem}\" — the published shard-index has no Backfill Recovery Manifest \
+         ([backfill_manifest]) to compare the canonical file's current bytes against — refusing \
+         to guess; canonical file left untouched pending operator investigation"
+    )]
+    MissingBackfillManifest { artifact_stem: String },
+
+    /// F-C3-P7-001 (S-25.02 F4 cluster-3 LOCAL adversarial pass-7 review,
+    /// HIGH; BC-1.18.008 v1.7 Postcondition 5's Manifest-Authoritative
+    /// Slice-and-Verify Rule, EC-011, Invariant 3; Postcondition
+    /// 6(c)/Invariant 4's heal-write disk-read-back extension; `E-SHD-012`,
+    /// `prd-supplements/error-taxonomy.md` v1.11): at the confirmed
+    /// DANGEROUS window (the top-level `(length, hash)` check already
+    /// matched the Manifest's `original_bytes`/`original_sha256` pair), the
+    /// Manifest-derived candidate slice fails ONE LEVEL DEEPER — either (a)
+    /// the mandatory pre-write verification (`sliced.len() == final_bytes
+    /// AND sha256(sliced) == final_sha256`) fails before anything is
+    /// written, or (b) a FRESH post-hoc disk read-back of the heal's own
+    /// just-completed write does not match `(final_bytes, final_sha256)`,
+    /// surfacing a write that silently truncated, partially flushed, or
+    /// otherwise landed corrupted bytes on disk. `detail` names which of
+    /// the two hard gates failed. Distinct from `E-SHD-011`
+    /// (`AmbiguousRecoveryState`): that code fires when the TOP-LEVEL check
+    /// cannot confirm DANGEROUS at all; this code fires only AFTER
+    /// DANGEROUS is already unambiguously confirmed, signaling that the
+    /// Manifest's own `final_bytes`/`final_sha256` fields (or the code
+    /// deriving/writing the slice) are themselves in an inconsistent state.
+    /// On disposition (a) the canonical file is left untouched; on
+    /// disposition (b) the destructive write already happened, so this
+    /// surfaces the corruption immediately for operator remediation from
+    /// git history/backup rather than reporting the heal complete.
+    #[error(
+        "E-SHD-012: backfill recovery heal slice-verification failed for artifact_stem \
+         \"{artifact_stem}\": {detail}"
+    )]
+    SliceVerificationFailed {
+        artifact_stem: String,
+        detail: String,
+    },
+
+    /// F-C3-P8-002 (S-25.02 F4 cluster-3 LOCAL adversarial pass-8 review,
+    /// MEDIUM; BC-1.18.008 v1.8 Postcondition 6(c)'s new
+    /// happy-path-canonical-write extension, Invariant 5, EC-013;
+    /// `E-SHD-013`, `prd-supplements/error-taxonomy.md` v1.12): after
+    /// Postcondition 5 step (ii)'s ORDINARY, non-recovery, first-time/
+    /// uninterrupted completion of the canonical-truncate write
+    /// (`write_atomic_bytes(canonical_path, &current_partition.bytes, ..)`),
+    /// a FRESH post-hoc disk read-back of the canonical file does NOT match
+    /// the Backfill Recovery Manifest's own `(final_bytes, final_sha256)`
+    /// pair — already durably published in Postcondition 5 step (i), before
+    /// step (ii) ever runs, so no new oracle value is computed here; the
+    /// SAME pair the heal write already verifies against. Distinct from
+    /// `E-SHD-012` (`SliceVerificationFailed`): that code's own read-back
+    /// gate covers the DANGEROUS-window HEAL write (a crash-recovery
+    /// re-invocation of an INTERRUPTED prior migration); this code covers
+    /// the FIRST, uninterrupted happy-path write that the heal exists to
+    /// recover FROM. The destructive write has already happened at this
+    /// point — unlike Postcondition 6(a)/(b)'s pre-write
+    /// content-preservation checks, which gate BEFORE the original file is
+    /// ever touched — so this surfaces the corruption immediately for
+    /// operator remediation from git history/backup rather than reporting
+    /// the migration complete over silently-corrupted content. Per EC-013's
+    /// own Canonical Test Vector note, the shard-index and Backfill Recovery
+    /// Manifest are already durably published (Postcondition 5 step (i))
+    /// strictly BEFORE this failing write, so a follow-on re-invocation
+    /// resolves the now-corrupted canonical file via the ordinary
+    /// recovery-confirmation path (AMBIGUOUS, `E-SHD-011`, per Invariant 3)
+    /// rather than getting stuck or silently re-migrating.
+    #[error(
+        "E-SHD-013: post-hoc canonical-file verification failed after happy-path \
+         final-partition write for artifact_stem \"{artifact_stem}\" — fresh disk read-back \
+         ({read_back_bytes} bytes, sha256 {read_back_sha256}) does NOT match the Backfill \
+         Recovery Manifest's recorded final partition ({final_bytes} bytes, sha256 \
+         {final_sha256}) — the destructive write already completed; original monolithic \
+         content is no longer recoverable from the canonical file itself; halting for \
+         operator investigation from git history/backup"
+    )]
+    CanonicalWriteVerificationFailed {
+        artifact_stem: String,
+        read_back_bytes: u64,
+        read_back_sha256: String,
+        final_bytes: u64,
+        final_sha256: String,
+    },
+}
+
+/// Fail-loud backfill-split errors surface to the operator/dispatcher
+/// handling path as `HookResult::Error`.
+///
+/// # WIRING-EXEMPT (BC-5.38.003)
+///
+/// `From<T>` blanket delegation to a single `Display`-forwarding call —
+/// identical in shape to this file's existing, already-shipped
+/// `From<ShardConfigError> for HookResult` / `From<ShardRollError> for
+/// HookResult` / `From<ShardRetentionError> for HookResult` impls. No
+/// domain decision: `MechanismABackfillError`'s own `Display` impl (via
+/// `thiserror`) already carries the full, artifact-stem-scoped diagnostic
+/// text.
+impl From<MechanismABackfillError> for HookResult {
+    fn from(err: MechanismABackfillError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// One structural partition of a mechanism-A backfill-split (BC-1.18.008
+/// Postcondition 2). `record_count` is this partition's own count of
+/// whole, native-format records (Postcondition 6(b)'s record-integrity
+/// check operates over these counts, summed across all partitions, against
+/// the original file's own total). `oversized_record` is `true` only for
+/// the rare EC-002 case — a single record alone exceeds `shard_cap_bytes`,
+/// which this BC allows for exactly that one record rather than splitting
+/// it mid-record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MechanismABackfillPartition {
+    pub bytes: Vec<u8>,
+    pub record_count: usize,
+    pub oversized_record: bool,
+}
+
+/// BC-1.18.008 v1.9 Postcondition 3's **Backfill Recovery Manifest**
+/// (F-C3-P6-001; promoted to an ordinary [`ShardIndex`] field by v1.9's
+/// Schema-location correction, F-C3-P9-004): four fields, each computed
+/// exactly once, at split time, from the SAME `original_content` buffer
+/// that drives Postcondition 2's partitioning — `original_bytes`/
+/// `original_sha256` (the pre-split monolithic file's own exact length +
+/// SHA-256 content hash) and `final_bytes`/`final_sha256` (the intended LAST
+/// partition's own exact length + SHA-256 content hash, i.e. the content the
+/// canonical file is intended to hold once Postcondition 5's
+/// canonical-truncate step completes). Postcondition 5's
+/// Recovery-Confirmation Rule is the SOLE authoritative basis for the later
+/// SAFE/DANGEROUS/AMBIGUOUS recovery-confirmation determination in
+/// [`heal_or_confirm_already_migrated`] — an exact whole-file `(length,
+/// SHA-256)` comparison against these two recorded pairs, NEVER a structural
+/// byte-prefix comparison against a re-concatenation of already-sealed
+/// shards (Invariant 3).
+///
+/// `pub` (and `pub` fields): this module's own [`ShardIndex::backfill_manifest`]
+/// field is `pub`, and BC-1.18.008's cluster-3 integration test file
+/// constructs `BackfillManifest` values directly (the roll-then-backfill and
+/// backfill-then-roll-then-backfill EC-014/EC-015 regression coverage) from
+/// outside this crate's `shard_manager` module.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct BackfillManifest {
+    pub original_bytes: u64,
+    pub original_sha256: String,
+    pub final_bytes: u64,
+    pub final_sha256: String,
+}
+
+/// SHA-256 content hash of `bytes`, hex-encoded (lowercase, no separator) —
+/// the exact encoding [`BackfillManifest`]'s `original_sha256`/`final_sha256`
+/// fields and [`MechanismABackfillError::AmbiguousRecoveryState`]'s
+/// `canonical_sha256` field use throughout.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// BC-1.18.008 Postcondition 2/Invariant 2 (v1.2's Record-Boundary Marker
+/// Table + its single implementable normalization predicate): locate the
+/// structural record-boundary byte offsets native to `artifact_stem`'s own
+/// append-log format within `content` — the ONLY points
+/// [`mechanism_a_partition_for_backfill`] may split at, never an arbitrary
+/// byte offset that could divide a single record across two shard files, and
+/// never keyed on heading LEVEL (h2 vs h3) alone.
+///
+/// Per artifact, per the marker table:
+/// - `decision-log.md`: PRIMARY key is the `"| D-"` table-row start
+///   (Appendix `### D-NNN (...)` sub-clause blocks are secondary atomic
+///   units, never a primary boundary — [`is_lesson_record_heading`]-style
+///   filtering is unnecessary here since `"| D-"` never collides with a
+///   `#`-prefixed heading line at all).
+/// - `burst-log.md`: PRIMARY key is any `"## "` (h2) heading, PLUS the
+///   confirmed `### Pass-N Fix Burst` h3-exception form
+///   ([`is_pass_fix_burst_heading`]) — a nested `### Block N:` sub-heading
+///   (or any other `### ` line) is never a boundary.
+/// - `lessons.md`: PRIMARY key is an ID-tagged `"## L-<tag>-NNN"` heading, OR
+///   `"## LESSON (D-NNN)"`, OR `"## RECURRENCE NOTE (D-NNN)"`
+///   ([`is_lesson_h2_record_heading`]), PLUS the confirmed pre-`L-EDP1-052`
+///   `### L-<tag>-NNN` h3-exception form ([`is_lesson_record_heading`]) — a
+///   nested `### ` sub-heading lacking the `L-<tag>-NNN` tag is never a
+///   boundary, and an untagged `"## "` aside is never a boundary either.
+/// - `session-checkpoints.md`: PRIMARY key is any `"## "` (h2) heading, with
+///   NO content-based filtering (F-002, BC-1.18.008 v1.3: direct inspection
+///   of both real `session-checkpoints.md` files confirmed every h2 heading
+///   in both is a genuine checkpoint record with zero legitimate non-record
+///   h2 asides) — nested `### ` sub-headings are never a boundary.
+pub fn mechanism_a_record_boundary_offsets(artifact_stem: &str, content: &[u8]) -> Vec<usize> {
+    const H2: &[u8] = b"## ";
+    const H3: &[u8] = b"### ";
+
+    match artifact_stem {
+        "decision-log" => decision_log_record_boundary_offsets(content),
+
+        "burst-log" => {
+            // PRIMARY: any h2 heading is a genuine burst-log record boundary
+            // (the marker table names no content-based h2 filter for this
+            // artifact — every confirmed h2 record form qualifies).
+            let mut offsets = line_anchored_marker_offsets(content, H2);
+            // CONFIRMED EXCEPTION: `### Pass-N Fix Burst` h3 records (e.g.
+            // the engine cycle's `### Pass-39/40 Fix Burst` records sitting
+            // between two h2 records). Every OTHER `### ` line (e.g. a
+            // nested `### Block N:` sub-heading) is excluded.
+            offsets.extend(
+                line_anchored_marker_offsets(content, H3)
+                    .into_iter()
+                    .filter(|&offset| {
+                        is_pass_fix_burst_heading(heading_line(content, offset, H3.len()))
+                    }),
+            );
+            offsets.sort_unstable();
+            offsets
+        }
+
+        "lessons" => {
+            // PRIMARY: an h2 heading that is either ID-tagged
+            // (`## L-<tag>-NNN`, the h2 form adopted starting at
+            // `L-EDP1-052`) or one of brownfield's own `## LESSON (D-NNN)` /
+            // `## RECURRENCE NOTE (D-NNN)` forms — an untagged h2 aside is
+            // never a boundary.
+            let mut offsets: Vec<usize> = line_anchored_marker_offsets(content, H2)
+                .into_iter()
+                .filter(|&offset| {
+                    is_lesson_h2_record_heading(heading_line(content, offset, H2.len()))
+                })
+                .collect();
+            // CONFIRMED EXCEPTION: the pre-`L-EDP1-052` `### L-<tag>-NNN` h3
+            // records (e.g. `### L-EDP1-050`/`### L-EDP1-051`) — a nested
+            // `### ` sub-heading lacking the `L-<tag>-NNN` tag (i.e. part of
+            // the preceding lesson's own body) is never a boundary.
+            offsets.extend(
+                line_anchored_marker_offsets(content, H3)
+                    .into_iter()
+                    .filter(|&offset| {
+                        is_lesson_record_heading(heading_line(content, offset, H3.len()))
+                    }),
+            );
+            offsets.sort_unstable();
+            offsets
+        }
+
+        "session-checkpoints" => {
+            // F-002 (BC-1.18.008 v1.3 fix-burst, HIGH): reverted from the
+            // MED-3 content-based `is_checkpoint_record_heading` filter
+            // back to bare `^## ` (any h2) detection, per product-owner's
+            // DECISION (BC-1.18.008 v1.3 Changelog, finding F-002): direct
+            // inspection of BOTH real session-checkpoints.md files (brownfield:
+            // 182 h2 records; engine: 12 h2 records) confirmed every h2
+            // heading in both is a genuine checkpoint record with ZERO
+            // legitimate non-record h2 asides — the marker table's own
+            // "any h2 = boundary, no confirmed exception forms" row was
+            // already correct. The removed filter was itself the defect:
+            // being case-sensitive, it silently dropped real records such
+            // as the verbatim all-caps `## ARCHIVED CHECKPOINT: ...` form,
+            // which matches neither `starts_with("Archived")` nor
+            // `contains("Checkpoint")`.
+            line_anchored_marker_offsets(content, H2)
+        }
+
+        // No known native record-boundary marker for this artifact stem --
+        // callers of `mechanism_a_partition_for_backfill` fall back to
+        // treating the whole content as a single record when given no
+        // boundaries at all.
+        _ => Vec::new(),
+    }
+}
+
+/// P3-002 (S-25.02 F4 cluster-3 adversarial pass-3, MEDIUM): `true` iff
+/// `artifact_stem` is one of the four KNOWN mechanism-A backfill-split
+/// artifacts this module's own Record-Boundary Marker Table has a rule for
+/// (`decision-log`/`burst-log`/`lessons`/`session-checkpoints`) --
+/// [`mechanism_a_record_boundary_offsets`]'s own match arms, named here
+/// rather than re-derived from its `_ => Vec::new()` fallthrough so
+/// [`run_mechanism_a_backfill_split`] can distinguish "this artifact is
+/// recognized but its content simply has no markers" (trust the caller,
+/// unaffected) from "this artifact_stem has no marker rule at all" (abort
+/// fail-loud, P3-002).
+fn is_known_mechanism_a_artifact_stem(artifact_stem: &str) -> bool {
+    matches!(
+        artifact_stem,
+        "decision-log" | "burst-log" | "lessons" | "session-checkpoints"
+    )
+}
+
+/// The text of the heading line starting at `marker_offset + marker_len`
+/// (i.e. immediately after the record-boundary marker itself), up to but
+/// not including the next `b'\n'` or the end of `content` -- the substring
+/// [`is_lesson_record_heading`], [`is_lesson_h2_record_heading`], and
+/// [`is_pass_fix_burst_heading`] apply their own real-format discriminators
+/// to. `session-checkpoints.md` no longer applies a content-based
+/// discriminator (F-002, BC-1.18.008 v1.3): every bare `^## ` heading is a
+/// boundary, so this function is not called for that artifact stem.
+fn heading_line(content: &[u8], marker_offset: usize, marker_len: usize) -> &[u8] {
+    let start = marker_offset + marker_len;
+    let rest = &content[start..];
+    let end = rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// `true` iff `heading` (already confirmed UTF-8-decodable prose, i.e. the
+/// text right after a `lessons.md` record marker) starts with an
+/// `L-<tag>-NNN`-shaped ID (`"L-"` + an alphanumeric cycle-prefix tag + `"-"`
+/// + a numeric sequence) — the ID-tag shape shared by BOTH lessons.md's
+/// pre-`L-EDP1-052` h3-exception records ([`is_lesson_record_heading`]) and
+/// its h2 primary-form records ([`is_lesson_h2_record_heading`]). Factored
+/// out so both callers apply the identical tag-detection rule rather than
+/// two independently-drifting copies (TD-VSDD-060).
+///
+/// F-C3-P6-003 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, BC-1.18.008 v1.6 Record-Boundary Marker
+/// Table's `^L-<tag>-[0-9]+\b` shape): the marker's own regex requires a
+/// `\b` WORD BOUNDARY immediately after the numeric id run — the character
+/// following the digits (if any) must be a non-word character (whitespace,
+/// punctuation, or end-of-string), never another word character continuing
+/// the SAME token. A prior implementation only checked that the byte right
+/// after the tag's trailing `-` was a digit, then declared a match without
+/// ever inspecting what follows the digit RUN — so `"L-EDP1-050details"`
+/// (another letter), `"L-EDP1-050_extra"` (underscore, a word character in
+/// `\b` terms), and `"L-EDP1-050x"` (another alnum char) all misdetected as
+/// genuine `L-EDP1-050` records, even though each merely SHARES that id as
+/// a PREFIX of its own, unrelated heading text — prose inside the real
+/// `L-EDP1-050` record's own body, not a new record. Consuming the FULL
+/// digit run and requiring a word boundary immediately after it (mirrors
+/// [`is_pass_fix_burst_heading`]'s own `\b`-after-"Burst" check, P3-003's
+/// sibling fix for burst-log.md) closes this gap for both lessons.md marker
+/// forms identically, since they share this one predicate (TD-VSDD-060).
+fn is_id_tagged_lesson_heading(heading: &str) -> bool {
+    let Some(rest) = heading.strip_prefix("L-") else {
+        return false;
+    };
+    let tag_len = rest
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(rest.len());
+    if tag_len == 0 {
+        return false;
+    }
+    let Some(after_dash) = rest[tag_len..].strip_prefix('-') else {
+        return false;
+    };
+    let digit_len = after_dash
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after_dash.len());
+    if digit_len == 0 {
+        return false;
+    }
+    after_dash[digit_len..]
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+}
+
+/// PC2 Record-Boundary Marker Table (`lessons.md` row), CONFIRMED EXCEPTION
+/// column: `true` iff `heading` (the text right after a `lessons.md` `### `
+/// marker) is the confirmed pre-`L-EDP1-052` h3-exception record form
+/// (`### L-<tag>-NNN ...`) rather than a nested, non-record sub-heading
+/// inside an existing lesson's own body. Grounded in the real
+/// `.factory/cycles/v1.0-feature-engine-discipline-pass-1/lessons.md`
+/// convention: every genuine pre-052 lesson record is tagged with its own
+/// `L-EDP1-NNN`-shaped ID immediately after the marker; that file's own
+/// lesson bodies use bold prose labels (`**Pattern:**`, `**Trend:**`, ...)
+/// for internal structure, never a further `### ` sub-heading, so ANY
+/// `### ` line lacking this ID tag is necessarily nested body content, not
+/// a new record.
+fn is_lesson_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    is_id_tagged_lesson_heading(heading)
+}
+
+/// P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): `true` iff
+/// `heading` starts with `prefix` immediately followed by one-or-more ASCII
+/// digits and a closing `")"` — the full `^<prefix>[0-9]+\)` shape the
+/// Record-Boundary Marker Table specifies for `## LESSON (D-NNN)` / `##
+/// RECURRENCE NOTE (D-NNN)`, not the bare `<prefix>` alone. A bare-prefix
+/// `starts_with` check would misdetect `"LESSON (D-foo)"` (non-digit
+/// suffix) or `"LESSON (D-)"` (no suffix at all) — headings that merely
+/// SHARE the marker's own leading substring without matching its full
+/// documented shape — as genuine record boundaries.
+fn is_digit_tagged_paren_marker(heading: &str, prefix: &str) -> bool {
+    let Some(rest) = heading.strip_prefix(prefix) else {
+        return false;
+    };
+    let digit_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    digit_len > 0 && rest[digit_len..].starts_with(')')
+}
+
+/// PC2 Record-Boundary Marker Table (`lessons.md` row), PRIMARY column:
+/// `true` iff `heading` (the text right after a `lessons.md` `## ` marker)
+/// is a GENUINE lesson-record heading — either the `L-EDP1-052`-onward
+/// ID-tagged h2 form (`## L-<tag>-NNN ...`), or one of brownfield's own
+/// `## LESSON (D-NNN) ...` / `## RECURRENCE NOTE (D-NNN) ...` forms — rather
+/// than an untagged h2 aside nested inside a lesson's own body.
+fn is_lesson_h2_record_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    is_id_tagged_lesson_heading(heading)
+        || is_digit_tagged_paren_marker(heading, "LESSON (D-")
+        || is_digit_tagged_paren_marker(heading, "RECURRENCE NOTE (D-")
+}
+
+/// PC2 Record-Boundary Marker Table (`burst-log.md` row), CONFIRMED
+/// EXCEPTION column: `true` iff `heading` (the text right after a
+/// `burst-log.md` `### ` marker) is the confirmed `### Pass-N Fix Burst`
+/// h3-exception record form rather than a nested, non-record sub-heading
+/// (e.g. `### Block N: ...`) inside an existing h2 burst record's own body.
+/// Grounded in the real
+/// `.factory/cycles/v1.0-feature-engine-discipline-pass-1/burst-log.md`
+/// convention: `### Pass-39 Fix Burst — ...` / `### Pass-40 Fix Burst — ...`
+/// are the only two confirmed real h3-level burst-log records, both shaped
+/// `"Pass-"` + digits + `" Fix Burst"`.
+fn is_pass_fix_burst_heading(heading: &[u8]) -> bool {
+    let Ok(heading) = std::str::from_utf8(heading) else {
+        return false;
+    };
+    let Some(rest) = heading.strip_prefix("Pass-") else {
+        return false;
+    };
+    let digit_len = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if digit_len == 0 {
+        return false;
+    }
+    // P3-003 (S-25.02 F4 cluster-3 adversarial pass-3, MINOR): the marker
+    // table's own regex is `^### Pass-[0-9]+ Fix Burst\b` -- the `\b` word
+    // boundary REQUIRES the character immediately after "Burst" (if any) to
+    // be a non-word character, never another word character continuing the
+    // same word. A bare `starts_with(" Fix Burst")` check would misdetect
+    // `"Pass-39 Fix Bursting"` -- sharing the same leading substring, but
+    // "Bursting" is a DIFFERENT word than "Burst" -- as a genuine
+    // Pass-N-Fix-Burst record.
+    let Some(after_burst) = rest[digit_len..].strip_prefix(" Fix Burst") else {
+        return false;
+    };
+    after_burst
+        .chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+}
+
+/// F-007 (BC-1.18.008 Record-Boundary Marker Table, `decision-log.md` row,
+/// MINOR); regex corrected by F-C3-P7-002 (v1.7, EC-012): every byte offset
+/// in `content` where a line matches the table's full
+/// `^\| D-[0-9]+(\([a-z0-9/]+\)|-[A-Za-z]+)? \|` marker regex -- the literal
+/// `"| D-"` prefix, one-or-more ASCII digits, an OPTIONAL sub-clause suffix
+/// (a parenthesized `([a-z0-9/]+)` form or a hyphenated `-[A-Za-z]+` form),
+/// and a closing `" |"` -- NOT the bare `"| D-"` prefix alone. The
+/// bare-prefix form would misdetect a wrapped prose table cell that merely
+/// happens to START a continuation line with the literal text `"| D-"`
+/// (e.g. `"| D-something, not a row, continues a multi-line cell..."` with
+/// no digits/closing pipe) as a record boundary.
+fn decision_log_record_boundary_offsets(content: &[u8]) -> Vec<usize> {
+    line_anchored_marker_offsets(content, b"| D-")
+        .into_iter()
+        .filter(|&offset| is_decision_log_row_marker(content, offset))
+        .collect()
+}
+
+/// `true` iff the line starting at `marker_offset` (already confirmed to
+/// start with the literal `"| D-"` prefix by
+/// [`line_anchored_marker_offsets`]) matches the full `^\|
+/// D-[0-9]+(\([a-z0-9/]+\)|-[A-Za-z]+)? \|` marker regex the Record-Boundary
+/// Marker Table specifies for `decision-log.md` (v1.7, F-C3-P7-002/EC-012)
+/// -- one-or-more ASCII digits, an OPTIONAL sub-clause suffix
+/// ([`decision_log_subclause_suffix_len`]), then a closing `" |"`. The PRIOR
+/// bare-only form (`^\| D-[0-9]+ \|`, with no optional-suffix clause)
+/// silently failed to match either confirmed suffix form -- the
+/// parenthetical `| D-440(a) |` / combined `| D-446(a/b/c/d/e) |` forms, and
+/// the hyphenated `| D-355-AMEND |` form -- under-segmenting the artifact by
+/// absorbing each sub-clause row into the preceding record (the defect this
+/// amendment corrects).
+fn is_decision_log_row_marker(content: &[u8], marker_offset: usize) -> bool {
+    const PREFIX: &[u8] = b"| D-";
+    let rest = &content[marker_offset + PREFIX.len()..];
+    let digit_len = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+    if digit_len == 0 {
+        return false;
+    }
+    let after_digits = &rest[digit_len..];
+    let suffix_len = decision_log_subclause_suffix_len(after_digits);
+    after_digits[suffix_len..].starts_with(b" |")
+}
+
+/// The optional sub-clause suffix's own byte length at the START of
+/// `after_digits` (`0` if it carries neither confirmed form) -- EITHER a
+/// parenthesized `([a-z0-9/]+)` sub-clause suffix (one-or-more
+/// lowercase-ASCII-letter/digit/`/` bytes between a literal `(` and `)`,
+/// e.g. `(a)` or the combined `(a/b/c/d/e)` form) OR a hyphenated
+/// `-[A-Za-z]+` suffix (one-or-more ASCII-alphabetic bytes after a literal
+/// `-`, e.g. `-AMEND`). A malformed near-match (an empty `()`, an unclosed
+/// paren, or a bare trailing hyphen with no following letters) yields `0`,
+/// deferring to [`is_decision_log_row_marker`]'s own closing-`" |"` check on
+/// the UNCONSUMED bytes -- which then correctly rejects the line as not a
+/// boundary, rather than this helper guessing at a partial match.
+fn decision_log_subclause_suffix_len(after_digits: &[u8]) -> usize {
+    if let Some(inner) = after_digits.strip_prefix(b"(") {
+        let inner_len = inner
+            .iter()
+            .take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || **b == b'/')
+            .count();
+        if inner_len > 0 && inner.get(inner_len) == Some(&b')') {
+            return 1 + inner_len + 1; // '(' + inner + ')'
+        }
+        return 0;
+    }
+    if let Some(inner) = after_digits.strip_prefix(b"-") {
+        let alpha_len = inner.iter().take_while(|b| b.is_ascii_alphabetic()).count();
+        if alpha_len > 0 {
+            return 1 + alpha_len; // '-' + letters
+        }
+        return 0;
+    }
+    0
+}
+
+/// Every byte offset in `content` where `marker` occurs AT THE START OF A
+/// LINE (offset `0`, or immediately preceded by `b'\n'`) -- Invariant 2's
+/// "never an arbitrary byte offset" guarantee: a mid-line occurrence of the
+/// same marker bytes (e.g. inside prose describing the marker) is never
+/// mistaken for a real structural record boundary.
+fn line_anchored_marker_offsets(content: &[u8], marker: &[u8]) -> Vec<usize> {
+    if marker.is_empty() {
+        return Vec::new();
+    }
+    let mut offsets = Vec::new();
+    for idx in 0..content.len() {
+        let at_line_start = idx == 0 || content[idx - 1] == b'\n';
+        if at_line_start && content[idx..].starts_with(marker) {
+            offsets.push(idx);
+        }
+    }
+    offsets
+}
+
+/// BC-1.18.008 Postcondition 2 (AC-013): partition `content` at
+/// `record_boundary_offsets` (never mid-record, Invariant 2), grouping
+/// consecutive whole records into chunks each `<= shard_cap_bytes` — except
+/// EC-002's single-oversized-record case, flagged
+/// `oversized_record: true` on its own partition rather than split. Returns
+/// partitions in original-file chronological order; the caller
+/// ([`run_mechanism_a_backfill_split`]) treats the LAST partition as the
+/// fresh "current" file and seals every partition before it with
+/// sequential `seq` numbers starting at 1 (Postcondition 2).
+pub fn mechanism_a_partition_for_backfill(
+    content: &[u8],
+    record_boundary_offsets: &[usize],
+    shard_cap_bytes: u64,
+) -> Vec<MechanismABackfillPartition> {
+    // F-003 (MINOR): guard against a malformed (non-ascending, duplicate,
+    // or out-of-bounds) `record_boundary_offsets` argument BEFORE this
+    // function's own partitioning loop below ever computes `rec_end -
+    // rec_start` (would underflow for a non-ascending pair) or slices
+    // `content[rec_start..rec_end]` (would panic for an out-of-bounds
+    // offset). This function is `pub`; callers other than
+    // `run_mechanism_a_backfill_split` (which independently validates
+    // well-formedness upfront via `record_boundary_offsets_are_well_formed`
+    // before ever reaching here, and additionally cross-checks against this
+    // module's own detected boundaries per F-001) may call it directly with
+    // an unchecked offsets list. Rather than trusting the caller and
+    // risking a panic in this critical path, fall back to the SAME safe
+    // "treat the whole content as a single record" behavior already used
+    // for an empty offsets list -- never panic, never silently fabricate a
+    // partial/corrupt partition set from offsets that don't genuinely
+    // describe this content's own structure.
+    if record_boundary_offsets.is_empty()
+        || !record_boundary_offsets_are_well_formed(content.len(), record_boundary_offsets)
+    {
+        // No known native record-boundary marker for this artifact (or a
+        // malformed offsets argument) -- treat the whole (non-empty)
+        // content as a single record rather than silently producing zero
+        // partitions for real content, or panicking on bad input.
+        return if content.is_empty() {
+            Vec::new()
+        } else {
+            vec![MechanismABackfillPartition {
+                bytes: content.to_vec(),
+                record_count: 1,
+                oversized_record: content.len() as u64 > shard_cap_bytes,
+            }]
+        };
+    }
+
+    let mut partitions = Vec::new();
+    // BLOCKER-1 (Postcondition 6(a)/Postcondition 2), SUPERSEDED by P3-001's
+    // Leading-Preamble Handling Rule (BC-1.18.008 v1.4, F-C3-P3-001): a real
+    // artifact's leading preamble (a title/section header, plus --
+    // decision-log.md only -- the table header/separator rows) belongs to no
+    // record of its own, but every byte of it still MUST round-trip
+    // (Postcondition 6(a)). BLOCKER-1's original fix unconditionally folded
+    // the preamble into whichever partition ends up holding the first
+    // record; a fresh-context adversarial pass-3 review (P3-001, HIGH) found
+    // that fold has no overflow check -- when
+    // `preamble_bytes + first_record_bytes > shard_cap_bytes`, the fold
+    // pushes the FIRST sealed shard over cap without any sanctioning
+    // `oversized_record`/`is_preamble_shard` flag, re-creating exactly the
+    // unsanctioned Postcondition 2 violation Layer 2 exists to eliminate.
+    //
+    // The preamble is now resolved ONCE, as a single atomic, indivisible
+    // packing unit, BEFORE record-based greedy packing begins:
+    //   - normal case (`preamble_bytes + first_record_bytes <=
+    //     shard_cap_bytes`): the preamble rides in the SAME shard as the
+    //     first record -- unchanged from BLOCKER-1/P2-003's own behavior
+    //     (P2-003: `partition_bytes` must be seeded with the preamble bytes
+    //     too, so the cap decision governing that first partition actually
+    //     sees them).
+    //   - overflow case (EC-007): preamble alone is under cap, but
+    //     preamble+first-record together are not -- the preamble seals as
+    //     its own zero-record partition (`record_count: 0`,
+    //     `oversized_record: false`; `run_mechanism_a_backfill_split` maps a
+    //     zero-record partition to `is_preamble_shard: true` in the
+    //     published index) before record packing starts fresh.
+    //   - degenerate case (EC-008): the preamble ALONE exceeds cap -- seals
+    //     as its own oversized partition (`record_count: 0`,
+    //     `oversized_record: true`), reusing EC-002's oversized-atomic-unit
+    //     exception rather than a fail-loud abort (content atomicity for an
+    //     indivisible structural unit beats the cap, identically to EC-002).
+    // When `record_boundary_offsets[0]` is already `0` (no preamble at all),
+    // this reduces to the pre-P3-001 seeding exactly (a no-op).
+    let preamble_bytes = record_boundary_offsets[0] as u64;
+    let first_record_end = record_boundary_offsets
+        .get(1)
+        .copied()
+        .unwrap_or(content.len());
+    let first_record_bytes = (first_record_end - record_boundary_offsets[0]) as u64;
+
+    let (mut partition_start, mut partition_bytes, mut partition_records): (usize, u64, usize) =
+        if preamble_bytes == 0 {
+            (0, 0, 0)
+        } else if preamble_bytes > shard_cap_bytes {
+            // EC-008 degenerate case.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[0..record_boundary_offsets[0]].to_vec(),
+                record_count: 0,
+                oversized_record: true,
+            });
+            (record_boundary_offsets[0], 0, 0)
+        } else if preamble_bytes + first_record_bytes > shard_cap_bytes {
+            // EC-007 overflow case.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[0..record_boundary_offsets[0]].to_vec(),
+                record_count: 0,
+                oversized_record: false,
+            });
+            (record_boundary_offsets[0], 0, 0)
+        } else {
+            // Normal case: fold the preamble into the first record's
+            // partition, seeding the cap accumulator with its bytes too
+            // (P2-003).
+            (0, preamble_bytes, 0)
+        };
+
+    let n = record_boundary_offsets.len();
+    for i in 0..n {
+        let rec_start = record_boundary_offsets[i];
+        let rec_end = record_boundary_offsets
+            .get(i + 1)
+            .copied()
+            .unwrap_or(content.len());
+        let rec_len = (rec_end - rec_start) as u64;
+
+        if rec_len > shard_cap_bytes {
+            // EC-002/EC-017: flush whatever was accumulating BEFORE this
+            // record -- possibly zero whole records but still the leading
+            // preamble bytes on the very first iteration -- then seal the
+            // oversized record on its own -- never merged with a neighbor,
+            // never split mid-record. Flushing is keyed on unflushed BYTES
+            // (`partition_start < rec_start`), not `partition_records > 0`,
+            // so a preamble-only leftover (first record itself oversized)
+            // is never silently dropped.
+            if partition_start < rec_start {
+                partitions.push(MechanismABackfillPartition {
+                    bytes: content[partition_start..rec_start].to_vec(),
+                    record_count: partition_records,
+                    oversized_record: false,
+                });
+            }
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[rec_start..rec_end].to_vec(),
+                record_count: 1,
+                oversized_record: true,
+            });
+            partition_start = rec_end;
+            partition_bytes = 0;
+            partition_records = 0;
+            continue;
+        }
+
+        if partition_records > 0 && partition_bytes + rec_len > shard_cap_bytes {
+            // Adding this (normally-sized) record would push the current
+            // partition over cap -- flush it now; this record starts a
+            // fresh partition instead.
+            partitions.push(MechanismABackfillPartition {
+                bytes: content[partition_start..rec_start].to_vec(),
+                record_count: partition_records,
+                oversized_record: false,
+            });
+            partition_start = rec_start;
+            partition_bytes = 0;
+            partition_records = 0;
+        }
+
+        partition_bytes += rec_len;
+        partition_records += 1;
+    }
+
+    if partition_start < content.len() {
+        partitions.push(MechanismABackfillPartition {
+            bytes: content[partition_start..].to_vec(),
+            record_count: partition_records,
+            oversized_record: false,
+        });
+    }
+
+    partitions
+}
+
+/// BC-1.18.008 Postcondition 6(a): `true` iff the byte-for-byte
+/// concatenation of `partitions`' own `bytes`, in order, reproduces
+/// `original_content` exactly (modulo the shard/index metadata itself,
+/// which is new). Part of the mandatory content-preservation verification
+/// gate (AC-014) — a hard gate: `false` here MUST abort the whole backfill
+/// operation via [`MechanismABackfillError::ContentPreservationFailed`],
+/// leaving the original file untouched.
+pub fn mechanism_a_verify_backfill_content_preserved(
+    original_content: &[u8],
+    partitions: &[MechanismABackfillPartition],
+) -> bool {
+    let mut reconstructed = Vec::with_capacity(original_content.len());
+    for partition in partitions {
+        reconstructed.extend_from_slice(&partition.bytes);
+    }
+    reconstructed == original_content
+}
+
+/// BC-1.18.008 Postcondition 6(b): `true` iff the sum of every partition's
+/// own `record_count` equals `original_record_count` — every structural
+/// record that existed in the original file is present in EXACTLY ONE
+/// resulting shard (never zero, never two). The other half of the mandatory
+/// content-preservation verification gate (AC-014), alongside
+/// [`mechanism_a_verify_backfill_content_preserved`].
+pub fn mechanism_a_verify_backfill_record_counts_preserved(
+    original_record_count: usize,
+    partitions: &[MechanismABackfillPartition],
+) -> bool {
+    let total: usize = partitions
+        .iter()
+        .map(|partition| partition.record_count)
+        .sum();
+    total == original_record_count
+}
+
+/// BC-1.18.008 Postcondition 6(c)/Invariant 4 (this amendment, F-C3-P3-001):
+/// `true` iff EVERY partition's own byte length is `<= shard_cap_bytes`,
+/// UNLESS that partition is flagged `oversized_record: true` (EC-002's
+/// single-oversized-record exception, or EC-008's degenerate
+/// oversized-preamble exception — this module represents both identically
+/// via `oversized_record: true` on the partition). The THIRD sub-clause of
+/// the SAME mandatory content-preservation verification gate (AC-014),
+/// alongside [`mechanism_a_verify_backfill_content_preserved`] (6(a)) and
+/// [`mechanism_a_verify_backfill_record_counts_preserved`] (6(b)) —
+/// [`run_mechanism_a_backfill_split`] wires this in as a hard, fail-loud
+/// gate BEFORE any durable write occurs, checked explicitly against the
+/// actual computed partition bytes rather than merely implied by the
+/// packer's own behavior (Invariant 4's own text). An unflagged partition
+/// exceeding `shard_cap_bytes` is exactly the unsanctioned Postcondition 2
+/// violation Layer 2 exists to eliminate.
+pub fn mechanism_a_verify_backfill_per_shard_cap_preserved(
+    partitions: &[MechanismABackfillPartition],
+    shard_cap_bytes: u64,
+) -> bool {
+    partitions.iter().all(|partition| {
+        partition.oversized_record || partition.bytes.len() as u64 <= shard_cap_bytes
+    })
+}
+
+/// MED-C: `true` iff `offsets` (a non-empty `record_boundary_offsets` list)
+/// is STRUCTURALLY well-formed against a `content_len`-byte original
+/// content buffer — strictly ascending (no duplicate or out-of-order
+/// offset) and every offset strictly less than `content_len`.
+///
+/// This predicate validates ORDERING and BOUNDS ONLY — it says nothing
+/// about whether `offsets` actually corresponds to `artifact_stem`'s real
+/// record structure (a well-formed-but-wrong offsets list, e.g. one that
+/// silently omits a genuine boundary present in the content, OR adds a
+/// spurious extra offset the content's real structure doesn't have, passes
+/// this check trivially either way). [`run_mechanism_a_backfill_split`]
+/// validates this BEFORE feeding `record_boundary_offsets` into
+/// [`mechanism_a_partition_for_backfill`] at all — rejecting a
+/// structurally malformed argument here rather than reaching
+/// [`mechanism_a_partition_for_backfill`]'s own `rec_end - rec_start`
+/// byte-length subtraction, which assumes ascending order and would
+/// otherwise panic on unsigned overflow (debug builds) or compute a bogus
+/// huge length (release builds) for a non-ascending offset pair (see
+/// [`mechanism_a_partition_for_backfill`]'s own F-003 guard, which reuses
+/// this same predicate). The genuinely-failable, record-integrity-aware
+/// half of the Postcondition 6 hard gate — catching a well-formed offsets
+/// list that is nonetheless WRONG against the content's real structure, in
+/// EITHER direction (F-001's UNDER-detection, a missing real boundary; or
+/// P2-001's OVER-detection, a spurious extra one) — is
+/// [`run_mechanism_a_backfill_split`]'s own independent recompute via
+/// [`mechanism_a_record_boundary_offsets`], cross-checked by SET EQUALITY
+/// (not just cardinality, and not merely a union) against the
+/// caller-supplied offsets whenever that oracle recognizes any genuine
+/// boundary at all — not this predicate.
+fn record_boundary_offsets_are_well_formed(content_len: usize, offsets: &[usize]) -> bool {
+    offsets.windows(2).all(|pair| pair[0] < pair[1])
+        && offsets.last().is_some_and(|&last| last < content_len)
+}
+
+/// BC-1.18.008 v1.9 Invariant 3 (AC-014, F-C3-P9-004, BLOCKING): `true` iff
+/// this artifact's shard-index (if any) carries a POPULATED
+/// `backfill_manifest` field — the SOLE evidence a mechanism-A backfill-split
+/// has ALREADY run for this artifact. Bare shard-index-FILE existence, or a
+/// non-empty `[[shard]]` array by itself, is NEVER sufficient: an index may
+/// exist, with real sealed shards, purely because BC-1.18.006's ordinary
+/// per-write roll mechanism sealed it (Postcondition 3's Composability
+/// clause, the roll-before-backfill ordering, EC-015) — the mandatory
+/// one-time backfill-split for that artifact may never have run at all. This
+/// function therefore LOADS the shard-index (never merely `stat()`s the
+/// file) and tests `index.backfill_manifest.is_some()`:
+///
+/// - No index file at all ⇒ `false` (genuinely fresh, no roll and no
+///   backfill have ever run).
+/// - Index present, `backfill_manifest: None` ⇒ `false` (the roll-before-
+///   backfill case, EC-015 — routes [`run_mechanism_a_backfill_split`] to a
+///   genuine first-ever backfill run that APPENDS its own shards after the
+///   pre-existing rolled entries, never to `heal_or_confirm_already_migrated`
+///   and never to an `E-SHD-011`/`E-SHD-012` disposition).
+/// - Index present, `backfill_manifest: Some(..)` ⇒ `true` (a Manifest-
+///   confirmed backfill has already run for this artifact at least once —
+///   routes to `heal_or_confirm_already_migrated`'s recovery-confirmation
+///   determination).
+///
+/// The idempotency short-circuit [`run_mechanism_a_backfill_split`] MUST
+/// consult before doing any split work: re-running the backfill against an
+/// already-migrated artifact must never double-split it into redundant
+/// shards.
+pub fn mechanism_a_backfill_already_migrated(
+    canonical_path: &Path,
+    artifact_stem: &str,
+) -> io::Result<bool> {
+    let index_path = shard_index_path_for(canonical_path, artifact_stem);
+    match load_shard_index(&index_path)? {
+        Some(index) => Ok(index.backfill_manifest.is_some()),
+        None => Ok(false),
+    }
+}
+
+/// One-time mechanism-A backfill-split outcome (BC-1.18.008 Postcondition
+/// 1/3/4).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MechanismABackfillOutcome {
+    /// [`mechanism_a_backfill_already_migrated`] found this artifact
+    /// already fully migrated (Invariant 3's idempotency short-circuit) —
+    /// no shards were (re-)produced this call.
+    AlreadyMigrated,
+    /// The backfill-split ran and published `sealed_count` newly-sealed
+    /// shards (`ceil(original_bytes / shard_cap_bytes) - 1`) plus a fresh
+    /// current file, publishing the full shard index for the complete
+    /// pre-existing history in this SAME operation (Postcondition 3).
+    /// `archived_count` names how many of the OLDEST of those, if any, were
+    /// ALSO archived in this SAME operation because the resulting shard
+    /// count already exceeded `retention_count` (Postcondition 4,
+    /// composing immediately with BC-1.18.007's retention policy — never
+    /// deferred to a later event).
+    Migrated {
+        sealed_count: u32,
+        archived_count: u32,
+    },
+    /// F4 BC-cluster-3 adversarial-review finding HIGH-2 (BC-1.18.008
+    /// Postcondition 5, Invariant 3; VP-124 Property Statement 1): this
+    /// re-run landed on the DANGEROUS crash window between a prior run's
+    /// index-publish and canonical-truncate writes (the shard-index already
+    /// fully and correctly accounted for `sealed_count` sealed shards, but
+    /// the canonical file was still holding the complete pre-split
+    /// content). The self-heal completed the interrupted truncation this
+    /// call — never re-sealing any already-sealed content into new,
+    /// redundant shards. Distinct from `AlreadyMigrated` (the SAFE window:
+    /// no gap to heal) and from `Migrated` (a genuinely fresh split).
+    Healed { sealed_count: u32 },
+}
+
+/// BC-1.18.008 Postcondition 1/2/3/4/5/6, Invariant 1/2/3 (AC-013/AC-014):
+/// the mechanism-A one-time backfill-split entry point, executed exactly
+/// once per artifact, as a one-time migration task at F4 activation — never
+/// as an ongoing per-write mechanism (Postcondition 1; distinct from
+/// [`execute_roll`]'s reactive, per-write roll).
+///
+/// Reuses BC-1.18.006's atomic-write / shard-index-schema primitives
+/// (Invariant 1) via a stage-then-verify-then-atomically-replace sequence
+/// (Postcondition 5): nothing durable about the original monolithic file's
+/// role changes until every resulting shard file AND the shard-index have
+/// been staged AND BOTH [`mechanism_a_verify_backfill_content_preserved`]
+/// and [`mechanism_a_verify_backfill_record_counts_preserved`] have passed
+/// (AC-014's hard gate) — a failure at any point aborts with the original
+/// file untouched and safely re-runnable from scratch (EC-003/EC-004).
+/// Idempotent (Invariant 3) via
+/// [`mechanism_a_backfill_already_migrated`]'s upfront check. Composes
+/// immediately with BC-1.18.007's retention policy in the SAME operation
+/// when the resulting shard count already exceeds `retention_count`
+/// (Postcondition 4) — `retention_count` is threaded in explicitly rather
+/// than re-derived, since no shard-index (and therefore no
+/// `ShardIndex::retention_count`) exists yet for an artifact that has never
+/// been backfilled.
+pub fn run_mechanism_a_backfill_split(
+    entry: &ShardEntry,
+    canonical_path: &Path,
+    record_boundary_offsets: &[usize],
+    retention_count: u32,
+) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
+    let index_path = shard_index_path_for(canonical_path, &entry.artifact_stem);
+
+    // Invariant 3: idempotency short-circuit, checked BEFORE any split work
+    // or disk read of `canonical_path`'s own content.
+    let already_migrated =
+        mechanism_a_backfill_already_migrated(canonical_path, &entry.artifact_stem).map_err(
+            |source| MechanismABackfillError::Io {
+                artifact_stem: entry.artifact_stem.clone(),
+                source,
+            },
+        )?;
+    if already_migrated {
+        // HIGH-2/VP-124: index-existence alone cannot distinguish a fully
+        // committed prior run (SAFE) from a crash landing in the DANGEROUS
+        // gap between this function's own index-publish and
+        // canonical-truncate writes below (see their ordering comment) --
+        // self-heal that gap here rather than silently accepting a
+        // permanent whole-corpus duplication.
+        return heal_or_confirm_already_migrated(entry, canonical_path, &index_path);
+    }
+
+    // BC-1.18.008 v1.9 Postcondition 3's Composability clause (F-C3-P9-004,
+    // BLOCKING, EC-015): `already_migrated == false` means no Manifest is
+    // present — but a non-empty `[[shard]]` array MAY already exist from an
+    // ordinary BC-1.18.006 roll that fired against this artifact BEFORE this
+    // mandatory one-time backfill ever ran (the roll-before-backfill
+    // ordering, expected in practice for exactly the four mandatory
+    // artifacts this BC exists to shrink). Those pre-existing rolled entries
+    // remain exactly as the roll mechanism published them — append-only,
+    // never renumbered, duplicated, or otherwise disturbed — so this
+    // backfill's own newly-sealed shards must continue `seq` numbering from
+    // `existing_max_seq + 1`, never restart at 1.
+    let existing_shards: Vec<ShardIndexEntry> = load_shard_index(&index_path)
+        .map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?
+        .map(|idx| idx.shards)
+        .unwrap_or_default();
+    let existing_max_seq: u32 = existing_shards.iter().map(|s| s.seq).max().unwrap_or(0);
+
+    // Postcondition 3's Composability clause point 1: `original_bytes`/
+    // `original_sha256` are always computed from the canonical file's
+    // CURRENT on-disk content at the moment this function is invoked — never
+    // from a reconstructed notion of "the full historical monolithic file"
+    // the artifact once held. Content a prior ordinary roll already sealed
+    // off is durably preserved in ITS OWN pre-existing `[[shard]]` entries
+    // (`existing_shards`, above), entirely outside this Manifest's scope.
+    let original_content =
+        std::fs::read(canonical_path).map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source,
+        })?;
+
+    // MED-C (Postcondition 6(b) load-bearing fix): validate
+    // `record_boundary_offsets` against the ACTUAL just-read
+    // `original_content` bytes BEFORE trusting it to drive partitioning or
+    // the record-count expectation at all — see
+    // [`record_boundary_offsets_are_well_formed`]'s own doc comment for why
+    // this is necessary for the Postcondition 6 hard gate to be genuinely
+    // load-bearing rather than tautological.
+    if !record_boundary_offsets.is_empty()
+        && !record_boundary_offsets_are_well_formed(original_content.len(), record_boundary_offsets)
+    {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: format!(
+                "record_boundary_offsets {record_boundary_offsets:?} is not well-formed \
+                 against the {}-byte original content read from disk (offsets must be \
+                 strictly ascending, non-duplicate, and in-bounds)",
+                original_content.len()
+            ),
+        });
+    }
+
+    let partitions = mechanism_a_partition_for_backfill(
+        &original_content,
+        record_boundary_offsets,
+        entry.shard_cap_bytes,
+    );
+
+    // F-001/P2-001 (BLOCKER/HIGH, Postcondition 6(b) load-bearing fix,
+    // BOTH-DIRECTIONS): independently recompute this artifact's TRUE record
+    // boundaries from the just-read `original_content` via this module's own
+    // oracle (`mechanism_a_record_boundary_offsets`) and require the
+    // caller-supplied `record_boundary_offsets` to match that oracle set
+    // EXACTLY (set equality -- same elements, neither a subset nor a
+    // superset) whenever the oracle independently recognizes ANY genuine
+    // structural boundary at all. Without this, both sides of the
+    // Postcondition 6(b) comparison
+    // (`mechanism_a_verify_backfill_record_counts_preserved`, just below)
+    // derived from the SAME caller-supplied `record_boundary_offsets` value
+    // -- `mechanism_a_partition_for_backfill`'s own `record_count` sum, by
+    // construction, always totals exactly `record_boundary_offsets.len()`
+    // too -- so a caller-supplied offsets list that is well-formed (MED-C's
+    // check, above, passes) but wrong against the content's real structure
+    // would tautologically report "preserved" regardless of how wrong it
+    // was. A prior fix (F-001) unioned the caller's list with the oracle's,
+    // which catches UNDER-detection (a caller list missing a real boundary)
+    // but is structurally blind to OVER-detection (a caller list that is a
+    // STRICT SUPERSET of the oracle -- every real boundary present, plus one
+    // spurious extra landing mid-record): the union contributes nothing new
+    // in that shape (`|caller ∪ oracle| == |caller|`), so both sides of the
+    // comparison stayed tautologically equal even though the spurious
+    // offset would physically split a real record across two shard files. A
+    // fresh-context adversarial pass-2 review (P2-001) found this gap; see
+    // this function's own module-level doc comment and the F-001/P2-001
+    // tests for the full mechanism. When the oracle recognizes NO
+    // independently-detectable boundary at all for this artifact_stem/
+    // content pair, two shapes are possible, and P3-002 (S-25.02 F4
+    // cluster-3 adversarial pass-3, MEDIUM) requires them to be handled
+    // DIFFERENTLY:
+    //   - `artifact_stem` is one of the four KNOWN mechanism-A artifacts
+    //     (`decision-log`/`burst-log`/`lessons`/`session-checkpoints`), but
+    //     THIS particular content simply does not match any real marker
+    //     form (e.g. a synthetic test fixture) -- there is genuinely
+    //     nothing for the oracle to corroborate OR refute against for a
+    //     recognized artifact's own content, so the caller-supplied offsets
+    //     are trusted at face value, unchanged from pre-P3-002 behavior.
+    //   - `artifact_stem` has NO marker rule at all (falls through
+    //     `mechanism_a_record_boundary_offsets`'s own `_ => Vec::new()`
+    //     arm) -- the oracle has nothing to corroborate the caller's claim
+    //     against, full stop, so trusting it at face value is exactly the
+    //     silently-mis-partition outcome Postcondition 2's Normalization
+    //     rule forbids ("If a future cycle introduces a heading form
+    //     outside this enumeration, Postcondition 6's fail-loud
+    //     content-preservation gate MUST reject the backfill run rather
+    //     than silently mis-partition"). This ABORTS fail-loud.
+    let true_boundary_offsets =
+        mechanism_a_record_boundary_offsets(&entry.artifact_stem, &original_content);
+    let original_record_count = if record_boundary_offsets.is_empty() {
+        // F-C3-P5-001 (S-25.02 F4 cluster-3 adversarial pass-5, LOW): the
+        // empty-caller-offsets twin of P3-002, above. An empty
+        // `record_boundary_offsets` argument must NOT be trusted at face
+        // value as "no real records exist" without first consulting the
+        // SAME oracle the non-empty branch below already cross-checks
+        // against -- otherwise a known stem's real, marker-bearing content
+        // silently collapses to a single partition (EC-016's zero-shard
+        // no-op) even though the oracle can independently find genuine
+        // record boundaries the caller's empty list missed entirely. This
+        // is exactly the silently-mis-partition outcome Postcondition 2's
+        // Normalization rule forbids. Abort fail-loud ONLY when the oracle
+        // finds real structure; a genuinely empty file, or a known stem
+        // whose content has zero oracle-detectable markers (e.g. a
+        // title-only preamble), has nothing for the oracle to have missed,
+        // so both remain valid zero/single-record no-ops.
+        if !true_boundary_offsets.is_empty() {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "record_boundary_offsets is empty but the independently-detected oracle \
+                     boundary set {true_boundary_offsets:?} finds genuine record boundaries in \
+                     this artifact's own on-disk content -- an empty caller-supplied \
+                     record_boundary_offsets must never silently no-op a mandated split when \
+                     real records exist (Postcondition 6(b)/Invariant 2/EC-004/EC-006, \
+                     F-C3-P5-001, twin of P3-002)"
+                ),
+            });
+        }
+        usize::from(!original_content.is_empty())
+    } else if true_boundary_offsets.is_empty() {
+        if !is_known_mechanism_a_artifact_stem(&entry.artifact_stem) {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "artifact_stem \"{}\" has no known BC-1.18.008 Record-Boundary Marker Table \
+                     rule at all, so the independently-detected oracle boundary set is empty and \
+                     cannot corroborate the caller-supplied record_boundary_offsets \
+                     {record_boundary_offsets:?} -- per Postcondition 2's Normalization rule, an \
+                     unrecognized artifact's content must never be silently mis-partitioned by \
+                     trusting caller-supplied offsets at face value (P3-002)",
+                    entry.artifact_stem
+                ),
+            });
+        }
+        record_boundary_offsets.len()
+    } else {
+        let mut sorted_caller_offsets: Vec<usize> = record_boundary_offsets.to_vec();
+        sorted_caller_offsets.sort_unstable();
+        sorted_caller_offsets.dedup();
+        let mut sorted_true_offsets = true_boundary_offsets;
+        sorted_true_offsets.sort_unstable();
+        if sorted_caller_offsets != sorted_true_offsets {
+            return Err(MechanismABackfillError::ContentPreservationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "record_boundary_offsets {record_boundary_offsets:?} diverges from the \
+                     independently-detected true record boundaries {sorted_true_offsets:?} for \
+                     this artifact's own on-disk content -- every genuine boundary must be \
+                     present and no spurious offset may be added (Postcondition 6(b)/Invariant \
+                     2/EC-004/EC-006 -- catches both UNDER-detection, F-001, and \
+                     OVER-detection, P2-001)"
+                ),
+            });
+        }
+        record_boundary_offsets.len()
+    };
+
+    // AC-014/Postcondition 6 hard gate: mandatory content-preservation and
+    // record-integrity verification BEFORE any durable write occurs.
+    if !mechanism_a_verify_backfill_content_preserved(&original_content, &partitions) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: "concatenation of the computed partitions does not reproduce the original \
+                      monolithic content byte-for-byte"
+                .to_string(),
+        });
+    }
+    if !mechanism_a_verify_backfill_record_counts_preserved(original_record_count, &partitions) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: "sum of the computed partitions' record counts does not match the original \
+                      record count"
+                .to_string(),
+        });
+    }
+    // Postcondition 6(c)/Invariant 4 (this amendment, F-C3-P3-001): the
+    // THIRD sub-clause of the SAME mandatory content-preservation hard gate
+    // -- every computed partition's own byte length must respect
+    // `shard_cap_bytes`, EXCEPT one flagged `oversized_record: true`
+    // (EC-002/EC-008). Checked against the actual computed partition bytes,
+    // BEFORE any durable write occurs, never merely implied by the packer's
+    // own behavior.
+    if !mechanism_a_verify_backfill_per_shard_cap_preserved(&partitions, entry.shard_cap_bytes) {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            detail: format!(
+                "at least one computed partition exceeds shard_cap_bytes ({}) without being \
+                 flagged oversized_record -- this is exactly the unsanctioned Postcondition 2 \
+                 violation Layer 2 exists to eliminate (Postcondition 6(c)/Invariant 4)",
+                entry.shard_cap_bytes
+            ),
+        });
+    }
+
+    // EC-016: content already fits within a single partition -- no sealing
+    // is structurally necessary. The canonical file is left COMPLETELY
+    // UNCHANGED; a shard-index is still created (or, per the Composability
+    // clause, re-published carrying forward any pre-existing rolled
+    // `existing_shards` entries UNCHANGED) and registered with a populated
+    // Manifest.
+    if partitions.len() <= 1 {
+        let mut index = fresh_backfill_shard_index(entry, retention_count, existing_shards);
+        // Postcondition 3's Backfill Recovery Manifest: even in the
+        // no-split EC-001 case, the manifest is populated from the SAME
+        // `original_content` buffer already read above -- with `final_*`
+        // equal to `original_*` (the canonical file is left COMPLETELY
+        // UNCHANGED, so what it will hold once "done" IS the original
+        // content). This artifact will always short-circuit at
+        // `mechanism_a_backfill_already_migrated`'s Manifest-populated
+        // branch on any later re-invocation (routing to
+        // `heal_or_confirm_already_migrated`'s own `index.shards.is_empty()`
+        // guard, below, when no pre-existing rolled shards carried forward),
+        // so the manifest is not load-bearing for THIS artifact's own
+        // recovery in that case -- it is populated anyway for consistency
+        // with the "computed once, at split time" contract Postcondition 3
+        // states unconditionally.
+        let manifest = BackfillManifest {
+            original_bytes: original_content.len() as u64,
+            original_sha256: sha256_hex(&original_content),
+            final_bytes: original_content.len() as u64,
+            final_sha256: sha256_hex(&original_content),
+        };
+        index.backfill_manifest = Some(manifest);
+        write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+        return Ok(MechanismABackfillOutcome::Migrated {
+            sealed_count: 0,
+            archived_count: 0,
+        });
+    }
+
+    // Postcondition 2: every partition before the last is sealed, in
+    // chronological (original-file) order, with sequential `seq` numbers
+    // continuing from `existing_max_seq + 1` (Composability clause point 2)
+    // -- starting at 1 when no pre-existing rolled shards exist; the LAST
+    // partition becomes the fresh current file.
+    //
+    // Deliberately reuses `write_atomic` (rename-based, unconditionally
+    // overwriting) rather than `publish_sealed_shard`'s `write_exclusive`
+    // write-once primitive: BC-1.18.006's per-write write-once/immutability
+    // guarantee governs shards sealed by the ONGOING mechanism, from the
+    // moment THIS one-time migration durably completes onward. Before that,
+    // a same-named leftover at a destination `seq` path can only be a
+    // stale, incomplete artifact of a crashed PRIOR backfill attempt
+    // (EC-003/Postcondition 5) -- not real sealed history -- and must be
+    // safely overwritten on restart, never refused.
+    let sealed_partitions = &partitions[..partitions.len() - 1];
+    let current_partition = &partitions[partitions.len() - 1];
+    let sealed_count = sealed_partitions.len() as u32;
+    let sealed_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut shard_entries = Vec::with_capacity(sealed_partitions.len());
+    for (i, partition) in sealed_partitions.iter().enumerate() {
+        // Composability clause point 2: continue `seq` numbering from
+        // `existing_max_seq + 1` -- never restart at 1 when this artifact
+        // already carries pre-existing rolled shard entries.
+        let seq = existing_max_seq + (i as u32) + 1;
+        let sealed_filename = format!("{}.{seq:04}.md", entry.artifact_stem);
+        let sealed_path = shard_sibling_path(canonical_path, &sealed_filename);
+        mechanism_a_write_and_verify_sealed_shard(
+            &sealed_path,
+            &partition.bytes,
+            &entry.artifact_stem,
+        )?;
+
+        shard_entries.push(ShardIndexEntry {
+            seq,
+            path: sealed_filename,
+            sealed_at: sealed_at.clone(),
+            bytes_at_seal: partition.bytes.len() as u64,
+            sealed_retroactively: false,
+            // P2-002 (EC-002 Canonical Test Vector): surface
+            // `mechanism_a_partition_for_backfill`'s own already-computed
+            // `oversized_record` flag through to the published shard-index
+            // entry -- previously computed but silently dropped here.
+            oversized_record: partition.oversized_record,
+            // P3-001 (Leading-Preamble Handling Rule, Postcondition 3): a
+            // preamble shard is the ONLY partition shape with zero domain
+            // records (every ordinary record-bearing partition has
+            // `record_count >= 1` by construction) -- `record_count == 0`
+            // is therefore a sound, sufficient discriminator for
+            // `is_preamble_shard` without needing a dedicated field on
+            // `MechanismABackfillPartition` itself.
+            is_preamble_shard: partition.record_count == 0,
+            // Postcondition 3: surface this partition's own record count
+            // through to the published index entry -- `0` for a preamble
+            // shard, `>= 1` for an ordinary record-bearing shard.
+            records: partition.record_count as u32,
+        });
+    }
+
+    // Composability clause point 2: this backfill's own newly-sealed shard
+    // entries are APPENDED to the pre-existing `[[shard]]` array -- never
+    // renumbering, duplicating, or otherwise disturbing the pre-existing
+    // rolled entries, which remain exactly as BC-1.18.006's roll mechanism
+    // published them (append-only, POLICY-1 consistent).
+    let mut all_shards = existing_shards;
+    all_shards.extend(shard_entries);
+    let mut index = fresh_backfill_shard_index(entry, retention_count, all_shards);
+
+    // Postcondition 4: compose immediately with BC-1.18.007's retention
+    // policy in this SAME operation when the backfill already produced more
+    // shards than `retention_count` -- never deferred to a later event.
+    let archived_count = archive_overflow_shards(&mut index, canonical_path)
+        .map_err(|source| MechanismABackfillError::Io {
+            artifact_stem: entry.artifact_stem.clone(),
+            source: io::Error::other(source.to_string()),
+        })?
+        .len() as u32;
+
+    // Publish the full shard index for the complete pre-existing history in
+    // this SAME operation (Postcondition 3) -- deliberately BEFORE the
+    // canonical-file rewrite below. A crash between the two leaves a
+    // fully-correct, fully-indexed set of sealed shards with the canonical
+    // file still (harmlessly, TEMPORARILY) holding the complete pre-split
+    // content rather than just the final partition -- HIGH-2/VP-124:
+    // `heal_or_confirm_already_migrated` (invoked via this function's own
+    // upfront `already_migrated` branch above on the NEXT run) detects
+    // exactly this gap and completes the interrupted truncation itself, so
+    // the "operator-fixable by re-running" property above is genuinely
+    // self-healing, not just self-evident. The alternative ordering
+    // (canonical rewritten first) is strictly worse: a crash in ITS gap
+    // would leave `mechanism_a_backfill_already_migrated` reporting
+    // "not yet migrated" while the canonical file has ALREADY been shrunk
+    // to just the final partition, so a naive restart would misread that
+    // shrunk remnant as the artifact's true original content and silently
+    // orphan every already-sealed shard from the index it (re-)computes.
+    //
+    // F-C3-P6-001 (BC-1.18.008 v1.6 Postcondition 3): the Backfill Recovery
+    // Manifest, computed from the SAME `original_content` buffer that drove
+    // Postcondition 2's partitioning above and the SAME `current_partition`
+    // that becomes the fresh canonical file below -- published in this SAME
+    // atomic index-publish write, durably BEFORE the canonical-truncate
+    // write that follows it, so it is guaranteed to exist for
+    // `heal_or_confirm_already_migrated`'s Recovery-Confirmation Rule on
+    // any later re-invocation, including one landing in the crash window
+    // this comment block already describes.
+    let backfill_manifest = BackfillManifest {
+        original_bytes: original_content.len() as u64,
+        original_sha256: sha256_hex(&original_content),
+        final_bytes: current_partition.bytes.len() as u64,
+        final_sha256: sha256_hex(&current_partition.bytes),
+    };
+    index.backfill_manifest = Some(backfill_manifest.clone());
+    write_shard_index_for_backfill(&index_path, &index, &entry.artifact_stem)?;
+
+    // F-C3-P8-002 (BC-1.18.008 v1.8 Postcondition 6(c)'s "Extension to the
+    // happy-path canonical-truncate write", Invariant 5, EC-013): this is
+    // the ORDINARY, non-recovery, first-time/uninterrupted completion of
+    // Postcondition 5 step (ii)'s destructive, source-overwriting write --
+    // structurally identical in kind to the DANGEROUS-window heal write
+    // `heal_or_confirm_already_migrated` already verifies (F-C3-P7-001), and
+    // to the sealed-shard writes above (F-C3-P6-002). It receives the SAME
+    // post-hoc disk read-back discipline via the SAME shared
+    // `write_and_read_back` primitive, verified against the SAME Backfill
+    // Recovery Manifest `(final_bytes, final_sha256)` pair already durably
+    // published in Postcondition 5 step (i) immediately above -- no new
+    // oracle value is computed here.
+    let read_back = write_and_read_back(
+        canonical_path,
+        &current_partition.bytes,
+        &entry.artifact_stem,
+    )?;
+    let read_back_bytes = read_back.len() as u64;
+    let read_back_sha256 = sha256_hex(&read_back);
+    if read_back_bytes != backfill_manifest.final_bytes
+        || read_back_sha256 != backfill_manifest.final_sha256
+    {
+        // The destructive write has already happened at this point -- fail
+        // loud with the NEW `E-SHD-013` code (distinct from `E-SHD-012`,
+        // which covers the crash-recovery heal's own read-back mismatch)
+        // rather than reporting `Migrated` over silently-corrupted content.
+        // The shard-index and Backfill Recovery Manifest are already
+        // durably published (Postcondition 5 step (i), above), so a
+        // follow-on re-invocation resolves the now-corrupted canonical file
+        // via the ordinary AMBIGUOUS (`E-SHD-011`) recovery-confirmation
+        // path per EC-013's own Canonical Test Vector note -- deliberately
+        // not suppressed here.
+        return Err(MechanismABackfillError::CanonicalWriteVerificationFailed {
+            artifact_stem: entry.artifact_stem.clone(),
+            read_back_bytes,
+            read_back_sha256,
+            final_bytes: backfill_manifest.final_bytes,
+            final_sha256: backfill_manifest.final_sha256,
+        });
+    }
+
+    Ok(MechanismABackfillOutcome::Migrated {
+        sealed_count,
+        archived_count,
+    })
+}
+
+/// F4 BC-cluster-3 adversarial-review finding HIGH-2, RESTRUCTURED under
+/// F-C3-P6-001 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 5's
+/// Recovery-Confirmation Rule, Invariant 3, EC-009/EC-010): distinguishes
+/// the SAFE crash window (a prior [`run_mechanism_a_backfill_split`] call
+/// completed in full) from the DANGEROUS one (that call's own index-publish
+/// write landed durably but its canonical-truncate write, immediately
+/// after, did not) — and self-heals the DANGEROUS case, or fails loud
+/// (`E-SHD-011`) on a genuinely AMBIGUOUS one.
+///
+/// **Manifest-based, never a structural byte-prefix heuristic.** A PRIOR
+/// implementation classified the DANGEROUS window structurally: read every
+/// already-sealed shard back from disk, concatenate them (`sealed_concat`),
+/// and check whether the canonical file's own leading bytes reproduce that
+/// concatenation as a PREFIX. BC-1.18.008 v1.6 retires this — it
+/// FALSE-POSITIVES whenever the artifact's real content legitimately
+/// repeats a sealed shard's exact bytes as a prefix of the SAFE-window
+/// final partition (EC-009; realistic for `session-checkpoints.md`, which
+/// imposes no uniqueness requirement on checkpoint headings/bodies), and it
+/// has NO ambiguous-state disposition at all — it only ever silently
+/// resolved SAFE or DANGEROUS, which is the exact class of defect
+/// Postcondition 5's Recovery-Confirmation Rule exists to eliminate.
+///
+/// The determination now reads the canonical file's CURRENT on-disk bytes
+/// exactly once and computes their exact whole-file `(length, SHA-256)`,
+/// then compares that pair against the Backfill Recovery Manifest's two
+/// recorded pairs (read directly off `index.backfill_manifest`, now an
+/// ordinary [`ShardIndex`] field — v1.9's Schema-location correction,
+/// F-C3-P9-004) — the SOLE authoritative basis for this determination
+/// (Invariant 3):
+///   - matches `(final_bytes, final_sha256)` exactly ⇒ SAFE: the prior
+///     run's canonical-truncate write already completed; no action.
+///   - matches `(original_bytes, original_sha256)` exactly ⇒ DANGEROUS,
+///     unambiguously confirmed: the canonical file still holds the FULL
+///     pre-split content byte-for-byte, so step (ii) never ran (or crashed
+///     before writing any bytes). Healing completes the interrupted write.
+///     The bytes to write are the canonical file's own trailing
+///     `original_bytes - final_bytes` bytes — safe to isolate ONLY because
+///     the canonical file's FULL contents were just confirmed, by exact
+///     SHA-256 match, to be byte-identical to the very `original_content`
+///     buffer Postcondition 2's packer partitioned at split time, so this
+///     is the SAME final partition already independently established
+///     then, never a heuristic re-derivation from an unconfirmed prefix
+///     match (the defect this rule corrects).
+///   - matches NEITHER pair ⇒ AMBIGUOUS: fails loud with `E-SHD-011`
+///     (EC-010); the canonical file is NOT written to under any
+///     circumstance.
+///
+/// Healing never re-derives partitions or re-seals any shard — the
+/// shard-index already correctly and completely accounts for the
+/// artifact's pre-existing history (Postcondition 3 already happened); it
+/// only finishes the single interrupted write.
+fn heal_or_confirm_already_migrated(
+    entry: &ShardEntry,
+    canonical_path: &Path,
+    index_path: &Path,
+) -> Result<MechanismABackfillOutcome, MechanismABackfillError> {
+    let io_err = |source: io::Error| MechanismABackfillError::Io {
+        artifact_stem: entry.artifact_stem.clone(),
+        source,
+    };
+
+    // `mechanism_a_backfill_already_migrated` (this function's only caller)
+    // just confirmed the index file exists -- a `None` here would mean it
+    // vanished in the interim (a DIFFERENT, worse corruption than the crash
+    // window this function heals), so this surfaces loudly rather than
+    // silently falling back to a fresh migration.
+    let index = load_shard_index(index_path)
+        .map_err(io_err)?
+        .ok_or_else(|| {
+            io_err(io::Error::other(format!(
+                "shard-index '{}' reported present by `mechanism_a_backfill_already_migrated` but \
+             vanished before this self-heal check could read it back",
+                index_path.display()
+            )))
+        })?;
+
+    if index.shards.is_empty() {
+        // EC-016: zero-shard registration -- the original run never
+        // rewrote the canonical file at all (nothing was ever sealed), so
+        // there is no interrupted truncation to complete.
+        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+    }
+
+    // Postcondition 5's Recovery-Confirmation Rule: the Backfill Recovery
+    // Manifest is the SOLE authoritative basis for this determination
+    // (Invariant 3) -- a shard-index with sealed shards but no manifest at
+    // all cannot support ANY safe disposition, so this fails loud under the
+    // SAME `E-SHD-011` code rather than falling back to a structural
+    // heuristic.
+    //
+    // BC-1.18.008 v1.9 Invariant 3's Residual `MissingBackfillManifest`
+    // disposition (F-C3-P9-004): `mechanism_a_backfill_already_migrated`
+    // (this function's only caller) already confirmed
+    // `backfill_manifest.is_some()` on ITS OWN load of this same index file
+    // before routing here -- a `None` on THIS independent re-read is
+    // therefore a genuine TOCTOU race (the index was concurrently rewritten
+    // between the two reads) or on-disk corruption of the
+    // `backfill_manifest` field specifically, never the ordinary
+    // roll-before-backfill case (that case is now caught upstream by the
+    // corrected idempotency check and never reaches this function at all).
+    let manifest = index.backfill_manifest.clone().ok_or_else(|| {
+        MechanismABackfillError::MissingBackfillManifest {
+            artifact_stem: entry.artifact_stem.clone(),
+        }
+    })?;
+
+    let canonical_bytes = std::fs::read(canonical_path).map_err(io_err)?;
+    let canonical_len = canonical_bytes.len() as u64;
+    let canonical_sha256 = sha256_hex(&canonical_bytes);
+
+    if canonical_len == manifest.final_bytes && canonical_sha256 == manifest.final_sha256 {
+        // SAFE window: the canonical file's exact whole-file (length,
+        // SHA-256) already matches the manifest's recorded intended-final
+        // pair -- the prior run's canonical-truncate write already
+        // completed. Nothing to heal, nothing written.
+        return Ok(MechanismABackfillOutcome::AlreadyMigrated);
+    }
+
+    if canonical_len == manifest.original_bytes && canonical_sha256 == manifest.original_sha256 {
+        // DANGEROUS window, unambiguously confirmed: the canonical file's
+        // exact whole-file (length, SHA-256) matches the manifest's
+        // recorded pre-split-original pair byte-for-byte -- step (ii) never
+        // ran. Postcondition 5's Manifest-Authoritative Slice-and-Verify
+        // Rule (F-C3-P7-001): the healed content is ALWAYS obtained by
+        // slicing the canonical file's own current bytes at an offset
+        // derived from the Manifest itself (`original_bytes - final_bytes`)
+        // -- NEVER by summing the shard-index's own `bytes_at_seal` fields
+        // (a separate, independently-corruptible piece of on-disk state
+        // the PRIOR implementation relied on, EC-011) -- and that slice is
+        // NEVER written before being confirmed against the Manifest's own
+        // `final_bytes`/`final_sha256` pair.
+        let offset = manifest
+            .original_bytes
+            .checked_sub(manifest.final_bytes)
+            .ok_or_else(|| MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Backfill Recovery Manifest's final_bytes ({}) exceeds its own \
+                     original_bytes ({}) -- the Manifest is internally inconsistent; refusing to \
+                     derive a slice offset from it",
+                    manifest.final_bytes, manifest.original_bytes
+                ),
+            })?;
+        let offset = usize::try_from(offset).map_err(|_| {
+            MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Manifest-derived slice offset {offset} does not fit a platform usize"
+                ),
+            }
+        })?;
+        let sliced = canonical_bytes.get(offset..).ok_or_else(|| {
+            MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Manifest-derived slice offset {offset} exceeds the canonical file's own \
+                     confirmed-original length {canonical_len}"
+                ),
+            }
+        })?;
+
+        // Step 2 (hard gate, pre-write): the candidate slice MUST verify
+        // against the Manifest's own recorded final-partition pair before
+        // anything is written -- a wrong slice (a future regression, a
+        // corrupted Manifest value, or a legacy caller still deriving the
+        // offset from the shard index) fails this check and is never
+        // written.
+        let sliced_len = sliced.len() as u64;
+        let sliced_sha256 = sha256_hex(sliced);
+        if sliced_len != manifest.final_bytes || sliced_sha256 != manifest.final_sha256 {
+            return Err(MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "the Manifest-derived candidate slice ({sliced_len} bytes, sha256 \
+                     {sliced_sha256}) does not verify against the Backfill Recovery Manifest's \
+                     own recorded final partition ({} bytes, sha256 {}) -- refusing to write an \
+                     unverified slice; canonical file left untouched pending operator \
+                     investigation",
+                    manifest.final_bytes, manifest.final_sha256
+                ),
+            });
+        }
+
+        // Step 3: both checks passed -- write the verified slice, then
+        // (Postcondition 6(c)/Invariant 4's F-C3-P7-001 extension) perform
+        // the SAME post-hoc disk read-back discipline sealed-shard writes
+        // already receive (F-C3-P6-002) on the heal's OWN destructive
+        // write, since it is the final write of the interrupted migration
+        // and the pre-heal content is irretrievably gone the moment it
+        // lands.
+        let read_back = write_and_read_back(canonical_path, sliced, &entry.artifact_stem)?;
+        let read_back_len = read_back.len() as u64;
+        let read_back_sha256 = sha256_hex(&read_back);
+        if read_back_len != manifest.final_bytes || read_back_sha256 != manifest.final_sha256 {
+            return Err(MechanismABackfillError::SliceVerificationFailed {
+                artifact_stem: entry.artifact_stem.clone(),
+                detail: format!(
+                    "post-hoc disk read-back of the heal's own write to '{}' \
+                     ({read_back_len} bytes, sha256 {read_back_sha256}) does not match the \
+                     Backfill Recovery Manifest's recorded final partition ({} bytes, sha256 \
+                     {}) -- the write silently truncated, partially flushed, or otherwise \
+                     landed corrupted bytes on disk; the destructive write already happened, so \
+                     this surfaces the corruption immediately for operator remediation from git \
+                     history/backup rather than reporting the heal complete",
+                    canonical_path.display(),
+                    manifest.final_bytes,
+                    manifest.final_sha256
+                ),
+            });
+        }
+
+        return Ok(MechanismABackfillOutcome::Healed {
+            sealed_count: index.shards.len() as u32,
+        });
+    }
+
+    // AMBIGUOUS (EC-010): the canonical file's exact whole-file
+    // (length, SHA-256) matches NEITHER recorded manifest pair -- never
+    // silently default to either the SAFE or DANGEROUS disposition. Fail
+    // loud; the canonical file is NOT written to.
+    Err(MechanismABackfillError::AmbiguousRecoveryState {
+        artifact_stem: entry.artifact_stem.clone(),
+        canonical_bytes: canonical_len,
+        canonical_sha256,
+        original_bytes: manifest.original_bytes,
+        original_sha256: manifest.original_sha256,
+        final_bytes: manifest.final_bytes,
+        final_sha256: manifest.final_sha256,
+    })
+}
+
+/// Build a fresh [`ShardIndex`] for a mechanism-A backfill-split (EC-016's
+/// zero-shard registration and the normal sealed-shard case alike) from
+/// `entry`'s own cap-formula inputs, threading `retention_count` explicitly
+/// (no pre-existing shard-index exists yet for an artifact that has never
+/// been backfilled, so there is no `ShardIndex::retention_count` to reuse).
+/// `shards` MAY already carry pre-existing rolled entries from an ordinary
+/// BC-1.18.006 roll that ran before this backfill (Postcondition 3's
+/// Composability clause, EC-015) — this constructor does not itself
+/// distinguish that case; its caller supplies the correct combined list.
+/// `backfill_manifest` always starts `None` here — every caller sets it
+/// explicitly, immediately after construction, once the Manifest's own
+/// values are computed from the original content buffer.
+fn fresh_backfill_shard_index(
+    entry: &ShardEntry,
+    retention_count: u32,
+    shards: Vec<ShardIndexEntry>,
+) -> ShardIndex {
+    ShardIndex {
+        schema_version: 1,
+        artifact_stem: entry.artifact_stem.clone(),
+        current_shard: entry.artifact_path.clone(),
+        shard_cap_bytes: entry.shard_cap_bytes,
+        max_single_record_bytes: entry.max_single_record_bytes,
+        safety_margin_bytes: entry.safety_margin,
+        practical_fuel_ceiling: entry.practical_fuel_ceiling,
+        worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+        retention_count,
+        backfill_manifest: None,
+        shards,
+    }
+}
+
+/// Serialize and atomically publish `index` at `index_path` -- the
+/// backfill-split's own index-publish primitive, reusing `write_atomic`
+/// (Invariant 1: caller of BC-1.18.006's atomic-write primitives, not a
+/// reimplementation).
+///
+/// BC-1.18.008 v1.9 Postcondition 3's Schema-location correction
+/// (F-C3-P9-004, BLOCKING): `index.backfill_manifest`, when `Some`, is now
+/// an ordinary field of `index` itself and round-trips through this
+/// function's single `toml::to_string(index)` call like every other
+/// `ShardIndex` field -- no separate `[backfill_manifest]` table append, and
+/// no special-case plumbing, is needed or permitted here. Callers set
+/// `index.backfill_manifest` before calling this function. Satisfies
+/// Postcondition 3's "populated in the SAME atomic index-publish write as
+/// the `[[shard]]` entries themselves" requirement exactly (one durable
+/// write, not two) -- and, unlike the retired side-channel design, this
+/// Manifest now ALSO survives every subsequent `publish_shard_index_update`
+/// call (BC-1.18.006's ongoing per-write roll) and both self-heal paths,
+/// since they load, mutate, and re-serialize the SAME struct.
+fn write_shard_index_for_backfill(
+    index_path: &Path,
+    index: &ShardIndex,
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    let to_err = |e: toml::ser::Error| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source: io::Error::other(e.to_string()),
+    };
+    let serialized = toml::to_string(index).map_err(to_err)?;
+    last_amended_migrate::atomic_write::write_atomic(index_path, &serialized).map_err(|e| {
+        MechanismABackfillError::Io {
+            artifact_stem: artifact_stem.to_string(),
+            source: migrate_err_to_io(e),
+        }
+    })
+}
+
+/// Atomically write `content` (arbitrary bytes) to `path` via `write_atomic`
+/// -- `write_atomic` itself is `&str`-typed (S-15.03 N2's permission-
+/// preservation + fsync-durability primitive), so this validates `content`
+/// is valid UTF-8 first, failing loud (never lossily substituting) if not:
+/// a lossy conversion would silently violate Postcondition 6(a)'s
+/// byte-for-byte content-preservation guarantee for exactly the corrupted
+/// bytes it replaced.
+fn write_atomic_bytes(
+    path: &Path,
+    content: &[u8],
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    let text = std::str::from_utf8(content).map_err(|e| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source: io::Error::new(io::ErrorKind::InvalidData, e.to_string()),
+    })?;
+    last_amended_migrate::atomic_write::write_atomic(path, text).map_err(|e| {
+        MechanismABackfillError::Io {
+            artifact_stem: artifact_stem.to_string(),
+            source: migrate_err_to_io(e),
+        }
+    })
+}
+
+/// F-C3-P6-002 (S-25.02 F4 cluster-3 CROSS-VENDOR (OpenAI Codex)
+/// adversarial pass-6 review, HIGH; BC-1.18.008 v1.6 Postcondition 6(c)'s
+/// disk-read-back ruling, Invariant 4): writes `bytes` to `sealed_path` via
+/// [`write_atomic_bytes`], then performs a POST-HOC READ-BACK of the
+/// JUST-WRITTEN file from disk and verifies the read-back bytes are
+/// byte-for-byte identical to `bytes` — the BC's own ruling text: "'actual
+/// bytes written to disk' means a POST-HOC READ-BACK of each sealed shard
+/// file from disk, via a FRESH file read performed AFTER that shard's
+/// write completes, compared against the in-memory partition buffer that
+/// was intended to be written." Checking only the in-memory buffer's own
+/// length/content before issuing the write (the shipped behavior this
+/// finding corrects) cannot detect a write that silently truncated,
+/// partially flushed, or otherwise landed corrupted bytes on disk — exactly
+/// the failure mode this gate exists to catch BEFORE the original
+/// monolithic file is retired and its content becomes unrecoverable except
+/// via git history. On a read-back mismatch, aborts fail-loud via
+/// [`MechanismABackfillError::ContentPreservationFailed`] — the original
+/// monolithic file is untouched and the operation is safely re-runnable
+/// from scratch (Postcondition 5, EC-003/EC-004), consistent with
+/// Postcondition 6's existing hard-gate discipline.
+///
+/// **The extracted fault-injection seam (`pub`, not a `#[cfg(test)]` hook):**
+/// [`run_mechanism_a_backfill_split`]'s own sealed-shard write loop is one
+/// synchronous call with no injectable I/O layer for a test to interpose
+/// between a shard's write completing and this gate's own read-back — this
+/// function is that seam, extracted as the write-then-read-back-then-verify
+/// unit in isolation, addressable directly by a fault-injection test (e.g.
+/// one that races a corrupting write against `sealed_path` between this
+/// function's own `write_atomic_bytes` call and its read-back) without
+/// needing to fabricate a full `run_mechanism_a_backfill_split` invocation.
+/// A lower-level extracted function was chosen over a test-only injectable
+/// callback parameter threaded through the whole call chain: it keeps
+/// production call sites simple (`mechanism_a_write_and_verify_sealed_shard(path,
+/// bytes, stem)?` reads identically to the `write_atomic_bytes` call it
+/// replaces) and needs no `#[cfg(test)]`-gated parameter on a `pub` function
+/// signature, while still giving a fault-injection test a single, real,
+/// disk-level operation to drive independently.
+pub fn mechanism_a_write_and_verify_sealed_shard(
+    sealed_path: &Path,
+    bytes: &[u8],
+    artifact_stem: &str,
+) -> Result<(), MechanismABackfillError> {
+    let read_back = write_and_read_back(sealed_path, bytes, artifact_stem)?;
+
+    if read_back != bytes {
+        return Err(MechanismABackfillError::ContentPreservationFailed {
+            artifact_stem: artifact_stem.to_string(),
+            detail: format!(
+                "post-hoc disk read-back of sealed shard '{}' ({} bytes) does not match the \
+                 in-memory partition that was just written ({} bytes) -- the write silently \
+                 truncated, partially flushed, or otherwise landed corrupted bytes on disk \
+                 (Postcondition 6(c)/Invariant 4's F-C3-P6-002 disk-read-back ruling)",
+                sealed_path.display(),
+                read_back.len(),
+                bytes.len()
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+/// Shared low-level I/O primitive behind BOTH
+/// [`mechanism_a_write_and_verify_sealed_shard`]'s sealed-shard write
+/// (F-C3-P6-002) AND `heal_or_confirm_already_migrated`'s DANGEROUS-window
+/// heal write (F-C3-P7-001's Postcondition 6(c)/Invariant 4 extension):
+/// writes `bytes` to `path` via [`write_atomic_bytes`], then performs a
+/// POST-HOC READ-BACK of the just-written file from disk, returning the
+/// read-back bytes for the CALLER's own verification. The two call sites
+/// verify against different "intended content" (a sealed shard's own
+/// in-memory partition buffer for the former, the Backfill Recovery
+/// Manifest's `final_bytes`/`final_sha256` pair for the latter) and report
+/// DIFFERENT error codes on a mismatch (`ContentPreservationFailed` for
+/// sealed shards, `SliceVerificationFailed` / `E-SHD-012` for the heal
+/// write) -- so the comparison itself stays with each caller rather than
+/// being baked into this shared write-then-read-back primitive.
+fn write_and_read_back(
+    path: &Path,
+    bytes: &[u8],
+    artifact_stem: &str,
+) -> Result<Vec<u8>, MechanismABackfillError> {
+    write_atomic_bytes(path, bytes, artifact_stem)?;
+
+    std::fs::read(path).map_err(|source| MechanismABackfillError::Io {
+        artifact_stem: artifact_stem.to_string(),
+        source,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -7857,6 +10257,9 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
 
         let index = publish_shard_index_update(&index_path, &entry, new_entry.clone()).expect(
@@ -7891,6 +10294,9 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 40_000,
             sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, &entry, first.clone())
             .expect("first publish must succeed");
@@ -7901,6 +10307,9 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-08T00:00:00Z".to_string(),
             bytes_at_seal: 41_000,
             sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         let index = publish_shard_index_update(&index_path, &entry, second.clone())
             .expect("second publish must succeed");
@@ -7928,6 +10337,9 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 3_000,
             sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
 
         let err = publish_shard_index_update(&index_path, &entry, new_entry)
@@ -8076,12 +10488,25 @@ mod bc_1_18_006_roll_tests {
             safety_margin_bytes: entry.safety_margin,
             practical_fuel_ceiling: entry.practical_fuel_ceiling,
             worst_case_fuel_per_byte: entry.worst_case_fuel_per_byte,
+            // Sibling-site sweep (S-25.02 cluster-3): new
+            // `ShardIndex::retention_count` field, default value — this
+            // existing (cluster-1/2) test is unconcerned with retention and
+            // is otherwise unchanged.
+            retention_count: default_retention_count(),
+            // Sibling-site sweep (BC-1.18.008 v1.9, F-C3-P9-004): new
+            // `ShardIndex::backfill_manifest` field — this existing
+            // (cluster-1/2) test is unconcerned with mechanism-A backfill
+            // and is otherwise unchanged.
+            backfill_manifest: None,
             shards: vec![ShardIndexEntry {
                 seq: u32::MAX,
                 path: "decision-log.4294967295.md".to_string(),
                 sealed_at: "2026-01-01T00:00:00Z".to_string(),
                 bytes_at_seal: 1,
                 sealed_retroactively: false,
+                oversized_record: false,
+                is_preamble_shard: false,
+                records: 0,
             }],
         };
         std::fs::write(
@@ -8289,6 +10714,9 @@ mod bc_1_18_006_roll_tests {
             sealed_at: "2026-09-07T00:00:00Z".to_string(),
             bytes_at_seal: 800,
             sealed_retroactively: false,
+            oversized_record: false,
+            is_preamble_shard: false,
+            records: 0,
         };
         publish_shard_index_update(&index_path, &entry, already_indexed)
             .expect("pre-seed the index with the already-correct entry");
