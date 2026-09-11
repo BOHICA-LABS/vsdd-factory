@@ -9737,3 +9737,96 @@ Refs: D-1198, D-1197, S-25.02, BC-1.18.008 v1.8, F-C3-P8-001, F-C3-P8-002, `8e2a
 ### Canonical 6-column row (STATE.md Decisions Log)
 
 | D-1198 | D-1198-S2502-CLUSTER3-PASS8-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-8 = NOT CLEAN — 2 MEDIUM findings.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-8.md`. F-C3-P8-001 (MEDIUM, doc-only): `E-SHD-012` taxonomy Message Format cell documented a fixed structured wording; shipped `Display` emits a `{detail}`-placeholder form (5 detail shapes) — 4th recurrence of the taxonomy-drift-vs-shipped-Display class in the cluster — FIXED via product-owner's corrected cell + completed `E-SHD-011` row (2nd real emission, `MissingBackfillManifest`, sanctioned reuse per BC-1.18.008 v1.7 Invariant 3(c)). F-C3-P8-002 (MEDIUM): the happy-path canonical-truncate write lacked the post-hoc disk read-back the DANGEROUS-window heal write gained at pass-7 — an unsanctioned asymmetry with a latent silent-data-loss consequence — FIXED via product-owner's **BC-1.18.008 v1.7→v1.8** (NEW Postcondition 6(c) happy-path read-back extension, NEW Invariant 5 generalizing the discipline across all three destructive write sites, NEW EC-013, NEW `E-SHD-013`) plus implementer's `write_and_read_back`-routed happy-path write — all THREE destructive write sites (sealed-shard/heal/happy-path canonical) now independently read-back-guarded via one shared helper, completing the class passes 6-8 progressively closed. `error-taxonomy.md` v1.11→v1.12 (E-SHD-013 added; E-SHD-012/E-SHD-011 cells corrected/completed). architect propagated a FIFTH VP-124 facet (VP-INDEX v3.12→v3.13, verification-architecture.md v1.29→v1.30, verification-coverage-matrix.md v1.27→v1.28, `total_vps` UNCHANGED 141). BC-INDEX v5.80→v5.81; STORY-INDEX v4.457→v4.458 (story v3.8→v3.9, AC-014 updated [trace widened to invariant 5], EC-054 added). Input-hashes reconciled in topological order (BC-1.18.008.md `dc4b072`→`9182c9a`; error-taxonomy.md `cd1a1e6`→`f5ba001`; story `8d5f873`→`5eb344f`); `--check` CLEAN on all touched files, plus verification-architecture.md/verification-coverage-matrix.md (architect's own same-burst update, `f52e536`). This burst ALSO closed a pre-existing multi-burst BC-5.45.001 write-path regression discovered on the 5 governed files: VP-INDEX.md's `last_amended` had grown an inline `[Prior: ...]` chain (2 entries relocated to `changelog:` via the sanctioned `last-amended-migrate` full-recovery split, PC7); BC-INDEX.md and STATE.md each carried an unescaped-`\|` D-1144 escape defect (both auto-fixed by the same tool); BC-INDEX.md additionally carried a pre-existing (2026-05-12-era) malformed-YAML duplicate-key defect (a missing `- date:` list-item marker ahead of its `v1.93` entry) — fixed in-scope (1-line mechanical correction) before the tool could validate/write the file. `last-amended-migrate migrate --check` now CLEAN (exit 0) across all 5 governed files. Feature branch `feature/S-25.02-backfill` @ `8e2a37f4` (pushed); full workspace test suite green, fmt+clippy clean. BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-8 not clean; pass-9 next; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 LOCAL adversary pass-9, fresh context, against BC-1.18.008 v1.8/code `8e2a37f4`.** Refs: D-1198, D-1197, S-25.02, BC-1.18.008 v1.8, F-C3-P8-001, F-C3-P8-002, `8e2a37f4`, `915b898c`. STATE.md v10.23→v10.24. | S-25.02 F4 | 2026-09-10 |
+
+## D-1199
+
+**D-1199-S2502-CLUSTER3-PASS9-FIX-BURST**
+
+Allocated as the next GLOBAL D-NNN per POLICY 16: max D-NNN across all cycle decision-logs was
+D-1198 (this file, immediately above). D-1199 allocated cleanly above that max.
+
+**Summary:** S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) **LOCAL adversary
+pass-9 = NOT CLEAN — 2 MEDIUM findings, both taxonomy doc-drift; CODE independently re-verified
+spec-conformant** 2026-09-10 (LOCAL Claude adversary + product-owner + state-manager; single-commit
+TD-VSDD-053). Fresh pass-9 (against pass-8's fix-burst, `feature/S-25.02-backfill` @ `8e2a37f4`)
+re-verified every `E-SHD-NNN` `Display` emitted by `ShardRollError`, `MechanismABackfillError`, and
+`ShardRetentionError` against `error-taxonomy.md` v1.12's Message Format cells and found the shipped
+CODE spec-conformant in every case — zero code/behavior/BC defects this pass — but 2 further
+instances of the cluster's own recurring "taxonomy Message Format cell ≠ shipped `Display`" drift
+class. Full Part A persisted as a standalone artifact —
+`cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-9.md`, matching pass-1..8's own
+convention.
+
+**F-C3-P9-001 (MEDIUM):** `E-SHD-011` form (b) (`MissingBackfillManifest`) diverged from the shipped
+`Display` text in three places — wrong lead clause ("cannot proceed for" vs shipped
+"recovery-confirmation ambiguous for"), a missing "([backfill_manifest]) to compare the canonical
+file's current bytes against" clause, and an over-elaborated closing clause where the shipped text
+reads the bare "refusing to guess;". FIXED via product-owner's corrected cell, shipped text
+reproduced verbatim.
+
+**F-C3-P9-002 (MEDIUM):** `E-SHD-003` documented only `MechanismABackfillError::
+ContentPreservationFailed`'s emission, in a form missing the `E-SHD-003:` prefix and the shipped
+`artifact_stem "<artifact>":` quoting convention; `Io`'s real emission (a genuine I/O failure during
+Postcondition 5's stage-then-verify-then-atomically-replace sequence) was entirely undocumented.
+FIXED via product-owner's corrected row documenting BOTH forms (a) `ContentPreservationFailed` /
+(b) `Io` verbatim.
+
+**Companion sweep (beyond the 2 named findings):** per the human's direction to stop fixing this
+drift class one code at a time, product-owner's fix burst performed a complete mechanical re-diff of
+every `#[error("E-SHD-...")]` `Display` in `shard_manager.rs` — covering `ShardRollError`,
+`MechanismABackfillError`, AND, for the first time this cluster, the previously-unswept
+`ShardRetentionError` — against this table's Message Format column, 13 codes / 17 real emissions
+total. This surfaced a THIRD drift instance: `E-SHD-002` (`ShardRetentionError`, two real emissions)
+documented only `IndexUnavailable`, missing the `E-SHD-002:` prefix, using bare `for <artifact>:`
+quoting, and mislabeling the `#[source] io::Error` field `<parse-error>`; `ArchivalMoveFailed`'s real
+emission was entirely undocumented. Corrected to document both forms verbatim in the same burst.
+Every other `E-SHD-NNN` row (`001`, `004`/`005` not-yet-implemented anywhere in the workspace,
+`006`-`010`, `012`, `013`) re-verified MATCH, no change — this is the first attestation covering all
+THREE error enums in one pass (the prior v1.8 changelog's "all nine rows source-verified"
+attestation covered only `ShardRollError`). No BC change required — shipped Displays were already
+correct in every case; BC-1.18.008 v1.8 already governs the semantics for the
+`MechanismABackfillError` codes and needs no amendment.
+
+**Artifact changes:** `prd-supplements/error-taxonomy.md` v1.12→v1.13 (single changelog entry
+covering F-C3-P9-001, F-C3-P9-002, and the companion `E-SHD-002` fix). `--update`/`--check` run via
+`compute-input-hash`: error-taxonomy.md's own input-hash stays `f5ba001` (UNCHANGED — its declared
+`inputs:` is `BC-1.18.008.md`, which did not change this burst; input-hash tracks declared-input
+drift, not the file's own content); `--check` CLEAN. No BC/AC/EC/VP/story content changed this burst
+— BC-INDEX, VP-INDEX, ARCH-INDEX all UNCHANGED (BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24).
+STORY-INDEX v4.458→v4.459 (row addition only — NEW draft follow-up story **S-12.11** registered, E-12
+Engine Governance, anchoring the `[codified][process-gap]` lesson below; no existing story content
+changed). Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `8e2a37f4` (doc-only fix, no
+code change; full `cargo test --workspace --all-targets` / `cargo fmt --check --all` / `cargo clippy
+--workspace --all-targets -- -D warnings` re-confirmed green/clean at the existing HEAD, no new
+commit required).
+
+**`[codified][process-gap]` lesson:** the taxonomy Message-Format-cell-≠-shipped-Display drift class
+has now recurred 6+ times across this cluster and cluster-2 (`E-SHD-001`/`006`/`008`/`009` at
+cluster-2 passes 8-10; `E-SHD-011`/`E-SHD-012` at cluster-3 pass-8; `E-SHD-002`/`E-SHD-003`/`E-SHD-011`
+form (b) at this pass) — no gate mechanically re-diffs the FULL emitted-`Display` set against this
+table on every change to either side; every prior fix reconciled only the one code the triggering
+finding named, letting a different code drift by the next pass. Recorded as lesson
+`L-BB-D1199-taxonomy-display-drift-recurring-6x-process-gap` in
+`cycles/v1.0-brownfield-backfill/lessons.md`, anchored to NEW draft follow-up story **S-12.11**
+(E-12 Engine Governance): a lint hook comparing `grep -oE '"E-SHD-[0-9]+:[^"]*"'` against every
+`E-SHD`-emitting Rust source file's Displays to this table's Message Format column, CI/pre-commit
+gated.
+
+Because findings were present, pass-9 is NOT CLEAN — BC-5.39.001 cluster-3 LOCAL streak stays
+**0/3** (cycle-level 3/3 CONVERGED streak UNCHANGED, separate track). `pipeline:` stays **PAUSED**.
+No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4 (LOCAL cluster-3 cascade, not a cycle-level
+adversary pass).
+
+### Next Steps
+
+**NEXT = pass-10 — the VSDD 10-pass guardrail.** 9 passes have now run against cluster-3 without
+reaching 3 consecutive CLEAN (streak 0/3 throughout). Per the project's convergence protocol, the
+orchestrator assesses cluster-3's 3-CLEAN convergence status WITH THE HUMAN at this guardrail rather
+than automatically dispatching a further fresh adversary pass.
+
+Refs: D-1199, D-1198, S-25.02, BC-1.18.008 v1.8, F-C3-P9-001, F-C3-P9-002, S-12.11, `8e2a37f4`,
+error-taxonomy.md v1.13.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1199 | D-1199-S2502-CLUSTER3-PASS9-FIX-BURST | **S-25.02 Phase F4 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-9 = NOT CLEAN — 2 MEDIUM findings, both taxonomy doc-drift; CODE independently re-verified spec-conformant.** Full Part A: `cycles/v1.0-brownfield-backfill/s2502-cluster3-local-adversary-pass-9.md`. F-C3-P9-001 (MEDIUM): `E-SHD-011` form (b) (`MissingBackfillManifest`) diverged from the shipped `Display` in 3 places — FIXED via product-owner's corrected cell, shipped text reproduced verbatim. F-C3-P9-002 (MEDIUM): `E-SHD-003` documented only `ContentPreservationFailed`'s emission, missing the code prefix/quoting convention; `Io`'s real emission was undocumented — FIXED via product-owner's corrected row documenting both forms verbatim. Companion sweep (beyond the 2 named findings, human-directed full mechanical re-diff of all 13 `E-SHD-NNN` codes / 17 emissions across `ShardRollError`+`MechanismABackfillError`+`ShardRetentionError`) surfaced and fixed a THIRD drift instance, `E-SHD-002` (`ShardRetentionError`, both forms). No BC change required — shipped code Displays were already correct in every case. `error-taxonomy.md` v1.12→v1.13. STORY-INDEX v4.458→v4.459 (row addition only — NEW draft follow-up story S-12.11 registered, E-12 Engine Governance). `[codified][process-gap]` lesson `L-BB-D1199-taxonomy-display-drift-recurring-6x-process-gap` (6+ recurrences of the class) anchored to S-12.11 — a lint hook diffing every `E-SHD`-emitting Rust source's Displays against this table's Message Format column, CI/pre-commit gated. BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 all UNCHANGED. Feature branch `feature/S-25.02-backfill` stays UNCHANGED at `8e2a37f4` (doc-only fix, no code change); full workspace test suite green, fmt+clippy clean (re-confirmed at existing HEAD). BC-5.39.001 cluster-3 LOCAL streak stays **0/3** (pass-9 not clean; cycle-level 3/3 CONVERGED UNCHANGED). `pipeline:` stays **PAUSED**. No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = pass-10, the VSDD 10-pass guardrail — orchestrator assesses cluster-3's 3-CLEAN convergence status WITH THE HUMAN, no further automatic adversary dispatch.** Refs: D-1199, D-1198, S-25.02, BC-1.18.008 v1.8, F-C3-P9-001, F-C3-P9-002, S-12.11, `8e2a37f4`. STATE.md v10.24→v10.25. | S-25.02 F4 | 2026-09-10 |

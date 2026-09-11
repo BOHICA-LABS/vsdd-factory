@@ -1776,3 +1776,65 @@ cross-vendor pass alone already produced a 100%-novelty-rate outcome (3 of 3 fin
 5-pass same-vendor baseline — that ratio is itself sufficient evidence of a structural (not incidental)
 blind spot, per the Canonical Principle's "most advisories become blockers" self-audit discipline.
 `[codified][process-gap][D-1196][cross-vendor][adversarial-review][openai-codex][model-diversity][S-12.10][E-12][BC-5.39.001][convergence-protocol][data-loss][spec-fidelity]`
+
+---
+
+**L-BB-D1199-taxonomy-display-drift-recurring-6x-process-gap** [codified][process-gap] — during the
+S-25.02 cluster-3 (mechanism-A backfill, BC-1.18.007+008) LOCAL adversary pass-9, the adversary
+independently re-verified every `E-SHD-NNN` `Display` emitted by `ShardRollError`,
+`MechanismABackfillError`, and `ShardRetentionError` in `crates/factory-dispatcher/src/
+shard_manager.rs` against `error-taxonomy.md`'s Message Format cells and found the shipped CODE
+spec-conformant in every case, but surfaced 2 further instances of the same taxonomy-cell-≠-shipped-
+Display drift shape: F-C3-P9-001 (`E-SHD-011` form (b), `MissingBackfillManifest` — 3 separate
+wording divergences from the shipped text, introduced at pass-8 when the row was first completed to
+document this form) and F-C3-P9-002 (`E-SHD-003` — the row documented only `ContentPreservationFailed`
+in an incorrectly-prefixed/quoted form, leaving `Io`'s real emission entirely undocumented). The
+same-burst product-owner companion sweep (a full mechanical re-diff of all 13 `E-SHD-NNN` codes / 17
+real emissions across all three error enums, human-directed to replace one-code-at-a-time fixing)
+surfaced a THIRD drift instance beyond the pass's own 2 findings: `E-SHD-002`
+(`ShardRetentionError`, both `IndexUnavailable` and the previously-wholly-undocumented
+`ArchivalMoveFailed`).
+
+**This is the 6th+ occurrence of the identical defect class within this engine-discipline pass.**
+Prior instances: `E-SHD-001` (cluster-2 pass-10, F-C2-P10-001), `E-SHD-006` (cluster-2 pass-8,
+F-C2-P8-003), `E-SHD-008`/`E-SHD-009` (cluster-2 pass-9, F-C2-P9-002), `E-SHD-011`/`E-SHD-012`
+(cluster-3 pass-8, F-C3-P8-001), and now `E-SHD-002`/`E-SHD-003`/`E-SHD-011` form (b) (cluster-3
+pass-9, this lesson). Every prior occurrence was fixed the same way: a single triggering finding
+named ONE stale code, product-owner corrected that one row, and the taxonomy's remaining rows were
+left unexamined until the NEXT pass's adversary (or a later human-directed sweep) happened to notice
+a different code had also drifted. Pass-9's own companion sweep is the first attempt at an
+exhaustive fix, but it is a one-time manual sweep, not a durable gate — nothing prevents an 18th,
+19th, or 20th occurrence the next time any `E-SHD`-emitting `Display` impl changes without a
+corresponding taxonomy-row re-diff.
+
+**Root-cause analysis:** the taxonomy (`prd-supplements/error-taxonomy.md`) and the shipped `Display`
+implementations (`crates/factory-dispatcher/src/shard_manager.rs`, and potentially other
+`E-SHD`-emitting files as the codebase grows) are two independently-editable artifacts with no
+mechanical cross-check binding them. A taxonomy row is frequently authored BEFORE the code exists
+(as a target contract, per this cluster's own "taxonomy-first" pattern for `E-SHD-011`/`E-SHD-012`/
+`E-SHD-013`), and the eventual implementation is not required to be diffed back against the row that
+specified it once it lands — nor is an existing row re-diffed when its owning code changes for an
+unrelated reason. Both directions of drift have now occurred in this cascade.
+
+**Going-forward discipline — PROCESS-LEVEL fix, not a 7th manual catch:** the recommended remedy,
+per this pass's own Part A recommendation and product-owner's companion-sweep changelog entry, is a
+lint hook / CI gate: `grep -oE '"E-SHD-[0-9]+:[^"]*"' crates/factory-dispatcher/src/shard_manager.rs`
+(and any future `E-SHD`-emitting source file) diffed programmatically against this table's Message
+Format column, run whenever either side changes (a pre-commit hook on the Rust source, and/or a CI
+step gating PRs that touch either file). This closes the recurrence at its source — a mechanical
+diff, not a human/adversary re-reading every row by eye each pass — rather than relying on the next
+adversary pass to catch the next instance by chance. **Anchor (Canonical Principle Rule 3 — concrete
+future dependency + specific story/wave, not an un-anchored observation):** routed to a NEW draft
+follow-up story **S-12.11** (E-12 Engine Governance, registered this burst in `STORY-INDEX.md`), the
+SAME epic this cluster has already used for its other codified cross-cutting process-gap lessons
+(`L-BB-D1172-partial-fix-propagation-stale-comment-sibling-sweep`,
+`L-BB-D1183-weak-substring-error-assertion-recurring-3x-process-gap`,
+`L-BB-D1194-transient-status-test-doc-comment-recurring-3x-process-gap`,
+`L-BB-D1196-cross-vendor-adversary-pass-surfaces-same-vendor-blind-spots`) — this is an
+engine-governance tooling gap general to any BC that maintains an error taxonomy alongside
+`thiserror`-style `Display` implementations, not specific to BC-1.18.008, so the fix belongs in that
+engine-wide governance follow-up rather than a further BC-1.18.008-scoped fix. Distinct from
+`L-BB-D1183`'s weak-substring-assertion class and `L-BB-D1194`'s test-doc-comment-framing class: this
+lesson is about SPEC-ARTIFACT-vs-SHIPPED-CODE TEXT fidelity specifically for the error taxonomy
+table, a narrower and more mechanically-checkable surface than either prior class.
+`[codified][process-gap][D-1199][taxonomy-drift][error-taxonomy][E-SHD][6x-recurrence][S-12.11][E-12][lint-hook][mechanical-diff]`

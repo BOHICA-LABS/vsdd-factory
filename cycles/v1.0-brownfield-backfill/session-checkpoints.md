@@ -8272,3 +8272,52 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 ### §8. BC-5.39.001 streak
 
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-7 = NOT CLEAN, streak stays 0/3** — 1 HIGH + 1 MEDIUM fixed this burst, LOCAL Claude adversary. Human's AUTHORIZED full grind-to-literal-3-CONSECUTIVE-CLEAN drive continues (the cluster-1/D-1172 standard), using LOCAL adversary only — no further cross-vendor rotation unless the human specifies. NEXT = fresh cluster-3 LOCAL adversary pass-8.
+
+## Archived checkpoint: S2502-CLUSTER3-PASS8-FIX-BURST (D-1198) — superseded 2026-09-10 by S2502-CLUSTER3-PASS9-FIX-BURST (D-1199)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on `feature/S-25.02-backfill` @ `8e2a37f4` (pushed to origin). LOCAL BC-5.39.001 pass-8 = NOT CLEAN (2 MEDIUM, F-C3-P8-001/002), LOCAL Claude adversary; BOTH fixed/disposed this burst. F-C3-P8-002 completes the "destructive write lacks read-back" class progressively closed across passes 6, 7, and 8 — all three destructive write sites (sealed-shard / heal / happy-path canonical) now share the identical Manifest-verified read-back discipline via one shared helper. Streak stays **0/3**. `pipeline:` stays **PAUSED**. Human directed drive-to-3-CLEAN continues using LOCAL adversary only, no further cross-vendor rotation unless the human specifies — NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-9.
+> Prior checkpoint (S2502-CLUSTER3-PASS7-FIX-BURST, D-1197) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-10. Cycle v1.0-brownfield-backfill. S-25.02 F4 cluster-3 (mechanism-A backfill, BC-1.18.007 retention + BC-1.18.008 backfill-split) delivery **IN PROGRESS** on branch `feature/S-25.02-backfill`. LOCAL adversary pass-8 fix-burst COMPLETE (D-1198) — LOCAL Claude adversary; 2 MEDIUM found, BOTH fixed. F-C3-P8-001 (doc-only) closed the 4th recurrence of the taxonomy-Message-Format-vs-shipped-Display drift class. F-C3-P8-002 closed an unsanctioned asymmetry — the happy-path canonical-truncate write now receives the SAME post-hoc disk read-back the DANGEROUS-window heal write gained at pass-7, completing the class across all three destructive write sites this BC specifies. Human directed drive-to-3-CLEAN continues using LOCAL adversary only — no further cross-vendor rotation unless the human specifies. NEXT = dispatch a fresh cluster-3 LOCAL adversary pass-9, fresh context, against BC-1.18.008 v1.8 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `8e2a37f4`.
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL cluster-3 streak = **0/3** (pass-1 not clean, all 7 in-scope findings fixed; pass-2 not clean, all 4 in-scope findings fixed; pass-3 not clean, all 3 in-scope findings fixed; pass-4 CODE CLEAN but NOT CLEAN OVERALL, 1 spec-internal MEDIUM fixed; pass-5 NOT CLEAN, 1 LOW finding fixed; pass-6 NOT CLEAN, 2 HIGH + 1 MEDIUM fixed, FIRST CROSS-VENDOR pass; pass-7 NOT CLEAN, 1 HIGH + 1 MEDIUM fixed, LOCAL Claude adversary; pass-8 NOT CLEAN, 2 MEDIUM fixed, LOCAL Claude adversary — completes the destructive-write-read-back class across all three write sites; pass-9 not yet run). Cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED (separate track).
+
+### §3. In-flight (c)
+
+- `feature/S-25.02-backfill` @ `8e2a37f4` (PUSHED to origin). Contains, on top of pass-7's `915b898c`: implementer's F-C3-P8-002 fix (happy-path canonical-truncate write routed through the shared `write_and_read_back` helper with manifest verification, new `CanonicalWriteVerificationFailed`/`E-SHD-013` variant). No BC/AC/EC/VP/behavior change beyond BC-1.18.008 v1.7→v1.8's own already-adjudicated additions. Full `cargo test --workspace --all-targets` green; `cargo fmt --check --all` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- NEXT = dispatch `vsdd-factory:adversary` for a fresh cluster-3 LOCAL adversary pass-9 (fresh context, no prior-pass visibility beyond this cascade's own convention) against BC-1.18.008 v1.8 / BC-1.18.007 v1.2 / code `feature/S-25.02-backfill` @ `8e2a37f4` — continuing the human-authorized full grind-to-literal-3-CONSECUTIVE-CLEAN drive, LOCAL adversary only, no further cross-vendor rotation unless the human specifies.
+- No abandoned/stalled agents this burst.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+None open. No human decision point arose this pass — both findings (F-C3-P8-001/002) were mechanically routable to product-owner/implementer/architect. No new open Drift Item this burst.
+
+### §5. WIP branches (e)
+
+`feature/S-25.02-backfill` @ `8e2a37f4` (pushed origin). `factory-artifacts` carries this burst's fix-burst bookkeeping commit (standalone pass-8 report, INDEX.md pass-8 row + Convergence Status advance, decision-log.md D-1198, BC-INDEX/STORY-INDEX/VP-INDEX version-sync, STATE.md advance, plus the incidentally-discovered BC-5.45.001 write-path regression closure across the 5 governed files) — BC-INDEX v5.80→v5.81, STORY-INDEX v4.457→v4.458, VP-INDEX v3.12→v3.13 all changed this burst (BC-1.18.008 v1.7→v1.8 content amendment + VP-124 fifth-facet extension).
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active** (POL-14 promoted at D-1186, UNCHANGED this burst) + BC-1.18.007 v1.2/**008 v1.8**/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 and cluster-2's BC-1.18.006 are the 2 ACTIVE ones of the 9 (7 remain draft, clusters 3-7 not yet shipped; BC-1.18.008 v1.7→v1.8 this burst — happy-path canonical-write read-back extension + Invariant 5). BC-INDEX **v5.81** (2,006 BCs, UNCHANGED this burst — content amendment only, no new BC). VP-INDEX v3.13 (141 VPs, UNCHANGED this burst — VP-124 5th facet extension only). STORY-INDEX **v4.458** (178 catalog rows, UNCHANGED count semantics from v4.457's established convention; 25 epics; S-25.02 v3.9; status ready, cluster-1 + cluster-2 DELIVERED/MERGED, cluster-3 IN PROGRESS; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; S-12.09 + S-12.10 draft stubs, E-12, no BC authored yet). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md **v1.12** (E-SHD-013 added this burst; E-SHD-012/E-SHD-011 cells corrected/completed).
+
+### §7. HEADs
+
+- `develop`: **`0959e34b29a41a1b064ff1c7ec62096e94a31c7e`** (PR #824 squash-merged, base `fff5e4cc`). merged_count **120**. UNCHANGED this burst.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED this burst.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD. Carries this D-1198 fix-burst bookkeeping commit (standalone pass-8 report, INDEX.md cluster-3 pass-8 row, decision-log.md D-1198, BC-INDEX/STORY-INDEX/VP-INDEX version-sync, STATE.md advance, BC-5.45.001 write-path regression closure), now on the branch.
+- `feature/S-25.02-backfill`: **IN PROGRESS, PUSHED** @ `8e2a37f4` (cluster-3, mechanism-A backfill; F-C3-P8-002 fix immediately after `915b898c`). Full code gate GREEN; 0 tests RED.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824's merge (D-1186), UNCHANGED this burst. **Cluster-3's OWN LOCAL BC-5.39.001 cascade: pass-8 = NOT CLEAN, streak stays 0/3** — 2 MEDIUM fixed this burst, LOCAL Claude adversary; completes the destructive-write-read-back class across all three write sites. Human's AUTHORIZED full grind-to-literal-3-CONSECUTIVE-CLEAN drive continues (the cluster-1/D-1172 standard), using LOCAL adversary only — no further cross-vendor rotation unless the human specifies. NEXT = fresh cluster-3 LOCAL adversary pass-9.
