@@ -10278,3 +10278,57 @@ Refs: D-1205, D-1204, D-1201, D-1200, D-1191, S-25.02, `2dd39bbb`.
 
 | D-1205 | D-1205-DECISION-LOG-D1201-DUPLICATE-ROW-HYGIENE-FIX | **Repaired a pre-existing structural defect in `cycles/v1.0-brownfield-backfill/decision-log.md`: the D-1201 canonical 6-column row appeared TWICE ahead of D-1200's own canonical row, in the wrong order, with one copy MALFORMED (missing its trailing phase/date columns).** Targeted Edit-tool patch (no shell bypass; TD-FACTORY-HOOK-BYPASS-001-compliant) removed the malformed duplicate `D-1201` row and reordered the surviving well-formed `D-1201` row to follow `D-1200`'s own row, matching the ascending-ID canonical-row convention used by the D-1202/D-1203/D-1204 sections that follow. Verified via targeted `grep`: `D-1201` now appears exactly once as a well-formed 6-column row (line 9931 post-fix); the malformed row's distinguishing tail string returns zero matches. No BC/AC/EC/VP/code/story change — BC-INDEX v5.81 / VP-INDEX v3.13 / ARCH-INDEX v4.24 / STORY-INDEX v4.461 all UNCHANGED. `pipeline:` stays **PAUSED**. BC-5.39.001 cluster-3 LOCAL streak stays **3/3 CONVERGED** (UNCHANGED — hygiene fix, not an adversary pass; cascade remains CLOSED @ `2dd39bbb`). No trajectory-tail drift — unchanged →0→1→1→1 LENGTH=4. **NEXT = cluster-3 code remains CONVERGED @ `2dd39bbb`, ready for per-story delivery, pending human GO for delivery OR pause — unchanged by this fix.** Refs: D-1205, D-1204, D-1201, D-1200, D-1191, S-25.02, `2dd39bbb`. STATE.md v10.30→v10.31. | S-25.02 F4 | 2026-09-10 |
 
+---
+
+## D-1209
+
+**Date:** 2026-09-11
+**Author:** state-manager (human-directed revert)
+**Subject:** S-25.02 cluster-4 Obs-B REVERT — unsound crash-recovery hardening WITHDRAWN; proper fix deferred to new story S-25.05; Obs-A guard E-SHD-014 RETAINED
+
+### Decision
+
+Human-directed revert of the S-25.02 cluster-4 Obs-B hardening (BC-1.18.009 v1.6, BC-10.13.001 v1.4 §PC8, ADR-051 v1.12 §Decision 7 B1 Obs-B bullet, VP-112 v1.1). The adversary review of cluster-4 code (LOCAL pass-1 on `f7d0a198`) found two fatal structural defects in the Obs-B sentinel-shard approach:
+
+- **F-C4H-P1-001 (HIGH):** `sentinel_shard_exists()` counter-divergence defect. If the dispatcher crashes between writing the sentinel shard and the regular shard, the sentinel count and the real shard count diverge permanently. BC-1.18.009 §Inv-6 (crash-idempotent archive boundary) is violated by the very mechanism intended to enforce it. The sentinel shard BECOMES the corruption it was meant to detect.
+
+- **F-C4H-P1-002 (HIGH):** Tail-match fallback unimplementable as specified. BC-1.18.009 §PC8 requires recovering a corrupted boundary by tail-matching content, but the B1 rotate-changelog path shards binary-serialized TOML, not line-addressable text. A tail-match of the last partial write is not semantically sound on that format.
+
+**Obs-A** (counter-divergence guard, BC-1.18.009 §Inv-5 / EC-008 / E-SHD-014) is **RETAINED** — it is a valid, implementable, independently-sound guard that is not affected by the Obs-B defects.
+
+### Disposition
+
+| Aspect | Disposition |
+|--------|-------------|
+| BC-1.18.009 Obs-B (§Inv-6/§PC8) | WITHDRAWN — v1.6→v1.7 removes Obs-B facet |
+| BC-10.13.001 §PC8 crash-recovery idempotency | WITHDRAWN — v1.4→v1.5 removes PC8 |
+| ADR-051 §Decision 7 B1 Obs-B bullet | WITHDRAWN — v1.12→v1.13 removes bullet |
+| VP-112 Obs-B facet (v1.1) | REVERTED — v1.1→v1.2 restores losslessness+idempotency-only scope |
+| BC-1.18.009 Obs-A (§Inv-5/EC-008/E-SHD-014) | RETAINED — independently sound |
+| Proper B1 crash-atomicity fix | DEFERRED to new story S-25.05 (E-25; P2; 8 pts; depends_on [S-25.02]) |
+| Code at feature/S-25.02-b1-rotation | `96487221` (Obs-B revert applied by implementer) |
+| LOCAL 3-CLEAN re-cascade | REQUIRED — Obs-A-only scope on `96487221` |
+
+### Artifact Versions After This Burst
+
+| Artifact | Version |
+|----------|---------|
+| BC-1.18.009 | v1.7 |
+| BC-10.13.001 | v1.5 |
+| ADR-051 | v1.13 |
+| VP-112 | v1.2 |
+| BC-INDEX.md | v5.85 |
+| VP-INDEX.md | v3.16 |
+| ARCH-INDEX.md | v4.26 |
+| STORY-INDEX.md | v4.465 |
+| verification-architecture.md | v1.33 |
+| verification-coverage-matrix.md | v1.31 |
+
+### Refs
+
+S-25.02, S-25.05, BC-1.18.009 v1.7, BC-10.13.001 v1.5, ADR-051 v1.13, VP-112 v1.2, F-C4H-P1-001, F-C4H-P1-002.
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1209 | D-1209-S25-02-CLUSTER-4-OBS-B-REVERT | **S-25.02 cluster-4 Obs-B hardening WITHDRAWN (human-directed). F-C4H-P1-001: sentinel-shard counter-divergence defect — sentinel count and real shard count diverge permanently on crash-between-writes, violating §Inv-6. F-C4H-P1-002: tail-match fallback unimplementable — B1 rotates binary-serialized TOML, not line-addressable text. BC-1.18.009 v1.6→v1.7 (Obs-B §Inv-6/§PC8 WITHDRAWN); BC-10.13.001 v1.4→v1.5 (§PC8 WITHDRAWN); ADR-051 v1.12→v1.13 (Obs-B bullet WITHDRAWN); VP-112 v1.1→v1.2 (REVERT — Obs-B facet removed; losslessness+idempotency-only scope restored). Obs-A guard (EC-008/Inv-5/E-SHD-014) RETAINED. Proper B1 crash-atomicity fix DEFERRED to new story S-25.05 (E-25; P2; 8 pts; depends_on [S-25.02]). Code HEAD `96487221` (Obs-B revert applied). NEXT: LOCAL 3-CLEAN re-cascade Obs-A-only scope on `96487221`. BC-INDEX v5.85 / VP-INDEX v3.16 / ARCH-INDEX v4.26 / STORY-INDEX v4.465.** | S-25.02 F4 | 2026-09-11 |
+

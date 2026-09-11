@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-11T19:16:25Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b1-rotation && cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -5 && cargo test --workspace --all-targets 2>&1 | grep \"FAILED\""}
+{"status":"pass","timestamp":"2026-09-11T22:01:30Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b1-rotation && cargo test --workspace --all-targets 2>&1 | grep \"FAILED\" | wc -l && git rev-parse HEAD"}
