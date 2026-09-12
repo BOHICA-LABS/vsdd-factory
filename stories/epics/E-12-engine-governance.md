@@ -1,7 +1,7 @@
 ---
 document_type: epic
 epic_id: "E-12"
-version: "1.4"
+version: "1.5"
 title: "Engine Governance — Per-Story Adversarial Convergence Discipline + WASM-Plugin Context Resolver Platform"
 status: draft
 prd_capabilities: [CAP-008, CAP-016, CAP-026]
@@ -9,7 +9,7 @@ prd_frs: []
 anchor_strategy: greenfield-discipline-gap-codification
 priority: P1
 target_release: "v1.0-feature-engine-discipline-pass-1"
-story_count: 9
+story_count: 10
 subsystems_affected: [SS-01, SS-04, SS-05]
 producer: product-owner
 timestamp: 2026-05-06T00:00:00Z
@@ -17,13 +17,13 @@ phase: 2
 level: L3
 traces_to: .factory/specs/architecture/decisions/ADR-017-per-story-adversary-phasing.md
 depends_on: ["E-7"]
-last_amended: "2026-08-30 (v1.4) — frontmatter normalization: add level: L3 (story-writer spec-hygiene sweep)"
+last_amended: "2026-09-11 (v1.5) — story_count 9→10: S-12.13 registered (E-SHD Display-parity lint gate + stale-narrative gate, 5 pts, P1, backlog; supersedes S-12.11 stub; cluster-4 re-cascade fix-wave-2, D-1210)"
 inputs:
   - .factory/specs/architecture/decisions/ADR-017-per-story-adversary-phasing.md
   - .factory/specs/architecture/ARCH-INDEX.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
   - .factory/stories/epics/E-7-process-codification.md
-input-hash: "c6ebb28"
+input-hash: "11a7203"
 modified:
   - "v1.3 2026-05-08: F-P22-003/004/005 subsystem swap fixed, frontmatter synced"
 ---

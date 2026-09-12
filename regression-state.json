@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-11T23:26:05Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b1-rotation && cargo test -p factory-dispatcher --test bc_1_18_009_b1_rotate_test 2>&1 | tail -15 && cargo test -p last-amended-migrate --test bc_1_18_009_rotate_at_test 2>&1 | tail -10"}
+{"status":"pass","timestamp":"2026-09-12T00:11:59Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b1-rotation && cargo test --workspace --all-targets 2>&1 | grep \"FAILED\""}
