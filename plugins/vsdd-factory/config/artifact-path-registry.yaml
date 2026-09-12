@@ -451,6 +451,11 @@ artifacts:
     description: Frozen pre-migration D-1149 amendment-history sidecar for specs/behavioral-contracts/BC-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
     enforcement_level: block
 
+  - artifact_type: bc-index-changelog-archive
+    canonical_path_pattern: ".factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md"
+    description: Evergreen changelog archive written by rotate_changelog_at (BC-1.18.009 PC5/PC2) — overflow changelog entries rotated out of BC-INDEX.md when the inline changelog exceeds the cap
+    enforcement_level: block
+
   - artifact_type: arch-index-amendment-history
     canonical_path_pattern: ".factory/specs/architecture/ARCH-INDEX-amendment-history.md"
     description: Frozen pre-migration D-1149 amendment-history sidecar for specs/architecture/ARCH-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)

@@ -270,7 +270,13 @@ fn test_BC_10_13_001_PC5_rotate_changelog_survives_backslash_in_archive_path() {
 
     // Re-parse the rewritten source file's frontmatter under strict YAML
     // `safe_load` and confirm `changelog_archive:` decodes back to the
-    // exact original archive path string.
+    // repo-root-relative archive path (B1 portability fix: the pointer written
+    // to the versioned document is relative, not machine-local absolute).
+    //
+    // The fixture creates the source at `<tmp>/.factory/specs/behavioral-
+    // contracts/BC-INDEX.md`, so `<tmp>` is the repo root (parent of the
+    // `.factory` ancestor).  `rewrite_source_after_rotation` strips that
+    // prefix from `archive_path`, yielding the relative form.
     let after = common::read_file(&path);
     let value: serde_norway::Value = serde_norway::from_str(common::frontmatter_block(&after))
         .expect("rewritten source frontmatter must parse under strict YAML safe_load");
@@ -278,10 +284,19 @@ fn test_BC_10_13_001_PC5_rotate_changelog_survives_backslash_in_archive_path() {
         .get("changelog_archive")
         .and_then(serde_norway::Value::as_str)
         .expect("changelog_archive key must be present and a string");
+
+    // Expected: the relative form of the archive path from the repo root.
+    let repo_root = dir.path();
+    let expected_relative = report
+        .archive_path
+        .strip_prefix(repo_root)
+        .expect("archive_path must be under the repo root in this fixture")
+        .display()
+        .to_string();
     assert_eq!(
-        decoded,
-        report.archive_path.display().to_string(),
-        "changelog_archive must round-trip to the exact original archive path, backslash included"
+        decoded, expected_relative,
+        "changelog_archive must round-trip to the repo-root-relative archive path \
+         (backslash included — the escape_raw_value round-trip is still exercised)"
     );
 }
 

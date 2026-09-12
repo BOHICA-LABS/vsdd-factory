@@ -1090,16 +1090,24 @@ fn format_block_if_marker_crash_reason(fields: Option<&MarkerFields>) -> String 
 fn extract_reason_from_outcome(result: &PluginResult) -> Option<String> {
     match result {
         PluginResult::Ok { stdout, .. } => {
-            // Fast-path: only attempt JSON parsing when the block marker is present.
-            if !stdout.contains(r#""outcome":"block""#) {
+            if stdout.contains(r#""outcome":"block""#) {
+                // Advisory block: parse the `reason` field.
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
+            } else if stdout.contains(r#""outcome":"error""#) {
+                // Gate fail-loud (e.g. shard_gate_error_outcome / VP-131
+                // E-SHD-004): parse the `message` field so operator-facing
+                // block_reason carries the diagnostic text rather than being
+                // silently empty (WASI-exit-code block without `"reason"` key).
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+            } else {
                 // WASI-exit-code block without advisory stdout JSON:
                 // no reason available from plugin stdout.
-                return None;
+                None
             }
-            // Parse the reason field from the JSON payload.
-            serde_json::from_str::<serde_json::Value>(stdout)
-                .ok()
-                .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
         }
         // Fail-closed crash/timeout: sentinel reasons distinguished by cause so
         // operators can choose the right remedy without opening the internal log.
@@ -1349,15 +1357,12 @@ mod red_gate_s18_14_log_dir {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    /// Emit a `dispatcher.started` event exactly as `main.rs` currently does
-    /// (WITHOUT `log_dir` — the pre-fix state), then read back the JSONL and
-    /// assert that the `log_dir` key IS present and is_absolute.
-    ///
-    /// This test is RED before the fix because the current code does not include
-    /// `log_dir` in the `DISPATCHER_STARTED` event builder chain at all.
-    ///
-    /// After the fix (implementer adds `.with_field("log_dir", std::path::absolute(...)...)`
-    /// to the builder chain in `main.rs`), this test turns GREEN.
+    /// Emit a `dispatcher.started` event and assert that the `log_dir` key
+    /// IS present and is_absolute (S-18.14 fix: `.with_field("log_dir",
+    /// std::path::absolute(...))` added to the builder chain in `main.rs`).
+    /// Uses a relative `log_dir` path to discriminate — an absolute tempdir
+    /// path would pass `is_absolute()` trivially without exercising the fix.
+    /// This test passes against HEAD (GREEN).
     ///
     /// Covers AC-005, AC-006 (BC-1.13.001 PC-10).
     #[test]
@@ -1442,10 +1447,8 @@ mod red_gate_s18_14_log_dir {
         let event: serde_json::Value =
             serde_json::from_str(line).expect("JSONL line must be valid JSON");
 
-        // PRIMARY RED-GATE ASSERTION (AC-005):
-        // The `log_dir` key MUST be present in the `dispatcher.started` event payload.
-        // Before fix: this assertion FAILS because the current code does not include `log_dir`.
-        // After fix: this assertion PASSES because the implementer adds the field.
+        // AC-005 assertion: `log_dir` key MUST be present in the
+        // `dispatcher.started` event payload (S-18.14 fix applied; GREEN).
         let log_dir_value = event
             .get("log_dir")
             .expect(
@@ -1482,9 +1485,10 @@ mod red_gate_s18_14_log_dir {
 // script investigation. Both previously returned "fail-closed: plugin timed
 // out", making them indistinguishable from the agent-visible block_reason.
 //
-// TDD: `fuel_timeout_reason_identifies_fuel_exhaustion` is RED before the
-// fix (current returns "plugin timed out" for both causes).  The epoch and
-// crash tests confirm those arms are unaffected by the change.
+// TDD: `fuel_timeout_reason_identifies_fuel_exhaustion` passes against HEAD
+// (fix applied: fuel returns "plugin timed out: fuel" distinct from epoch's
+// "plugin timed out").  The epoch and crash tests confirm those arms are
+// unaffected by the change.
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests_extract_reason_cause_distinction {

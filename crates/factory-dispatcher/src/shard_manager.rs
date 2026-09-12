@@ -44,7 +44,8 @@
 //! genuine staleness-risk surface for zero measurable benefit under this
 //! process model.
 //!
-//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger"; UPDATED by cluster-2)
+//! # Scope note (S-25.02 F4 BC-cluster 1 "cap+trigger"; UPDATED by cluster-2,
+//! UPDATED by cluster-4)
 //!
 //! This module originally implemented BC-1.18.005 ONLY (tasks T-1/T-2/T-3;
 //! AC-001..AC-005) — fully, not as a stub; see the "BC-5.38.001 Red Gate
@@ -52,27 +53,31 @@
 //! BC-1.18.006 (the observable roll/block outcome once the `"flat"` shape's
 //! trigger fires) is now ALSO implemented in this module — it is no longer
 //! out of scope; see the "BC-1.18.006 — Roll-Before-Write..." section
-//! further below for its full implementation. BC-1.18.009 (the observable
-//! rotate/block-and-retry outcome once the item-count trigger fires) and
-//! BC-1.18.012 (the one-time changelog backfill migration) remain LATER
-//! clusters and are still explicitly OUT OF SCOPE here — the
-//! `"frontmatter-changelog-array"` shape's trigger-fired branch still only
-//! owns the trigger-boundary decision and hand-off point for THOSE two BCs,
-//! per Postcondition 8's "Ownership" bullet.
+//! further below for its full implementation. **UPDATE (S-25.02 cluster-4,
+//! "B1 rotation"):** BC-1.18.009 (the observable rotate/block-and-retry
+//! outcome once the item-count trigger fires) is now IMPLEMENTED in cluster-4 —
+//! the `"frontmatter-changelog-array"` shape's trigger-fired branch constructs
+//! an observable `HookResult::Block`/`HookResult::Error` outcome via
+//! `rotate_changelog_at` + `build_b1_block_reason`; see the "BC-5.38.001 Red Gate
+//! discipline" section below. BC-1.18.012
+//! (the one-time changelog backfill migration) remains a LATER cluster and is
+//! still explicitly OUT OF SCOPE here.
 //!
 //! # BC-5.38.001 Red Gate discipline — implemented (S-25.02 F4 BC-cluster 1;
-//! EXTENDED by cluster-2)
+//! EXTENDED by cluster-2; EXTENDED by cluster-4)
 //!
 //! Every function in this module now carries a real implementation driving
-//! the test-writer's Red Gate suites green (both BC-1.18.005's cluster-1
-//! suite and BC-1.18.006's cluster-2 suite). A fired `"flat"`-shape trigger
-//! now DOES construct an observable `HookResult::Block`/`HookResult::Error`
-//! outcome via `execute_roll` (BC-1.18.006's roll-before-write mechanism,
-//! implemented below) — the withdrawn cluster-1 posture (a non-fatal
-//! `tracing::warn!` advisory followed by `Continue`) applies ONLY to the
-//! `"frontmatter-changelog-array"` shape's item-count trigger now, whose
-//! observable rotate-and-retry outcome remains owned by the still-pending
-//! BC-1.18.009 cluster.
+//! the test-writer's Red Gate suites green (BC-1.18.005's cluster-1 suite,
+//! BC-1.18.006's cluster-2 suite, and BC-1.18.009's cluster-4 suite). A
+//! fired `"flat"`-shape trigger constructs an observable
+//! `HookResult::Block`/`HookResult::Error` outcome via `execute_roll`
+//! (BC-1.18.006's roll-before-write mechanism). A fired
+//! `"frontmatter-changelog-array"`-shape trigger now ALSO constructs an
+//! observable `HookResult::Block`/`HookResult::Error` outcome via
+//! `rotate_changelog_at` + `build_b1_block_reason` (BC-1.18.009's
+//! rotate-and-retry mechanism, cluster-4 implementer pass). The withdrawn
+//! cluster-1 posture (a non-fatal `tracing::warn!` advisory followed by
+//! `Continue`) is no longer applicable to either shape arm.
 //!
 //! # Scope note (S-25.02 F4 BC-cluster 3 "retention+backfill" —
 //! IMPLEMENTED, BC-5.38.001 Red Gate discipline)
@@ -2112,27 +2117,90 @@ pub fn shard_cap_gate_check(
             };
 
             if item_count_trigger_fires(current_item_count, n) {
-                // Ownership bullet (Postcondition 8): BC-1.18.009 owns the
-                // observable rotate-then-block-and-retry outcome once this
-                // trigger fires — still out of scope for this cluster (see
-                // this module's own "Scope note" — UPDATED by cluster-2:
-                // BC-1.18.006's "flat"-shape roll IS now implemented above,
-                // but BC-1.18.009's item-count rotate remains pending). This
-                // arm keeps the non-Block, honest hand-off posture
-                // (`tracing::warn!` + `Continue`) the "flat" shape's
-                // trigger-fired branch above has since WITHDRAWN in favor of
-                // a real `execute_roll`-backed outcome.
-                tracing::warn!(
-                    artifact_stem = %entry.artifact_stem,
-                    current_item_count,
-                    n,
-                    "BC-1.18.005: item-count shard-cap trigger fired; rotate/block outcome is \
-                     owned by BC-1.18.009 (not yet implemented in this cluster) — allowing \
-                     the call to proceed"
-                );
+                // BC-1.18.009 Postcondition 2: rotate-then-block-and-retry.
+                //
+                // The archive path is a fixed, non-cycle, target-sibling path
+                // derived from `entry.artifact_stem` (F1 delta analysis §3.1):
+                //   <parent-of-target>/<artifact_stem>-changelog-archive.md
+                // Using `artifact_stem` (not a hardcoded `"BC-INDEX"`) makes
+                // this handler shape-generic: a VP-INDEX or ARCH-INDEX entry
+                // rotates to its own correctly-named archive, not to
+                // `BC-INDEX-changelog-archive.md`.
+                // `rotate_changelog_at` receives this path directly — callers
+                // that supply an explicit archive path bypass the
+                // `resolve_archive_path(path, cycle_name)` indirection that
+                // `rotate_changelog` uses for cycle-log rotation.
+                // SEC-002 (CWE-252): a `target_path` without a parent
+                // component (e.g. a bare filename with no directory) would
+                // silently resolve the archive into the process's CWD via
+                // the prior `unwrap_or_else(|| Path::new("."))` fallback.
+                // Treat that as an unrecoverable configuration error rather
+                // than silently writing to an unexpected location.
+                let archive_path = match target_path.parent() {
+                    Some(parent) => {
+                        parent.join(format!("{}-changelog-archive.md", entry.artifact_stem))
+                    }
+                    None => {
+                        return HookResult::Error {
+                            message: format!(
+                                "E-SHD-015: cannot resolve archive path — \
+                                 target_path '{}' has no parent directory \
+                                 component",
+                                target_path.display()
+                            ),
+                        };
+                    }
+                };
+                let keep_recent = resolved_low_water_mark(n, entry.low_water_mark) as usize;
+                match last_amended_migrate::rotate::rotate_changelog_at(
+                    target_path,
+                    &archive_path,
+                    keep_recent,
+                    last_amended_migrate::MigrationMode::Apply,
+                ) {
+                    // BC-1.18.009 EC-008 / Invariant Inv-5 counter-divergence
+                    // guard (E-SHD-014): the item-count trigger uses serde
+                    // `read_changelog_item_count` to decide whether to fire;
+                    // `rotate_changelog_at` uses `parse_frontmatter` line-scan
+                    // internally to count items and decide whether to actually
+                    // rotate. If the two methods disagree (e.g. inline-sequence
+                    // vs. block-sequence YAML form), the trigger fires but
+                    // `rotate_changelog_at` returns `mutated=false`. Returning
+                    // `HookResult::Block` in that case would send the retrying
+                    // agent into a permanent self-DoS loop — `Error(E-SHD-014)`
+                    // breaks the loop and asks for manual inspection.
+                    // This arm MUST precede `Ok(_report) => Block`.
+                    Ok(report) if !report.mutated => HookResult::Error {
+                        message: format!(
+                            "E-SHD-014: rotate_changelog_at returned \
+                             Ok(mutated=false) after item-count trigger fired \
+                             for \"{}\": trigger (serde \
+                             read_changelog_item_count) counts >= N but \
+                             rotate_changelog_at line-scan (parse_frontmatter) \
+                             found total <= keep_recent — counter-method \
+                             divergence; manual inspection of {} required",
+                            entry.artifact_stem,
+                            target_path.display()
+                        ),
+                    },
+                    Ok(_report) => HookResult::Block {
+                        reason: build_b1_block_reason(
+                            &entry.artifact_stem,
+                            &archive_path,
+                            keep_recent,
+                        ),
+                    },
+                    Err(e) => HookResult::Error {
+                        message: format!(
+                            "E-SHD-004: rotate_changelog invocation failed for \
+                             \"{}\": {e}",
+                            entry.artifact_stem
+                        ),
+                    },
+                }
+            } else {
+                HookResult::Continue
             }
-
-            HookResult::Continue
         }
     }
 }
@@ -2240,7 +2308,7 @@ pub struct ShardIndexEntry {
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
 /// Postcondition 5's schema; EXTENDED BC-1.18.007 Postcondition 1 with
-/// `retention_count`, S-25.02 F4 BC-cluster 3, stub-only this burst).
+/// `retention_count`, S-25.02 F4 BC-cluster 3, fully implemented).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ShardIndex {
     pub schema_version: u32,
@@ -3615,6 +3683,55 @@ fn build_empty_roll_retry_block_reason(
              to rotate away; the shard remains exactly as it was before this call."
         )
     }
+}
+
+/// Retry-instruction `Block` message for the BC-1.18.009 B1 rotate-and-retry
+/// outcome. Emitted after a successful `rotate_changelog_at` invocation to
+/// tell the originating agent to re-read the post-rotation file before
+/// reissuing its prepend (BC-1.18.009 Postcondition 2 step 3).
+///
+/// `artifact_stem` — the matched `[[shard]]` config entry's stem (e.g.
+/// `BC-INDEX`).
+/// `archive_path` — the fixed, non-cycle sibling path the rotate call wrote
+/// the overflow tail to (e.g.
+/// `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md` for
+/// `artifact_stem = "BC-INDEX"`; the stem is interpolated, so VP-INDEX
+/// produces `VP-INDEX-changelog-archive.md` and so on).
+/// `keep_recent` — the `low_water_mark` item count the live sequence was
+/// trimmed to; named in the retry instruction so the agent knows the current
+/// state of the file before retrying.
+///
+/// # GREEN-BY-DESIGN (BC-5.38.002)
+///
+/// Zero branching, no I/O, no non-trivial helpers, body ≤ 3 lines (one
+/// `format!` expression). GREEN-BY-DESIGN per BC-5.38.002: the
+/// prescribing test
+/// (`test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim`)
+/// verifies the BC-1.18.009 Postcondition 2 step 3 retry-instruction text
+/// verbatim (L-BB-D1179 verbatim-pin lesson).
+///
+/// **Self-Check (BC-5.38.005):** "If I include this real implementation, will
+/// the test for this function pass trivially without any implementer work?"
+/// Yes — and it is GREEN-BY-DESIGN per the F1 delta analysis §5.4 explicit
+/// exception (inheriting the cluster-2 `build_roll_retry_block_reason`
+/// precedent). All four GREEN-BY-DESIGN criteria hold: zero branching, no I/O,
+/// no non-trivial helpers, single `format!` expression.
+pub fn build_b1_block_reason(
+    artifact_stem: &str,
+    archive_path: &Path,
+    keep_recent: usize,
+) -> String {
+    format!(
+        "`{artifact_stem}`'s `changelog:` sequence was rotated to make room \
+         (oldest item(s) appended to `{}`); the frontmatter now has {keep_recent} items. \
+         Retry your write: if you used `Edit`, reissue as a fresh `Write` or a fresh \
+         `Edit` re-read against the current (post-rotation) file, since your original \
+         `old_string`/`new_string` pair may no longer match; if you used `Write`, \
+         recompute your `content` payload against the current (post-rotation) file before \
+         retrying — do not resubmit your original payload unchanged, since it reflects \
+         pre-rotation state.",
+        archive_path.display()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -9754,19 +9871,15 @@ mod bc_1_18_006_roll_tests {
     // -----------------------------------------------------------------
     // BC-1.18.006 v1.9 Postcondition 8's 0-byte-destination exception
     // (cluster-2 LOCAL adversary pass-8, F-C2-P8-002, MEDIUM; EC-024/EC-025)
-    // — RED GATE (pass-8 fix-burst): `publish_sealed_shard` is currently
-    // UNCONDITIONALLY write-once (any pre-existing destination, 0 bytes or
-    // not, refuses via `E-SHD-009`/`ShardRollError::SealedShardAlreadyExists`
-    // — see `write_exclusive`/`publish_sealed_shard` above, which has NO
-    // 0-byte-reclaim branch yet). Per BC v1.9, a 0-byte pre-existing
-    // destination MUST instead be reclaimed (`stat()` once, unlink if
-    // exactly 0 bytes, retry `write_exclusive` exactly ONCE — never a loop)
-    // rather than refused, while a NON-EMPTY pre-existing destination MUST
-    // continue to refuse loudly (write-once immutability is unweakened for
-    // real, non-empty sealed history). These two tests currently FAIL
-    // against HEAD (both collide and both surface `E-SHD-009` today) for the
-    // 0-byte case specifically — the non-empty case is the regression guard
-    // that must stay green once the 0-byte branch is added.
+    // — IMPLEMENTED (cluster-2 LOCAL adversary pass-8, F-C2-P8-002, MEDIUM;
+    // EC-024/EC-025): `publish_sealed_shard` now reclaims a 0-byte
+    // pre-existing destination (`stat()` once, unlink if exactly 0 bytes,
+    // retry `write_exclusive` exactly ONCE — never a loop) rather than
+    // refusing via `E-SHD-009`. A NON-EMPTY pre-existing destination
+    // continues to refuse loudly (write-once immutability unweakened for
+    // real, non-empty sealed history). Both tests below now pass against HEAD:
+    // the 0-byte reclaim test (EC-025) confirms the reclaim path is taken;
+    // the non-empty guard (EC-024) confirms write-once is preserved.
     // -----------------------------------------------------------------
 
     /// EC-025 (F-C2-P8-002) reclaim-success test — drives the FULL
@@ -11073,18 +11186,11 @@ mod bc_1_18_006_roll_tests {
     // remains completely unaffected (EC-004, legitimate first-write) —
     // this Invariant 8 gate is scoped to every OTHER `io::ErrorKind`.
     //
-    // RED GATE (BC-5.38.001): this test MUST FAIL against the code as of
-    // this writing. The `ToolKind::Write` arm's backstop `Err(e)` leg
-    // (see the doc comment on that arm's `match current_shard_bytes_flat`
-    // above, "F-002 ... still binding: a non-NotFound stat() failure here
-    // is fail-OPEN, never fail-loud") only `tracing::warn!`s and falls
-    // through to this dispatch's own (stat-free) trigger formula,
-    // returning `HookResult::Continue` for an under-cap payload — never
-    // `HookResult::Error`. Implementer must flip that specific `Err(e)`
-    // arm to return `HookResult::Error` naming `E-SHD-008` for every
-    // non-`NotFound` `io::ErrorKind`, leaving `current_shard_bytes_flat`'s
-    // own `NotFound` -> `Ok(0)` mapping (EC-004) completely untouched —
-    // this fixture never exercises that leg.
+    // IMPLEMENTED (BC-5.38.001): the `ToolKind::Write` arm's backstop `Err(e)`
+    // leg now returns `HookResult::Error` naming `E-SHD-008` for every
+    // non-`NotFound` `io::ErrorKind`. `current_shard_bytes_flat`'s own
+    // `NotFound` -> `Ok(0)` mapping (EC-004) is preserved untouched —
+    // this fixture never exercises that leg. This test passes against HEAD.
     //
     // STATIC CONFLICT WITH CLUSTER-1's F-002 (flagged, NOT resolved here):
     // this fixture deliberately reuses cluster-1's own
