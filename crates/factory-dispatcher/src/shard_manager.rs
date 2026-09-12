@@ -55,9 +55,11 @@
 //! out of scope; see the "BC-1.18.006 — Roll-Before-Write..." section
 //! further below for its full implementation. **UPDATE (S-25.02 cluster-4,
 //! "B1 rotation"):** BC-1.18.009 (the observable rotate/block-and-retry
-//! outcome once the item-count trigger fires) is now IN SCOPE for cluster-4 —
-//! the `"frontmatter-changelog-array"` shape's trigger-fired branch below
-//! carries a `todo!()` stub awaiting the cluster-4 implementer pass. BC-1.18.012
+//! outcome once the item-count trigger fires) is now IMPLEMENTED in cluster-4 —
+//! the `"frontmatter-changelog-array"` shape's trigger-fired branch constructs
+//! an observable `HookResult::Block`/`HookResult::Error` outcome via
+//! `rotate_changelog_at` + `build_b1_block_reason`; see the "BC-5.38.001 Red Gate
+//! discipline" section below. BC-1.18.012
 //! (the one-time changelog backfill migration) remains a LATER cluster and is
 //! still explicitly OUT OF SCOPE here.
 //!
@@ -2285,7 +2287,7 @@ pub struct ShardIndexEntry {
 
 /// The whole `<artifact-stem>.shard-index.toml` file (BC-1.18.006
 /// Postcondition 5's schema; EXTENDED BC-1.18.007 Postcondition 1 with
-/// `retention_count`, S-25.02 F4 BC-cluster 3, stub-only this burst).
+/// `retention_count`, S-25.02 F4 BC-cluster 3, fully implemented).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ShardIndex {
     pub schema_version: u32,
@@ -9845,19 +9847,15 @@ mod bc_1_18_006_roll_tests {
     // -----------------------------------------------------------------
     // BC-1.18.006 v1.9 Postcondition 8's 0-byte-destination exception
     // (cluster-2 LOCAL adversary pass-8, F-C2-P8-002, MEDIUM; EC-024/EC-025)
-    // — RED GATE (pass-8 fix-burst): `publish_sealed_shard` is currently
-    // UNCONDITIONALLY write-once (any pre-existing destination, 0 bytes or
-    // not, refuses via `E-SHD-009`/`ShardRollError::SealedShardAlreadyExists`
-    // — see `write_exclusive`/`publish_sealed_shard` above, which has NO
-    // 0-byte-reclaim branch yet). Per BC v1.9, a 0-byte pre-existing
-    // destination MUST instead be reclaimed (`stat()` once, unlink if
-    // exactly 0 bytes, retry `write_exclusive` exactly ONCE — never a loop)
-    // rather than refused, while a NON-EMPTY pre-existing destination MUST
-    // continue to refuse loudly (write-once immutability is unweakened for
-    // real, non-empty sealed history). These two tests currently FAIL
-    // against HEAD (both collide and both surface `E-SHD-009` today) for the
-    // 0-byte case specifically — the non-empty case is the regression guard
-    // that must stay green once the 0-byte branch is added.
+    // — IMPLEMENTED (cluster-2 LOCAL adversary pass-8, F-C2-P8-002, MEDIUM;
+    // EC-024/EC-025): `publish_sealed_shard` now reclaims a 0-byte
+    // pre-existing destination (`stat()` once, unlink if exactly 0 bytes,
+    // retry `write_exclusive` exactly ONCE — never a loop) rather than
+    // refusing via `E-SHD-009`. A NON-EMPTY pre-existing destination
+    // continues to refuse loudly (write-once immutability unweakened for
+    // real, non-empty sealed history). Both tests below now pass against HEAD:
+    // the 0-byte reclaim test (EC-025) confirms the reclaim path is taken;
+    // the non-empty guard (EC-024) confirms write-once is preserved.
     // -----------------------------------------------------------------
 
     /// EC-025 (F-C2-P8-002) reclaim-success test — drives the FULL
@@ -11164,18 +11162,11 @@ mod bc_1_18_006_roll_tests {
     // remains completely unaffected (EC-004, legitimate first-write) —
     // this Invariant 8 gate is scoped to every OTHER `io::ErrorKind`.
     //
-    // RED GATE (BC-5.38.001): this test MUST FAIL against the code as of
-    // this writing. The `ToolKind::Write` arm's backstop `Err(e)` leg
-    // (see the doc comment on that arm's `match current_shard_bytes_flat`
-    // above, "F-002 ... still binding: a non-NotFound stat() failure here
-    // is fail-OPEN, never fail-loud") only `tracing::warn!`s and falls
-    // through to this dispatch's own (stat-free) trigger formula,
-    // returning `HookResult::Continue` for an under-cap payload — never
-    // `HookResult::Error`. Implementer must flip that specific `Err(e)`
-    // arm to return `HookResult::Error` naming `E-SHD-008` for every
-    // non-`NotFound` `io::ErrorKind`, leaving `current_shard_bytes_flat`'s
-    // own `NotFound` -> `Ok(0)` mapping (EC-004) completely untouched —
-    // this fixture never exercises that leg.
+    // IMPLEMENTED (BC-5.38.001): the `ToolKind::Write` arm's backstop `Err(e)`
+    // leg now returns `HookResult::Error` naming `E-SHD-008` for every
+    // non-`NotFound` `io::ErrorKind`. `current_shard_bytes_flat`'s own
+    // `NotFound` -> `Ok(0)` mapping (EC-004) is preserved untouched —
+    // this fixture never exercises that leg. This test passes against HEAD.
     //
     // STATIC CONFLICT WITH CLUSTER-1's F-002 (flagged, NOT resolved here):
     // this fixture deliberately reuses cluster-1's own

@@ -128,7 +128,7 @@ pub enum DispatchOutcome {
 /// # BC-5.38.001
 ///
 /// Non-trivial body — contains branching, pattern matching, conditional returns.
-/// todo!() per Red Gate discipline. Implementer fills in.
+/// Fully implemented (S-25.01); all Red Gate test suites (BC-1.18.001/002/003/004) pass.
 pub fn classify_outcome(
     plugin_result: PluginResult,
     _policy: FailurePolicy,
@@ -1770,12 +1770,9 @@ mod tests {
     use crate::registry::FailurePolicy;
 
     // ── S-25.01 Red Gate tests — BC-1.18.001/002/003/004 ─────────────────────
-    // Each test calls a todo!() production function, compiles, and MUST FAIL
-    // at runtime until the implementer fills in the production logic (T-1..T-3).
-    //
-    // BC-5.38.005 self-check: "If I include this real implementation, will the
-    // test pass trivially without implementer work?" — YES for all tests below.
-    // Therefore all production bodies remain todo!() per BC-5.38.001.
+    // These tests were originally Red Gate fixtures (BC-5.38.001 discipline)
+    // written before classify_outcome was implemented. All production bodies
+    // are now fully implemented (S-25.01); all tests below pass against HEAD.
 
     // ── S-25.01 Red Gate stub 1 ───────────────────────────────────────────────
     #[test]
