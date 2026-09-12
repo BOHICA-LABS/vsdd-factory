@@ -57,6 +57,13 @@ pub enum MigrateError {
     #[error("{path} is not an allowed target for this operation: {reason}")]
     PathNotAllowed { path: PathBuf, reason: String },
 
+    /// A caller-supplied path parameter failed a structural validation check
+    /// (e.g. CWE-22 path-traversal guard on `archive_path` in
+    /// `rotate_changelog_at`). No file I/O has occurred when this variant is
+    /// returned.
+    #[error("{path}: invalid path argument — {reason}")]
+    InvalidPath { path: PathBuf, reason: String },
+
     /// PC7's full-recovery split found an inline `[Prior: ...]` chain on
     /// `STATE.md`, but the caller did not pass the explicit opt-in
     /// (`--discard-state-chain` at the CLI boundary /

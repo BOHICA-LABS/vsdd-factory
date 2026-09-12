@@ -145,6 +145,24 @@ pub fn rotate_changelog_at(
     mode: MigrationMode,
 ) -> Result<RotationReport, MigrateError> {
     let doc = crate::frontmatter::parse_frontmatter(path)?;
+    // SEC-001 (CWE-22): reject any caller-supplied `archive_path` that
+    // contains `..` (parent-directory) components.  `rotate_changelog` is
+    // constrained by `resolve_archive_path` which anchors the output inside
+    // `.factory/cycles/`; `rotate_changelog_at` accepts a pre-computed path
+    // from the caller and must apply its own structural guard.  A `..`
+    // component is the sole traversal vector for workspace-internal callers;
+    // absolute-path containment is enforced by the outer allowlist in
+    // `path_guard.rs` before any mutation reaches this function.
+    if archive_path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(MigrateError::InvalidPath {
+            path: archive_path.to_path_buf(),
+            reason: "archive_path must not contain parent-directory (..) traversal components"
+                .to_string(),
+        });
+    }
     let total = doc.changelog_items_raw.len();
 
     if total <= keep_recent {

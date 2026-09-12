@@ -2126,10 +2126,25 @@ pub fn shard_cap_gate_check(
                 // that supply an explicit archive path bypass the
                 // `resolve_archive_path(path, cycle_name)` indirection that
                 // `rotate_changelog` uses for cycle-log rotation.
-                let archive_path = target_path
-                    .parent()
-                    .unwrap_or_else(|| std::path::Path::new("."))
-                    .join("BC-INDEX-changelog-archive.md");
+                // SEC-002 (CWE-252): a `target_path` without a parent
+                // component (e.g. a bare filename with no directory) would
+                // silently resolve the archive into the process's CWD via
+                // the prior `unwrap_or_else(|| Path::new("."))` fallback.
+                // Treat that as an unrecoverable configuration error rather
+                // than silently writing to an unexpected location.
+                let archive_path = match target_path.parent() {
+                    Some(parent) => parent.join("BC-INDEX-changelog-archive.md"),
+                    None => {
+                        return HookResult::Error {
+                            message: format!(
+                                "E-SHD-015: cannot resolve archive path — \
+                                 target_path '{}' has no parent directory \
+                                 component",
+                                target_path.display()
+                            ),
+                        };
+                    }
+                };
                 let keep_recent = resolved_low_water_mark(n, entry.low_water_mark) as usize;
                 match last_amended_migrate::rotate::rotate_changelog_at(
                     target_path,
