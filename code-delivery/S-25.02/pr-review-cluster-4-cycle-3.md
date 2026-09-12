@@ -6,13 +6,8 @@
 **Cycle:** 3 (fresh-eyes, diff + description + evidence only)
 **Verdict:** **APPROVE** — 0 BLOCKING, 4 SUGGESTION, 2 NIT
 
-> Posted to GitHub via `gh pr review 832 --comment --body-file` rather than
-> `--approve`, because GitHub rejects an approving review from the PR author's own
-> token. The verdict line and `covered_sha` are carried in the posted body.
->
-> Per-cycle archive of this same review: `pr-review-cluster-4-cycle-3.md`.
-> The prior occupant of this canonical slot (PR #831, cluster-3 final) is
-> preserved verbatim at `pr-review-cluster-3-final-pr831.md`.
+> Posted as a review **comment** rather than an `APPROVED` review because GitHub rejects
+> `--approve` from the PR author's own token.
 
 ---
 

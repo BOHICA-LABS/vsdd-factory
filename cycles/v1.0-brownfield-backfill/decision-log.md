@@ -10396,3 +10396,50 @@ VP-INDEX.md frontmatter `changelog:` contains a duplicate `version: "v3.14"` ent
 
 | D-1211 | D-1211-S2502-CLUSTER4-LOCAL-3CLEAN-CONVERGENCE | **S-25.02 Phase F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) achieved BC-5.39.001 3-CLEAN convergence at passes A/B/C on frozen code `32350e2c` / specs `16e02782` — LOCAL adversarial cascade CLOSED. Obs-A (EC-008/Inv-5/E-SHD-014) RETAINED; Obs-B REVERTED (D-1209) → S-25.05. S-7.02 cycle-closing confirmed: (a) Obs-B unsound-design/implementer-shipped-architect-rejected/first-crash-only-test-masking/orchestrator-parallel-commit-race → D-1209 lessons + S-25.05; (b) recurring E-SHD drift + stale-pre-implementation-narrative → S-12.13 + D-1210 lessons. VP-INDEX.md v3.14 duplicate (BC-5.45.001 artifact) → Drift Item [D-1211], maintenance sweep owed. Full trajectory: c36006aa initial-3CLEAN VOIDED by hardening → F-C4H-P1-001 CRITICAL (Obs-B sentinel-divergence) → Obs-B REVERT (D-1209) → doc-drift sweeps (D-1210) → VP-body straggler sweep → passes A/B/C CLEAN. BC-INDEX v5.85 / VP-INDEX v3.19 / ARCH-INDEX v4.26 / STORY-INDEX v4.468. pipeline: in_progress. NEXT = demo-recorder (AC-015 E-SHD-014) → pr-manager PR to develop → merge → worktree cleanup.** | S-25.02 F4 | 2026-09-11 |
 
+
+---
+
+## D-1212: S-25.02 F4 Cluster-4 (Mechanism-B1 Rotation, BC-1.18.009) POST-MERGE Burst
+
+**Date:** 2026-09-11
+**Decision ID:** D-1212
+**Codified by:** state-manager (single-commit TD-VSDD-053)
+**Phase:** S-25.02 F4 (Delta-Implementation), cluster-4 DELIVERED
+**Type:** Post-merge burst — POL-14 promotion + code↔spec reconciliation + engine-defect follow-up
+
+### Context
+
+PR #832 (`feature/S-25.02-b1-rotation`, S-25.02 cluster-4 mechanism-B1 rotation, BC-1.18.009 v1.7) squash-merged into `develop` as `ebd16f79` (base `08ad44b5`). This is the 4th of 7 clusters per D-1170's sequencing. LOCAL BC-5.39.001 3-CLEAN CONVERGENCE was achieved pre-PR (passes A/B/C on frozen code `32350e2c` / specs `factory-artifacts @ 16e02782`, D-1211). PR-level convergence included SEC-001 (CWE-22 path-traversal guard in `rotate_changelog_at`) + SEC-002 (CWE-252 no-parent `unwrap_or_else(".")` → E-SHD-015) fixes added during pr-reviewer cycle; demo-recorder evidence captured for AC-015 (E-SHD-014 counter-divergence guard). Feature branch deleted post-merge.
+
+### Decisions
+
+1. **POL-14 auto-promotion-at-merge (BC-1.18.009):** BC-1.18.009 `status`/`lifecycle_status` promoted `draft`→`active`. BC-1.18.005/006/007/008 already `active` from clusters 1-3; BC-10.13.001 pre-existing `active`. No new BC registered (total_bcs UNCHANGED 2,006). BC-INDEX v5.85→v5.86 (1 status-cell flip).
+
+2. **develop HEAD / merged_count update:** develop HEAD `08ad44b5`→`ebd16f79`. merged_count 121→122 (genuine BC-cluster feature delivery, cluster-1/2/3 precedents D-1173/D-1186/D-1206 applied).
+
+3. **Code↔spec reconciliation:**
+   - E-SHD-015 taxonomy row EXISTS (error-taxonomy.md v1.17, BLK-C2-2 PR cycle-2) — RECONCILED IN SCOPE.
+   - BC-1.18.009 ECs 001-008 documented; EC-009 for SEC-002/E-SHD-015 guard behavior is MISSING → **Drift Item [D-1212-DRIFT-001]**, route product-owner (add EC-009 to BC-1.18.009 v1.7).
+   - SEC-001 (CWE-22 in `rotate_changelog_at`, `rotate.rs`) maps to existing EC-003/E-SHD-004 — covered, no action.
+
+4. **Engine-defect follow-up — validate-pr-review-posted:** 3 structural defects surfaced by pr-manager (filename regex mismatch, comment-invocation conflation, state-based text match). Allocated **S-12.14** (next free E-12 Engine Governance story after S-12.13); story-writer to author; not an in-scope fix for this state-manager burst. Recorded as **Drift Item [D-1212-DRIFT-002]**.
+
+5. **Remaining clusters:** clusters 5-7 still queued per D-1170 — cluster-5 (mechanism-B2 sharding, BC-1.18.010+011) is next.
+
+### Summary Table
+
+| Aspect | Value |
+|--------|-------|
+| PR merged | #832 `ebd16f79` (base `08ad44b5`) |
+| BC promoted | BC-1.18.009 v1.7 draft→active (POL-14) |
+| BC-INDEX | v5.85→v5.86 |
+| merged_count | 121→122 |
+| E-SHD-015 taxonomy | EXISTS (v1.17, BLK-C2-2) — RECONCILED |
+| BC-1.18.009 EC gap | EC-009 missing for SEC-002/E-SHD-015 → Drift Item [D-1212-DRIFT-001] |
+| validate-pr-review-posted | 3 defects → S-12.14 → Drift Item [D-1212-DRIFT-002] |
+| pipeline | in_progress |
+| Next cluster | cluster-5 (mechanism-B2 sharding, BC-1.18.010+011) |
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1212 | D-1212-S2502-CLUSTER4-DELIVERY-MERGE-BURST | **S-25.02 Phase F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) DELIVERED — PR #832 squash-merged into develop as `ebd16f79` (base `08ad44b5`); feature branch `feature/S-25.02-b1-rotation` deleted. LOCAL BC-5.39.001 3-CLEAN CONVERGED pre-PR at `32350e2c` (passes A/B/C, D-1211). BC-1.18.009 `status`/`lifecycle_status` draft→active (POL-14); BC-INDEX v5.85→v5.86. Code↔spec: E-SHD-015 taxonomy row EXISTS (v1.17, BLK-C2-2) — RECONCILED; BC-1.18.009 missing EC-009 for SEC-002/E-SHD-015 → Drift Item [D-1212-DRIFT-001], route product-owner. SEC-001 (CWE-22) maps to existing EC-003/E-SHD-004 — covered. validate-pr-review-posted 3 structural defects → S-12.14 → Drift Item [D-1212-DRIFT-002]. merged_count 121→122. pipeline: in_progress. NEXT = cluster-5 (mechanism-B2 sharding, BC-1.18.010+011).** | S-25.02 F4 | 2026-09-11 |

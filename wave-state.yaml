@@ -1,9 +1,10 @@
-wave: S-25.02-F4-C4 (E-25 mechanism-B1 rotation)
+wave: S-25.02-F4-C5 (E-25 mechanism-B2 sharding)
 stories:
   - id: S-25.02
     spec_files:
       - .factory/stories/S-25.02-artifact-sharding-layer2.md
-      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.009.md
+      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.010.md
+      - .factory/specs/behavioral-contracts/ss-01/BC-1.18.011.md
 arch_files:
   - .factory/stories/epics/E-25-validation-integrity.md
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
