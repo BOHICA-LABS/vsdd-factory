@@ -42,6 +42,17 @@
 # F-P3-008: concurrent resolver timeout integration test.
 
 # ---------------------------------------------------------------------------
+# Provenance recording (setup_file runs once per suite; output always visible)
+# ---------------------------------------------------------------------------
+
+setup_file() {
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance
+}
+
+# ---------------------------------------------------------------------------
 # Setup / teardown helpers
 # ---------------------------------------------------------------------------
 
@@ -158,7 +169,7 @@ EOF
     # The dispatcher emits hook.block events (with the CONVERGENCE_PASSES_INSUFFICIENT code)
     # to the internal log. VSDD_SINK_FILE (debug-only) flushes them to a JSONL file.
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/resolver-sink-XXXXXX.jsonl")"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     # Run dispatcher with synthetic SubagentStop event via stdin.
     # CWD = PLUGIN_ROOT so resolver WASM path resolves correctly.
@@ -198,7 +209,7 @@ EOF
     # Run dispatcher with synthetic SubagentStop event via stdin.
     # last_assistant_message satisfies the handoff-validator (>= 40 non-whitespace chars).
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/resolver-sink-XXXXXX.jsonl")"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-test-session","dispatcher_trace_id":"bats-test-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
     run bash -c "cd '${PLUGIN_ROOT}' && printf '%s' '${payload}' | VSDD_SINK_FILE='${sink_file}' CLAUDE_PLUGIN_ROOT='${PLUGIN_ROOT}' CLAUDE_PROJECT_DIR='${FACTORY_TMP}' '${DISPATCHER}'"
@@ -254,7 +265,7 @@ EOF
     # No cycle directory needed — no stories to check.
 
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/resolver-sink-XXXXXX.jsonl")"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     # Synthetic SubagentStop event with agent_type = wave-gate-dispatch and a
     # valid last_assistant_message so the handoff-validator does not block first.
@@ -315,7 +326,7 @@ EOF
     # Deliberately do NOT create .factory/cycles/test-cycle-block-001/S-NOSTATE/
 
     local sink_file
-    sink_file="${BATS_TMPDIR}/block-code-1-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-block-001","dispatcher_trace_id":"bats-block-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
     run bash -c "cd '${PLUGIN_ROOT}' && printf '%s' '${payload}' | VSDD_SINK_FILE='${sink_file}' CLAUDE_PLUGIN_ROOT='${PLUGIN_ROOT}' CLAUDE_PROJECT_DIR='${FACTORY_TMP}' '${DISPATCHER}'"
@@ -366,7 +377,7 @@ EOF
 EOF
 
     local sink_file
-    sink_file="${BATS_TMPDIR}/block-code-2-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-block-002","dispatcher_trace_id":"bats-block-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
     run bash -c "cd '${PLUGIN_ROOT}' && printf '%s' '${payload}' | VSDD_SINK_FILE='${sink_file}' CLAUDE_PLUGIN_ROOT='${PLUGIN_ROOT}' CLAUDE_PROJECT_DIR='${FACTORY_TMP}' '${DISPATCHER}'"
@@ -420,7 +431,7 @@ EOF
     printf 'schema_version = 1\n' > "${temp_plugin_root}/resolvers-registry.toml"
 
     local sink_file
-    sink_file="${BATS_TMPDIR}/block-code-3-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-block-003","dispatcher_trace_id":"bats-block-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
     run bash -c "cd '${temp_plugin_root}' && printf '%s' '${payload}' | VSDD_SINK_FILE='${sink_file}' CLAUDE_PLUGIN_ROOT='${temp_plugin_root}' CLAUDE_PROJECT_DIR='${FACTORY_TMP}' '${DISPATCHER}'"
@@ -557,7 +568,7 @@ path_allow = []
 RESOLVER_TOML
 
     local sink_file log_dir
-    sink_file="${BATS_TMPDIR}/timeout-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
     log_dir="$(mktemp -d "${BATS_TMPDIR}/timeout-log-XXXXXX")"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-timeout","dispatcher_trace_id":"bats-timeout-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
