@@ -109,9 +109,34 @@ fn rewrite_source_after_rotation(
     // back as an actual tab/newline/CR byte instead of the literal
     // backslash — silent path corruption, not a parse failure (see
     // `escape_raw_value`'s doc comment for the full analysis).
+    //
+    // B1 portability fix: write a repo-root-relative path into the
+    // `changelog_archive:` pointer (e.g.
+    // `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md`),
+    // not an absolute machine-local path. Absolute paths bake the developer's
+    // or CI runner's filesystem prefix into a versioned factory-artifacts-branch
+    // document, making it non-portable across checkouts.
+    //
+    // Resolution: walk `path`'s ancestors for a `.factory` component (the
+    // canonical factory root marker), take its parent as the repo root, and
+    // strip that prefix from `archive_path`. Falls back to writing
+    // `archive_path` as-is when the `.factory` ancestor cannot be found (e.g.
+    // test fixtures that land in a bare tempdir with no `.factory` above them)
+    // or when `strip_prefix` fails (archive does not live under the repo root —
+    // defensive, should not occur in production).
+    let relative_archive: Option<PathBuf> = if archive_path.is_absolute() {
+        path.ancestors()
+            .find(|a| a.file_name().is_some_and(|n| n == ".factory"))
+            .and_then(|factory_dir| factory_dir.parent())
+            .and_then(|repo_root| archive_path.strip_prefix(repo_root).ok())
+            .map(|p| p.to_path_buf())
+    } else {
+        None
+    };
+    let effective_path: &Path = relative_archive.as_deref().unwrap_or(archive_path);
     let pointer_line = format!(
         "changelog_archive: \"{}\"\n",
-        crate::escape::escape_raw_value(&archive_path.display().to_string())
+        crate::escape::escape_raw_value(&effective_path.display().to_string())
     );
 
     let mut result = String::with_capacity(raw.len() + pointer_line.len());

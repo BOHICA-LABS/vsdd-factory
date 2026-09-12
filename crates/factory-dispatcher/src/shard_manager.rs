@@ -2119,9 +2119,13 @@ pub fn shard_cap_gate_check(
             if item_count_trigger_fires(current_item_count, n) {
                 // BC-1.18.009 Postcondition 2: rotate-then-block-and-retry.
                 //
-                // The archive path for BC-INDEX artifacts is a fixed,
-                // non-cycle, BC-INDEX-sibling path (F1 delta analysis §3.1):
-                //   <parent-of-target>/BC-INDEX-changelog-archive.md
+                // The archive path is a fixed, non-cycle, target-sibling path
+                // derived from `entry.artifact_stem` (F1 delta analysis §3.1):
+                //   <parent-of-target>/<artifact_stem>-changelog-archive.md
+                // Using `artifact_stem` (not a hardcoded `"BC-INDEX"`) makes
+                // this handler shape-generic: a VP-INDEX or ARCH-INDEX entry
+                // rotates to its own correctly-named archive, not to
+                // `BC-INDEX-changelog-archive.md`.
                 // `rotate_changelog_at` receives this path directly — callers
                 // that supply an explicit archive path bypass the
                 // `resolve_archive_path(path, cycle_name)` indirection that
@@ -2133,7 +2137,9 @@ pub fn shard_cap_gate_check(
                 // Treat that as an unrecoverable configuration error rather
                 // than silently writing to an unexpected location.
                 let archive_path = match target_path.parent() {
-                    Some(parent) => parent.join("BC-INDEX-changelog-archive.md"),
+                    Some(parent) => {
+                        parent.join(format!("{}-changelog-archive.md", entry.artifact_stem))
+                    }
                     None => {
                         return HookResult::Error {
                             message: format!(
@@ -3688,7 +3694,9 @@ fn build_empty_roll_retry_block_reason(
 /// `BC-INDEX`).
 /// `archive_path` — the fixed, non-cycle sibling path the rotate call wrote
 /// the overflow tail to (e.g.
-/// `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md`).
+/// `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md` for
+/// `artifact_stem = "BC-INDEX"`; the stem is interpolated, so VP-INDEX
+/// produces `VP-INDEX-changelog-archive.md` and so on).
 /// `keep_recent` — the `low_water_mark` item count the live sequence was
 /// trimmed to; named in the retry instruction so the agent knows the current
 /// state of the file before retrying.
