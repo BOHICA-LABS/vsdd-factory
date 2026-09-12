@@ -3704,10 +3704,11 @@ fn build_empty_roll_retry_block_reason(
 /// # GREEN-BY-DESIGN (BC-5.38.002)
 ///
 /// Zero branching, no I/O, no non-trivial helpers, body ≤ 3 lines (one
-/// `format!` expression). The test for this function's message format
-/// passes against this stub immediately — expected per BC-5.38.002. The
-/// test-writer MUST still write a test verifying the prescribed text
-/// (BC-1.18.009 Postcondition 2 step 3) to lock the template.
+/// `format!` expression). GREEN-BY-DESIGN per BC-5.38.002: the
+/// prescribing test
+/// (`test_BC_1_18_009_AC015_build_b1_block_reason_format_pinned_verbatim`)
+/// verifies the BC-1.18.009 Postcondition 2 step 3 retry-instruction text
+/// verbatim (L-BB-D1179 verbatim-pin lesson).
 ///
 /// **Self-Check (BC-5.38.005):** "If I include this real implementation, will
 /// the test for this function pass trivially without any implementer work?"

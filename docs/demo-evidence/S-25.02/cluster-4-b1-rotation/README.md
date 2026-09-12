@@ -7,12 +7,12 @@ commit history for current HEAD.
 
 **Story spec:** `.factory/stories/S-25.02-artifact-sharding-layer2.md` (AC-015, AC-016, EC-008)
 
-**Behavioral contract:** BC-1.18.009 v1.6 — Mechanism-B1 FrontmatterChangelogArray rotate-and-retry
+**Behavioral contract:** BC-1.18.009 v1.7 — Mechanism-B1 FrontmatterChangelogArray rotate-and-retry
 for `BC-INDEX.md`. The B1 gate intercepts `Edit`/`Write` PreToolUse dispatches targeting `BC-INDEX.md`
 when the live `changelog:` sequence reaches `N=50` items, rotates the oldest entries to a single
 evergreen archive file (`BC-INDEX-changelog-archive.md`), and returns a `HookResult::Block` with a
 retry instruction — or `HookResult::Error(E-SHD-014)` when the rotation reports `mutated=false`
-(counter-divergence guard, EC-008/INV-5 v1.6 hardening).
+(counter-divergence guard, EC-008/INV-5 v1.7 hardening).
 
 ## Why a VHS terminal recording, not a browser demo
 
