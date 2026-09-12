@@ -8688,3 +8688,21 @@ Open follow-ups at wrap: S-12.09, S-12.10, S-12.11, S-12.12 (E-12 Engine Governa
 No WIP branches — feature/S-25.02-backfill MERGED+DELETED; develop @ 08ad44b5; factory-artifacts @ pause commit.
 
 `/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+---
+
+## Archived Checkpoint: S2502-CLUSTER4-DELIVERY-MERGE-BURST/D-1212 (develop ebd16f79; main 51023185; merged_count 122; PIPELINE in_progress)
+
+> **Archived from STATE.md by the SESSION-WRAP-PAUSE-2026-09-12 keep-last-1 discipline, 2026-09-12.**
+
+S-25.02 F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) DELIVERED/MERGED (PR #832 → `develop` `ebd16f79`); pipeline in_progress; next actionable = S-25.02 cluster-5 (mechanism-B2 sharding, BC-1.18.010+011) per D-1170's sequencing.
+
+cluster-4 BC-5.39.001 LOCAL 3/3 CONVERGED + CLOSED (passes A/B/C on frozen `32350e2c`, D-1211); PR-level convergence COMPLETE (SEC-001+SEC-002+E-SHD-015 fixed pre-merge; pr-reviewer APPROVE). No active convergence loop.
+
+None in-flight — cluster-4 delivered end-to-end (3-CLEAN → demo-recorder AC-015 → PR #832 → merge → post-merge). No story mid-TDD, no PR awaiting.
+
+Open follow-ups: [D-1212-DRIFT-001] BC-1.18.009 missing EC-009 → product-owner. [D-1212-DRIFT-002] validate-pr-review-posted 3 defects → S-12.14. S-12.09..S-12.14 open (E-12). F-006+SEC-831-01 → T-12. Compaction owed (decision-log.md ~10,300+ lines, session-checkpoints.md ~8,700+ lines). [D-1207] .factory/.gitignore unregistered. 4 pre-existing open PRs: #769, #768, #729, #632.
+
+No WIP branches — `feature/S-25.02-b1-rotation` MERGED+DELETED; `develop` @ `ebd16f79`; `factory-artifacts` @ D-1212 burst commit.
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
