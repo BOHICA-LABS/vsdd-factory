@@ -1,12 +1,12 @@
 ---
 document_type: pipeline-state
 level: ops
-version: "10.42"
+version: "10.41"
 status: in_progress
 producer: state-manager
 timestamp: 2026-09-12T00:00:00Z
 phase: "PAUSED 2026-09-12. S-25.02 F4 cluster-4 (BC-1.18.009 mechanism-B1 rotation) DELIVERED/MERGED (PR #832 @ ebd16f79); cluster-4 fully closed out; next = cluster-5 (mechanism-B2 body-table sharding, BC-1.18.010 + migration BC-1.18.011) pending human GO."
-last_amended: "2026-09-12 (v10.42) — CYCLE-FILE-COMPACTION-HYGIENE-BURST: archive sidecars created (decision-log-archive.md D-731..D-1169 7394L; session-checkpoints-archive.md pre-S2502-F4-GATE 6855L); pointer notes added; §4 compaction-owed item annotated PARTIAL; physical trimming blocked by auto-mode Bash permission gap. state-manager, single-commit TD-VSDD-053. v10.41→v10.42. [Prior history → STATE-amendment-history.md]"
+last_amended: "2026-09-12 (v10.41) — SESSION-WRAP-PAUSE-2026-09-12: pipeline set to PAUSED; cluster-4 (BC-1.18.009) fully closed out; next = cluster-5 (BC-1.18.010+011) pending human GO. state-manager, single-commit TD-VSDD-053. v10.40→v10.41. [Prior history → STATE-amendment-history.md]"
 inputs: []
 input-hash: "[live-state]"
 traces_to: prd.md
@@ -24,7 +24,7 @@ dtu_services: []
 <!--
   STATE.md SIZE BUDGET (per D-421(c) + D-422(c) reconciliation):
   Soft target: <=415 lines; hard cap: 500 lines (validate-state-md-size hook enforcement).
-  Hard cap (500 lines) margin from soft-target = 500 - 415 = 85; margin from actual = 500 - 431 = 69 (D-446(c) dual-margin form). 431 lines (wc-l .factory/STATE.md; CYCLE-FILE-COMPACTION-HYGIENE-BURST v10.41→v10.42; net 0 line-count change this burst — all edits were in-line text replacements within existing lines; §4 compaction-owed item annotated PARTIAL; frontmatter version+last_amended refreshed — 16 lines OVER the 415-line soft target but 69 lines under the 500 hard cap; D-446(c) margin healthy. Source-file trimming of cycle files (reduce decision-log.md + session-checkpoints.md line counts) blocked by Bash auto-mode permission gap — see §4 for recovery command.
+  Hard cap (500 lines) margin from soft-target = 500 - 415 = 85; margin from actual = 500 - 431 = 69 (D-446(c) dual-margin form). 431 lines (wc-l .factory/STATE.md; SESSION-WRAP-PAUSE-2026-09-12 v10.40→v10.41; net +3 lines this burst — 1 new Phase Progress row + 1 new Current Phase Steps row prepended replacing 1 evicted oldest [D-1205, content archived verbatim to cycles/v1.0-brownfield-backfill/burst-log.md], Session Resume Checkpoint fully replaced (prior S2502-CLUSTER4-DELIVERY-MERGE-BURST/D-1212 checkpoint archived verbatim to cycles/v1.0-brownfield-backfill/session-checkpoints.md), frontmatter refreshed in place — 16 lines OVER the 415-line soft target but 69 lines under the 500 hard cap; D-446(c) margin healthy; /compact-state pass remains owed before cluster-5 cascade (see Session Resume Checkpoint §4).
   Historical content belongs in cycle files, NOT here.
   D-1057..D-1076 (exhaustive) banner-history paragraphs extracted 2026-08-23 to cycles/v1.0-brownfield-backfill/burst-log.md.
   Pre-D-1058 history: git -C .factory log -p -- STATE.md + burst-log.md + decision-log.md.
@@ -400,7 +400,7 @@ NONE — cluster-4 merged (PR #832) + closed; no story mid-TDD, no PR awaiting r
 
 ### §4. Pending human decisions / open blockers (d)
 
-cluster-5 GO (deferred to a future session per human wrap decision). OPEN Drift Item **[D-1212-DRIFT-002]** validate-pr-review-posted hook 3 structural defects → **S-12.14** (story-writer to author). Anchored follow-ups: **S-25.05** (Obs-B cross-file crash-atomicity), **S-12.13** (E-SHD Message-Format↔Display lint gate), **S-12.14** (pr-review-posted hook fix). Additional open: S-12.09, S-12.10, S-12.11, S-12.12 (E-12 Engine Governance). **F-006 + SEC-831-01** → **T-12**. **[D-1206]** compute-input-hash cascade Drift Item. **Cycle-file compaction PARTIAL (2026-09-12 hygiene burst):** Archive sidecars created — `decision-log-archive.md` (D-731..D-1169, 7,394 lines) + `session-checkpoints-archive.md` (pre-S2502-F4-GATE, 6,855 lines). Pointer notes added to source files via Edit tool. Physical source-file trimming (removing archived content from source files) is BLOCKED by auto-mode on Bash overwrite of existing `.factory/` cycle files — requires user to add a Bash permission OR manually run: `cd .factory && { head -n 13 cycles/v1.0-brownfield-backfill/decision-log.md; echo '> Archived…'; tail -n +7392 cycles/v1.0-brownfield-backfill/decision-log.md; } > /tmp/dl_new.txt && cp /tmp/dl_new.txt cycles/v1.0-brownfield-backfill/decision-log.md` (and similar for session-checkpoints.md). Source files retain full original content + pointer notes until trimming completes. 4 pre-existing open PRs: **#769, #768, #729, #632**. **[D-1207]** `.factory/.gitignore` unregistered in `artifact-path-registry.yaml`.
+cluster-5 GO (deferred to a future session per human wrap decision). OPEN Drift Item **[D-1212-DRIFT-002]** validate-pr-review-posted hook 3 structural defects → **S-12.14** (story-writer to author). Anchored follow-ups: **S-25.05** (Obs-B cross-file crash-atomicity), **S-12.13** (E-SHD Message-Format↔Display lint gate), **S-12.14** (pr-review-posted hook fix). Additional open: S-12.09, S-12.10, S-12.11, S-12.12 (E-12 Engine Governance). **F-006 + SEC-831-01** → **T-12**. **[D-1206]** compute-input-hash cascade Drift Item. **Cycle-file compaction owed:** `decision-log.md` (~10,300+ lines) + `session-checkpoints.md` (~8,700+ lines) — schedule before cluster-5 cascade. 4 pre-existing open PRs: **#769, #768, #729, #632**. **[D-1207]** `.factory/.gitignore` unregistered in `artifact-path-registry.yaml`.
 
 ### §5. WIP branches (e)
 

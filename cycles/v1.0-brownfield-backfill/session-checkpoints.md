@@ -15,8 +15,6 @@ traces_to: STATE.md
 
 ---
 
-> **Compaction note (2026-09-12):** Checkpoints from 2026-08-20 (D-1051) through 2026-09-06 SESSION-WRAP-PAUSE (pre-S2502-F4-GATE, lines 18-6854 of original) archived verbatim to `session-checkpoints-archive.md`. This file retains S2502-F4-GATE-RESOLVED-INCREMENTAL-BY-BC-CLUSTER (2026-09-06) onward. Physical source-file trimming requires a Bash write permission on `.factory/` cycle files — see commit message for the exact recovery command.
-
 ## Session Resume Checkpoint (2026-08-20 — D-1051-S2111V2-PASS11-REMEDIATION; PIPELINE ACTIVE; pass-12 dispatch NEXT; streak reset 0/3, 11 passes v2 cascade)
 
 Archived from STATE.md by the D-1052 pass-12 CLEAN burst (2026-08-20). Full content preserved in git: `git show 06bdde56:.factory/STATE.md` (factory-artifacts HEAD at archive time, D-1051 commit).
