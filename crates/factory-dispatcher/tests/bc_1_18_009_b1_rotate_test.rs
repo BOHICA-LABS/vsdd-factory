@@ -59,6 +59,28 @@ use factory_dispatcher::registry::Registry;
 use factory_dispatcher::resolver::ResolverRegistry;
 use factory_dispatcher::shard_manager::build_b1_block_reason;
 
+/// Well-formed `"frontmatter-changelog-array"`-shaped `[[shard]]` config for
+/// `VP-INDEX.md` — identical calibration constants as [`B1_SHARD_CONFIG`] but
+/// with `artifact_stem = "VP-INDEX"` and `artifact_path = "VP-INDEX.md"`.
+///
+/// Used by the B2 discriminating test: if the B2 fix (`entry.artifact_stem`
+/// in the archive filename) is reverted back to a hardcoded `"BC-INDEX"`, the
+/// archive file would be named `BC-INDEX-changelog-archive.md` instead of
+/// `VP-INDEX-changelog-archive.md`.
+const VP_INDEX_SHARD_CONFIG: &str = "\
+[[shard]]
+artifact_stem = \"VP-INDEX\"
+artifact_path = \"VP-INDEX.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 49152
+shape = \"frontmatter-changelog-array\"
+n = 50
+low_water_mark = 25
+";
+
 /// Well-formed `"frontmatter-changelog-array"`-shaped `[[shard]]` config
 /// entry for `BC-INDEX.md`, calibrated to N=50 items and low_water_mark=25
 /// (BC-1.18.009 CTV canonical test vectors).
@@ -1050,5 +1072,180 @@ async fn test_BC_1_18_009_EC008_INV5_mutated_false_returns_e_shd_014_error_varia
         !archive_path.exists(),
         "EC-008/Inv-5: the archive file must NOT be created when the guard fires \
          (mutated=false means no rotation happened)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SEC-002 — no-parent fallback: E-SHD-015 guard present in shard_manager.rs
+// ---------------------------------------------------------------------------
+
+/// SEC-002 (CWE-252): verifies that the `target_path.parent() == None` guard
+/// in the `FrontmatterChangelogArray` arm of `shard_cap_gate_check` is present
+/// in `shard_manager.rs` and implemented via the fail-loud `HookResult::Error`
+/// path (`"E-SHD-015: ..."`) rather than the pre-fix
+/// `target_path.parent().unwrap_or_else(|| Path::new("."))` silent-CWD
+/// fallback.
+///
+/// # Why a source scan rather than an end-to-end integration test
+///
+/// On POSIX systems (Linux/macOS), no path can simultaneously carry a file
+/// stem (required for `find_matching_entry` to resolve a `[[shard]]` entry)
+/// AND have `Path::parent()` return `None` (root-only condition on POSIX:
+/// only the root path `/` has `parent() == None`, and `/` has no file stem).
+/// The `None` arm is therefore unreachable through the integration test path
+/// on POSIX — any path that reaches the `FrontmatterChangelogArray` arm has
+/// `Some(parent)`.  A source scan is the correct coverage mechanism for a
+/// guard that is structurally unreachable in the CI environment.
+///
+/// Two discriminating checks together ensure the fix cannot be reverted
+/// silently:
+/// 1. `E-SHD-015` must appear in `shard_manager.rs` — reverting the guard
+///    removes the error code from the production code path.
+/// 2. `target_path.parent().unwrap_or_else` must NOT appear — that is the
+///    exact pre-fix pattern the guard replaced; its presence means the fix
+///    was reverted.
+#[test]
+fn test_BC_1_18_009_SEC002_shard_manager_contains_e_shd_015_none_parent_guard() {
+    let shard_manager_src = include_str!("../src/shard_manager.rs");
+
+    // Check 1: E-SHD-015 error code is present in shard_manager.rs.
+    // Reverting the SEC-002 fix removes this string from the None => arm.
+    assert!(
+        shard_manager_src.contains("E-SHD-015"),
+        "SEC-002 (CWE-252): shard_manager.rs must contain the E-SHD-015 error code \
+         in the `target_path.parent() == None` guard inside the \
+         FrontmatterChangelogArray arm of shard_cap_gate_check. Found 0 occurrences \
+         of \"E-SHD-015\" — the guard has been removed or renamed. Reverting this \
+         guard silently accepts a target_path with no parent directory, causing the \
+         archive to be written to an unexpected CWD-relative location (CWE-252)."
+    );
+
+    // Check 2: the pre-fix vulnerable pattern is absent.
+    // Before SEC-002, the code was:
+    //   target_path.parent().unwrap_or_else(|| Path::new(".")).join(...)
+    // The fix changed this to a match with a None => HookResult::Error arm.
+    // If the fix is reverted, this exact substring reappears.
+    assert!(
+        !shard_manager_src.contains("target_path.parent().unwrap_or_else"),
+        "SEC-002 (CWE-252): shard_manager.rs must NOT contain \
+         `target_path.parent().unwrap_or_else` — that is the pre-fix vulnerable \
+         pattern that silently resolved the archive path into the process's CWD \
+         when target_path had no parent directory component. The SEC-002 fix \
+         replaced it with `match target_path.parent() {{ Some(p) => ..., \
+         None => HookResult::Error(\"E-SHD-015: ...\") }}`. Presence of this \
+         pattern means the fix has been reverted."
+    );
+}
+
+// ---------------------------------------------------------------------------
+// B2 — artifact_stem-specific archive name for non-BC-INDEX stems
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.009, B2 (fix-burst pass-2): the `FrontmatterChangelogArray` arm
+/// uses `entry.artifact_stem` (not a hardcoded `"BC-INDEX"` string) to
+/// construct the archive filename.
+///
+/// Scenario: a `[[shard]]` entry with `artifact_stem = "VP-INDEX"` (the
+/// verification-property catalog, not the BC catalog) rotates to
+/// `VP-INDEX-changelog-archive.md` — NOT to `BC-INDEX-changelog-archive.md`.
+///
+/// # Discriminating property
+///
+/// Every existing test in this file uses `artifact_stem = "BC-INDEX"`, whose
+/// name is byte-identical to the old hardcoded value the B2 fix replaced.
+/// This test deliberately uses a DIFFERENT stem (`"VP-INDEX"`) so that
+/// reverting B2 (changing `entry.artifact_stem` back to a hardcoded
+/// `"BC-INDEX"`) causes the test to fail:
+/// * The rotation would write to `BC-INDEX-changelog-archive.md` (not VP).
+/// * The assert on `vp_archive.exists()` would FAIL.
+/// * The assert on `!bc_archive.exists()` would FAIL.
+/// * The block-reason assert would FAIL (wrong archive name in the message).
+#[tokio::test(flavor = "current_thread")]
+async fn test_BC_1_18_009_B2_non_bc_index_artifact_stem_uses_stem_specific_archive_name() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Write the VP-INDEX shard config (artifact_stem = "VP-INDEX").
+    write_shard_config(dir.path(), VP_INDEX_SHARD_CONFIG);
+
+    // Write a VP-INDEX.md fixture with exactly N=50 changelog items so the
+    // item-count trigger fires. We reuse write_bc_index_fixture because the
+    // rotation logic only inspects the `changelog:` sequence — document_type
+    // is irrelevant to the trigger or the archive-name derivation under test.
+    let target = dir.path().join("VP-INDEX.md");
+    write_bc_index_fixture(&target, N_CAP as usize);
+
+    // Precondition: fixture at exactly N items.
+    assert_eq!(
+        count_changelog_items(&target),
+        N_CAP as usize,
+        "B2 precondition: VP-INDEX.md fixture must have exactly N={N_CAP} changelog items"
+    );
+
+    let engine = build_engine().unwrap();
+    let cache = PluginCache::new(engine.clone());
+    let registry = empty_registry();
+    let internal_log = Arc::new(InternalLog::new(dir.path().join("logs")));
+
+    let (inputs, precheck) = inputs_for(
+        &engine,
+        &cache,
+        &registry,
+        &internal_log,
+        dir.path(),
+        "Edit",
+        &target,
+        serde_json::json!({"old_string": "test", "new_string": "test-new"}),
+    );
+
+    let summary = execute_tiers(inputs, vec![], precheck).await;
+
+    // The rotation trigger must have fired (gate blocks the dispatch).
+    assert_ne!(
+        summary.exit_code, 0,
+        "B2: over-N Edit to VP-INDEX.md must Block (rotation trigger fires at N=50 items)"
+    );
+    assert!(
+        summary.block_intent,
+        "B2: block_intent must be set after VP-INDEX.md rotation trigger fires"
+    );
+
+    let vp_archive = dir.path().join("VP-INDEX-changelog-archive.md");
+    let bc_archive = dir.path().join("BC-INDEX-changelog-archive.md");
+
+    // B2 primary assertion: archive file uses the entry's artifact_stem.
+    assert!(
+        vp_archive.exists(),
+        "B2: rotation of VP-INDEX.md must create VP-INDEX-changelog-archive.md \
+         (stem-specific archive name derived from entry.artifact_stem). \
+         Reverting B2 would hardcode \"BC-INDEX\" as the archive filename \
+         regardless of artifact_stem — the archive would be created at \
+         BC-INDEX-changelog-archive.md instead. \
+         vp_archive={}, bc_archive={}",
+        vp_archive.display(),
+        bc_archive.display()
+    );
+
+    // B2 secondary assertion: BC-INDEX archive must NOT exist.
+    assert!(
+        !bc_archive.exists(),
+        "B2: BC-INDEX-changelog-archive.md must NOT be created for a VP-INDEX \
+         rotation — the archive filename must use entry.artifact_stem \
+         (\"VP-INDEX\"), not a hardcoded \"BC-INDEX\" literal. \
+         If this assertion fails, B2 has been reverted."
+    );
+
+    // B2 block-reason assertion: the retry instruction must name the
+    // VP-INDEX-specific archive path.
+    let reason = exact_block_reason(&summary);
+    assert!(
+        reason.contains("VP-INDEX-changelog-archive.md"),
+        "B2: Block reason must reference the VP-INDEX-specific archive path \
+         \"VP-INDEX-changelog-archive.md\". Got: {reason}"
+    );
+    assert!(
+        !reason.contains("BC-INDEX-changelog-archive.md"),
+        "B2: Block reason must NOT reference \"BC-INDEX-changelog-archive.md\" \
+         for a VP-INDEX artifact stem — the hardcoded name from before the B2 fix. \
+         Got: {reason}"
     );
 }

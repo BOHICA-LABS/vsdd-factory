@@ -30,7 +30,7 @@
 //!   whose first rotation's content is preserved verbatim at the front,
 //!   followed by the second rotation's appended items.
 
-use last_amended_migrate::{MigrationMode, rotate_changelog_at};
+use last_amended_migrate::{MigrateError, MigrationMode, rotate_changelog_at};
 use std::path::Path;
 
 mod common;
@@ -92,6 +92,65 @@ fn count_items_in_file(path: &Path) -> usize {
         // Fence-less archive file: count all `  - ` lines across the whole file.
         content.lines().filter(|l| l.starts_with("  - ")).count()
     }
+}
+
+// ---------------------------------------------------------------------------
+// SEC-001 — CWE-22 ParentDir traversal guard in archive_path
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.009, SEC-001 (CWE-22): `rotate_changelog_at` must reject any
+/// caller-supplied `archive_path` that contains a parent-directory (`..`)
+/// component, returning `Err(MigrateError::InvalidPath)` before any I/O is
+/// performed.
+///
+/// This test is the discriminating guard for SEC-001: reverting the check
+/// (removing the `archive_path.components().any(|c| c == Component::ParentDir)`
+/// guard) would cause `rotate_changelog_at` to silently accept a traversal path
+/// and write the archive outside the caller's intended directory — a CWE-22
+/// path-traversal vulnerability.  The guard fires before any filesystem
+/// mutation, so the source fixture must be left unchanged on the `Err` path.
+#[test]
+fn test_BC_1_18_009_SEC001_rotate_changelog_at_rejects_parent_dir_traversal_in_archive_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("BC-INDEX.md");
+
+    // Write a 30-item fixture so the call would otherwise succeed (enough items
+    // to exceed any keep_recent=20 threshold without hitting the 0-items no-op).
+    let fixture = bc_index_fixture(30);
+    common::write_file(dir.path(), "BC-INDEX.md", &fixture);
+
+    // archive_path with a `..` component — must be rejected by SEC-001.
+    // dir.path().join("..").join("escape-archive.md") resolves to a path
+    // OUTSIDE `dir`, which is exactly the traversal scenario SEC-001 guards.
+    let traversal_archive = dir.path().join("..").join("escape-archive.md");
+    // Confirm the `..` component is present (sanity-check the fixture).
+    assert!(
+        traversal_archive
+            .components()
+            .any(|c| c == std::path::Component::ParentDir),
+        "test precondition: traversal_archive must contain a ParentDir component"
+    );
+
+    let result = rotate_changelog_at(&source_path, &traversal_archive, 20, MigrationMode::Apply);
+
+    assert!(
+        matches!(result, Err(MigrateError::InvalidPath { .. })),
+        "SEC-001 (CWE-22): rotate_changelog_at must return \
+         Err(MigrateError::InvalidPath) when archive_path contains a \
+         parent-directory (..) traversal component. Reverting this guard would \
+         silently accept a path-traversal archive destination, allowing the \
+         caller to write outside the intended directory. Got: {:?}",
+        result
+    );
+
+    // No archive file must have been written at the traversal destination.
+    assert!(
+        !traversal_archive.exists(),
+        "SEC-001: the archive file must NOT be created at the traversal destination \
+         after a rejected rotate_changelog_at call — the guard fires before any \
+         filesystem mutation: {}",
+        traversal_archive.display()
+    );
 }
 
 // ---------------------------------------------------------------------------
