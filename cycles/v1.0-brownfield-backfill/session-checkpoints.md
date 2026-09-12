@@ -8706,3 +8706,57 @@ Open follow-ups: [D-1212-DRIFT-001] BC-1.18.009 missing EC-009 → product-owner
 No WIP branches — `feature/S-25.02-b1-rotation` MERGED+DELETED; `develop` @ `ebd16f79`; `factory-artifacts` @ D-1212 burst commit.
 
 `/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+---
+
+## Session Resume Checkpoint (2026-09-12 — SESSION-WRAP-PAUSE-2026-09-12; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) **DELIVERED/MERGED** & closed out — PR #832 squash-merged into `develop` as `ebd16f79` (base `08ad44b5`). `pipeline:` **PAUSED** (human `/vsdd-factory:wrap`). **NEXT = cluster-5 (mechanism-B2 sharding, BC-1.18.010+011), pending human GO.**
+> Prior checkpoint (S2502-CLUSTER4-DELIVERY-MERGE-BURST/D-1212, 2026-09-11) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-12. S-25.02 F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) DELIVERED/MERGED & closed out (PR #832 → `develop` `ebd16f79`); `pipeline:` PAUSED. Next = cluster-5 (mechanism-B2 body-table sharding, BC-1.18.010 + migration BC-1.18.011) pending human GO.
+
+### §2. Convergence (b)
+
+cluster-4 BC-5.39.001 3/3 CONVERGED (closed, D-1211); no active convergence loop open.
+
+### §3. In-flight (c)
+
+NONE — cluster-4 merged (PR #832) + closed; no story mid-TDD, no PR awaiting review/CI, no abandoned sub-agent step.
+
+### §4. Pending human decisions / open blockers (d)
+
+cluster-5 GO (deferred to a future session per human wrap decision). OPEN Drift Item **[D-1212-DRIFT-002]** validate-pr-review-posted hook 3 structural defects → **S-12.15** (re-anchored 2026-09-12; S-12.14 is now cargo-audit-cache cwd-path fix; story-writer to author S-12.15). Anchored follow-ups: **S-25.05** (Obs-B cross-file crash-atomicity), **S-25.06** (append-log backfill-split executor — compaction-deferral anchor), **S-12.13** (E-SHD Message-Format↔Display lint gate), **S-12.14** (cargo-audit-cache cwd-relative-path fix — Codex CV-DIR-F4), **S-12.15** (pr-review-posted hook fix — D-1212-DRIFT-002). Additional open: S-12.09, S-12.10, S-12.11, S-12.12 (E-12 Engine Governance). New cluster-5 F1 follow-ups: [CV-DIR-F1a] BC-1.18.011 reconciliation; [CV-DIR-F1b] S-25.02 cluster-7 body note + consistency check; [CV-DIR-F2-OPEN] architect invocation-mechanism spec for S-25.06 T-10. **F-006 + SEC-831-01** → **T-12**. **[D-1206]** compute-input-hash cascade Drift Item. **Cycle-file compaction:** DEFERRED to **S-25.06** (append-log backfill-split executor; mechanistic-coverage gap — no sanctioned executor for the append-log class; last-amended-migrate scoped to 4 indexes + STATE.md only; BC-1.18.008 backfill never executed against these files). See Drift Item **[S-25.06-DRIFT-001]**. 4 pre-existing open PRs: **#769, #768, #729, #632**. **[D-1207]** `.factory/.gitignore` unregistered in `artifact-path-registry.yaml`.
+
+### §5. WIP branches (e)
+
+None — `feature/S-25.02-b1-rotation` merged to `develop` @ `ebd16f79` and deleted; `develop` @ `ebd16f79`; `factory-artifacts` @ this burst's commit.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212; EC-009 D-1212-DRIFT-001 closed) + BC-1.18.010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; clusters 1-4's BCs (BC-1.18.005/006/007/008/009) are the 5 ACTIVE ones of the 9 (4 remain draft, clusters 5-7 not yet shipped). BC-INDEX v5.87 (2,006 BCs, total_bcs UNCHANGED). VP-INDEX v3.19 (141 VPs, UNCHANGED). STORY-INDEX v4.468 (25 epics; status ready, cluster-1/2/3/4 DELIVERED/MERGED, cluster-5 next; S-25.01 merged; S-25.04 merged; S-15.03 merged). ARCH-INDEX v4.26 (48 ADRs, UNCHANGED). error-taxonomy.md v1.17 (BLK-C2-2 E-SHD-015 added PR #832 cycle-2, UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: **this pause burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-b1-rotation`: **MERGED+DELETED** — PR #832, `ebd16f79`. No longer exists.
+- `feature/S-25.02-backfill`: **MERGED+DELETED** — PR #831, `08ad44b5`. No longer exists.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824 (D-1186). **Cluster-3's OWN LOCAL cascade stays 3/3 CONVERGED — CLOSED** (D-1204), fully retired since PR #831 (D-1206). **Cluster-4's OWN LOCAL cascade stays 3/3 CONVERGED — CLOSED** (passes A/B/C, D-1211), fully retired since PR #832 (D-1212). **NEXT = cluster-5 (mechanism-B2 sharding, BC-1.18.010+011) begins a FRESH LOCAL BC-5.39.001 cascade once its own TDD implementation lands, per D-1170's sequencing. PIPELINE PAUSED — cluster-5 pending human GO.**
+
+*(Archived 2026-09-12 during SESSION-WRAP-PAUSE-2026-09-12 v10.47→v10.48 pause burst; replaced by new SRC reflecting 2nd Codex ADR-052 closure state.)*
