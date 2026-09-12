@@ -10332,3 +10332,67 @@ S-25.02, S-25.05, BC-1.18.009 v1.7, BC-10.13.001 v1.5, ADR-051 v1.13, VP-112 v1.
 
 | D-1209 | D-1209-S25-02-CLUSTER-4-OBS-B-REVERT | **S-25.02 cluster-4 Obs-B hardening WITHDRAWN (human-directed). F-C4H-P1-001: sentinel-shard counter-divergence defect — sentinel count and real shard count diverge permanently on crash-between-writes, violating §Inv-6. F-C4H-P1-002: tail-match fallback unimplementable — B1 rotates binary-serialized TOML, not line-addressable text. BC-1.18.009 v1.6→v1.7 (Obs-B §Inv-6/§PC8 WITHDRAWN); BC-10.13.001 v1.4→v1.5 (§PC8 WITHDRAWN); ADR-051 v1.12→v1.13 (Obs-B bullet WITHDRAWN); VP-112 v1.1→v1.2 (REVERT — Obs-B facet removed; losslessness+idempotency-only scope restored). Obs-A guard (EC-008/Inv-5/E-SHD-014) RETAINED. Proper B1 crash-atomicity fix DEFERRED to new story S-25.05 (E-25; P2; 8 pts; depends_on [S-25.02]). Code HEAD `96487221` (Obs-B revert applied). NEXT: LOCAL 3-CLEAN re-cascade Obs-A-only scope on `96487221`. BC-INDEX v5.85 / VP-INDEX v3.16 / ARCH-INDEX v4.26 / STORY-INDEX v4.465.** | S-25.02 F4 | 2026-09-11 |
 
+## D-1211
+
+**Decision:** S-25.02 Phase F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) LOCAL BC-5.39.001 3-CLEAN CONVERGENCE ACHIEVED — adversarial cascade CLOSED on frozen code `feature/S-25.02-b1-rotation @ 32350e2c` / specs `factory-artifacts @ 16e02782`.
+
+**Date:** 2026-09-11
+
+**Phase:** S-25.02 F4
+
+**Context:**
+
+S-25.02 cluster-4 implements the mechanism-B1 rotation (BC-1.18.009). After an initial pre-hardening 3-CLEAN on `c36006aa` was VOIDED by human-directed Obs-A/B hardening, a post-hardening cascade discovered F-C4H-P1-001 CRITICAL (Obs-B sentinel-shard counter-divergence) and F-C4H-P1-002 (Obs-B tail-match unimplementable). Obs-B was REVERTED (D-1209). Following multi-round doc-drift sweeps (D-1210: `error-taxonomy.md` v1.15→v1.16, STORY-INDEX v4.466→v4.468, S-12.13 registered) and VP-body straggler sweep (VP-126 v1.4→v1.5 + VP-131 v1.4→v1.5; VP-INDEX v3.18→v3.19), the re-cascade on the frozen code `32350e2c` achieved 3 consecutive CLEAN passes (A, B, C — all zero blocking findings, fresh-context, independent) under Obs-A-only scope.
+
+**Decision:**
+
+Allocate D-1211 as the convergence record for the cluster-4 LOCAL adversarial cascade. This follows the D-1204 (cluster-3) and D-1172 (cluster-1) precedent for literal 3-CLEAN convergence records. The cascade is CLOSED. Code `feature/S-25.02-b1-rotation @ 32350e2c` is CONVERGED and ready for per-story delivery.
+
+**Full Cluster-4 Trajectory:**
+
+| Phase | Event | Code HEAD | Notes |
+|-------|-------|-----------|-------|
+| F1 delta analysis | Scope established | — | BC-1.18.009 v1.1 authored |
+| Spec authoring + hardening design | Obs-A + Obs-B designed | — | BC-1.18.009 v1.1→v1.5 |
+| Implementer burst | Obs-A + Obs-B implemented | `c36006aa` | Implementer implemented both observations |
+| Initial LOCAL cascade | 3-CLEAN on `c36006aa` | `c36006aa` | **VOIDED** — hardening spec not yet applied; human-directed re-cascade required |
+| Post-hardening cascade pass-H1 | F-C4H-P1-001 CRITICAL + F-C4H-P1-002 | pre-revert | Obs-B sentinel counter diverges on crash; tail-match unimplementable |
+| Obs-B REVERT (D-1209) | BC-1.18.009 v1.6→v1.7 | `96487221` | Obs-A RETAINED; S-25.05 opened for proper crash-atomicity fix |
+| Doc-drift fix-wave-1 + fix-wave-2 (D-1210) | `error-taxonomy.md` v1.15→v1.16 | `32350e2c` | STORY-INDEX v4.466→v4.468; S-12.13 registered |
+| VP-body straggler sweep | VP-126 v1.4→v1.5 + VP-131 v1.4→v1.5 | `32350e2c` | VP-INDEX v3.18→v3.19 |
+| Pass A | CLEAN — 0 blocking findings | `32350e2c` | streak 0/3→1/3 |
+| Pass B | CLEAN — 0 blocking findings | `32350e2c` | streak 1/3→2/3 |
+| Pass C | CLEAN — 0 blocking findings | `32350e2c` | streak 2/3→3/3 — **CONVERGED** |
+
+**S-7.02 Cycle-Closing Checklist:**
+
+All process-gap findings from the cluster-4 cascade have concrete follow-up anchors:
+
+(a) **Obs-B unsound-design + implementer-shipped-architect-rejected-mechanism + first-crash-only-test-masking + orchestrator-parallel-commit-race:** codified in D-1209 lessons (L-BB-D1209-*) + Obs-B proper fix DEFERRED to new story **S-25.05** (E-25; P2; 8 pts; depends_on [S-25.02]) — satisfies all three Canonical Principle Rule 3 conditions (explicit human direction, concrete future dependency on S-25.02 delivery, specific story anchor S-25.05).
+
+(b) **Recurring E-SHD Message-Format↔Display drift + stale-pre-implementation-narrative:** codified in D-1210 lessons + routed to **S-12.13** (E-12 Engine Governance). Story S-12.13 registered in STORY-INDEX v4.468 (D-1210 burst). Both classes have real story anchors; neither is an un-anchored advisory.
+
+**VP-INDEX.md v3.14 Duplicate (Opportunistic Cleanup Attempt):**
+
+VP-INDEX.md frontmatter `changelog:` contains a duplicate `version: "v3.14"` entry — two distinct list items both stamped v3.14 describing the same F-C3-P9-004/BC-1.18.008 v1.9 propagation; the first embeds a `[Prior: (v3.13)]` chain (BC-5.45.001 violation artifact), the second is clean. The discriminating phrase between the two is "— same-burst propagation" (first/bad) vs "— this is a same-burst propagation" (second/good). Reliable Edit-tool match requires matching ~7,800 bytes; the phrase "— same-burst propagation" appears 3 times total in the file (present in [Prior:] chains as well), making targeted unique matching uncertain. Per the task's fallback instruction, this is recorded as **Drift Item [D-1211]** in STATE.md Drift Items rather than guessing at a risky edit. The authoritative action: remove the first `- date: "2026-09-10" / version: "v3.14"` list-item (the one whose `change:` value starts with "S-25.02 cluster-3 fix-burst facet-extension propagation…NO new VP allocated — same-burst propagation of ONE facet" and ends with "Refs: S-25.02, E-25, ADR-051, F-C3-P8-002, BC-1.18.008 v1.8.") and retain the second clean v3.14 entry. POLICY-1 compliance deferred to a dedicated maintenance sweep.
+
+### Summary Table
+
+| Aspect | Value |
+|--------|-------|
+| Convergence type | Literal BC-5.39.001 3-CLEAN |
+| Passes | A (CLEAN) / B (CLEAN) / C (CLEAN) |
+| Streak | 3/3 |
+| Frozen code | `feature/S-25.02-b1-rotation @ 32350e2c` |
+| Frozen specs | `factory-artifacts @ 16e02782` |
+| Scope | Obs-A (EC-008/Inv-5/E-SHD-014) RETAINED; Obs-B REVERTED |
+| Obs-B deferral | S-25.05 (E-25; P2; 8 pts; depends_on [S-25.02]) |
+| S-7.02 anchors | (a) D-1209 lessons + S-25.05; (b) D-1210 lessons + S-12.13 |
+| Convention | Per cluster-1 D-1172 + cluster-3 D-1204 precedent |
+| VP-INDEX v3.14 duplicate | Drift Item [D-1211] — maintenance sweep owed |
+| Next step | demo-recorder (AC-015 E-SHD-014) → pr-manager PR → merge → worktree cleanup |
+
+### Canonical 6-column row (STATE.md Decisions Log)
+
+| D-1211 | D-1211-S2502-CLUSTER4-LOCAL-3CLEAN-CONVERGENCE | **S-25.02 Phase F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) achieved BC-5.39.001 3-CLEAN convergence at passes A/B/C on frozen code `32350e2c` / specs `16e02782` — LOCAL adversarial cascade CLOSED. Obs-A (EC-008/Inv-5/E-SHD-014) RETAINED; Obs-B REVERTED (D-1209) → S-25.05. S-7.02 cycle-closing confirmed: (a) Obs-B unsound-design/implementer-shipped-architect-rejected/first-crash-only-test-masking/orchestrator-parallel-commit-race → D-1209 lessons + S-25.05; (b) recurring E-SHD drift + stale-pre-implementation-narrative → S-12.13 + D-1210 lessons. VP-INDEX.md v3.14 duplicate (BC-5.45.001 artifact) → Drift Item [D-1211], maintenance sweep owed. Full trajectory: c36006aa initial-3CLEAN VOIDED by hardening → F-C4H-P1-001 CRITICAL (Obs-B sentinel-divergence) → Obs-B REVERT (D-1209) → doc-drift sweeps (D-1210) → VP-body straggler sweep → passes A/B/C CLEAN. BC-INDEX v5.85 / VP-INDEX v3.19 / ARCH-INDEX v4.26 / STORY-INDEX v4.468. pipeline: in_progress. NEXT = demo-recorder (AC-015 E-SHD-014) → pr-manager PR to develop → merge → worktree cleanup.** | S-25.02 F4 | 2026-09-11 |
+

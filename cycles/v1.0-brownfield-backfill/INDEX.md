@@ -776,6 +776,53 @@ LOCAL cluster cascade, not a cycle-level adversary pass). Full Part A:
 cluster-3 code is CONVERGED @ `2dd39bbb` and ready for per-story delivery (demo-recorder per-AC →
 push → pr-manager 9-step PR cycle → merge), pending human GO to proceed with delivery.**
 
+## S-25.02 F4 Cluster-4 Adversarial Reviews (mechanism-B1 rotation, BC-1.18.009 — LOCAL cascade)
+
+> **Gate:** local-equivalent convergence track for S-25.02 Feature Mode Phase F4 (delta-implementation)
+> cluster-4 (mechanism-B1 rotation, BC-1.18.009), same human-directed literal 3-CLEAN convention as
+> cluster-1 (D-1172) and cluster-3 (D-1204). Scope: Obs-A counter-divergence blocking guard
+> (EC-008/Inv-5/E-SHD-014) RETAINED; Obs-B crash-atomicity REVERTED (deferred to new story S-25.05,
+> D-1209). NOT the cycle-level gate (cycle-level BC-5.39.001 streak stays 3/3 CONVERGED, UNCHANGED
+> throughout this table).
+
+| Pass | Verdict | Findings | Streak | Notes |
+|------|---------|----------|--------|-------|
+| **A** | **CLEAN** | 0 blocking findings | **1/3** | LOCAL Claude adversary, fresh context, run against `feature/S-25.02-b1-rotation @ 32350e2c` (Obs-A-only scope; BC-1.18.009 v1.7 post Obs-B REVERT D-1209; VP-INDEX v3.19; code build/fmt/clippy GREEN). Zero blocking findings. BC-5.39.001 cluster-4 LOCAL streak: 0/3 → 1/3 — FIRST CLEAN PASS. |
+| **B** | **CLEAN** | 0 blocking findings | **2/3** | LOCAL Claude adversary, fresh context, run against the SAME frozen `32350e2c` code pass-A left in place. Zero blocking findings. BC-5.39.001 cluster-4 LOCAL streak: 1/3 → 2/3 — 2nd consecutive clean pass. |
+| **C** | **CLEAN — 3-CLEAN CONVERGED** | 0 blocking findings | **3/3 — CONVERGED** | LOCAL Claude adversary, fresh context, run against the SAME frozen `32350e2c` code passes A/B left in place. Zero blocking findings. BC-5.39.001 cluster-4 LOCAL streak: 2/3 → 3/3 — CONVERGED. LOCAL adversarial cascade CLOSED. |
+
+**Convergence Status (S-25.02 F4 cluster-4 LOCAL cascade): CONVERGED — streak 3/3, CASCADE CLOSED
+2026-09-11 (D-1211).** Literal BC-5.39.001 3-CLEAN convergence reached on frozen code
+`feature/S-25.02-b1-rotation @ 32350e2c` / specs `factory-artifacts @ 16e02782` across passes A, B,
+and C (all CLEAN, zero blocking findings, fresh-context, independent). Scope: Obs-A
+counter-divergence blocking guard (EC-008/Inv-5/E-SHD-014) RETAINED; Obs-B crash-atomicity
+REVERTED (D-1209, human-directed) and deferred to new story S-25.05. Human-directed
+drive-to-literal-3-CLEAN convention per cluster-1 D-1172 precedent.
+
+**Full cluster-4 trajectory:** F1 delta analysis → spec authoring (BC-1.18.009 v1.1) → hardening-spec
+design (Obs-A + Obs-B) → implementer burst (Obs-A + Obs-B implemented at implementer discretion) →
+initial cluster-4 LOCAL cascade on `c36006aa`: 3-CLEAN — **VOIDED** by human-directed Obs-A/B
+hardening (hardening spec had not yet been applied to code) → post-hardening cascade:
+F-C4H-P1-001 CRITICAL (Obs-B sentinel-shard counter-divergence defect — sentinel count and real
+shard count diverge permanently on crash-between-writes, violating §Inv-6) + F-C4H-P1-002 (Obs-B
+tail-match fallback unimplementable — B1 rotates binary-serialized TOML, not line-addressable text)
+→ **Obs-B REVERTED** (D-1209, human-directed): BC-1.18.009 v1.6→v1.7, BC-10.13.001 v1.4→v1.5,
+ADR-051 v1.12→v1.13, VP-112 v1.1→v1.2; Obs-A guard RETAINED → multi-round doc-drift sweep
+fix-wave-1 + fix-wave-2 (D-1210: `error-taxonomy.md` v1.15→v1.16; STORY-INDEX v4.466→v4.468;
+S-12.13 registered) → VP-body straggler sweep (VP-126 v1.4→v1.5 + VP-131 v1.4→v1.5; VP-INDEX
+v3.18→v3.19) → **3-CLEAN CONVERGED on `32350e2c`** (passes A/B/C).
+
+**S-7.02 cycle-closing process-gap anchors confirmed:** (a) Obs-B unsound-design +
+implementer-shipped-architect-rejected-mechanism + first-crash-only-test-masking +
+orchestrator-parallel-commit-race → codified in D-1209 lessons (L-BB-D1209-*) + Obs-B deferred to
+S-25.05 (E-25; P2; 8 pts; depends_on [S-25.02]); (b) recurring E-SHD Message-Format↔Display drift
++ stale-pre-implementation-narrative → S-12.13 (E-12) + D-1210 lessons. Full narrative:
+`decision-log.md` D-1211.
+
+**NEXT: cluster-4 code CONVERGED @ `32350e2c`. Deliver: demo-recorder (per-AC evidence, AC-015
+E-SHD-014) → push → pr-manager 9-step PR to develop → merge → worktree cleanup. Tracked
+follow-ups (non-blocking): Obs-B crash-atomicity → S-25.05; E-SHD-lint-gate → S-12.13.**
+
 ## Artifact Size Budgets (IP-003 / D-835)
 
 | Artifact | Soft Cap | Hard Cap | Current Lines | Compaction Destination | Codified |
