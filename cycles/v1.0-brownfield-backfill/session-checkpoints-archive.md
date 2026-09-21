@@ -3660,3 +3660,288 @@ Streak = **0/3** (pass 9 FINDINGS → RESET). Passes 1–9 history: 1–7 FINDIN
 - `main`: `89f6f87c` (v1.0.0-rc.24)
 - `factory-artifacts`: `4df7c0e7` (S1705-P9-FIX-BURST)
 - `feature/S-17.05`: `a8d85160` (PUSHED)
+
+### §4. Resume command at archive
+
+`/vsdd-factory:next-step` → re-run S-17.05 local adversary pass 10 (fresh, against `feature/S-17.05` @ `a8d85160`), streak 0/3.
+
+---
+
+## Archived Checkpoint: S1705-P11-FINDINGS-BURST (2026-08-28)
+
+> Archived from STATE.md during S1705-P12-CLEAN-BURST. Replaced by S1705-P12-CLEAN-BURST checkpoint.
+
+### §1. Position
+
+Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 spec gate CONVERGED-VALIDATED (D-1124). E-17 Wave-5 TDD IN FLIGHT. S-17.06 MERGED (PR #787 `3200149d`). S-17.05 IN FLIGHT — mid local BC-5.39.001 3-CLEAN, streak **0/3** (pass 11 FINDINGS→all fixed; pass 12 next). `feature/S-17.05` @ `a73086a5` (PUSHED). S-17.07 queued.
+
+### §2. Convergence counter
+
+Streak = **0/3** (pass 11 FINDINGS → RESET from 1/3). Passes 1–11: P1–P7 FINDINGS (all fixed), P8 CLEAN, P9 FINDINGS (all fixed), P10 CLEAN, P11 FINDINGS (F-P11-001 MEDIUM fixed in-scope). NEED passes 12/13/14 consecutive CLEAN for local 3-CLEAN.
+
+Pass 11 finding F-P11-001 MEDIUM: `**BC gate:**` header cited stale BC version tokens + false `[pending]` claim. Fixed by story-writer (story v1.6→v1.7; input-hash 6067e5f UNCHANGED). O-P11-1/2/3 fixed in-scope.
+
+### §3. HEADs at archive
+
+- `develop`: `3200149d` (S-17.06 MERGED PR #787 2026-08-28)
+- `main`: `89f6f87c` (v1.0.0-rc.24)
+- `factory-artifacts`: `34ed29cb` (S1705-P11-FINDINGS-BURST 2026-08-28)
+- `feature/S-17.05`: `a73086a5` (PUSHED; pass 11 doc-comment de-pin + O-P11-2/3 fixes)
+
+### §4. Resume command at archive
+
+`/vsdd-factory:next-step` → re-run S-17.05 local adversary pass 12 (fresh, against `feature/S-17.05` @ `a73086a5`), streak 0/3.
+
+---
+
+## Archived Checkpoint: S1705-P12-CLEAN-BURST (2026-08-28)
+
+> Archived from STATE.md during S1705-P13-CLEAN-BURST. Replaced by S1705-P13-CLEAN-BURST checkpoint.
+
+### §1. Position
+
+Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 spec gate CONVERGED-VALIDATED (D-1124). E-17 Wave-5 TDD IN FLIGHT. S-17.06 MERGED (PR #787 `3200149d`). S-17.05 IN FLIGHT — mid local BC-5.39.001 3-CLEAN, streak **1/3** (pass 12 CLEAN → ADVANCES from 0/3; pass 13 next). `feature/S-17.05` @ `a73086a5` (PUSHED, FROZEN). S-17.07 queued.
+
+### §2. Convergence counter
+
+Streak = **1/3** (pass 12 CLEAN → ADVANCES from 0/3). Passes 1–12: P1–P7 FINDINGS (all fixed), P8 CLEAN, P9 FINDINGS (all fixed), P10 CLEAN, P11 FINDINGS (F-P11-001 MEDIUM fixed in-scope), P12 CLEAN (F-P12-001 LOW BATCHED per D-1127). NEED 2 more consecutive CLEAN passes (13, 14) for local 3-CLEAN.
+
+Pass 12 observation BATCHED: F-P12-001 LOW/documentary — story §Red Gate prose tally sentence cites stale counts (28/31 vs. actual 30/32). Normative Red Gate TABLE met in full. Anchor: finalization-doc-sweep.md.
+
+### §3. HEADs at archive
+
+- `develop`: `3200149d` (S-17.06 MERGED PR #787 2026-08-28)
+- `main`: `89f6f87c` (v1.0.0-rc.24)
+- `factory-artifacts`: `29baac32` (S1705-P12-CLEAN-BURST SHA-patch 2026-08-28)
+- `feature/S-17.05`: `a73086a5` (FROZEN — no changes at pass 12)
+
+### §4. Resume command at archive
+
+`/vsdd-factory:next-step` → re-run S-17.05 local adversary pass 13 (fresh, against `feature/S-17.05` @ `a73086a5`), streak 1/3.
+
+---
+
+## Archived Checkpoint: S1705-P13-CLEAN-BURST (2026-08-28)
+
+**Archived by:** S1705-P14-3CLEAN-CONVERGED-BURST (state-manager)
+**STATE.md version at archive:** v9.23
+
+### §1. Position at archive
+
+S-17.05 IN FLIGHT — mid local BC-5.39.001 3-CLEAN cascade. Streak = 2/3 (pass 13 CLEAN → ADVANCES
+from 1/3). `feature/S-17.05` @ `a73086a5` (PUSHED, FROZEN). Story v1.7 (19 ACs, 35 Red Gate;
+BC-4.17.001 v1.28 / BC-5.40.001 v1.21; input-hash 6067e5f). S-17.06 MERGED (PR #787, `3200149d`).
+
+### §2. Convergence state at archive
+
+Passes 1–13: P1–P7 FINDINGS (all fixed), P8 CLEAN, P9 FINDINGS (all fixed), P10 CLEAN, P11
+FINDINGS (all fixed), P12 CLEAN, P13 CLEAN (zero MEDIUM+; O-P13-1 ADVISORY spec-conformant BATCHED
+per D-1127). Streak = 2/3. NEED 1 more consecutive CLEAN pass (14) for local 3-CLEAN.
+
+Batched observations at archive:
+- F-P12-001 LOW/documentary: story §Red Gate prose tally sentence 28/31 vs. 30/32.
+- O-P13-1 ADVISORY: guard_logic GAP-4 hardcoded 262_144 literal; AC-018-mandated; optional hardening.
+
+### §3. HEADs at archive
+
+- `develop`: `3200149d` (S-17.06 MERGED PR #787 2026-08-28)
+- `main`: `89f6f87c` (v1.0.0-rc.24)
+- `factory-artifacts`: `e37d2bd6` (S1705-P13-CLEAN-BURST main) / `bc1f3256` (SHA-patch)
+- `feature/S-17.05`: `a73086a5` (FROZEN — no changes at passes 12/13)
+
+### §4. Resume command at archive
+
+`/vsdd-factory:next-step` → re-run S-17.05 local adversary pass 14 (fresh, against `feature/S-17.05` @ `a73086a5`), streak 2/3.
+
+---
+
+## Archived Checkpoint: S1705-DELIVERY-BURST (2026-08-29)
+
+**Archived by:** SESSION-WRAP-PAUSE-2026-08-29 (state-manager)
+**STATE.md version at archive:** v9.27
+
+### §1. Position at archive
+
+Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 "fix-state-writes" spec gate
+**CONVERGED-VALIDATED (D-1124)**. E-17 Wave-5 TDD implementation (state+timestamp hooks).
+
+- **S-17.06** — MERGED PR #787 `3200149d` 2026-08-28 (D-1126).
+- **S-17.05** — MERGED PR #798 `a4b24601` 2026-08-29T13:45:46Z (D-1129). Branch DELETED. merged_count 112→113.
+- **S-17.07** — NOT started; NEXT queued.
+
+### §2. S-17.05 delivery status at archive
+
+MERGED (D-1129). LOCAL 3-CLEAN converged D-1128 (passes 12/13/14). Finalization doc-sweep COMPLETE
+(D-1127; story v1.8). PR review APPROVE at `ec1ea2ef` (0 blocking; 3 non-blocking cosmetic:
+orphaned crate ADVISORY + 2 LOW doc-comment drift). 6 CI-only failures fixed before merge.
+PG-CI-1/2/3 process-gaps codified (D-1129).
+
+Non-blocking carry-over observations:
+- O-P10-001 LOW: `STATE_MD_MAX_BYTES=262144` dormant copy. No defect.
+- O-P10-002 LOW: 32 Rust unit tests vs. 31 mandated. Over-coverage.
+- PG-CI-1/2/3 OPEN: follow-up OWED before convergence gate.
+
+### §3. Governance at archive
+
+- Autonomous-merge policy AUTHORIZED (D-1126b, 2026-08-28).
+- BC-4.17.001 held at draft (POL-14 exception, D-1126).
+- D-1127 LOW-only doc findings BATCHED (human-ratified 2026-08-28).
+- PR #787 self-approval RATIFIED by human 2026-08-28 (D-1126a).
+- BC-7.07.001 re-anchored to S-17.07 (D-1124/D-1125 cascade).
+
+### §4. HEADs at archive
+
+- `develop`: `a4b24601` (S-17.05 MERGED PR #798 2026-08-29).
+- `main`: `89f6f87c` (v1.0.0-rc.24).
+- `factory-artifacts`: `27cbcba6` (S1705-DELIVERY-BURST-2026-08-29; SHA-patch applied).
+- `feature/S-17.05`: MERGED+DELETED.
+- `feature/S-17.06`: MERGED+DELETED.
+
+### §5. Pending at archive
+
+1. `.worktrees/` permission-prompt fix — awaiting human decision.
+2. S-17.07 AC↔BC-7.07.001 spot-check before delivery (human-directed).
+3. PG-CI-1/2/3 follow-up OWED before convergence gate.
+4. ADR-045 v1.3 ratification-recording burst (blocks Wave-7).
+5. E-23 re-scope to frozen-provenance model.
+
+### §6. Resume command at archive
+
+`/vsdd-factory:next-step` → resumes E-17 Wave-5: S-17.07 (precompact-flush Step-4 identity-gate
+amendment). BEFORE starting: AC↔BC-7.07.001 reconciliation spot-check (human-directed).
+
+---
+
+## Archived: Session Resume Checkpoint (2026-08-30 — VALIDATION-INTEGRITY-CONSISTENCY-AUDIT-CORRECTIONS; S-25.01 v1.2; BC-3.08.001 v1.29; BC-1.18.004 v1.1; VP-INDEX v2.83; BC-INDEX v5.27; D-1133)
+
+> Archived from STATE.md v9.36 by SESSION-WRAP-PAUSE-2026-08-30 state-manager burst.
+
+### §1. Position at archive
+
+Brownfield cycle `v1.0-brownfield-backfill`. Pipeline PAUSED at clean boundary.
+E-17 Wave-5 DELIVERY COMPLETE. E-24 Wave-1 COMPLETE (S-24.01 MERGED). E-25 REGISTERED (D-1133).
+Convergence-gate-declaration BLOCKED on process-gap disposition (human deferred).
+S-25.01 READY-FOR-TDD (P0; 12 pts; W1; depends_on S-21.10 MERGED; CAP-041; ADR-047; input-hash 887539f).
+
+Active work: VALIDATION-INTEGRITY-CONSISTENCY-AUDIT-CORRECTIONS-2026-08-30 COMPLETE.
+S-25.01 v1.2 (F1/F3/F4/F5/F9/F10 + AC-006/AC-018/AC-019; input-hash 887539f). BC-3.08.001 v1.29 (F7 VP-079 staleness flag; POLICY 14 v1.28 row backfill). BC-1.18.004 v1.1 (F9 PC4). VP-INDEX v2.83 (F6 unit-test 50→51; 106 VPs). BC-INDEX v5.27 (1,993 BCs). STORY-INDEX v4.408 (162 stories; 25 epics). ARCH-INDEX v3.99 (47 ADRs). POLICY 18 VERIFIED (887539f). ADR-047 human-ratified (INDETERMINATE Outcome Model). CAP-041. BC-1.18.001/002/003 draft v1.0.
+
+### §2. No in-flight work at archive
+
+No story mid-TDD, no open PRs awaiting action, no running sub-agents, no abandoned steps.
+2 stale worktrees remain (`fix/d999-sentinel-code-migration`, `feature/S-21.04`) — inert, human aware.
+
+### §3. Governance at archive
+
+- BC-4.17.001 v1.29 ACTIVE (D-1130, POL-14 auto-promotion satisfied 2026-08-29).
+- BC-6.28.001 v1.3 ACTIVE (D-1132 + SPEC-HYGIENE-SWEEP-2026-08-30 EC-002 wording).
+- ADR-047 HUMAN-RATIFIED (POLICY 22, 2026-08-30; D-1133): INDETERMINATE Outcome Model.
+- Autonomous-merge policy AUTHORIZED (D-1126b, 2026-08-28).
+- D-1133: E-25 + BC-1.18.001-004 + BC-3.08.001 v1.29 + 4-index v5.27/v2.83/v4.408/v3.99.
+
+### §4. HEADs at archive
+
+- `develop`: `9ab5a6f6` (PR #802 S-24.01 squash-merged 2026-08-30).
+- `main`: `89f6f87c` (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `factory-artifacts`: `20c98d6b` (VALIDATION-INTEGRITY-CONSISTENCY-AUDIT-CORRECTIONS v9.35→v9.36).
+- `feature/S-17.05`: MERGED+DELETED (PR #798 2026-08-29).
+- `feature/S-17.07`: MERGED+DELETED (PR #800 2026-08-29).
+
+### §5. Pending at archive
+
+1. PG-CI-1/2/3 follow-up OWED before E-17/cycle convergence gate (D-1129).
+2. F-WG5-001 disposition (D-1130).
+3. PR-MANAGER-MERGE-OVER-RED disposition (D-1130).
+4. `.worktrees/` permission-prompt fix — awaiting human decision.
+5. ADR-045 v1.3 ratification burst — blocks Wave-7 cascade (S-21.19/20/21/23 HELD).
+6. E-23 re-scope — STALE, must be scoped to frozen-provenance model before use.
+7. S-25.01 TDD readiness — READY-FOR-TDD v1.2 (P0; 12 pts; input-hash 887539f).
+
+### §6. Resume command at archive
+
+`/vsdd-factory:next-step` — E-25 registered. S-25.01 READY-FOR-TDD (P0; 12 pts; input-hash 887539f; D-1133).
+Next: (A) PG-CI-1/2/3 + process-gaps before convergence; (B) S-25.01 TDD; (C) ADR-045 ratification.
+
+---
+
+## Session Resume Checkpoint (2026-08-31 — S2501-LOCAL-ADV-FAILOPEN-THREATMODEL-QUOTING-HARDENING; develop 9ab5a6f6; merged_count 115; S-25.01 F4 TDD IN PROGRESS; BC-5.39.001 streak 0/3)
+
+Archived from STATE.md by the S2501-READ-ERROR-SEMANTICS-AND-SECURITY-RATIFICATION-2026-08-31 burst (2026-08-31; factory-artifacts 757e0c2a). Full content preserved in git: `git show 06b4bf2c:.factory/STATE.md` (factory-artifacts HEAD at archive time).
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S2501-LOCAL-ADV-FAILOPEN-THREATMODEL-QUOTING-HARDENING-2026-08-31. D-chain cite D-1134. LOCAL adversary FAIL-OPEN + THREAT-MODEL + QUOTING HARDENING BURST COMPLETE. BC-5.39.001 streak RESET 0/3. S-25.01 v1.6 input-hash 45522e9. BC-INDEX v5.31 (1,993 BCs). VP-INDEX v2.88 (106 VPs; VP-105 v1.7). STORY-INDEX v4.415 (175 stories; 25 epics). ARCH-INDEX v4.00 (47 ADRs). merged_count 115. No factory_lock held.
+> Prior checkpoint (S2501-LOCAL-ADV-COMPREHENSIVE-GIT-DETECTION-HARDENING 2026-08-31) archived to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position
+
+Pipeline **F4 TDD IN PROGRESS** — S-25.01 LOCAL adversary FAIL-OPEN + THREAT-MODEL + QUOTING HARDENING BURST COMPLETE 2026-08-31 (D-chain cite D-1134). Brownfield cycle `v1.0-brownfield-backfill`. BC-5.39.001 streak 0/3.
+
+**(a) Fail-open + threat-model + quoting hardening burst summary:**
+- PO: BC-1.18.002 v1.2→v1.3 (on_error=continue reconciliation + two-axis model note ADR-039/ADR-047 §Decision 9 + Threat Model & Scope section + quoting-in-scope EC-024/EC-025/EC-026 shell-words POSIX tokenizer + out-of-scope EC-027/EC-028/EC-029 eval/xargs/subshell undecidable + ci.yml wasm32-wasip1 check; adversary HIGH-1 fail-open-on-crash / MEDIUM-1 PostToolUse-scoped-clear-guard / MEDIUM-2 bounded-threat-model+quoting / LOW-1 stale-regex / LOW-2 proof-harness-API-drift / LOW-3 artifact_path-doc — ALL addressed).
+- Story-writer: S-25.01 v1.5→v1.6 (AC-008/AC-009/AC-011/AC-012/EC sync to BC-1.18.002 v1.3; EC-021..EC-026 added; BC table v1.2→v1.3).
+- Architect @70202713: VP-105 v1.6→v1.7 (LOW-2 proof-harness API drift) + VP-INDEX v2.87→v2.88.
+- Implementer @813ebc3a: quoting/out-of-scope/PreToolUse-no-clear test vectors; fmt/clippy CLEAN; WASM rebuilt.
+- Test-writer @813ebc3a: quoting/out-of-scope/PreToolUse-no-clear vectors.
+- BC-5.39.001 streak RESET 0/3 (findings-then-fix burst; no CLEAN adversary pass yet).
+
+**(b) Index state post-burst:**
+- BC-INDEX v5.31 (BC-1.18.002 v1.3 row updated; total_bcs 1,993 UNCHANGED).
+- STORY-INDEX v4.415 (S-25.01 v1.6; input-hash 45522e9).
+- VP-INDEX v2.88 (architect 70202713; VP-105 v1.7). ARCH-INDEX v4.00 (UNCHANGED).
+
+### §2. In-flight work
+
+Feature branch `feature/S-25.01` at `436c0039`. F4 TDD in progress. BC-5.39.001 streak 0/3. No open PRs. No abandoned steps. 2 stale worktrees remain (`fix/d999-sentinel-code-migration`, `feature/S-21.04`) — inert, human aware.
+
+### §3. Governance decisions in effect
+
+- **BC-4.17.001 v1.29 ACTIVE** (D-1130, POL-14 auto-promotion satisfied 2026-08-29).
+- **BC-6.28.001 v1.3 ACTIVE** (D-1132 + SPEC-HYGIENE-SWEEP-2026-08-30 EC-002 wording).
+- **BC-1.18.002 v1.3** (PO fail-open+threat-model+quoting hardening 2026-08-31; on_error=continue reconciliation + Threat Model & Scope + quoting-in-scope EC-024..EC-026 + out-of-scope EC-027..EC-029; three-phase git detection from v1.2 + quoting scope; ci.yml wasm32-wasip1 check).
+- **ADR-047 HUMAN-RATIFIED** (POLICY 22, 2026-08-30; D-1133): INDETERMINATE Outcome Model.
+- **Autonomous-merge policy AUTHORIZED** (D-1126b, 2026-08-28).
+- **D-1134**: F4 TDD AUTHORIZED; story-count 175; S-25.01 authorized.
+- **D-1133**: E-25 + BC-1.18.001-004 + BC-3.08.001 v1.29.
+- **Layer-1 fail-closed count = 1** (validate-factory-path-staging EFFECTIVE-NOW). Cohort A-deferred SET-BUT-LATENT.
+
+### §4. HEADs
+
+- `develop`: **`9ab5a6f6`** (PR #802 S-24.01 squash-merged 2026-08-30).
+- `main`: **`89f6f87c`** (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `feature/S-25.01`: **`813ebc3a`** (test-writer quoting/out-of-scope/PreToolUse-no-clear vectors; implementer @813ebc3a).
+- `factory-artifacts`: **`06b4bf2c`** (S2501-LOCAL-ADV-FAILOPEN-THREATMODEL-QUOTING-HARDENING-2026-08-31 v9.43→v9.44).
+
+### §5. Pending / OWED (backlog, NOT drift)
+
+**IMMEDIATE next on resume:** Re-run LOCAL adversary pass 1 FRESH on `feature/S-25.01` @ `813ebc3a` (BC-5.39.001 streak 0/3; must reach 3-CLEAN). On 3-CLEAN: demo-recorder per-AC → pr-manager PR → merge.
+
+1. **PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED** — OWED before E-17/cycle convergence gate (D-1129, D-1130). Human deferred.
+2. **Spec-hygiene sweep OWED:** E-10 missing body sections; E-9/19/21/22 non-monotonic `modified[]`.
+3. **Layer 2/3 BACKLOG:** S-25.02 sharding (P1; 15 pts) + S-25.03 bounded-window (P2; 12 pts).
+4. **ADR-045 v1.3 ratification burst** — blocks Wave-7 (S-21.19/20/21/23 HELD).
+5. **E-23 re-scope** — STALE, must be scoped to frozen-provenance model.
+6. **LOW-7 DEFERRED** — AC-006 events-sink wording; PO follow-up (out of S-25.01 scope).
+7. **RELEASE fast-follow:** cut a new rc to ship `vsdd-factory:wrap` + Layer-1 dispatcher to operator cache.
+
+### §6. Resume command at archive
+
+`/vsdd-factory:next-step` (resumes at LOCAL adversary pass 1 re-run FRESH for S-25.01).
+Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
+
+---
+
+## Session Resume Checkpoint (2026-08-31 — S2501-READ-ERROR-SEMANTICS-AND-SECURITY-RATIFICATION; develop 9ab5a6f6; merged_count 115; S-25.01 F4 TDD IN PROGRESS; BC-5.39.001 streak 0/3)
+
+Archived from STATE.md by S2501-LOCAL-ADV-ARTIFACT-SCOPED-MARKER-CLEAR-2026-08-31 burst (state-manager single-commit TD-VSDD-053). Full content preserved in git on factory-artifacts branch.
+
+Key state at archive:
+- READ-ERROR + DEP-TABLE + DOC FIX-BURST COMPLETE. D-1135 security ratification. BC-5.39.001 streak 0/3.
+- S-25.01 v1.7 input-hash b673414. BC-INDEX v5.32 (1,993 BCs). VP-INDEX v2.89 (VP-105 v1.8). STORY-INDEX v4.416. ARCH-INDEX v4.00.
+- BC-1.18.002 v1.4 (PO read-error-adjudication; EC-030 unreadable→Allow fail-open; EC-008 readable-but-malformed→Block; INV2 expansion; 4 canonical read-outcome vectors).
+- D-1135 human security ratification (POLICY 22, 2026-08-31): gate fail-open-on-crash posture + EC-030 Allow on unreadable marker.
+- feature/S-25.01 @ `480e902f` (test-writer EC-030+EC-008; implementer @39ddca1c evaluate_gate four-case; 13/13 PASS).
+- factory-artifacts @ `757e0c2a` (v9.44→v9.45).
+- develop `9ab5a6f6`; main `89f6f87c`.
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-1.18.002 v1.3 active. BC-INDEX v5.31 (1,993 BCs). VP-INDEX v2.88 (106 VPs). STORY-INDEX v4.415 (175 stories; 25 epics). ARCH-INDEX v4.00 (47 ADRs). merged_count 115. develop `9ab5a6f6`. feature/S-25.01 `813ebc3a`. BC-5.39.001 streak 0/3.
+
+---
