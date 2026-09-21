@@ -4507,4 +4507,303 @@ No transient upstream failures this burst; single-pass clean execution of the fi
 Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
 BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-1.18.001 v1.5 draft. BC-1.18.002 v1.7 draft. BC-1.18.003 v1.7 draft. BC-3.08.001 v1.34 active. BC-INDEX v5.39 (1,993 BCs; UNCHANGED). VP-INDEX v2.98 (108 VPs per frontmatter; VP-108 v1.7; STATE.md narrative "107" citation remains an OPEN Drift Item, see D-1138). STORY-INDEX v4.426 (175 stories; 25 epics; S-25.01 v1.18; input-hash f3da248). ARCH-INDEX v4.08 (48 ADRs; Document Map pointer sync only, UNCHANGED). merged_count 115. develop `8b4b60e6` (UNCHANGED this burst). feature/S-25.01 `817c52ae` (FROZEN, NEW). BC-5.39.001 streak 0/3. PIPELINE ACTIVE.
 
+### §10. BC-5.39.001 streak
+
+**Streak: 0/3.** LOCAL adversary pass 11 (fresh context, frozen `df855ed8`) = NOT-CLEAN (1 HIGH F-P11-001 + 1 LOW F-P11-002), fixed via architect `e070941a` + story-writer `1e9cb131` (D-1144, SPEC/DOC-ONLY, code HEAD UNCHANGED) — streak RESET 0/3 (unchanged, already 0/3 entering pass 12). Pass 12 (fresh context, frozen `df855ed8`) = NOT-CLEAN (1 MED F-P12-001 + 2 non-blocking OBSERVATIONS), fixed via implementer `adf3a1b1` + test-writer `817c52ae` + architect `fc7760a5`+`87a5aeec` (D-1145, code HEAD ADVANCED to `817c52ae`) — streak RESET 0/3 (unchanged). Per frozen-artifact-reset protocol (L-EDP1-007/051/061), a findings-then-fix burst does not advance the streak. On resume: dispatch fresh LOCAL adversary pass 13 against frozen `817c52ae`. Zero-to-3-CLEAN progression restarts from 0/3.
+
+---
+
+## Session Resume Checkpoint (2026-09-02 — S2501-PASS13-CLEAN-STREAK-1of3-2026-09-02; develop 8b4b60e6; merged_count 115; S-25.01 F4 TDD IN PROGRESS; BC-5.39.001 streak 1/3)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.01 LOCAL adversary pass 13 (fresh context, frozen `feature/S-25.01` @ `817c52ae`) = **CLEAN** (0 BLOCKER / 0 MEDIUM+). **BC-5.39.001 streak ADVANCES 0/3 → 1/3.** This is a STREAK-ADVANCE BOOKKEEPING burst — NOT a fix-burst: per the BC-5.39.001 3-CLEAN protocol, the reviewed artifact MUST stay byte-for-byte STABLE across the streak, so this burst touched NO reviewed-artifact file (no story, BC, VP, 4-index, or worktree-code edit). Reported this pass: **F-P13-001** (LOW) — AC-007 block-message parenthetical example ("re-invoke the named plugin") is stale vs. the four-tier recovery model at AC-020; mandate met, example text only. **F-P13-002** (LOW) — `read_all_marker_fields` doc "five required fields" reads inconsistently beside `write_indeterminate_marker`'s "six required" — a DELIBERATE Postel's-law legacy-marker-tolerance distinction per ADR-048 §D2 backward-compat; correct behavior, doc-clarity only. Both DEFERRED (not fixed, to preserve artifact stability), anchored to the S-25.01 finalization-doc-sweep (post-3-CLEAN, before/at the S-25.01 PR); 2 Drift Items recorded (D-1146). feature/S-25.01 code HEAD **UNCHANGED** @ `817c52ae`. VP-108 v1.7 UNCHANGED. Story v1.18 UNCHANGED (input-hash `f3da248` UNCHANGED). BC-INDEX v5.39 / VP-INDEX v2.98 / STORY-INDEX v4.426 / ARCH-INDEX v4.08 ALL UNCHANGED (no index version bump this burst). merged_count 115 (UNCHANGED — fix PRs, not stories). No factory_lock held. PIPELINE ACTIVE (human actively driving the cycle — no session wrap this burst). NEXT on resume/continue: fresh LOCAL adversary pass 14 (fresh context) on the SAME frozen `817c52ae` — 2 more consecutive CLEAN passes needed for LOCAL BC-5.39.001 3-CLEAN convergence.
+> Prior checkpoint (S2501-PASS12-FIX-BURST-VP108-PROOF-HARNESS-ANCHOR-CORRECTION-2026-09-02 layered on S2501-PASS11-FIX-BURST-VP108-ARCH-DOC-PROPAGATION-2026-09-01/S2501-PASS10-FIX-BURST-INDEX-SYNC-2026-09-01/SESSION-WRAP-PAUSE-2026-09-01/S2501-PASS9-FIX-BURST-PLUS-SESSION-WRAP layered on S2501-PASS6-FIX-BURST-INDEX-SYNC-2026-09-01 layered on POST-MERGE-BOOKKEEPING-2026-09-01) archived to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position
+
+Pipeline **ACTIVE** (human continuing the S-25.01 cascade; no wrap this burst). Brownfield cycle `v1.0-brownfield-backfill`. S-25.01 F4 TDD: LOCAL adversary pass 13 = CLEAN. **BC-5.39.001 streak 1/3.** `feature/S-25.01` FROZEN @ **`817c52ae`** (UNCHANGED — no code touched this burst). **NEXT on resume/continue = LOCAL adversary pass 14 (fresh context)** against the SAME frozen `817c52ae`.
+
+### §2. Session arc
+
+S-25.01 LOCAL adversary cascade continues past the pass-12 (code-changing) boundary: pass 13 ran fresh-context against still-frozen `817c52ae` and returned CLEAN — 0 BLOCKER / 0 MEDIUM+, with 2 non-blocking LOW observations (F-P13-001 stale example text; F-P13-002 doc-comment cross-reference gap, both spec-conformant/deliberate-behavior). Per the BC-5.39.001 3-CLEAN protocol, a CLEAN pass advances the streak (0/3 → 1/3) but the reviewed artifact must remain byte-for-byte stable across the full 3-pass streak — so unlike passes 2/3/6/9/10/11/12 (all of which required a fix and therefore reset the streak to 0/3), this burst is bookkeeping-only: no story, BC, VP, index, or code file was touched. The 2 LOW observations are recorded as Drift Items and deferred to the S-25.01 finalization-doc-sweep rather than fixed now, specifically because fixing them would edit the frozen artifact and reset the streak back to 0/3 — the opposite of the goal.
+
+### §3. In-flight
+
+**NONE.** This commit closes the pass-13 bookkeeping burst; no open PRs, no partially-applied edits, no pending sub-tasks.
+
+### §4. Pending human decisions
+
+**NONE outstanding** at this pause point (pass 13 required no human ratification — no ADR/BC/wire-format/security-model change, no code change at all). Longer-horizon items requiring eventual human input remain in §5 below (none are blocking resume).
+
+### §5. Pending / OWED (deferred follow-ups)
+
+1. **VP-079/VP-028 POLICY-9 "ten events" propagation** — unchanged from prior checkpoint; anchored to Phase-6 formal-verification / next wave-gate touch.
+2. **AC-021/AC-022/AC-023/AC-024/AC-025 Red Gate stub gap** — CARRIED FORWARD, still OPEN (not addressed this burst). Follow-up story-writer/test-writer pass OWED.
+3. **Finalization doc-sweep batched LOWs** (per D-1127 governance ruling) — unchanged from prior checkpoint; now also carrying F-P13-001/F-P13-002 (this burst).
+4. PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED — OWED before E-17/cycle convergence gate (D-1129, D-1130; human deferred).
+5. ADR-045 v1.3 ratification burst — blocks Wave-7 (S-21.19/20/21/23 HELD).
+6. E-23 re-scope to frozen-provenance model (STALE).
+7. LOW-7 DEFERRED — AC-006 events-sink wording; PO follow-up (out of S-25.01 scope).
+8. RELEASE fast-follow: cut rc.25 to ship ADR-048 v1.5 + wasmtime fix + Layer-1 dispatcher to operator cache.
+9. [process-gap] registry-comment-lint — tracked follow-up story or justified deferral at cycle-close (finalization-doc-sweep.md).
+10. Spec-hygiene sweep OWED: E-10 missing body sections; E-9/19/21/22 non-monotonic `modified[]`.
+11. Layer 2/3 BACKLOG: S-25.02 sharding (P1; 15 pts) + S-25.03 bounded-window (P2; 12 pts).
+12. VP-INDEX total_vps 108 vs STATE.md narrative 107 mismatch (D-1138 Drift Item) — still OPEN, not addressed this burst.
+13. S-4.07 anchor (D-1140) — when S-4.07 wires the real observable Router/FileSink into main.rs, re-point `reconcile_raw_delete`'s scan target from `dispatcher-internal-{date}.jsonl` to `events-*.jsonl` and re-amend ADR-048 §D4.
+14. S-25.01 frontmatter `last_amended` unescaped-quote STRICT-YAML-parse failure (D-1144 Drift Item) — anchored future spec-steward frontmatter-hygiene sweep, likely systematic across story corpus.
+15. **F-P13-001 (D-1146)** — AC-007 block-message parenthetical example stale vs four-tier recovery model AC-020 — anchored S-25.01 finalization-doc-sweep.
+16. **F-P13-002 (D-1146)** — `read_all_marker_fields`/`write_indeterminate_marker` doc-comment field-count inconsistency (deliberate Postel's-law tolerance; doc-clarity only) — anchored S-25.01 finalization-doc-sweep.
+
+### §6. Housekeeping
+
+- WASM FUEL_EXHAUSTED on large files (session-checkpoints.md triggered it this burst; STATE.md/decision-log.md/burst-log.md may also) is advisory PostToolUse — writes land; not an error. Confirmed via post-edit grep verification on every touched file this burst.
+- 2 stale worktrees inert: `fix/d999-sentinel-code-migration`, `feature/S-21.04` — human aware.
+- Transient dispatcher/sidecar-learning telemetry diffs bundled into this SAME single commit per TD-VSDD-053 (avoids leaving the tree dirty for the next burst's guards).
+
+### §7. Note
+
+No transient upstream failures this burst; single-pass clean execution of the streak-advance bookkeeping protocol. This is the FIRST CLEAN pass in the S-25.01 cascade since the restart-pass-1 CLEAN (2026-08-31) — the streak has been stuck at 0/3 across passes 2/3/6/9/10/11/12 (seven consecutive findings-then-fix resets) until now.
+
+### §8. HEADs
+
+- `develop`: **`8b4b60e6`** (UNCHANGED this burst). merged_count **115**.
+- `main`: **`89f6f87c`** (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `feature/S-25.01`: **`817c52ae`** (UNCHANGED this burst — no code touched; FROZEN for BC-5.39.001 3-CLEAN cascade; streak 1/3).
+- `factory-artifacts`: per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for live HEAD.
+- `fix/count-propagation-cpu-runaway`: **MERGED+DELETED** (PR #803 squash `8b4b60e6` 2026-09-01).
+- `fix/wasmtime-46.0.3-rustsec-2026-0268-0269`: **MERGED** (PR #804 squash `fc0f6ccc` 2026-09-01; remote branch auto-deleted).
+
+### §9. Resume command
+
+`/vsdd-factory:next-step` (resumes at LOCAL adversary pass 14 for S-25.01; artifact FROZEN @ `817c52ae`; BC-5.39.001 streak 1/3).
+Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-1.18.001 v1.5 draft. BC-1.18.002 v1.7 draft. BC-1.18.003 v1.7 draft. BC-3.08.001 v1.34 active. BC-INDEX v5.39 (1,993 BCs; UNCHANGED). VP-INDEX v2.98 (108 VPs per frontmatter; VP-108 v1.7; STATE.md narrative "107" citation remains an OPEN Drift Item, see D-1138). STORY-INDEX v4.426 (175 stories; 25 epics; S-25.01 v1.18; input-hash f3da248; UNCHANGED). ARCH-INDEX v4.08 (48 ADRs; Document Map pointer sync only, UNCHANGED). merged_count 115. develop `8b4b60e6` (UNCHANGED this burst). feature/S-25.01 `817c52ae` (FROZEN, UNCHANGED). BC-5.39.001 streak 1/3. PIPELINE ACTIVE.
+
+### §10. BC-5.39.001 streak
+
+**Streak: 1/3.** LOCAL adversary pass 12 (fresh context, frozen `df855ed8`) = NOT-CLEAN (1 MED F-P12-001 + 2 non-blocking OBSERVATIONS), fixed via implementer `adf3a1b1` + test-writer `817c52ae` + architect `fc7760a5`+`87a5aeec` (D-1145, code HEAD ADVANCED to `817c52ae`) — streak RESET 0/3 (unchanged, already 0/3 entering pass 13). **Pass 13 (fresh context, frozen `817c52ae`) = CLEAN** (0 BLOCKER / 0 MEDIUM+; 2 non-blocking LOW observations F-P13-001/F-P13-002, both DEFERRED per D-1146) — **streak ADVANCES 0/3 → 1/3.** Per the BC-5.39.001 3-CLEAN protocol, the reviewed artifact `feature/S-25.01` @ `817c52ae` MUST stay byte-for-byte STABLE across the remaining 2 passes — no story/BC/VP/index/code edit until 3-CLEAN is achieved OR a genuine BLOCKER/MEDIUM+ finding forces a fix (which would reset the streak). On resume: dispatch fresh LOCAL adversary pass 14 against the SAME frozen `817c52ae`. Need 2 more consecutive CLEAN passes (14, then 15) for LOCAL 3-CLEAN convergence.
+
+---
+
+## Session Resume Checkpoint (2026-09-02 — S2501-PASS14-FIX-BURST-2026-09-02; develop 8b4b60e6; merged_count 115; S-25.01 F4 TDD IN PROGRESS; BC-5.39.001 streak 0/3)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.01 LOCAL adversary pass 14 (fresh context, frozen `feature/S-25.01` @ `817c52ae`) = **NOT-CLEAN** (1 MED F-P14-001 + 1 LOW F-P14-002). **BC-5.39.001 streak RESETS 1/3 → 0/3.** F-P14-001 MEDIUM (TD-VSDD-060 sibling-emitter inconsistency): `emit_indeterminate` (Event 8 `plugin.indeterminate`, `executor.rs`) emitted `plugin_version`, a field BC-3.08.001 §Common Fields explicitly EXCLUDES from Event 8; sibling emitters `emit_marker_cleared`/`emit_marker_written` correctly omit it. F-P14-002 LOW (doc-clarity; RESOLVES F-P13-002 from D-1146): `read_all_marker_fields` "five required" vs `write_indeterminate_marker` "six required" doc inconsistency. BOTH FIXED this burst — test-writer `5e9d4f7b` (RED: `plugin_version.is_none()` negative assertion on both sinks); implementer `3919ebcb` (GREEN: `.with_plugin_version(...)` call removed from `emit_indeterminate`, doc comment clarified). Verified: `grep -n with_plugin_version executor.rs` → exactly 2 matches (sibling emitters only); `cargo test -p factory-dispatcher --lib` @ `3919ebcb` → 290 passed/0 failed (UNCHANGED count). feature/S-25.01 code HEAD **ADVANCES** `817c52ae`→`3919ebcb` — NEW frozen re-review HEAD. No ADR/BC/VP/story/wire-format/security-model change — POLICY 22 NOT required. BC-INDEX v5.39 / VP-INDEX v2.98 / STORY-INDEX v4.426 / ARCH-INDEX v4.08 ALL CONFIRMED UNCHANGED (input-hash `f3da248` UNCHANGED). F-P13-002 Drift Item (D-1146) CLOSED/RESOLVED this burst; F-P13-001 Drift Item (D-1146) remains OPEN, UNCHANGED. D-1147 allocated; L-BB-D1147 lesson codified. merged_count 115 (UNCHANGED — fix PRs, not stories). No factory_lock held. PIPELINE ACTIVE (human actively driving the cycle — no session wrap this burst). NEXT on resume/continue: fresh LOCAL adversary pass 15 (fresh context) on the NEW frozen `3919ebcb` — 3 consecutive CLEAN passes needed for LOCAL BC-5.39.001 3-CLEAN convergence (restart from 0/3).
+> Prior checkpoint (S2501-PASS13-CLEAN-STREAK-1of3-2026-09-02 layered on S2501-PASS12-FIX-BURST-VP108-PROOF-HARNESS-ANCHOR-CORRECTION-2026-09-02/S2501-PASS11-FIX-BURST-VP108-ARCH-DOC-PROPAGATION-2026-09-01/S2501-PASS10-FIX-BURST-INDEX-SYNC-2026-09-01/SESSION-WRAP-PAUSE-2026-09-01 layered on S2501-PASS9-FIX-BURST-PLUS-SESSION-WRAP) archived to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position
+
+Pipeline **ACTIVE** (human continuing the S-25.01 cascade; no wrap this burst). Brownfield cycle `v1.0-brownfield-backfill`. S-25.01 F4 TDD: LOCAL adversary pass 14 = NOT-CLEAN, fixed same-burst. **BC-5.39.001 streak 0/3 (RESET).** `feature/S-25.01` FROZEN @ **`3919ebcb`** (ADVANCED this burst from `817c52ae`). **NEXT on resume/continue = LOCAL adversary pass 15 (fresh context)** against the NEW frozen `3919ebcb`.
+
+### §2. Session arc
+
+S-25.01 LOCAL adversary cascade continued past the pass-13 CLEAN advance: pass 14 ran fresh-context against the frozen `817c52ae` artifact and returned NOT-CLEAN — 1 MED (F-P14-001, a genuine spec↔code wire-format divergence) + 1 LOW (F-P14-002, doc-clarity, which independently re-surfaced the same issue already recorded as the F-P13-002 Drift Item). Both were fixed same-burst: test-writer added a RED negative assertion, implementer removed the offending `.with_plugin_version(...)` call and clarified the doc comment. Because F-P14-001 is a genuine MEDIUM finding, the BC-5.39.001 streak resets to 0/3 per protocol — the pass-13 CLEAN advance is voided, and the 3-CLEAN accumulation restarts against the NEW frozen HEAD `3919ebcb`. Fixing F-P14-002 in the same burst was safe (unlike at pass 13, where fixing it would have needlessly reset an otherwise-CLEAN streak) because the streak was resetting anyway due to F-P14-001 — so the previously-deferred F-P13-002 Drift Item is now closed rather than carried forward again.
+
+### §3. In-flight
+
+**NONE.** This commit closes the pass-14 fix-burst; no open PRs, no partially-applied edits, no pending sub-tasks.
+
+### §4. Pending human decisions
+
+**NONE outstanding** at this pause point (pass 14's fix required no human ratification — no ADR/BC/wire-format/security-model change). Longer-horizon items requiring eventual human input remain in §5 below (none are blocking resume).
+
+### §5. Pending / OWED (deferred follow-ups)
+
+1. **VP-079/VP-028 POLICY-9 "ten events" propagation** — unchanged from prior checkpoint; anchored to Phase-6 formal-verification / next wave-gate touch.
+2. **AC-021/AC-022/AC-023/AC-024/AC-025 Red Gate stub gap** — CARRIED FORWARD, still OPEN (not addressed this burst). Follow-up story-writer/test-writer pass OWED.
+3. **Finalization doc-sweep batched LOWs** (per D-1127 governance ruling) — unchanged from prior checkpoint; now carrying F-P13-001 only (F-P13-002 CLOSED this burst).
+4. PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED — OWED before E-17/cycle convergence gate (D-1129, D-1130; human deferred).
+5. ADR-045 v1.3 ratification burst — blocks Wave-7 (S-21.19/20/21/23 HELD).
+6. E-23 re-scope to frozen-provenance model (STALE).
+7. LOW-7 DEFERRED — AC-006 events-sink wording; PO follow-up (out of S-25.01 scope).
+8. RELEASE fast-follow: cut rc.25 to ship ADR-048 v1.5 + wasmtime fix + Layer-1 dispatcher to operator cache.
+9. [process-gap] registry-comment-lint — tracked follow-up story or justified deferral at cycle-close (finalization-doc-sweep.md).
+10. Spec-hygiene sweep OWED: E-10 missing body sections; E-9/19/21/22 non-monotonic `modified[]`.
+11. Layer 2/3 BACKLOG: S-25.02 sharding (P1; 15 pts) + S-25.03 bounded-window (P2; 12 pts).
+12. VP-INDEX total_vps 108 vs STATE.md narrative 107 mismatch (D-1138 Drift Item) — still OPEN, not addressed this burst.
+13. S-4.07 anchor (D-1140) — when S-4.07 wires the real observable Router/FileSink into main.rs, re-point `reconcile_raw_delete`'s scan target from `dispatcher-internal-{date}.jsonl` to `events-*.jsonl` and re-amend ADR-048 §D4.
+14. S-25.01 frontmatter `last_amended` unescaped-quote STRICT-YAML-parse failure (D-1144 Drift Item) — anchored future spec-steward frontmatter-hygiene sweep, likely systematic across story corpus.
+15. **F-P13-001 (D-1146)** — AC-007 block-message parenthetical example stale vs four-tier recovery model AC-020 — anchored S-25.01 finalization-doc-sweep. STILL OPEN.
+
+### §6. Housekeeping
+
+- WASM FUEL_EXHAUSTED on large files (session-checkpoints.md triggered it this burst; STATE.md/decision-log.md/burst-log.md may also) is advisory PostToolUse — writes land; not an error. Confirmed via post-edit grep verification on every touched file this burst.
+- 2 stale worktrees inert: `fix/d999-sentinel-code-migration`, `feature/S-21.04` — human aware.
+- Transient dispatcher/sidecar-learning telemetry diffs bundled into this SAME single commit per TD-VSDD-053 (avoids leaving the tree dirty for the next burst's guards).
+
+### §7. Note
+
+No transient upstream failures this burst. This is the eighth streak reset in the S-25.01 cascade (passes 2/3/6/9/10/11 previously reset it, pass 13 briefly advanced it to 1/3, and pass 14 now resets it again to 0/3) — the cascade continues to find genuine, fixable defects on each fresh-context pass, consistent with the adversarial-convergence model working as intended rather than a process failure.
+
+### §8. HEADs
+
+- `develop`: **`8b4b60e6`** (UNCHANGED this burst). merged_count **115**.
+- `main`: **`89f6f87c`** (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `feature/S-25.01`: **`3919ebcb`** (ADVANCED this burst from `817c52ae` via `5e9d4f7b`(RED test)→`3919ebcb`(GREEN fix); FROZEN for BC-5.39.001 3-CLEAN cascade; streak 0/3).
+- `factory-artifacts`: per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for live HEAD.
+- `fix/count-propagation-cpu-runaway`: **MERGED+DELETED** (PR #803 squash `8b4b60e6` 2026-09-01).
+- `fix/wasmtime-46.0.3-rustsec-2026-0268-0269`: **MERGED** (PR #804 squash `fc0f6ccc` 2026-09-01; remote branch auto-deleted).
+
+### §9. Resume command
+
+`/vsdd-factory:next-step` (resumes at LOCAL adversary pass 15 for S-25.01; artifact FROZEN @ `3919ebcb`; BC-5.39.001 streak 0/3).
+Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-1.18.001 v1.5 draft. BC-1.18.002 v1.7 draft. BC-1.18.003 v1.7 draft. BC-3.08.001 v1.34 active. BC-INDEX v5.39 (1,993 BCs; UNCHANGED). VP-INDEX v2.98 (108 VPs per frontmatter; VP-108 v1.7; STATE.md narrative "107" citation remains an OPEN Drift Item, see D-1138). STORY-INDEX v4.426 (175 stories; 25 epics; S-25.01 v1.18; input-hash f3da248; UNCHANGED). ARCH-INDEX v4.08 (48 ADRs; Document Map pointer sync only, UNCHANGED). merged_count 115. develop `8b4b60e6` (UNCHANGED this burst). feature/S-25.01 `3919ebcb` (FROZEN, NEW). BC-5.39.001 streak 0/3. PIPELINE ACTIVE.
+
+### §10. BC-5.39.001 streak
+
+**Streak: 0/3.** LOCAL adversary pass 12 (fresh context, frozen `df855ed8`) = NOT-CLEAN, fixed via implementer `adf3a1b1` + test-writer `817c52ae` + architect `fc7760a5`+`87a5aeec` (D-1145, code HEAD ADVANCED to `817c52ae`) — streak RESET 0/3. **Pass 13 (fresh context, frozen `817c52ae`) = CLEAN** (0 BLOCKER / 0 MEDIUM+) — streak ADVANCED 0/3 → 1/3. **Pass 14 (fresh context, frozen `817c52ae`) = NOT-CLEAN** (1 MED F-P14-001 + 1 LOW F-P14-002), fixed via test-writer `5e9d4f7b` + implementer `3919ebcb` (D-1147, code HEAD ADVANCED to `3919ebcb`) — **streak RESETS 1/3 → 0/3** (the pass-13 CLEAN advance is voided by pass 14's NOT-CLEAN verdict, per the standard 3-CLEAN protocol). On resume: dispatch fresh LOCAL adversary pass 15 against the NEW frozen `3919ebcb`. Need 3 consecutive CLEAN passes (15, 16, 17) for LOCAL 3-CLEAN convergence, restarting from 0/3.
+
+---
+
+## Session Resume Checkpoint (2026-09-02 — LAST-AMENDED-SIDECAR-SURGERY-2026-09-02 [D-1149, one-time POL-3 exception, bookkeeping-only] atop S2501-PASS15-FIX-BURST-2026-09-02; develop 8b4b60e6; merged_count 115; S-25.01 F4 TDD IN PROGRESS; BC-5.39.001 streak 0/3)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.01 LOCAL adversary pass 15 (fresh context, frozen `feature/S-25.01` @ `3919ebcb`) = **NOT-CLEAN** (1 HIGH F-P15-001). **BC-5.39.001 streak stays 0/3** (findings-then-fix; no accumulated streak existed against the pass-14 fix-burst's new frozen HEAD to reset). F-P15-001 HIGH (`[regression]`, TD-VSDD-060-class partial-fix-propagation miss): VP-108 Postcondition 1 (REVALIDATED clear)'s Property Statement contradicted BC-3.08.001 Event 9 trace_id semantics, sibling PC2/PC3/PC5 wording, and the code — the F-P2-002/F-P3-001 trace_id-source + emission-locus corrections were swept into PC2/PC3/PC5 but never into PC1, surviving 12+ subsequent passes because the code and PC1's own implementing test were already correct. FIXED this burst — architect commit `90675c7d`: VP-108 v1.7→v1.8 (trace_id source corrected to the marker's own trace_id read pre-deletion; emission locus corrected to dispatcher-native `executor.rs::execute_tier` [`delete_marker_if_pass`+`emit_marker_cleared`]; trigger corrected to `classify_outcome==Pass` in the named validator's PostToolUse; PC2–PC8 + wire tables + harness + traceability sibling-swept clean, no other instance found). SPEC-TEXT-ONLY — no code/test change. feature/S-25.01 code HEAD **UNCHANGED** @ `3919ebcb`. No ADR/BC/VP-title/wire-format/security-model change — POLICY 22 NOT required. VP-INDEX v2.98→v2.99 (VP-108 v1.8). STORY-INDEX v4.426→v4.427 (S-25.01 v1.18→v1.19, input-hash re-sync `f3da248`→`6ca47ed`, POLICY 18 three-way parity VERIFIED). BC-INDEX v5.39 CONFIRMED UNCHANGED. ARCH-INDEX v4.08 CONFIRMED UNCHANGED. No Drift Items opened or closed this burst. D-1148 allocated; L-BB-D1148 lesson codified. merged_count 115 (UNCHANGED — fix PRs, not stories). No factory_lock held. PIPELINE ACTIVE (human actively driving the cycle — no session wrap this burst). NEXT on resume/continue: fresh LOCAL adversary pass 16 (fresh context) on the frozen `3919ebcb` (code HEAD unchanged from pass 15) — 3 consecutive CLEAN passes needed for LOCAL BC-5.39.001 3-CLEAN convergence (restart from 0/3).
+> Prior checkpoint (S2501-PASS14-FIX-BURST-2026-09-02 layered on S2501-PASS13-CLEAN-STREAK-1of3-2026-09-02/S2501-PASS12-FIX-BURST-VP108-PROOF-HARNESS-ANCHOR-CORRECTION-2026-09-02/S2501-PASS11-FIX-BURST-VP108-ARCH-DOC-PROPAGATION-2026-09-01/S2501-PASS10-FIX-BURST-INDEX-SYNC-2026-09-01/SESSION-WRAP-PAUSE-2026-09-01 layered on S2501-PASS9-FIX-BURST-PLUS-SESSION-WRAP) archived to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position
+
+Pipeline **ACTIVE** (human continuing the S-25.01 cascade; no wrap this burst). Brownfield cycle `v1.0-brownfield-backfill`. S-25.01 F4 TDD: LOCAL adversary pass 15 = NOT-CLEAN, fixed same-burst (SPEC-TEXT-ONLY). **BC-5.39.001 streak stays 0/3.** `feature/S-25.01` FROZEN @ **`3919ebcb`** (UNCHANGED this burst — no code touched). **NEXT on resume/continue = LOCAL adversary pass 16 (fresh context)** against the frozen `3919ebcb`.
+
+### §2. Session arc
+
+S-25.01 LOCAL adversary cascade continued past the pass-14 fix-burst: pass 15 ran fresh-context against the frozen `3919ebcb` artifact and returned NOT-CLEAN — 1 HIGH (F-P15-001, a genuine spec-text regression, not a code defect). The finding traced a specific historical gap: at pass 2 (F-P2-002) and pass 3 (F-P3-001), the trace_id-source and emission-locus corrections for VP-108's `marker.cleared` postconditions were applied to PC2/PC3 and PC5 respectively, but PC1 (REVALIDATED clear) was never touched by either correction — it pre-dated both fixes and was not the postcondition either finding named. The stale wording survived because the code and PC1's own implementing test were correct throughout; only a fresh-context adversary directly comparing PC1's prose against BC-3.08.001 Event 9 and the sibling postconditions caught the drift. Fixed same-burst by the architect: VP-108 v1.7→v1.8, with PC1 corrected and PC2–PC8 proactively re-swept for the same three-part error class (no additional instance found). Because this was a spec-text-only regression with no code/test change, no BC-5.39.001 streak accumulated against the pass-14 fix-burst's new frozen HEAD to reset — the streak simply stays at 0/3, and pass 16 begins the 3-CLEAN accumulation fresh against the SAME frozen `3919ebcb` (no code advance this burst).
+
+### §3. In-flight
+
+**NONE.** This commit closes the pass-15 fix-burst; no open PRs, no partially-applied edits, no pending sub-tasks.
+
+### §4. Pending human decisions
+
+**NONE outstanding** at this pause point (pass 15's fix required no human ratification — no ADR/BC/wire-format/security-model change; SPEC-TEXT-ONLY VP correction). Longer-horizon items requiring eventual human input remain in §5 below (none are blocking resume).
+
+### §5. Pending / OWED (deferred follow-ups)
+
+1. **VP-079/VP-028 POLICY-9 "ten events" propagation** — unchanged from prior checkpoint; anchored to Phase-6 formal-verification / next wave-gate touch.
+2. **AC-021/AC-022/AC-023/AC-024/AC-025 Red Gate stub gap** — CARRIED FORWARD, still OPEN (not addressed this burst). Follow-up story-writer/test-writer pass OWED.
+3. **Finalization doc-sweep batched LOWs** (per D-1127 governance ruling) — unchanged from prior checkpoint; still carrying F-P13-001 only.
+4. PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED — OWED before E-17/cycle convergence gate (D-1129, D-1130; human deferred).
+5. ADR-045 v1.3 ratification burst — blocks Wave-7 (S-21.19/20/21/23 HELD).
+6. E-23 re-scope to frozen-provenance model (STALE).
+7. LOW-7 DEFERRED — AC-006 events-sink wording; PO follow-up (out of S-25.01 scope).
+8. RELEASE fast-follow: cut rc.25 to ship ADR-048 v1.5 + wasmtime fix + Layer-1 dispatcher to operator cache.
+9. [process-gap] registry-comment-lint — tracked follow-up story or justified deferral at cycle-close (finalization-doc-sweep.md).
+10. Spec-hygiene sweep OWED: E-10 missing body sections; E-9/19/21/22 non-monotonic `modified[]`.
+11. Layer 2/3 BACKLOG: S-25.02 sharding (P1; 15 pts) + S-25.03 bounded-window (P2; 12 pts).
+12. VP-INDEX total_vps 108 vs STATE.md narrative 107 mismatch (D-1138 Drift Item) — still OPEN, not addressed this burst.
+13. S-4.07 anchor (D-1140) — when S-4.07 wires the real observable Router/FileSink into main.rs, re-point `reconcile_raw_delete`'s scan target from `dispatcher-internal-{date}.jsonl` to `events-*.jsonl` and re-amend ADR-048 §D4.
+14. S-25.01 frontmatter `last_amended` unescaped-quote STRICT-YAML-parse failure (D-1144 Drift Item) — anchored future spec-steward frontmatter-hygiene sweep, likely systematic across story corpus.
+15. **F-P13-001 (D-1146)** — AC-007 block-message parenthetical example stale vs four-tier recovery model AC-020 — anchored S-25.01 finalization-doc-sweep. STILL OPEN.
+
+### §6. Housekeeping
+
+- WASM FUEL_EXHAUSTED on large files (STORY-INDEX.md/VP-INDEX.md/decision-log.md/lessons.md/burst-log.md/session-checkpoints.md all triggered it this burst) is advisory PostToolUse — writes land; not an error. Confirmed via post-edit grep verification on every touched file this burst.
+- 2 stale worktrees inert: `fix/d999-sentinel-code-migration`, `feature/S-21.04` — human aware.
+- Transient dispatcher/sidecar-learning telemetry diffs bundled into this SAME single commit per TD-VSDD-053 (avoids leaving the tree dirty for the next burst's guards).
+
+### §7. Note
+
+No transient upstream failures this burst. This is the first time the S-25.01 cascade found a SPEC-TEXT-ONLY defect (all prior findings — passes 2/3/6/9/10/11/12/14 — required a code or code+doc change); the code and its tests were correct throughout, and the fix ONLY touched the VP-108 spec document. This demonstrates the adversarial-convergence model catching drift between spec prose and code even when the code itself has no defect — a class distinct from every prior pass's findings.
+
+### §8. HEADs
+
+- `develop`: **`8b4b60e6`** (UNCHANGED this burst). merged_count **115**.
+- `main`: **`89f6f87c`** (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `feature/S-25.01`: **`3919ebcb`** (UNCHANGED this burst — no code touched; FROZEN for BC-5.39.001 3-CLEAN cascade; streak 0/3).
+- `factory-artifacts`: per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for live HEAD.
+- `fix/count-propagation-cpu-runaway`: **MERGED+DELETED** (PR #803 squash `8b4b60e6` 2026-09-01).
+- `fix/wasmtime-46.0.3-rustsec-2026-0268-0269`: **MERGED** (PR #804 squash `fc0f6ccc` 2026-09-01; remote branch auto-deleted).
+
+### §9. Resume command
+
+`/vsdd-factory:next-step` (resumes at LOCAL adversary pass 16 for S-25.01; artifact FROZEN @ `3919ebcb`; BC-5.39.001 streak 0/3).
+Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-1.18.001 v1.5 draft. BC-1.18.002 v1.7 draft. BC-1.18.003 v1.7 draft. BC-3.08.001 v1.34 active. BC-INDEX v5.39 (1,993 BCs; UNCHANGED). VP-INDEX v2.99 (108 VPs per frontmatter; VP-108 v1.8; STATE.md narrative "107" citation remains an OPEN Drift Item, see D-1138). STORY-INDEX v4.427 (175 stories; 25 epics; S-25.01 v1.19; input-hash 6ca47ed). ARCH-INDEX v4.08 (48 ADRs; Document Map pointer sync only, UNCHANGED). merged_count 115. develop `8b4b60e6` (UNCHANGED this burst). feature/S-25.01 `3919ebcb` (FROZEN, UNCHANGED). BC-5.39.001 streak 0/3. PIPELINE ACTIVE.
+
+### §10. BC-5.39.001 streak
+
+**Streak: 0/3.** LOCAL adversary pass 13 (fresh context, frozen `817c52ae`) = CLEAN — streak ADVANCED 0/3→1/3. **Pass 14 (fresh context, frozen `817c52ae`) = NOT-CLEAN** (1 MED F-P14-001 + 1 LOW F-P14-002), fixed via test-writer `5e9d4f7b` + implementer `3919ebcb` (D-1147, code HEAD ADVANCED to `3919ebcb`) — streak RESETS 1/3→0/3. **Pass 15 (fresh context, frozen `3919ebcb`) = NOT-CLEAN** (1 HIGH F-P15-001), fixed via architect `90675c7d` (D-1148, code HEAD UNCHANGED @ `3919ebcb`, SPEC-TEXT-ONLY) — **streak stays 0/3** (no accumulated streak existed to reset — pass 15 was the first pass against the pass-14 fix-burst's new frozen HEAD). On resume: dispatch fresh LOCAL adversary pass 16 against the SAME frozen `3919ebcb`. Need 3 consecutive CLEAN passes (16, 17, 18) for LOCAL 3-CLEAN convergence, restarting from 0/3.
+
+---
+
+Archived from STATE.md by the SESSION-WRAP-PAUSE-2026-09-03 burst (D-chain cite D-1152, no new D-NNN — bookkeeping-only wrap). Full content preserved verbatim below.
+
+## Session Resume Checkpoint (2026-09-03 — S1503-POST-MERGE-BOOKKEEPING-2026-09-03 [D-1152] atop S2501-PASS15-FIX-BURST-2026-09-02; develop b4ff2383; merged_count 116; S-25.01 F4 TDD IN PROGRESS (untouched this burst); BC-5.39.001 streak 0/3)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** This is a POST-MERGE BOOKKEEPING burst for S-15.03, a DIFFERENT track from the S-25.01 LOCAL adversary cascade — no adversary pass ran this burst. PR #805 (`feature/S-15.03`) SQUASH-MERGED into `develop` as `b4ff2383` 2026-09-03T10:43:17Z (branch base `8b4b60e6`); feature branch + `.worktrees/S-15.03` deleted. `merged_count` 115→116. Delivered on `develop`: `crates/last-amended-migrate` (PC7 full-recovery split, bounded O(n) scan, `escape_raw_value`, SEC-003 atomic write, register CLI); write-path discipline codified in `state-burst` SKILL.md + state-manager.md; 5 sidecar paths registered in `artifact-path-registry.yaml` (closes D-1150(a)). CI 16 checks green (3 Windows-only fixes). **POL-14 auto-promotion:** BC-5.45.001 v1.2→v1.3, BC-10.13.001 v1.2→v1.3, BC-4.18.001 v1.1→v1.2 — all draft→active; BC-INDEX v5.42→v5.43 (this burst dogfoods BC-5.45.001 PC2/PC3 on BC-INDEX's own `last_amended` AND on THIS file's own `last_amended` — current-entry-only, no frontmatter `changelog:` added to STATE.md per PC3). CAP-042 has no per-capability lifecycle field — no action applicable. All 3 promoted BCs' `input-hash` re-verified + re-synced after this burst's own edits to their own inputs (`decision-log.md`/S-15.03 story). STORY-INDEX v4.430→v4.431 (S-15.03 v1.7→v1.8 draft→merged). D-1151 BACKFILLED into `decision-log.md` SoT (existed only in this file's table before this burst). Two process-gap lessons codified (pr-manager CI-watcher sprawl+worktree-clobber; `validate-factory-path-staging` cwd-fallback false-positive). One environmental Drift Item (macOS TCC EPERM). **S-25.01 convergence completely UNTOUCHED** (code HEAD stays `3919ebcb`, BC-5.39.001 streak stays 0/3, NEXT still fresh LOCAL adversary pass 16). No factory_lock held. PIPELINE ACTIVE (no session wrap this burst). NEXT on resume/continue: fresh LOCAL adversary pass 16 (fresh context) on the frozen `3919ebcb` for S-25.01 — this S-15.03 merge burst does not change that queue.
+> Prior checkpoint (LAST-AMENDED-SIDECAR-SURGERY-2026-09-02 [D-1149] atop S2501-PASS15-FIX-BURST-2026-09-02 layered on S2501-PASS14-FIX-BURST-2026-09-02/S2501-PASS13-CLEAN-STREAK-1of3-2026-09-02/.../SESSION-WRAP-PAUSE-2026-09-01) archived to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position
+
+Pipeline **ACTIVE** (human actively driving; no wrap this burst). Brownfield cycle `v1.0-brownfield-backfill`. **S-15.03 MERGED** this burst (PR #805, `b4ff2383`) — a separate track from S-25.01. S-25.01 F4 TDD remains exactly where pass-15's fix-burst left it: `feature/S-25.01` FROZEN @ **`3919ebcb`**, BC-5.39.001 streak **0/3**. **NEXT on resume/continue = LOCAL adversary pass 16 (fresh context)** against the frozen `3919ebcb` for S-25.01; S-15.03 has no further TDD/adversary work of its own (fully delivered and merged).
+
+### §2. Session arc
+
+This burst is state-manager POST-MERGE bookkeeping for S-15.03 (the `last_amended` Write-Path Durable Fix story), which had been in spec-authoring/design phases (D-1149 sidecar surgery → D-1150 scope extension → D-1151 consistency-audit remediation) across several prior bursts, culminating in Phase C TDD implementation (not tracked burst-by-burst in this checkpoint — delegated to the per-story delivery pipeline) and PR #805's squash-merge into `develop`. This burst records that merge: POL-14 auto-promotes the 3 BCs S-15.03 authored (BC-5.45.001/BC-10.13.001/BC-4.18.001) from draft to active, `merged_count` advances 115→116, and the D-1150(a) artifact-path-registry Drift Item closes now that the 5 `*-amendment-history.md` sidecar paths are registered on `develop`. This burst is ALSO the first time BC-5.45.001's own write-path discipline is dogfooded manually on BC-INDEX's and STATE.md's own `last_amended` fields (current-entry-only + exactly-one-`changelog:`-prepend for BC-INDEX; current-entry-only with no `changelog:` for STATE.md per PC3) — ahead of `last-amended-migrate`'s own release, which remains HELD per human. Concurrently, this burst discovered and fixed in scope (production-grade Rule 4) a genuine gap: D-1151 had been recorded in this file's Decisions Log table but never appended to `decision-log.md`'s own SoT file — backfilled verbatim, in correct chronological order. Two process-gap lessons surfaced during S-15.03's PR #805 delivery were also captured: a pr-manager CI-watcher-sprawl + shared-worktree-clobber coordination gap, and a `validate-factory-path-staging` branch-detection cwd-fallback false-positive. The S-25.01 LOCAL adversary cascade itself is completely orthogonal to and untouched by this entire burst — it remains paused at pass-15's endpoint, frozen `3919ebcb`, streak 0/3, awaiting fresh pass 16.
+
+### §3. In-flight
+
+**NONE.** This commit closes the S-15.03 post-merge bookkeeping burst; no open PRs, no partially-applied edits, no pending sub-tasks. S-25.01's own in-flight state (frozen `3919ebcb`, awaiting pass 16) is UNCHANGED from the prior checkpoint.
+
+### §4. Pending human decisions
+
+**NONE outstanding** at this pause point (POL-14 auto-promotion is a mechanical consequence of merge, not a new ratification — no ADR/BC-title/wire-format/security-model change). Longer-horizon items requiring eventual human input remain in §5 below (none are blocking resume). The `last-amended-migrate` tool's own RELEASE remains HELD per human — not actioned this burst.
+
+### §5. Pending / OWED (deferred follow-ups)
+
+1. **VP-079/VP-028 POLICY-9 "ten events" propagation** — unchanged from prior checkpoint; anchored to Phase-6 formal-verification / next wave-gate touch.
+2. **AC-021/AC-022/AC-023/AC-024/AC-025 Red Gate stub gap** — CARRIED FORWARD, still OPEN. Follow-up story-writer/test-writer pass OWED.
+3. **Finalization doc-sweep batched LOWs** (per D-1127 governance ruling) — unchanged; still carrying F-P13-001 only.
+4. PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED — OWED before E-17/cycle convergence gate (D-1129, D-1130; human deferred).
+5. ADR-045 v1.3 ratification burst — blocks Wave-7 (S-21.19/20/21/23 HELD).
+6. E-23 re-scope to frozen-provenance model (STALE).
+7. LOW-7 DEFERRED — AC-006 events-sink wording; PO follow-up (out of S-25.01 scope).
+8. RELEASE fast-follow: cut rc.25 to ship ADR-048 v1.5 + wasmtime fix + Layer-1 dispatcher to operator cache.
+9. [process-gap] registry-comment-lint — tracked follow-up story or justified deferral at cycle-close (finalization-doc-sweep.md).
+10. Spec-hygiene sweep OWED: E-10 missing body sections; E-9/19/21/22 non-monotonic `modified[]`.
+11. Layer 2/3 BACKLOG: S-25.02 sharding (P1; 15 pts) + S-25.03 bounded-window (P2; 12 pts).
+12. VP-INDEX total_vps 108 vs STATE.md narrative 107 mismatch (D-1138 Drift Item) — still OPEN.
+13. S-4.07 anchor (D-1140) — when S-4.07 wires the real observable Router/FileSink into main.rs, re-point `reconcile_raw_delete`'s scan target and re-amend ADR-048 §D4.
+14. S-25.01 frontmatter `last_amended` unescaped-quote STRICT-YAML-parse failure (D-1144 Drift Item) — anchored future spec-steward frontmatter-hygiene sweep.
+15. **F-P13-001 (D-1146)** — AC-007 block-message parenthetical example stale vs four-tier recovery model AC-020 — anchored S-25.01 finalization-doc-sweep. STILL OPEN.
+16. **S-15.03 Phase D** (running `last-amended-migrate migrate` on the 5 real `.factory/` index/state files) — OPTIONAL/OWED, anchored post-release (the 5 files are already slim from the D-1149 surgery; not urgent). Tool RELEASE itself HELD per human.
+17. **ADR-049/CAP-042 scope-overstatement** (D-1151 Drift Item) — anchored architect+business-analyst.
+18. **E-12 epic `subsystems_affected` omits SS-06/SS-10** (D-1151 Drift Item) — anchored story-writer/architect.
+19. **ARCH-INDEX SS-01/SS-06 count-methodology question** (D-1151 Drift Item) — anchored architect adjudication.
+20. **pr-manager CI-watcher sprawl + shared-worktree clobber** (D-1152, `L-BB-D1152`) — anchored E-12 follow-up story, no ID allocated yet.
+21. **`validate-factory-path-staging` cwd-fallback false-positive** (D-1152, `L-BB-D1152`) — anchored `crates/hook-plugins/validate-factory-path-staging` (devops-engineer/architect).
+22. **`stories/STORY-INDEX.md` S-19.01 row pipe-count defect** (D-1152, incidental pre-existing) — anchored next maintenance-sweep/spec-steward pass.
+
+### §6. Housekeeping
+
+- WASM FUEL_EXHAUSTED on large files (BC-INDEX.md/STORY-INDEX.md/decision-log.md/burst-log.md/lessons.md all triggered it this burst) is advisory PostToolUse — writes land; not an error. Confirmed via post-edit grep verification on every touched file this burst.
+- 2 stale worktrees inert: `fix/d999-sentinel-code-migration`, `feature/S-21.04` — human aware.
+- macOS TCC EPERM read-block on some `.factory/` files affected direct reads this session (new environmental Drift Item; mitigation: grant Full Disk Access).
+
+### §7. Note
+
+This burst is orthogonal to the S-25.01 cascade documented in §2/§10 below — it is the FIRST time in this cycle that a story merge (S-15.03) and the S-25.01 adversary cascade have been checkpointed together without the merge touching S-25.01's own frozen artifact in any way. The dual-track nature of `v1.0-brownfield-backfill` (concurrent story-delivery track + S-25.01 LOCAL-adversary track) is intentional and both tracks' states are independently reported in this checkpoint.
+
+### §8. HEADs
+
+- `develop`: **`b4ff2383`** (PR #805 S-15.03 squash-merge, this burst; base `8b4b60e6`). merged_count **116**.
+- `main`: **`89f6f87c`** (v1.0.0-rc.24 bundle commit, tagged 2026-08-26).
+- `feature/S-25.01`: **`3919ebcb`** (UNCHANGED this burst — no code touched; FROZEN for BC-5.39.001 3-CLEAN cascade; streak 0/3).
+- `feature/S-15.03`: **MERGED+DELETED** (PR #805 squash `b4ff2383` 2026-09-03T10:43:17Z; `.worktrees/S-15.03` removed).
+- `factory-artifacts`: per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for live HEAD.
+- `fix/count-propagation-cpu-runaway`: **MERGED+DELETED** (PR #803 squash `8b4b60e6` 2026-09-01).
+- `fix/wasmtime-46.0.3-rustsec-2026-0268-0269`: **MERGED** (PR #804 squash `fc0f6ccc` 2026-09-01; remote branch auto-deleted).
+
+### §9. Resume command
+
+`/vsdd-factory:next-step` (resumes at LOCAL adversary pass 16 for S-25.01; artifact FROZEN @ `3919ebcb`; BC-5.39.001 streak 0/3; S-15.03 has no further pending work — fully merged).
+Note: per BC-6.24.001, run `/vsdd-factory:rehydrate-wave` first if a wave-state manifest applies.
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.5 draft. BC-1.18.002 v1.7 draft. BC-1.18.003 v1.7 draft. BC-3.08.001 v1.34 active. BC-INDEX v5.43 (1,996 BCs). VP-INDEX v2.99 (108 VPs per frontmatter; VP-108 v1.8; STATE.md narrative "107" citation remains an OPEN Drift Item, see D-1138). STORY-INDEX v4.431 (175 stories; 25 epics; S-25.01 v1.19; S-15.03 v1.8 merged). ARCH-INDEX v4.11 (48 ADRs). merged_count 116. develop `b4ff2383`. feature/S-25.01 `3919ebcb` (FROZEN, UNCHANGED). BC-5.39.001 streak 0/3. PIPELINE ACTIVE.
+
+### §10. BC-5.39.001 streak
+
+**Streak: 0/3.** (S-25.01 track — UNCHANGED this burst, which is a different track.) LOCAL adversary pass 13 (fresh context, frozen `817c52ae`) = CLEAN — streak ADVANCED 0/3→1/3. **Pass 14 (fresh context, frozen `817c52ae`) = NOT-CLEAN** (1 MED F-P14-001 + 1 LOW F-P14-002), fixed via test-writer `5e9d4f7b` + implementer `3919ebcb` (D-1147, code HEAD ADVANCED to `3919ebcb`) — streak RESETS 1/3→0/3. **Pass 15 (fresh context, frozen `3919ebcb`) = NOT-CLEAN** (1 HIGH F-P15-001), fixed via architect `90675c7d` (D-1148, code HEAD UNCHANGED @ `3919ebcb`, SPEC-TEXT-ONLY) — **streak stays 0/3** (no accumulated streak existed to reset — pass 15 was the first pass against the pass-14 fix-burst's new frozen HEAD). On resume: dispatch fresh LOCAL adversary pass 16 against the SAME frozen `3919ebcb`. Need 3 consecutive CLEAN passes (16, 17, 18) for LOCAL 3-CLEAN convergence, restarting from 0/3.
+
 ---
