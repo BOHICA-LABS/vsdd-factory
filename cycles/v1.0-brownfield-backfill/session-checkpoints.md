@@ -1343,3 +1343,178 @@ No WIP branches — `feature/S-25.02-b1-rotation` MERGED+DELETED; `develop` @ `e
 `/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
 
 ---
+
+## Session Resume Checkpoint (2026-09-12 — SESSION-WRAP-PAUSE-2026-09-12; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** S-25.02 F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) **DELIVERED/MERGED** & closed out — PR #832 squash-merged into `develop` as `ebd16f79` (base `08ad44b5`). `pipeline:` **PAUSED** (human `/vsdd-factory:wrap`). **NEXT = cluster-5 (mechanism-B2 sharding, BC-1.18.010+011), pending human GO.**
+> Prior checkpoint (S2502-CLUSTER4-DELIVERY-MERGE-BURST/D-1212, 2026-09-11) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-12. S-25.02 F4 cluster-4 (mechanism-B1 rotation, BC-1.18.009) DELIVERED/MERGED & closed out (PR #832 → `develop` `ebd16f79`); `pipeline:` PAUSED. Next = cluster-5 (mechanism-B2 body-table sharding, BC-1.18.010 + migration BC-1.18.011) pending human GO.
+
+### §2. Convergence (b)
+
+cluster-4 BC-5.39.001 3/3 CONVERGED (closed, D-1211); no active convergence loop open.
+
+### §3. In-flight (c)
+
+NONE — cluster-4 merged (PR #832) + closed; no story mid-TDD, no PR awaiting review/CI, no abandoned sub-agent step.
+
+### §4. Pending human decisions / open blockers (d)
+
+cluster-5 GO (deferred to a future session per human wrap decision). OPEN Drift Item **[D-1212-DRIFT-002]** validate-pr-review-posted hook 3 structural defects → **S-12.15** (re-anchored 2026-09-12; S-12.14 is now cargo-audit-cache cwd-path fix; story-writer to author S-12.15). Anchored follow-ups: **S-25.05** (Obs-B cross-file crash-atomicity), **S-25.06** (append-log backfill-split executor — compaction-deferral anchor), **S-12.13** (E-SHD Message-Format↔Display lint gate), **S-12.14** (cargo-audit-cache cwd-relative-path fix — Codex CV-DIR-F4), **S-12.15** (pr-review-posted hook fix — D-1212-DRIFT-002). Additional open: S-12.09, S-12.10, S-12.11, S-12.12 (E-12 Engine Governance). New cluster-5 F1 follow-ups: [CV-DIR-F1a] BC-1.18.011 reconciliation; [CV-DIR-F1b] S-25.02 cluster-7 body note + consistency check; [CV-DIR-F2-OPEN] architect invocation-mechanism spec for S-25.06 T-10. **F-006 + SEC-831-01** → **T-12**. **[D-1206]** compute-input-hash cascade Drift Item. **Cycle-file compaction:** DEFERRED to **S-25.06** (append-log backfill-split executor; mechanistic-coverage gap — no sanctioned executor for the append-log class; last-amended-migrate scoped to 4 indexes + STATE.md only; BC-1.18.008 backfill never executed against these files). See Drift Item **[S-25.06-DRIFT-001]**. 4 pre-existing open PRs: **#769, #768, #729, #632**. **[D-1207]** `.factory/.gitignore` unregistered in `artifact-path-registry.yaml`.
+
+### §5. WIP branches (e)
+
+None — `feature/S-25.02-b1-rotation` merged to `develop` @ `ebd16f79` and deleted; `develop` @ `ebd16f79`; `factory-artifacts` @ this burst's commit.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212; EC-009 D-1212-DRIFT-001 closed) + BC-1.18.010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; clusters 1-4's BCs (BC-1.18.005/006/007/008/009) are the 5 ACTIVE ones of the 9 (4 remain draft, clusters 5-7 not yet shipped). BC-INDEX v5.87 (2,006 BCs, total_bcs UNCHANGED). VP-INDEX v3.19 (141 VPs, UNCHANGED). STORY-INDEX v4.468 (25 epics; status ready, cluster-1/2/3/4 DELIVERED/MERGED, cluster-5 next; S-25.01 merged; S-25.04 merged; S-15.03 merged). ARCH-INDEX v4.26 (48 ADRs, UNCHANGED). error-taxonomy.md v1.17 (BLK-C2-2 E-SHD-015 added PR #832 cycle-2, UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: **this pause burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-b1-rotation`: **MERGED+DELETED** — PR #832, `ebd16f79`. No longer exists.
+- `feature/S-25.02-backfill`: **MERGED+DELETED** — PR #831, `08ad44b5`. No longer exists.
+- `feature/S-25.02-roll`: **MERGED+DELETED** — PR #824, `0959e34b`. No longer exists.
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. Cluster-2's OWN LOCAL cascade stays **CLOSED at 0/3** via human-authorized asymptotic acceptance (D-1184), fully retired since PR #824 (D-1186). **Cluster-3's OWN LOCAL cascade stays 3/3 CONVERGED — CLOSED** (D-1204), fully retired since PR #831 (D-1206). **Cluster-4's OWN LOCAL cascade stays 3/3 CONVERGED — CLOSED** (passes A/B/C, D-1211), fully retired since PR #832 (D-1212). **NEXT = cluster-5 (mechanism-B2 sharding, BC-1.18.010+011) begins a FRESH LOCAL BC-5.39.001 cascade once its own TDD implementation lands, per D-1170's sequencing. PIPELINE PAUSED — cluster-5 pending human GO.**
+
+---
+
+## Session Resume Checkpoint (2026-09-13 — D-1220-ADR052-V13-RESEARCH-GROUNDED-REDESIGN-BURST v10.51→v10.52; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED — ADR-052 v1.3 COMMITTED; NEXT = 4th Codex re-review → POLICY 22 ratification)
+
+Archived from STATE.md by the D-1221-ADR052-V14-LOCAL-ADV-PASS1-FIX-BURST (2026-09-13). Full content preserved in git: `git show HEAD:.factory/STATE.md` at factory-artifacts HEAD before D-1221 commit.
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.3 research-grounded redesign COMMITTED (D-1220; 11 Codex findings closed via atomic-publication architecture). OWED item #1 status = v1.3 redesign DONE. **NEXT = 4th cross-vendor Codex re-review of ADR-052 v1.3**, then HUMAN POLICY 22 ratification carrying 2 sign-off items: (i) macOS exec-TOCTOU residual window; (ii) APFS directory-fsync durability test. Cluster-5 TDD BLOCKED until POLICY 22 ratification. PIPELINE REMAINS PAUSED.
+
+### §1. Position (a)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.3 COMMITTED (D-1220) — research-grounded redesign per research brief `research-adr-052-v13-atomic-publication-2026-09-13.md`; 11 Codex findings from D-1218 closed via atomic-publication architecture. OWED item #1 (v1.3 redesign) COMPLETE. NEXT = 4th cross-vendor Codex re-review of ADR-052 v1.3 → HUMAN POLICY 22 ratification (with 2 sign-off items). `pipeline:` PAUSED.
+
+### §2. Convergence (b)
+
+BC-5.39.001 cycle streak **3/3 — CONVERGED, UNCHANGED** (D-1213..D-1220 are spec-convergence/bookkeeping bursts, NOT cycle-level adversary passes). ADR-052 Codex review track: 1st (7 findings, D-1214) →2nd (8 findings, D-1216) →3rd (11 findings, D-1218) — DIVERGING; v1.3 redesign addresses all 11; 4th re-review OWED. No cluster-5 LOCAL cascade yet (TDD BLOCKED).
+
+### §3. In-flight / Abandoned (c)
+
+None. D-1220 burst committed successfully. No abandoned dispatches.
+
+### §4. Pending human decisions / open blockers (d)
+
+**ADR-052 v1.3 COMMITTED (D-1220) — NEXT = 4th Codex re-review + POLICY 22 ratification.** The v1.3 redesign addresses all 11 findings. 4th cross-vendor Codex re-review is the next step (adversary dispatch). After re-review: HUMAN POLICY 22 ratification required with 2 mandatory sign-off items:
+- **(i) macOS exec-TOCTOU residual window:** Architect chose freeze-build-under-lock + documented residual window; mandatory operational constraint "no concurrent `cargo build` during active migration." Human must explicitly acknowledge.
+- **(ii) APFS directory-fsync durability:** Treated best-effort in v1.3; empirical darwin-arm64 durability test owed before APFS code path declared production-grade. Confirm darwin-arm64 CI runner availability (GitHub Actions macOS-14 or equivalent).
+
+Cluster-5 TDD BLOCKED until POLICY 22 ratification. Other open: **[D-1212-DRIFT-002]** → S-12.15. **S-25.05** (Obs-B), **S-25.06** (executor). S-12.09..S-12.15 (E-12). **F-006+SEC-831-01** → T-12. **[D-1207]** `.factory/.gitignore` unregistered. Cycle-file compaction → S-25.06. 4 PRs open: **#769, #768, #729, #632**.
+
+**OWED ON RESUME (2 items remaining):**
+2. input-hash currency refresh — `compute-input-hash --scan --update` sweep (907 files) OWED.
+3. ADR-052↔BC input-hash circular-dependency re-settle (after POLICY 22 ratification).
+
+### §5. WIP branches (e)
+
+None — `develop` @ `ebd16f79` (PR #832 merged, cluster-4 closed); no story worktrees open. `factory-artifacts` HEAD = this burst's commit.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212). BC-1.18.010 **v1.5** / BC-1.18.011 **v1.3** (draft; SS-01; ADR-052 PROPOSED v1.3 COMMITTED D-1220 — 11 Codex findings closed; 4th Codex re-review + HUMAN POLICY 22 ratification OWED; 2 sign-off items: macOS exec-TOCTOU + APFS fsync durability). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX **v5.90** (2,006 BCs). VP-INDEX v3.19 (141 VPs). STORY-INDEX v4.468 (25 epics). ARCH-INDEX **v4.30** (52 ADRs; ADR-052 PROPOSED v1.3). error-taxonomy.md **v1.20**.
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25; UNCHANGED).
+- `factory-artifacts`: run `git -C .factory log -1` for live HEAD.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9`.
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f`.
+
+### §8. BC-5.39.001 streak (D-1220 state)
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED** (D-1213..D-1220 are spec-convergence/bookkeeping bursts). Cross-vendor Codex ADR-052 closure reviews NON-STREAK (decision-support only). Cluster-5 LOCAL cascade NOT started (TDD BLOCKED — awaiting POLICY 22). All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211). **PIPELINE PAUSED — 4th Codex re-review then POLICY 22 ratification owed on resume.**
+
+*(Archived 2026-09-12 during SESSION-WRAP-PAUSE-2026-09-12 v10.47→v10.48 pause burst; replaced by new SRC reflecting 2nd Codex ADR-052 closure state.)*
+
+---
+
+## Session Resume Checkpoint (2026-09-13 — D-1221-ADR052-V14-LOCAL-ADV-PASS1-FIX-BURST v10.52→v10.53; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED — ADR-052 v1.4 COMMITTED; LOCAL CASCADE 0/3; NEXT = adversary pass-2 → 3-CLEAN → POLICY 22 ratification)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.4 re-hardening COMMITTED (D-1221; in-house adversary LOCAL pass-1 NOT-RATIFIABLE 2C+5H+5M, all 12 findings closed). BC-5.39.001 LOCAL streak RESET 0/3. ADR-052 review track is now the REGULAR in-house adversary LOCAL cascade (Codex cross-vendor HELD per human direction, decision-support only). **NEXT = adversary pass-2 (fresh-context, reads only pass-1 Part A per Iron Law)** toward 3-CLEAN. PIPELINE REMAINS PAUSED.
+> Prior checkpoint (D-1220-ADR052-V13-RESEARCH-GROUNDED-REDESIGN-BURST v10.51→v10.52, 2026-09-13) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (D-1221 state)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.4 COMMITTED (D-1221) — in-house adversary LOCAL pass-1 = NOT-RATIFIABLE (2C+5H+5M); all 12 findings closed. BC-5.39.001 LOCAL streak RESET 0/3. NEXT = adversary pass-2 (fresh context, reads only pass-1 Part A). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items). `pipeline:` PAUSED.
+
+### §2. Convergence (D-1221 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — RESET** (D-1221 fix burst = adversary pass-1 NOT-RATIFIABLE; streak starts fresh). Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221); passes 2 and 3 needed for 3-CLEAN.
+
+### §3. In-flight / Abandoned (D-1221 state)
+
+None. D-1221 burst committed successfully. No abandoned dispatches.
+
+### §4. Pending human decisions / open blockers (D-1221 state)
+
+ADR-052 v1.4 COMMITTED (D-1221) — NEXT = adversary pass-2 → 3-CLEAN → POLICY 22. BC-5.39.001 LOCAL streak 0/3. After 3 consecutive clean passes: HUMAN POLICY 22 ratification required with 2 sign-off items: (i) macOS exec-TOCTOU residual window; (ii) APFS directory-fsync durability test. Cluster-5 TDD BLOCKED. [D-1212-DRIFT-002] → S-12.15. [D-1221-PG-001] → S-12.13. S-25.05, S-25.06. OWED #2+#3.
+
+### §5. WIP branches (D-1221 state)
+
+None. `develop` @ `ebd16f79`. `factory-artifacts` HEAD = D-1221 burst commit.
+
+### §6. Resume command
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-1.18.010 **v1.6** / BC-1.18.011 **v1.4** (draft). BC-INDEX **v5.91**. ARCH-INDEX **v4.31** (ADR-052 v1.4). error-taxonomy.md **v1.21**.
+
+### §7. HEADs (D-1221 state)
+
+- `develop`: **`ebd16f79`** (PR #832 merged). `main`: **`51023185`**. `factory-artifacts`: D-1221 burst commit (run `git -C .factory log -1`).
+
+### §8. BC-5.39.001 streak (D-1221 state)
+
+**LOCAL cluster-5 streak: 0/3 — RESET** (pass-1 = NOT-RATIFIABLE D-1221; adversary pass-2 next). Cycle-level streak: 3/3 CONVERGED UNCHANGED.
+
+*(Archived 2026-09-13 during D-1222-ADR052-V15-LOCAL-ADV-PASS2-FIX-BURST v10.53→v10.54; replaced by new SRC reflecting ADR-052 v1.5 + ADR-051 v1.14 committed state.)*
+
+---
+
+## Archived Checkpoint: D-1222-ADR052-V15-LOCAL-ADV-PASS2-FIX-BURST (v10.53→v10.54, 2026-09-13)
+
+*(Archived 2026-09-13 during D-1223-ADR052-V16-LOCAL-ADV-PASS3-FIX-BURST v10.54→v10.55; replaced by new SRC reflecting ADR-052 v1.6 deep-consolidated fix committed state.)*
+
+**SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.5 + ADR-051 v1.14 COMMITTED (D-1222; in-house adversary LOCAL pass-2 NOT-RATIFIABLE 1C+4H+7M, all 12 findings closed). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-3 (fresh-context, reads only pass-2 Part A per Iron Law)** toward 3-CLEAN. PIPELINE REMAINS PAUSED. New: [D-1222-DRIFT-001] prd.md §5.1 MIG+MAINTENANCE sync owed before POLICY 22 ratification.
+
+### §1. Position
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.5 + ADR-051 v1.14 COMMITTED (D-1222) — in-house adversary LOCAL pass-2 = NOT-RATIFIABLE (1C+4H+7M); all 12 findings closed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-3 (fresh context, reads only pass-2 Part A). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221), pass-2 done (D-1222); pass-3 next toward 3-CLEAN. ADR-052 Codex cross-vendor track (NON-STREAK): paused — Codex held.
+
+### §8. BC-5.39.001 streak (D-1222 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222); adversary pass-3 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED.
+
+
+---
+
+## Archived Checkpoint: D-1223-ADR052-V16-LOCAL-ADV-PASS3-FIX-BURST (v10.54→v10.55, 2026-09-13)
