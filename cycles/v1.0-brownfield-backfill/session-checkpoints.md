@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "971223d"
+input-hash: "b288ae1"
 traces_to: STATE.md
 ---
 
@@ -1751,3 +1751,64 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 **LOCAL cluster-5 streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor per D-386 Option C (D-1230).** pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN), pass-7 RATIFY-WITH-CHANGES (D-1227; ≠ CLEAN), pass-8 NOT-RATIFIABLE (D-1228; ≠ CLEAN), pass-9 NOT-RATIFIABLE (D-1229; ≠ CLEAN; TRAJECTORY REVERSED 1→2; 3rd concurrency regression), pass-10 RATIFY-WITH-CHANGES (D-1230; ≠ CLEAN; ACCEPT-AT-FLOOR declared). Cycle-level streak: 3/3 CONVERGED UNCHANGED. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 cascade CLOSED at accept-at-floor (D-1230). **PIPELINE PAUSED — AWAITING HUMAN POLICY 22 RATIFICATION (5 sign-off items: APFS = prerequisite; accept-at-floor acknowledgment).**
 
 **This checkpoint superseded by the D-1232-POLICY22-RATIFIED-CLUSTER5-UNBLOCKED burst 2026-09-20 (POLICY 22 ratified on D-1231's mechanical proof; ACCEPT-AT-FLOOR basis superseded; cluster-5 UNBLOCKED; pipeline PAUSED→in_progress).**
+
+## Session Resume Checkpoint (2026-09-20 — D-1232-POLICY22-RATIFIED-CLUSTER5-UNBLOCKED v10.62→v10.63; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress — POLICY 22 RATIFIED; CLUSTER-5 UNBLOCKED; NEXT = RESUME CLUSTER-5 TDD)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** POLICY 22 RATIFIED (D-1232, 2026-09-20) via human interactive 5-item sign-off walk (AskUserQuestion), superseding D-1230's accept-at-floor basis on the strength of D-1231's mechanical proof (ADR-052 v1.14; Kani cargo-kani 0.67.0 pass-1 found DEF-1 HIGH, fixed structurally via Option B drain-step reorder; re-verified 7/7 VP proofs PROVED, INV-GATE-TXN UNSAT, non-vacuity CONFIRMED, 5/5 regression + 7/7 fault-injection PASS). All 5 sign-off items dispositioned: (i) macOS exec-TOCTOU ACKNOWLEDGED; (ii) APFS dir-fsync durability SATISFIED VIA HYBRID (mandated fsync sequence + differential VM-kill test PENDING + residual-risk ACK); (iii) CLAUDE.md ADR-052 EXCEPTION amendment APPROVED (apply at F4 activation); (iv) 4 dispatcher-guard amendments APPROVED (deploy at cluster-5 activation); (v) concurrency core RATIFIED ON MECHANICAL PROOF, BINDING NON-DEFERRABLE CONDITION: impl-phase Kani on `executor.rs`+`shard_manager.rs` mandatory at cluster-5 build. 4 binding obligations registered (STATE.md Blocking Issues, anchored cluster-5/S-25.02). trajectory-tail →1→1→2→1 LENGTH=4 (unchanged this burst — no new adversary pass ran). **Cluster-5 TDD UNBLOCKED. `pipeline:` PAUSED→in_progress. NEXT = resume cluster-5 F4 delta-implementation TDD.**
+> Prior checkpoint (D-1230-ADR052-V113-PASS10-ACCEPT-AT-FLOOR v10.61→v10.62, 2026-09-13) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a)
+
+2026-09-20. S-25.02 F4 cluster-5; POLICY 22 RATIFIED (D-1232) — human interactive 5-item sign-off walk dispositioned all outstanding items, ratifying on the strength of D-1231's mechanical (Kani) proof rather than D-1230's accept-at-floor basis (human explicitly rejected accept-at-floor and required more convergence first). ADR-052 v1.14 COMMITTED (D-1231): DEF-1 (HIGH, 5th fix-induced concurrency-core regression) found and fixed structurally; 7/7 VP proofs PROVED; INV-GATE-TXN UNSAT; non-vacuity CONFIRMED. Cluster-5 TDD UNBLOCKED. 4 binding obligations registered, anchored cluster-5/S-25.02 (impl-phase Kani mandatory; APFS hybrid fsync+VM-kill test; CLAUDE.md amendment apply at F4 activation; 4 dispatcher-guard amendments deploy at activation). `pipeline:` PAUSED→in_progress. NEXT = resume cluster-5 F4 delta-implementation TDD (orchestrator dispatches per D-1170's cluster sequencing, now that the F1-follow-up POLICY 22 gate is cleared).
+
+### §2. Convergence (b)
+
+BC-5.39.001 LOCAL cluster-5 prose-adversarial streak **0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this burst** (pass-1 (D-1221) through pass-10 (D-1230), full history unchanged — see prior checkpoint archive for the per-pass table). This burst did NOT run a new prose-adversary pass; it ran a MECHANICAL (Kani) re-verification track (D-1231, non-streak) and then human ratification (D-1232). Cycle-level streak: CONVERGED 3/3 (unchanged). TRAJECTORY: CRIT+HIGH trajectory-tail →1→1→2→1 LENGTH=4 (unchanged — 10-pass LOCAL prose-adversarial floor from D-1221..D-1230 (exhaustive)). ADR-052 Codex cross-vendor track (NON-STREAK): still paused per human direction — Codex held.
+
+### §3. In-flight / Abandoned (c)
+
+None. D-1232 burst committed successfully. No abandoned dispatches. (D-1231's ADR-052 v1.14 fix-burst, committed 2026-09-20 in the prior commit `9e4570f2`, also completed successfully — that commit's STATE.md sync was deferred to this D-1232 burst, now closed.)
+
+### §4. Pending human decisions / open blockers (d)
+
+**POLICY 22 RATIFIED (D-1232) — CLUSTER-5 UNBLOCKED. NEXT = RESUME CLUSTER-5 F4 TDD.** No further human ratification gate stands between here and cluster-5 implementation start. 4 binding obligations are registered as pending work (NOT blocking cluster-5 TDD *start*; the Kani obligation blocks TDD *completion*; the APFS/CLAUDE.md/dispatcher-guard obligations block F4 *activation*, a later sub-step) — see STATE.md `## Blocking Issues` rows `[D-1232-OBL-1]`..`[D-1232-OBL-4]`:
+- **(a) [D-1232-OBL-1] Implementation-phase Kani harnesses on `executor.rs` + `shard_manager.rs`:** MANDATORY, non-deferrable. Blocks cluster-5 TDD completion, not start.
+- **(b) [D-1232-OBL-2] APFS hybrid durability:** `F_FULLFSYNC(temp)→rename→F_FULLFSYNC(dir)` + strict error propagation (mandatory code shape) + differential VM-kill test (PENDING) + residual-risk ack (already recorded). Blocks cluster-5 F4 activation on macOS.
+- **(c) [D-1232-OBL-3] CLAUDE.md ADR-052 EXCEPTION amendment:** APPROVED exact text; apply at cluster-5 F4 activation (human-mandated-direct-edit exception).
+- **(d) [D-1232-OBL-4] 4 dispatcher-guard amendments:** APPROVED; deploy at cluster-5 activation boundary (devops-engineer scope).
+
+**[D-1222-DRIFT-001] RESOLVED (D-1230, unchanged):** prd.md §5.1 MIG/MAINTENANCE sync applied.
+
+**[D-1224-DRIFT-001] ASSESSED DEFERRABLE (D-1230, unchanged):** E-SHD-005 VP-leg — NOT a POLICY 22 blocker; anchored to E-12/BC-1.18.006/010 verification story.
+
+**S-12.15 OPEN (propagation-lint gate, E-12):** [D-1225-PG-001] → S-12.15. Unaffected by ratification.
+
+Other open (unchanged): **[D-1212-DRIFT-002]** → S-12.14. **[D-1221-PG-001]** process-gap → S-12.13. **S-25.05** (Obs-B), **S-25.06** (executor). S-12.09..S-12.15 (E-12). **F-006+SEC-831-01** → T-12. **[D-1207]** `.factory/.gitignore` unregistered. Cycle-file compaction → S-25.06. 4 PRs open: **#769, #768, #729, #632**.
+
+**OWED ON RESUME (1 item remaining):**
+2. input-hash currency refresh — `compute-input-hash --scan --update` sweep (907 files) OWED.
+
+### §5. WIP branches (e)
+
+None — `develop` @ `ebd16f79` (PR #832 merged, cluster-4 closed); no story worktrees open. `factory-artifacts` HEAD = this burst's commit (run `git -C .factory log -1` for live SHA).
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step` — cluster-5 F4 delta-implementation TDD is next (no further human gate).
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212). BC-1.18.010 **v1.9** / BC-1.18.011 **v1.8** (draft; SS-01; ADR-052 v1.14 COMMITTED D-1231, POLICY 22 RATIFIED D-1232 — DEF-1 Kani fix + human ratification; cluster-5 UNBLOCKED). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX **v5.96** (2,006 BCs). VP-INDEX **v3.22** UNCHANGED (141 VPs). STORY-INDEX **v4.472** (25 epics). ARCH-INDEX **v4.42** (52 ADRs; ADR-052 v1.14). error-taxonomy.md **v1.30**.
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**LOCAL cluster-5 prose-adversarial streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this burst.** pass-1 NOT-RATIFIABLE (D-1221) through pass-10 RATIFY-WITH-CHANGES (D-1230; ACCEPT-AT-FLOOR declared) — full per-pass history unchanged, see prior checkpoint archive. Cycle-level streak: 3/3 CONVERGED UNCHANGED. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231 (Kani DEF-1 fix, 7/7 VP PROVED). **PIPELINE in_progress — POLICY 22 RATIFIED (D-1232); CLUSTER-5 UNBLOCKED; NEXT = resume cluster-5 F4 TDD.**
+
+**This checkpoint superseded by the SESSION-WRAP-PAUSE-2026-09-21 burst (state-manager, single-commit TD-VSDD-053, BC-6.28.001 Step 4): POLICY 22 (D-1232) ratification unchanged; S-25.02 F4 cluster-5 (BC-1.18.010/011) UNBLOCKED but NOT started this session; recording+catalog layer compacted under the WASM fuel wall (STATE.md 459KB→292KB, decision-log.md 1.35MB→270KB, burst-log.md 957KB→269KB, session-checkpoints.md 1.27MB→262KB, STORY-INDEX.md 548KB→377KB, BC-INDEX.md 664KB→427KB); pipeline in_progress→PAUSED; session wrapped.**
