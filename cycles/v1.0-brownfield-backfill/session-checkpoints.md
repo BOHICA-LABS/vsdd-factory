@@ -1518,3 +1518,236 @@ BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pas
 ---
 
 ## Archived Checkpoint: D-1223-ADR052-V16-LOCAL-ADV-PASS3-FIX-BURST (v10.54→v10.55, 2026-09-13)
+
+*(Archived 2026-09-13 during D-1224-ADR052-V17-LOCAL-ADV-PASS4-FIX-BURST v10.55→v10.56; replaced by new SRC reflecting ADR-052 v1.7 fix burst committed state.)*
+
+**SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.6 COMMITTED (D-1223; in-house adversary LOCAL pass-3 NOT-RATIFIABLE 1C+4H+5M+2L, all 12 findings closed; census gate byte-for-byte+ID-set; provenance persisted). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-4 (fresh-context, reads only pass-3 Part A per Iron Law)** toward 3-CLEAN. HARD STOP gate: if pass-4 does NOT drop below ~3 CRIT+HIGH, orchestrator escalates to human for scope/expertise decision. PIPELINE REMAINS PAUSED.
+
+### §1. Position
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.6 COMMITTED (D-1223) — in-house adversary LOCAL pass-3 = NOT-RATIFIABLE (1C+4H+5M+2L); all 12 findings closed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-4 (fresh context, reads only pass-3 Part A). HARD STOP: if pass-4 ≥3 CRIT+HIGH, orchestrator escalates to human. After 3-CLEAN: HUMAN POLICY 22 ratification (with 4 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221), pass-2 done (D-1222), pass-3 done (D-1223); pass-4 next toward 3-CLEAN. ADR-052 Codex cross-vendor track (NON-STREAK): paused — Codex held.
+
+### §8. BC-5.39.001 streak (D-1223 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223); adversary pass-4 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED.
+
+---
+
+## Archived Checkpoint: D-1225-ADR052-V18-SIBLING-SWEEP-PASS5 (v10.56→v10.57, 2026-09-13)
+
+*(Archived 2026-09-13 during D-1226-ADR052-V19-PASS6-DRAIN-GC-TTL v10.57→v10.58; replaced by new SRC reflecting ADR-052 v1.9 fix burst committed state. NOTE: D-1224 checkpoint was noted as "archived" in STATE.md v10.56 but was not present in this file — pre-existing gap from prior session context cutoff; D-1224 checkpoint reconstruction not attempted per production-grade principle.)*
+
+**SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.8 + ADR-051 v1.15 COMMITTED (D-1225; in-house adversary LOCAL pass-5 RATIFY-WITH-CHANGES 2H F-1,F-2 + 2M F-3,F-4 + 2 orch-caught stray sites; all findings closed; F-1 error-taxonomy CONTENT_PRESERVATION_ABORT; F-2 ADR §Files-to-Change PC1 per-BC-row model; F-3 BC-1.18.011 PC1 propagation; F-4 §4e STAGING+expired EXPIRY_ABORT row; VP-132 realigned in 4 docs; ADR-051 §BC-Impact tense fixed). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-6 (fresh-context, reads only pass-5 Part A per Iron Law).** TRAJECTORY: CRIT+HIGH 7→5→5→2→2 (verdict upgraded NOT-RATIFIABLE→RATIFY-WITH-CHANGES; plateau at 2). PIPELINE REMAINS PAUSED.
+
+### §1. Position
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.8 + ADR-051 v1.15 COMMITTED (D-1225) — in-house adversary LOCAL pass-5 = RATIFY-WITH-CHANGES (2H F-1,F-2 + 2M F-3,F-4 + 2 orch-caught stray sites); all findings closed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-6 (fresh context, reads only pass-5 Part A). TRAJECTORY: CRIT+HIGH 7→5→5→2→2 (verdict upgraded NOT-RATIFIABLE→RATIFY-WITH-CHANGES). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221), pass-2 done (D-1222), pass-3 done (D-1223), pass-4 done (D-1224), pass-5 done (D-1225); pass-6 next toward 3-CLEAN. TRAJECTORY: CRIT+HIGH 7→5→5→2→2 (verdict upgraded NOT-RATIFIABLE→RATIFY-WITH-CHANGES; plateau at 2). ADR-052 Codex cross-vendor track (NON-STREAK): paused per human direction — Codex held.
+
+### §8. BC-5.39.001 streak (D-1225 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN); adversary pass-6 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED.
+
+---
+
+## Archived Checkpoint: D-1226-ADR052-V19-PASS6-DRAIN-GC-TTL (v10.57→v10.58, 2026-09-13)
+
+*(Archived 2026-09-13 during D-1227-ADR052-V110-PASS7-STALE-GATE-SELF-HEAL-GENERALIZED v10.58→v10.59; replaced by new SRC reflecting ADR-052 v1.10 fix burst committed state.)*
+
+**SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.9 COMMITTED (D-1226; in-house adversary LOCAL pass-6 RATIFY-WITH-CHANGES H1+H2 HIGH + M1/M2/M3 MED + L1/L2 LOW + §Files-to-Change straggler orch-caught; all findings closed; H1 drain-GC PID→TTL soundness fix; H2 E-SHD-005 re-anchored to steady-state gate; M1 VP-132.md v1.2; S-12.15 propagation-lint story opened). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-7 (fresh-context, reads only pass-6 Part A per Iron Law).** TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2 (plateau; tail LENGTH=4 →2→2→2→2). PIPELINE REMAINS PAUSED.
+
+### §1. Position (D-1226 state)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.9 COMMITTED (D-1226) — in-house adversary LOCAL pass-6 = RATIFY-WITH-CHANGES (H1+H2 HIGH + M1/M2/M3 MED + L1/L2 LOW + §Files-to-Change straggler orch-caught); all findings closed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-7 (fresh context, reads only pass-6 Part A). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2 (plateau). `pipeline:` PAUSED.
+
+### §2. Convergence (D-1226 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 (D-1226) RATIFY-WITH-CHANGES (≠ CLEAN); pass-7 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2 (plateau; tail LENGTH=4 →2→2→2→2).
+
+### §8. BC-5.39.001 streak (D-1226 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN); adversary pass-7 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED.
+
+## Archived Checkpoint: D-1227-ADR052-V110-PASS7-STALE-GATE-SELF-HEAL-GENERALIZED (v10.58→v10.59, 2026-09-13)
+
+*(Archived 2026-09-13 during D-1228-ADR052-V111-PASS8-FLOCK-SELF-HEAL-REGRESSION v10.59→v10.60; replaced by new SRC reflecting ADR-052 v1.11 fix burst committed state.)*
+
+**SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.10 COMMITTED (D-1227; in-house adversary LOCAL pass-7 RATIFY-WITH-CHANGES HIGH-1 + MED-1 + MED-2 + LOW-1/LOW-2/LOW-3; all findings closed; HIGH-1 stale-gate self-heal generalized to all no-active-txn stuck states (LOCKED+DRAINING, incl. post-ABORT/post-drain-timeout crash windows); MED-1 EXPIRY_ABORT widened; MED-2 TTL operator runbook). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-8 (fresh-context, reads only pass-7 Part A per Iron Law).** TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1 (converging; tail LENGTH=4 →2→2→2→1). PIPELINE REMAINS PAUSED.
+Prior checkpoint (D-1226-ADR052-V19-PASS6-DRAIN-GC-TTL v10.57→v10.58, 2026-09-13) archived above.
+
+### §1. Position (D-1227 state)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.10 COMMITTED (D-1227) — in-house adversary LOCAL pass-7 = RATIFY-WITH-CHANGES (HIGH-1 + MED-1 + MED-2 + LOW-1/LOW-2/LOW-3); all findings closed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-8 (fresh context, reads only pass-7 Part A). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1 (converging). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence (D-1227 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 (D-1226) RATIFY-WITH-CHANGES (≠ CLEAN); pass-7 (D-1227) RATIFY-WITH-CHANGES (≠ CLEAN); pass-8 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221), pass-2 done (D-1222), pass-3 done (D-1223), pass-4 done (D-1224), pass-5 done (D-1225), pass-6 done (D-1226), pass-7 done (D-1227); pass-8 next toward 3-CLEAN. TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1 (converging; tail LENGTH=4 →2→2→2→1). ADR-052 Codex cross-vendor track (NON-STREAK): paused per human direction — Codex held.
+
+### §6 BC versions (D-1227 state)
+
+BC-1.18.010 **v1.8** / BC-1.18.011 **v1.7** (draft; SS-01; ADR-052 v1.10 COMMITTED D-1227 — LOCAL pass-7 RATIFY-WITH-CHANGES HIGH-1+MED-1+MED-2+LOW-1/2/3 all closed; LOCAL streak 0/3; adversary pass-8 NEXT; POLICY 22 ratification OWED after 3-CLEAN; 2 sign-off items: APFS = prerequisite; prd.md §5.1 sync D-1222-DRIFT-001 owed). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX **v5.94** UNCHANGED (2,006 BCs). VP-INDEX **v3.22** UNCHANGED (141 VPs). STORY-INDEX **v4.472** (25 epics). ARCH-INDEX **v4.38** (52 ADRs; ADR-052 v1.10). error-taxonomy.md **v1.27**.
+
+### §8. BC-5.39.001 streak (D-1227 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN), pass-7 RATIFY-WITH-CHANGES (D-1227; ≠ CLEAN); adversary pass-8 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED. **PIPELINE PAUSED — adversary pass-8 (fresh-context) next; then 3-CLEAN streak needed; then POLICY 22 ratification (2 sign-off items: APFS = prerequisite).**
+
+---
+
+## Archived checkpoint: D-1228-ADR052-V111-PASS8-FLOCK-SELF-HEAL-REGRESSION (v10.59→v10.60; 2026-09-13)
+
+> Archived from STATE.md when D-1229 checkpoint replaced it per BC-5.45.001 single-checkpoint protocol.
+
+**Header:** Session Resume Checkpoint (2026-09-13 — D-1228-ADR052-V111-PASS8-FLOCK-SELF-HEAL-REGRESSION v10.59→v10.60; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED — ADR-052 v1.11 COMMITTED; LOCAL CASCADE 0/3; NEXT = adversary pass-9 → 3-CLEAN → POLICY 22 ratification)
+
+**SELF-SUFFICIENT RESUME CONTEXT (D-1228 state):** ADR-052 v1.11 COMMITTED (D-1228; in-house adversary LOCAL pass-8 NOT-RATIFIABLE 1 HIGH + 2 MED + 2 LOW; all findings closed; HIGH-1 REGRESSION: v1.10 generalized predicate matched live coordinator mid-drain → writer-exclusion break; fixed via flock(LOCK_EX|LOCK_NB) FIRST + EWOULDBLOCK→E-MAINTENANCE-001 + drain txn=STAGING BEFORE DRAINING flip; MED-1 reader open-with-ENOENT-fallback propagated to BC-1.18.010 v1.9 + BC-1.18.011 v1.8). BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-9 (fresh-context, reads only pass-8 Part A per Iron Law). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1 (plateau; tail LENGTH=4 →2→2→1→1). PIPELINE REMAINS PAUSED.
+
+### §1. Position (D-1228 state)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.11 COMMITTED (D-1228) — in-house adversary LOCAL pass-8 = NOT-RATIFIABLE (1 HIGH + 2 MED + 2 LOW); all findings closed. HIGH-1 REGRESSION: flock(LOCK_EX|LOCK_NB) FIRST fix. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-9 (fresh context, reads only pass-8 Part A). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1 (plateau; tail LENGTH=4 →2→2→1→1). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence (D-1228 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 (D-1226) RATIFY-WITH-CHANGES (≠ CLEAN); pass-7 (D-1227) RATIFY-WITH-CHANGES (≠ CLEAN); pass-8 (D-1228) NOT-RATIFIABLE (≠ CLEAN); pass-9 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1..pass-8 done; pass-9 next toward 3-CLEAN. TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1 (plateau; tail LENGTH=4 →2→2→1→1).
+
+### §3. In-flight (D-1228 state)
+
+None. D-1228 burst committed successfully. No abandoned dispatches.
+
+### §4. Pending human decisions (D-1228 state)
+
+ADR-052 v1.11 COMMITTED (D-1228) — NEXT = adversary pass-9 → 3-CLEAN → POLICY 22 ratification. BC-5.39.001 LOCAL streak 0/3. TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1. POLICY 22 2 sign-off items: (i) macOS exec-TOCTOU residual window; (ii) APFS darwin-arm64 durability test (RATIFICATION PREREQUISITE). [D-1222-DRIFT-001] prd.md §5.1 sync OWED (error-taxonomy.md v1.28). [D-1224-DRIFT-001] E-SHD-005 VP-leg gap. S-12.15 OPENED. OWED #2: 907-file hash sweep. OWED #3 CLOSED (BC-1.18.010 v1.9 + BC-1.18.011 v1.8 re-settled).
+
+### §5. WIP branches (D-1228 state)
+
+None — develop @ ebd16f79. factory-artifacts HEAD = D-1228 burst commit (run git -C .factory log -1).
+
+### §6. Resume command (D-1228 state)
+
+/vsdd-factory:rehydrate-wave then /vsdd-factory:next-step.
+
+### §7. Active versions (D-1228 state)
+
+BC-INDEX v5.95 (2,006 BCs). VP-INDEX v3.22 UNCHANGED. STORY-INDEX v4.472. ARCH-INDEX v4.39 (52 ADRs; ADR-052 v1.11). error-taxonomy.md v1.28. BC-1.18.010 v1.9 / BC-1.18.011 v1.8 (draft).
+
+### §8. BC-5.39.001 streak (D-1228 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN), pass-7 RATIFY-WITH-CHANGES (D-1227; ≠ CLEAN), pass-8 NOT-RATIFIABLE (D-1228; ≠ CLEAN); adversary pass-9 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED. **PIPELINE PAUSED — adversary pass-9 (fresh-context) next; then 3-CLEAN streak needed; then POLICY 22 ratification (2 sign-off items: APFS = prerequisite).**
+
+---
+
+## Session Resume Checkpoint (2026-09-13 — D-1229-ADR052-V112-PASS9-BC-INDEX-TRANSCRIPTION-NULL-STAGING v10.60→v10.61; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED — ADR-052 v1.12 COMMITTED; LOCAL CASCADE 0/3; NEXT = adversary pass-10 → 3-CLEAN → POLICY 22 ratification)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.12 COMMITTED (D-1229; in-house adversary LOCAL pass-9 NOT-RATIFIABLE 2 HIGH + 2 MED + 2 LOW; all 6 findings closed; F1 HIGH BC-INDEX transcription inversion corrected — state-manager mis-transcribed 3 changelog/catalog cells at D-1228 as canonical-first; generation-first/canonical-fallback restored in all 3 locations; F2 HIGH §4e null-STAGING crash sub-state fixed; F3/F4 MED closed; F5/F6 LOW closed). BC-5.39.001 LOCAL streak 0/3. **NEXT = adversary pass-10 (fresh-context, reads only pass-9 Part A per Iron Law).** TRAJECTORY REVERSED: CRIT+HIGH 7→5→5→2→2→2→1→1→2 (3rd fix-induced concurrency regression; human elected keep-grinding 2nd time; tail LENGTH=4 →2→1→1→2). PIPELINE REMAINS PAUSED.
+> Prior checkpoint (D-1228-ADR052-V111-PASS8-FLOCK-SELF-HEAL-REGRESSION v10.59→v10.60, 2026-09-13) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a) (D-1229 state)
+
+2026-09-13. S-25.02 F4 cluster-5 F1; ADR-052 v1.12 COMMITTED (D-1229) — in-house adversary LOCAL pass-9 = NOT-RATIFIABLE (2 HIGH + 2 MED + 2 LOW); all 6 findings closed. F1 HIGH BC-INDEX transcription inversion corrected (generation-first/canonical-fallback restored in 3 locations); F2 HIGH null-STAGING crash sub-state fixed. BC-5.39.001 LOCAL streak 0/3. NEXT = adversary pass-10 (fresh context, reads only pass-9 Part A). TRAJECTORY REVERSED: CRIT+HIGH 7→5→5→2→2→2→1→1→2 (3rd fix-induced concurrency regression; tail LENGTH=4 →2→1→1→2). After 3-CLEAN: HUMAN POLICY 22 ratification (with 2 sign-off items + prd.md §5.1 sync). `pipeline:` PAUSED.
+
+### §2. Convergence (b) (D-1229 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 (D-1226) RATIFY-WITH-CHANGES (≠ CLEAN); pass-7 (D-1227) RATIFY-WITH-CHANGES (≠ CLEAN); pass-8 (D-1228) NOT-RATIFIABLE (≠ CLEAN); pass-9 (D-1229) NOT-RATIFIABLE (≠ CLEAN; TRAJECTORY REVERSED 1→2; 3rd regression); pass-10 next.** Cycle-level streak: CONVERGED 3/3 (unchanged). TRAJECTORY REVERSED: CRIT+HIGH 7→5→5→2→2→2→1→1→2 (3rd regression; tail LENGTH=4 →2→1→1→2). ADR-052 Codex cross-vendor track (NON-STREAK): paused per human direction — Codex held.
+
+### §3. In-flight / Abandoned (c) (D-1229 state)
+
+None. D-1229 burst committed successfully. No abandoned dispatches.
+
+### §4. Pending human decisions / open blockers (d) (D-1229 state)
+
+**ADR-052 v1.12 COMMITTED (D-1229) — NEXT = adversary pass-10 → 3-CLEAN → POLICY 22 ratification.** BC-5.39.001 LOCAL streak 0/3 (NOT-RATIFIABLE ≠ CLEAN). TRAJECTORY REVERSED: CRIT+HIGH 7→5→5→2→2→2→1→1→2 (3rd fix-induced concurrency regression; tail LENGTH=4 →2→1→1→2). Human elected keep-grinding 2nd time. After 3 consecutive clean passes: HUMAN POLICY 22 ratification required with 2 mandatory sign-off items: (i) macOS exec-TOCTOU residual window; (ii) APFS darwin-arm64 durability test (RATIFICATION PREREQUISITE). **ALSO required before POLICY 22 ratification:** [D-1222-DRIFT-001] prd.md §5.1 does NOT enumerate MIG + MAINTENANCE error categories; product-owner must sync §5.1. Cluster-5 TDD BLOCKED until POLICY 22 ratification. OWED #2 (907-file hash sweep).
+
+### §5. WIP branches (e) (D-1229 state)
+
+None — `develop` @ `ebd16f79` (PR #832 merged, cluster-4 closed); no story worktrees open. `factory-artifacts` HEAD = D-1229 burst commit.
+
+### §6. Resume command (f) (D-1229 state)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212). BC-1.18.010 **v1.9** / BC-1.18.011 **v1.8** (draft; SS-01; ADR-052 v1.12 COMMITTED D-1229). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX **v5.96** (2,006 BCs). VP-INDEX **v3.22** UNCHANGED (141 VPs). STORY-INDEX **v4.472** (25 epics). ARCH-INDEX **v4.40** (52 ADRs; ADR-052 v1.12). error-taxonomy.md **v1.29**.
+
+### §7. HEADs (D-1229 state)
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: D-1229 burst commit (run `git -C .factory log -1` for SHA).
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9`.
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f`.
+
+### §8. BC-5.39.001 streak (D-1229 state)
+
+**LOCAL cluster-5 streak: 0/3** — pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN), pass-7 RATIFY-WITH-CHANGES (D-1227; ≠ CLEAN), pass-8 NOT-RATIFIABLE (D-1228; ≠ CLEAN), pass-9 NOT-RATIFIABLE (D-1229; ≠ CLEAN; TRAJECTORY REVERSED 1→2; 3rd concurrency regression); adversary pass-10 next. Cycle-level streak: 3/3 CONVERGED UNCHANGED. **PIPELINE PAUSED — adversary pass-10 (fresh-context) next; then 3-CLEAN streak needed; then POLICY 22 ratification (2 sign-off items: APFS = prerequisite).**
+
+---
+
+## Session Resume Checkpoint (2026-09-13 — D-1230-ADR052-V113-PASS10-ACCEPT-AT-FLOOR v10.61→v10.62; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE PAUSED — ADR-052 v1.13 COMMITTED; ACCEPT-AT-FLOOR DECLARED per D-386 Option C; NEXT = HUMAN POLICY 22 RATIFICATION)
+
+Archived from STATE.md by the D-1232-POLICY22-RATIFIED-CLUSTER5-UNBLOCKED burst (2026-09-20). Full content preserved in git: `git show eddae7dc:.factory/STATE.md` (factory-artifacts HEAD at archive time).
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 v1.13 COMMITTED (D-1230; in-house adversary LOCAL pass-10 RATIFY-WITH-CHANGES 1 HIGH + 3 MED + 2 LOW; all 6 findings closed; HIGH-1 4th fix-induced concurrency-core regression: step-3.5 self-heal covers null-generation STAGING crash; MED-1 EXPIRY_ABORT third arm; MED-2 v1.2 dangling refs inlined; MED-3 null-generation ABORTED-retained; LOW-1/LOW-2). §Verification-Strategy accept-at-floor note added. prd.md §5.1 MIG/MAINTENANCE sync ([D-1222-DRIFT-001] RESOLVED): prd.md v1.4→v1.5. error-taxonomy v1.30. TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1→2→1 (10 passes; floor at 1; tail LENGTH=4 →1→1→2→1). **HUMAN DECISION (D-1230): ACCEPT-AT-FLOOR per D-386 Option C — concurrency state machine FROZEN; crash-safety/liveness DEFERRED to cluster-5 Kani+fault-injection. NEXT = HUMAN POLICY 22 RATIFICATION (5 sign-off items).** PIPELINE PAUSED.
+> Prior checkpoint (D-1229-ADR052-V112-PASS9-BC-INDEX-TRANSCRIPTION-NULL-STAGING v10.60→v10.61, 2026-09-13) archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+### §1. Position (a) (D-1230 state)
+
+2026-09-13. S-25.02 F4 cluster-5; ADR-052 v1.13 COMMITTED (D-1230) — in-house adversary LOCAL pass-10 = RATIFY-WITH-CHANGES (1 HIGH + 3 MED + 2 LOW); all 6 findings closed. HIGH-1 (4th fix-induced concurrency-core regression): step-3.5 self-heal covers null-generation STAGING crash. prd.md §5.1 MIG/MAINTENANCE sync ([D-1222-DRIFT-001] RESOLVED). BC-5.39.001 LOCAL streak 0/3 (adversary cascade CLOSED at accept-at-floor per D-386 Option C). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1→2→1 (floor at 1; tail LENGTH=4 →1→1→2→1). HUMAN DECISION: ACCEPT-AT-FLOOR per D-386 Option C. NEXT = HUMAN POLICY 22 RATIFICATION (5 sign-off items). `pipeline:` PAUSED.
+
+### §2. Convergence (b) (D-1230 state)
+
+BC-5.39.001 LOCAL cluster-5 streak **0/3 — pass-1 (D-1221) NOT-RATIFIABLE; pass-2 (D-1222) NOT-RATIFIABLE; pass-3 (D-1223) NOT-RATIFIABLE; pass-4 (D-1224) NOT-RATIFIABLE; pass-5 (D-1225) RATIFY-WITH-CHANGES (≠ CLEAN); pass-6 (D-1226) RATIFY-WITH-CHANGES (≠ CLEAN); pass-7 (D-1227) RATIFY-WITH-CHANGES (≠ CLEAN); pass-8 (D-1228) NOT-RATIFIABLE (≠ CLEAN); pass-9 (D-1229) NOT-RATIFIABLE (≠ CLEAN; TRAJECTORY REVERSED 1→2; 3rd regression); pass-10 (D-1230) RATIFY-WITH-CHANGES (≠ CLEAN; ACCEPT-AT-FLOOR declared per D-386 Option C — adversary cascade CLOSED).** Cycle-level streak: CONVERGED 3/3 (unchanged). ADR-052 LOCAL cascade: pass-1 done (D-1221) through pass-10 done (D-1230); cascade CLOSED at accept-at-floor per D-386 Option C. TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1→2→1 (10 passes; floor at 1; tail LENGTH=4 →1→1→2→1). ADR-052 Codex cross-vendor track (NON-STREAK): paused per human direction — Codex held.
+
+### §3. In-flight / Abandoned (c) (D-1230 state)
+
+None. D-1230 burst committed successfully. No abandoned dispatches.
+
+### §4. Pending human decisions / open blockers (d) (D-1230 state)
+
+**ADR-052 v1.13 COMMITTED (D-1230) — ACCEPT-AT-FLOOR DECLARED. NEXT = HUMAN POLICY 22 RATIFICATION.** BC-5.39.001 LOCAL streak 0/3 (cascade CLOSED per D-386 Option C). TRAJECTORY: CRIT+HIGH 7→5→5→2→2→2→1→1→2→1 (floor at 1; tail LENGTH=4 →1→1→2→1). HUMAN POLICY 22 ratification required with 5 sign-off items:
+- **(i) macOS exec-TOCTOU residual window:** Sub-instruction stat→execve gap. Mitigation: no-concurrent-`cargo build` pre-flight before migration activation. Human must explicitly acknowledge.
+- **(ii) APFS directory-fsync durability (RATIFICATION PREREQUISITE):** APFS darwin-arm64 durability test = ratification prerequisite per D-1224. Must be completed before POLICY 22 ratification — not merely acknowledged. Confirm darwin-arm64 CI runner (GitHub Actions macOS-14 or equivalent).
+- **(iii) CLAUDE.md amendment:** 4 exact append-log paths + sub-shard/manifest allowlist pattern. Human must explicitly approve text.
+- **(iv) 4 dispatcher-guard amendments:** At cluster-5 activation boundary. Human must explicitly approve.
+- **(v) Accept-at-floor acknowledgment (D-1230):** Human must explicitly ratify the D-386 Option C decision codified at D-1230.
+
+**[D-1222-DRIFT-001] RESOLVED:** prd.md §5.1 MIG/MAINTENANCE sync applied (prd.md v1.4→v1.5, D-1230).
+
+**[D-1224-DRIFT-001] ASSESSED DEFERRABLE:** E-SHD-005 VP-leg — STEADY-STATE gate HookResult (BC-1.18.006/BC-1.18.010); NOT a POLICY 22 blocker; anchored to E-12/BC-1.18.006/010 verification story.
+
+**S-12.15 OPEN (propagation-lint gate, E-12):** [D-1225-PG-001] → S-12.15. Not blocking ratification.
+
+Cluster-5 TDD BLOCKED until POLICY 22 ratification. Other open: **[D-1212-DRIFT-002]** → S-12.14. **[D-1221-PG-001]** process-gap → S-12.13. **S-25.05** (Obs-B), **S-25.06** (executor). S-12.09..S-12.15 (E-12). **F-006+SEC-831-01** → T-12. **[D-1207]** `.factory/.gitignore` unregistered. Cycle-file compaction → S-25.06. 4 PRs open: **#769, #768, #729, #632**.
+
+**OWED ON RESUME (1 item remaining):**
+2. input-hash currency refresh — `compute-input-hash --scan --update` sweep (907 files) OWED.
+
+### §5. WIP branches (e) (D-1230 state)
+
+None — `develop` @ `ebd16f79` (PR #832 merged, cluster-4 closed); no story worktrees open. `factory-artifacts` HEAD = D-1230 burst commit.
+
+### §6. Resume command (f) (D-1230 state)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.15 active.** **BC-1.18.006 v1.12 active.** **BC-1.18.007 v1.2 active.** **BC-1.18.008 v1.9 active.** **BC-1.18.009 v1.8 active** (POL-14 promoted D-1212). BC-1.18.010 **v1.9** / BC-1.18.011 **v1.8** (draft; SS-01; ADR-052 v1.13 COMMITTED D-1230 — LOCAL pass-10 RATIFY-WITH-CHANGES 1 HIGH+3 MED+2 LOW all closed; HIGH-1 step-3.5 self-heal covers null-generation STAGING crash; ACCEPT-AT-FLOOR declared per D-386 Option C; LOCAL streak 0/3 cascade CLOSED; POLICY 22 AWAITING HUMAN RATIFICATION; 5 sign-off items: APFS = prerequisite; TRAJECTORY: CRIT+HIGH floor at 1). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX **v5.96** (2,006 BCs). VP-INDEX **v3.22** UNCHANGED (141 VPs). STORY-INDEX **v4.472** (25 epics). ARCH-INDEX **v4.41** (52 ADRs; ADR-052 v1.13). error-taxonomy.md **v1.30**.
+
+### §7. HEADs (D-1230 state)
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: D-1230 burst commit (run `git -C .factory log -1` for SHA).
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak (D-1230 state)
+
+**LOCAL cluster-5 streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor per D-386 Option C (D-1230).** pass-1 NOT-RATIFIABLE (D-1221), pass-2 NOT-RATIFIABLE (D-1222), pass-3 NOT-RATIFIABLE (D-1223), pass-4 NOT-RATIFIABLE (D-1224), pass-5 RATIFY-WITH-CHANGES (D-1225; ≠ CLEAN), pass-6 RATIFY-WITH-CHANGES (D-1226; ≠ CLEAN), pass-7 RATIFY-WITH-CHANGES (D-1227; ≠ CLEAN), pass-8 NOT-RATIFIABLE (D-1228; ≠ CLEAN), pass-9 NOT-RATIFIABLE (D-1229; ≠ CLEAN; TRAJECTORY REVERSED 1→2; 3rd concurrency regression), pass-10 RATIFY-WITH-CHANGES (D-1230; ≠ CLEAN; ACCEPT-AT-FLOOR declared). Cycle-level streak: 3/3 CONVERGED UNCHANGED. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 cascade CLOSED at accept-at-floor (D-1230). **PIPELINE PAUSED — AWAITING HUMAN POLICY 22 RATIFICATION (5 sign-off items: APFS = prerequisite; accept-at-floor acknowledgment).**
+
+**This checkpoint superseded by the D-1232-POLICY22-RATIFIED-CLUSTER5-UNBLOCKED burst 2026-09-20 (POLICY 22 ratified on D-1231's mechanical proof; ACCEPT-AT-FLOOR basis superseded; cluster-5 UNBLOCKED; pipeline PAUSED→in_progress).**
