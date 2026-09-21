@@ -7068,3 +7068,306 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 **Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), a separate LOCAL track now fully retired for cluster-1. Next adversary activity: cluster-2's (roll, BC-1.18.006) own fresh LOCAL cascade, starting at 0/3, once its TDD delivery begins.
 
 ---
+
+## Session Resume Checkpoint (2026-09-07 — S2502-CLUSTER2-PASS1-SEALEDRETRO-WRITEARM-SPEC-CASCADE; develop fff5e4cc (PR #818 merged); main 51023185; merged_count 119; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Brownfield cycle `v1.0-brownfield-backfill`. S-25.02 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-1 = NOT CLEAN — 6 findings (4 MAJOR F-C2-P1-001/002/003/004, 2 MINOR F-C2-P1-005/006), ALL fixed this burst. BC-1.18.006 v1.4→v1.5 (product-owner, 3 of 4 MAJOR findings); F-C2-P1-003/005/006 code-side-only on `feature/S-25.02-roll` @ `d0514e14`. `pipeline:` stays **in_progress** this burst. BC-5.39.001 cluster-2 LOCAL streak stays 0/3 (pass-1 not clean; pass-2 next).
+> Prior checkpoint (S2502-CLUSTER1-DELIVERY-MERGE-BURST, D-1173 — itself never actually superseded by
+> the D-1174 F2/F3-FINALIZED burst despite that burst's own claim of a checkpoint refresh, a gap this
+> burst closes) was already archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md` (line ~7031).
+
+### §1. Position (a)
+
+**S-25.02 Feature-Mode Phase F4 (delta-implementation), incremental-by-BC-cluster (D-1170).** Cluster 1 (cap+trigger, BC-1.18.005) **DELIVERED/MERGED** (PR #818 @ `fff5e4cc`, D-1173). Cluster 2 (roll, BC-1.18.006) F2/F3 spec-evolution FINALIZED (D-1174) and has now landed its first LOCAL adversary pass (D-1175): pass-1 = NOT CLEAN, all 6 findings fixed — BC-1.18.006 v1.5, story v2.9, code `feature/S-25.02-roll` @ `d0514e14`. **NEXT = cluster-2 LOCAL adversary pass-2, fresh context.** Remaining clusters: 3 mech-A backfill (BC-1.18.007+008), 4 B1 rotation (BC-1.18.009), 5 B2 sharding (BC-1.18.010+011), 6 migrations (BC-1.18.012), 7 Cohort-B flip (BC-7.08.001).
+
+### §2. Convergence (b)
+
+Cluster-1 LOCAL BC-5.39.001 = **3/3 CONVERGED — CLOSED** (D-1172/D-1173, fully retired). Cluster-2 LOCAL BC-5.39.001 = **0/3** — pass-1 NOT CLEAN (6 findings, all fixed this burst); pass-2 next, fresh context, against BC-1.18.006 v1.5/story v2.9/code `d0514e14`. Cycle-level BC-5.39.001 = **3/3 CONVERGED** (separate track, unchanged). No trajectory-tail drift — unchanged `→0→1→1→1` LENGTH=4 (LOCAL cascade, not a cycle-level adversary pass).
+
+### §3. In-flight (c)
+
+**Cluster-2 LOCAL adversary cascade, pass-2 pending.** BC-1.18.006 is at v1.5 (frontmatter, uncommitted-to-develop; `status`/`lifecycle_status` stays `draft`), S-25.02 story at v2.9, code frozen on `feature/S-25.02-roll` @ `d0514e14`. No TDD worktree state changed this burst (spec-side + index-side only). NEXT step is a fresh-context adversary pass-2 against this exact frozen delta.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+This session + carried:
+1. **F6-owed VPs** for BC-1.18.005 EC-013..EC-022 + PC9, AND BC-1.18.006 Postcondition 7/EC-014/EC-015/EC-016/EC-017/EC-018/Invariant 7 (all deferred to Phase F6 targeted-hardening; the BC-1.18.006 pending VP-NNN row was EXTENDED, not newly allocated, at D-1175).
+2. **BC-1.18.009/cluster-4 carry-forward:** `read_changelog_item_count` closing-fence heuristic robustness (Drift Item D-1172).
+3. **`replace_all` multiplicity gap** — SPEC-SIDE CLOSED at BC-1.18.006/cluster-2 (D-1174); code-side lands at cluster-2's own TDD (AC-024/AC-025, still pending implementation as of this burst — the pass-1 cascade fixed SPEC gaps in the not-yet-implemented ACs, not code).
+4. **Branch protection on `develop`** BLOCKED on repo-admin.
+5. **[D-1173] Worktree fragmentation [process-gap]:** during PR #818 cycles 2-4, a legitimate fix was nearly orphaned in a stale-base worktree; caught by a pre-merge orchestrator integrity check. Needs a codified guardrail. Anchor: next engine-discipline self-improvement cycle.
+6. **[D-1173] TC-EC001 flaky test [process-gap]:** `tests/precompact-routing.bats:350` flaked once during PR #818 CI — needs de-flaking. Anchor: next maintenance sweep or self-improvement cycle.
+7. **[NEW D-1175] `.factory/policies.yaml` YAML defect:** fails strict YAML parse (unescaped literal pipe character in a double-quoted scalar near line ~425 + an early `---` making it multi-document). NOT fixed this burst (out of scope per explicit instruction). Anchor: next maintenance sweep.
+8. **[NEW D-1175] STATE-manager checkpoint-refresh gap:** the D-1174 burst claimed "Session Resume Checkpoint content REPLACED" but the checkpoint header/content actually stayed at the D-1173 (S2502-CLUSTER1-DELIVERY-MERGE-BURST) value through D-1174 — closed THIS burst (this checkpoint). No further action needed; recorded here only as a discovered process-gap for awareness, not an OPEN item.
+9. **All prior carried OWED items** (Dependabot backlog, ~871 stale input-hashes, decision-log backfill through D-1173/D-1165/D-1156..D-1160, O-P18-001) unchanged.
+
+**Full historical long-tail (unchanged, nothing dropped — see archived session-checkpoints.md history):** cargo-deny advisory disposition; VP-079/VP-028 POLICY-9 "ten events" propagation; PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED; ADR-045 v1.3 ratification burst (Wave-7 HELD); E-23 re-scope to frozen-provenance model (STALE); LOW-7 DEFERRED AC-006 events-sink wording; `[process-gap]` registry-comment-lint (E-12 follow-up); spec-hygiene sweep OWED (E-10 follow-up); the 4 D-1164 documentary follow-ups; redundant `git stash@{0}`.
+
+### §5. WIP branches (e)
+
+**Cluster-2:** `feature/S-25.02-roll` @ `d0514e14` — code-side fixes for F-C2-P1-003/005/006 landed; TDD/code state otherwise unchanged by this spec-side burst. Inert carried-forward (unchanged, not re-verified): `fix/d999-sentinel-code-migration` @ `bf642fd9`, `feature/S-21.04` @ `323f440f`.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.14 active.** **BC-1.18.006 v1.5** (draft; SS-01; cluster-2 not shipped) + BC-1.18.007 v1.2/008 v1.1/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 remains the only ACTIVE one of the 9. BC-INDEX v5.67 (2,006 BCs, UNCHANGED count). VP-INDEX v3.07 (141 VPs, UNCHANGED). STORY-INDEX v4.448 (176 stories; 25 epics; S-25.02 v2.9, status ready, cluster-1 DELIVERED/MERGED, cluster-2 pass-1 fixed/pass-2 next; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.23 (48 ADRs; UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`fff5e4cc`** (PR #818 squash-merged, base `54fa985f`). merged_count **119**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-roll`: **ACTIVE** @ `d0514e14` — cluster-2's code branch, F-C2-P1-003/005/006 landed this burst; TDD in progress (AC-024/AC-025 not yet implemented).
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran; this is a LOCAL cluster-2 pass). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: 0/3** — pass-1 NOT CLEAN (6 findings, all fixed this burst); pass-2 next, fresh context, against BC-1.18.006 v1.5/story v2.9/code `feature/S-25.02-roll` @ `d0514e14`.
+
+## Session Resume Checkpoint (2026-09-07 — S2502-CLUSTER2-PASS2-FAILLOUD-STABLECAP-SPEC-CASCADE; develop fff5e4cc (PR #818 merged); main 51023185; merged_count 119; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Brownfield cycle `v1.0-brownfield-backfill`. S-25.02 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-2 = NOT CLEAN — 6 findings (2 MAJOR F-C2-P2-001/002, 2 MINOR F-C2-P2-003/004, 2 ADVISORY F-C2-P2-005/006), ALL fixed this burst. BC-1.18.006 v1.5→v1.6 (product-owner, 2 MINOR findings — F-C2-P2-003's fix SURFACED and RESOLVED a spec-vs-spec-looking conflict with cluster-1's shipped BC-1.18.005 F-002 test); F-C2-P2-001/002/006 code-side-only on `feature/S-25.02-roll` @ `a9611f71`. `pipeline:` stays **in_progress** this burst. BC-5.39.001 cluster-2 LOCAL streak stays 0/3 (pass-2 not clean, 2 consecutive not-clean passes; pass-3 next).
+> Prior checkpoint (S2502-CLUSTER2-PASS1-SEALEDRETRO-WRITEARM-SPEC-CASCADE, D-1175) was already
+> archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md` (appended after line ~7082).
+
+### §1. Position (a)
+
+**S-25.02 Feature-Mode Phase F4 (delta-implementation), incremental-by-BC-cluster (D-1170).** Cluster 1 (cap+trigger, BC-1.18.005) **DELIVERED/MERGED** (PR #818 @ `fff5e4cc`, D-1173). Cluster 2 (roll, BC-1.18.006) has now landed its second LOCAL adversary pass (D-1176): pass-2 = NOT CLEAN, all 6 findings fixed — BC-1.18.006 v1.6, story v3.0, code `feature/S-25.02-roll` @ `a9611f71`. **NEXT = cluster-2 LOCAL adversary pass-3, fresh context.** Remaining clusters: 3 mech-A backfill (BC-1.18.007+008), 4 B1 rotation (BC-1.18.009), 5 B2 sharding (BC-1.18.010+011), 6 migrations (BC-1.18.012), 7 Cohort-B flip (BC-7.08.001).
+
+### §2. Convergence (b)
+
+Cluster-1 LOCAL BC-5.39.001 = **3/3 CONVERGED — CLOSED** (D-1172/D-1173, fully retired). Cluster-2 LOCAL BC-5.39.001 = **0/3** — pass-2 NOT CLEAN (6 findings, all fixed this burst; 2 consecutive not-clean passes); pass-3 next, fresh context, against BC-1.18.006 v1.6/story v3.0/code `a9611f71`. Cycle-level BC-5.39.001 = **3/3 CONVERGED** (separate track, unchanged). No trajectory-tail drift — unchanged `→0→1→1→1` LENGTH=4 (LOCAL cascade, not a cycle-level adversary pass).
+
+### §3. In-flight (c)
+
+**Cluster-2 LOCAL adversary cascade, pass-3 pending.** BC-1.18.006 is at v1.6 (frontmatter, uncommitted-to-develop; `status`/`lifecycle_status` stays `draft`), S-25.02 story at v3.0, code frozen on `feature/S-25.02-roll` @ `a9611f71`. No TDD worktree state changed this burst (spec-side + index-side only). NEXT step is a fresh-context adversary pass-3 against this exact frozen delta.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+This session + carried:
+1. **F6-owed VPs** for BC-1.18.005 EC-013..EC-022 + PC9, AND BC-1.18.006 Postcondition 7/EC-014..EC-020/Invariant 7/Invariant 8 (all deferred to Phase F6 targeted-hardening; the BC-1.18.006 pending VP-NNN row was EXTENDED again, not newly allocated, at D-1176).
+2. **BC-1.18.009/cluster-4 carry-forward:** `read_changelog_item_count` closing-fence heuristic robustness (Drift Item D-1172).
+3. **`replace_all` multiplicity gap** — SPEC-SIDE CLOSED at BC-1.18.006/cluster-2 (D-1174); code-side lands at cluster-2's own TDD (AC-024/AC-025, still pending implementation as of this burst — the pass-1/pass-2 cascades fixed SPEC gaps in the not-yet-implemented ACs, not code).
+4. **Branch protection on `develop`** BLOCKED on repo-admin.
+5. **[D-1173] Worktree fragmentation [process-gap]:** during PR #818 cycles 2-4, a legitimate fix was nearly orphaned in a stale-base worktree; caught by a pre-merge orchestrator integrity check. Needs a codified guardrail. Anchor: next engine-discipline self-improvement cycle.
+6. **[D-1173] TC-EC001 flaky test [process-gap]:** `tests/precompact-routing.bats:350` flaked once during PR #818 CI — needs de-flaking. Anchor: next maintenance sweep or self-improvement cycle.
+7. **[D-1175] `.factory/policies.yaml` YAML defect:** fails strict YAML parse (unescaped literal pipe character in a double-quoted scalar near line ~425 + an early `---` making it multi-document). NOT fixed this burst either (out of scope). Anchor: next maintenance sweep.
+8. **All prior carried OWED items** (Dependabot backlog, ~871 stale input-hashes, decision-log backfill through D-1173/D-1165/D-1156..D-1160, O-P18-001) unchanged.
+
+**Full historical long-tail (unchanged, nothing dropped — see archived session-checkpoints.md history):** cargo-deny advisory disposition; VP-079/VP-028 POLICY-9 "ten events" propagation; PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED; ADR-045 v1.3 ratification burst (Wave-7 HELD); E-23 re-scope to frozen-provenance model (STALE); LOW-7 DEFERRED AC-006 events-sink wording; `[process-gap]` registry-comment-lint (E-12 follow-up); spec-hygiene sweep OWED (E-10 follow-up); the 4 D-1164 documentary follow-ups; redundant `git stash@{0}`.
+
+### §5. WIP branches (e)
+
+**Cluster-2:** `feature/S-25.02-roll` @ `a9611f71` — code-side fixes for F-C2-P2-001/002/003/006 landed (F-C2-P2-003's Red Gate + fail-loud flip + F-002 retarget: commits `982a2998`/`d18bf08b`/`a9611f71`); TDD/code state otherwise unchanged by this spec-side burst. Inert carried-forward (unchanged, not re-verified): `fix/d999-sentinel-code-migration` @ `bf642fd9`, `feature/S-21.04` @ `323f440f`.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.14 active.** **BC-1.18.006 v1.6** (draft; SS-01; cluster-2 not shipped) + BC-1.18.007 v1.2/008 v1.1/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 remains the only ACTIVE one of the 9. BC-INDEX v5.68 (2,006 BCs, UNCHANGED count). VP-INDEX v3.07 (141 VPs, UNCHANGED). STORY-INDEX v4.449 (176 stories; 25 epics; S-25.02 v3.0, status ready, cluster-1 DELIVERED/MERGED, cluster-2 pass-2 fixed/pass-3 next; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.23 (48 ADRs; UNCHANGED this burst). error-taxonomy.md v1.3 (new `E-SHD-008` row; no dedicated registry index in this repo).
+
+### §7. HEADs
+
+- `develop`: **`fff5e4cc`** (PR #818 squash-merged, base `54fa985f`). merged_count **119**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-roll`: **ACTIVE** @ `a9611f71` — cluster-2's code branch, F-C2-P2-001/002/003/006 landed this burst; TDD in progress (AC-024/AC-025 not yet implemented).
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran; this is a LOCAL cluster-2 pass). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: 0/3** — pass-2 NOT CLEAN (6 findings, all fixed this burst; 2 consecutive not-clean passes); pass-3 next, fresh context, against BC-1.18.006 v1.6/story v3.0/code `feature/S-25.02-roll` @ `a9611f71`.
+
+---
+
+## Session Resume Checkpoint (2026-09-07 — S2502-CLUSTER2-PASS3-EMPTYCANON-ZEROBYTESEAL-SPEC-CASCADE; develop fff5e4cc (PR #818 merged); main 51023185; merged_count 119; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Brownfield cycle `v1.0-brownfield-backfill`. S-25.02 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-3 = NOT CLEAN — 3 findings/observations (1 MAJOR F-C2-P3-001, 1 MINOR F-C2-P3-002, 1 ADVISORY O-C2-P3-001), ALL fixed this burst. BC-1.18.006 v1.6→v1.7 (product-owner: F-C2-P3-001's empty-canonical `Ok(None)` short-circuit SANCTIONED as a spec-doc gap, not a code defect; F-C2-P3-002's NEW Invariant 9 closes a genuine self-heal zero-byte-seal gap, CODE+TEST ROUTED to implementer/test-writer; O-C2-P3-001's NEW Invariant 10 is documentary). No code changed this burst (spec + index only); code stays frozen on `feature/S-25.02-roll` @ `e2d6a45a`. `pipeline:` stays **in_progress** this burst. BC-5.39.001 cluster-2 LOCAL streak stays 0/3 (pass-3 not clean, 3 consecutive not-clean passes; pass-4 next).
+> Prior checkpoint (S2502-CLUSTER2-PASS2-FAILLOUD-STABLECAP-SPEC-CASCADE, D-1176) was already
+> archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md` (appended after line ~7143).
+
+### §1. Position (a)
+
+**S-25.02 Feature-Mode Phase F4 (delta-implementation), incremental-by-BC-cluster (D-1170).** Cluster 1 (cap+trigger, BC-1.18.005) **DELIVERED/MERGED** (PR #818 @ `fff5e4cc`, D-1173). Cluster 2 (roll, BC-1.18.006) has now landed its third LOCAL adversary pass (D-1177): pass-3 = NOT CLEAN, all 3 findings/observations fixed — BC-1.18.006 v1.7, story v3.1, code `feature/S-25.02-roll` @ `e2d6a45a`. **NEXT = cluster-2 LOCAL adversary pass-4, fresh context.** Remaining clusters: 3 mech-A backfill (BC-1.18.007+008), 4 B1 rotation (BC-1.18.009), 5 B2 sharding (BC-1.18.010+011), 6 migrations (BC-1.18.012), 7 Cohort-B flip (BC-7.08.001).
+
+### §2. Convergence (b)
+
+Cluster-1 LOCAL BC-5.39.001 = **3/3 CONVERGED — CLOSED** (D-1172/D-1173, fully retired). Cluster-2 LOCAL BC-5.39.001 = **0/3** — pass-3 NOT CLEAN (3 findings/observations, all fixed this burst; 3 consecutive not-clean passes); pass-4 next, fresh context, against BC-1.18.006 v1.7/story v3.1/code `e2d6a45a`. Cycle-level BC-5.39.001 = **3/3 CONVERGED** (separate track, unchanged). No trajectory-tail drift — unchanged `→0→1→1→1` LENGTH=4 (LOCAL cascade, not a cycle-level adversary pass).
+
+### §3. In-flight (c)
+
+**Cluster-2 LOCAL adversary cascade, pass-4 pending.** BC-1.18.006 is at v1.7 (frontmatter, uncommitted-to-develop; `status`/`lifecycle_status` stays `draft`), S-25.02 story at v3.1, code frozen on `feature/S-25.02-roll` @ `e2d6a45a`. No TDD worktree state changed this burst (spec-side + index-side only) — but EC-022's self-heal 0-byte-orphan guard is a NEW, unimplemented pending Red-Gate obligation under T-4, so cluster-2's TDD scope grew this burst even though no code landed. NEXT step is a fresh-context adversary pass-4 against this exact frozen delta.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+This session + carried:
+1. **F6-owed VPs** for BC-1.18.005 EC-013..EC-022 + PC9, AND BC-1.18.006 Postcondition 7/EC-014..EC-020/Invariant 7/Invariant 8 (all deferred to Phase F6 targeted-hardening; the BC-1.18.006 pending VP-NNN row stays UNCHANGED at its pass-2 scope this burst — EC-021/EC-022 were fully covered by the VP-120/138/139 facet extensions instead, no new F6 deferral needed).
+2. **BC-1.18.009/cluster-4 carry-forward:** `read_changelog_item_count` closing-fence heuristic robustness (Drift Item D-1172).
+3. **`replace_all` multiplicity gap** — SPEC-SIDE CLOSED at BC-1.18.006/cluster-2 (D-1174); code-side lands at cluster-2's own TDD (AC-024/AC-025, still pending implementation as of this burst; EC-022's self-heal guard is a NEW pending obligation under T-4 as of pass-3).
+4. **Branch protection on `develop`** BLOCKED on repo-admin.
+5. **[D-1173] Worktree fragmentation [process-gap]:** during PR #818 cycles 2-4, a legitimate fix was nearly orphaned in a stale-base worktree; caught by a pre-merge orchestrator integrity check. Needs a codified guardrail. Anchor: next engine-discipline self-improvement cycle.
+6. **[D-1173] TC-EC001 flaky test [process-gap]:** `tests/precompact-routing.bats:350` flaked once during PR #818 CI — needs de-flaking. Anchor: next maintenance sweep or self-improvement cycle.
+7. **[D-1175] `.factory/policies.yaml` YAML defect:** fails strict YAML parse (unescaped literal pipe character in a double-quoted scalar near line ~425 + an early `---` making it multi-document). NOT fixed this burst either (out of scope). Anchor: next maintenance sweep.
+8. **[D-1177] `validate-factory-path-staging` raw-substring-scan false-positive [process-gap]:** scans the full Bash command text (including commit-message heredoc bodies) for `.factory/`, false-positive-blocking commits that merely mention `.factory/` in prose. NOT fixed this burst (hook-source change is a distinct fix). Anchor: next maintenance sweep or self-improvement cycle.
+9. **[D-1177] `validate-count-propagation` VP-count scope-mismatch [process-gap]:** compares VP-INDEX's catalog-total (141) against STATE.md's story-scoped `VP-116..VP-141 (26 VPs)` cite as if the same quantity — a hook false-positive, NOT a STATE.md drift; both numbers are independently correct. Anchor: next maintenance sweep or self-improvement cycle.
+10. **[process-gap] lesson (F-C2-P3-001's root cause):** F-C2-P2-006 (pass-2 ADVISORY, empty-shard) shipped code+test WITHOUT BC codification, unlike sibling findings F-C2-P2-003/004 which got full BC codification — this asymmetry is why pass-3 re-found the identical mechanism as a spec-doc gap. Going forward, code fixes MUST carry same-burst BC codification.
+11. **All prior carried OWED items** (Dependabot backlog, ~871 stale input-hashes, decision-log backfill through D-1173/D-1165/D-1156..D-1160, O-P18-001) unchanged.
+
+**Full historical long-tail (unchanged, nothing dropped — see archived session-checkpoints.md history):** cargo-deny advisory disposition; VP-079/VP-028 POLICY-9 "ten events" propagation; PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED; ADR-045 v1.3 ratification burst (Wave-7 HELD); E-23 re-scope to frozen-provenance model (STALE); LOW-7 DEFERRED AC-006 events-sink wording; `[process-gap]` registry-comment-lint (E-12 follow-up); spec-hygiene sweep OWED (E-10 follow-up); the 4 D-1164 documentary follow-ups; redundant `git stash@{0}`.
+
+### §5. WIP branches (e)
+
+**Cluster-2:** `feature/S-25.02-roll` @ `e2d6a45a` — no code changed this burst (spec-only pass-3); TDD/code state otherwise unchanged. Inert carried-forward (unchanged, not re-verified): `fix/d999-sentinel-code-migration` @ `bf642fd9`, `feature/S-21.04` @ `323f440f`.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.14 active.** **BC-1.18.006 v1.7** (draft; SS-01; cluster-2 not shipped) + BC-1.18.007 v1.2/008 v1.1/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 remains the only ACTIVE one of the 9. BC-INDEX v5.69 (2,006 BCs, UNCHANGED count). VP-INDEX v3.08 (141 VPs, UNCHANGED — 3-facet extension, no new VP). STORY-INDEX v4.450 (176 stories; 25 epics; S-25.02 v3.1, status ready, cluster-1 DELIVERED/MERGED, cluster-2 pass-3 fixed/pass-4 next; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.23 (48 ADRs; UNCHANGED this burst). error-taxonomy.md v1.3 (UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`fff5e4cc`** (PR #818 squash-merged, base `54fa985f`). merged_count **119**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-roll`: **ACTIVE** @ `e2d6a45a` — cluster-2's code branch; no code changed this burst (spec-only pass-3); TDD in progress (AC-024/AC-025 not yet implemented; EC-022's self-heal guard is a NEW pending obligation under T-4).
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran; this is a LOCAL cluster-2 pass). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: 0/3** — pass-3 NOT CLEAN (3 findings/observations, all fixed this burst; 3 consecutive not-clean passes); pass-4 next, fresh context, against BC-1.18.006 v1.7/story v3.1/code `feature/S-25.02-roll` @ `e2d6a45a`.
+
+## Session Resume Checkpoint (2026-09-08 — S2502-CLUSTER2-PASS4-SELFHEALFIRST-WRITEONCE-SPEC-CASCADE; develop fff5e4cc (PR #818 merged); main 51023185; merged_count 119; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Brownfield cycle `v1.0-brownfield-backfill`. S-25.02 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-4 = NOT CLEAN — 4 findings (1 MAJOR F-C2-P4-001 data-loss, 2 MINOR F-C2-P4-002/003, 1 ADVISORY F-C2-P4-004), ALL fixed this burst. BC-1.18.006 v1.7→v1.8 (product-owner: F-C2-P4-001 FALSIFIES v1.7's Invariant 10 and REPLACES it with a self-heal-first-sequencing requirement, CODE+TEST ROUTED; F-C2-P4-002 adds a write-once Postcondition 8/`E-SHD-009` defense-in-depth layer, CODE+TEST ROUTED; F-C2-P4-003 threads `payload_len_bytes`, CODE+TEST ROUTED; F-C2-P4-004 requires byte-level `execute_roll` I/O, CODE+TEST ROUTED). No code changed this burst (spec + index only); code fixes are stated to land on `feature/S-25.02-roll` @ `05e047d9` (merges via PR later) — this burst does not verify the code itself. `pipeline:` stays **in_progress** this burst. BC-5.39.001 cluster-2 LOCAL streak stays 0/3 (pass-4 not clean, 4 consecutive not-clean passes; pass-5 next).
+> Prior checkpoint (S2502-CLUSTER2-PASS3-EMPTYCANON-ZEROBYTESEAL-SPEC-CASCADE, D-1177) was already
+> archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md` (appended after line ~7200).
+
+### §1. Position (a)
+
+**S-25.02 Feature-Mode Phase F4 (delta-implementation), incremental-by-BC-cluster (D-1170).** Cluster 1 (cap+trigger, BC-1.18.005) **DELIVERED/MERGED** (PR #818 @ `fff5e4cc`, D-1173). Cluster 2 (roll, BC-1.18.006) has now landed its fourth LOCAL adversary pass (D-1178): pass-4 = NOT CLEAN, all 4 findings fixed — BC-1.18.006 v1.8, story v3.2, code `feature/S-25.02-roll` @ `05e047d9`. **NEXT = cluster-2 LOCAL adversary pass-5, fresh context.** Remaining clusters: 3 mech-A backfill (BC-1.18.007+008), 4 B1 rotation (BC-1.18.009), 5 B2 sharding (BC-1.18.010+011), 6 migrations (BC-1.18.012), 7 Cohort-B flip (BC-7.08.001).
+
+### §2. Convergence (b)
+
+Cluster-1 LOCAL BC-5.39.001 = **3/3 CONVERGED — CLOSED** (D-1172/D-1173, fully retired). Cluster-2 LOCAL BC-5.39.001 = **0/3** — pass-4 NOT CLEAN (4 findings, all fixed this burst; 4 consecutive not-clean passes); pass-5 next, fresh context, against BC-1.18.006 v1.8/story v3.2/code `05e047d9`. Cycle-level BC-5.39.001 = **3/3 CONVERGED** (separate track, unchanged). No trajectory-tail drift — unchanged `→0→1→1→1` LENGTH=4 (LOCAL cascade, not a cycle-level adversary pass).
+
+### §3. In-flight (c)
+
+**Cluster-2 LOCAL adversary cascade, pass-5 pending.** BC-1.18.006 is at v1.8 (frontmatter, uncommitted-to-develop; `status`/`lifecycle_status` stays `draft`), S-25.02 story at v3.2, code stated at `feature/S-25.02-roll` @ `05e047d9`. No TDD worktree state verified this burst (spec-side + index-side only, per the assigning task's explicit scope boundary) — EC-023 (self-heal-first sequencing fault-injection), EC-024 (write-once collision test), the `payload_len_bytes` table-driven test, and the byte-level round-trip fixture are FOUR NEW, unimplemented pending Red-Gate obligations landing under T-13/T-4. NEXT step is a fresh-context adversary pass-5 against this exact delta (BC-1.18.006 v1.8/story v3.2/code `05e047d9`) — pass-5 should independently verify the `05e047d9` code actually implements all four pass-4 fixes, since this burst (spec-side only) did not.
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+This session + carried:
+1. **F6-owed VPs** for BC-1.18.005 EC-013..EC-022 + PC9, AND BC-1.18.006 Postcondition 7/EC-014..EC-020/EC-023/Invariant 7/Invariant 8/corrected-Invariant-10 (all deferred to Phase F6 targeted-hardening; the BC-1.18.006 pending VP-NNN row EXTENDED again this burst to cover EC-023/corrected-Invariant-10 [D-1178]; EC-024 instead propagated onto the already-allocated VP-119).
+2. **BC-1.18.009/cluster-4 carry-forward:** `read_changelog_item_count` closing-fence heuristic robustness (Drift Item D-1172).
+3. **`replace_all` multiplicity gap** — SPEC-SIDE CLOSED at BC-1.18.006/cluster-2 (D-1174); code-side lands at cluster-2's own TDD (AC-006/AC-007/AC-024, still pending implementation as of this burst; EC-023/EC-024/payload_len_bytes/byte-level-I/O are 4 NEW pending obligations as of pass-4).
+4. **Branch protection on `develop`** BLOCKED on repo-admin.
+5. **[D-1173] Worktree fragmentation [process-gap]:** during PR #818 cycles 2-4, a legitimate fix was nearly orphaned in a stale-base worktree; caught by a pre-merge orchestrator integrity check. Needs a codified guardrail. Anchor: next engine-discipline self-improvement cycle.
+6. **[D-1173] TC-EC001 flaky test [process-gap]:** `tests/precompact-routing.bats:350` flaked once during PR #818 CI — needs de-flaking. Anchor: next maintenance sweep or self-improvement cycle.
+7. **[D-1175] `.factory/policies.yaml` YAML defect:** fails strict YAML parse (unescaped literal pipe character in a double-quoted scalar near line ~425 + an early `---` making it multi-document). NOT fixed this burst either (out of scope). Anchor: next maintenance sweep.
+8. **[D-1177] `validate-factory-path-staging` raw-substring-scan false-positive [process-gap]:** scans the full Bash command text (including commit-message heredoc bodies) for `.factory/`, false-positive-blocking commits that merely mention `.factory/` in prose. NOT fixed this burst (hook-source change is a distinct fix). Anchor: next maintenance sweep or self-improvement cycle.
+9. **[D-1177] `validate-count-propagation` VP-count scope-mismatch [process-gap]:** compares VP-INDEX's catalog-total (141) against STATE.md's story-scoped `VP-116..VP-141 (26 VPs)` cite as if the same quantity — a hook false-positive, NOT a STATE.md drift; both numbers are independently correct; RECONFIRMED this burst (D-1178) still standing, not re-fixed. Anchor: next maintenance sweep or self-improvement cycle.
+10. **[process-gap] lesson (D-1178, NEW, prominent):** pass-3 codified Invariant 10 as a documentary "by-construction" safety claim WITHOUT a discharging test/VP, and pass-4 found it FALSE — a real, reachable data-loss counterexample. Never codify a by-construction safety claim as an invariant without a discharging test/VP going forward; the corrected Invariant 10 now carries EC-023's Canonical Test Vector as its discharge.
+11. **[process-gap] lesson (F-C2-P3-001's root cause, carried):** F-C2-P2-006 (pass-2 ADVISORY, empty-shard) shipped code+test WITHOUT BC codification, unlike sibling findings F-C2-P2-003/004 which got full BC codification — this asymmetry is why pass-3 re-found the identical mechanism as a spec-doc gap. Going forward, code fixes MUST carry same-burst BC codification.
+12. **All prior carried OWED items** (Dependabot backlog, ~871 stale input-hashes, decision-log backfill through D-1173/D-1177/D-1178/D-1165/D-1156..D-1160, O-P18-001) unchanged.
+
+**Full historical long-tail (unchanged, nothing dropped — see archived session-checkpoints.md history):** cargo-deny advisory disposition; VP-079/VP-028 POLICY-9 "ten events" propagation; PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED; ADR-045 v1.3 ratification burst (Wave-7 HELD); E-23 re-scope to frozen-provenance model (STALE); LOW-7 DEFERRED AC-006 events-sink wording; `[process-gap]` registry-comment-lint (E-12 follow-up); spec-hygiene sweep OWED (E-10 follow-up); the 4 D-1164 documentary follow-ups; redundant `git stash@{0}`.
+
+### §5. WIP branches (e)
+
+**Cluster-2:** `feature/S-25.02-roll` @ `05e047d9` — code fixes for pass-4's 4 findings stated to land here (merges via PR later); this burst did not itself verify the code (spec-side-only scope). Inert carried-forward (unchanged, not re-verified): `fix/d999-sentinel-code-migration` @ `bf642fd9`, `feature/S-21.04` @ `323f440f`.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.14 active.** **BC-1.18.006 v1.8** (draft; SS-01; cluster-2 not shipped) + BC-1.18.007 v1.2/008 v1.1/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 remains the only ACTIVE one of the 9. BC-INDEX v5.70 (2,006 BCs, UNCHANGED count). VP-INDEX v3.09 (141 VPs, UNCHANGED — pending-VP-row extension + VP-119 facet extension, no new VP). STORY-INDEX v4.451 (176 stories; 25 epics; S-25.02 v3.2, status ready, cluster-1 DELIVERED/MERGED, cluster-2 pass-4 fixed/pass-5 next; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.24 (48 ADRs; ADR-051 v1.9→v1.10 this burst). error-taxonomy.md v1.4 (NEW E-SHD-009 row this burst).
+
+### §7. HEADs
+
+- `develop`: **`fff5e4cc`** (PR #818 squash-merged, base `54fa985f`). merged_count **119**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-roll`: **ACTIVE** @ `05e047d9` — cluster-2's code branch; code fixes for pass-4's 4 findings stated to land here (not independently verified this burst); TDD in progress (AC-006/AC-007/AC-024 not yet re-verified against `05e047d9`; EC-023/EC-024/payload_len_bytes/byte-level-I/O are 4 NEW pending obligations).
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran; this is a LOCAL cluster-2 pass). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: 0/3** — pass-4 NOT CLEAN (4 findings, all fixed this burst; 4 consecutive not-clean passes); pass-5 next, fresh context, against BC-1.18.006 v1.8/story v3.2/code `feature/S-25.02-roll` @ `05e047d9`.
+
+## Session Resume Checkpoint (2026-09-08 — S2502-CLUSTER2-PASS5-EMPTYCANON-BLOCKMSG-VERBATIM-BOOKKEEPING; develop fff5e4cc (PR #818 merged); main 51023185; merged_count 119; v1.0.0-rc.25 SHIPPED; PIPELINE in_progress)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Brownfield cycle `v1.0-brownfield-backfill`. S-25.02 cluster-2 (roll, BC-1.18.006) LOCAL adversary pass-5 = NOT CLEAN — 2 findings (1 MAJOR F-C2-P5-001, 1 MINOR F-C2-P5-002), BOTH fixed this burst. **LIGHT/bookkeeping-only burst — NO BC/story/VP/index content changed.** BC-1.18.006 stays v1.8, S-25.02 story stays v3.2 — F-C2-P5-001 (MAJOR, POLICY 12) was a code-vs-spec emitter-text divergence where the SPEC (BC-1.18.006 v1.8 Postcondition 2 / EC-021's CTV) was already authoritative and correct; fixed CODE-ONLY, `build_empty_roll_retry_block_reason` aligned to the verbatim spec text. F-C2-P5-002 (MINOR) strengthened the F-C2-P4-003 test from a weak substring assertion to a full verbatim table-driven assertion — this weak assertion is WHY F-C2-P5-001 reached pass-5 undetected. Code fixes land on `feature/S-25.02-roll` @ `6ea30300` (commits `2f18812b` test-strengthen then `6ea30300` code-fix). `pipeline:` stays **in_progress** this burst. BC-5.39.001 cluster-2 LOCAL streak stays 0/3 (pass-5 not clean, 5 consecutive not-clean passes; pass-6 next). Important positive result: pass-5 independently re-derived the ENTIRE data-loss/correctness surface CLEAN — only text-consistency + test-quality findings remained.
+> Prior checkpoint (S2502-CLUSTER2-PASS4-SELFHEALFIRST-WRITEONCE-SPEC-CASCADE, D-1178) was already
+> archived verbatim to
+> `cycles/v1.0-brownfield-backfill/session-checkpoints.md` (appended after line ~7260).
+
+### §1. Position (a)
+
+**S-25.02 Feature-Mode Phase F4 (delta-implementation), incremental-by-BC-cluster (D-1170).** Cluster 1 (cap+trigger, BC-1.18.005) **DELIVERED/MERGED** (PR #818 @ `fff5e4cc`, D-1173). Cluster 2 (roll, BC-1.18.006) has now landed its fifth LOCAL adversary pass (D-1179): pass-5 = NOT CLEAN, both findings fixed — LIGHT/bookkeeping-only burst, BC-1.18.006 stays v1.8, story stays v3.2, code `feature/S-25.02-roll` @ `6ea30300`. **NEXT = cluster-2 LOCAL adversary pass-6, fresh context.** Remaining clusters: 3 mech-A backfill (BC-1.18.007+008), 4 B1 rotation (BC-1.18.009), 5 B2 sharding (BC-1.18.010+011), 6 migrations (BC-1.18.012), 7 Cohort-B flip (BC-7.08.001).
+
+### §2. Convergence (b)
+
+Cluster-1 LOCAL BC-5.39.001 = **3/3 CONVERGED — CLOSED** (D-1172/D-1173, fully retired). Cluster-2 LOCAL BC-5.39.001 = **0/3** — pass-5 NOT CLEAN (2 findings, both fixed this burst; 5 consecutive not-clean passes); pass-6 next, fresh context, against BC-1.18.006 v1.8/story v3.2/code `6ea30300`. Cycle-level BC-5.39.001 = **3/3 CONVERGED** (separate track, unchanged). No trajectory-tail drift — unchanged `→0→1→1→1` LENGTH=4 (LOCAL cascade, not a cycle-level adversary pass).
+
+### §3. In-flight (c)
+
+**Cluster-2 LOCAL adversary cascade, pass-6 pending.** BC-1.18.006 stays at v1.8 (frontmatter, uncommitted-to-develop; `status`/`lifecycle_status` stays `draft`), S-25.02 story stays at v3.2, code at `feature/S-25.02-roll` @ `6ea30300`. Pass-5 independently re-verified the entire data-loss/correctness surface CLEAN (corrected Invariant 10 self-heal-first, Postcondition 8 write-once `hard_link` EEXIST, byte-level roll, Invariants 7/8/9, catch-(ii) ordering) — the pass-4 pending Red-Gate obligations (EC-023 self-heal-first fault-injection, EC-024 write-once collision test, `payload_len_bytes` table-driven test, byte-level round-trip fixture) remain the same 4 unimplemented obligations under T-13/T-4; pass-5 did not add new ones. NEXT step is a fresh-context adversary pass-6 against this exact delta (BC-1.18.006 v1.8/story v3.2/code `6ea30300`).
+
+### §4. Pending human decisions / blockers — OWED (d)
+
+This session + carried:
+1. **F6-owed VPs** for BC-1.18.005 EC-013..EC-022 + PC9, AND BC-1.18.006 Postcondition 7/EC-014..EC-020/EC-023/Invariant 7/Invariant 8/corrected-Invariant-10 (all deferred to Phase F6 targeted-hardening; UNCHANGED this burst — pass-5 added no new EC, so the pending VP-NNN row was NOT extended).
+2. **BC-1.18.009/cluster-4 carry-forward:** `read_changelog_item_count` closing-fence heuristic robustness (Drift Item D-1172).
+3. **`replace_all` multiplicity gap** — SPEC-SIDE CLOSED at BC-1.18.006/cluster-2 (D-1174); code-side lands at cluster-2's own TDD (AC-006/AC-007/AC-024, still pending implementation as of this burst; EC-023/EC-024/payload_len_bytes/byte-level-I/O are the 4 pending obligations, UNCHANGED as of pass-5).
+4. **Branch protection on `develop`** BLOCKED on repo-admin.
+5. **[D-1173] Worktree fragmentation [process-gap]:** during PR #818 cycles 2-4, a legitimate fix was nearly orphaned in a stale-base worktree; caught by a pre-merge orchestrator integrity check. Needs a codified guardrail. Anchor: next engine-discipline self-improvement cycle.
+6. **[D-1173] TC-EC001 flaky test [process-gap]:** `tests/precompact-routing.bats:350` flaked once during PR #818 CI — needs de-flaking. Anchor: next maintenance sweep or self-improvement cycle.
+7. **[D-1175] `.factory/policies.yaml` YAML defect:** fails strict YAML parse (unescaped literal pipe character in a double-quoted scalar near line ~425 + an early `---` making it multi-document). NOT fixed this burst either (out of scope). Anchor: next maintenance sweep.
+8. **[D-1177] `validate-factory-path-staging` raw-substring-scan false-positive [process-gap]:** scans the full Bash command text (including commit-message heredoc bodies) for `.factory/`, false-positive-blocking commits that merely mention `.factory/` in prose. NOT fixed this burst (hook-source change is a distinct fix). Anchor: next maintenance sweep or self-improvement cycle.
+9. **[D-1177] `validate-count-propagation` VP-count scope-mismatch [process-gap]:** compares VP-INDEX's catalog-total (141) against STATE.md's story-scoped `VP-116..VP-141 (26 VPs)` cite as if the same quantity — a hook false-positive, NOT a STATE.md drift; both numbers are independently correct; RECONFIRMED this burst still standing, not re-fixed. Anchor: next maintenance sweep or self-improvement cycle.
+10. **[process-gap] lesson (D-1179, NEW, prominent):** a routed "pin verbatim" test obligation (F-C2-P4-003) was silently down-scoped to a weak `.contains("(N bytes)")` substring assertion instead of the routed verbatim table-driven assertion, masking F-C2-P5-001's MAJOR spec-vs-code divergence for a full pass. Test obligations that say "verbatim" MUST be implemented verbatim, never as a substring/contains check.
+11. **[process-gap] lesson (D-1178, prominent, carried):** pass-3 codified Invariant 10 as a documentary "by-construction" safety claim WITHOUT a discharging test/VP, and pass-4 found it FALSE — never codify such a claim without a discharging test/VP going forward; the corrected Invariant 10 now carries EC-023's Canonical Test Vector as its discharge.
+12. **[process-gap] lesson (F-C2-P3-001's root cause, carried):** F-C2-P2-006 (pass-2 ADVISORY, empty-shard) shipped code+test WITHOUT BC codification, unlike sibling findings F-C2-P2-003/004 which got full BC codification — this asymmetry is why pass-3 re-found the identical mechanism as a spec-doc gap. Going forward, code fixes MUST carry same-burst BC codification.
+13. **All prior carried OWED items** (Dependabot backlog, ~871 stale input-hashes, decision-log backfill through D-1173/D-1177/D-1178/D-1179/D-1165/D-1156..D-1160, O-P18-001) unchanged.
+
+**Full historical long-tail (unchanged, nothing dropped — see archived session-checkpoints.md history):** cargo-deny advisory disposition; VP-079/VP-028 POLICY-9 "ten events" propagation; PG-CI-1/2/3 + F-WG5-001 + PR-MANAGER-MERGE-OVER-RED; ADR-045 v1.3 ratification burst (Wave-7 HELD); E-23 re-scope to frozen-provenance model (STALE); LOW-7 DEFERRED AC-006 events-sink wording; `[process-gap]` registry-comment-lint (E-12 follow-up); spec-hygiene sweep OWED (E-10 follow-up); the 4 D-1164 documentary follow-ups; redundant `git stash@{0}`.
+
+### §5. WIP branches (e)
+
+**Cluster-2:** `feature/S-25.02-roll` @ `6ea30300` — code fixes for pass-5's 2 findings landed here this burst is bookkeeping-confirmed (commit history `2f18812b`/`6ea30300` verified via `git log`). Inert carried-forward (unchanged, not re-verified): `fix/d999-sentinel-code-migration` @ `bf642fd9`, `feature/S-21.04` @ `323f440f`.
+
+### §6. Resume command (f)
+
+`/vsdd-factory:rehydrate-wave` then `/vsdd-factory:next-step`.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. **BC-1.18.005 v1.14 active.** **BC-1.18.006 v1.8** (draft; SS-01; cluster-2 not shipped, UNCHANGED this burst) + BC-1.18.007 v1.2/008 v1.1/009 v1.5/010 v1.2/011 v1.0/012 v1.1 (draft; SS-01) + BC-7.08.001 v1.1 (draft; SS-07) — 9 BCs anchored in S-25.02's frontmatter; cluster-1's BC-1.18.005 remains the only ACTIVE one of the 9. BC-INDEX v5.70 (2,006 BCs, UNCHANGED this burst). VP-INDEX v3.09 (141 VPs, UNCHANGED this burst — no new EC owed to F6). STORY-INDEX v4.451 (176 stories; 25 epics; S-25.02 v3.2, UNCHANGED this burst, status ready, cluster-1 DELIVERED/MERGED, cluster-2 pass-5 fixed/pass-6 next; S-25.01 v1.22 merged; S-25.04 v2.0 merged; S-15.03 v1.8 merged; UNCHANGED otherwise). ARCH-INDEX v4.24 (48 ADRs, UNCHANGED this burst). error-taxonomy.md v1.4 (UNCHANGED this burst).
+
+### §7. HEADs
+
+- `develop`: **`fff5e4cc`** (PR #818 squash-merged, base `54fa985f`). merged_count **119**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this burst does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-roll`: **ACTIVE** @ `6ea30300` — cluster-2's code branch; pass-5's 2 findings' fixes verified landed via `git log` (`2f18812b` test-strengthen, `6ea30300` code-fix); TDD still in progress (AC-006/AC-007/AC-024 not yet re-verified against `6ea30300`; EC-023/EC-024/payload_len_bytes/byte-level-I/O remain 4 pending obligations).
+- `feature/S-25.02-cap-trigger`: **MERGED+DELETED** — PR #818, `fff5e4cc`. No longer exists.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**Cycle-level streak: 3/3 — CONVERGED, UNCHANGED this burst** (no cycle-level adversary pass ran; this is a LOCAL cluster-2 pass). Cluster-1's OWN LOCAL BC-5.39.001 cascade stays **3/3 CONVERGED — CLOSED** (D-1172/D-1173), fully retired. **Cluster-2's OWN LOCAL BC-5.39.001 cascade: 0/3** — pass-5 NOT CLEAN (2 findings, both fixed this burst; 5 consecutive not-clean passes); pass-6 next, fresh context, against BC-1.18.006 v1.8/story v3.2/code `feature/S-25.02-roll` @ `6ea30300`.
+
+---
