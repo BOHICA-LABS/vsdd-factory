@@ -3336,3 +3336,327 @@ S-21.25 Phase-3 TDD sequencing decision (CONVERGED, UNCHANGED). Standing decisio
 **This checkpoint superseded by the D-1073-WAVE7-PASS3-SESSION-WRAP checkpoint burst (state-manager, single-commit pause burst, TD-VSDD-053, human-invoked `/wrap`, 2026-08-22) — a new self-sufficient §1-§7 Session Resume Checkpoint was written in its place. See STATE.md for the live checkpoint.**
 
 ---
+
+## Session Resume Checkpoint (2026-08-22 — D-1073-WAVE7-PASS3-SESSION-WRAP; PIPELINE PAUSED)
+
+> **SELF-SUFFICIENT RESUME CONTEXT — ASSUMES ZERO PRIOR CONTEXT.**
+
+### §1 Position
+
+Cycle `v1.0-brownfield-backfill`, brownfield mode. **PIPELINE PAUSED** (human-invoked `/wrap`, session wrap). S-21.11 v2.11 previously reached BC-5.39.001 **3-CLEAN convergence** (D-1056); the operator OVERRODE the standing keep-unified sizing decision → **SPLIT** (D-1057) into 6 sub-stories **S-21.19..S-21.24** plus a new tracked story **S-21.25**. Wave 6 (S-21.19 + S-21.25) reached 3-CLEAN CONVERGENCE for both stories by D-1066 ("WAVE 6 COMPLETE"), then **S-21.19 was REOPENED at D-1070** (per D-1069 Q1=Option A human ruling: wire PC13's error-exit axis live at wave 7, jointly owned with S-21.21) — BC-5.39.001 streak RESET 3/3→0/3, **Wave 6 NO LONGER COMPLETE**. Two further Wave-7 remediation rounds ran: **pass-2/R1 at D-1071/D-1072** (all five wave-7-adjacent stories NOT-CLEAN, spec-layer landed D-1071 as ADR-044 v1.2/BC-1.03.017 v1.21/BC-1.03.018 v1.3, story-layer landed D-1072). **This session's work — pass-3/R2 at D-1073 (this burst)**: dispatched fresh-context against S-21.19 (R2) + S-21.20/S-21.21/S-21.22/S-21.23 (pass-3), against the D-1072-landed v1.21/v1.3 spec state. **S-21.19 R2 returned CLEAN** — the first clean pass since the D-1070 reopen; BC-5.39.001 LOCAL streak **ADVANCES 0/3→1/3**. The other four all returned **NOT-CLEAN**: S-21.20 (F-S2120-P3-001 MEDIUM, a STORY-INDEX catalog-row version-cite drift — the story's own body is independently clean, this is a pure index-propagation defect); S-21.21 (F-S2121-P3-001 HIGH — the v1.1/v1.2 Addendum's literal-replacement wiring wording for the wave-7 error-exit step would have opened a genuine Timeout fail-open window for one full wave, since the retained 2-arg `plugin_fail_closed` call is the ONLY live disjunct re-catching `Timeout` until S-21.24's wave-8 wiring lands + F-S2121-P3-002 MEDIUM, an EC-011 baseline-framing imprecision); S-21.22 (F-S2122-P3-001 MEDIUM — BC-1.03.017's Precondition 6 conflated the one-time live-corpus calibration confirmation with the durable frozen-snapshot standing gate that the story's own converged Task 5a already correctly implements — a BC-side divergence, not a story defect); S-21.23 (F-S2123-P3-001 HIGH — no test proved the `all`-wildcard's scope-restriction guarantee preserves a non-named blocking plugin's fail-closed enforcement, a compound CWE-636+CWE-863 hazard + F-S2123-P3-002 MEDIUM, an AC-022/PC9 control-count drift). **The spec-layer half of this remediation LANDED this burst (D-1073)**: `ADR-044 v1.2→v1.3` (Addendum corrected to make the wave-7 wiring step ADDITIVE rather than a literal replacement, and give S-21.24's wave-8 step a same-commit MIGRATION sub-task — closes F-S2121-P3-001); `BC-1.03.017 v1.21→v1.22` (Precondition 6 split into one-time-confirmation vs. durable-frozen-gate, new Invariant 12 migration coverage-continuity — closes F-S2122-P3-001 and mirrors ADR-044's new invariant); `BC-1.03.018 v1.3→v1.4` (PC8 explicit `all`-scope non-named-plugin preservation, PC9 detector-precision + 7th control — closes F-S2123-P3-001/002). ARCH-INDEX v3.78→v3.79; BC-INDEX v4.90→v4.91; VP-INDEX v2.79 UNCHANGED; STORY-INDEX v4.384 UNCHANGED. **The story-layer half of this remediation is explicitly NOT STARTED** — the human-invoked `/wrap` pause boundary lands between the spec-layer commit and what would otherwise be the second, distinctly-themed 'story-remediation' commit (mirroring the D-1071/D-1072 and D-1069/D-1070 two-commit precedent). Compact pass-3 review record persisted: `cycles/v1.0-brownfield-backfill/adv-wave7-pass3.md`.
+
+### §2 Convergence Counters
+
+**S-21.19** (story v1.5, `915ec83` UNCHANGED): BC-5.39.001 LOCAL streak **ADVANCES 0/3→1/3** — R2 CLEAN; **R3 (fresh context) is NEXT**. **S-21.25** (story v1.5, UNCHANGED, `eefe28b`): streak **3/3 — CONVERGED**, cascade CLOSED, UNCHANGED this burst; held for a batched Phase-3 TDD-entry sequencing decision. **S-21.20** (story v1.3, `33ca0c4` UNCHANGED): streak **REMAINS 1/3** (P3 MEDIUM STORY-INDEX-only finding, non-resetting, story body independently clean); needs a state-manager STORY-INDEX title-cite fix + BC-1.03.017 v1.22 re-anchor before **pass-4 (fresh context)**. **S-21.21** (story v1.3, `d91e444` UNCHANGED), **S-21.22** (story v1.3, `915ec83` UNCHANGED), **S-21.23** (story v1.2, `33ca0c4` UNCHANGED): all three streaks **REMAIN 0/3** (P3 NOT-CLEAN, spec-layer fixed D-1073 but story-layer application NOT YET STARTED); each needs a story-writer application pass + BC re-anchor before **pass-4 (fresh context) is NEXT for all three**. **S-21.24** (story v1.4, Wave 8 capstone): **0/3**, STRICTLY LAST, needs the ADR-044 v1.3 wave-8 MIGRATION sub-task wiring description applied (Task 0 removes the retained 2-arg call in the SAME commit that adds `plugin_fail_closed_on_exhaustion`) + BC-1.03.017 v1.22/BC-1.03.018 v1.4 re-anchor; own cascade not yet started, awaits all five prior seams to converge.
+
+### §3 NEXT ACTION (resume)
+
+**Step 1 — story-layer application (two story-writer sub-bursts):** (3a) S-21.21 (Task 5a ADDITIVE-wiring rewrite — retain the 2-arg `plugin_fail_closed` call, ADD `plugin_fail_closed_on_error_exit` alongside it; rewrite EC-011's baseline framing to acknowledge `Timeout{Epoch}` IS enforced today via the retained call; add a new Timeout+on_error=Block regression fixture) + S-21.22 (re-anchor only, no body defect) + S-21.24 (apply the wave-8 MIGRATION sub-task wiring description — Task 0 removes the retained 2-arg call in the same commit `plugin_fail_closed_on_exhaustion` is added) + `S-21.11-decomposition-plan.md` (re-anchor sweep). (3b) S-21.23 (new `all`×non-named-plugin negative-control AC — block stands + no `break_glass.activated` event; reconcile AC-022's control-count citation six→seven to match BC-1.03.018 v1.4's PC9). Both sub-bursts also perform the full BC-1.03.017 v1.21→v1.22 / BC-1.03.018 v1.3→v1.4 re-anchor sweep (frontmatter + all body cites) across their respective stories. **Step 2 — state-manager story-layer commit:** land the two sub-bursts as ONE atomic commit; ALSO fix S-21.20's STORY-INDEX v1.19 title-cite drift (F-S2120-P3-001) + re-anchor S-21.20 to BC-1.03.017 v1.22; allocate a fresh D-NNN for this commit (D-1073 already allocated to the spec-layer half landed this burst). **Step 3 — dispatch pass-4/R3:** five independent fresh-context cascades — S-21.19 R3, S-21.20/S-21.21/S-21.22/S-21.23 pass-4 — against the newly re-anchored v1.22/v1.4 spec state. Route each pass through `/vsdd-factory:adversarial-review` (or the equivalent orchestrator dispatch); route any findings back to the correct specialist per the Agent Routing Table in CLAUDE.md.
+
+Separately, unresolved: the **orchestrator/human Phase-3 TDD-entry sequencing decision** for S-21.25 (already converged, UNCHANGED this burst) — see §5. Independent of the cascades above; can proceed in parallel.
+
+### §4 Deferred / Owed (with concrete anchors)
+
+- `ADR-044` body cites `BC-1.03.017 v1.18` at ~lines 35/104/190 — fix at the architect's next ADR-044 touch (D-1064/F-S2119-P6-002); target version now **v1.22** per D-1073.
+- VP-079's own `BC-3.08.001 v1.25`→`v1.26` stale cite, frontmatter POLICY 17 gap, and internal "six"/"seven" header-comment inconsistency — all fix at the architect's next VP-079 touch (all three UNCHANGED, unresolved this burst).
+- Accumulated S-21.25 cosmetic nits, all DEFERRED to a single post-convergence cosmetic sweep for S-21.25 (see Drift Items table for the full enumeration).
+- BC-1.03.019/BC-1.03.017/BC-1.03.018 all carry `VP-TBD` — real triggering-condition/semantics VPs are owed (anchored Phase-6 formal-verifier).
+- develop-side uncommitted `plugins/vsdd-factory/config/artifact-path-registry.yaml` — needs a develop-branch PR; do NOT commit to develop directly from a factory-artifacts burst.
+- hooks-registry.toml header plugin-count 35→37 OWED — anchored next maintenance sweep.
+- ADR-044 ↔ BC-1.03.017 mutual `inputs:` cite non-converging input-hash cascade — **resettled at the new (ADR-044 v1.3, BC-1.03.017 v1.22) snapshot pair this burst**; underlying design defect still anchored a future architect/product-owner touch (see Drift Items table).
+- **NEW this burst:** ARCH-INDEX.md / BC-INDEX.md `last_amended` fields have unbounded nested-bracket growth (~113KB / ~155KB single lines) — same drift class as the STORY-INDEX `[D-1053-drift]` item; anchored a future S-15.03 PRIORITY-A section-aware compaction burst (see Drift Items table for full detail).
+- Carry-forward (unchanged, see Blocking Issues / Drift Items tables for full detail): decision-log.md D-1016..D-1042 (exhaustive) plus D-1068..D-1073 per-decision backfill OWED (D-1011/D-1012 also OWED); `[P0-followup]` POLICY 15 branch-protection enforcement (human/admin-only action required); `[C-1]`..`[C-5]` exec_subprocess security findings (ADR-043 NOT RATIFIED); `[D-952]` compute-input-hash operator-cache-vs-dev-source hash divergence (self-heals at rc.24).
+
+### §5 Pending Human Decision
+
+**S-21.25 Phase-3 TDD sequencing decision (CONVERGED, UNCHANGED this burst).** S-21.25 has reached full BC-5.39.001 3-CLEAN convergence and is technically ready for TDD delivery. The orchestrator/human must decide: start its TDD delivery NOW (in parallel with the Wave-7/S-21.19 adversarial cascades), or HOLD until the remaining split-story seams also converge, so the whole split cohort enters Phase-3 as one coordinated wave. Neither option is inherently wrong — this is a resourcing/sequencing call, not a correctness call. Standing decision (unchanged): keep each of the 7 split stories scoped as-is — do not re-merge them back into a unified story. S-21.19 is explicitly EXCLUDED from any "start TDD now" batch decision until its cascade (now R3) re-converges.
+
+### §6 HEADs
+
+- `develop`: `27c56c01` — CI-GREEN, unchanged this entire session.
+- `factory-artifacts`: this commit (see `git -C .factory log -1`). D-1073 is the last content-bearing decision; parent commit is `8ef46b8a` (D-1072).
+
+### §7 Resume Command
+
+`/vsdd-factory:next-step`
+
+**This checkpoint superseded by the D-1074-WAVE7-PASS3-STORY-REMEDIATION checkpoint burst (state-manager, single-commit story-layer 'story-remediation' burst, TD-VSDD-053, Single-Commit Burst Protocol via `/vsdd-factory:state-burst`, 2026-08-23) — a new self-sufficient §1-§7 Session Resume Checkpoint was written in its place. See STATE.md for the live checkpoint.**
+
+---
+
+## Session Resume Checkpoint (2026-08-24 — D-1081-WAVE7-PASS9-RECORDED-HELD; PIPELINE PAUSED / HELD)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Written at D-1081 (pass-9/R8 recorded, Wave-7 HELD pending ADR-045 ratification). **NEXT action: human ADR-045 ratification decision** via POLICY 22 channel — ratification unblocks the validator-build + corpus-migration epic. If ADR-045 is rejected: manual remediation route available (see adv-wave7-pass9.md §Remediation Routing). Resume: `/vsdd-factory:next-step`.
+
+### §1 Position
+
+Cycle `v1.0-brownfield-backfill`, brownfield mode. **PIPELINE PAUSED / HELD** post D-1081. S-21.11 v2.11 previously reached BC-5.39.001 3-CLEAN (D-1056); operator OVERRODE → **SPLIT** (D-1057) into 6 sub-stories **S-21.19..S-21.24** plus new **S-21.25**. Wave 6 reached 3-CLEAN by D-1066, then **S-21.19 REOPENED at D-1070** — streak RESET 3/3→0/3, **Wave 6 NO LONGER COMPLETE**. Wave-7 remediation rounds: pass-1/R0 through pass-8/R7 (D-1069–D-1080). Pass-9/R8 dispatched (D-1081): S-21.22 CLEAN (streak 0/3→1/3); S-21.19 R8 NOT-CLEAN (F-S2119-R8-001 HIGH line-wrapped BC-1.03.017 v1.26 cite; F-S2119-R8-002 MED ADR-039 AMD-002 pin); S-21.20 pass-9 NOT-CLEAN (F-S2120-P9-001 MED AC-022 over-scope; F-S2120-P9-002 LOW [[hook]]); S-21.21 pass-9 NOT-CLEAN (F-S2121-P9-001 HIGH 6 anchor-interposed ADR-039 pins; F-S2121-P9-002 MED [process-gap]); S-21.23 pass-9 NOT-CLEAN (F-S2123-P9-001 HIGH line-wrapped ADR-039 §Decision 3 v1.10 in Invariant 6; F-S2123-P9-002 LOW [process-gap]). NOT remediated — PIVOTED to research → ADR-045 proposal. ADR-045 PROPOSED 2026-08-24 (stable-anchor cross-reference architecture; eliminates load-bearing version pins by construction; SS-01/SS-04/SS-05/SS-07; HUMAN RATIFICATION REQUIRED). ARCH-INDEX v3.80 (ADR count 44→45). trajectory-tail →1→1→0→1, LENGTH=4.
+
+### §2 Convergence Counters
+
+**S-21.22** (v1.10, BC-1.03.017 v1.27): pass-9 CLEAN; streak **1/3** (ADVANCES). **S-21.19** (v1.11, BC-1.03.017 v1.27): R8 NOT-CLEAN; F-S2119-R8-001 HIGH + F-S2119-R8-002 MED; streak **0/3** (REMAINS); NOT remediated. **S-21.20** (v1.9, BC-1.03.017 v1.27): pass-9 NOT-CLEAN; F-S2120-P9-001 MED + F-S2120-P9-002 LOW; streak **0/3** (REMAINS); NOT remediated. **S-21.21** (v1.10, BC-1.03.017 v1.27): pass-9 NOT-CLEAN; F-S2121-P9-001 HIGH + F-S2121-P9-002 MED [process-gap]; streak **0/3** (REMAINS); NOT remediated. **S-21.23** (v1.8, BC-1.03.018 v1.6): pass-9 NOT-CLEAN; F-S2123-P9-001 HIGH + F-S2123-P9-002 LOW [process-gap]; streak **0/3** (REMAINS); NOT remediated. **S-21.24** (v1.11, BC-1.03.017 v1.27 + BC-1.03.018 v1.6, Wave 8): STRICTLY LAST — cascade not started. **S-21.25** (v1.5): **3/3 CONVERGED**; held TDD sequencing.
+
+### §3 NEXT ACTION (resume)
+
+**Human ADR-045 ratification decision.** ADR-045 v1.0 is at `.factory/specs/architecture/decisions/ADR-045-stable-anchor-cross-reference-architecture.md`. Research report at `.factory/research/wave7-xref-consistency-research.md`. Decision required via POLICY 22 channel (same channel as all prior ADR ratifications).
+
+**If RATIFIED:** orchestrator dispatches architect (amendments to POLICY 7/8/14/17/19 per ADR-045 §decisions) + story-writer (create corpus-migration epic: new stories for stable-anchor migration of Wave-7 stories, BCs, ADRs) + state-manager (record ratification burst).
+
+**If REJECTED (manual remediation route):** story-writer fixes pass-9 findings per adv-wave7-pass9.md §Remediation Routing, then pass-10/R9 dispatch. Five cascades: S-21.19 (R9), S-21.20 (pass-10), S-21.21 (pass-10), S-21.22 (pass-10), S-21.23 (pass-10).
+
+### §4 Deferred / Owed (with concrete anchors)
+
+- `ADR-044` body cites `BC-1.03.017 v1.18` at ~lines 35/104/190 — fix at architect's next ADR-044 touch; target now **v1.27**.
+- VP-079: stale `BC-3.08.001 v1.25→v1.26` cite, POLICY 17 frontmatter gap, "six"/"seven" inconsistency — all fix at architect's next VP-079 touch.
+- BC-1.03.019/BC-1.03.017/BC-1.03.018 VP-TBD — owed Phase-6 formal-verifier.
+- develop-side `artifact-path-registry.yaml` — develop-branch PR only; do NOT commit from factory-artifacts.
+- hooks-registry.toml header plugin-count 35→37 — next maintenance sweep.
+- S-21.25 accumulated cosmetic nits (D-1065/D-1066) — post-convergence cosmetic sweep.
+- decision-log.md per-decision backfill D-1011/D-1012, D-1016..D-1042 (exhaustive), D-1068..D-1076 (exhaustive) OWED.
+- `[P0-followup]` branch-protection enforcement — human/admin action required.
+- `[C-1]...[C-5]` exec_subprocess security findings — ADR-043 NOT RATIFIED.
+- F-S2120-P6-002 DAG label editorial — anchor next S-21.20 touch per D-1078.
+- F-S2122-P7-003 LOW stale cross-ref (Task 3→S-21.21 Task 6 mismatch) — deferred; anchor wave-gate pre-merge consistency check.
+
+### §5 Pending Human Decision
+
+1. **ADR-045 ratification (PRIMARY — BLOCKS Wave-7 HELD):** Ratify or reject stable-anchor cross-reference architecture via POLICY 22 channel. This is the unblocking decision.
+2. **S-21.25 Phase-3 TDD sequencing** (CONVERGED 3/3, UNCHANGED). Decision: start TDD now or HOLD until remaining split-story seams converge.
+
+### §6 HEADs
+
+- `develop`: `27c56c01` — CI-GREEN, unchanged.
+- `factory-artifacts`: see `git -C .factory log -1`. D-1081 is this burst.
+
+### §7 Resume Command
+
+`/vsdd-factory:next-step`
+
+**This checkpoint superseded by the SESSION-WRAP-PAUSE-2026-08-26 checkpoint burst (state-manager, single-commit bookkeeping-only pause burst, TD-VSDD-053, human-invoked `/wrap`, 2026-08-26) — a new self-sufficient §1-§7 Session Resume Checkpoint was written in its place, covering two concurrent workstreams (rc.24 release + ADR-046 spec-convergence) that advanced between D-1081 (2026-08-24) and this wrap without an intervening STATE.md update. See STATE.md for the live checkpoint; the D-1081 Wave-7/ADR-045 position above is PRESERVED VERBATIM as historical record — ADR-045 has since been ACCEPTED at v1.3 (pivoted to frozen-provenance model per human direction) but its ratification-recording burst (POLICY 7/8/14/17/19 amendments to policies.yaml, decision-log D-NNN, BC-INDEX/ARCH-INDEX rows) remains OWED as of this wrap.**
+
+## Session Resume Checkpoint (2026-08-27 — D-1116-ADR046-PASS59-SPEC-CONVERGENCE-REMEDIATION; PIPELINE ACTIVE)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** Written after the D-1116 pass-59 fix-burst. **NEXT action: `/vsdd-factory:next-step`** resumes the ADR-046 3-CLEAN gate (fresh pass 60 — against the pass-59-corrected frozen set — needing 3 consecutive clean passes for literal 3-CLEAN). Separately: merge marketplace PR #19; record ADR-045 v1.3 ratification; re-scope E-23. The prior D-1115 checkpoint's substantive content is folded into §1/§2 below (superseded, not separately preserved verbatim — the D-1115 burst itself remains fully preserved in decision-log.md/burst-log.md).
+
+### §1 Position — two concurrent workstreams
+
+**(1) rc.24 RELEASE — SHIPPED.** v1.0.0-rc.24 tag cut at main tip (main=89f6f87c bundle commit); GitHub prerelease published; sync-develop back-merge landed (develop=6993138b, merge commit, ancestry preserved). Cleared 6 advisories (5 RUSTSEC incl. wasmtime sandbox escape + h2 RUSTSEC-2026-0258), fuel-cap 10M→20M, POLICY 15 gate. **OPEN OPERATOR-FACING ACTION: marketplace PR #19 at drbothen/claude-mp ("bump vsdd-factory to 1.0.0-rc.24") must be MERGED by the human to deliver rc.24 to operators.** UNCHANGED this burst.
+
+**(2) "Fix state writes" feature (ADR-046) — SPEC-CONVERGENCE IN PROGRESS, STREAK STAYS AT 0/3 (pass-59, VERDICT FINDINGS (1 MED) — F-P59-001 fixed).** Human-ratified ADR-046 (PostToolUse hook-authored STATE.md `timestamp:` re-stamp + identity-gated `factory_lock.expires_at` keep-alive, retiring `verify-state-timestamp-refresh`). Running the BC-5.39.001 3-CLEAN adversarial spec gate. Human chose LITERAL 3-CLEAN (decisively — CONTINUE looping toward literal 3-CLEAN rather than accept D-386 Option C asymptotic-acceptance for this gate). Streak history this session (compact form, full detail in decision-log.md/burst-log.md): 36C→37R→38C→39R→40f→41C→42C→43R→44obsfix→45C→46R→47f→48f→49f→50f→51obsfix→52C→53C→54R→55C→56R→57C→58R→**59f**. Pass-58 (D-1115) was a fix burst that RESET the streak to 0/3. **Pass-59 (D-1116) returned VERDICT FINDINGS (1 MED):** F-P59-001 — BC-5.40.001's §Traceability ADR Reference row and §Description named ADR-046 coverage only for §Decision 1(b), omitting **Decision 5**, despite this BC's own Precondition 6/Invariant 7/Invariant 8/EC-010/§VP Anchors T-001..T-007 all carrying explicit "MIGRATED/RETAINED-AS-HISTORICAL … per ADR-046 §Decision 5" annotations — the **mirror-image gap of BC-4.17.001's own F-P58-001** (fixed target-side at pass-58; this is the source-side gap, never itself swept when the pass-58 fix landed, despite the pass-58 disposition prose explicitly anchoring the sweep for "the next pass"). Fixed by product-owner (BC-5.40.001 v1.20→**v1.21**): §Description gains a Decision-5 reconciliation sentence; §Traceability ADR Reference row adds a `§Decision 5` line with summary. Same defect CLASS as O-P48-001/F-P58-001 — not a new discipline. **Mandatory cluster-wide ADR-Decision-coverage audit (in-scope, this pass)** confirmed BC-4.17.001's v1.26 §Decision 5 addition COMPLETE and BC-7.07.001 clean (body cites only ADR-046 §Decision 1(b)/3/4, matching its own row — not a §Decision 5 participant) — **BC-5.40.001 was the LAST remaining gap in the cluster, now closed.** **BC-5.39.001 3-CLEAN streak STAYS 0/3** — already at floor from pass-58, this fix burst does not add a further reset. No non-blocking observations were raised this pass (O-P58-001/O-P58-002 re-examined, remain ACCEPTED-tracked, untouched). No other spec artifact was edited this burst — ADR-046 v1.23, BC-4.17.001 v1.26, BC-7.07.001 v1.39 all UNCHANGED. Input-hash recomputed for BC-5.40.001 only (`a21ce60`→`6a9cc08`, cyclic-hash TD [D-1082], settled + cross-referenced, NOT reopened). BC-INDEX v5.17→v5.18 (BC-5.40.001 row + Changelog cross-ref). **CODIFIED 1 new lesson**: `[codified][process-gap]` SWEEP-BOTH-MIGRATION-PARTIES-AT-FIX-TIME (reinforces D-1104) — a fix to a migration-coverage/cross-reference finding MUST sweep BOTH parties (migration SOURCE and TARGET) AND run the cluster-wide audit AT FIX TIME, in the SAME burst, not defer to "the next pass." Wave-7 (S-21.19/20/21/22/23) did NOT advance this burst — trajectory-tail →1→1→0→1, LENGTH=4, unchanged from D-1081.
+
+### §2 Convergence Counter
+
+**ADR-046 3-CLEAN streak = 0/3 (STAYS this burst — pass-59 was FINDINGS(1), F-P59-001 fixed; already at floor from pass-58).** 59 passes run against evolving/frozen sets. Streak history (compact): 36C→37R→38C→39R→40f→41C→42C→43R→44obsfix→45C→46R→47f→48f→49f→50f→51obsfix→52C→53C→54R→55C→56R→57C→58R→**59f**. Fresh pass 60 runs next against the pass-59-corrected frozen set (ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 **v1.21** + BC-7.07.001 v1.39), applying all eighteen now-codified convergence-technique disciplines proactively from the start. Any BLOCKING finding OR spec edit on pass 60 keeps the streak at 0/3 (already at floor). **ON CONVERGENCE (3/3 literal clean, i.e. passes 60, 61, AND 62 all clean): S-17.05 TDD implementation unblocks** — this remains the standing gate condition.
+
+Gate history: the gate has caught 45 GENUINE BLOCKING findings across 59 passes (all fixed; passes 51, 52, 53, 55, and 57 found zero; pass-54 found F-P54-001; pass-56 found F-P56-001; pass-58 found F-P58-001; **pass-59 found F-P59-001**) plus 10 audit-extra stragglers (pass-31, pass-33, and 6 at pass-49), 1 latent-bracket drain (pass-37, not counted as genuine), 4 ACCEPTED non-blocking observations (O-P42-001, O-P53-DESC-NOOP, O-P57-001, O-P58-001, plus O-P58-002 — none counting against the streak), and 3 FIXED non-blocking observations (O-P44-001, O-P48-001, O-P51-001; all governance-elected fixes at zero streak cost). Full per-finding roster preserved in decision-log.md/burst-log.md D-1057..D-1116 (exhaustive). Passes 34, 36, 38, 41, 42, 45, 52, 53, 55, and 57 were zero-blocking-finding CLEAN passes; pass-44 and pass-51 carried a single LOW observation each; pass-54, pass-56, pass-58, and **pass-59** were genuine fix bursts. **O-P42-001** — ACCEPTED at D-1099, tracked, UNCHANGED this burst. **O-P53-DESC-NOOP** — ACCEPTED at D-1110, tracked, UNCHANGED this burst. **O-P57-001** — ACCEPTED at D-1114, tracked, UNCHANGED this burst. **O-P58-001 / O-P58-002** — ACCEPTED at D-1115, tracked, UNCHANGED this burst. **O-P44-001**/**O-P48-001**/**O-P51-001** — FIXED (governance election), UNCHANGED this burst.
+
+### §3 Current Artifact Versions
+
+**ADR-046 v1.23, UNCHANGED** (SS-04/SS-05/SS-07, ratified stamper contract — audited, not implicated by F-P59-001), BC-4.17.001 **v1.26, UNCHANGED** (SS-04, stamper contract — audited COMPLETE), BC-5.40.001 **v1.20→v1.21** (SS-05, factory-lock writer contract — F-P59-001 fix: §Description + §Traceability ADR Reference row both add §Decision 5 coverage; O-P42-001 tracked, not fixed), BC-7.07.001 **v1.39, UNCHANGED** (SS-07, precompact-flush identity-gated renewal — audited CLEAN, not a §Decision 5 participant), BC-6.23.001 unchanged. Story **S-17.05** (E-17 Wave 5, 8pts, `tdd_mode: strict`) drafted for implementation, REGISTERED in STORY-INDEX since D-1107 (v4.392, UNCHANGED this burst) — NOT started (spec gate must pass first; cited as confirmed implementing story in all 3 companion BCs' Traceability §Stories rows since D-1082, in all 3 companion BCs' §Story Anchor sections since D-1084, and in all 3 companion BCs' `inputs:` arrays since D-1107).
+
+### §4 Also Parked / Owed (do NOT lose these)
+
+- **ADR-045 v1.3** (stable-anchor → pivoted to FROZEN-PROVENANCE + suspect-link per human) is ACCEPTED but its RATIFICATION RECORDING BURST is OWED (POLICY 7/8/14/17/19 amendments never applied to policies.yaml; decision-log D-NNN + BC-INDEX/ARCH-INDEX not recorded). **E-23 epic + S-23.01..S-23.14 stories are STALE** — built for the ABANDONED strip model; must be RE-SCOPED to the frozen-provenance model before use.
+- **ADR-025 v1.25** — out-of-perimeter expiry-boundary bug fix (now>expires_at → now>=expires_at) landed prior session. Its §Decision 14 (cap raise) and §Decision 12 §12.5 (shared parse logic) remain correctly disambiguated in BC-4.17.001/BC-5.40.001 per the pass-35 fix, re-confirmed at every subsequent pass through pass-59.
+- **Index reconciliation — this burst:** BC-INDEX v5.17→v5.18 (BC-5.40.001 row + Changelog cross-ref). ARCH-INDEX v3.93, STORY-INDEX v4.392, VP-INDEX v2.79 all UNCHANGED (only BC-5.40.001 touched this pass).
+- **Input-hash cyclic ping-pong — 4-artifact tangle**: BC-5.40.001 TOUCHED at D-1116 (`a21ce60`→`6a9cc08`, F-P59-001 fix). Other values remain: ADR-046 `3335ad4`, BC-4.17.001 `6b0b35c` (SETTLED at D-1115), BC-7.07.001 `e73bc01` (SETTLED at D-1113). Ten consecutive triggering/touching-or-unchanged bursts still sharpen the case for prioritizing the structural fix (exclude sibling BCs/ADRs from `inputs:` hashing) ahead of rc.25.
+- **ARCH-INDEX/BC-INDEX `last_amended` field growth ([D-1073])**: BC-INDEX.md grew again this burst (v5.17→v5.18, table-row append + last_amended prepend); ARCH-INDEX.md UNCHANGED. Remediation remains anchored to the S-15.03 PRIORITY-A compaction burst. **Note:** BC-INDEX.md's `last_amended` field carries a PRE-EXISTING [D-1073]-tracked bracket-count imbalance (many historical `[Prior: ...]` openings never closed); this burst followed the established prepend-only convention (no attempt to retroactively balance the field, which is out of scope for a single-pass fix-burst and explicitly anchored to S-15.03).
+- **TD-FACTORY-HOOK-BYPASS-001 P0 deviation**: no occurrence this burst. This D-1116 state-manager burst used Edit/Write exclusively for all `.factory` content mutations; Bash was used only for READ-ONLY git/grep/awk preflight/gate commands and the `compute-input-hash` recompute utility.
+- **[D-952] compute-input-hash operator cache binary divergence**: no divergence observed this burst — `compute-input-hash` recomputed BC-5.40.001 cleanly using the dev-tree binary (`plugins/vsdd-factory/bin/compute-input-hash`).
+- **O-P42-001 / O-P53-DESC-NOOP / O-P57-001 / O-P58-001 / O-P58-002 (accepted non-blocking)**: all UNCHANGED at D-1116 — no new observations this burst. All five tracked at different loci, no overlap.
+- **AC-attribution class (D-1100, eighth discipline, extended D-1103/D-1104, eleventh discipline): DRAINED CLUSTER-WIDE, UNCHANGED at D-1116** — this burst's own SWEEP-BOTH-MIGRATION-PARTIES-AT-FIX-TIME codification explicitly reinforces (does not supersede) D-1104's root-cause class.
+- **Illustrative-content verbatim-source-accuracy + sibling-parity-check discipline (D-1101, ninth discipline): RE-CONFIRMED through D-1116**, orthogonal to pass-59's scope.
+- **STEP-NUMBER CITATION (D-1111, sixteenth discipline): RE-CONFIRMED through D-1116** — orthogonal to pass-59's scope.
+- **0TH-CASE/NO-OP CLAIM VERIFICATION (D-1113, seventeenth discipline): RE-CONFIRMED through D-1116** — orthogonal to pass-59's scope.
+- **ADR-DECISION-COVERAGE-ENUMERATION (D-1115, eighteenth discipline): CLUSTER-DRAINED at D-1116** — F-P58-001 (target side) + F-P59-001 (source side) close the full cluster; BC-7.07.001 confirmed not a §Decision-5 participant.
+- **SWEEP-BOTH-MIGRATION-PARTIES-AT-FIX-TIME (D-1116, NEW codification this burst)**: reinforces D-1104 (eleventh discipline). Applied same-burst this time (BC-5.40.001 fix + cluster audit both landed in pass-59).
+- **CITATION→INPUT PARITY (D-1106, fourteenth discipline) / catalog-membership-verification (D-1107, fifteenth discipline)**: both UNCHANGED at D-1116 — no new citations or catalog-membership claims introduced this pass.
+- **STORY-INDEX headline/§Status-Summary stale-aggregate ([D-1107])**: UNCHANGED at D-1116 (STORY-INDEX not touched this pass).
+- **Convention-divergence question (D-1086)**: historical-correction-in-place vs. dated-history-preserved for the same class of historical mis-attribution correction. Anchored for human policy decision — NOT resolved this burst.
+- **rc.24 fast-follows (tracked)**: POLICY-15 release-PR scoping; release.yml toolchain-pin + rust-cache (TD#70-adjacent); HD-1/HD-2 self-review hook defects; #777/#778/#779 skipped their mandatory CHANGELOG rows; O-P17-001 extract_frontmatter opening-fence hardening (low-pri).
+
+### §5 Pending Human Decision
+
+1. Merge marketplace PR #19 (drbothen/claude-mp) to deliver rc.24 to operators.
+2. ADR-045 v1.3 ratification-recording burst (already ACCEPTED; the burst that applies POLICY 7/8/14/17/19 amendments + records it is OWED).
+3. E-23 re-scope decision (stale strip-model stories → frozen-provenance model).
+4. Convergence-strategy decision for the ADR-046 gate: the streak has RESET to 0/3 EIGHT times this session (passes 35, 37, 39, 43, 46, 54, 56, 58) and pass-59 kept it there via a genuine fix (not a further reset). Human previously chose to CONTINUE looping toward literal 3-CLEAN under manual discipline (not accept-provisional under D-386 Option C) at every prior reset. The open question remains: continue looping toward literal 3-CLEAN (3 more consecutive clean passes, 60-62), or accept D-386 Option C asymptotic-acceptance for this gate given the gate has now caught 45 genuine findings across 59 passes.
+5. Convention-divergence policy decision (D-1086): does correcting a factually-wrong statement inside a PRESERVED HISTORICAL dated changelog entry fall under POLICY 1 append-only preservation, or under the general correct-misleading-code-attribution obligation?
+6. `validate-modified-head-parity` validator hook (D-1089 follow-up anchor): develop-branch Rust/WASM code work to mechanically enforce the 4-leg head==version self-check. Anchored to S-15.03 PRIORITY-A.
+7. O-P42-001 / O-P53-DESC-NOOP / O-P57-001 / O-P58-001 / O-P58-002 disposition ratification: state-manager formally accepted all five as tracked-not-fixed dispositions rather than escalating to the human. If the human disagrees with any disposition, the fix can be applied as a SEPARATE burst AFTER literal 3-CLEAN is reached.
+8. `[D-952]` compute-input-hash operator cache binary divergence: requires a human/architect decision on whether to prioritize a permanent structural fix ahead of rc.25.
+9. Fix-vs-accept governance rule ratification (D-1101, extended D-1110/D-1114): state-manager formally applied the `[convergence-governance]` fix-vs-accept rule. If the human disagrees with any disposition, request re-adjudication.
+10. Fourteenth/fifteenth discipline ratification (D-1106/D-1107): CITATION→INPUT PARITY and catalog-membership-verification. If the human disagrees with applying either as the standing default, request re-adjudication.
+11. `[D-1082]` cyclic-hash input-tangle structural fix: ten consecutive triggering/touching-or-unchanged bursts — requires a human/architect decision on whether to prioritize the structural fix ahead of rc.25.
+12. Ninth-discipline extension ratification (D-1108, RE-CONFIRMED through D-1116): illustrative example-enumeration accuracy. If the human disagrees, request re-adjudication.
+13. Sixteenth discipline ratification (D-1111, RE-CONFIRMED through D-1116): STEP-NUMBER CITATION. If the human disagrees with applying this as the standing default, request re-adjudication.
+14. Seventeenth discipline ratification (D-1113, RE-CONFIRMED through D-1116): 0TH-CASE/NO-OP CLAIM VERIFICATION. If the human disagrees, request re-adjudication.
+15. Convergence-strategy re-affirmation (D-1114/D-1115/D-1116): the human was offered accept-provisional under D-386 Option C at the pass-54 convergence-pass reset and declined, choosing to continue looping toward literal 3-CLEAN. Pass-57 advanced the streak to 1/3; pass-58 reset it to 0/3; pass-59 kept it at 0/3 via a genuine fix. If this preference has changed, say so explicitly and accept-provisional can be exercised immediately.
+16. Non-defect-vs-correctable-inaccuracy adjudication rule ratification (D-1114, RE-CONFIRMED at D-1115/D-1116): a fresh-context adversary explicitly adjudicating an item a NON-DEFECT is accepted-and-tracked, not fixed — distinct from a correctable inaccuracy (fixed, e.g. F-P59-001). If the human disagrees, request re-adjudication.
+17. ADR-Decision-coverage-enumeration discipline ratification (D-1115, CLUSTER-DRAINED at D-1116): state-manager formally codified that a BC's §Description/§Traceability ADR-coverage enumeration must include every ADR Decision the BC is a migration participant of. If the human disagrees with applying this as the standing default, request re-adjudication.
+18. Sweep-both-migration-parties-at-fix-time discipline ratification (D-1116, NEW this burst): state-manager formally codified that a fix to a migration-coverage finding on one artifact MUST sweep the migration counterpart AND run the cluster-wide audit in the SAME burst (reinforces D-1104). If the human disagrees with applying this as the standing default, request re-adjudication before it is applied again.
+
+### §6 HEADs
+
+- `main`: `89f6f87c` — rc.24 bundle commit, tagged v1.0.0-rc.24.
+- `develop`: `6993138b` — rc.24 sync-develop back-merge, CI-GREEN.
+- `factory-artifacts`: see `git -C .factory log -1`. This D-1116 burst commit is the latest.
+
+### §7 Resume Command
+
+`/vsdd-factory:next-step` → resumes the ADR-046 3-CLEAN gate by running a **fresh adversary pass 60** against the pass-59-corrected frozen set (ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 **v1.21** + BC-7.07.001 v1.39) — applying all eighteen prior codified convergence-technique disciplines proactively from the start. Any BLOCKING finding OR spec edit on pass 60 keeps the streak at 0/3 (already at floor). **ON CONVERGENCE (3/3 literal clean, i.e. passes 60, 61, AND 62 all clean): S-17.05 TDD implementation unblocks.** Separately: merge marketplace PR #19; and record ADR-045 v1.3 ratification + re-scope E-23.
+
+**This checkpoint superseded by the SESSION-WRAP-PAUSE-2026-08-27 checkpoint burst (state-manager, single-commit bookkeeping-only pause burst, TD-VSDD-053, human-invoked `/wrap`, 2026-08-27) — a new self-sufficient Session Resume Checkpoint was written in its place in STATE.md. See STATE.md for the live checkpoint; the D-1116 pass-59 position above is PRESERVED VERBATIM as historical record — the ADR-046 BC-5.39.001 3-CLEAN gate remains at streak 0/3, fresh pass-60 is the NEXT documented action on resume, against the frozen set ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39, needing 3 consecutive clean passes (60, 61, 62) for literal 3-CLEAN.**
+
+---
+
+## ARCHIVED CHECKPOINT: 2026-08-27 — pass-60 CLEAN D-1117; PIPELINE ACTIVE (streak 1/3)
+
+> **ARCHIVED FROM STATE.md** — superseded by the pass-61 CLEAN D-1118 burst (2026-08-27). Position: streak ADVANCES 1/3→2/3; fresh pass-62 NEXT. See STATE.md for the live checkpoint.
+
+**Position:** Brownfield cycle `v1.0-brownfield-backfill`. Active work is the ADR-046 BC-5.39.001 3-CLEAN spec-convergence gate. **Streak = 1/3.** Frozen set: **ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39** (UNCHANGED since pass-59 fix). NEXT = fresh adversary pass-61 — 2 more consecutive clean passes (61, 62) needed for literal BC-5.39.001 3-CLEAN.
+
+**Convergence counter (as of this checkpoint):** Passes 25→60 run (36 passes). 8 streak resets. Streak reached 2/3 twice (41-42 → reset at 43; 52-53 → reset at 54). ~21 decision codifications, D-1082..D-1117 (exhaustive).
+
+**8 ACCEPTED non-blocking items (pass-60 checkpoint):** [D-1082] mutual-inputs cyclic-hash; O-P42-001; STORY-INDEX stale aggregates; O-P53-DESC-NOOP; O-P57-001; O-P58-001/O-P58-002; O-P60-001 (extract_frontmatter opening-fence); O-P60-002 (trim_git_email cross-ref).
+
+**Pending human decisions (pass-60 checkpoint):** ADR-045 ratification-recording burst OWED; E-23 epic re-scope; accept-provisional option (D-386 Option C).
+
+**HEADs (pass-60 checkpoint):** main `89f6f87c` (rc.24 tagged); develop `6993138b` (CI-GREEN); factory-artifacts: `git -C .factory log -1` (D-1117 pass-60 CLEAN burst).
+
+**Resume Command (pass-60 checkpoint):** `/vsdd-factory:next-step` — fresh adversary pass-61 against the frozen set (ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39). Streak 1/3. Any BLOCKING finding OR spec edit resets streak to 0/3. On 2 more consecutive clean passes (61, 62): S-17.05 TDD unblocks.
+
+---
+
+## Archived Checkpoint: D-1123 pass-65 CLEAN burst (2026-08-27) — LITERAL 3-CLEAN ACHIEVED
+
+**Context:** pass-65 CLEAN (D-1123); BC-5.39.001 streak ADVANCES 2/3→3/3 — LITERAL 3-CLEAN
+ACHIEVED (63/64/65). Gate closure PENDING: (a) fresh-context consistency-validator perimeter
+audit; (b) explicit human gate approval. S-17.05 TDD NOT yet unblocked. This checkpoint was
+replaced by the D-1124 checkpoint (perimeter audit + wave-decomposition) on 2026-08-27.
+
+**Position:** ADR-046 "fix-state-writes" BC-5.39.001 3-CLEAN spec-convergence gate. Streak = 3/3.
+Frozen set: ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39
+(UNCHANGED since pass-59 fix; 4-index: ARCH-INDEX v3.94, BC-INDEX v5.18, VP-INDEX v2.79,
+STORY-INDEX v4.393).
+
+**14 spec-vs-code ground-truth checks (all MATCH at pass-65):** F-P56-001 empty/absent-holder
+→Err(Malformed) + Ok(None) only for absent/fully-null; renew_lock_with_now opaque expires_at/
+byte-compare/silent-rewrite; has_factory_lock_key key-line-only; parse_lock FactoryLock vs
+LockState; is_expired now>=expires_at; trim_git_email trim_end; parse_iso8601 distinct local
+wrapper (F-P13-002); step numbering Steps 4-7/8 (F-P54-001); precompact-flush Step-4 identity-
+blind renew_lock as-built; three TTL literals 2700 incl u64 + "MUST NOT be overridden" comment;
+S-19.08 retained-historical test names HEAD-reproducible; EC-011 holder:null→literal "null";
+five-case table byte-identical; Decision-5 MIGRATED/RETAINED-AS-HISTORICAL reconciled
+SOURCE↔TARGET. Novelty ZERO.
+
+**Non-blocking items (17 accepted + 2 tracked-to-fix):**
+- O-P65-001: SS-07 label misnomer (NON-DEFECT, deferred).
+- O-P65-002: design-only symbols (NON-DEFECT, S-17.05 scope).
+- O-P65-003: input-hash cyclic residual (known TD, D-1082).
+- O-P61-001/O-P62-001: TRACKED DEFECT-TO-FIX — stale factory-lock doc-comments, CAPTURED in
+  S-17.05 v1.1 Task T-8 (story commit f323b5e2 2026-08-27).
+- O-P42-001 through O-P64-002: all accepted/tracked; see prior session-checkpoints.md entries.
+
+**Pending (as of D-1123):**
+1. ADR-046 gate closure — PENDING fresh-context consistency audit + human gate approval.
+2. ADR-045 v1.3 ratification-recording burst OWED.
+3. E-23 epic re-scope.
+4. S-17.05 story task addition — COMPLETE (T-8 added, f323b5e2).
+
+**HEADs (D-1123 checkpoint):** main `89f6f87c`; develop `6993138b`; factory-artifacts `16652bb5`.
+
+**Resume Command (D-1123 checkpoint):** Await perimeter audit + human gate approval. Upon approval:
+dispatch S-17.05 TDD.
+
+---
+
+## Archived Session Checkpoint: D-1125 Wave-5 decomp cascade COMPLETE (2026-08-27)
+
+> Archived from STATE.md at D-1126 burst (S-17.06 delivery, 2026-08-28). See STATE.md for current checkpoint.
+
+**Position:** Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 spec-convergence gate CONVERGED-VALIDATED (D-1124). Wave-5 decomposition cascade COMPLETE (D-1125). Frozen set: ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39 (UNCHANGED since pass-59 fix; 4-index: ARCH-INDEX v3.95, BC-INDEX v5.19, VP-INDEX v2.79, STORY-INDEX v4.394). Next phase: E-17 Wave-5 TDD — S-17.06 (factory-lock-fns, no deps) → S-17.05 (stamper, depends_on S-17.06) + S-17.07 (precompact-flush, depends_on S-17.06) in parallel. All three same wave/release (ADR-046 Rollout Note atomicity). NOTE: E-17 epic target_release may be stale (set to rc.24 before decomp decision) — verify before release-cut. Merged count 111.
+
+**Convergence summary:** 65 adversary passes (passes 25→65); 46 genuine BLOCKING findings found+fixed; 9 streak resets. Literal BC-5.39.001 3-CLEAN achieved at passes 63/64/65 (D-1121/D-1122/D-1123). Perimeter audit (D-1124) confirmed 3-CLEAN VALID; found 3 BLOCKS-CLOSURE story-scope gaps in S-17.05. Wave-5 decomp cascade (D-1125): 4 phases (A=bebb9e92, B=fb9d7e6d, C=add9a3f4, D=4e8b5301). ~29 decision codifications this session, D-1082..D-1125 (exhaustive).
+
+**Non-blocking items (17 ACCEPTED + 2 TRACKED-TO-FIX):** O-P42-001 through O-P65-003 — all accepted/tracked; O-P61-001/O-P62-001 CAPTURED in S-17.05 v1.2 Task T-8 (story commit f323b5e2 2026-08-27; fix executes when S-17.05 enters TDD).
+
+**Pending (as of D-1125):**
+1. E-17 Wave-5 TDD — NEXT (S-17.06 first per DAG, then S-17.05 + S-17.07 in parallel).
+2. ADR-045 v1.3 ratification-recording burst OWED.
+3. E-23 epic + S-23.01..S-23.14 re-scope to frozen-provenance model (ADR-045 v1.3).
+4. D-1082 cyclic-hash residual — one-round stop per D-1082 disposition.
+
+**HEADs (D-1125 checkpoint):** main `89f6f87c`; develop `6993138b`; factory-artifacts `4e8b5301`.
+
+**Resume Command (D-1125 checkpoint):** Dispatch E-17 Wave-5 TDD: S-17.06 (factory-lock shared-fns, no deps — start first); then S-17.05 (stamper + TTL) and S-17.07 (precompact-flush + identity-gate) in parallel after S-17.06 TDD completes.
+
+---
+
+## Archived Session Checkpoint: D-1126 S-17.06 MERGED; E-17 Wave-5 1/3 done (2026-08-28)
+
+> Archived from STATE.md at SESSION-WRAP-PAUSE burst (2026-08-28). See STATE.md for current checkpoint.
+
+**SELF-SUFFICIENT RESUME CONTEXT.** S-17.06 (factory-lock shared functions) MERGED PR #787
+`3200149d` 2026-08-28 (D-1126). E-17 Wave-5: 1 of 3 stories merged; S-17.05 + S-17.07 now
+UNBLOCKED. BC-4.17.001 held at `draft` (POL-14 exception: co-implemented across Wave-5 group;
+promotes only when S-17.05 + wave-integration gate land). Autonomous-merge policy AUTHORIZED
+by human 2026-08-28 for this session (D-1126b). develop: `6993138b`→`3200149d`.
+Prior checkpoint archived to `cycles/v1.0-brownfield-backfill/session-checkpoints.md`.
+
+**Position:** Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 spec-convergence gate CONVERGED-VALIDATED
+(D-1124). S-17.06 MERGED (D-1126). E-17 Wave-5: 1/3 stories merged (S-17.06 done;
+S-17.05 and S-17.07 UNBLOCKED). Frozen spec set: ADR-046 v1.23 + BC-4.17.001 v1.26 +
+BC-5.40.001 v1.21 + BC-7.07.001 v1.39 (UNCHANGED since pass-59 fix). 4-index: ARCH-INDEX
+v3.95, BC-INDEX v5.19, VP-INDEX v2.79, STORY-INDEX v4.397. trajectory-tail →1→0→0→0 LENGTH=4.
+Merged count: 112 (S-17.06 + prior 111).
+
+**Convergence summary:** 65 adversary passes (passes 25→65); 46 genuine BLOCKING findings found+fixed; 9 streak resets.
+Literal BC-5.39.001 3-CLEAN achieved at passes 63/64/65 (D-1121/D-1122/D-1123). Perimeter audit
+(D-1124) confirmed 3-CLEAN VALID. Wave-5 decomp cascade (D-1125): A=bebb9e92, B=fb9d7e6d,
+C=add9a3f4, D=4e8b5301. S-17.06 delivery (D-1126): PR #787 3200149d.
+
+**Non-blocking items (17 ACCEPTED + 2 TRACKED-TO-FIX):** O-P42-001 through O-P65-003 — all accepted/tracked; full list in
+prior session-checkpoints.md entries. O-P61-001/O-P62-001 CAPTURED in S-17.05 v1.2 Task T-8
+(story commit f323b5e2 2026-08-27; fix executes when S-17.05 enters TDD).
+
+**Governance decisions in effect:**
+- Autonomous-merge policy AUTHORIZED (D-1126b, 2026-08-28): pr-manager may merge story/fix PRs on clean diverse-model review + CI-green; human retains veto-after. Excludes: release PRs, P0 security, meta-docs.
+- BC-4.17.001 held at draft (POL-14 exception, D-1126): promotes when S-17.05 + wave-integration gate land.
+- PR #787 self-approval RATIFIED by human 2026-08-28 (D-1126a).
+
+**Pending (as of D-1126):**
+1. S-17.05 spec-boundary correction (story-writer: Duration::seconds(2700)→TTL_SECONDS) — NEXT.
+2. S-17.05 + S-17.07 TDD — both UNBLOCKED (S-17.06 = merged); can run in parallel after spec-boundary correction.
+3. ADR-045 v1.3 ratification-recording burst OWED.
+4. E-23 epic + S-23.01..S-23.14 re-scope to frozen-provenance model (ADR-045 v1.3).
+5. Worktree .worktrees/S-17.06 cleanup OWED (devops).
+6. rc.24 fast-follow sub-items remain OPEN.
+
+**HEADs (D-1126 checkpoint):** main `89f6f87c`; develop `3200149d`; factory-artifacts `f4c018b2`; feature/S-17.06 merged+deleted.
+
+**Resume Command (D-1126 checkpoint):** Dispatch story-writer to add spec-boundary correction to S-17.05:
+migrate `Duration::seconds(2700)` → `factory_lock_parse::TTL_SECONDS` literal. After correction:
+dispatch TDD for S-17.05 (stamper + TTL) and S-17.07 (precompact-flush + identity-gate) in parallel.
+ADR-046 frozen spec set confirmed: ADR-046 v1.23 + BC-4.17.001 v1.26 + BC-5.40.001 v1.21 + BC-7.07.001 v1.39.
+
+---
+
+## Archived Checkpoint: S1705-P9-FIX-BURST (2026-08-28)
+
+> Archived from STATE.md during S1705-P10-CLEAN-BURST. Replaced by S1705-P10-CLEAN-BURST checkpoint.
+
+### §1. Position
+
+Brownfield cycle `v1.0-brownfield-backfill`. ADR-046 spec gate CONVERGED-VALIDATED (D-1124). E-17 Wave-5 TDD IN FLIGHT. S-17.06 MERGED (PR #787 3200149d). S-17.05 IN FLIGHT — mid local BC-5.39.001 3-CLEAN, streak **0/3** (pass 9 FINDINGS→all fixed; pass 10 next). `feature/S-17.05` @ `a8d85160` (PUSHED). S-17.07 queued.
+
+### §2. Convergence counter
+
+Streak = **0/3** (pass 9 FINDINGS → RESET). Passes 1–9 history: 1–7 FINDINGS (all fixed), 8 CLEAN, 9 FINDINGS (all fixed). NEED passes 10/11/12 consecutive CLEAN for local 3-CLEAN.
+
+### §3. HEADs at archive
+
+- `develop`: `3200149d` (S-17.06 MERGED PR #787 2026-08-28)
+- `main`: `89f6f87c` (v1.0.0-rc.24)
+- `factory-artifacts`: `4df7c0e7` (S1705-P9-FIX-BURST)
+- `feature/S-17.05`: `a8d85160` (PUSHED)
