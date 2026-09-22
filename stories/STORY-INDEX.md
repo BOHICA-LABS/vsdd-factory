@@ -1,12 +1,14 @@
 ---
 document_type: story-index
 level: ops
-version: "4.472"
+version: "4.473"
 status: current
 producer: story-writer
 timestamp: 2026-09-12T00:00:00Z
-last_amended: "2026-09-13 (v4.472) — ADR-052 v1.9 fix burst (state-manager, single-commit TD-VSDD-053; D-1226): S-12.15 added to E-12 catalog (TBD pts; P2; draft; depends_on []; input-hash c58b23f; predicate-propagation-lint gate — §Decision↔§Files-to-Change↔BC/VP/error-taxonomy mechanical propagation check; 3rd recurrence §Files-to-Change straggler class D-1226; lesson L-BB-D1226 recorded; closes [D-1225-PG-001]). E-12 story_count 11→12. STORY-INDEX v4.471→v4.472. [Prior history → STATE-amendment-history.md]"
+last_amended: "2026-09-21 (v4.473) — Dangling-input remediation (story-writer, single-commit TD-VSDD-053): dropped stale `inputs:` entry `.factory/stories/v1.0/EPIC.md` (path renamed to `.factory/stories/v1.0-legacy/EPIC.md` at commit f344b56e when the v1.0 tier epic was superseded by inline `## Epic E-N` sections during the Phase 1.8 S-N.M→S-N.MM migration; the legacy doc is frozen provenance for the original 36-story tier structure, not a live generative input to the current 89-story catalog). Remaining `inputs:` (pass-6-synthesis.md, ARCH-INDEX.md) verified present on disk. STORY-INDEX v4.472→v4.473. [Prior history → STATE-amendment-history.md]"
 changelog:
+  - date: 2026-09-21
+    change: "2026-09-21 (v4.473) — Dangling-input remediation (story-writer, single-commit TD-VSDD-053): `inputs:` frontmatter entry `.factory/stories/v1.0/EPIC.md` dropped — path no longer exists (renamed to `.factory/stories/v1.0-legacy/EPIC.md` at f344b56e); epic definitions now live inline as `## Epic E-N` sections in this file, so the legacy doc is archival provenance only, not a live compute-input-hash dependency. Unblocks `compute-input-hash --update`."
   - date: 2026-09-13
     change: "2026-09-13 (v4.472) — ADR-052 v1.9 fix burst (state-manager, single-commit TD-VSDD-053; D-1226): S-12.15 registered in E-12 (TBD pts; P2; draft; input-hash c58b23f; predicate-propagation-lint gate). E-12 story_count 11→12."
   - date: 2026-09-12
@@ -23,13 +25,13 @@ changelog:
     change: "[Relocated to STORY-INDEX-amendment-history.md, 2026-09-21 state-manager fuel-wall compaction burst — Batch 1, entries v4.465 down to v4.452, verbatim.]"
 phase: 1.8
 inputs:
-  - .factory/stories/v1.0/EPIC.md
   - .factory/phase-0-ingestion/pass-6-synthesis.md
   - .factory/specs/architecture/ARCH-INDEX.md
 traces_to: .factory/specs/domain-spec/capabilities.md
 changelog:
   - date: 2026-09-08
     change: "[Relocated to STORY-INDEX-amendment-history.md, 2026-09-21 state-manager fuel-wall compaction burst — Batch 2, entries v4.451 down to v4.429 (from the source's duplicate-key `changelog:` block), verbatim.]"
+input-hash: "7cc0c23"
 ---
 
 # Story Index — vsdd-factory v1.0 (brownfield)

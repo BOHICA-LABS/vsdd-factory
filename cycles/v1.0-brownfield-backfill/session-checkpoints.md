@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "ca02d8c"
+input-hash: "153b04c"
 traces_to: STATE.md
 ---
 
@@ -1873,3 +1873,63 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 **LOCAL cluster-5 prose-adversarial streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this session.** Cycle-level streak: 3/3 CONVERGED, unchanged. No new adversary pass ran. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231 (Kani DEF-1 fix, 7/7 VP PROVED). **PIPELINE PAUSED — POLICY 22 RATIFIED (D-1232); CLUSTER-5 UNBLOCKED BUT NOT STARTED; SESSION WRAPPED; NEXT = resume via rehydrate-wave → next-step.**
 
 **This checkpoint superseded by the S2502-ADR052-ACCEPTED-POLICY22-RATIFICATION-FLIP burst (state-manager, single-commit TD-VSDD-053; D-1233): ADR-052 status proposed→accepted persisted (architect's already-edited body, v1.14→v1.15); basis = D-1231 Kani mechanical proof re-verification per POLICY 22 ratification (D-1232); ARCH-INDEX v4.42→v4.43; first Phase-A on-ramp step toward S-25.02 cluster-5 F4 activation; pipeline PAUSED→in_progress — session RESUMED.**
+
+---
+
+## Session Resume Checkpoint (2026-09-21 — S2502-ADR052-ACCEPTED-POLICY22-RATIFICATION-FLIP v10.64→v10.65; develop ebd16f79 (PR #832 merged); main 51023185; merged_count 122; v1.0.0-rc.25 SHIPPED; PIPELINE RESUMED — ADR-052 ACCEPTED (D-1233); CLUSTER-5 UNBLOCKED, ON-RAMP IN PROGRESS)
+
+> **SELF-SUFFICIENT RESUME CONTEXT.** ADR-052 status-flip ratification-persist burst (single-commit TD-VSDD-053; D-1233) committed 2026-09-21, resuming the session that was wrapped/paused earlier the same day. ADR-052 status `proposed`→`accepted` (v1.14→v1.15) persisted — the architect's already-edited body committed this burst, closing the gap left open since D-1232's own ratification (POLICY 22, 2026-09-20) recorded the ratification DECISION without the ADR's own status field being flipped. ARCH-INDEX v4.42→v4.43. This is the first Phase-A on-ramp step toward S-25.02 cluster-5 F4 activation — cluster-5 TDD dispatch itself has NOT started. `pipeline:` PAUSED→in_progress — session RESUMED. **NEXT = work the REMAINING-WORK inventory in §4, starting at item #3 (item #2 closed this burst; item #1 DEFERRED).**
+> Prior checkpoint (SESSION-WRAP-PAUSE-2026-09-21 v10.63→v10.64) archived verbatim above.
+
+### §1. Position (a)
+
+2026-09-21. ADR-052 ACCEPTED (v1.15, D-1233) — the status flip `proposed`→`accepted` persisted this burst, realizing the POLICY 22 ratification recorded at D-1232 (2026-09-20) in the ADR's own artifact record. S-25.02 F4 cluster-5 (BC-1.18.010/011) remains UNBLOCKED; this burst is the first Phase-A on-ramp step, NOT cluster-5 TDD dispatch itself, which has not yet started. ARCH-INDEX v4.42→v4.43. Session RESUMED — `pipeline:` PAUSED→in_progress. NEXT = work the REMAINING-WORK inventory in §4 starting at item #3 (item #2 closed this burst; item #1 DEFERRED).
+
+### §2. Convergence (b)
+
+UNCHANGED this burst (no new adversary pass). ADR-052 concurrency core CONVERGED via mechanical proof — Kani DEF-1 (HIGH, 5th fix-induced regression) fixed in v1.14 (Option B structural drain reorder); re-verified 7/7 VP proofs PROVED, INV-GATE-TXN UNSAT, non-vacuity CONFIRMED, 5/5 regression + 7/7 fault-injection PASS. That proof is now reflected in ADR-052's own `status: accepted` (v1.15, this burst) — previously the proof existed (D-1231) and the ratification decision existed (D-1232), but the ADR artifact itself still read `proposed`; that gap is now closed. Prose adversarial cascade CLOSED at 10 passes (superseded by mechanical proof). LOCAL cluster-5 prose-adversarial streak stays 0/3 (cascade closed, not reset). Cycle-level streak: 3/3 CONVERGED, unchanged.
+
+### §3. In-flight / Abandoned (c)
+
+None — all sub-agents dispatched this session completed; no abandoned mid-step work. No story worktrees open.
+
+### §4. Pending human decisions / open blockers (d)
+
+None blocking resume. The 4 binding obligations registered at D-1232 remain OPEN/PENDING, cluster-5-scoped (NOT resume blockers — see STATE.md `## Blocking Issues` rows `[D-1232-OBL-1]`..`[D-1232-OBL-4]`):
+- **(1) [D-1232-OBL-1]** Implementation-phase Kani harnesses on `executor.rs` + `shard_manager.rs` — mandatory, non-deferrable; blocks cluster-5 TDD *completion*, not start.
+- **(2) [D-1232-OBL-2]** APFS hybrid durability — mandated `F_FULLFSYNC(temp)→rename→F_FULLFSYNC(dir)` sequence + differential VM-kill test + residual-ack; blocks F4 *activation*.
+- **(3) [D-1232-OBL-3]** Apply CLAUDE.md ADR-052 EXCEPTION amendment; apply at F4 activation.
+- **(4) [D-1232-OBL-4]** Deploy 4 dispatcher-guard amendments; deploy at activation boundary.
+
+**REMAINING-WORK INVENTORY (worked in priority order on resume):**
+1. **E-26 registration** — DEFERRED: human direction 2026-09-21 is that E-25 completion (delivered via S-25.02 cluster-5 F4) precedes E-26 registration. 6 committed E-26/S-26.01–05 draft files + issue #841 remain unregistered in STORY-INDEX until cluster-5 lands.
+2. ~~**ADR-052 `proposed→accepted`**~~ — **DONE this burst (D-1233).** Architect's already-edited body persisted; ADR-052 v1.14→v1.15, status accepted; ARCH-INDEX v4.42→v4.43.
+3. **STORY-INDEX dangling-input fix** — `.factory/stories/v1.0/EPIC.md` missing from disk but cited in STORY-INDEX `inputs:`; blocks its `compute-input-hash --update`; route product-owner/story-writer. **NEXT ITEM ON RESUME.**
+4. **BC-INDEX sharding** — 427KB, marginal; cluster-5 B2 per-subsystem split (BC-1.18.010/011) is the durable fix. Plus cluster-5 TDD proper (Kani obligation [D-1232-OBL-1] applies).
+5. **Hook-hardening batch #837–841** → rc.26 (deployment drift #837 + source-logic defects #838/839/840 + validator mis-scoping #841).
+
+Other open (unchanged, carried from prior checkpoint): **[D-1222-DRIFT-001] RESOLVED.** **[D-1224-DRIFT-001] ASSESSED DEFERRABLE.** **S-12.15 OPEN** (propagation-lint, E-12). **[D-1212-DRIFT-002]** → S-12.14. **[D-1221-PG-001]** → S-12.13. **S-25.05/S-25.06**. S-12.09..S-12.15 (E-12). **F-006+SEC-831-01** → T-12. **[D-1207]** `.factory/.gitignore` unregistered. 4 PRs open: **#769, #768, #729, #632**. input-hash currency refresh (`compute-input-hash --scan --update`, 907 files) still OWED.
+
+### §5. WIP branches (e)
+
+None. `develop` @ `ebd16f79` (clean). `factory-artifacts` = this burst's commit (run `git -C .factory log -1` for live SHA). Inert: `fix/d999-sentinel-code-migration` @ `bf642fd9`; `feature/S-21.04-story-worktree-write-path-discipline` @ `323f440f`.
+
+### §6. Resume command (f)
+
+Work directly from §4 REMAINING-WORK — item #3 (STORY-INDEX dangling-input fix, route product-owner/story-writer) is next in line; item #2 closed this burst; item #1 DEFERRED pending E-25/cluster-5 completion. After the §4 inventory, cluster-5 F4 delta-implementation TDD dispatch is the following action (subject to [D-1232-OBL-1] impl-phase Kani obligation).
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. BC-1.18.005 v1.15 active. BC-1.18.006 v1.12 active. BC-1.18.007 v1.2 active. BC-1.18.008 v1.9 active. BC-1.18.009 v1.8 active (POL-14 promoted D-1212). BC-1.18.010 v1.9 / BC-1.18.011 v1.8 (draft; SS-01; cluster-5 UNBLOCKED-NOT-STARTED). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX v5.96 (2,006 BCs). VP-INDEX v3.22 UNCHANGED (141 VPs). STORY-INDEX v4.472 (25 epics) — 7 E-26 draft artifacts committed prior burst, registration DEFERRED (§4 item 1). ARCH-INDEX v4.43 (52 ADRs; ADR-052 v1.15 ACCEPTED, D-1233). error-taxonomy.md v1.30.
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this checkpoint does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**LOCAL cluster-5 prose-adversarial streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this burst.** Cycle-level streak: 3/3 CONVERGED, unchanged. No new adversary pass ran. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231 (Kani DEF-1 fix, 7/7 VP PROVED), ADR-052 formally ACCEPTED at D-1233 (this burst). **PIPELINE RESUMED (in_progress) — ADR-052 ACCEPTED (D-1233); CLUSTER-5 UNBLOCKED, ON-RAMP IN PROGRESS; NEXT = §4 REMAINING-WORK item #3.**
+
+**This checkpoint superseded by the S2502-STORYINDEX-DANGLING-INPUT-FIX burst (state-manager, single-commit TD-VSDD-053; D-1234): STORY-INDEX stale `inputs:` citation fix persisted (story-writer's already-edited frontmatter, dangling `.factory/stories/v1.0/EPIC.md` dropped); STORY-INDEX v4.472→v4.473; input-hash recomputed `compute-input-hash --update` (none→`7cc0c23`), `--check` CLEAN; Phase-A on-ramp item #3 DONE; pipeline stays in_progress (unchanged).**
