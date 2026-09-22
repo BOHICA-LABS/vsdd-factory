@@ -120,3 +120,149 @@ fn write_and_sync_temp(tmp_path: &Path, content: &str) -> Result<(), MigrateErro
         source,
     })
 }
+
+// ---------------------------------------------------------------------------
+// D-1232-OBL-2(a) mandated STRICT durability sequence — `F_FULLFSYNC(temp)
+// -> rename -> F_FULLFSYNC(dir)` on macOS, with STRICT error propagation
+// and NO silent fallback (a failed fsync is a fail-loud abort, not a
+// swallowed best-effort). This is a STRONGER guarantee than
+// `write_atomic`/`write_and_sync_temp` above provide: `write_atomic`'s own
+// directory fsync is Unix-only BEST-EFFORT (`let _ = dir.sync_all()`), and
+// its file-content fsync is plain `fsync(2)` (`File::sync_all`) rather
+// than the macOS-specific `F_FULLFSYNC` durability lever Apple's own docs
+// require for power-loss durability (`fsync(2)` on APFS/HFS+ does NOT
+// flush the drive's write cache). `write_atomic` remains correct and
+// sufficient for this crate's own `changelog`/`migrate`/`registry`
+// callers; BC-1.18.011's B2 BC-INDEX governed migration
+// (`crates/factory-dispatcher/src/shard_manager.rs`) is a
+// governance-integrity-critical migration with its OWN stronger
+// crash-durability obligation (BC-1.18.011 Postcondition 3 / D-1232-
+// OBL-2(a)) that this module now also provides, deliberately housed HERE
+// rather than in `factory-dispatcher` itself: that crate carries a
+// crate-wide `#![deny(unsafe_code)]` security regression guard
+// ("the crate operates in a security-critical dispatch path; unsafe is
+// never warranted here" — `crates/factory-dispatcher/src/lib.rs`), and
+// `F_FULLFSYNC` has no safe-Rust std equivalent (`std::fs::File::sync_all`
+// is plain `fsync(2)`, insufficient on macOS/APFS). This crate carries no
+// such restriction, so the two narrowly-scoped, safety-commented `unsafe`
+// blocks below stay confined to this already-privileged, standalone
+// operator/agent-invoked CLI tool rather than entering the dispatcher's
+// own hot path.
+// ---------------------------------------------------------------------------
+
+/// `F_FULLFSYNC` on macOS — the documented durability lever (`fsync(2)`
+/// alone does not flush the drive's write cache on APFS/HFS+); plain
+/// `fsync(2)` (`File::sync_all`) on every other platform, where ordinary
+/// `fsync(2)` already IS the durability guarantee. STRICT: any failure
+/// propagates as an `io::Error`, never silently swallowed.
+fn sync_file_durable(file: &File) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::io::AsRawFd;
+        // Raw, stable macOS <fcntl.h> value -- avoids pulling in a
+        // `libc`/`nix` dependency for one `i32` constant, matching this
+        // workspace's existing convention for such narrow, well-known
+        // per-OS syscall values (see
+        // `crates/factory-dispatcher/src/shard_manager.rs`'s
+        // `reclaim_identity_still_safe` for the same pattern applied to
+        // `O_NONBLOCK`/`O_NOFOLLOW`).
+        const F_FULLFSYNC: i32 = 51;
+        unsafe extern "C" {
+            fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+        }
+        // SAFETY: `file.as_raw_fd()` is a valid, open file descriptor for
+        // the duration of this call (borrowed from `file: &File`, which
+        // outlives this call); `F_FULLFSYNC` takes no variadic argument,
+        // matching this call site's own zero-varargs invocation; `fcntl`
+        // with `F_FULLFSYNC` has no other memory-safety precondition
+        // beyond a valid fd.
+        let rc = unsafe { fcntl(file.as_raw_fd(), F_FULLFSYNC) };
+        if rc == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        file.sync_all()
+    }
+}
+
+/// Directory-entry durability barrier after a rename. Issues the
+/// strongest available barrier for the platform (`F_FULLFSYNC` on macOS
+/// via [`sync_file_durable`], `fsync(2)` elsewhere) and propagates a hard
+/// I/O failure — but, per BC-1.18.011 Postcondition 3's own
+/// platform-branched durability language, does not claim a stronger
+/// guarantee than macOS/APFS actually provides for directory fsync
+/// (Apple's docs do not guarantee APFS directory-fsync itself survives
+/// power loss, even under `F_FULLFSYNC`); this function still issues the
+/// call and still propagates a hard failure, it just does not oversell
+/// what the underlying platform call durably promises.
+fn sync_dir_durable(dir: &Path) -> std::io::Result<()> {
+    let dir_file = File::open(dir)?;
+    sync_file_durable(&dir_file)
+}
+
+/// Public wrapper around this module's own `F_FULLFSYNC`-on-macOS
+/// directory durability barrier, for external crates (BC-1.18.011's B2
+/// migration in `factory-dispatcher`) that need to durably fsync a
+/// directory entry (e.g. immediately after creating a new staging
+/// directory, or after a `rename(2)` this module's own
+/// `write_atomic_strict_durable` does not itself cover) without
+/// introducing their own `unsafe` FFI — `factory-dispatcher` carries a
+/// crate-wide `#![deny(unsafe_code)]` security regression guard that this
+/// crate does not.
+pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
+    sync_dir_durable(dir).map_err(|source| MigrateError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })
+}
+
+/// D-1232-OBL-2(a) STRICT durable-write sequence: write `content` to a
+/// sibling temp file, `F_FULLFSYNC` it (macOS) / `fsync` it (elsewhere),
+/// `rename(2)` onto `path`, then `F_FULLFSYNC`/`fsync` the parent
+/// directory — every step's failure propagates (no silent fallback), and
+/// on ANY failure `path` is left completely untouched. Callers needing
+/// this crate's ordinary best-effort durability (`write_atomic` above)
+/// are UNAFFECTED — this is a separate, additive, stronger-guarantee
+/// entry point for a governance-integrity-critical writer (BC-1.18.011's
+/// B2 BC-INDEX migration).
+pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), MigrateError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let basename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
+    let tmp_path = parent.join(format!(".{basename}.strict-tmp-{}", std::process::id()));
+
+    let write_result: std::io::Result<()> = (|| {
+        let mut file = File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        sync_file_durable(&file)
+    })();
+    if let Err(source) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(MigrateError::Io {
+            path: tmp_path,
+            source,
+        });
+    }
+
+    if let Ok(existing_meta) = std::fs::metadata(path) {
+        let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
+    }
+
+    if let Err(source) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(MigrateError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+
+    sync_dir_durable(parent).map_err(|source| MigrateError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })
+}

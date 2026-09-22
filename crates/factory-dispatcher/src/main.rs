@@ -435,30 +435,36 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // gated behind `build_engine()`, which that path never reaches at all**;
     // see the empty-tier-groups guard immediately below for the full
     // rationale.
-    let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
-
     // BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a (S-25.02 cluster-5,
     // T-11) — the native OPEN/DRAINING writer-admission gate for the B2
-    // governed one-time migration. Computed EXACTLY ONCE, at the same
-    // pre-`build_engine()` point as `shard_gate_precheck_result` immediately
-    // above, and folded into that SAME single `Option<HookResult>` slot via
-    // `.or(...)` — this migration-admission gate never coexists with a real
-    // committed `.factory/migration-state/` directory today (see
-    // `bc_index_migration_admission_precheck`'s own real, non-stub
-    // existence-guard), so this composition is inert under every current
-    // test fixture and does not alter `shard_cap_precheck`'s own observable
-    // behavior. **Precedence note (stub-architect, this burst — flagged for
-    // architect confirmation, not guessed at):** a fired migration-admission
-    // verdict is given precedence over a fired shard-cap-gate verdict for
-    // the SAME dispatch via `.or()`'s left-biased short-circuit; ADR-052
-    // does not explicitly rule on ordering between these two independent
-    // native gates when both could theoretically fire for the same
-    // dispatch (a BC-INDEX-path write that is BOTH over-cap AND mid-
-    // migration), so this ordering is this stub's own reasonable default,
-    // not a spec-derived guarantee — the implementer should confirm this
-    // composition against BC-1.18.011/BC-1.18.005 before relying on it.
-    let shard_gate_precheck_result = bc_index_migration_admission_precheck(&payload, &project_cwd)
-        .or(shard_gate_precheck_result);
+    // governed one-time migration. Computed FIRST, before
+    // `shard_cap_precheck`, per BC-1.18.011 Architect Ruling 1
+    // (D-1232-OBL, this burst): `shard_cap_precheck`'s fired branch reaches
+    // `shard_manager::execute_roll` — a DESTRUCTIVE seal-and-truncate-to-0
+    // operation — so it must be STRUCTURALLY SKIPPED (never invoked at
+    // all) when a BC-INDEX-path write is already blocked by a
+    // STAGING/COMMITTING migration txn, never merely evaluated and then
+    // outcome-discarded via `.or(...)` after both already ran (the prior
+    // revision's defect: it computed `shard_gate_precheck_result` via
+    // `shard_cap_precheck` UNCONDITIONALLY above, before the migration
+    // check ever ran, so a fired migration-admission verdict would have
+    // "won" only in the RETURNED value, after `execute_roll`'s destructive
+    // side effect had already landed on disk).
+    let migration_gate_precheck_result =
+        bc_index_migration_admission_precheck(&payload, &project_cwd);
+
+    // `shard_cap_precheck` is reachable ONLY in the `None` arm below — this
+    // `match`'s control flow IS Ruling 1's "structurally skipped" guarantee.
+    // Non-BC-INDEX-path dispatches (decision-log/burst-log/lessons/session-
+    // checkpoints) and every dispatch while no migration is in flight are
+    // UNAFFECTED: `bc_index_migration_admission_precheck` returns `None`
+    // for them (its own real, non-stub existence/scope guards), so
+    // `shard_cap_precheck` continues to run normally on exactly the same
+    // inputs as before this restructure.
+    let shard_gate_precheck_result = match migration_gate_precheck_result {
+        Some(verdict) => Some(verdict),
+        None => shard_cap_precheck(&payload, &project_cwd),
+    };
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
     // a fired shard-cap-gate verdict (`Some(_)`) must still reach

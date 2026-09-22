@@ -472,16 +472,56 @@ pub fn bc_index_migration_admission_precheck(
         return None;
     }
 
-    todo!(
-        "BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a: with migration_state_dir known to \
-         exist, determine whether the dispatch's target path falls under \
-         .factory/specs/behavioral-contracts/ or .factory/cycles/ (short-circuit None \
-         otherwise); if in-scope, call shard_manager::reconcile_stale_admission_gate followed \
-         by shard_manager::admit_or_block_bc_index_writer, translating a refusal into \
-         HookResult::Block (E-MAINTENANCE-001 — 'writer must retry after migration \
-         completes', BLOCK semantics per ADR-052 §Error Code Semantics, never Error) and \
-         admission into None (Continue)"
-    )
+    // In-scope ONLY for a dispatch that targets `.factory/specs/behavioral-
+    // contracts/` or `.factory/cycles/` — everything else (an unrelated
+    // Edit/Write) stays out of this gate's scope even while a migration
+    // txn is in flight.
+    let target_path = payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from);
+    let Some(target_path) = target_path else {
+        return None;
+    };
+    let normalized = target_path.to_string_lossy().replace('\\', "/");
+    let in_scope = normalized.contains(".factory/specs/behavioral-contracts")
+        || normalized.contains(".factory/cycles");
+    if !in_scope {
+        return None;
+    }
+
+    let active_txn = match crate::shard_manager::read_active_txn_record(&migration_state_dir) {
+        Ok(txn) => txn,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the active BC-INDEX migration txn record: {e}"
+                ),
+            });
+        }
+    };
+
+    let Some(txn) = active_txn else {
+        return None;
+    };
+
+    if matches!(
+        txn.state,
+        crate::shard_manager::BcIndexMigrationTxnState::Staging
+            | crate::shard_manager::BcIndexMigrationTxnState::Committing
+    ) {
+        return Some(vsdd_hook_sdk::HookResult::Block {
+            reason: format!(
+                "BC-1.18.011 E-MAINTENANCE-001: a governed BC-INDEX migration (txn {}, \
+                 state={:?}) is currently in flight — this write is refused; retry after the \
+                 migration completes",
+                txn.txn_id, txn.state
+            ),
+        });
+    }
+
+    None
 }
 
 /// Synthesize a blocking [`PluginOutcome`] for the native shard-cap gate's
