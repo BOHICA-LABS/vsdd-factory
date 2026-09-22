@@ -12160,3 +12160,1136 @@ mod bc_1_18_006_roll_tests {
         );
     }
 }
+
+// ===========================================================================
+// BC-1.18.010 — Mechanism B2 end-state addressing (S-25.02 cluster-5
+// "shard-b2", T-10) — STUB SURFACE, stub-architect this burst.
+//
+// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
+//
+// This section and the BC-1.18.011 section below it are COMPILABLE STUBS
+// only. Every non-trivial function body is `todo!()`, citing the AC/BC
+// postcondition/invariant it will implement. Trivial, zero-branching,
+// ≤3-line, no-I/O, no-helper-call bodies are marked GREEN-BY-DESIGN per
+// BC-5.38.002 and given real bodies (see the stub commit report). No
+// WIRING-EXEMPT bodies are used in this section — every `From<...> for
+// HookResult` impl below branches on the source error's variant and is
+// therefore `todo!()`, unlike a pure single-field delegation.
+//
+// Scope: BC-1.18.010 (this section, T-10) specifies the END-STATE
+// addressing scheme only — first-level `BC-S Prefix` → `SS-NN` pure-
+// function addressing (zero shard-manifest reads, VP-127), the
+// `subsystem_prefixes` config-snapshot + three-way ARCH-INDEX parity
+// mechanism (Invariant 2), manifest-keyed second-level sub-sharding for
+// SS-05/SS-06, and the §Reader Integration OPEN-based-with-ENOENT-fallback
+// protocol for the migration window. The TRANSITION mechanics (content-
+// preservation, census, crash-atomicity, txn/intent-log state machine) are
+// BC-1.18.011's scope — see the section below.
+// ===========================================================================
+
+/// A parsed `BC-X.YY.NNN` behavioral-contract identifier.
+///
+/// `subsystem_major` is the `X` component — the value the
+/// `BC-S Prefix` → `SS-NN` mapping (ARCH-INDEX Subsystem Registry, POLICY 6)
+/// keys on for first-level addressing (BC-1.18.010 Postcondition 2).
+/// `capability_minor`/`sequence` (`YY`/`NNN`) are carried for canonical
+/// BC-ID sort-order comparisons (BC-1.18.011 Postcondition 1/2) but play no
+/// role in first-level shard-path computation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BcId {
+    /// The `X` in `BC-X.YY.NNN` — the subsystem-linked major number the
+    /// ARCH-INDEX `BC-S Prefix` mapping keys on (e.g. `5` for `BC-5.*`).
+    pub subsystem_major: u32,
+    /// The `YY` in `BC-X.YY.NNN` — the capability-linked minor number.
+    pub capability_minor: u32,
+    /// The `NNN` in `BC-X.YY.NNN` — the per-capability sequence number.
+    pub sequence: u32,
+}
+
+impl std::fmt::Display for BcId {
+    /// GREEN-BY-DESIGN (BC-5.38.002): pure `write!` formatting of three
+    /// already-validated integer fields — zero branching, no I/O, no
+    /// helper calls, 3 lines. See stub commit report GREEN-BY-DESIGN table.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BC-{}.{:02}.{:03}",
+            self.subsystem_major, self.capability_minor, self.sequence
+        )
+    }
+}
+
+/// Failure modes for BC-1.18.010's end-state addressing surface: BC-ID
+/// parsing, first-/second-level shard-path computation, the
+/// `subsystem_prefixes` config-snapshot load, the three-way ARCH-INDEX
+/// parity check (Invariant 2), and the §Reader Integration migration-window
+/// read protocol.
+#[derive(Debug, Error)]
+pub enum BcIndexAddressingError {
+    #[error("BC-INDEX addressing: I/O error reading {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("BC-INDEX addressing: TOML parse failure loading {path}: {source}")]
+    Toml {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    /// A candidate string does not match the `BC-X.YY.NNN` grammar.
+    #[error(
+        "BC-INDEX addressing: \"{candidate}\" is not a well-formed BC-X.YY.NNN identifier \
+         (BC-1.18.010 Postcondition 2)"
+    )]
+    MalformedBcId { candidate: String },
+
+    /// EC-020 counterpart: no `BC-S Prefix` → `SS-NN` mapping entry exists
+    /// for this BC ID's `subsystem_major` in the loaded config snapshot.
+    #[error(
+        "BC-INDEX addressing: no subsystem_prefixes mapping entry for BC-{subsystem_major} \
+         (BC-1.18.010 Invariant 2 — the mapping is never independently hardcoded; regenerate \
+         the config snapshot from ARCH-INDEX's Subsystem Registry)"
+    )]
+    UnmappedBcPrefix { subsystem_major: u32 },
+
+    /// EC-001: the subsystem is sub-sharded (per the top-level manifest)
+    /// but no `sub_manifest` path is present, or the sub-manifest itself
+    /// has no range entry covering this BC ID.
+    #[error(
+        "BC-INDEX addressing: subsystem {ss_id} is marked sub_sharded=true but its \
+         sub-manifest is missing or has no BC-ID-range entry covering {bc_id} \
+         (BC-1.18.010 Postcondition 4, EC-020)"
+    )]
+    SubShardRangeNotFound { ss_id: String, bc_id: String },
+
+    /// Invariant 2's three-way parity check: `config.arch_index_sha`,
+    /// `manifest.approved_arch_index_sha`, and the live ARCH-INDEX SHA must
+    /// all agree; any pairwise divergence — including a stale binary
+    /// (config at revision A) invoked against a current manifest
+    /// (revision B) — fails CLOSED.
+    #[error(
+        "BC-INDEX addressing: ARCH-INDEX three-way parity check FAILED \
+         (BC-1.18.010 Invariant 2, ARCH_INDEX_PARITY_ABORT). config.arch_index_sha={config_sha}, \
+         manifest.approved_arch_index_sha={manifest_sha}, live ARCH-INDEX SHA={live_sha}. All \
+         three must be identical; failing CLOSED rather than risk a stale or divergent \
+         BC-S-prefix→SS-NN mapping."
+    )]
+    ArchIndexParityMismatch {
+        config_sha: String,
+        manifest_sha: String,
+        live_sha: String,
+    },
+
+    /// The §Reader Integration protocol found neither `completed.json` nor
+    /// a `CURRENT.json` with `status: committing`, and the caller-supplied
+    /// relative path is unreachable at the legacy `BC-INDEX.md` fallback
+    /// (a structural inconsistency, not an ordinary ENOENT — an ordinary
+    /// ENOENT on the legacy path is not this variant's concern; callers
+    /// reading a path that simply doesn't exist yet propagate their own
+    /// `io::Error` instead).
+    #[error(
+        "BC-INDEX addressing: §Reader Integration protocol could not resolve a read path for \
+         {relative_path} (BC-1.18.010 §Reader Integration; BC-1.18.011 Invariant 3)"
+    )]
+    ReaderProtocolUnresolvable { relative_path: PathBuf },
+}
+
+impl From<BcIndexAddressingError> for HookResult {
+    fn from(_err: BcIndexAddressingError) -> Self {
+        todo!(
+            "BC-1.18.010: map each BcIndexAddressingError variant to the correct HookResult \
+             (most map to HookResult::Error; the migration-window read-protocol variants are \
+             never surfaced through this native-gate path at all — they belong to the reader \
+             integration call sites, not the PreToolUse admission gate). Branches on the error \
+             variant, so this is NOT WIRING-EXEMPT (BC-5.38.003 excludes multi-arm dispatch)."
+        )
+    }
+}
+
+/// One `[[subsystem_shard]]` entry of the top-level shard-manifest
+/// (`.factory/specs/behavioral-contracts/shards/BC-INDEX.shard-manifest.toml`,
+/// BC-1.18.010 Postcondition 3).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubsystemShardManifestEntry {
+    /// e.g. `"SS-01"`.
+    pub ss_id: String,
+    /// e.g. `"BC-1"` — the ARCH-INDEX `BC-S Prefix` this entry corresponds to.
+    pub bc_prefix: String,
+    /// Path relative to `.factory/specs/behavioral-contracts/`,
+    /// e.g. `"shards/BC-INDEX-SS-01.md"`. Becomes a stub pointer once
+    /// `sub_sharded=true` (Postcondition 3).
+    pub path: String,
+    pub sub_sharded: bool,
+    /// Present only when `sub_sharded=true`; e.g.
+    /// `"shards/BC-INDEX-SS-05.manifest.toml"`.
+    pub sub_manifest: Option<String>,
+}
+
+/// The top-level shard manifest (BC-1.18.010 Postcondition 3 schema).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubsystemShardManifest {
+    pub schema_version: u32,
+    #[serde(rename = "subsystem_shard")]
+    pub subsystem_shard: Vec<SubsystemShardManifestEntry>,
+}
+
+/// One BC-ID-range boundary entry of a second-level sub-shard manifest
+/// (e.g. `shards/BC-INDEX-SS-05.manifest.toml`, BC-1.18.010 Postcondition 4).
+/// Sub-shard boundaries are growth-based, not ID-prefix-deterministic —
+/// unlike first-level addressing, this second level genuinely requires a
+/// manifest read (EC-020/EC-001).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubShardRangeEntry {
+    /// e.g. `".a"`, `".b"` — the sub-shard suffix.
+    pub sub_shard_id: String,
+    /// Path relative to `.factory/specs/behavioral-contracts/`,
+    /// e.g. `"shards/BC-INDEX-SS-05.a.md"`.
+    pub path: String,
+    /// Inclusive lower bound of this sub-shard's `BC-X.YY.NNN` range.
+    pub range_start: String,
+    /// Inclusive upper bound of this sub-shard's `BC-X.YY.NNN` range.
+    pub range_end: String,
+}
+
+/// A second-level sub-shard manifest for one sub-sharded subsystem
+/// (SS-05/SS-06 today; any subsystem that grows over cap in the future,
+/// EC-003/Postcondition 4).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubShardManifest {
+    pub schema_version: u32,
+    pub ss_id: String,
+    #[serde(rename = "sub_shard")]
+    pub sub_shard: Vec<SubShardRangeEntry>,
+}
+
+/// The `subsystem_prefixes` TOML config snapshot (BC-1.18.010 Invariant 2 /
+/// ADR-052 §Decision 10): a `BC-S Prefix` → `SS-NN` mapping embedding the
+/// `arch_index_sha` of the ARCH-INDEX commit it was generated from. This is
+/// the ONLY source `shard_manager.rs` reads for first-level addressing at
+/// runtime — the mapping is never independently hardcoded or re-derived
+/// from a live ARCH-INDEX read on the hot path.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubsystemPrefixSnapshot {
+    pub schema_version: u32,
+    /// The ARCH-INDEX commit SHA this snapshot was generated from — the
+    /// binding Invariant 2's three-way parity check validates.
+    pub arch_index_sha: String,
+    #[serde(rename = "prefix")]
+    pub prefix: Vec<SubsystemPrefixEntry>,
+}
+
+/// One `BC-S Prefix` → `SS-NN` mapping row of [`SubsystemPrefixSnapshot`].
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SubsystemPrefixEntry {
+    /// The `X` in `BC-X` (e.g. `5` for `BC-5` → `SS-05`).
+    pub bc_prefix_major: u32,
+    pub ss_id: String,
+}
+
+/// Load the `subsystem_prefixes` config snapshot from disk (effectful
+/// read; BC-1.18.010 Invariant 2). Does NOT itself perform the three-way
+/// parity check — see [`check_arch_index_parity`].
+pub fn load_subsystem_prefix_snapshot(
+    _path: &Path,
+) -> Result<SubsystemPrefixSnapshot, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 Invariant 2: read + toml::from_str the subsystem_prefixes config snapshot \
+         at _path, mapping io::Error -> BcIndexAddressingError::Io and toml::de::Error -> \
+         BcIndexAddressingError::Toml"
+    )
+}
+
+/// Invariant 2's three-way ARCH-INDEX parity check, performed at migration
+/// activation time (under exclusion): `config.arch_index_sha ==
+/// manifest.approved_arch_index_sha == live_arch_index_sha`. Fails CLOSED
+/// on any pairwise divergence, including a stale binary (config at
+/// revision A) invoked against a current manifest (revision B).
+pub fn check_arch_index_parity(
+    _config: &SubsystemPrefixSnapshot,
+    _manifest_approved_arch_index_sha: &str,
+    _live_arch_index_sha: &str,
+) -> Result<(), BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 Invariant 2 / ADR-052 §Decision 10: compare all three SHAs for exact \
+         equality; on any pairwise mismatch return \
+         BcIndexAddressingError::ArchIndexParityMismatch (ARCH_INDEX_PARITY_ABORT at the \
+         migration binary's call site, per ADR-052 §Error Code Semantics)"
+    )
+}
+
+/// **VP-127 — zero-lookup invariant.** Pure-function first-level shard-path
+/// computation for `bc_id`: `BC-X` → `subsystem_prefixes` mapping → `SS-NN`
+/// → `shards/BC-INDEX-SS-NN.md`. MUST NOT read the shard-manifest
+/// (`BC-INDEX.shard-manifest.toml`) or any sub-manifest — this function's
+/// only I/O-shaped input is the already-loaded `prefixes` snapshot
+/// (BC-1.18.010 Postcondition 2, Invariant 1).
+///
+/// Callers whose subsystem turns out to be sub-sharded (`sub_sharded=true`
+/// in the top-level manifest) must instead use
+/// [`second_level_shard_path`] — this function alone is insufficient for
+/// SS-05/SS-06-class lookups (EC-020).
+pub fn first_level_shard_path(
+    _bc_id: &BcId,
+    _prefixes: &SubsystemPrefixSnapshot,
+) -> Result<PathBuf, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 Postcondition 2, Invariant 1 (VP-127): look up _bc_id.subsystem_major in \
+         _prefixes.prefix (zero manifest reads), compute \
+         shards/BC-INDEX-{{ss_id}}.md; return BcIndexAddressingError::UnmappedBcPrefix on no \
+         match"
+    )
+}
+
+/// Load the top-level shard manifest (effectful read; needed only for
+/// whole-corpus scans and to discover whether a subsystem is sub-sharded —
+/// never for an ordinary single-BC first-level lookup, per Invariant 1).
+pub fn load_shard_manifest(_path: &Path) -> Result<SubsystemShardManifest, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 Postcondition 3: read + toml::from_str the top-level shard manifest at \
+         _path"
+    )
+}
+
+/// Load a second-level sub-shard manifest for one sub-sharded subsystem
+/// (effectful read; e.g. `shards/BC-INDEX-SS-05.manifest.toml`).
+pub fn load_sub_shard_manifest(_path: &Path) -> Result<SubShardManifest, BcIndexAddressingError> {
+    todo!("BC-1.18.010 Postcondition 4: read + toml::from_str the sub-shard manifest at _path")
+}
+
+/// Full addressing resolution covering BOTH the zero-lookup first level
+/// AND, when the target subsystem is sub-sharded, the second level
+/// (EC-020: two manifest reads for SS-05/SS-06-class lookups, versus zero
+/// for a non-sub-sharded subsystem). This is the function most external
+/// callers (product-owner authorship tooling, consistency-validator) should
+/// use; [`first_level_shard_path`] is exposed separately for VP-127's own
+/// zero-manifest-read unit-test assertion (a mock filesystem read-call
+/// counter must observe zero reads for a non-sub-sharded lookup through
+/// THAT function specifically).
+pub fn resolve_bc_shard_path(
+    _bc_id: &BcId,
+    _prefixes: &SubsystemPrefixSnapshot,
+    _shards_dir: &Path,
+) -> Result<PathBuf, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 Postconditions 2 and 4 (EC-001/EC-002/EC-020): compute the first-level \
+         path via first_level_shard_path; load the top-level manifest ONLY to check \
+         sub_sharded for that entry's ss_id; if sub_sharded, load the sub-manifest and \
+         resolve the BC-ID-range entry containing _bc_id, returning \
+         BcIndexAddressingError::SubShardRangeNotFound if no range entry covers it"
+    )
+}
+
+/// Parse a `BC-X.YY.NNN` string into a [`BcId`]. Non-trivial: validates
+/// three integer components and the `BC-`/`.`/`.` grammar; genuinely
+/// branches on malformed input (EC-031-analogue for BC-INDEX row parsing).
+pub fn parse_bc_id(_candidate: &str) -> Result<BcId, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010/BC-1.18.011: parse \"BC-{{X}}.{{YY}}.{{NNN}}\" into BcId {{ \
+         subsystem_major, capability_minor, sequence }}; return \
+         BcIndexAddressingError::MalformedBcId on any grammar violation (missing BC- prefix, \
+         non-numeric component, wrong dot count)"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// §Reader Integration — migration-window OPEN-based-with-ENOENT-fallback
+// read protocol (BC-1.18.010 §Reader Integration; BC-1.18.011 Invariant 3;
+// ADR-052 §Decision 7c "Reader protocol").
+// ---------------------------------------------------------------------------
+
+/// Which of the three migration-window read states a caller observes,
+/// per BC-1.18.010's §Reader Integration protocol:
+/// `completed.json` present → [`Completed`](Self::Completed); else
+/// `CURRENT.json` with `status: committing` present →
+/// [`Committing`](Self::Committing); else [`NotStarted`](Self::NotStarted)
+/// (legacy `BC-INDEX.md` is current).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BcIndexMigrationReadState {
+    NotStarted,
+    Committing { generation_id: String },
+    Completed,
+}
+
+/// Steps 1-2 of the §Reader Integration protocol: probe
+/// `completed.json`/`CURRENT.json` and classify the current read state.
+/// Effectful (filesystem reads of two small marker files).
+pub fn detect_migration_read_state(
+    _migration_state_dir: &Path,
+) -> Result<BcIndexMigrationReadState, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 §Reader Integration steps 1-2: check \
+         _migration_state_dir/completed.json first (-> Completed if present); else check \
+         _migration_state_dir/CURRENT.json for status=\"committing\" (-> Committing with \
+         generation_id); else -> NotStarted"
+    )
+}
+
+/// Step 2's per-file OPEN-based-with-ENOENT-fallback read: open
+/// `gen-<generation_id>/<relative_path>` first; on ENOENT, open the
+/// canonical path instead. Race-free under `rename(2)` atomicity — a
+/// required file is never absent from both paths simultaneously (ADR-052
+/// §Decision 7c "Reader protocol", v1.11 MED-1).
+///
+/// Callers in [`BcIndexMigrationReadState::NotStarted`] should instead open
+/// the legacy `BC-INDEX.md` path directly; callers in
+/// [`BcIndexMigrationReadState::Completed`] should open the canonical path
+/// directly. This function is for the
+/// [`BcIndexMigrationReadState::Committing`] case only.
+pub fn open_bc_index_path_during_migration(
+    _generation_id: &str,
+    _relative_path: &Path,
+    _migration_state_dir: &Path,
+    _canonical_root: &Path,
+) -> Result<std::fs::File, BcIndexAddressingError> {
+    todo!(
+        "BC-1.18.010 §Reader Integration step 2 / ADR-052 §Decision 7c Reader protocol: \
+         attempt File::open(_migration_state_dir/gen-{{_generation_id}}/_relative_path); on \
+         ENOENT specifically, fall back to File::open(_canonical_root/_relative_path); any \
+         OTHER io::Error propagates unchanged (never silently treated as the fallback case)"
+    )
+}
+
+// ===========================================================================
+// BC-1.18.011 — Governed one-time migration for the B2 BC-INDEX body split
+// (S-25.02 cluster-5 "shard-b2", T-11) — STUB SURFACE, stub-architect this
+// burst.
+//
+// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
+//
+// Implements the durable txn-record + framed checksummed intent-log
+// STAGING/COMMITTING/COMPLETED/ABORTED state machine (ADR-052 §Decision 7a/
+// 7b/7c), the dual writer-exclusion mechanism (advisory flock + txn-record
+// admission gate + OPEN/DRAINING writer-reservation gate, ADR-052
+// §Decision 5a), structured per-BC-row content-preservation (Postcondition
+// 1, the v1.7 `source_body_row_sha256` model — NEVER the withdrawn
+// whole-concatenation-vs-`source_sha256` model), the independent census
+// (Postcondition 2), the Postcondition 3a exactly-once TOCTOU pre-commit
+// fingerprint recheck, and the CONTENT_PRESERVATION_ABORT/
+// CENSUS_MISMATCH_ABORT process-exit-code paths (never HookResult/
+// E-SHD-005 — that code is scoped exclusively to the steady-state native
+// admission gate, BC-1.18.006/BC-1.18.010).
+// ===========================================================================
+
+/// STAGING → COMMITTING → COMPLETED (or ABORTED) — the txn-record state
+/// machine (BC-1.18.011 Precondition 5; ADR-052 §Decision 7a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BcIndexMigrationTxnState {
+    Staging,
+    Committing,
+    Completed,
+    Aborted,
+}
+
+/// A `{staging_path, canonical_path}` pair not yet moved (ADR-052
+/// §Decision 7a `pending_canonical_moves` field).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PendingCanonicalMove {
+    pub staging_path: String,
+    pub canonical_path: String,
+}
+
+/// The durable transaction record at
+/// `.factory/migration-state/txn-<activation_uuid>.json` (BC-1.18.011
+/// Precondition 5; ADR-052 §Decision 7a full field schema). Tracks the
+/// migration through its full STAGING → COMMITTING → COMPLETED lifecycle
+/// and is the authoritative "is maintenance in progress" signal the native
+/// admission gate (§Decision 5a) consults independent of flock/PID
+/// liveness.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct BcIndexMigrationTxnRecord {
+    pub txn_id: String,
+    pub activation_id: String,
+    /// Monotonic; starts at 1; incremented by each recovery-owner claim.
+    /// AUDIT-ONLY — the advisory flock is the actual mutual-exclusion
+    /// mechanism (ADR-052 §Decision 7a "Recovery-owner claim protocol").
+    pub fencing_generation: u64,
+    pub state: BcIndexMigrationTxnState,
+    /// `None` until assigned at ADR-052 §Decision 7c step 1.
+    pub generation_id: Option<String>,
+    /// SHA-256 of ALL source files at quiescence — used ONLY by the step-5
+    /// fingerprint recheck, NEVER by content-preservation (PC1).
+    pub source_sha256: Option<String>,
+    /// SHA-256 of the per-BC-row table-row content in canonical BC-ID sort
+    /// order — used ONLY by content-preservation (PC1). Distinct field,
+    /// distinct scope, from `source_sha256` (BC-1.18.011 Postcondition 1).
+    pub source_body_row_sha256: Option<String>,
+    pub intent_log_path: Option<String>,
+    pub pending_canonical_moves: Vec<PendingCanonicalMove>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One framed, checksummed record of the intent log
+/// (`.factory/migration-state/intent-<generation_uuid>.log`, ADR-052
+/// §Decision 7b). A torn record (truncated, checksum mismatch, missing
+/// terminator) MUST be treated as absent, never as a partial INTENT/DONE —
+/// enforced by the (stubbed) parser, not by this data type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentLogRecordType {
+    Intent,
+    Done,
+    Aborted,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntentLogRecord {
+    pub txn_id: String,
+    pub fencing_generation: u64,
+    pub record_type: IntentLogRecordType,
+    pub target_canonical: PathBuf,
+    pub staging_path: PathBuf,
+    pub expected_post_hash: String,
+    /// `None` represents the `missing` sentinel (target did not exist at
+    /// intent-write time).
+    pub expected_pre_state: Option<String>,
+    pub timestamp_utc: String,
+    /// SHA-256 of all the above fields concatenated — the record's own
+    /// tamper/torn-record checksum.
+    pub record_checksum: String,
+}
+
+/// The atomic pointer file `.factory/migration-state/CURRENT.json`
+/// (ADR-052 §Decision 7c step 6 — the sole commit-point for the whole
+/// multi-file migration).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct CurrentGenerationPointer {
+    pub generation_id: String,
+    /// Always `"committing"` while this file exists — kept as an explicit
+    /// field (not a marker-file-presence-only signal) to match the wire
+    /// schema ADR-052 §Decision 7c step 6 specifies verbatim.
+    pub status: String,
+    pub txn_id: String,
+}
+
+/// The permanent terminal record `.factory/migration-state/completed.json`
+/// (ADR-052 §Decision 7c step 8). NEVER deleted, NEVER archived — its mere
+/// presence is sufficient for any reader or rerun to know the migration is
+/// done, with no other file consulted (BC-1.18.010 §Reader Integration
+/// step 1).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct CompletedMigrationRecord {
+    pub generation_id: String,
+    pub txn_id: String,
+    pub completed_at: String,
+    pub canonical_paths_count: u64,
+}
+
+/// The OPEN/DRAINING/LOCKED native admission-gate state persisted to
+/// `.factory/migration-state/gate-state` (ADR-052 §Decision 5a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BcIndexAdmissionGateState {
+    Open,
+    Draining,
+    Locked,
+}
+
+/// One writer reservation file's content
+/// (`.factory/migration-state/reservations/<tool_use_id>.reservation`,
+/// ADR-052 §Decision 5a v1.9 H1 — `created_at` timestamp ONLY, deliberately
+/// no PID: the creating PreToolUse binary is a per-event process that has
+/// already exited by the time any drain step runs, so PID-liveness GC is
+/// unsound for this reservation model).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct WriterReservation {
+    pub created_at: String,
+    pub tool_use_id: String,
+}
+
+/// Migration-binary PROCESS EXIT CODES (ADR-052 §Error Code Semantics) —
+/// distinct from, and never surfaced as, a `HookResult`/`E-SHD-005` value
+/// (that code is scoped exclusively to the steady-state native admission
+/// gate, BC-1.18.006/BC-1.18.010).
+#[derive(Debug, Error)]
+pub enum BcIndexMigrationError {
+    #[error("BC-INDEX migration: {message} (BINARY_INTEGRITY_FAILURE, exit 2)")]
+    BinaryIntegrityFailure { message: String },
+
+    #[error(
+        "BC-INDEX migration: recovery encountered a COMMITTING txn whose manifest has expired \
+         and no valid completion-only recovery manifest is present \
+         (RECOVERY_REQUIRES_REAUTHORIZATION, exit 2)"
+    )]
+    RecoveryRequiresReauthorization,
+
+    #[error(
+        "BC-INDEX migration: activation manifest expired or absent at STAGING resume \
+         (EXPIRY_ABORT, exit 1); txn record left in STAGING, no canonical paths changed; \
+         re-activation required"
+    )]
+    ExpiryAbort,
+
+    #[error(
+        "BC-INDEX migration: source files changed between the quiescence snapshot and the \
+         Postcondition 3a pre-commit fingerprint recheck (FINGERPRINT_MISMATCH_ABORT, exit 2)"
+    )]
+    FingerprintMismatchAbort,
+
+    #[error(
+        "BC-INDEX migration: writer-reservation quiescence not reached within the drain \
+         timeout (DRAIN_TIMEOUT_ABORT, exit 2); gate returned to OPEN"
+    )]
+    DrainTimeoutAbort,
+
+    #[error(
+        "BC-INDEX migration: ARCH-INDEX three-way parity check failed \
+         (ARCH_INDEX_PARITY_ABORT, exit 2): {source}"
+    )]
+    ArchIndexParityAbort {
+        #[source]
+        source: BcIndexAddressingError,
+    },
+
+    #[error(
+        "BC-INDEX migration: completion-only recovery manifest failed validation \
+         (COMPLETION_MANIFEST_REJECTION, exit 2): {reason}"
+    )]
+    CompletionManifestRejection { reason: String },
+
+    /// BC-1.18.011 Postcondition 2 (PC2) failure: an ID from the original
+    /// census appears in zero or more than one staged shard file, or a
+    /// sub-shard's row count exceeds shard-cap bounds. Process exit code —
+    /// distinct from `HookResult`/`E-SHD-005` (ADR-052 §Decision 7c step
+    /// 3b note).
+    #[error(
+        "BC-INDEX migration: independent-census check FAILED for {bc_id} \
+         (CENSUS_MISMATCH_ABORT, exit 2; BC-1.18.011 Postcondition 2): {detail}"
+    )]
+    CensusMismatchAbort { bc_id: String, detail: String },
+
+    /// BC-1.18.011 Postcondition 1 (PC1) failure — structured per-BC-row
+    /// equivalence, never a whole-concatenation hash (that model is
+    /// explicitly UNSATISFIABLE per the BC's own v1.7 correction).
+    #[error(
+        "BC-INDEX migration: content-preservation check FAILED \
+         (CONTENT_PRESERVATION_ABORT, exit 2; BC-1.18.011 Postcondition 1): {detail}"
+    )]
+    ContentPreservationAbort { detail: String },
+
+    #[error("BC-INDEX migration: I/O error at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+impl BcIndexMigrationError {
+    /// Map this error to the migration-binary process exit code ADR-052
+    /// §Error Code Semantics assigns it. `ExpiryAbort` alone is exit 1
+    /// ("no harm done, but re-activation required"); every other error
+    /// variant here is exit 2.
+    pub fn process_exit_code(&self) -> i32 {
+        todo!(
+            "ADR-052 §Error Code Semantics: match self, returning 1 for ExpiryAbort and 2 for \
+             every other variant (BinaryIntegrityFailure, \
+             RecoveryRequiresReauthorization, FingerprintMismatchAbort, DrainTimeoutAbort, \
+             ArchIndexParityAbort, CompletionManifestRejection, CensusMismatchAbort, \
+             ContentPreservationAbort, Io)"
+        )
+    }
+}
+
+/// The migration binary's own successful-completion outcomes (ADR-052
+/// §Error Code Semantics: exit 0 for both).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BcIndexMigrationOutcome {
+    /// `completed.json` already existed — ALREADY_MIGRATED sentinel,
+    /// idempotent no-op (BC-1.18.011 EC-006).
+    AlreadyMigrated,
+    /// This invocation performed the split and reached COMPLETED.
+    Completed { canonical_paths_count: u64 },
+}
+
+// ---------------------------------------------------------------------------
+// Content-preservation (PC1) and independent census (PC2) — Postconditions
+// 1 and 2. Pure computation over already-read content (Purity Classification
+// table: "content-preservation/census verification is itself pure
+// computation over read content").
+// ---------------------------------------------------------------------------
+
+/// Extract every `BC-X.YY.NNN` table row from `body`, EXCLUDING `§Summary`,
+/// `§Subsystem Shard Manifest`, cross-cutting invariants, and non-row
+/// separator lines, then sort by canonical BC-ID order (BC-1.18.011
+/// Postcondition 1). Shared by both the pre-split source extraction (over
+/// the original monolithic body) and the post-split staged extraction
+/// (over the concatenation of all staged shard files' bodies) — callers
+/// pass the appropriate `body` for each side.
+pub fn extract_and_sort_bc_rows(_body: &str) -> Result<Vec<(BcId, String)>, BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Postcondition 1: parse _body's BC-X.YY.NNN table rows (excluding \
+         §Summary/§Subsystem Shard Manifest/cross-cutting invariants/separator lines), sort \
+         by canonical BC-ID order via BcId's Ord impl"
+    )
+}
+
+/// Compute `source_body_row_sha256`: the SHA-256 of the sorted, extracted
+/// per-BC-row content, concatenated as raw bytes (BC-1.18.011 Postcondition
+/// 1 / ADR-052 §Decision 5a drain step 5(c)). Used both to capture the
+/// txn record's field at quiescence (over the ORIGINAL body) and to
+/// compute the staged-side hash for the PC1 comparison (over the staged
+/// shard files' concatenated rows).
+pub fn compute_body_row_sha256(_sorted_rows: &[(BcId, String)]) -> String {
+    todo!(
+        "BC-1.18.011 Postcondition 1: concatenate _sorted_rows' row bytes in order and hash \
+         via the module's private sha256_hex helper (mirrors BackfillManifest's own \
+         original_sha256/final_sha256 encoding)"
+    )
+}
+
+/// Postcondition 1 (PC1) — structured per-BC-row content-preservation.
+/// Compares a freshly recomputed staged-row hash against
+/// `source_body_row_sha256` from the txn record. NEVER compares a
+/// whole-concatenation hash against `source_sha256` — that model is
+/// explicitly UNSATISFIABLE (the staged lean body adds the new §Subsystem
+/// Shard Manifest section and reorders content).
+pub fn verify_content_preservation(
+    _staged_shard_bodies: &[String],
+    _source_body_row_sha256: &str,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Postcondition 1 (PC1) / ADR-052 §Decision 7c step 3b: extract+sort rows \
+         from the concatenation of _staged_shard_bodies via extract_and_sort_bc_rows, hash via \
+         compute_body_row_sha256, compare against _source_body_row_sha256; on mismatch return \
+         BcIndexMigrationError::ContentPreservationAbort"
+    )
+}
+
+/// Postcondition 2 (PC2) — independent census. Verifies every ID in
+/// `original_census` appears in EXACTLY ONE staged shard (never zero,
+/// never two — this is what EC-001's dup+drop counterexample defeats a
+/// byte-count-only check on), that the union of staged shard row counts
+/// equals `original_census.len()` exactly, and that the staged lean
+/// `BC-INDEX.md` body itself carries zero per-BC rows (BC-1.18.010
+/// Invariant 3).
+pub fn verify_independent_census(
+    _original_census: &std::collections::BTreeSet<BcId>,
+    _staged_shard_bodies: &[String],
+    _staged_bc_index_body: &str,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Postcondition 2 (PC2) / ADR-052 §Decision 7c step 3b: for each staged \
+         shard body, extract its BC-X.YY.NNN IDs; verify every ID in _original_census appears \
+         in exactly one staged shard (BcIndexMigrationError::CensusMismatchAbort naming the \
+         duplicated/missing ID on violation, EC-001); verify _staged_bc_index_body has zero \
+         per-BC rows (BC-1.18.010 Invariant 3)"
+    )
+}
+
+/// A fresh, independent pre-split enumeration of every `BC-X.YY.NNN` ID in
+/// the ORIGINAL (pre-split) `BC-INDEX.md` body, cross-checked against the
+/// `total_bcs` frontmatter field as a sanity bound (BC-1.18.011
+/// Precondition 3, Postcondition 2). `total_bcs` is a sanity bound, never
+/// the census itself.
+pub fn compute_independent_census(
+    _original_body: &str,
+    _total_bcs: usize,
+) -> Result<std::collections::BTreeSet<BcId>, BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Precondition 3, Postcondition 2: extract every BC-X.YY.NNN ID from \
+         _original_body (a fresh enumeration, not reused from any cached count); verify the \
+         resulting set's cardinality matches _total_bcs; return the ID set"
+    )
+}
+
+/// Postcondition 3a — the EXACTLY-ONCE TOCTOU pre-commit source-fingerprint
+/// recheck, performed immediately before the CURRENT.json pointer swap
+/// (ADR-052 §Decision 7c step 5), never between individual renames.
+/// Re-reads and re-hashes the live source content and compares against
+/// `source_sha256` captured in the txn record at quiescence.
+pub fn pre_commit_fingerprint_recheck(
+    _source_paths: &[PathBuf],
+    _expected_source_sha256: &str,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Postcondition 3a / ADR-052 §Decision 7c step 5: re-read every path in \
+         _source_paths, recompute a combined SHA-256, compare against \
+         _expected_source_sha256; on mismatch return \
+         BcIndexMigrationError::FingerprintMismatchAbort — this check runs EXACTLY ONCE"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Dual writer-exclusion: advisory flock + txn-record admission gate +
+// OPEN/DRAINING writer-reservation gate (BC-1.18.011 Precondition 6;
+// ADR-052 §Decision 5a/7a).
+// ---------------------------------------------------------------------------
+
+/// RAII guard for the advisory flock on
+/// `.factory/migration-state/exclusive.lock` (a stable, pre-created,
+/// NEVER-unlinked inode — ADR-052 §Decision 7a). Dropping this guard
+/// releases the flock (including implicitly on process death, via the
+/// kernel — the `Drop` impl is a defense-in-depth explicit close, not the
+/// sole release mechanism).
+#[derive(Debug)]
+pub struct MigrationLockGuard {
+    _file: std::fs::File,
+}
+
+impl Drop for MigrationLockGuard {
+    fn drop(&mut self) {
+        todo!(
+            "BC-1.18.011 Precondition 6(a) / ADR-052 §Decision 7a: release the LOCK_EX flock \
+             held on self._file (libc::flock(fd, LOCK_UN)); the kernel already releases on fd \
+             close as a backstop, but an explicit unlock keeps behavior deterministic under \
+             test doubles"
+        )
+    }
+}
+
+/// Attempt to acquire the exclusive advisory flock on `lock_path`
+/// (non-blocking). Returns `Ok(None)` (never blocks) if another process
+/// already holds it — callers surface `E-MAINTENANCE-001`; this function
+/// itself does not construct that `HookResult`.
+pub fn try_acquire_migration_lock(
+    _lock_path: &Path,
+) -> Result<Option<MigrationLockGuard>, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7a: open(_lock_path, O_RDWR); flock(fd, LOCK_EX | LOCK_NB); on \
+         EWOULDBLOCK return Ok(None); on success, write the lock file's diagnostic JSON body \
+         (pid/activation_id/fencing_generation/timestamp_utc — informational only, never the \
+         authorization source of truth) and return Ok(Some(MigrationLockGuard))"
+    )
+}
+
+/// Read the durable txn record, if one exists, from
+/// `.factory/migration-state/txn-*.json`.
+pub fn read_active_txn_record(
+    _migration_state_dir: &Path,
+) -> Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7a: glob _migration_state_dir/txn-*.json, parse the (at most one \
+         active) txn record; return None if no txn-*.json file exists"
+    )
+}
+
+/// Atomically write (temp-file-then-rename, reusing
+/// `last_amended_migrate::atomic_write::write_atomic`) the txn record.
+pub fn write_txn_record(
+    _migration_state_dir: &Path,
+    _record: &BcIndexMigrationTxnRecord,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Invariant 1: serialize _record to JSON and write via \
+         last_amended_migrate::atomic_write::write_atomic to \
+         _migration_state_dir/txn-<_record.activation_id>.json — reusing BC-1.18.006's \
+         per-file write primitive, never a reimplementation"
+    )
+}
+
+/// The native admission-gate check the OPEN/DRAINING gate performs: is a
+/// mutation currently admissible against `.factory/specs/behavioral-
+/// contracts/` or `.factory/cycles/` paths? (ADR-052 §Decision 5a, dual
+/// check — `gate_state == OPEN` AND no active txn.)
+pub fn is_bc_index_admission_open(
+    _gate_state: BcIndexAdmissionGateState,
+    _active_txn: Option<&BcIndexMigrationTxnRecord>,
+) -> bool {
+    todo!(
+        "ADR-052 §Decision 5a Invariant M-1 (dual-check): admit only when _gate_state == Open \
+         AND (_active_txn is None OR _active_txn.state is Completed/Aborted); a txn in \
+         Staging/Committing blocks admission regardless of gate_state"
+    )
+}
+
+/// PreToolUse admission-check entry point (ADR-052 §Decision 5a's atomic
+/// admission protocol steps 1-5, minus the flock-gated stale-gate
+/// reconciliation sub-procedure — see
+/// [`reconcile_stale_admission_gate`] for that). On admission, creates the
+/// writer reservation file; on refusal, returns the reason without
+/// creating one.
+pub fn admit_or_block_bc_index_writer(
+    _migration_state_dir: &Path,
+    _tool_use_id: &str,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 5a steps 1-5: acquire LOCK_SH on gate-state, read gate_state, check \
+         for an active txn record; if admissible (is_bc_index_admission_open), create \
+         reservations/{{_tool_use_id}}.reservation and return Ok(()); otherwise return an \
+         E-MAINTENANCE-001-shaped error (the HookResult::Block/Error translation happens at \
+         the executor.rs call site, not here)"
+    )
+}
+
+/// PostToolUse counterpart: remove the reservation file this tool
+/// invocation's PreToolUse created. A missing file (writer crashed between
+/// Pre and Post) is a no-op, not an error.
+pub fn release_bc_index_writer_reservation(
+    _migration_state_dir: &Path,
+    _tool_use_id: &str,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 5a: remove reservations/{{_tool_use_id}}.reservation if present; \
+         absence is a normal no-op, never an error"
+    )
+}
+
+/// Flock-gated stale-gate reconciliation (ADR-052 §Decision 5a step 3.5,
+/// Branch A / Branch B). A recovery process (or the next ordinary
+/// PreToolUse admission check) that finds `gate_state ∈ {LOCKED,
+/// DRAINING}` with no live coordinator holding `exclusive.lock` self-heals
+/// the gate back to `OPEN` — this is the mechanism that makes
+/// `E-MAINTENANCE-001` always self-heal by the next PreToolUse dispatch,
+/// never requiring operator intervention for a routine stuck-gate case.
+pub fn reconcile_stale_admission_gate(
+    _migration_state_dir: &Path,
+) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 5a step 3.5 Branch A/Branch B: attempt \
+         try_acquire_migration_lock(exclusive.lock); on EWOULDBLOCK, a live coordinator holds \
+         it — return the gate's CURRENT (unreconciled) state; on acquisition, re-read \
+         gate/txn under LOCK_EX, apply Branch A (no active txn -> flip OPEN) or Branch B \
+         (txn=Staging with generation_id=None -> mark txn Aborted, flip OPEN), release both \
+         locks, and return the resulting state"
+    )
+}
+
+/// Poll the writer-reservations directory until it is empty (quiescence)
+/// or the drain timeout elapses (ADR-052 §Decision 5a drain procedure step
+/// 4; default timeout 30s). Also performs the stale-reservation TTL GC
+/// pass (step 1) before polling, per the v1.9 H1 correction (TTL-only, NOT
+/// PID-liveness — the creating PreToolUse binary is a per-event process
+/// that has already exited).
+pub fn drain_bc_index_writers(
+    _reservations_dir: &Path,
+    _drain_timeout: std::time::Duration,
+    _max_reservation_ttl: std::time::Duration,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 5a drain procedure steps 1+4: GC reservation files older than \
+         _max_reservation_ttl (TTL-only, no PID check — v1.9 H1); poll \
+         _reservations_dir until empty; on _drain_timeout elapsed without reaching quiescence, \
+         return BcIndexMigrationError::DrainTimeoutAbort"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Intent log (ADR-052 §Decision 7b) — framed, checksummed, per-target
+// expected-hash recovery.
+// ---------------------------------------------------------------------------
+
+/// Append one framed record to the intent log (append-only). Callers MUST
+/// `fsync` the underlying fd immediately after this call per the WAL
+/// boundary discipline (ADR-052 §Decision 7b step 2/step 5) — this
+/// function's own `todo!()` implementation will own that fsync call.
+pub fn append_intent_log_record(
+    _intent_log_path: &Path,
+    _record: &IntentLogRecord,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7b: serialize _record in the `--- INTENT_LOG_RECORD v1 ---` framed \
+         format (including record_checksum = sha256 of the preceding fields), append to \
+         _intent_log_path, then fsync the file descriptor — this call is the WAL boundary \
+         after which the corresponding rename is recoverable"
+    )
+}
+
+/// Parse the intent log, discarding any torn (truncated, checksum-
+/// mismatched, or unterminated) trailing record — a torn record MUST be
+/// treated as absent, never as a partial INTENT or DONE (ADR-052 §Decision
+/// 7b).
+pub fn read_intent_log(
+    _intent_log_path: &Path,
+) -> Result<Vec<IntentLogRecord>, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7b: parse the framed record sequence at _intent_log_path; validate \
+         each record's record_checksum; on any torn/invalid trailing record, silently drop it \
+         (recovery reads from the last valid record) rather than erroring"
+    )
+}
+
+/// The recovery decision for one target, per ADR-052 §Decision 7b's
+/// recovery decision table (all cases fail closed except the two
+/// explicitly marked safe).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntentLogRecoveryDecision {
+    /// Canonical already holds `expected_post_hash`; append a DONE record
+    /// (or it's already DONE) and move on.
+    TreatDone,
+    /// Staging holds `expected_post_hash` and canonical still holds
+    /// `expected_pre_state` (or is legitimately missing): redo the rename,
+    /// sync the parent dir, append DONE.
+    RedoRename,
+    /// Every other combination in the table — ambiguous or untrustworthy
+    /// state; recovery MUST halt for this target.
+    FailClosed { reason: String },
+}
+
+/// Apply ADR-052 §Decision 7b's recovery decision table to one target's
+/// current on-disk state plus its intent-log record.
+pub fn decide_intent_log_recovery(
+    _canonical_hash: Option<&str>,
+    _staging_hash: Option<&str>,
+    _record: Option<&IntentLogRecord>,
+) -> IntentLogRecoveryDecision {
+    todo!(
+        "ADR-052 §Decision 7b recovery decision table: apply the 8-row table verbatim over \
+         (_canonical_hash, _staging_hash, _record) — TreatDone / RedoRename for the two safe \
+         rows, FailClosed for every other combination (torn/absent record, canonical matching \
+         neither expected hash, staging missing when needed)"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Atomic publication (ADR-052 §Decision 7c) — generation staging, the
+// CURRENT.json pointer swap (the sole commit-point), canonical path moves,
+// and the completed.json terminal record.
+// ---------------------------------------------------------------------------
+
+/// ADR-052 §Decision 7c step 1: assign a new staging-generation UUID,
+/// create `.factory/migration-state/gen-<uuid>/`, and durably persist
+/// `generation_id` to the txn record ONLY AFTER the generation directory
+/// itself is durable (v1.13 LOW-1 ordering invariant — load-bearing for
+/// the corruption-detection check at resume time).
+pub fn stage_new_generation(_migration_state_dir: &Path) -> Result<String, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7c step 1: generate a UUIDv4 generation_id (uuid::Uuid::new_v4), \
+         create _migration_state_dir/gen-<uuid>/, apply the platform durability barrier, and \
+         return the generation_id string — the CALLER is responsible for the v1.13 LOW-1 \
+         ordering invariant (persist generation_id to the txn record only after this \
+         directory is durable)"
+    )
+}
+
+/// ADR-052 §Decision 7c step 6 — the SOLE commit-point for the entire
+/// multi-file migration: write `CURRENT.tmp.json`, sync it, then
+/// `rename()` it onto `CURRENT.json` (atomic on POSIX/APFS), then sync the
+/// parent directory. After this call returns `Ok(())` there is no turning
+/// back — forward recovery, never rollback, governs everything past this
+/// point (BC-1.18.011 Invariant 3).
+pub fn commit_current_generation_pointer(
+    _migration_state_dir: &Path,
+    _pointer: &CurrentGenerationPointer,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7c step 6: write _migration_state_dir/CURRENT.tmp.json with \
+         _pointer's JSON, sync_file_durable it, rename(2) it onto \
+         _migration_state_dir/CURRENT.json, sync_dir_best_effort/sync_dir_durable the parent \
+         per the platform branch (§Decision 7d) — this is the sole atomic commit-point; \
+         composing N independent write_atomic calls without this pointer swap does NOT \
+         satisfy BC-1.18.011 Invariant 3"
+    )
+}
+
+/// ADR-052 §Decision 7c step 7 — execute the canonical path moves,
+/// forward-recoverable via the intent log. On any single move's failure,
+/// this function MUST NOT abort the whole operation: it records the
+/// failure, halts further renames, and leaves the migration in a state
+/// [`decide_intent_log_recovery`]-driven forward recovery can resume from.
+pub fn execute_canonical_path_moves(
+    _pending: &[PendingCanonicalMove],
+    _intent_log_path: &Path,
+) -> Result<u64, BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7c step 7: for each _pending move, rename(staging_path, \
+         canonical_path), sync_dir the canonical parent, append a DONE intent-log record, \
+         fsync it; on any single-move failure, HALT further renames (do not abort/rollback) \
+         and return the count of moves completed so far so the caller can update the txn \
+         record's pending_canonical_moves for forward recovery"
+    )
+}
+
+/// ADR-052 §Decision 7c step 8 — write the permanent `completed.json`
+/// terminal record after every canonical path move is complete AND
+/// individually hash-verified.
+pub fn write_completed_record(
+    _migration_state_dir: &Path,
+    _record: &CompletedMigrationRecord,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "ADR-052 §Decision 7c step 8: serialize _record to JSON, write via \
+         last_amended_migrate::atomic_write::write_atomic to \
+         _migration_state_dir/completed.json — this file is PERMANENT, never deleted or \
+         archived"
+    )
+}
+
+/// BC-1.18.011 EC-003 — resume-from-STAGING mandatory full census re-run.
+/// A prior migration attempt that left a verified-complete staged
+/// generation MUST still re-run the FULL Postcondition 2 census (against
+/// the SAME staged generation files — never re-running the split itself,
+/// Postcondition 5's idempotency) before proceeding to the pointer swap.
+/// The census gate is NOT skippable on resume, even from a previously-
+/// verified-complete staged state.
+pub fn resume_from_staging(
+    _txn_record: &BcIndexMigrationTxnRecord,
+    _migration_state_dir: &Path,
+) -> Result<(), BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 EC-003 (ADR-052 §Decision 7c step 3b, referenced by §Decision 4e): \
+         re-load the staged generation at _txn_record.generation_id, re-run PC1 \
+         (verify_content_preservation) and PC2 (verify_independent_census) against those SAME \
+         staged files — never re-splitting from scratch — before allowing the caller to \
+         proceed to commit_current_generation_pointer"
+    )
+}
+
+/// The top-level governed-migration entry point (BC-1.18.011; invoked via
+/// the `migrate-bc-index` CLI subcommand — see [`run_migrate_bc_index_cli`]
+/// in this module and ADR-052 §Decision 3's closed argument grammar).
+/// Orchestrates: Branch-2 terminal-state short-circuit
+/// (`completed.json` present → `AlreadyMigrated`) → lock acquisition →
+/// drain → snapshot/census capture → stage new generation → write shard
+/// files + manifest → PC1/PC2 gate (step 3b) → authorization-expiry check
+/// → Postcondition 3a fingerprint recheck → CURRENT.json pointer swap (the
+/// commit point) → canonical path moves → `completed.json`.
+pub fn run_bc_index_migration(
+    _cwd: &Path,
+) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    todo!(
+        "BC-1.18.011 Postconditions 1-8 / ADR-052 §Decision 7a/7b/7c full sequence: orchestrate \
+         the Branch-2 ALREADY_MIGRATED short-circuit, try_acquire_migration_lock, \
+         drain_bc_index_writers, quiescence snapshot (source_sha256 + \
+         compute_independent_census + compute_body_row_sha256 over the ORIGINAL body), \
+         stage_new_generation, write staged shard files + top-level/sub-level manifests via \
+         last_amended_migrate::atomic_write::write_atomic, verify_content_preservation + \
+         verify_independent_census (step 3b gate; abort with ContentPreservationAbort/ \
+         CensusMismatchAbort on failure, deleting the staging generation + flipping the gate \
+         OPEN), authorization-expiry check (ExpiryAbort), \
+         pre_commit_fingerprint_recheck (FingerprintMismatchAbort), \
+         commit_current_generation_pointer (the sole commit point), \
+         execute_canonical_path_moves, write_completed_record"
+    )
+}
+
+/// Maps a [`run_bc_index_migration`] result to the OS process exit code
+/// ADR-052 §Error Code Semantics assigns: 0 for both success outcomes
+/// (`AlreadyMigrated` and `Completed` alike — ADR-052 does not distinguish
+/// them at the exit-code layer), [`BcIndexMigrationError::process_exit_code`]
+/// otherwise.
+pub fn migration_process_exit_code(
+    _outcome: &Result<BcIndexMigrationOutcome, BcIndexMigrationError>,
+) -> i32 {
+    todo!(
+        "ADR-052 §Error Code Semantics: match _outcome; Ok(_) -> 0 (covers both \
+         ALREADY_MIGRATED and a fresh COMPLETED run); Err(e) -> e.process_exit_code()"
+    )
+}
+
+/// The `migrate-bc-index` CLI entry point (ADR-052 §Decision 3's closed
+/// argument grammar: invoked as
+/// `{project-root}/target/release/factory-dispatcher migrate-bc-index`,
+/// absolute-path-pinned, no other arguments accepted). This function is
+/// the scaffold [`run_bc_index_migration`] is invoked through; `main.rs`
+/// dispatches to it before falling through to the ordinary hook-envelope
+/// stdin-reading path — see the `main.rs` wiring comment at the
+/// `migrate-bc-index` argv check.
+///
+/// Does NOT itself implement ADR-052 §Decision 11's executable
+/// verify-to-execute binding (open-once/hash-through-fd/exec-through-
+/// same-fd) — that TOCTOU-closing binding governs how THIS binary is
+/// invoked by the Bash-tool allowlist guard, not this function's own
+/// internal logic; it belongs to the allowlist/guard cluster, out of this
+/// story's T-10/T-11 task scope.
+pub fn run_migrate_bc_index_cli(_cwd: &Path) -> i32 {
+    todo!(
+        "ADR-052 §Decision 3/§Decision 9: call run_bc_index_migration(_cwd) and return \
+         migration_process_exit_code(&result) — this is the process-level entry point \
+         `main.rs`'s migrate-bc-index argv branch calls before process::exit"
+    )
+}

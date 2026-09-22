@@ -413,6 +413,77 @@ pub fn shard_cap_precheck(
     ))
 }
 
+/// BC-1.18.011 Precondition 6(b)/(c) — native OPEN/DRAINING writer-
+/// admission precheck for the BC-1.18.011 governed one-time B2 migration
+/// (S-25.02 cluster-5, T-11; ADR-052 §Decision 5a). Structurally mirrors
+/// [`shard_cap_precheck`] immediately above it: a `PreToolUse`-only,
+/// non-WASM native check consulted before the registry-driven plugin loop
+/// (Invariant 1 precedent), short-circuiting to `None` for every dispatch
+/// that is not a genuine mutation-tool candidate against a BC-INDEX path
+/// with migration state present on disk.
+///
+/// **STUB SURFACE (BC-5.38.001):** the body below is `todo!()` — this
+/// function's SIGNATURE and its call-site wiring (see `main.rs`, computed
+/// exactly once alongside `shard_gate_precheck_result`, before
+/// `build_engine()`) are the load-bearing artifact of this cluster's stub
+/// commit; the ADR-052 §Decision 5a admission logic itself
+/// (`shard_manager::admit_or_block_bc_index_writer`,
+/// `shard_manager::reconcile_stale_admission_gate`) is implemented (also
+/// as stubs) in `shard_manager.rs`.
+///
+/// Unlike `shard_cap_precheck`, this gate additionally covers `Bash`
+/// dispatches whose write effect targets `.factory/specs/behavioral-
+/// contracts/` or `.factory/cycles/` (ADR-052 §Decision 5a "Bash admission
+/// and reservation") — the `^Bash$` full-command pre-shell classifier
+/// (§Decision 5c) is a SEPARATE guard from this function and is not
+/// implemented here; this function's own tool-kind guard below covers only
+/// the `Edit`/`Write`/`MultiEdit` admission path, matching
+/// `shard_cap_precheck`'s own scoping. The `Bash`-classifier arm is a
+/// distinct, not-yet-scheduled piece of this ADR's guard stack.
+///
+/// **Red-Gate safety note (stub-architect, this burst):** the
+/// `.factory/migration-state/` presence guard below is REAL code, not a
+/// stub — mirroring `shard_cap_precheck`'s own real `shard_config_path
+/// .exists()` short-circuit immediately above. Only the gate logic BEHIND
+/// that guard (reached exclusively once a real migration is in flight) is
+/// `todo!()`. This ordering is load-bearing: today, and for every existing
+/// test fixture, no `.factory/migration-state/` directory exists anywhere
+/// in the repository, so this function safely returns `None` on every
+/// dispatch without ever reaching the `todo!()` arm — an unguarded
+/// `todo!()` reachable from every ordinary `Edit`/`Write`/`MultiEdit`
+/// dispatch would panic the dispatcher binary for all callers, which is a
+/// regression the Red Gate must never introduce, not merely a "new test
+/// fails" outcome.
+pub fn bc_index_migration_admission_precheck(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
+        return None;
+    }
+
+    let tool_name = payload.tool_name.as_str();
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit") {
+        return None;
+    }
+
+    let migration_state_dir = cwd.join(".factory/migration-state");
+    if !migration_state_dir.exists() {
+        return None;
+    }
+
+    todo!(
+        "BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a: with migration_state_dir known to \
+         exist, determine whether the dispatch's target path falls under \
+         .factory/specs/behavioral-contracts/ or .factory/cycles/ (short-circuit None \
+         otherwise); if in-scope, call shard_manager::reconcile_stale_admission_gate followed \
+         by shard_manager::admit_or_block_bc_index_writer, translating a refusal into \
+         HookResult::Block (E-MAINTENANCE-001 — 'writer must retry after migration \
+         completes', BLOCK semantics per ADR-052 §Error Code Semantics, never Error) and \
+         admission into None (Continue)"
+    )
+}
+
 /// Synthesize a blocking [`PluginOutcome`] for the native shard-cap gate's
 /// own fail-loud verdict (F-C1-P2-001, S-25.02 Phase F4 LOCAL adversary
 /// pass-2 cluster-1, MEDIUM).

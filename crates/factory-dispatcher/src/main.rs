@@ -38,7 +38,8 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, execute_tiers, shard_cap_precheck, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck, execute_tiers,
+    shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -95,6 +96,26 @@ const ENV_FORCE_ENGINE_BUILD_FAILURE: &str = "VSDD_FORCE_ENGINE_BUILD_FAILURE";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    // BC-1.18.011 / ADR-052 §Decision 3 (S-25.02 cluster-5, T-11) —
+    // `migrate-bc-index` CLI subcommand scaffold. ADR-052 §Decision 3's
+    // closed argument grammar sanctions exactly this one-argument
+    // invocation form, absolute-path-pinned, via the Bash-tool allowlist
+    // guard (a SEPARATE guard, not implemented by this check): `{project-
+    // root}/target/release/factory-dispatcher migrate-bc-index`. This
+    // check MUST run BEFORE the ordinary hook-envelope stdin read below —
+    // the migration subcommand is a distinct invocation mode, never a hook
+    // dispatch, and must never attempt to parse a hook envelope from
+    // stdin. WIRING-EXEMPT (BC-5.38.003): pure argv-routing delegation to
+    // a single call, zero branching beyond the one dispatch condition —
+    // see the stub commit report WIRING-EXEMPT table. The real migration
+    // logic behind `run_migrate_bc_index_cli` is `todo!()`.
+    if std::env::args().nth(1).as_deref() == Some("migrate-bc-index") {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        std::process::exit(factory_dispatcher::shard_manager::run_migrate_bc_index_cli(
+            &cwd,
+        ));
+    }
+
     // ONLY an explicit VSDD_LOG_DIR (resolution level A) bypasses the #206
     // mount gate: the operator said exactly where to log, and suppressing
     // that would override the override (the bats harness points VSDD_LOG_DIR
@@ -415,6 +436,29 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // see the empty-tier-groups guard immediately below for the full
     // rationale.
     let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
+
+    // BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a (S-25.02 cluster-5,
+    // T-11) — the native OPEN/DRAINING writer-admission gate for the B2
+    // governed one-time migration. Computed EXACTLY ONCE, at the same
+    // pre-`build_engine()` point as `shard_gate_precheck_result` immediately
+    // above, and folded into that SAME single `Option<HookResult>` slot via
+    // `.or(...)` — this migration-admission gate never coexists with a real
+    // committed `.factory/migration-state/` directory today (see
+    // `bc_index_migration_admission_precheck`'s own real, non-stub
+    // existence-guard), so this composition is inert under every current
+    // test fixture and does not alter `shard_cap_precheck`'s own observable
+    // behavior. **Precedence note (stub-architect, this burst — flagged for
+    // architect confirmation, not guessed at):** a fired migration-admission
+    // verdict is given precedence over a fired shard-cap-gate verdict for
+    // the SAME dispatch via `.or()`'s left-biased short-circuit; ADR-052
+    // does not explicitly rule on ordering between these two independent
+    // native gates when both could theoretically fire for the same
+    // dispatch (a BC-INDEX-path write that is BOTH over-cap AND mid-
+    // migration), so this ordering is this stub's own reasonable default,
+    // not a spec-derived guarantee — the implementer should confirm this
+    // composition against BC-1.18.011/BC-1.18.005 before relying on it.
+    let shard_gate_precheck_result = bc_index_migration_admission_precheck(&payload, &project_cwd)
+        .or(shard_gate_precheck_result);
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
     // a fired shard-cap-gate verdict (`Some(_)`) must still reach
