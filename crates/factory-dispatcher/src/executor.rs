@@ -480,10 +480,7 @@ pub fn bc_index_migration_admission_precheck(
         .tool_input
         .get("file_path")
         .and_then(|v| v.as_str())
-        .map(std::path::PathBuf::from);
-    let Some(target_path) = target_path else {
-        return None;
-    };
+        .map(std::path::PathBuf::from)?;
     let normalized = target_path.to_string_lossy().replace('\\', "/");
     let in_scope = normalized.contains(".factory/specs/behavioral-contracts")
         || normalized.contains(".factory/cycles");
@@ -502,9 +499,7 @@ pub fn bc_index_migration_admission_precheck(
         }
     };
 
-    let Some(txn) = active_txn else {
-        return None;
-    };
+    let txn = active_txn?;
 
     if matches!(
         txn.state,

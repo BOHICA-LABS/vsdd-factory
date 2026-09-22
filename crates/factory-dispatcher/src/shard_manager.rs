@@ -12403,11 +12403,10 @@ pub struct SubsystemPrefixEntry {
 pub fn load_subsystem_prefix_snapshot(
     _path: &Path,
 ) -> Result<SubsystemPrefixSnapshot, BcIndexAddressingError> {
-    let content =
-        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
-            path: _path.to_path_buf(),
-            source,
-        })?;
+    let content = std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+        path: _path.to_path_buf(),
+        source,
+    })?;
     toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
         path: _path.to_path_buf(),
         source,
@@ -12466,11 +12465,10 @@ pub fn first_level_shard_path(
 /// whole-corpus scans and to discover whether a subsystem is sub-sharded —
 /// never for an ordinary single-BC first-level lookup, per Invariant 1).
 pub fn load_shard_manifest(_path: &Path) -> Result<SubsystemShardManifest, BcIndexAddressingError> {
-    let content =
-        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
-            path: _path.to_path_buf(),
-            source,
-        })?;
+    let content = std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+        path: _path.to_path_buf(),
+        source,
+    })?;
     toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
         path: _path.to_path_buf(),
         source,
@@ -12480,11 +12478,10 @@ pub fn load_shard_manifest(_path: &Path) -> Result<SubsystemShardManifest, BcInd
 /// Load a second-level sub-shard manifest for one sub-sharded subsystem
 /// (effectful read; e.g. `shards/BC-INDEX-SS-05.manifest.toml`).
 pub fn load_sub_shard_manifest(_path: &Path) -> Result<SubShardManifest, BcIndexAddressingError> {
-    let content =
-        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
-            path: _path.to_path_buf(),
-            source,
-        })?;
+    let content = std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+        path: _path.to_path_buf(),
+        source,
+    })?;
     toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
         path: _path.to_path_buf(),
         source,
@@ -12691,7 +12688,9 @@ pub fn open_bc_index_path_during_migration(
     // unlike `stage_new_generation`'s own bare-UUID return value, which
     // ITS OWN callers are responsible for formatting as `gen-<uuid>`
     // themselves.
-    let gen_path = _migration_state_dir.join(_generation_id).join(_relative_path);
+    let gen_path = _migration_state_dir
+        .join(_generation_id)
+        .join(_relative_path);
     match std::fs::File::open(&gen_path) {
         Ok(file) => Ok(file),
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
@@ -13257,19 +13256,18 @@ pub fn read_active_txn_record(
         let file_name = entry.file_name();
         let name = file_name.to_string_lossy();
         if name.starts_with("txn-") && name.ends_with(".json") {
-            let content =
-                std::fs::read_to_string(entry.path()).map_err(|source| BcIndexMigrationError::Io {
+            let content = std::fs::read_to_string(entry.path()).map_err(|source| {
+                BcIndexMigrationError::Io {
                     path: entry.path(),
                     source,
-                })?;
-            let record: BcIndexMigrationTxnRecord = serde_json::from_str(&content).map_err(|e| {
-                BcIndexMigrationError::BinaryIntegrityFailure {
-                    message: format!(
-                        "malformed txn record at {}: {e}",
-                        entry.path().display()
-                    ),
                 }
             })?;
+            let record: BcIndexMigrationTxnRecord =
+                serde_json::from_str(&content).map_err(|e| {
+                    BcIndexMigrationError::BinaryIntegrityFailure {
+                        message: format!("malformed txn record at {}: {e}", entry.path().display()),
+                    }
+                })?;
             return Ok(Some(record));
         }
     }
@@ -13465,7 +13463,8 @@ pub fn reconcile_stale_admission_gate(
         {
             let mut aborted = txn.clone();
             aborted.state = BcIndexMigrationTxnState::Aborted;
-            aborted.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            aborted.updated_at =
+                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             write_txn_record(_migration_state_dir, &aborted)?;
             BcIndexAdmissionGateState::Open
         }
@@ -13556,23 +13555,20 @@ fn intent_log_record_type_str(record_type: IntentLogRecordType) -> &'static str 
 /// over — shared by both `append_intent_log_record` (which computes the
 /// checksum to write) and `read_intent_log` (which recomputes it to
 /// validate a parsed record, detecting tampering/corruption beyond a
-/// simple missing-terminator tear).
-fn intent_log_checksum_input(
-    txn_id: &str,
-    fencing_generation: u64,
-    record_type: IntentLogRecordType,
-    target_canonical: &Path,
-    staging_path: &Path,
-    expected_post_hash: &str,
-    expected_pre_state: Option<&str>,
-    timestamp_utc: &str,
-) -> String {
+/// simple missing-terminator tear). Takes a full [`IntentLogRecord`]
+/// reference (its own `record_checksum` field is NOT read) rather than
+/// eight positional fields.
+fn intent_log_checksum_input(record: &IntentLogRecord) -> String {
     format!(
-        "{txn_id}|{fencing_generation}|{}|{}|{}|{expected_post_hash}|{}|{timestamp_utc}",
-        intent_log_record_type_str(record_type),
-        target_canonical.display(),
-        staging_path.display(),
-        expected_pre_state.unwrap_or("MISSING"),
+        "{}|{}|{}|{}|{}|{}|{}|{}",
+        record.txn_id,
+        record.fencing_generation,
+        intent_log_record_type_str(record.record_type),
+        record.target_canonical.display(),
+        record.staging_path.display(),
+        record.expected_post_hash,
+        record.expected_pre_state.as_deref().unwrap_or("MISSING"),
+        record.timestamp_utc,
     )
 }
 
@@ -13580,19 +13576,7 @@ pub fn append_intent_log_record(
     _intent_log_path: &Path,
     _record: &IntentLogRecord,
 ) -> Result<(), BcIndexMigrationError> {
-    let checksum = sha256_hex(
-        intent_log_checksum_input(
-            &_record.txn_id,
-            _record.fencing_generation,
-            _record.record_type,
-            &_record.target_canonical,
-            &_record.staging_path,
-            &_record.expected_post_hash,
-            _record.expected_pre_state.as_deref(),
-            &_record.timestamp_utc,
-        )
-        .as_bytes(),
-    );
+    let checksum = sha256_hex(intent_log_checksum_input(_record).as_bytes());
 
     let mut block = String::new();
     block.push_str(INTENT_LOG_RECORD_START);
@@ -13609,7 +13593,10 @@ pub fn append_intent_log_record(
         "target_canonical={}\n",
         _record.target_canonical.display()
     ));
-    block.push_str(&format!("staging_path={}\n", _record.staging_path.display()));
+    block.push_str(&format!(
+        "staging_path={}\n",
+        _record.staging_path.display()
+    ));
     block.push_str(&format!(
         "expected_post_hash={}\n",
         _record.expected_post_hash
@@ -13671,25 +13658,7 @@ fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
     let timestamp_utc = (*fields.get("timestamp_utc")?).to_string();
     let record_checksum = (*fields.get("record_checksum")?).to_string();
 
-    let expected_checksum = sha256_hex(
-        intent_log_checksum_input(
-            &txn_id,
-            fencing_generation,
-            record_type,
-            &target_canonical,
-            &staging_path,
-            &expected_post_hash,
-            expected_pre_state.as_deref(),
-            &timestamp_utc,
-        )
-        .as_bytes(),
-    );
-    if expected_checksum != record_checksum {
-        // Corrupted/tampered record — treated identically to a torn one.
-        return None;
-    }
-
-    Some(IntentLogRecord {
+    let record = IntentLogRecord {
         txn_id,
         fencing_generation,
         record_type,
@@ -13698,8 +13667,15 @@ fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
         expected_post_hash,
         expected_pre_state,
         timestamp_utc,
-        record_checksum,
-    })
+        record_checksum: record_checksum.clone(),
+    };
+    let expected_checksum = sha256_hex(intent_log_checksum_input(&record).as_bytes());
+    if expected_checksum != record_checksum {
+        // Corrupted/tampered record — treated identically to a torn one.
+        return None;
+    }
+
+    Some(record)
 }
 
 /// Parse the intent log, discarding any torn (truncated, checksum-
@@ -13827,7 +13803,10 @@ fn migration_durable_write(path: &Path, content: &[u8]) -> Result<(), BcIndexMig
     // own signature.
     let content_str = std::str::from_utf8(content).map_err(|e| {
         BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("migration_durable_write: content for {} is not valid UTF-8: {e}", path.display()),
+            message: format!(
+                "migration_durable_write: content for {} is not valid UTF-8: {e}",
+                path.display()
+            ),
         }
     })?;
     last_amended_migrate::atomic_write::write_atomic_strict_durable(path, content_str).map_err(
@@ -13900,19 +13879,18 @@ pub fn execute_canonical_path_moves(
         let staging = PathBuf::from(&mv.staging_path);
         let canonical = PathBuf::from(&mv.canonical_path);
 
-        if let Some(parent) = canonical.parent() {
-            if !parent.exists() {
-                if let Err(source) = std::fs::create_dir_all(parent) {
-                    tracing::warn!(
-                        target: "bc_1_18_011_migration",
-                        canonical = %canonical.display(),
-                        error = %source,
-                        "execute_canonical_path_moves: failed to create canonical parent dir; \
-                         halting further renames (forward recovery resumes from here)"
-                    );
-                    break;
-                }
-            }
+        if let Some(parent) = canonical.parent()
+            && !parent.exists()
+            && let Err(source) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                canonical = %canonical.display(),
+                error = %source,
+                "execute_canonical_path_moves: failed to create canonical parent dir; \
+                 halting further renames (forward recovery resumes from here)"
+            );
+            break;
         }
 
         match std::fs::rename(&staging, &canonical) {
@@ -13990,15 +13968,13 @@ pub fn resume_from_staging(
     _txn_record: &BcIndexMigrationTxnRecord,
     _migration_state_dir: &Path,
 ) -> Result<(), BcIndexMigrationError> {
-    let generation_id =
-        _txn_record
-            .generation_id
-            .as_deref()
-            .ok_or_else(|| BcIndexMigrationError::BinaryIntegrityFailure {
-                message: "resume_from_staging: STAGING txn record has no generation_id -- \
+    let generation_id = _txn_record.generation_id.as_deref().ok_or_else(|| {
+        BcIndexMigrationError::BinaryIntegrityFailure {
+            message: "resume_from_staging: STAGING txn record has no generation_id -- \
                            cannot locate the staged generation to re-verify"
-                    .to_string(),
-            })?;
+                .to_string(),
+        }
+    })?;
     let shards_dir = _migration_state_dir
         .join(format!("gen-{generation_id}"))
         .join("shards");
@@ -14024,10 +14000,11 @@ pub fn resume_from_staging(
         if path.extension().is_some_and(|ext| ext == "toml") {
             continue;
         }
-        let content = std::fs::read_to_string(path).map_err(|source| BcIndexMigrationError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        let content =
+            std::fs::read_to_string(path).map_err(|source| BcIndexMigrationError::Io {
+                path: path.clone(),
+                source,
+            })?;
         let rows = extract_and_sort_bc_rows(&content)?;
         for (id, _) in &rows {
             if !census.insert(*id) {
@@ -14141,7 +14118,8 @@ fn finish_committing_migration(
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     let generation_id = txn.generation_id.clone().unwrap_or_default();
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
-    let completed_count = execute_canonical_path_moves(&txn.pending_canonical_moves, &intent_log_path)?;
+    let completed_count =
+        execute_canonical_path_moves(&txn.pending_canonical_moves, &intent_log_path)?;
 
     if (completed_count as usize) < txn.pending_canonical_moves.len() {
         // Not every move completed — forward recovery (never rollback,
@@ -14311,9 +14289,11 @@ pub fn run_bc_index_migration(
 
         let shard_filename = format!("BC-INDEX-{ss_id}.md");
         let staging_path = shards_dir.join(&shard_filename);
-        std::fs::write(&staging_path, section_body).map_err(|source| BcIndexMigrationError::Io {
-            path: staging_path.clone(),
-            source,
+        std::fs::write(&staging_path, section_body).map_err(|source| {
+            BcIndexMigrationError::Io {
+                path: staging_path.clone(),
+                source,
+            }
         })?;
         staged_bodies.push(section_body.clone());
         let canonical_path = shards_canonical_root.join(&shard_filename);
@@ -14374,12 +14354,13 @@ pub fn run_bc_index_migration(
     // the staging generation discarded and BC-INDEX.md's original body
     // completely untouched (Postcondition 4) — no rename has occurred at
     // this point.
-    let abort_staging = |migration_state_dir: &Path, gen_dir: &Path, txn: &mut BcIndexMigrationTxnRecord| {
-        let _ = std::fs::remove_dir_all(gen_dir);
-        txn.state = BcIndexMigrationTxnState::Aborted;
-        txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = write_txn_record(migration_state_dir, txn);
-    };
+    let abort_staging =
+        |migration_state_dir: &Path, gen_dir: &Path, txn: &mut BcIndexMigrationTxnRecord| {
+            let _ = std::fs::remove_dir_all(gen_dir);
+            txn.state = BcIndexMigrationTxnState::Aborted;
+            txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let _ = write_txn_record(migration_state_dir, txn);
+        };
     if let Err(e) = verify_content_preservation(&staged_bodies, &source_body_row_sha256) {
         abort_staging(&migration_state_dir, &gen_dir, &mut txn);
         return Err(e);
