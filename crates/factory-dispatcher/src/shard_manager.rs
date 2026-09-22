@@ -13908,8 +13908,26 @@ pub fn execute_canonical_path_moves(
             }
         }
 
-        if let Some(parent) = canonical.parent() {
-            let _ = sync_dir_durable(parent);
+        // D-1232-OBL-2(a) STRICT: propagate a dir-fsync failure as a halt
+        // condition for THIS move — never silently swallowed. The rename
+        // itself already landed (the file IS at `canonical`), but with the
+        // directory-entry durability barrier unconfirmed, this move is
+        // NOT counted as durably completed; forward recovery on the next
+        // invocation re-derives the correct outcome via
+        // `decide_intent_log_recovery` rather than this call trusting an
+        // unconfirmed rename.
+        if let Some(parent) = canonical.parent()
+            && let Err(e) = sync_dir_durable(parent)
+        {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                canonical = %canonical.display(),
+                error = %e,
+                "execute_canonical_path_moves: D-1232-OBL-2(a) directory-durability barrier \
+                 failed after a successful rename; halting further renames (forward recovery \
+                 resumes from here, never a silent fallback)"
+            );
+            break;
         }
 
         let post_hash = std::fs::read(&canonical)
@@ -14289,12 +14307,9 @@ pub fn run_bc_index_migration(
 
         let shard_filename = format!("BC-INDEX-{ss_id}.md");
         let staging_path = shards_dir.join(&shard_filename);
-        std::fs::write(&staging_path, section_body).map_err(|source| {
-            BcIndexMigrationError::Io {
-                path: staging_path.clone(),
-                source,
-            }
-        })?;
+        // D-1232-OBL-2(a): the staging publish of each per-subsystem shard
+        // body — F_FULLFSYNC(temp) -> rename -> F_FULLFSYNC(dir), STRICT.
+        migration_durable_write(&staging_path, section_body.as_bytes())?;
         staged_bodies.push(section_body.clone());
         let canonical_path = shards_canonical_root.join(&shard_filename);
         pending_moves.push(PendingCanonicalMove {
@@ -14320,12 +14335,8 @@ pub fn run_bc_index_migration(
         }
     })?;
     let top_manifest_staging_path = shards_dir.join("BC-INDEX.shard-manifest.toml");
-    std::fs::write(&top_manifest_staging_path, &top_manifest_toml).map_err(|source| {
-        BcIndexMigrationError::Io {
-            path: top_manifest_staging_path.clone(),
-            source,
-        }
-    })?;
+    // D-1232-OBL-2(a): staging publish of the top-level shard manifest.
+    migration_durable_write(&top_manifest_staging_path, top_manifest_toml.as_bytes())?;
     pending_moves.push(PendingCanonicalMove {
         staging_path: top_manifest_staging_path.to_string_lossy().into_owned(),
         canonical_path: shards_canonical_root
@@ -14338,12 +14349,11 @@ pub fn run_bc_index_migration(
                                  `shards/BC-INDEX.shard-manifest.toml`.\n"
         .to_string();
     let staged_bc_index_staging_path = gen_dir.join("BC-INDEX.md");
-    std::fs::write(&staged_bc_index_staging_path, &staged_bc_index_body).map_err(|source| {
-        BcIndexMigrationError::Io {
-            path: staged_bc_index_staging_path.clone(),
-            source,
-        }
-    })?;
+    // D-1232-OBL-2(a): staging publish of the lean staged BC-INDEX.md body.
+    migration_durable_write(
+        &staged_bc_index_staging_path,
+        staged_bc_index_body.as_bytes(),
+    )?;
     pending_moves.push(PendingCanonicalMove {
         staging_path: staged_bc_index_staging_path.to_string_lossy().into_owned(),
         canonical_path: canonical_bc_index_path.to_string_lossy().into_owned(),
