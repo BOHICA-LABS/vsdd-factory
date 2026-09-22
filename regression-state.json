@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-20T16:16:58Z","command":"cd /private/tmp/claude-501/-Users-zious-Documents-GITHUB-vsdd-factory/5c32d38b-6ece-4052-886f-f3b6624b72f8/scratchpad/adr052-model && cargo test 2>&1 | tail -25"}
+{"status":"pass","timestamp":"2026-09-22T04:51:44Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.02-b2-sharding && cargo test -p factory-dispatcher --all-targets 2>&1 | grep -E \"^test result|FAILED|error\\[\" | head -40"}
