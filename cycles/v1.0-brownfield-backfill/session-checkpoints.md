@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "a616c44"
+input-hash: "b0541a4"
 traces_to: STATE.md
 ---
 
@@ -2052,3 +2052,64 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 **LOCAL cluster-5 prose-adversarial streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this burst.** Cycle-level streak: 3/3 CONVERGED, unchanged. No new adversary pass ran. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231 (Kani DEF-1 fix, 7/7 VP PROVED), ADR-052 formally ACCEPTED at D-1233, S-25.02 cluster-5 F3 story-finalization propagation DONE at D-1235 (this burst). **PIPELINE STAYS in_progress — CLUSTER-5 F3-FINALIZED AND TDD-READY (D-1235); NEXT = §4 REMAINING-WORK item #4 (cluster-5 F4 TDD dispatch).**
 
 **This checkpoint superseded by the S2502-CLUSTER5-F4-TDD-STUBS-ADJUDICATION burst (state-manager, single-commit TD-VSDD-053; D-1236): S-25.02 cluster-5 F4 stub-architect ambiguity adjudication persisted — architect's already-edited ADR-052 body (v1.15→v1.16, §Decision 5c stale label corrected to attribute the negative-test list to devops-engineer's [D-1232-OBL-4] activation-boundary deliverable) committed; 3 rulings adjudicated: (1) native-gate precedence CORRECTED (`bc_index_migration_admission_precheck` before `shard_cap_precheck`, routed implementer, no spec amendment); (2) E-MAINTENANCE-001 → `HookResult::Block` CONFIRMED (no edit); (3) §5c classifier + §5b dispatcher guards + §Decision 11 OUT of cluster-5 TDD scope ([D-1232-OBL-4]). Cluster-5 F4 TDD IN PROGRESS: stubs committed `feature/S-25.02-b2-sharding` @ `adbc795a` (48 `todo!()` functions, crate green, baseline 3204 tests pass); test-writer authoring failing tests next. See STATE.md v10.68 for the current checkpoint.**
+
+---
+
+## Archived checkpoint: S2502-CLUSTER5-F4-TDD-STUBS-ADJUDICATION (v10.67→v10.68; D-1236)
+
+> Archived verbatim at the S2502-CLUSTER5-SUBSHARD-SPEC-CLOSURE burst (D-1237), per state-manager Session-checkpoint protocol (replace-in-STATE.md + archive-prior-verbatim).
+
+### §1. Position (a)
+
+2026-09-22. S-25.02 cluster-5 F4 stub-architect ambiguity adjudication burst persisted (D-1236) — architect's already-edited ADR-052 body (v1.15→v1.16; §Decision 5c label corrected) committed this burst; 3 rulings resolved (native-gate precedence fix routed to implementer, E-MAINTENANCE-001→Block confirmed, §5c/§5b/§Decision-11 scoped to devops-engineer OBL-4). ARCH-INDEX v4.43→v4.44; ADR-052 input-hash `a9d309a` UNCHANGED (`--check` CLEAN). This continues directly from D-1235 (F3 story-finalization propagation) earlier the same session-track — no pause/resume transition. **Cluster-5 F4 TDD is now IN PROGRESS**: stub Red Gate committed `feature/S-25.02-b2-sharding` @ `adbc795a` (48 `todo!()` functions, crate green, baseline 3204 tests pass). `pipeline:` stays in_progress. NEXT = test-writer authors failing tests against the T-10/T-11 stub surface, subject to `[D-1232-OBL-1]`.
+
+### §2. Convergence (b)
+
+UNCHANGED this burst (no new adversary pass; spec-adjudication + bookkeeping burst). ADR-052 concurrency core remains CONVERGED via mechanical proof (D-1231 Kani DEF-1 fix, D-1233 status flip) — the v1.16 §5c label correction touches ONLY the classifier's scope-attribution prose, not the frozen §Decision 4e/5a/7c state machine. BC-1.18.010/BC-1.18.011 remain CONVERGED at v1.9/v1.8, fully reflected in the S-25.02 story (D-1235) and now in the T-10/T-11 stub surface (D-1236 rulings applied). LOCAL cluster-5 prose-adversarial streak stays 0/3 (cascade closed, not reset). Cycle-level streak: 3/3 CONVERGED, unchanged. Cluster-5's OWN fresh F4-code LOCAL adversary cascade has not yet started (0/3; begins after test-writer + implementer land the T-10/T-11 code).
+
+### §3. In-flight / Abandoned (c)
+
+**IN-FLIGHT (not abandoned):** cluster-5 F4 TDD. Stub Red Gate committed and pushed to `feature/S-25.02-b2-sharding` @ `adbc795a` (worktree `.worktrees/S-25.02-b2-sharding`); 48 `todo!()` functions across the T-10 (BC-1.18.010, AC-017, B2 end-state addressing) and T-11 (BC-1.18.011, AC-018, governed one-time migration) stub surface, crate compiles green, baseline 3204 workspace tests pass (regression-gate confirmed `regression-state.json`, `status: pass`, 2026-09-22T04:51:44Z). 3 stub-ambiguity questions surfaced by stub-architect during that commit were adjudicated this burst (D-1236) — no ambiguity remains blocking test-writer dispatch. **Next agent in the TDD chain: test-writer**, to author failing tests against the T-10/T-11 stub surface (AC-017/AC-018), followed by implementer (subject to `[D-1232-OBL-1]` impl-phase Kani obligation before TDD is considered complete).
+
+### §4. Pending human decisions / open blockers (d)
+
+None blocking resume. The 4 binding obligations registered at D-1232 remain OPEN/PENDING, cluster-5-scoped (NOT resume blockers — see STATE.md `## Blocking Issues` rows `[D-1232-OBL-1]`..`[D-1232-OBL-4]`); ruling 3 of D-1236 clarifies OBL-4's scope boundary (§5c classifier + §5b guards + §Decision-11 binding are devops-engineer/activation-boundary work, not cluster-5 TDD-scope) but does not close or otherwise modify the obligation:
+- **(1) [D-1232-OBL-1]** Implementation-phase Kani harnesses on `executor.rs` + `shard_manager.rs` — mandatory, non-deferrable; blocks cluster-5 TDD *completion*, not start.
+- **(2) [D-1232-OBL-2]** APFS hybrid durability — mandated `F_FULLFSYNC(temp)→rename→F_FULLFSYNC(dir)` sequence + differential VM-kill test + residual-ack; blocks F4 *activation*.
+- **(3) [D-1232-OBL-3]** Apply CLAUDE.md ADR-052 EXCEPTION amendment; apply at F4 activation.
+- **(4) [D-1232-OBL-4]** Deploy 4 dispatcher-guard amendments (§5b/§5c, scope clarified this burst per D-1236 ruling 3); deploy at activation boundary.
+
+**REMAINING-WORK INVENTORY (worked in priority order on resume):**
+1. **E-26 registration** — DEFERRED: human direction 2026-09-21 is that E-25 completion (delivered via S-25.02 cluster-5 F4) precedes E-26 registration. 6 committed E-26/S-26.01–05 draft files + issue #841 remain unregistered in STORY-INDEX until cluster-5 lands.
+2. ~~**ADR-052 `proposed→accepted`**~~ — **DONE (D-1233).** Architect's already-edited body persisted; ADR-052 v1.14→v1.15, status accepted; ARCH-INDEX v4.42→v4.43.
+3. ~~**STORY-INDEX dangling-input fix**~~ — **DONE (D-1234).** Dangling `.factory/stories/v1.0/EPIC.md` `inputs:` entry dropped (story-writer edit, persisted); STORY-INDEX v4.472→v4.473; input-hash `7cc0c23` (was unset/blocked); `--check` CLEAN.
+3b. ~~**S-25.02 cluster-5 F3 story-finalization propagation**~~ — **DONE (D-1235).** BC-1.18.010 v1.2→v1.9 + BC-1.18.011 v1.0→v1.8 propagated into the story body; STORY-INDEX v4.473→v4.474; input-hash `171c3bb`; POLICY 18 three-way parity VERIFIED. **Cluster-5 is F3-FINALIZED and TDD-READY.**
+4. **Cluster-5 F4 TDD proper** — **ACTIVE/IN PROGRESS this burst (D-1236).** Stubs committed (`feature/S-25.02-b2-sharding` @ `adbc795a`, worktree `.worktrees/S-25.02-b2-sharding`), architect rulings D-1236 applied (3 stub-ambiguities resolved), test-writer authoring failing tests next; implementer follows (subject to `[D-1232-OBL-1]` impl-phase Kani obligation). BC-INDEX sharding (427KB, marginal) remains the durable fix delivered by this same cluster-5 B2 per-subsystem split. **NEXT ITEM ON RESUME.**
+5. **Hook-hardening batch #837–841** → rc.26 (deployment drift #837 + source-logic defects #838/839/840 + validator mis-scoping #841).
+
+Other open (unchanged, carried from prior checkpoint): **[D-1222-DRIFT-001] RESOLVED.** **[D-1224-DRIFT-001] ASSESSED DEFERRABLE.** **S-12.15 OPEN** (propagation-lint, E-12). **[D-1212-DRIFT-002]** → S-12.14. **[D-1221-PG-001]** → S-12.13. **S-25.05/S-25.06**. S-12.09..S-12.15 (E-12). **F-006+SEC-831-01** → T-12. **[D-1207]** `.factory/.gitignore` unregistered. 4 PRs open: **#769, #768, #729, #632**. input-hash currency refresh (`compute-input-hash --scan --update`, 907 files) still OWED — the ~180-file STALE/PARTIAL/UNCOMPUTED population across other story files remains that same OWED #2 scope.
+
+### §5. WIP branches (e)
+
+**`feature/S-25.02-b2-sharding` @ `adbc795a`** — cluster-5 F4 TDD stub Red Gate (BC-1.18.010 v1.9 / BC-1.18.011 v1.8, T-10/T-11, 48 `todo!()` functions); worktree `.worktrees/S-25.02-b2-sharding`; crate green, baseline 3204 tests pass; NEXT = test-writer failing-tests commit on this same branch/worktree. `develop` @ `ebd16f79` (clean). `factory-artifacts` = this burst's commit (run `git -C .factory log -1` for live SHA). Inert: `fix/d999-sentinel-code-migration` @ `bf642fd9`; `feature/S-21.04-story-worktree-write-path-discipline` @ `323f440f`.
+
+### §6. Resume command (f)
+
+Work directly from §4 REMAINING-WORK — item #4 (cluster-5 F4 TDD proper) is ACTIVE/IN PROGRESS: resume on worktree `.worktrees/S-25.02-b2-sharding` (branch `feature/S-25.02-b2-sharding` @ `adbc795a`), dispatch test-writer next to author failing tests against the T-10/T-11 stub surface (AC-017/AC-018), then implementer (subject to `[D-1232-OBL-1]` impl-phase Kani obligation before TDD completion). item #3b closed at D-1235; item #3 closed at D-1234; item #2 closed at D-1233; item #1 DEFERRED pending E-25/cluster-5 completion.
+
+BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-10.13.001 v1.3 active. BC-4.18.001 v1.2 active. BC-1.18.001 v1.7 active. BC-1.18.002 v1.8 active. BC-1.18.003 v1.8 active. BC-1.18.004 v1.4 active. BC-3.08.001 v1.34 active. BC-4.16.002 v1.2 active. BC-5.39.006 v1.9 active. BC-1.18.005 v1.15 active. BC-1.18.006 v1.12 active. BC-1.18.007 v1.2 active. BC-1.18.008 v1.9 active. BC-1.18.009 v1.8 active (POL-14 promoted D-1212). BC-1.18.010 v1.9 / BC-1.18.011 v1.8 (draft; SS-01; cluster-5 F4 TDD IN PROGRESS — stub surface committed, D-1236 rulings applied). BC-1.18.012 v1.1 (draft; SS-01). BC-7.08.001 v1.1 (draft; SS-07). BC-INDEX v5.96 (2,006 BCs). VP-INDEX v3.22 UNCHANGED (141 VPs). STORY-INDEX v4.474 (25 epics; self-input-hash `7cc0c23` UNCHANGED; S-25.02 own input-hash 171c3bb) — 7 E-26 draft artifacts committed prior burst, registration DEFERRED (§4 item 1). ARCH-INDEX v4.44 (52 ADRs; ADR-052 v1.16, D-1236). error-taxonomy.md v1.30.
+
+### §7. HEADs
+
+- `develop`: **`ebd16f79`** (PR #832 squash-merged, base `08ad44b5`; short SHA — run `git rev-parse origin/develop` for the live full SHA). merged_count **122**.
+- `main`: **`51023185`** (origin/main; v1.0.0-rc.25 bundle+retag commit 2026-09-04; immediate parent `101ebb64`, the release PR #808 merge commit). Tag `v1.0.0-rc.25` → `101ebb64`. UNCHANGED.
+- `factory-artifacts`: **this burst's commit** — per TD-VSDD-053 SHA-patch anti-pattern retirement, this checkpoint does not self-cite its own resulting commit SHA — run `git -C .factory log -1` for the live HEAD.
+- `feature/S-25.02-b2-sharding`: **`adbc795a`** — cluster-5 F4 TDD stub Red Gate (WIP, active this session; see §5).
+- `fix/d999-sentinel-code-migration`: clean+inert @ `bf642fd9` (ADR-041 sentinel).
+- `feature/S-21.04-story-worktree-write-path-discipline`: clean+inert @ `323f440f` (pass-31 pending, no PR).
+
+### §8. BC-5.39.001 streak
+
+**LOCAL cluster-5 prose-adversarial streak: 0/3 — ADVERSARY CASCADE CLOSED at accept-at-floor (D-1230), UNCHANGED this burst.** Cycle-level streak: 3/3 CONVERGED, unchanged. No new adversary pass ran. Cluster-5's fresh F4-code LOCAL adversary cascade has not yet started (0/3) — begins once test-writer + implementer land the T-10/T-11 code. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231 (Kani DEF-1 fix, 7/7 VP PROVED), ADR-052 formally ACCEPTED at D-1233 and amended to v1.16 at D-1236, S-25.02 cluster-5 F3 story-finalization propagation DONE at D-1235. **PIPELINE STAYS in_progress — CLUSTER-5 F4 TDD IN PROGRESS (D-1236); NEXT = test-writer authors failing tests against the T-10/T-11 stub surface.**
+
+**This checkpoint superseded by the S2502-CLUSTER5-SUBSHARD-SPEC-CLOSURE burst (state-manager, single-commit TD-VSDD-053; D-1237): S-25.02 cluster-5 B2 second-level sub-shard chunk-boundary algorithm spec-closure persisted — architect's ADR-051 body (v1.15→v1.16, NEW §Decision 18), product-owner's BC-1.18.010 v1.9→v1.10 + BC-1.18.011 v1.8→v1.9, formal-verifier's NEW VP-142, story-writer's S-25.02 v4.4→v4.5 all committed. BC-INDEX v5.96→v5.97; VP-INDEX v3.22→v3.23; STORY-INDEX v4.474→v4.475; ARCH-INDEX v4.44→v4.45. Cluster-5 F4 TDD CONTINUES: test-writer adds 7 Red-Gate tests next. See STATE.md v10.69 for the current checkpoint.**

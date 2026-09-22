@@ -1577,6 +1577,193 @@ event/tool pair — previously impossible to exercise truthfully, and the concre
 `tracing::warn!` emitted) against a `[[shard]]` entry that fails `validate_entry` even when
 `find_matching_entry` would otherwise match it — the falsifier for item 2.
 
+### Decision 18 — Second-Level Sub-Shard Chunk-Boundary Algorithm for B2 SS-05/SS-06 (and Future Over-Cap Subsystems) Second-Level Sub-Sharding (addendum, closing a genuine spec gap surfaced by the S-25.02-b2-sharding cluster-5 implementer's inline flag in `run_bc_index_migration`, routed via architect adjudication)
+
+**Why this addendum exists.** Decision 7/8 specify B2's addressing END-STATE (per-subsystem shard
+files, manifest-keyed second-level addressing) and Decision 10 specifies the GOVERNED MIGRATION
+that produces it (content-preservation, independent-census, crash-atomicity, rollback), including
+Postcondition 6's requirement that SS-05/SS-06's second-level sub-split happen within the SAME
+one-time migration operation. Neither Decision specified the actual CHUNK-BOUNDARY MECHANISM —
+where inside a `### SS-05` section body a sub-shard boundary falls. This is not deferrable: at the
+current provisional 49,152-byte cap (Decision 2), `run_bc_index_migration` as implemented today
+performs only the first-level split (one file per `### SS-NN` section, `sub_sharded`/`sub_manifest`
+hardcoded `false`/`None`), and SS-05/SS-06's own section bodies (~88,695 / ~85,407 bytes measured)
+already exceed that cap — the unmodified migration would ship a directly falsifiable violation of
+BC-1.18.011 Postcondition 6 the moment it runs against live data. This Decision supplies the missing
+mechanism.
+
+**1. Trigger — reuse Decision 2's cap formula unmodified; no new formula.** Second-level
+sub-sharding fires when a subsystem's assembled `section_body: String` (the exact value
+`split_original_body_into_subsystems` already produces per subsystem, `### SS-NN` heading through
+its last BC row) satisfies `section_body.len() as u64 > shard_cap_bytes`, where `shard_cap_bytes` is
+the SAME `[[shard]]`-config-sourced value (Decision 2/4) the live `shard_cap_precheck` gate reads
+for the `"flat"` artifact shape. A sub-shard file (`shards/BC-INDEX-SS-05.a.md`) is, structurally,
+the same artifact shape as a first-level shard file — governed by the same byte-`stat()` trigger,
+never the item-count trigger (Decision 1's trigger-shape dispatch), which is exclusively for
+BC-INDEX's own `changelog:` frontmatter array. This is the "identical size-check mechanism" BC-1.18.010
+Invariant 4 requires between first- and second-level sub-sharding.
+
+**2. Input — reuse the migration's own row-extraction/sort primitive.** The chunker consumes
+`extract_and_sort_bc_rows(section_body: &str) -> Result<Vec<(BcId, String)>, BcIndexMigrationError>`
+(already implemented and exercised by the migration's content-preservation/census machinery per
+Decision 10) unmodified: it extracts every `| ... [BC-X.YY.NNN] ... |` table row and sorts by
+canonical `BcId` ascending. Reusing this primitive for chunk boundaries means the boundary order is,
+by construction, the SAME canonical order the content-preservation SHA-256
+(`compute_body_row_sha256`) and the independent census (`compute_independent_census`) already key
+on — no second, independently-fallible ordering is introduced.
+
+**3. Preamble — a fixed heading-plus-table-header block, replicated verbatim into EVERY sub-shard,
+never packed with only the first.** Each sub-shard file MUST be an independently openable,
+self-contained markdown document, because `resolve_bc_shard_path` (Decision 8's already-implemented
+reader) returns a bare path to one sub-shard file and callers open it directly with no expectation
+of consulting a sibling file for heading/table-header context. The preamble (the `### SS-NN`
+section heading, rewritten per sub-shard — exact heading text, e.g. `### SS-05.a` vs.
+`### SS-05 (part a)`, is a product-owner wording call, not an architecture concern — plus the
+markdown table header row and its separator row) is therefore replicated verbatim into every
+sub-shard, and its byte cost (`preamble.len()`) is counted as the starting `current_bytes` for every
+new chunk in step 4 below — an empty sub-shard is never "free." The preamble is NOT matched by
+`extract_and_sort_bc_rows` (it requires a leading `|` and a `[BC-` bracket), so it is invisible to
+content-preservation/census verification, exactly as intended.
+
+**4. Chunk-boundary algorithm — greedy-pack-until-cap, single left-to-right pass over
+canonically-sorted rows; never a balanced/rebalanced partition.**
+
+```
+fn chunk_subsystem_rows_into_sub_shards(
+    sorted_rows: &[(BcId, String)],
+    preamble: &str,
+    shard_cap_bytes: u64,
+) -> Vec<SubShardChunk>
+```
+
+where `SubShardChunk { sub_shard_id: String, body: String, range_start: BcId, range_end: BcId }`.
+Walk `sorted_rows` in the already-canonical order from step 2; maintain `current_bytes =
+preamble.len()` and a `current_chunk` under construction. For each row (`row_bytes =
+row.1.len() + 1`, the `+1` for the row-separating newline):
+   (a) if `current_chunk` is non-empty AND `current_bytes + row_bytes > shard_cap_bytes`: close
+       `current_chunk` as a completed `SubShardChunk` (its first/last row's `BcId` become
+       `range_start`/`range_end`), start a new chunk with `current_bytes` reset to
+       `preamble.len()`;
+   (b) append the row to `current_chunk`; `current_bytes += row_bytes`;
+   (c) after the loop, close the final non-empty `current_chunk`.
+A small helper `sub_shard_letter(index: usize) -> String` maps a 0-based chunk index to its
+filename suffix (item 6 below). Greedy-pack is chosen over a balanced/rebalanced partition because
+it is O(n), single-pass, needs no advance knowledge of total size or target chunk count, and matches
+every other Layer-2 size-trigger decision's own fill-until-cap-then-roll philosophy (mechanism A's
+copy-then-truncate seal on overflow; B1's trim-then-block-retry, Decision 7) — no other Decision in
+this ADR retroactively rebalances already-written content, and greedy-pack is also the exact rule
+the steady-state unification in item 7 below requires.
+
+**5. Determinism.** `chunk_subsystem_rows_into_sub_shards` is a pure function of `(sorted_rows,
+preamble, shard_cap_bytes)`: `sorted_rows` is itself a deterministic, pure function of
+`section_body` (stable sort by `BcId`, no hashmap iteration, no wall-clock, no UUIDs); `preamble` is
+a fixed string template, not derived from filesystem enumeration order; `shard_cap_bytes` is a
+single config-sourced scalar; the walk in item 4 branches only on accumulated byte counts. Identical
+input bytes in identical order always produce identical chunk boundaries, on any invocation, any
+machine, any retry. **Consequence: zero new verification code needed for content-preservation/
+census.** `verify_content_preservation` and `verify_independent_census` (Decision 10) already
+re-extract and re-sort rows from the CONCATENATION of however many staged bodies are passed in —
+they are structurally split-count-agnostic. Feeding N sub-shard bodies into that same `Vec<String>`
+instead of 1 whole-subsystem body requires no change to either function.
+
+**6. Sub-manifest — BC-ID-range representation, reusing the already-implemented reader
+unmodified.** `resolve_bc_shard_path`, `SubShardManifest`, `SubShardRangeEntry`, and
+`load_sub_shard_manifest` (Decision 8's per-subsystem `sub_manifest` field) already exist in
+`shard_manager.rs` and already expect exactly this shape — they are unused today only because
+nothing writes a sub-manifest yet. This Decision specifies the writer that produces what the reader
+already consumes:
+
+```toml
+# shards/BC-INDEX-SS-05.manifest.toml
+schema_version = 1
+ss_id = "SS-05"
+
+[[sub_shard]]
+sub_shard_id = ".a"
+path = "shards/BC-INDEX-SS-05.a.md"
+range_start = "BC-5.01.001"   # first row's BcId in that chunk, canonical order
+range_end   = "BC-5.30.099"   # last row's BcId in that chunk
+
+[[sub_shard]]
+sub_shard_id = ".b"
+path = "shards/BC-INDEX-SS-05.b.md"
+range_start = "BC-5.30.100"
+range_end   = "BC-5.99.999"
+```
+
+BC-ID-range addressing (not an explicit per-row ID list) is chosen because: (a) it is exactly the
+schema `resolve_bc_shard_path` already range-compares against (`range_start <= bc_id <=
+range_end`), so the reader needs zero change; (b) it is O(1) metadata per sub-shard versus O(rows)
+for an explicit list; (c) it mirrors mechanism A's own time-range-keyed shard index, keeping the two
+mechanisms' addressing philosophy consistent; (d) because chunks are produced by one contiguous walk
+over a fully sorted, gap-free sequence (item 4), a `[range_start, range_end]` interval unambiguously
+and completely identifies chunk membership by construction — there is no "orphan ID between two
+ranges" possibility. The range scheme is an ADDRESSING convenience only, not a correctness
+mechanism: "each row in exactly one sub-shard" is independently enforced by
+`verify_independent_census`'s ID-set membership check (item 5), regardless of how the manifest
+represents ranges. Decision 8's top-level `shards/BC-INDEX.shard-manifest.toml` entry for a
+sub-sharded subsystem is updated from `sub_sharded: false, sub_manifest: None` (today's hardcoded
+values) to `sub_sharded: true, sub_manifest: Some("shards/BC-INDEX-SS-05.manifest.toml")` — a
+one-line change to the existing per-subsystem `SubsystemShardManifestEntry` construction, not a new
+type.
+
+**Edge-case rulings (never fail-loud; the migration MUST complete):**
+
+| Case | Ruling | Rationale |
+|---|---|---|
+| A single BC row's own markdown line exceeds `shard_cap_bytes`, even alone with only the preamble | Allowed as a lone-row sub-shard that exceeds `shard_cap_bytes`; never split a row's line across two files; emit a non-blocking `tracing::warn!` | Decision 2's `MAX_SINGLE_RECORD_BYTES` margin exists precisely so "current content + one more max-size record" never threatens the true fuel ceiling even when it nominally exceeds the provisional `shard_cap_bytes` figure — treating this as fail-loud would block migration over the exact case the margin was designed to tolerate. A table row is the atomic unit `extract_and_sort_bc_rows` already treats it as. |
+| Exactly at cap (`current_bytes + row_bytes == shard_cap_bytes`) | Stays in the current chunk — `<=` inclusive boundary | Matches BC-1.18.005 Postcondition 3's `projected_size <= shard_cap_bytes -> Continue` convention verbatim — one inequality direction project-wide, not a second subtly different rule. |
+| Sub-shard letter exhaustion (>26 chunks for one subsystem) | Extend with a base-26 two-letter scheme (`.a`..`.z`, then `.aa`..`.az`, `.ba`..., spreadsheet-column-naming style, per `sub_shard_letter`); never fail-loud | Refusing to sub-shard because a naming convention ran out of single letters would silently block legitimate content growth. At today's measured sizes (SS-05/SS-06 each trigger roughly 2 chunks) this is future-proofing, not an active concern. |
+| Independent census across N sub-shards | No new logic — `verify_independent_census` (item 5) already iterates staged bodies generically | Confirms "each row in exactly one sub-shard" is enforced by EXISTING Decision 10 machinery, not new code this Decision introduces. |
+| Third-level splitting (a sub-shard itself would exceed cap even alone — not the lone-row case) | Out of scope, per BC-1.18.010's own Canonical Test Vectors table, which already flags this as a future extension | No current subsystem approaches this threshold; a third addressing level now would be speculative generality against an already-stated non-goal. |
+
+**7. Steady-state unification — the SAME pure function, called as a FULL REBUILD, not an
+incremental append-and-split.** BC-1.18.010's own AC-017 requires the identical size-check gate to
+trigger second-level sub-sharding for any future subsystem that grows over cap. This Decision
+achieves that at the algorithm level: `chunk_subsystem_rows_into_sub_shards` (item 4) is a pure
+function with no migration-specific state in its signature, so the future steady-state
+`shape`-dispatch extension (item 8 below) calls this SAME function when an ordinary `Edit`/`Write`
+against an already-sub-sharded subsystem's sub-shard would push it over cap. Because BC-ID
+assignment order is not strictly monotonic with authorship time within a subsystem (a new BC can
+land anywhere in `YY` capability-number space, not only at the tail), the steady-state trigger MUST
+recompute the FULL chunk set from scratch — read every row across the subsystem's current
+sub-shards (via the sub-manifest), plus the new in-flight row, re-sort, re-run
+`chunk_subsystem_rows_into_sub_shards` over the complete set, and stage the recomputed sub-shard
+files — rather than incrementally appending into the "last" sub-shard and splitting only that one.
+This guarantees migration-time and steady-state produce BYTE-IDENTICAL boundaries for the same row
+set (full idempotency/determinism parity between "migrate once" and "grow into it later"), and
+composes with mechanism A's already-established roll-then-block-retry contract (the gate performs
+the rebuild+stage+atomic-swap, then `Block`s with a retry instruction — never a double-actor write,
+per Decision 7's single-actor precedent).
+
+**8. A related, separately-scoped gap this Decision does NOT close.** BC-1.18.010 Precondition 3
+already states that the dispatcher's native shard-cap gate (BC-1.18.005/BC-1.18.006) must be
+extended with a "per-subsystem body table" artifact-shape case to trigger second-level
+sub-sharding when an already-sub-sharded subsystem's own shard exceeds cap at steady state — the
+ONGOING per-write trigger for item 7's rebuild path. That `shape` dispatch case (alongside today's
+`"flat"` and `"frontmatter-changelog-array"` cases, Decision 1) does not yet exist in BC-1.18.005
+Postcondition 8's enumeration or BC-1.18.006's rotation/roll contract; both gaps reuse the identical
+`chunk_subsystem_rows_into_sub_shards` function (item 7), but wiring the steady-state gate's own
+precondition/postcondition text and `shape` dispatch is a separate product-owner authoring task
+against BC-1.18.005/BC-1.18.006, not resolved here. Flagged explicitly so it is not lost, mirroring
+how Decision 1's trigger-shape dispatch subsection flagged the B1 item-count-shape postcondition
+obligation for product-owner.
+
+**9. Relationship to Decision 10 and concurrency-core impact.** This Decision supplies the
+MECHANISM Decision 10 Postcondition 6 invokes ("MUST cover the SS-05/SS-06 second-level sub-split
+within the SAME one-time migration operation") — Decision 10's staging, independent-verification,
+crash-atomicity, and rollback discipline apply IDENTICALLY at the sub-shard level, with this
+Decision's chunker supplying the boundary computation Decision 10 assumed but did not specify. This
+Decision changes only HOW MANY staged files an over-cap subsystem produces (N sub-shard files + 1
+sub-manifest, instead of 1 whole-section file) and WHAT CONTENT goes in each; it does not touch
+ADR-052's transaction envelope (txn record state machine, intent log, writer-exclusion, atomic
+`CURRENT.json` pointer swap) — sub-shard files and their sub-manifest are additional entries pushed
+into the SAME `pending_canonical_moves` list, staged via the SAME `migration_durable_write`
+primitive, moved via the SAME generic `execute_canonical_path_moves`/intent-log recovery path
+already used for first-level shards and the top-level manifest. Verdict: pure chunking at the
+staging-content-generation phase; zero new concurrency primitives, zero new txn states, zero new
+crash-recovery cases beyond "N staged files instead of 10" already handling generically.
+
 ---
 
 ## Rationale
@@ -2094,6 +2281,7 @@ location and the Decision 17 citation.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.16 | 2026-09-22 | architect | NEW §Decision 18 (architect design-proposal, human-approved 2026-09-22): closes the genuine second-level sub-shard chunk-boundary mechanism gap surfaced by the S-25.02-b2-sharding cluster-5 implementer's inline flag in `run_bc_index_migration` (the loop unconditionally emits exactly one file per `### SS-NN` section and hardcodes `sub_sharded`/`sub_manifest` to `false`/`None`, producing a directly falsifiable BC-1.18.011 Postcondition 6 violation for SS-05/SS-06 the moment migration runs against live data). Decision 18 specifies: (1) trigger reuse — SAME `shard_cap_bytes` (Decision 2), no new formula, per BC-1.18.010 Invariant 4's "identical size-check mechanism"; (2) input reuse — `extract_and_sort_bc_rows` (Decision 10's already-implemented ordering primitive); (3) preamble replicated verbatim into every sub-shard (not packed with the first), counted against cap as starting `current_bytes`; (4) the `chunk_subsystem_rows_into_sub_shards(sorted_rows, preamble, shard_cap_bytes) -> Vec<SubShardChunk>` pure-function greedy-pack-until-cap algorithm, single left-to-right pass over canonically-sorted rows; (5) determinism argument (pure function of its three inputs; zero new verification code needed — `verify_content_preservation`/`verify_independent_census` already split-count-agnostic); (6) sub-manifest BC-ID-range schema (`shards/BC-INDEX-SS-05.manifest.toml`), reusing the already-implemented-but-unused reader (`resolve_bc_shard_path`/`SubShardManifest`/`SubShardRangeEntry`/`load_sub_shard_manifest`, Decision 8); edge-case rulings (lone-oversized-row allowed as an over-cap lone sub-shard with `tracing::warn!`, never fail-loud; `<=` inclusive at-cap boundary; base-26 `.aa`/`.ab`... letter-exhaustion extension, never fail-loud; third-level splitting remains out of scope per BC-1.18.010's own Canonical Test Vectors table); (7) steady-state unification — the SAME pure function called as a FULL REBUILD (never incremental append-and-split) guarantees migration-time and steady-state produce byte-identical boundaries for the same row set; (8) flags the SEPARATE, NOT-closed-here gap: BC-1.18.005/BC-1.18.006's own steady-state `shape`-dispatch extension for the "per-subsystem body table" artifact shape (BC-1.18.010 Precondition 3) remains a distinct product-owner authoring task; (9) confirms zero ADR-052 concurrency-core impact — pure chunking at the staging-content-generation phase, reusing the existing `pending_canonical_moves`/`migration_durable_write`/intent-log machinery unmodified. Not a POLICY 22 reversal — a net-new addendum supplying a mechanism Decision 10 assumed but never specified, mirroring Decision 15/16/17's own precedent for closing an ADR-level specification gap. Downstream: product-owner amends BC-1.18.010 Postcondition 4 (cite §Decision 18 for the actual deterministic boundary rule, replacing the current worked-example-only text) and BC-1.18.011 Postcondition 6 (name the concrete function contract + edge-case rulings as explicit migration-behavior postconditions); formal-verifier allocates NEW VP-142 (proptest; chunk-boundary determinism/correctness; hosted on BC-1.18.011, cross-referenced from BC-1.18.010 PC4) — VP-INDEX.md/verification-architecture.md/verification-coverage-matrix.md propagated same-burst per POLICY 9. Refs: S-25.02, BC-1.18.010, BC-1.18.011, ADR-052, b2-subshard-algorithm-proposal.md (human-approved 2026-09-22). |
 | 1.15 | 2026-09-13 | architect | Light reconciliation of §Decision 10 Postcondition 1's content-preservation statement to remove literal-whole-concat ambiguity introduced by ADR-052 v1.8 §Decision 7c step 3b. The "byte-for-byte" heading is renamed to "per-BC-row" and a v1.15 clarification note is appended to item 1 explaining that a literal whole-file-concatenation SHA-256 is NOT a viable gate (the staged lean body adds `§Subsystem Shard Manifest`; content is reordered) and that verification is instead performed as structured per-BC-row-set equivalence via `source_body_row_sha256` per ADR-052 §Decision 7c step 3b. Design intent unchanged — all per-BC-row content is preserved, modulo `§Summary`, `§Subsystem Shard Manifest`, and cross-cutting invariants. No decision content reversed. Refs: ADR-052 §Decision 7c step 3b. |
 | 1.14 | 2026-09-13 | architect | M-2 coupling removal (ADR-052 v1.5 fix-burst, 5th adversarial review finding M-2): §Decision 10 item 6's "at the SAME F4 activation moment mechanism A's own backfill (BC-1.18.008) runs" coupling removed. The B2 migration activates independently from mechanism A — per BC-1.18.011 Precondition 4 and ADR-052 §Decision 1, the two migrations activate independently and may run in any order. Replaced with: "as part of this SAME one-time B2 migration operation (independently of mechanism A's activation schedule — per BC-1.18.011 Precondition 4 and ADR-052 §Decision 1, the two migrations activate independently and may run in any order)." No decision content reversed; erratum-class correction. Refs: ADR-052 v1.5 §Decision 1, BC-1.18.011 Precondition 4. |
 | 1.13 | 2026-09-11 | architect | Withdrawal of §Decision 7 Obs-B crash-recovery self-heal bullet (adv re-cascade pass-1, F-C4H-P1-002). The pure byte-level tail-match mechanism the Obs-B bullet (added in v1.12) described is unimplementable: it cannot distinguish a crash-retry from a legitimate later rotation whose `move_items` coincidentally match the archive's tail — an undetectable false-positive class (F-C4H-P1-002). The implementer's proposed sentinel-file workaround was independently broken (F-C4H-P1-001 CRITICAL: sentinel never reset between rotations) and architect-rejected. Removed the entire Obs-B "B1 crash-recovery partial failure — transparent self-heal, no new error code" paragraph from §Decision 7. B1 archive crash-atomicity deferred to follow-up story S-25.05. **The Obs-A E-SHD-014 counter-divergence guard bullet is RETAINED unchanged.** Withdrawal-class; no decision reversed for Obs A. Refs: adv re-cascade pass-1 F-C4H-P1-001, F-C4H-P1-002, S-25.05. |

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.8"
+version: "1.9"
 status: draft
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
-input-hash: "e027627"
+input-hash: "e823637"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -178,15 +178,56 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    double-split. This is BC-1.18.008 Invariant 3's exact analogue.
 
 6. **MUST cover the SS-05/SS-06 second-level sub-split within the SAME one-time migration
-   operation, not a separate follow-on.** Both subsystems already exceed the provisional cap on
-   their own section size alone (SS-05 ~88,695 bytes / 661 BCs; SS-06 ~85,407 bytes / 592 BCs,
+   operation, not a separate follow-on, using the `chunk_subsystem_rows_into_sub_shards` function
+   contract specified by ADR-051 §Decision 18.** Both subsystems already exceed the provisional cap
+   on their own section size alone (SS-05 ~88,695 bytes / 661 BCs; SS-06 ~85,407 bytes / 592 BCs,
    both measured 2026-09-05) and require immediate second-level sub-sharding at F4 activation,
    as part of the same one-time B2 migration operation (independently of mechanism A's activation
-   schedule). This BC's content-preservation,
-   independent-census, atomicity, and rollback obligations (Postconditions 1-5 above) apply
-   IDENTICALLY at the sub-shard level for SS-05/SS-06 — i.e., the census for SS-05 verifies every
-   `BC-5.YY.NNN` row lands in exactly one of `shards/BC-INDEX-SS-05.a.md`/`.b.md`/etc., with the
-   SS-05-scoped total matching an independent pre-split count of `BC-5.*` rows specifically.
+   schedule). The migration invokes
+   `chunk_subsystem_rows_into_sub_shards(sorted_rows: &[(BcId, String)], preamble: &str,
+   shard_cap_bytes: u64) -> Vec<SubShardChunk>` (ADR-051 §Decision 18 item 4) — a pure,
+   canonical-BC-ID-sorted (via `extract_and_sort_bc_rows`, item 2), greedy-pack-until-cap,
+   single left-to-right pass — to compute sub-shard boundaries for any over-cap subsystem section,
+   reusing the SAME `shard_cap_bytes` value as first-level splitting (no separately-calibrated
+   migration-time cap). This BC's content-preservation, independent-census, atomicity, and rollback
+   obligations (Postconditions 1-5 above) apply IDENTICALLY at the sub-shard level for SS-05/SS-06 —
+   i.e., the census for SS-05 verifies every `BC-5.YY.NNN` row lands in exactly one of
+   `shards/BC-INDEX-SS-05.a.md`/`.b.md`/etc., with the SS-05-scoped total matching an independent
+   pre-split count of `BC-5.*` rows specifically.
+
+   **Migration-time edge-case rulings (ADR-051 §Decision 18; the migration MUST complete in every
+   case below — none of these is a fail-loud abort condition):**
+   - **Lone oversized row.** If a single BC row's own markdown line, by itself with only the
+     preamble, exceeds `shard_cap_bytes`, the migration emits it as its own over-cap lone sub-shard
+     — it MUST NOT split a table row's line across two files, and it MUST NOT fail-loud or abort the
+     migration on this condition. A non-blocking `tracing::warn!` is logged so the anomaly remains
+     visible. This is a bounded case, not an unbounded hazard: BC-1.18.005 Postcondition 6's
+     `MAX_SINGLE_RECORD_BYTES` margin exists precisely so that "current content + one more max-size
+     record" never threatens the true fuel ceiling even when it nominally exceeds the provisional
+     `shard_cap_bytes` figure.
+   - **Exactly-at-cap boundary.** When appending a row would make `current_bytes + row_bytes`
+     exactly equal to `shard_cap_bytes`, the row stays in the current chunk — `<=` inclusive,
+     matching BC-1.18.005 Postcondition 3's `projected_size <= shard_cap_bytes -> Continue`
+     convention verbatim (one inequality direction project-wide, not a second, subtly different
+     rule).
+   - **Sub-shard letter exhaustion.** If a subsystem's row set produces more than 26 chunks, the
+     migration extends sub-shard naming with a base-26 two-letter scheme (`.a`..`.z`, then
+     `.aa`..`.az`, `.ba`..., spreadsheet-column-naming style) — it MUST NOT fail-loud or refuse to
+     sub-shard on letter exhaustion.
+   - **Each row in exactly one sub-shard.** Already independently enforced by this BC's own
+     Postcondition 2 census (an ID-set membership check over the staged bodies), which is
+     structurally split-count-agnostic — feeding N sub-shard bodies in place of 1 whole-subsystem
+     body requires no change to the census logic; the BC-ID-range addressing scheme in the
+     sub-manifest schema is an addressing convenience only and is orthogonal to, and does not
+     weaken, this independently-enforced correctness guarantee.
+
+   **Verification.** Chunk-boundary determinism and correctness for this Postcondition — same input
+   row set + preamble + `shard_cap_bytes` always yields identical chunk boundaries; every row
+   appears in exactly one chunk; no chunk's preamble+rows exceeds `shard_cap_bytes` except the
+   documented lone-row-overflow case above; consecutive chunks' BC-ID ranges are non-overlapping and
+   jointly cover the full sorted sequence — is hosted by **VP-142** (proptest), cross-referenced from
+   BC-1.18.010 Postcondition 4, since the property must hold identically for both this one-time
+   migration and the steady-state rebuild path (ADR-051 §Decision 18 item 7).
 
 7. **No new Cohort-B dependency.** Unlike BC-1.18.008 (which BC-7.08.001's fail-closed flip depends
    on, since `regression-gate`/`convergence-tracker` read the four mechanism-A artifacts), this
@@ -281,6 +322,7 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | VP-133 | Idempotency invariant — running the migration twice against an already-split `BC-INDEX.md`, or resuming from a verified-complete staged state, does not re-split, re-duplicate, or corrupt any shard | integration test (double-invocation + resume-from-staged-checkpoint fixtures) |
 | VP-133 | SS-05/SS-06 second-level sub-split coverage invariant — the same content-preservation/census/atomicity/rollback obligations hold at the sub-shard level for SS-05 and SS-06 specifically, verified against an independent `BC-5.*`/`BC-6.*`-scoped count | integration test (sub-shard-scoped census comparison for SS-05/SS-06 fixtures) |
 | VP-134 | No-new-Cohort-B-dependency invariant — this BC's migration completion is never referenced as a precondition in `hooks-registry.toml`'s `failure_policy` deployment sequencing for `regression-gate`/`convergence-tracker` | static-check (config/PR-template audit confirming BC-7.08.001's gating conditions cite only BC-1.18.005/006/008, never this BC) |
+| VP-142 | Chunk-boundary determinism and correctness (ADR-051 §Decision 18, hosted here as Postcondition 6's concrete algorithm) — for a fixed row set, preamble, and `shard_cap_bytes`, `chunk_subsystem_rows_into_sub_shards` always produces identical chunk boundaries on any invocation, any machine, any retry; every row appears in exactly one chunk; no chunk's preamble+rows exceeds `shard_cap_bytes` except the documented lone-row-overflow edge case; consecutive chunks' BC-ID ranges are non-overlapping and jointly cover the full sorted sequence. Cross-referenced from BC-1.18.010 Postcondition 4, since the property holds identically for this one-time migration and the future steady-state rebuild path | proptest (property: chunking twice over the same input yields identical output; every row in exactly one chunk; no chunk exceeds cap except the lone-row case; consecutive ranges non-overlapping and gap-free) |
 
 VP IDs allocated by formal-verifier (S-25.02 F2 verification-property fix-burst; VP-INDEX v3.03):
 **VP-132** (proptest; content-preservation byte-for-byte), **VP-133** (integration; independent-census
@@ -290,6 +332,12 @@ mirroring VP-124), and **VP-134** (static-check; no-new-Cohort-B-dependency). Th
 of VP-123/VP-124 (BC-1.18.008's content-preservation + atomicity/idempotency pair) but keyed to
 BC-INDEX's ID-census model instead of decision-log's byte-count model. Traceability-reference
 completion only (VP-side of the trace); no BC body/postcondition/version change.
+
+**VP-142** (proptest; chunk-boundary determinism and correctness) allocated by formal-verifier per
+ADR-051 §Decision 18's authoring instruction (architect design-proposal, human-approved 2026-09-22),
+hosted on THIS BC's Postcondition 6 since Postcondition 6 is where the `chunk_subsystem_rows_into_sub_shards`
+function contract is named as a migration-behavior obligation; cross-referenced (not re-hosted) from
+BC-1.18.010 Postcondition 4.
 
 ## Related BCs
 
@@ -362,6 +410,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 ## VP Anchors
 
 - VP-132, VP-133, VP-134 — allocated by formal-verifier (S-25.02 F2 verification-property fix-burst; VP-INDEX v3.03), analogous to VP-123/VP-124 (content-preservation + record-integrity; atomicity-under-interruption + idempotency) but keyed to BC-INDEX's ID-census model instead of decision-log's byte-count model, per the F2 architecture-delta doc §4a authorship input for this BC. VP-132 (proptest; content-preservation structured-row-equivalence), VP-133 (integration; independent-census integrity + crash-atomicity + fail-loud rollback CENSUS_MISMATCH_ABORT (process exit code) + idempotency + SS-05/SS-06 second-level sub-split census — four same-method obligations consolidated per the single-method-per-VP convention), VP-134 (static-check; no-new-Cohort-B-dependency). The six candidate properties enumerated in `## Verification Properties` above map to these three VPs: candidate 1 → VP-132; candidates 2/3/4/5 → VP-133; candidate 6 → VP-134.
+- VP-142 — allocated by formal-verifier per ADR-051 §Decision 18's authoring instruction (S-25.02-b2-sharding cluster-5 spec-closure chain; human-approved 2026-09-22 design proposal). Hosted on THIS BC's Postcondition 6 (proptest; chunk-boundary determinism and correctness for `chunk_subsystem_rows_into_sub_shards`), cross-referenced from BC-1.18.010 Postcondition 4 since the property holds identically for the one-time migration and the steady-state rebuild path.
 
 ## Traceability
 
@@ -380,6 +429,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.9 | 2026-09-22 | product-owner | ADR-051 §Decision 18 addendum encoding (spec-closure chain step 2 of 2: architect → product-owner; human-approved 2026-09-22 design proposal). Postcondition 6 amended: named the concrete `chunk_subsystem_rows_into_sub_shards(sorted_rows, preamble, shard_cap_bytes) -> Vec<SubShardChunk>` function contract (ADR-051 §Decision 18 item 4) the migration invokes for SS-05/SS-06's second-level sub-split, and added explicit migration-behavior edge-case rulings per §Decision 18's edge-case table: lone-oversized-row (emitted as an over-cap lone sub-shard with a non-blocking `tracing::warn!`, never fail-loud, bounded by BC-1.18.005's `MAX_SINGLE_RECORD_BYTES` margin), exactly-at-cap (`<=` inclusive, matching BC-1.18.005 Postcondition 3's convention), sub-shard letter exhaustion (base-26 `.aa`/`.ab`... naming beyond 26 chunks, never fail-loud), and each-row-in-exactly-one-sub-shard (already covered by this BC's own Postcondition 2 independent census — zero new verification code). Added **VP-142** (proptest; chunk-boundary determinism and correctness) to this BC's own Verification Properties table and VP Anchors as the hosting BC, cross-referenced from BC-1.18.010 Postcondition 4. No change to Postconditions 1-5, 7-8 or to this BC's existing content-preservation/census/atomicity/rollback machinery — this amendment supplies the previously-unspecified chunk-boundary mechanism Postcondition 6 assumed but did not name. input-hash recompute owed to state-manager. |
 | 1.8 | 2026-09-13 | product-owner | ADR-052 v1.11 pass-8 reader-protocol mirror (MED-1). Invariant 3 COMMITTING-window accessibility description: replaced "generation-first/canonical-fallback protocol (ADR-052 §Decision 7c C-1 fix)" with the OPEN-based with ENOENT fallback form per the canonical reader protocol (ADR-052 §Decision 7c): for each required file, open `gen-<uuid>/<file>`; on ENOENT, open the canonical path. Replaced "a file absent from `gen-<uuid>/` has already been renamed to canonical" with "ENOENT on `gen-<uuid>/<file>` means the file has already been renamed to canonical — open the canonical path instead." Replaced "`rename(2)` atomicity ensures ENOENT is not possible for any new-generation file" with "`rename(2)` atomicity makes this protocol race-free and ENOENT-safe: a required file is never absent from both `gen-<uuid>/` and canonical during the COMMITTING window." Preserves the "never partially applied / There is no turning back" guarantee; grounds the COMMITTING-window accessibility claim in open-with-fallback, not exists-then-read. input-hash recompute owed to state-manager. |
 | 1.7 | 2026-09-13 | product-owner | **ADR-052 v1.7 F1 PC1 structured-equivalence reconciliation (adversary pass-5 F-3 MED).** Rewrote Postcondition 1 from the "byte-for-byte concatenation" model to the structured per-BC-row-equivalence model per ADR-052 §Decision 7c step 3b / §Decision 5a drain step 5(c): PC1 now describes extracting BC-X.YY.NNN table rows from staged shard files, sorting in canonical BC-ID order, computing SHA-256, and comparing against `source_body_row_sha256` from the txn record. Explicitly calls out that `§Summary`, `§Subsystem Shard Manifest`, cross-cutting invariants, and non-row separator lines are excluded from both the staged-row extraction and the source hash — preserving the "modulo the manifest section" intent. Explicitly states that a whole-concat SHA-256 against `source_sha256` is UNSATISFIABLE (the staged lean body adds the §Subsystem Shard Manifest section, making the whole-concat SHA unequal to `source_sha256` by construction) and that `source_sha256` is used ONLY by step 5 fingerprint recheck (Postcondition 3a). Updated VP-132 description in Verification Properties table to the structured-row-equivalence formulation with the `source_body_row_sha256` / `source_sha256` scope distinction. Updated VP-132 label in VP Anchors from "(proptest; content-preservation byte-for-byte)" to "(proptest; content-preservation structured-row-equivalence)". input-hash recompute owed to state-manager (compute-input-hash --update). |
 | 1.6 | 2026-09-13 | product-owner | ADR-052 v1.7 re-hardening (F2/F3/F6/F7). (F2) Replaced HookResult/E-SHD-005 terminology in Canonical Test Vectors rows 3–4 and VP-133/VP-Anchors prose with correct process exit code terminology — CONTENT_PRESERVATION_ABORT (exit 2) for content-preservation failure, CENSUS_MISMATCH_ABORT (exit 2) for census/ID-set failure; the migration binary is Bash-invoked and emits process exit codes, not HookResult values; E-SHD-005 is scoped to the steady-state native gate (BC-1.18.006/BC-1.18.010) only. (F3) Corrected all path-bearing COMPLETED.json occurrences in Precondition 5, Invariant 3, Architecture Anchors, and Traceability ADR row to lowercase completed.json per ADR-052 §Decision 7c step 8. (F6) Amended Precondition 2 and Invariant 1 to disclose ADR-052 §Decision 7 NEW multi-file crash-atomicity machinery: removed the false claim that the migration "does not invent new atomic-write machinery"; Precondition 2 now states BC-1.18.006's write_atomic handles per-file writes while §Decision 7a (advisory flock + durable txn record), §Decision 7b (framed intent log + WAL boundary + matching-destination-hash recovery), and §Decision 7c (CURRENT.json pointer swap + completed.json terminal record) provide the multi-file atomicity envelope; Invariant 1 retitled to reflect write_atomic invocation (not reimplementation) plus §Decision 7 machinery disclosure. (F7) SDK Grounding: removed write_indeterminate_marker (CAP-041 INDETERMINATE quarantine-marker writer; not an atomic-write staging primitive; incorrectly cited in prior versions); added grep confirming last_amended_migrate::atomic_write::write_atomic is called in crates/factory-dispatcher/src/shard_manager.rs; updated Architecture Anchors first bullet to cite write_atomic by fully-qualified name. |

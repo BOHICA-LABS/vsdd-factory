@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.9"
+version: "1.10"
 status: draft
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -13,7 +13,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.009.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "6e2d3a3"
+input-hash: "6b1de10"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -104,13 +104,25 @@ specifies the end-state addressing scheme only, not the transition mechanics.
    Orchestration, 661 BCs, ~88,695 bytes measured 2026-09-05) and SS-06 (Skill Catalog, 592 BCs,
    ~85,407 bytes) both already exceed the provisional 48 KiB today-cap on their own section size
    and require immediate second-level sub-sharding at F4 activation (covered by BC-1.18.011's
-   one-time migration operation — see Related BCs). A sub-shard boundary is growth-based (e.g.,
-   `shards/BC-INDEX-SS-05.a.md` covering `BC-5.01.001`..`BC-5.30.099`), NOT ID-prefix-deterministic
-   like the first level — so, unlike first-level addressing, a reader needing a specific
-   `BC-5.YY.NNN` row MUST consult `shards/BC-INDEX-SS-05.manifest.toml` to determine which
-   sub-shard (`.a`, `.b`, ...) holds that ID range. This second-level manifest read is the genuine,
-   acknowledged asymmetry with mechanism A's near-zero-cost addressing (ADR-051 Consequences
-   §Negative item 2).
+   one-time migration operation — see Related BCs). **Sub-shard boundaries are computed by the
+   deterministic chunk-boundary algorithm specified in ADR-051 §Decision 18: canonical-BC-ID-sorted
+   (via `extract_and_sort_bc_rows`), greedy-pack-until-cap, single left-to-right pass over the
+   subsystem's rows — using the SAME `shard_cap_bytes` value that triggers first-level splitting
+   (per Invariant 4 below), never a separately-calibrated boundary rule.** A fixed preamble (the
+   rewritten `### SS-NN` section heading plus the markdown table header and separator rows) is
+   replicated verbatim into EVERY sub-shard file — never packed with only the first — and its byte
+   cost is counted against `shard_cap_bytes` as that sub-shard's starting `current_bytes` (an empty
+   sub-shard is never "free"). Given a fixed row set, preamble, and `shard_cap_bytes`, the resulting
+   chunk boundaries are a pure, deterministic function of those three inputs — identical input
+   bytes in identical order always produce identical boundaries, on any invocation, any machine, any
+   retry (ADR-051 §Decision 18 item 5). Chunk-boundary determinism and correctness are verified by
+   **VP-142** (proptest; hosted on BC-1.18.011 Postcondition 6, cross-referenced here because the
+   property must hold identically for the one-time migration and the steady-state rebuild path). A
+   sub-shard boundary is growth-based, NOT ID-prefix-deterministic like the first level — so, unlike
+   first-level addressing, a reader needing a specific `BC-5.YY.NNN` row MUST consult
+   `shards/BC-INDEX-SS-05.manifest.toml` to determine which sub-shard (`.a`, `.b`, ...) holds that ID
+   range. This second-level manifest read is the genuine, acknowledged asymmetry with mechanism A's
+   near-zero-cost addressing (ADR-051 Consequences §Negative item 2).
    The SAME size-check gate that triggers first-level splitting also triggers second-level
    sub-sharding for every subsystem — SS-05/SS-06 are not hardcoded as the only subsystems that can
    ever need a second level; the other eight subsystems (SS-07 measured at ~39,072 bytes,
@@ -272,6 +284,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 ## VP Anchors
 
 - VP-127, VP-128 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-127 (unit-test; zero-lookup first-level addressing), VP-128 (integration; manifest-keyed second-level + single-authoritative-row integrity + ARCH-INDEX-sourced prefix mapping).
+- VP-142 (cross-reference; hosted on BC-1.18.011 Postcondition 6, not owned by this BC) — proptest; chunk-boundary determinism and correctness for the ADR-051 §Decision 18 `chunk_subsystem_rows_into_sub_shards` algorithm this BC's Postcondition 4 cites. Cited here because sub-shard boundary correctness is a property of the shared chunking algorithm that must hold identically for BC-1.18.011's one-time migration and the future steady-state rebuild path (ADR-051 §Decision 18 item 7) — not a property owned or independently verified by this BC's own VP-127/VP-128.
 
 ## Traceability
 
@@ -290,6 +303,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.10 | 2026-09-22 | product-owner | ADR-051 §Decision 18 addendum encoding (spec-closure chain step 2 of 2: architect → product-owner; human-approved 2026-09-22 design proposal). Postcondition 4 amended: replaced the worked-example-only "growth-based (e.g., ... covering `BC-5.01.001`..`BC-5.30.099`)" boundary text with the actual deterministic chunk-boundary rule — sub-shard boundaries are computed by ADR-051 §Decision 18's `chunk_subsystem_rows_into_sub_shards` algorithm (canonical-BC-ID-sorted via `extract_and_sort_bc_rows`, greedy-pack-until-cap, single left-to-right pass), reusing the SAME `shard_cap_bytes` value as first-level splitting per Invariant 4 (no separately-calibrated migration-time cap), with a fixed preamble replicated verbatim into every sub-shard and counted against cap as that sub-shard's starting size. Determinism (same row set + preamble + cap always yields identical boundaries) and chunk-boundary correctness now cited to **VP-142** (proptest; hosted on BC-1.18.011 Postcondition 6, cross-referenced here since the property holds identically for migration-time and the steady-state rebuild path). VP Anchors section updated with the VP-142 cross-reference. No change to Postcondition 4's SS-05/SS-06 measured-size facts or its migration-coverage claim (still covered by BC-1.18.011). input-hash recompute owed to state-manager. |
 | 1.9 | 2026-09-13 | product-owner | ADR-052 v1.11 pass-8 reader-protocol mirror (MED-1). §Reader Integration step 2: replaced existence-check-then-read form ("try gen path FIRST; if absent, fall back to the canonical path") with the OPEN-based with ENOENT fallback form per the canonical reader protocol (ADR-052 §Decision 7c): open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. Updated "ENOENT is impossible" rationale to reference the open-with-fallback implementation: ENOENT on the gen-path signals the file was already renamed to canonical; `rename(2)` atomicity makes the protocol race-free (the canonical path is guaranteed to hold new content the moment ENOENT is observable on the gen-path). "generation-first ensures new content is always returned" rationale rephrased to "OPEN-based with ENOENT fallback ensures new content is always returned." input-hash recompute owed to state-manager. |
 | 1.8 | 2026-09-13 | product-owner | ADR-052 v1.7 re-hardening (F3 casing sweep). Corrected all path-bearing COMPLETED.json occurrences in §Reader Integration to lowercase completed.json per ADR-052 §Decision 7c step 8: (1) §Reader Integration preamble "before COMPLETED.json written" → "before completed.json written"; (2) steady-state prose "In steady state (COMPLETED.json present)" → "In steady state (completed.json present)"; (3) "COMPLETED.json is permanent and its presence is unambiguous" → "completed.json is permanent and its presence is unambiguous". Step 1's `completed.json` check (line 220) was already lowercase — confirmed correct and unchanged. |
 | 1.7 | 2026-09-13 | product-owner | ADR-052 v1.5 re-hardening (C-1 mirror). §Reader Integration step 2 protocol inverted to generation-first/canonical-fallback: for each required file, try `gen-<generation_id>/` path FIRST; if absent, fall back to canonical path. Rationale (C-1, ADR-052 §Decision 7c): the canonical path holds STALE old content for in-place-overwrite targets (e.g. BC-INDEX.md itself) until step 7's specific rename for that file — canonical-first (the v1.6 protocol) returns stale content for BC-INDEX.md before its rename; generation-first is correct for BOTH net-new shard files AND in-place-overwrite targets. A file present at `gen-<uuid>/` is not yet moved (new content); a file absent from `gen-<uuid>/` has already been renamed to canonical (new content at canonical); `rename(2)` atomicity ensures ENOENT is impossible for any new-generation file during the COMMITTING window. |
