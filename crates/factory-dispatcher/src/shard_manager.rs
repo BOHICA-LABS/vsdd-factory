@@ -12932,6 +12932,17 @@ pub enum BcIndexMigrationError {
         #[source]
         source: io::Error,
     },
+
+    /// BC-1.18.011 Precondition 6(b)/(c) — the native OPEN/DRAINING
+    /// writer-admission gate refused this dispatch (an active txn record
+    /// in STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-
+    /// binary process-exit-code path — this variant is constructed only by
+    /// `admit_or_block_bc_index_writer`, whose caller (`executor.rs`'s
+    /// `bc_index_migration_admission_precheck`) translates it into
+    /// `HookResult::Block` (E-MAINTENANCE-001), never `HookResult::Error`
+    /// (BC-1.18.011 Architect Ruling 2).
+    #[error("BC-INDEX writer admission refused: {reason}")]
+    WriterAdmissionRefused { reason: String },
 }
 
 impl BcIndexMigrationError {
@@ -12940,13 +12951,10 @@ impl BcIndexMigrationError {
     /// ("no harm done, but re-activation required"); every other error
     /// variant here is exit 2.
     pub fn process_exit_code(&self) -> i32 {
-        todo!(
-            "ADR-052 §Error Code Semantics: match self, returning 1 for ExpiryAbort and 2 for \
-             every other variant (BinaryIntegrityFailure, \
-             RecoveryRequiresReauthorization, FingerprintMismatchAbort, DrainTimeoutAbort, \
-             ArchIndexParityAbort, CompletionManifestRejection, CensusMismatchAbort, \
-             ContentPreservationAbort, Io)"
-        )
+        match self {
+            BcIndexMigrationError::ExpiryAbort => 1,
+            _ => 2,
+        }
     }
 }
 
@@ -12976,11 +12984,33 @@ pub enum BcIndexMigrationOutcome {
 /// (over the concatenation of all staged shard files' bodies) — callers
 /// pass the appropriate `body` for each side.
 pub fn extract_and_sort_bc_rows(_body: &str) -> Result<Vec<(BcId, String)>, BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Postcondition 1: parse _body's BC-X.YY.NNN table rows (excluding \
-         §Summary/§Subsystem Shard Manifest/cross-cutting invariants/separator lines), sort \
-         by canonical BC-ID order via BcId's Ord impl"
-    )
+    let mut rows: Vec<(BcId, String)> = Vec::new();
+    for line in _body.lines() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('|') {
+            // Not a table row at all — this naturally excludes §Summary/
+            // §Subsystem Shard Manifest prose, cross-cutting invariant
+            // text, and separator lines with no leading pipe.
+            continue;
+        }
+        let Some(bracket_start) = trimmed.find("[BC-") else {
+            // A table row (e.g. §Summary's own `| SS-01 ... | BC-1 | ... |`
+            // row) with no markdown-link-wrapped BC-X.YY.NNN cell at all —
+            // never mistaken for a per-BC row.
+            continue;
+        };
+        let after_open = &trimmed[bracket_start + 1..];
+        let Some(bracket_end) = after_open.find(']') else {
+            continue;
+        };
+        let candidate = &after_open[..bracket_end];
+        let Ok(id) = parse_bc_id(candidate) else {
+            continue;
+        };
+        rows.push((id, line.to_string()));
+    }
+    rows.sort_by_key(|(id, _)| *id);
+    Ok(rows)
 }
 
 /// Compute `source_body_row_sha256`: the SHA-256 of the sorted, extracted
@@ -12990,11 +13020,12 @@ pub fn extract_and_sort_bc_rows(_body: &str) -> Result<Vec<(BcId, String)>, BcIn
 /// compute the staged-side hash for the PC1 comparison (over the staged
 /// shard files' concatenated rows).
 pub fn compute_body_row_sha256(_sorted_rows: &[(BcId, String)]) -> String {
-    todo!(
-        "BC-1.18.011 Postcondition 1: concatenate _sorted_rows' row bytes in order and hash \
-         via the module's private sha256_hex helper (mirrors BackfillManifest's own \
-         original_sha256/final_sha256 encoding)"
-    )
+    let mut buf = String::new();
+    for (_, row) in _sorted_rows {
+        buf.push_str(row);
+        buf.push('\n');
+    }
+    sha256_hex(buf.as_bytes())
 }
 
 /// Postcondition 1 (PC1) — structured per-BC-row content-preservation.
@@ -13007,12 +13038,19 @@ pub fn verify_content_preservation(
     _staged_shard_bodies: &[String],
     _source_body_row_sha256: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Postcondition 1 (PC1) / ADR-052 §Decision 7c step 3b: extract+sort rows \
-         from the concatenation of _staged_shard_bodies via extract_and_sort_bc_rows, hash via \
-         compute_body_row_sha256, compare against _source_body_row_sha256; on mismatch return \
-         BcIndexMigrationError::ContentPreservationAbort"
-    )
+    let concatenated = _staged_shard_bodies.join("\n");
+    let staged_rows = extract_and_sort_bc_rows(&concatenated)?;
+    let staged_hash = compute_body_row_sha256(&staged_rows);
+    if staged_hash == _source_body_row_sha256 {
+        Ok(())
+    } else {
+        Err(BcIndexMigrationError::ContentPreservationAbort {
+            detail: format!(
+                "staged per-BC-row SHA-256 {staged_hash} does not match \
+                 source_body_row_sha256 {_source_body_row_sha256} captured at quiescence"
+            ),
+        })
+    }
 }
 
 /// Postcondition 2 (PC2) — independent census. Verifies every ID in
@@ -13027,13 +13065,66 @@ pub fn verify_independent_census(
     _staged_shard_bodies: &[String],
     _staged_bc_index_body: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Postcondition 2 (PC2) / ADR-052 §Decision 7c step 3b: for each staged \
-         shard body, extract its BC-X.YY.NNN IDs; verify every ID in _original_census appears \
-         in exactly one staged shard (BcIndexMigrationError::CensusMismatchAbort naming the \
-         duplicated/missing ID on violation, EC-001); verify _staged_bc_index_body has zero \
-         per-BC rows (BC-1.18.010 Invariant 3)"
-    )
+    // BC-1.18.010 Invariant 3: the staged lean BC-INDEX.md body itself must
+    // carry ZERO per-BC rows.
+    let index_rows = extract_and_sort_bc_rows(_staged_bc_index_body)?;
+    if let Some((id, _)) = index_rows.first() {
+        return Err(BcIndexMigrationError::CensusMismatchAbort {
+            bc_id: id.to_string(),
+            detail: "staged BC-INDEX.md body retains at least one per-BC row after the split \
+                      (BC-1.18.010 Invariant 3)"
+                .to_string(),
+        });
+    }
+
+    let mut occurrences: std::collections::BTreeMap<BcId, u32> = std::collections::BTreeMap::new();
+    for shard_body in _staged_shard_bodies {
+        let rows = extract_and_sort_bc_rows(shard_body)?;
+        for (id, _) in rows {
+            *occurrences.entry(id).or_insert(0) += 1;
+        }
+    }
+
+    for id in _original_census {
+        match occurrences.get(id).copied().unwrap_or(0) {
+            0 => {
+                return Err(BcIndexMigrationError::CensusMismatchAbort {
+                    bc_id: id.to_string(),
+                    detail: "census ID is absent from every staged shard (expected exactly one \
+                              occurrence)"
+                        .to_string(),
+                });
+            }
+            1 => {}
+            n => {
+                return Err(BcIndexMigrationError::CensusMismatchAbort {
+                    bc_id: id.to_string(),
+                    detail: format!(
+                        "census ID is present in {n} staged shards, expected exactly one \
+                         occurrence"
+                    ),
+                });
+            }
+        }
+    }
+
+    // Postcondition 2(b): the union of staged shard row counts must equal
+    // the pre-split census count exactly — an ID present in a staged shard
+    // that is NOT in the original census is itself a discrepancy (a
+    // phantom/extraneous row), not merely a silently-ignored extra.
+    for (id, count) in &occurrences {
+        if !_original_census.contains(id) {
+            return Err(BcIndexMigrationError::CensusMismatchAbort {
+                bc_id: id.to_string(),
+                detail: format!(
+                    "staged shard content contains BC ID {id} ({count} occurrence(s)) that is \
+                     NOT present in the pre-split independent census"
+                ),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// A fresh, independent pre-split enumeration of every `BC-X.YY.NNN` ID in
@@ -13045,11 +13136,20 @@ pub fn compute_independent_census(
     _original_body: &str,
     _total_bcs: usize,
 ) -> Result<std::collections::BTreeSet<BcId>, BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Precondition 3, Postcondition 2: extract every BC-X.YY.NNN ID from \
-         _original_body (a fresh enumeration, not reused from any cached count); verify the \
-         resulting set's cardinality matches _total_bcs; return the ID set"
-    )
+    let rows = extract_and_sort_bc_rows(_original_body)?;
+    let census: std::collections::BTreeSet<BcId> = rows.iter().map(|(id, _)| *id).collect();
+    if census.len() == _total_bcs {
+        Ok(census)
+    } else {
+        Err(BcIndexMigrationError::CensusMismatchAbort {
+            bc_id: String::new(),
+            detail: format!(
+                "fresh pre-split census enumerated {} unique BC-X.YY.NNN IDs, but the \
+                 total_bcs frontmatter sanity bound claims {_total_bcs}",
+                census.len()
+            ),
+        })
+    }
 }
 
 /// Postcondition 3a — the EXACTLY-ONCE TOCTOU pre-commit source-fingerprint
@@ -13061,12 +13161,20 @@ pub fn pre_commit_fingerprint_recheck(
     _source_paths: &[PathBuf],
     _expected_source_sha256: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Postcondition 3a / ADR-052 §Decision 7c step 5: re-read every path in \
-         _source_paths, recompute a combined SHA-256, compare against \
-         _expected_source_sha256; on mismatch return \
-         BcIndexMigrationError::FingerprintMismatchAbort — this check runs EXACTLY ONCE"
-    )
+    let mut combined = Vec::new();
+    for path in _source_paths {
+        let bytes = std::fs::read(path).map_err(|source| BcIndexMigrationError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        combined.extend_from_slice(&bytes);
+    }
+    let actual = sha256_hex(&combined);
+    if actual == _expected_source_sha256 {
+        Ok(())
+    } else {
+        Err(BcIndexMigrationError::FingerprintMismatchAbort)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -13088,12 +13196,16 @@ pub struct MigrationLockGuard {
 
 impl Drop for MigrationLockGuard {
     fn drop(&mut self) {
-        todo!(
-            "BC-1.18.011 Precondition 6(a) / ADR-052 §Decision 7a: release the LOCK_EX flock \
-             held on self._file (libc::flock(fd, LOCK_UN)); the kernel already releases on fd \
-             close as a backstop, but an explicit unlock keeps behavior deterministic under \
-             test doubles"
-        )
+        // BC-1.18.011 Precondition 6(a) / ADR-052 §Decision 7a: explicit
+        // unlock via `std::fs::File::unlock` (stable since Rust 1.89 — no
+        // new `libc`/`fs2`/`fs4` dependency needed, per this story's own
+        // "no new external crate dependencies" requirement). The kernel
+        // already releases the advisory lock on fd close as a backstop
+        // (and unconditionally on process death), but an explicit unlock
+        // keeps behavior deterministic for a guard dropped mid-process.
+        // Best-effort: a failed unlock here must never panic in a `Drop`
+        // impl, and the fd-close backstop still applies regardless.
+        let _ = self._file.unlock();
     }
 }
 
@@ -13104,12 +13216,22 @@ impl Drop for MigrationLockGuard {
 pub fn try_acquire_migration_lock(
     _lock_path: &Path,
 ) -> Result<Option<MigrationLockGuard>, BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 7a: open(_lock_path, O_RDWR); flock(fd, LOCK_EX | LOCK_NB); on \
-         EWOULDBLOCK return Ok(None); on success, write the lock file's diagnostic JSON body \
-         (pid/activation_id/fencing_generation/timestamp_utc — informational only, never the \
-         authorization source of truth) and return Ok(Some(MigrationLockGuard))"
-    )
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(_lock_path)
+        .map_err(|source| BcIndexMigrationError::Io {
+            path: _lock_path.to_path_buf(),
+            source,
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(MigrationLockGuard { _file: file })),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(source)) => Err(BcIndexMigrationError::Io {
+            path: _lock_path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Read the durable txn record, if one exists, from
@@ -13117,10 +13239,41 @@ pub fn try_acquire_migration_lock(
 pub fn read_active_txn_record(
     _migration_state_dir: &Path,
 ) -> Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 7a: glob _migration_state_dir/txn-*.json, parse the (at most one \
-         active) txn record; return None if no txn-*.json file exists"
-    )
+    let entries = match std::fs::read_dir(_migration_state_dir) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(BcIndexMigrationError::Io {
+                path: _migration_state_dir.to_path_buf(),
+                source,
+            });
+        }
+    };
+    for entry in entries {
+        let entry = entry.map_err(|source| BcIndexMigrationError::Io {
+            path: _migration_state_dir.to_path_buf(),
+            source,
+        })?;
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if name.starts_with("txn-") && name.ends_with(".json") {
+            let content =
+                std::fs::read_to_string(entry.path()).map_err(|source| BcIndexMigrationError::Io {
+                    path: entry.path(),
+                    source,
+                })?;
+            let record: BcIndexMigrationTxnRecord = serde_json::from_str(&content).map_err(|e| {
+                BcIndexMigrationError::BinaryIntegrityFailure {
+                    message: format!(
+                        "malformed txn record at {}: {e}",
+                        entry.path().display()
+                    ),
+                }
+            })?;
+            return Ok(Some(record));
+        }
+    }
+    Ok(None)
 }
 
 /// Atomically write (temp-file-then-rename, reusing
@@ -13129,12 +13282,18 @@ pub fn write_txn_record(
     _migration_state_dir: &Path,
     _record: &BcIndexMigrationTxnRecord,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "BC-1.18.011 Invariant 1: serialize _record to JSON and write via \
-         last_amended_migrate::atomic_write::write_atomic to \
-         _migration_state_dir/txn-<_record.activation_id>.json — reusing BC-1.18.006's \
-         per-file write primitive, never a reimplementation"
-    )
+    let path = _migration_state_dir.join(format!("txn-{}.json", _record.activation_id));
+    let json = serde_json::to_string_pretty(_record).map_err(|e| {
+        BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize txn record: {e}"),
+        }
+    })?;
+    last_amended_migrate::atomic_write::write_atomic(&path, &json).map_err(|e| {
+        BcIndexMigrationError::Io {
+            path: path.clone(),
+            source: migrate_err_to_io(e),
+        }
+    })
 }
 
 /// The native admission-gate check the OPEN/DRAINING gate performs: is a
@@ -13145,11 +13304,16 @@ pub fn is_bc_index_admission_open(
     _gate_state: BcIndexAdmissionGateState,
     _active_txn: Option<&BcIndexMigrationTxnRecord>,
 ) -> bool {
-    todo!(
-        "ADR-052 §Decision 5a Invariant M-1 (dual-check): admit only when _gate_state == Open \
-         AND (_active_txn is None OR _active_txn.state is Completed/Aborted); a txn in \
-         Staging/Committing blocks admission regardless of gate_state"
-    )
+    if _gate_state != BcIndexAdmissionGateState::Open {
+        return false;
+    }
+    match _active_txn {
+        None => true,
+        Some(txn) => matches!(
+            txn.state,
+            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted
+        ),
+    }
 }
 
 /// PreToolUse admission-check entry point (ADR-052 §Decision 5a's atomic
@@ -13158,17 +13322,89 @@ pub fn is_bc_index_admission_open(
 /// [`reconcile_stale_admission_gate`] for that). On admission, creates the
 /// writer reservation file; on refusal, returns the reason without
 /// creating one.
+/// Read the persisted OPEN/DRAINING/LOCKED admission-gate state from
+/// `.factory/migration-state/gate-state.json` — absent file defaults to
+/// `Open` (the OPEN default case: no gate-state file and no txn record
+/// present).
+fn read_admission_gate_state(
+    migration_state_dir: &Path,
+) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
+    let path = migration_state_dir.join("gate-state.json");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).map_err(|e| {
+            BcIndexMigrationError::BinaryIntegrityFailure {
+                message: format!("malformed gate-state at {}: {e}", path.display()),
+            }
+        }),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            Ok(BcIndexAdmissionGateState::Open)
+        }
+        Err(source) => Err(BcIndexMigrationError::Io { path, source }),
+    }
+}
+
+/// Durably persist the admission-gate state.
+fn write_admission_gate_state(
+    migration_state_dir: &Path,
+    state: BcIndexAdmissionGateState,
+) -> Result<(), BcIndexMigrationError> {
+    let path = migration_state_dir.join("gate-state.json");
+    let json = serde_json::to_string_pretty(&state).map_err(|e| {
+        BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize gate-state: {e}"),
+        }
+    })?;
+    last_amended_migrate::atomic_write::write_atomic(&path, &json).map_err(|e| {
+        BcIndexMigrationError::Io {
+            path: path.clone(),
+            source: migrate_err_to_io(e),
+        }
+    })
+}
+
 pub fn admit_or_block_bc_index_writer(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 5a steps 1-5: acquire LOCK_SH on gate-state, read gate_state, check \
-         for an active txn record; if admissible (is_bc_index_admission_open), create \
-         reservations/{{_tool_use_id}}.reservation and return Ok(()); otherwise return an \
-         E-MAINTENANCE-001-shaped error (the HookResult::Block/Error translation happens at \
-         the executor.rs call site, not here)"
-    )
+    let gate_state = read_admission_gate_state(_migration_state_dir)?;
+    let active_txn = read_active_txn_record(_migration_state_dir)?;
+    if !is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
+        let detail = match &active_txn {
+            Some(txn) => format!(
+                "a BC-INDEX governed migration is currently in flight (txn {} state={:?}); \
+                 writers must retry after the migration completes",
+                txn.txn_id, txn.state
+            ),
+            None => format!(
+                "the BC-INDEX writer-admission gate is not OPEN (state={gate_state:?}); \
+                 writers must retry once the gate self-heals or the current maintenance \
+                 window completes"
+            ),
+        };
+        return Err(BcIndexMigrationError::WriterAdmissionRefused { reason: detail });
+    }
+
+    let reservations_dir = _migration_state_dir.join("reservations");
+    std::fs::create_dir_all(&reservations_dir).map_err(|source| BcIndexMigrationError::Io {
+        path: reservations_dir.clone(),
+        source,
+    })?;
+    let reservation = WriterReservation {
+        created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        tool_use_id: _tool_use_id.to_string(),
+    };
+    let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
+        BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize writer reservation: {e}"),
+        }
+    })?;
+    let reservation_path = reservations_dir.join(format!("{_tool_use_id}.reservation"));
+    last_amended_migrate::atomic_write::write_atomic(&reservation_path, &json).map_err(|e| {
+        BcIndexMigrationError::Io {
+            path: reservation_path.clone(),
+            source: migrate_err_to_io(e),
+        }
+    })
 }
 
 /// PostToolUse counterpart: remove the reservation file this tool
@@ -13178,10 +13414,14 @@ pub fn release_bc_index_writer_reservation(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 5a: remove reservations/{{_tool_use_id}}.reservation if present; \
-         absence is a normal no-op, never an error"
-    )
+    let path = _migration_state_dir
+        .join("reservations")
+        .join(format!("{_tool_use_id}.reservation"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(BcIndexMigrationError::Io { path, source }),
+    }
 }
 
 /// Flock-gated stale-gate reconciliation (ADR-052 §Decision 5a step 3.5,
@@ -13194,14 +13434,49 @@ pub fn release_bc_index_writer_reservation(
 pub fn reconcile_stale_admission_gate(
     _migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 5a step 3.5 Branch A/Branch B: attempt \
-         try_acquire_migration_lock(exclusive.lock); on EWOULDBLOCK, a live coordinator holds \
-         it — return the gate's CURRENT (unreconciled) state; on acquisition, re-read \
-         gate/txn under LOCK_EX, apply Branch A (no active txn -> flip OPEN) or Branch B \
-         (txn=Staging with generation_id=None -> mark txn Aborted, flip OPEN), release both \
-         locks, and return the resulting state"
-    )
+    let lock_path = _migration_state_dir.join("exclusive.lock");
+    if !lock_path.exists() {
+        std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    }
+    let current_state = read_admission_gate_state(_migration_state_dir)?;
+
+    let Some(_guard) = try_acquire_migration_lock(&lock_path)? else {
+        // A live coordinator holds the lock -- return the gate's CURRENT
+        // (unreconciled) state; reconciliation is that coordinator's own
+        // responsibility, not this caller's.
+        return Ok(current_state);
+    };
+
+    let active_txn = read_active_txn_record(_migration_state_dir)?;
+    let reconciled = match &active_txn {
+        // Branch A: no active txn record at all -- the gate can only be
+        // stuck due to a crash between "flip DRAINING/LOCKED" and
+        // "create/commit the txn record"; safe to flip OPEN.
+        None => BcIndexAdmissionGateState::Open,
+        // Branch B: a STAGING txn with no generation_id yet assigned means
+        // the coordinator crashed before `stage_new_generation` ever ran
+        // (ADR-052 §Decision 7c step 1) -- nothing durable was ever
+        // published, so this txn is safely abandoned.
+        Some(txn)
+            if txn.state == BcIndexMigrationTxnState::Staging && txn.generation_id.is_none() =>
+        {
+            let mut aborted = txn.clone();
+            aborted.state = BcIndexMigrationTxnState::Aborted;
+            aborted.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            write_txn_record(_migration_state_dir, &aborted)?;
+            BcIndexAdmissionGateState::Open
+        }
+        // Every other active-txn shape (STAGING with a generation_id
+        // already assigned, or COMMITTING) represents genuine in-flight
+        // migration work this reconciliation pass must NOT abandon --
+        // leave the gate's current state untouched.
+        Some(_) => current_state,
+    };
+    write_admission_gate_state(_migration_state_dir, reconciled)?;
+    Ok(reconciled)
 }
 
 /// Poll the writer-reservations directory until it is empty (quiescence)
@@ -13215,12 +13490,42 @@ pub fn drain_bc_index_writers(
     _drain_timeout: std::time::Duration,
     _max_reservation_ttl: std::time::Duration,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 5a drain procedure steps 1+4: GC reservation files older than \
-         _max_reservation_ttl (TTL-only, no PID check — v1.9 H1); poll \
-         _reservations_dir until empty; on _drain_timeout elapsed without reaching quiescence, \
-         return BcIndexMigrationError::DrainTimeoutAbort"
-    )
+    // Step 1: TTL-only stale-reservation GC (v1.9 H1 — NOT PID-liveness;
+    // the creating PreToolUse binary is a per-event process that has
+    // already exited by the time any drain step runs).
+    if let Ok(entries) = std::fs::read_dir(_reservations_dir) {
+        let now = std::time::SystemTime::now();
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            if now
+                .duration_since(modified)
+                .unwrap_or(std::time::Duration::ZERO)
+                > _max_reservation_ttl
+            {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    // Step 4: poll until quiescence (empty reservations dir) or timeout.
+    let start = std::time::Instant::now();
+    loop {
+        let is_quiescent = std::fs::read_dir(_reservations_dir)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(true);
+        if is_quiescent {
+            return Ok(());
+        }
+        if start.elapsed() >= _drain_timeout {
+            return Err(BcIndexMigrationError::DrainTimeoutAbort);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -13232,16 +13537,169 @@ pub fn drain_bc_index_writers(
 /// `fsync` the underlying fd immediately after this call per the WAL
 /// boundary discipline (ADR-052 §Decision 7b step 2/step 5) — this
 /// function's own `todo!()` implementation will own that fsync call.
+/// Framed intent-log record boundary markers (ADR-052 §Decision 7b) — a
+/// plain, line-oriented `key=value` block between these two literal
+/// markers. A block whose closing marker is missing (truncated mid-write)
+/// is a torn record and MUST be discarded, never parsed as partial.
+const INTENT_LOG_RECORD_START: &str = "INTENT_LOG_RECORD_V1\n";
+const INTENT_LOG_RECORD_END: &str = "END_INTENT_LOG_RECORD\n";
+
+fn intent_log_record_type_str(record_type: IntentLogRecordType) -> &'static str {
+    match record_type {
+        IntentLogRecordType::Intent => "INTENT",
+        IntentLogRecordType::Done => "DONE",
+        IntentLogRecordType::Aborted => "ABORTED",
+    }
+}
+
+/// The exact byte sequence this record's `record_checksum` is computed
+/// over — shared by both `append_intent_log_record` (which computes the
+/// checksum to write) and `read_intent_log` (which recomputes it to
+/// validate a parsed record, detecting tampering/corruption beyond a
+/// simple missing-terminator tear).
+fn intent_log_checksum_input(
+    txn_id: &str,
+    fencing_generation: u64,
+    record_type: IntentLogRecordType,
+    target_canonical: &Path,
+    staging_path: &Path,
+    expected_post_hash: &str,
+    expected_pre_state: Option<&str>,
+    timestamp_utc: &str,
+) -> String {
+    format!(
+        "{txn_id}|{fencing_generation}|{}|{}|{}|{expected_post_hash}|{}|{timestamp_utc}",
+        intent_log_record_type_str(record_type),
+        target_canonical.display(),
+        staging_path.display(),
+        expected_pre_state.unwrap_or("MISSING"),
+    )
+}
+
 pub fn append_intent_log_record(
     _intent_log_path: &Path,
     _record: &IntentLogRecord,
 ) -> Result<(), BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 7b: serialize _record in the `--- INTENT_LOG_RECORD v1 ---` framed \
-         format (including record_checksum = sha256 of the preceding fields), append to \
-         _intent_log_path, then fsync the file descriptor — this call is the WAL boundary \
-         after which the corresponding rename is recoverable"
-    )
+    let checksum = sha256_hex(
+        intent_log_checksum_input(
+            &_record.txn_id,
+            _record.fencing_generation,
+            _record.record_type,
+            &_record.target_canonical,
+            &_record.staging_path,
+            &_record.expected_post_hash,
+            _record.expected_pre_state.as_deref(),
+            &_record.timestamp_utc,
+        )
+        .as_bytes(),
+    );
+
+    let mut block = String::new();
+    block.push_str(INTENT_LOG_RECORD_START);
+    block.push_str(&format!("txn_id={}\n", _record.txn_id));
+    block.push_str(&format!(
+        "fencing_generation={}\n",
+        _record.fencing_generation
+    ));
+    block.push_str(&format!(
+        "record_type={}\n",
+        intent_log_record_type_str(_record.record_type)
+    ));
+    block.push_str(&format!(
+        "target_canonical={}\n",
+        _record.target_canonical.display()
+    ));
+    block.push_str(&format!("staging_path={}\n", _record.staging_path.display()));
+    block.push_str(&format!(
+        "expected_post_hash={}\n",
+        _record.expected_post_hash
+    ));
+    block.push_str(&format!(
+        "expected_pre_state={}\n",
+        _record.expected_pre_state.as_deref().unwrap_or("MISSING")
+    ));
+    block.push_str(&format!("timestamp_utc={}\n", _record.timestamp_utc));
+    block.push_str(&format!("record_checksum={checksum}\n"));
+    block.push_str(INTENT_LOG_RECORD_END);
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(_intent_log_path)
+        .map_err(|source| BcIndexMigrationError::Io {
+            path: _intent_log_path.to_path_buf(),
+            source,
+        })?;
+    file.write_all(block.as_bytes())
+        .map_err(|source| BcIndexMigrationError::Io {
+            path: _intent_log_path.to_path_buf(),
+            source,
+        })?;
+    // WAL boundary (ADR-052 §Decision 7b step 2/5): fsync before returning
+    // — the corresponding canonical-path rename is recoverable only after
+    // this call durably lands.
+    file.sync_all().map_err(|source| BcIndexMigrationError::Io {
+        path: _intent_log_path.to_path_buf(),
+        source,
+    })
+}
+
+fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
+    let mut fields: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for line in body.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            fields.insert(k, v);
+        }
+    }
+    let txn_id = (*fields.get("txn_id")?).to_string();
+    let fencing_generation = fields.get("fencing_generation")?.parse::<u64>().ok()?;
+    let record_type = match *fields.get("record_type")? {
+        "INTENT" => IntentLogRecordType::Intent,
+        "DONE" => IntentLogRecordType::Done,
+        "ABORTED" => IntentLogRecordType::Aborted,
+        _ => return None,
+    };
+    let target_canonical = PathBuf::from(*fields.get("target_canonical")?);
+    let staging_path = PathBuf::from(*fields.get("staging_path")?);
+    let expected_post_hash = (*fields.get("expected_post_hash")?).to_string();
+    let pre_state_raw = *fields.get("expected_pre_state")?;
+    let expected_pre_state = if pre_state_raw == "MISSING" {
+        None
+    } else {
+        Some(pre_state_raw.to_string())
+    };
+    let timestamp_utc = (*fields.get("timestamp_utc")?).to_string();
+    let record_checksum = (*fields.get("record_checksum")?).to_string();
+
+    let expected_checksum = sha256_hex(
+        intent_log_checksum_input(
+            &txn_id,
+            fencing_generation,
+            record_type,
+            &target_canonical,
+            &staging_path,
+            &expected_post_hash,
+            expected_pre_state.as_deref(),
+            &timestamp_utc,
+        )
+        .as_bytes(),
+    );
+    if expected_checksum != record_checksum {
+        // Corrupted/tampered record — treated identically to a torn one.
+        return None;
+    }
+
+    Some(IntentLogRecord {
+        txn_id,
+        fencing_generation,
+        record_type,
+        target_canonical,
+        staging_path,
+        expected_post_hash,
+        expected_pre_state,
+        timestamp_utc,
+        record_checksum,
+    })
 }
 
 /// Parse the intent log, discarding any torn (truncated, checksum-
@@ -13251,11 +13709,28 @@ pub fn append_intent_log_record(
 pub fn read_intent_log(
     _intent_log_path: &Path,
 ) -> Result<Vec<IntentLogRecord>, BcIndexMigrationError> {
-    todo!(
-        "ADR-052 §Decision 7b: parse the framed record sequence at _intent_log_path; validate \
-         each record's record_checksum; on any torn/invalid trailing record, silently drop it \
-         (recovery reads from the last valid record) rather than erroring"
-    )
+    let content = match std::fs::read_to_string(_intent_log_path) {
+        Ok(content) => content,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(BcIndexMigrationError::Io {
+                path: _intent_log_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    let mut records = Vec::new();
+    for raw_block in content.split(INTENT_LOG_RECORD_START).skip(1) {
+        let Some(body) = raw_block.strip_suffix(INTENT_LOG_RECORD_END) else {
+            // Torn (truncated mid-write, missing terminator) -- discard.
+            continue;
+        };
+        if let Some(record) = parse_intent_log_block(body) {
+            records.push(record);
+        }
+    }
+    Ok(records)
 }
 
 /// The recovery decision for one target, per ADR-052 §Decision 7b's
@@ -13282,12 +13757,31 @@ pub fn decide_intent_log_recovery(
     _staging_hash: Option<&str>,
     _record: Option<&IntentLogRecord>,
 ) -> IntentLogRecoveryDecision {
-    todo!(
-        "ADR-052 §Decision 7b recovery decision table: apply the 8-row table verbatim over \
-         (_canonical_hash, _staging_hash, _record) — TreatDone / RedoRename for the two safe \
-         rows, FailClosed for every other combination (torn/absent record, canonical matching \
-         neither expected hash, staging missing when needed)"
-    )
+    let Some(record) = _record else {
+        return IntentLogRecoveryDecision::FailClosed {
+            reason: "no intent-log record exists for this target (torn or absent) -- \
+                      ambiguous recovery state, cannot proceed safely"
+                .to_string(),
+        };
+    };
+
+    if _canonical_hash == Some(record.expected_post_hash.as_str()) {
+        return IntentLogRecoveryDecision::TreatDone;
+    }
+
+    let expected_pre = record.expected_pre_state.as_deref();
+    if _staging_hash == Some(record.expected_post_hash.as_str()) && _canonical_hash == expected_pre
+    {
+        return IntentLogRecoveryDecision::RedoRename;
+    }
+
+    IntentLogRecoveryDecision::FailClosed {
+        reason: format!(
+            "canonical/staging on-disk state matches neither safe recovery row for target \
+             with expected_post_hash={} — ambiguous or untrustworthy state",
+            record.expected_post_hash
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
