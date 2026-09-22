@@ -12299,14 +12299,21 @@ pub enum BcIndexAddressingError {
 }
 
 impl From<BcIndexAddressingError> for HookResult {
-    fn from(_err: BcIndexAddressingError) -> Self {
-        todo!(
-            "BC-1.18.010: map each BcIndexAddressingError variant to the correct HookResult \
-             (most map to HookResult::Error; the migration-window read-protocol variants are \
-             never surfaced through this native-gate path at all — they belong to the reader \
-             integration call sites, not the PreToolUse admission gate). Branches on the error \
-             variant, so this is NOT WIRING-EXEMPT (BC-5.38.003 excludes multi-arm dispatch)."
-        )
+    /// BC-1.18.010: every variant surfaces as `HookResult::Error` — a
+    /// defect in the addressing layer itself (malformed ID, unmapped
+    /// prefix, missing sub-shard range, ARCH-INDEX parity divergence, I/O/
+    /// TOML failure) is never a normal, retry-actionable `Block` outcome
+    /// the way BC-1.18.011's writer-admission refusal is. The
+    /// §Reader Integration variant (`ReaderProtocolUnresolvable`) is never
+    /// actually surfaced through THIS conversion in practice — its call
+    /// sites are reader integration helpers, not the PreToolUse admission
+    /// gate — but still maps to `Error` here for exhaustive, defensive
+    /// correctness rather than a `match` that could panic on an
+    /// unanticipated variant.
+    fn from(err: BcIndexAddressingError) -> Self {
+        HookResult::Error {
+            message: err.to_string(),
+        }
     }
 }
 
@@ -12396,11 +12403,15 @@ pub struct SubsystemPrefixEntry {
 pub fn load_subsystem_prefix_snapshot(
     _path: &Path,
 ) -> Result<SubsystemPrefixSnapshot, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 Invariant 2: read + toml::from_str the subsystem_prefixes config snapshot \
-         at _path, mapping io::Error -> BcIndexAddressingError::Io and toml::de::Error -> \
-         BcIndexAddressingError::Toml"
-    )
+    let content =
+        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+            path: _path.to_path_buf(),
+            source,
+        })?;
+    toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
+        path: _path.to_path_buf(),
+        source,
+    })
 }
 
 /// Invariant 2's three-way ARCH-INDEX parity check, performed at migration
@@ -12413,12 +12424,17 @@ pub fn check_arch_index_parity(
     _manifest_approved_arch_index_sha: &str,
     _live_arch_index_sha: &str,
 ) -> Result<(), BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 Invariant 2 / ADR-052 §Decision 10: compare all three SHAs for exact \
-         equality; on any pairwise mismatch return \
-         BcIndexAddressingError::ArchIndexParityMismatch (ARCH_INDEX_PARITY_ABORT at the \
-         migration binary's call site, per ADR-052 §Error Code Semantics)"
-    )
+    if _config.arch_index_sha == _manifest_approved_arch_index_sha
+        && _manifest_approved_arch_index_sha == _live_arch_index_sha
+    {
+        Ok(())
+    } else {
+        Err(BcIndexAddressingError::ArchIndexParityMismatch {
+            config_sha: _config.arch_index_sha.clone(),
+            manifest_sha: _manifest_approved_arch_index_sha.to_string(),
+            live_sha: _live_arch_index_sha.to_string(),
+        })
+    }
 }
 
 /// **VP-127 — zero-lookup invariant.** Pure-function first-level shard-path
@@ -12436,28 +12452,43 @@ pub fn first_level_shard_path(
     _bc_id: &BcId,
     _prefixes: &SubsystemPrefixSnapshot,
 ) -> Result<PathBuf, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 Postcondition 2, Invariant 1 (VP-127): look up _bc_id.subsystem_major in \
-         _prefixes.prefix (zero manifest reads), compute \
-         shards/BC-INDEX-{{ss_id}}.md; return BcIndexAddressingError::UnmappedBcPrefix on no \
-         match"
-    )
+    _prefixes
+        .prefix
+        .iter()
+        .find(|entry| entry.bc_prefix_major == _bc_id.subsystem_major)
+        .map(|entry| PathBuf::from(format!("shards/BC-INDEX-{}.md", entry.ss_id)))
+        .ok_or(BcIndexAddressingError::UnmappedBcPrefix {
+            subsystem_major: _bc_id.subsystem_major,
+        })
 }
 
 /// Load the top-level shard manifest (effectful read; needed only for
 /// whole-corpus scans and to discover whether a subsystem is sub-sharded —
 /// never for an ordinary single-BC first-level lookup, per Invariant 1).
 pub fn load_shard_manifest(_path: &Path) -> Result<SubsystemShardManifest, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 Postcondition 3: read + toml::from_str the top-level shard manifest at \
-         _path"
-    )
+    let content =
+        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+            path: _path.to_path_buf(),
+            source,
+        })?;
+    toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
+        path: _path.to_path_buf(),
+        source,
+    })
 }
 
 /// Load a second-level sub-shard manifest for one sub-sharded subsystem
 /// (effectful read; e.g. `shards/BC-INDEX-SS-05.manifest.toml`).
 pub fn load_sub_shard_manifest(_path: &Path) -> Result<SubShardManifest, BcIndexAddressingError> {
-    todo!("BC-1.18.010 Postcondition 4: read + toml::from_str the sub-shard manifest at _path")
+    let content =
+        std::fs::read_to_string(_path).map_err(|source| BcIndexAddressingError::Io {
+            path: _path.to_path_buf(),
+            source,
+        })?;
+    toml::from_str(&content).map_err(|source| BcIndexAddressingError::Toml {
+        path: _path.to_path_buf(),
+        source,
+    })
 }
 
 /// Full addressing resolution covering BOTH the zero-lookup first level
@@ -12474,25 +12505,87 @@ pub fn resolve_bc_shard_path(
     _prefixes: &SubsystemPrefixSnapshot,
     _shards_dir: &Path,
 ) -> Result<PathBuf, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 Postconditions 2 and 4 (EC-001/EC-002/EC-020): compute the first-level \
-         path via first_level_shard_path; load the top-level manifest ONLY to check \
-         sub_sharded for that entry's ss_id; if sub_sharded, load the sub-manifest and \
-         resolve the BC-ID-range entry containing _bc_id, returning \
-         BcIndexAddressingError::SubShardRangeNotFound if no range entry covers it"
-    )
+    let first_level = first_level_shard_path(_bc_id, _prefixes)?;
+    // Already validated by the call above (Ok only if a mapping entry
+    // exists) — re-look-up the ss_id string for the top-level manifest
+    // lookup below.
+    let ss_id = _prefixes
+        .prefix
+        .iter()
+        .find(|entry| entry.bc_prefix_major == _bc_id.subsystem_major)
+        .map(|entry| entry.ss_id.clone())
+        .ok_or(BcIndexAddressingError::UnmappedBcPrefix {
+            subsystem_major: _bc_id.subsystem_major,
+        })?;
+
+    // Canonical layout root BC-1.18.010 Postcondition 3's own schema
+    // comment names: `.factory/specs/behavioral-contracts/`, with the
+    // top-level manifest at `shards/BC-INDEX.shard-manifest.toml` relative
+    // to it — `_shards_dir` joined with the manifest entry's own
+    // `path`/`sub_manifest` field verbatim.
+    let top_manifest_path = _shards_dir.join("shards/BC-INDEX.shard-manifest.toml");
+    let manifest = load_shard_manifest(&top_manifest_path)?;
+    let entry = manifest.subsystem_shard.iter().find(|e| e.ss_id == ss_id);
+
+    let Some(entry) = entry else {
+        // The top-level manifest doesn't enumerate this subsystem at all —
+        // Invariant 1's zero-lookup first-level guarantee still holds for
+        // this case: fall back to the already-computed first-level path
+        // rather than treating an unlisted-but-mapped subsystem as an
+        // error (the manifest is only consulted to discover sub-sharding,
+        // never to re-derive first-level addressing itself).
+        return Ok(first_level);
+    };
+
+    if !entry.sub_sharded {
+        return Ok(first_level);
+    }
+
+    let sub_manifest_rel =
+        entry
+            .sub_manifest
+            .clone()
+            .ok_or(BcIndexAddressingError::SubShardRangeNotFound {
+                ss_id: ss_id.clone(),
+                bc_id: _bc_id.to_string(),
+            })?;
+    let sub_manifest_path = _shards_dir.join(&sub_manifest_rel);
+    let sub_manifest = load_sub_shard_manifest(&sub_manifest_path)?;
+
+    for sub_entry in &sub_manifest.sub_shard {
+        let range_start = parse_bc_id(&sub_entry.range_start)?;
+        let range_end = parse_bc_id(&sub_entry.range_end)?;
+        if *_bc_id >= range_start && *_bc_id <= range_end {
+            return Ok(PathBuf::from(&sub_entry.path));
+        }
+    }
+
+    Err(BcIndexAddressingError::SubShardRangeNotFound {
+        ss_id,
+        bc_id: _bc_id.to_string(),
+    })
 }
 
 /// Parse a `BC-X.YY.NNN` string into a [`BcId`]. Non-trivial: validates
 /// three integer components and the `BC-`/`.`/`.` grammar; genuinely
 /// branches on malformed input (EC-031-analogue for BC-INDEX row parsing).
 pub fn parse_bc_id(_candidate: &str) -> Result<BcId, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010/BC-1.18.011: parse \"BC-{{X}}.{{YY}}.{{NNN}}\" into BcId {{ \
-         subsystem_major, capability_minor, sequence }}; return \
-         BcIndexAddressingError::MalformedBcId on any grammar violation (missing BC- prefix, \
-         non-numeric component, wrong dot count)"
-    )
+    let malformed = || BcIndexAddressingError::MalformedBcId {
+        candidate: _candidate.to_string(),
+    };
+    let rest = _candidate.strip_prefix("BC-").ok_or_else(malformed)?;
+    let parts: Vec<&str> = rest.split('.').collect();
+    let [major, minor, seq] = parts.as_slice() else {
+        return Err(malformed());
+    };
+    let subsystem_major = major.parse::<u32>().map_err(|_| malformed())?;
+    let capability_minor = minor.parse::<u32>().map_err(|_| malformed())?;
+    let sequence = seq.parse::<u32>().map_err(|_| malformed())?;
+    Ok(BcId {
+        subsystem_major,
+        capability_minor,
+        sequence,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -12520,12 +12613,58 @@ pub enum BcIndexMigrationReadState {
 pub fn detect_migration_read_state(
     _migration_state_dir: &Path,
 ) -> Result<BcIndexMigrationReadState, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 §Reader Integration steps 1-2: check \
-         _migration_state_dir/completed.json first (-> Completed if present); else check \
-         _migration_state_dir/CURRENT.json for status=\"committing\" (-> Committing with \
-         generation_id); else -> NotStarted"
-    )
+    let completed_path = _migration_state_dir.join("completed.json");
+    match std::fs::read_to_string(&completed_path) {
+        Ok(content) => {
+            // "a well-formed completed.json must parse" — validate it is
+            // genuine JSON, not merely that the file exists.
+            serde_json::from_str::<serde_json::Value>(&content).map_err(|source| {
+                BcIndexAddressingError::Io {
+                    path: completed_path.clone(),
+                    source: io::Error::new(io::ErrorKind::InvalidData, source),
+                }
+            })?;
+            return Ok(BcIndexMigrationReadState::Completed);
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(BcIndexAddressingError::Io {
+                path: completed_path,
+                source,
+            });
+        }
+    }
+
+    let current_path = _migration_state_dir.join("CURRENT.json");
+    match std::fs::read_to_string(&current_path) {
+        Ok(content) => {
+            let value: serde_json::Value =
+                serde_json::from_str(&content).map_err(|source| BcIndexAddressingError::Io {
+                    path: current_path.clone(),
+                    source: io::Error::new(io::ErrorKind::InvalidData, source),
+                })?;
+            let status = value
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if status == "committing" {
+                let generation_id = value
+                    .get("generation_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                return Ok(BcIndexMigrationReadState::Committing { generation_id });
+            }
+            Ok(BcIndexMigrationReadState::NotStarted)
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            Ok(BcIndexMigrationReadState::NotStarted)
+        }
+        Err(source) => Err(BcIndexAddressingError::Io {
+            path: current_path,
+            source,
+        }),
+    }
 }
 
 /// Step 2's per-file OPEN-based-with-ENOENT-fallback read: open
@@ -12545,12 +12684,28 @@ pub fn open_bc_index_path_during_migration(
     _migration_state_dir: &Path,
     _canonical_root: &Path,
 ) -> Result<std::fs::File, BcIndexAddressingError> {
-    todo!(
-        "BC-1.18.010 §Reader Integration step 2 / ADR-052 §Decision 7c Reader protocol: \
-         attempt File::open(_migration_state_dir/gen-{{_generation_id}}/_relative_path); on \
-         ENOENT specifically, fall back to File::open(_canonical_root/_relative_path); any \
-         OTHER io::Error propagates unchanged (never silently treated as the fallback case)"
-    )
+    // `_generation_id` here is the EXACT `gen-<...>` directory name (as
+    // produced by `BcIndexMigrationReadState::Committing`'s own
+    // `generation_id` field, itself the raw `CURRENT.json` "generation_id"
+    // value) — this function does NOT re-add a "gen-" prefix on top of it,
+    // unlike `stage_new_generation`'s own bare-UUID return value, which
+    // ITS OWN callers are responsible for formatting as `gen-<uuid>`
+    // themselves.
+    let gen_path = _migration_state_dir.join(_generation_id).join(_relative_path);
+    match std::fs::File::open(&gen_path) {
+        Ok(file) => Ok(file),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            let canonical_path = _canonical_root.join(_relative_path);
+            std::fs::File::open(&canonical_path).map_err(|source| BcIndexAddressingError::Io {
+                path: canonical_path,
+                source,
+            })
+        }
+        Err(source) => Err(BcIndexAddressingError::Io {
+            path: gen_path,
+            source,
+        }),
+    }
 }
 
 // ===========================================================================
