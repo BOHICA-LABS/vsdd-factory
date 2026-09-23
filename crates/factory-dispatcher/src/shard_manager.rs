@@ -13912,6 +13912,17 @@ pub fn reconcile_stale_admission_gate(
     Ok(reconciled)
 }
 
+/// ADR-052 §Decision 5a drain procedure's own documented default drain
+/// timeout (step 4).
+pub const DEFAULT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A writer reservation older than this is presumed abandoned (its
+/// creating PreToolUse binary is a per-event process that has already
+/// exited by the time any drain step runs — TTL-only GC, never
+/// PID-liveness, per [`drain_bc_index_writers`]'s own doc comment / v1.9
+/// H1 correction).
+pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Poll the writer-reservations directory until it is empty (quiescence)
 /// or the drain timeout elapses (ADR-052 §Decision 5a drain procedure step
 /// 4; default timeout 30s). Also performs the stale-reservation TTL GC
@@ -15083,6 +15094,31 @@ fn finish_committing_migration(
     txn.updated_at = record.completed_at.clone();
     let _ = write_txn_record(migration_state_dir, txn);
 
+    // OBL-1 §5 (O-5 fold-in): once COMPLETED, the writer-admission gate
+    // MUST return to OPEN — otherwise whichever caller flipped it to
+    // DRAINING/LOCKED (the fresh-run branch's drain procedure, below)
+    // would leave future writers permanently blocked even though
+    // `is_bc_index_admission_open` already treats a COMPLETED/ABORTED
+    // active txn as admissible on its OWN half of that conjunction; gate
+    // state is the other half. Called from all three
+    // `finish_committing_migration` call sites (fresh-run, STAGING-resume,
+    // COMMITTING-resume) uniformly, so every path to COMPLETED resets the
+    // gate the same way. Best-effort: a failure here does not change the
+    // migration's own COMPLETED outcome; `reconcile_stale_admission_gate`'s
+    // Branch A self-heals a stuck-Locked gate with no live txn on the next
+    // admission check regardless.
+    if let Err(e) =
+        write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)
+    {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            error = %e,
+            "finish_committing_migration: best-effort gate-state reset to OPEN after COMPLETED \
+             failed (non-fatal -- reconcile_stale_admission_gate self-heals this on the next \
+             admission check)"
+        );
+    }
+
     Ok(BcIndexMigrationOutcome::Completed {
         canonical_paths_count: completed_count,
     })
@@ -15190,6 +15226,35 @@ pub fn run_bc_index_migration(
             }
         }
     }
+
+    // OBL-1 §5 (O-5 fold-in): ADR-052 §Decision 5a drain procedure steps
+    // 1-4/6, run once before the fresh-run quiescence snapshot is taken —
+    // ensures no writer holding a reservation from BEFORE this migration
+    // started can race the snapshot read below. Scoped to the fresh-run
+    // path only (matching the OBL-1 discharge design's own scoping); the
+    // STAGING/COMMITTING resume branches above do not re-run it.
+    //
+    // Step 3 (flip DRAINING) then step 4 (drain_bc_index_writers, which
+    // itself performs step 1's TTL GC before polling) then step 6 (flip
+    // LOCKED once quiescent). A drain timeout resets the gate to OPEN and
+    // propagates DrainTimeoutAbort — no txn record was ever created for
+    // this attempt, so there is nothing else to clean up.
+    let reservations_dir = migration_state_dir.join("reservations");
+    std::fs::create_dir_all(&reservations_dir).map_err(|source| BcIndexMigrationError::Io {
+        path: reservations_dir.clone(),
+        source,
+    })?;
+    write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Draining)?;
+    if let Err(e) = drain_bc_index_writers(
+        &reservations_dir,
+        DEFAULT_DRAIN_TIMEOUT,
+        DEFAULT_MAX_RESERVATION_TTL,
+    ) {
+        let _ =
+            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
+        return Err(e);
+    }
+    write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Locked)?;
 
     // Fresh run: quiescence snapshot of the source, then stage + verify +
     // commit + move + complete.
@@ -15436,6 +15501,11 @@ pub fn run_bc_index_migration(
             txn.state = BcIndexMigrationTxnState::Aborted;
             txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             let _ = write_txn_record(migration_state_dir, txn);
+            // OBL-1 §5 (O-5 fold-in): every abort path resets the
+            // writer-admission gate to OPEN — best-effort, mirroring the
+            // established `let _ =` convention this closure already uses
+            // for its other cleanup writes.
+            let _ = write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open);
         };
     if let Err(e) = verify_content_preservation(&staged_bodies, &source_body_row_sha256) {
         abort_staging(&migration_state_dir, &gen_dir, &mut txn);
@@ -15477,6 +15547,9 @@ pub fn run_bc_index_migration(
         txn.state = BcIndexMigrationTxnState::Aborted;
         txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let _ = write_txn_record(&migration_state_dir, &txn);
+        // OBL-1 §5 (O-5 fold-in): fingerprint-abort resets gate→OPEN.
+        let _ =
+            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
 

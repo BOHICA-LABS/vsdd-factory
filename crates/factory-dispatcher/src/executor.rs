@@ -484,6 +484,43 @@ pub fn bc_index_migration_admission_precheck(
         return None;
     }
 
+    // NOTE (surfaced, not silently fixed — see final report): OBL-1's
+    // drain-procedure wiring (below, in `run_bc_index_migration`'s
+    // fresh-run branch) can leave the gate at DRAINING/LOCKED if the
+    // migration binary crashes or errors between the gate flip and the
+    // next covered abort/completion point.
+    // `shard_manager::reconcile_stale_admission_gate` already exists as
+    // the documented self-heal mechanism for exactly this case, and a
+    // full-crate grep confirms it is never called from anywhere in the
+    // real dispatch path today (dead code) — its own "self-heals by the
+    // next PreToolUse dispatch" doc-comment claim is therefore not
+    // actually true in production yet. Wiring it in here (the natural
+    // call site) was attempted in this burst but reverted: it broke
+    // `test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_precheck_never_runs_no_roll`,
+    // whose STAGING fixture (`write_migration_txn`) does not hold the
+    // `exclusive.lock` a live coordinator would hold — `reconcile_stale_
+    // admission_gate`'s Branch A/B then (correctly, per its own ratified
+    // spec) treats the fixture's generation-id-less STAGING record as an
+    // abandoned pre-generation crash and self-heals it to ABORTED+OPEN,
+    // which defeats that test's "still blocked while genuinely STAGING"
+    // scenario. This is a genuine pre-existing gap this burst's O-5
+    // wiring makes newly load-bearing (before this burst, a stuck gate
+    // had no automatic drain path TO get stuck from) — not something
+    // this burst's own change introduces net-new — but closing it safely
+    // requires the STAGING test fixture to first be updated to hold the
+    // lock (test-writer's domain, not implementer's), so it is left
+    // unwired here rather than silently breaking that test.
+    let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
+        Ok(state) => state,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
+                ),
+            });
+        }
+    };
+
     // OBL-1 §4 fail-open structural fix (TD-VSDD-060 sibling-site sweep):
     // this precheck previously duplicated its own ad hoc
     // `matches!(txn.state, Staging | Committing)` check and NEVER
@@ -532,16 +569,6 @@ pub fn bc_index_migration_admission_precheck(
         };
     }
 
-    let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
-        Ok(state) => state,
-        Err(e) => {
-            return Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!(
-                    "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
-                ),
-            });
-        }
-    };
     let active_txn = match crate::shard_manager::read_active_txn_record(&migration_state_dir) {
         Ok(txn) => txn,
         Err(e) => {
