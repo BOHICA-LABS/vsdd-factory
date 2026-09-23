@@ -14236,19 +14236,13 @@ fn split_original_body_into_subsystems(body: &str) -> Vec<(String, String)> {
 
     for line in body.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("### ") {
-            let candidate = rest.split_whitespace().next().unwrap_or("");
-            let is_ss_heading = candidate.len() == 5
-                && candidate.starts_with("SS-")
-                && candidate[3..5].chars().all(|c| c.is_ascii_digit());
-            if is_ss_heading {
-                if let Some(ss_id) = current_ss_id.take() {
-                    sections.push((ss_id, current_lines.join("\n")));
-                }
-                current_ss_id = Some(candidate.to_string());
-                current_lines = vec![line];
-                continue;
+        if let Some(candidate) = parse_ss_heading_line(trimmed) {
+            if let Some(ss_id) = current_ss_id.take() {
+                sections.push((ss_id, current_lines.join("\n")));
             }
+            current_ss_id = Some(candidate.to_string());
+            current_lines = vec![line];
+            continue;
         }
         if current_ss_id.is_some() {
             current_lines.push(line);
@@ -14258,6 +14252,47 @@ fn split_original_body_into_subsystems(body: &str) -> Vec<(String, String)> {
         sections.push((ss_id, current_lines.join("\n")));
     }
     sections
+}
+
+/// Detects whether `trimmed` (a line with leading whitespace already
+/// stripped) is a `### SS-NN` subsystem-heading boundary line, returning the
+/// `SS-NN` token when it is. Shared by [`split_original_body_into_subsystems`]
+/// and [`extract_bc_index_preamble`] so the two functions can never drift on
+/// what counts as the section-boundary — both must agree on exactly where
+/// the original document's preamble ends and the first per-subsystem
+/// section begins (BC-1.18.010 Postcondition 1 / F-C5-P1-001).
+fn parse_ss_heading_line(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix("### ")?;
+    let candidate = rest.split_whitespace().next().unwrap_or("");
+    let is_ss_heading = candidate.len() == 5
+        && candidate.starts_with("SS-")
+        && candidate[3..5].chars().all(|c| c.is_ascii_digit());
+    is_ss_heading.then_some(candidate)
+}
+
+/// BC-1.18.010 Postcondition 1 (F-C5-P1-001): extract the ORIGINAL (pre-
+/// split) `BC-INDEX.md` content's preamble — everything before the first
+/// `### SS-NN` subsystem heading (YAML frontmatter, `## Summary`, `##
+/// Index by subsystem`, cross-cutting invariants, and any other document
+/// prose that precedes the per-subsystem sections) — VERBATIM. This is the
+/// portion of the original document that survives into the staged lean
+/// `BC-INDEX.md` body; Invariant 3 removes ONLY the per-subsystem `### SS-
+/// NN` BC tables that follow (they move to shards), never anything in this
+/// preamble.
+fn extract_bc_index_preamble(original_content: &str) -> String {
+    let mut preamble_lines: Vec<&str> = Vec::new();
+    for line in original_content.lines() {
+        let trimmed = line.trim_start();
+        if parse_ss_heading_line(trimmed).is_some() {
+            break;
+        }
+        preamble_lines.push(line);
+    }
+    let mut preamble = preamble_lines.join("\n");
+    if !preamble.is_empty() {
+        preamble.push('\n');
+    }
+    preamble
 }
 
 /// Reads the `total_bcs:` frontmatter field BC-1.18.011 Precondition 3
@@ -14624,9 +14659,27 @@ pub fn run_bc_index_migration(
             .into_owned(),
     });
 
-    let staged_bc_index_body = "## Summary\n\n## Subsystem Shard Manifest\n\nSee \
-                                 `shards/BC-INDEX.shard-manifest.toml`.\n"
-        .to_string();
+    // F-C5-P1-001 (BC-1.18.010 Postcondition 1): the lean staged body is the
+    // ORIGINAL content's preamble — frontmatter, `## Summary`,
+    // `## Index by subsystem`, cross-cutting invariants, and any other
+    // prose before the first `### SS-NN` heading, VERBATIM — plus the
+    // inserted `## Subsystem Shard Manifest` section. Invariant 3 removes
+    // ONLY the per-subsystem `### SS-NN` BC tables that followed in the
+    // original document (they now live in the shards); nothing else is
+    // discarded. This replaces the prior hardcoded 4-line stub that
+    // destroyed the frontmatter/§Summary/invariants content wholesale.
+    let mut staged_bc_index_body = extract_bc_index_preamble(&original_content);
+    // Normalize to exactly one blank line between the preserved preamble
+    // and the inserted manifest section, regardless of how many trailing
+    // newlines the preamble itself ends with (or whether it's empty).
+    while staged_bc_index_body.ends_with('\n') {
+        staged_bc_index_body.pop();
+    }
+    if !staged_bc_index_body.is_empty() {
+        staged_bc_index_body.push_str("\n\n");
+    }
+    staged_bc_index_body
+        .push_str("## Subsystem Shard Manifest\n\nSee `shards/BC-INDEX.shard-manifest.toml`.\n");
     let staged_bc_index_staging_path = gen_dir.join("BC-INDEX.md");
     // D-1232-OBL-2(a): staging publish of the lean staged BC-INDEX.md body.
     migration_durable_write(
