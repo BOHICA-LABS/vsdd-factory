@@ -13254,6 +13254,328 @@ pub fn try_acquire_migration_lock(
     }
 }
 
+// ---------------------------------------------------------------------------
+// OBL-1 (D-1232-OBL-1) — the total, WAL-ordered recovery-decision authority
+// (research blueprint §2; ADR-052 §Decision 4e's recovery-mode table,
+// TXN-RECORD-state-primary per §0.3). Subsumes the ad hoc pass-2 arm
+// patches (F-C5-P2-001's live/terminal split, now `classify_txn_records`
+// above; F-C5-P2-002's `decide_intent_log_recovery`, unchanged, called from
+// the `ForwardRecovery` arm's actual per-target redo/skip execution) into
+// one function whose every output arm is a real, exhaustively-matched
+// (rustc-checked -- no wildcard `_` arm anywhere in this match) enum
+// variant. `recover()` is a PURE function: every disk-derived fact
+// (`txn_records`, `current_pointer`, `completed`, `gen_dir_exists`,
+// `manifest_status`) is a parameter the caller already gathered, so this
+// function itself performs no I/O and needs no `Fs` parameter -- a
+// deliberate simplification from the OBL-1 design doc's `recover<F: Fs>`
+// signature (§2.1), chosen because every fact `recover()` needs is already
+// produced by an existing `std::fs`-based reader (`read_active_txn_record`,
+// `read_admission_gate_state`, `Path::exists`) with no additional I/O
+// primitive required; this keeps `recover()` itself maximally Kani-friendly
+// (a Kani harness can enumerate every parameter combination directly, no
+// abstract `Fs` model needed at this layer) without weakening its
+// exhaustiveness guarantee.
+// ---------------------------------------------------------------------------
+
+/// Distinguishes a STAGING/COMMITTING txn's authorization-to-resume state
+/// (ADR-052 §Decision 4e/§Decision 7c's "activation manifest" concept).
+///
+/// **No production caller in this codebase today supplies a
+/// non-`Unknown` value.** A full-crate grep confirms
+/// [`BcIndexMigrationError::ExpiryAbort`],
+/// [`BcIndexMigrationError::RecoveryRequiresReauthorization`], and
+/// [`BcIndexMigrationError::CompletionManifestRejection`] are declared
+/// error variants but are never constructed anywhere in this module — the
+/// activation-manifest system ADR-052 describes (a durable, independently
+/// timestamped authorization artifact distinct from the txn record itself)
+/// is not yet implemented anywhere in this codebase. `recover()`'s
+/// STAGING/COMMITTING resume arms are built against this parameter for
+/// TOTALITY and Kani-provability regardless (formal-verifier's harness
+/// supplies arbitrary values via `kani::any()` to exercise every table
+/// row), but wiring a REAL manifest-reading function that can produce a
+/// non-`Unknown` value in production is a genuine gap in the wider
+/// migration system — surfaced here explicitly rather than silently
+/// fabricated or silently ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestStatus {
+    /// The activation manifest is present and not expired.
+    StillValid,
+    /// Absent or expired.
+    ExpiredOrAbsent,
+    /// A completion-only recovery manifest is present (COMMITTING-resume
+    /// specific — ADR-052 §Decision 4e row 2's "OR completion-only
+    /// manifest" clause).
+    CompletionOnly,
+    /// No production manifest-reading implementation exists yet to
+    /// determine this — see this type's own doc comment. `recover()`
+    /// treats `Unknown` conservatively: NEVER as `StillValid`/
+    /// `CompletionOnly` (which would authorize forward action) — it always
+    /// routes to the same fail-closed arm `ExpiredOrAbsent` reaches.
+    Unknown,
+}
+
+/// Why [`recover`] reached its safety-net [`RecoveryDecision::Quarantine`]
+/// arm — every combination the ratified table doesn't explicitly
+/// authorize forward action for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuarantineReason {
+    /// More than one LIVE (STAGING/COMMITTING) txn record coexists —
+    /// Precondition 6(b)'s writer-exclusion invariant violated.
+    MultipleLiveTxnRecords { count: usize },
+    /// A live txn record has `generation_id` set, but the corresponding
+    /// staged-generation directory is absent — the ordering invariant
+    /// `stage_new_generation` itself establishes (persist `generation_id`
+    /// to the txn record ONLY AFTER the generation directory is durable)
+    /// is violated, meaning the on-disk state cannot be trusted (ADR-052
+    /// §7c step 1 "Corruption case").
+    GenerationIdWithoutGenDir {
+        activation_id: String,
+        generation_id: String,
+    },
+    /// A COMMITTING txn record has no `generation_id` — COMMITTING is only
+    /// ever entered after `stage_new_generation` durably assigns one
+    /// (`run_bc_index_migration`'s own STAGING → COMMITTING transition
+    /// requires it), so this combination is untrustworthy.
+    CommittingWithoutGenerationId { activation_id: String },
+    /// Defensive-only: a record already classified as LIVE by
+    /// [`classify_txn_records`] was observed with a terminal state inside
+    /// [`recover`]'s own match — impossible by construction (the two
+    /// classifications are the same code path), but handled as a
+    /// fail-closed Quarantine rather than `unreachable!()` so `recover()`
+    /// remains panic-free under every input, including a hypothetical
+    /// future refactor that decouples the two call sites.
+    InternalClassificationInconsistency { activation_id: String },
+}
+
+/// Total output type for [`recover`] — every combination `recover()` can
+/// observe maps to exactly one of these. No panic, no `unreachable!()`, no
+/// fall-through (see [`recover`]'s own doc comment for the exhaustiveness
+/// argument).
+// Note: PartialEq only, not Eq -- `PendingCanonicalMove` (embedded in the
+// `ForwardRecovery` arm) is itself only PartialEq (its own `f64`-free but
+// still-not-Eq-derived struct, matching this module's existing convention).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecoveryDecision {
+    /// No txn record (or only a stale terminal COMPLETED one) — no active
+    /// migration; the writer-admission gate may be OPEN.
+    NoActiveTransaction,
+    /// `completed.json` present (terminal, permanent) — ADR-052 §7c step
+    /// 8. Checked FIRST, unconditionally, regardless of any txn record's
+    /// state — its mere presence is sufficient, no other file consulted.
+    AlreadyMigrated,
+    /// The only txn record present is ABORTED (terminal, retained for
+    /// audit) — treated as no active txn for admission purposes; a
+    /// distinct variant from `NoActiveTransaction` only so callers can log
+    /// which terminal state was observed.
+    AbortedTerminal { activation_id: String },
+    /// txn=STAGING, `generation_id=None` — pre-generation crash. Safe
+    /// decision: DISCARD — set ABORTED, no canonical paths touched, no
+    /// EC-003 census attempted (nothing durable was ever published).
+    DiscardPreGeneration { activation_id: String },
+    /// txn=STAGING, `generation_id` set, staged gen dir present, manifest
+    /// still valid. Safe decision: RESUME — re-run full census/PC1/PC2 on
+    /// resume (never skip, EC-003/H3), then proceed to the fingerprint
+    /// recheck + pointer swap.
+    ResumeFromStaging {
+        activation_id: String,
+        generation_id: String,
+    },
+    /// txn=STAGING, manifest absent/expired (or unknown — see
+    /// [`ManifestStatus::Unknown`]'s doc comment). Safe decision:
+    /// CLEAN-ABORT — delete the staging gen dir if present, ABORTED,
+    /// gate→OPEN.
+    CleanAbortExpiredStaging {
+        activation_id: String,
+        generation_id: Option<String>,
+    },
+    /// txn=COMMITTING, gen dir present, manifest still valid OR a
+    /// completion-only manifest. Safe decision: FORWARD RECOVERY — resume
+    /// canonical-path moves via [`decide_intent_log_recovery`]'s existing
+    /// per-target redo/skip rule, never rollback (Invariant 3: "There is
+    /// no turning back").
+    ForwardRecovery {
+        activation_id: String,
+        generation_id: String,
+        pending: Vec<PendingCanonicalMove>,
+    },
+    /// txn=COMMITTING, manifest absent/expired/unknown. Safe decision:
+    /// human intervention required — this is the one row in the ratified
+    /// table that is not machine-resolvable by design: an
+    /// unauthorized-looking COMMITTING state must not silently self-heal.
+    RequiresReauthorization { activation_id: String },
+    /// The safety-net arm: physical/structural state CONTRADICTS what the
+    /// txn-record state implies it must be, or an internal invariant this
+    /// match itself depends on was violated. NEVER blind-overwrite, NEVER
+    /// fail-open. See [`QuarantineReason`] for the specific cause.
+    Quarantine { reason: QuarantineReason },
+}
+
+/// The single, total recovery-decision authority for the B2 migration
+/// (OBL-1 §2). Structured as ADR-052 §Decision 4e's recovery-mode table,
+/// TXN-RECORD-state-primary (§0.3 of the OBL-1 design) —
+/// `current_pointer`/`gen_dir_exists`/`completed` physical state is a
+/// per-branch CONSISTENCY CROSS-CHECK, not an overriding authority.
+///
+/// # Exhaustiveness argument
+///
+/// This function's only `match` is over `live.state` (2 live-eligible
+/// variants after [`classify_txn_records`]'s own partition, defensively
+/// handling the other 2 as a fail-closed [`QuarantineReason::
+/// InternalClassificationInconsistency`] rather than `unreachable!()`)
+/// crossed with `generation_id.is_some()`, `gen_dir_exists`, and
+/// `manifest_status` (4 variants) — every arm of every nested match is
+/// written out explicitly (no wildcard `_` arm), so rustc itself proves
+/// this function's pattern coverage is total. Because `txn_records` is
+/// classified as a FULL slice via `classify_txn_records` (never a
+/// first-found/short-circuited scan), a stale-terminal-plus-live
+/// combination is a single call with `live.len()==1 && terminal.len()>=1`,
+/// and the live branch fires unconditionally on `live.len()==1` regardless
+/// of `terminal.len()` — there is no code path that inspects `terminal`
+/// before `live`. This directly closes research finding #1 (fail-open on
+/// stale-terminal+live) structurally, for every possible `terminal.len()`,
+/// not merely the cases existing tests happened to construct.
+///
+/// `current_pointer` is accepted for future extension (a §7c-step-6
+/// CURRENT.json-content cross-check) but is not independently consulted by
+/// this function's classification today — per §0.3 of the OBL-1 design,
+/// TXN-RECORD state is the primary discriminator and CURRENT.json content
+/// is guaranteed redundant with it under the WAL-ordering invariant this
+/// same OBL-1 discharge restores.
+pub fn recover(
+    txn_records: &[BcIndexMigrationTxnRecord],
+    _current_pointer: Option<&CurrentGenerationPointer>,
+    completed: Option<&CompletedMigrationRecord>,
+    gen_dir_exists: bool,
+    manifest_status: ManifestStatus,
+) -> RecoveryDecision {
+    // ADR-052 §7c step 8: completed.json's mere presence is sufficient —
+    // no other file consulted. Checked first, unconditionally.
+    if completed.is_some() {
+        return RecoveryDecision::AlreadyMigrated;
+    }
+
+    let (live, terminal) = classify_txn_records(txn_records);
+
+    if live.len() > 1 {
+        return RecoveryDecision::Quarantine {
+            reason: QuarantineReason::MultipleLiveTxnRecords { count: live.len() },
+        };
+    }
+
+    let Some(live) = live.into_iter().next() else {
+        return match terminal.first() {
+            Some(t) if t.state == BcIndexMigrationTxnState::Aborted => {
+                RecoveryDecision::AbortedTerminal {
+                    activation_id: t.activation_id.clone(),
+                }
+            }
+            _ => RecoveryDecision::NoActiveTransaction,
+        };
+    };
+
+    match live.state {
+        BcIndexMigrationTxnState::Staging => {
+            let Some(generation_id) = live.generation_id.clone() else {
+                return RecoveryDecision::DiscardPreGeneration {
+                    activation_id: live.activation_id.clone(),
+                };
+            };
+            if !gen_dir_exists {
+                return RecoveryDecision::Quarantine {
+                    reason: QuarantineReason::GenerationIdWithoutGenDir {
+                        activation_id: live.activation_id.clone(),
+                        generation_id,
+                    },
+                };
+            }
+            match manifest_status {
+                ManifestStatus::StillValid => RecoveryDecision::ResumeFromStaging {
+                    activation_id: live.activation_id.clone(),
+                    generation_id,
+                },
+                ManifestStatus::ExpiredOrAbsent
+                | ManifestStatus::CompletionOnly
+                | ManifestStatus::Unknown => RecoveryDecision::CleanAbortExpiredStaging {
+                    activation_id: live.activation_id.clone(),
+                    generation_id: Some(generation_id),
+                },
+            }
+        }
+        BcIndexMigrationTxnState::Committing => {
+            let Some(generation_id) = live.generation_id.clone() else {
+                return RecoveryDecision::Quarantine {
+                    reason: QuarantineReason::CommittingWithoutGenerationId {
+                        activation_id: live.activation_id.clone(),
+                    },
+                };
+            };
+            if !gen_dir_exists {
+                return RecoveryDecision::Quarantine {
+                    reason: QuarantineReason::GenerationIdWithoutGenDir {
+                        activation_id: live.activation_id.clone(),
+                        generation_id,
+                    },
+                };
+            }
+            match manifest_status {
+                ManifestStatus::StillValid | ManifestStatus::CompletionOnly => {
+                    RecoveryDecision::ForwardRecovery {
+                        activation_id: live.activation_id.clone(),
+                        generation_id,
+                        pending: live.pending_canonical_moves.clone(),
+                    }
+                }
+                ManifestStatus::ExpiredOrAbsent | ManifestStatus::Unknown => {
+                    RecoveryDecision::RequiresReauthorization {
+                        activation_id: live.activation_id.clone(),
+                    }
+                }
+            }
+        }
+        BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
+            // Defensive-only — see QuarantineReason::InternalClassificationInconsistency's
+            // own doc comment. `live` was already classified as
+            // Staging/Committing by `classify_txn_records`.
+            RecoveryDecision::Quarantine {
+                reason: QuarantineReason::InternalClassificationInconsistency {
+                    activation_id: live.activation_id.clone(),
+                },
+            }
+        }
+    }
+}
+
+/// OBL-1 §2.4 / §4: the shared live/terminal partition over a slice of
+/// already-read txn records (ADR-052 §Decision 4e's TXN-RECORD-state-
+/// primary classification, first step). Used by BOTH
+/// [`read_active_txn_record`] (I/O: enumerates `txn-*.json` from disk,
+/// then calls this) and [`recover`] (pure: takes an already-gathered
+/// slice) -- the SAME classification both consult, closing the
+/// TD-VSDD-060 sibling-site drift the OBL-1 discharge design identified
+/// between them ("the two patches become two facets of one proven-total
+/// match, not two independent functions each hoping to agree with each
+/// other").
+fn classify_txn_records(
+    records: &[BcIndexMigrationTxnRecord],
+) -> (
+    Vec<&BcIndexMigrationTxnRecord>,
+    Vec<&BcIndexMigrationTxnRecord>,
+) {
+    let mut live = Vec::new();
+    let mut terminal = Vec::new();
+    for record in records {
+        match record.state {
+            BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing => {
+                live.push(record);
+            }
+            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
+                terminal.push(record);
+            }
+        }
+    }
+    (live, terminal)
+}
+
 /// Read the durable txn record, if one exists, from
 /// `.factory/migration-state/txn-*.json`.
 ///
@@ -13300,8 +13622,7 @@ pub fn read_active_txn_record(
     // record exists) regardless of filesystem enumeration order.
     txn_paths.sort();
 
-    let mut live: Vec<BcIndexMigrationTxnRecord> = Vec::new();
-    let mut terminal: Vec<BcIndexMigrationTxnRecord> = Vec::new();
+    let mut records: Vec<BcIndexMigrationTxnRecord> = Vec::new();
     for path in &txn_paths {
         let content =
             std::fs::read_to_string(path).map_err(|source| BcIndexMigrationError::Io {
@@ -13313,19 +13634,13 @@ pub fn read_active_txn_record(
                 message: format!("malformed txn record at {}: {e}", path.display()),
             }
         })?;
-        match record.state {
-            BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing => {
-                live.push(record);
-            }
-            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
-                terminal.push(record);
-            }
-        }
+        records.push(record);
     }
 
+    let (live, terminal) = classify_txn_records(&records);
     match live.len() {
-        0 => Ok(terminal.into_iter().next()),
-        1 => Ok(live.into_iter().next()),
+        0 => Ok(terminal.into_iter().next().cloned()),
+        1 => Ok(live.into_iter().next().cloned()),
         n => Err(BcIndexMigrationError::BinaryIntegrityFailure {
             message: format!(
                 "found {n} coexisting LIVE (STAGING/COMMITTING) txn records in {} -- \
