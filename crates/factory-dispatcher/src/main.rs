@@ -38,8 +38,9 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck, execute_tiers,
-    resolve_shard_gate_precedence, shard_cap_precheck, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck,
+    bc_index_migration_reservation_release, execute_tiers, resolve_shard_gate_precedence,
+    shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -452,6 +453,15 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // side effect had already landed on disk).
     let migration_gate_precheck_result =
         bc_index_migration_admission_precheck(&payload, &project_cwd);
+
+    // OBL-1 §5 (O-5 fold-in): the PostToolUse release counterpart to the
+    // admission precheck above. No-ops internally for every dispatch that
+    // isn't a genuine PostToolUse Edit/Write/MultiEdit with migration state
+    // present (mirrors `bc_index_migration_admission_precheck`'s own
+    // real, non-stub existence/scope guards) — fire-and-forget, never
+    // produces a verdict, never affects `shard_gate_precheck_result` or
+    // any downstream exit-code aggregation below.
+    bc_index_migration_reservation_release(&payload, &project_cwd);
 
     // `shard_cap_precheck` is reachable ONLY in the `None` arm below — this
     // `match`'s control flow IS Ruling 1's "structurally skipped" guarantee.

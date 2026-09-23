@@ -484,17 +484,6 @@ pub fn bc_index_migration_admission_precheck(
         return None;
     }
 
-    let active_txn = match crate::shard_manager::read_active_txn_record(&migration_state_dir) {
-        Ok(txn) => txn,
-        Err(e) => {
-            return Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!(
-                    "BC-1.18.011: failed to read the active BC-INDEX migration txn record: {e}"
-                ),
-            });
-        }
-    };
-
     // OBL-1 §4 fail-open structural fix (TD-VSDD-060 sibling-site sweep):
     // this precheck previously duplicated its own ad hoc
     // `matches!(txn.state, Staging | Committing)` check and NEVER
@@ -502,16 +491,63 @@ pub fn bc_index_migration_admission_precheck(
     // dispatch arriving during the drain window (gate flipped to DRAINING/
     // LOCKED but no txn record created yet, e.g. a crash between
     // `write_admission_gate_state(Draining)` and the txn-record write) was
-    // silently admitted. Routes through the SAME
-    // `is_bc_index_admission_open` classification
-    // `admit_or_block_bc_index_writer` itself consults, instead of a
-    // second, independently-maintained live/terminal scan.
+    // silently admitted.
+    //
+    // OBL-1 §5 (O-5 fold-in): when the real Claude Code PreToolUse envelope
+    // carries `tool_use_id` (captured by `HookPayload::extra`'s
+    // `#[serde(flatten)]` catch-all — this dispatcher-native struct does
+    // not promote it to a named field), this precheck now calls
+    // `admit_or_block_bc_index_writer` directly: the SAME
+    // `is_bc_index_admission_open` classification this precheck used to
+    // duplicate ad hoc, PLUS (on admission) creation of the writer
+    // reservation `drain_bc_index_writers` polls for quiescence — closing
+    // the O-5 drain-wiring gap in the same call that fixes the fail-open
+    // gap, one shared call site instead of two independently-maintained
+    // checks.
+    //
+    // A payload with no `tool_use_id` (a malformed/non-conforming
+    // envelope, or a fixture/shape that predates this field) falls back to
+    // a check-only admission decision: no reservation is created, so this
+    // write proceeds untracked by the drain procedure. This is a
+    // deliberate non-blocking degradation, not a silently fabricated key —
+    // per the O-5 assessment's own conclusion, an untracked writer is
+    // "ACCEPTABLE-AS-IS for data integrity... no corruption path" because
+    // Postcondition 3a's TOCTOU fingerprint recheck independently
+    // backstops content integrity regardless of whether this specific
+    // writer was tracked by the drain procedure.
+    if let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) {
+        return match crate::shard_manager::admit_or_block_bc_index_writer(
+            &migration_state_dir,
+            tool_use_id,
+        ) {
+            Ok(()) => None,
+            Err(crate::shard_manager::BcIndexMigrationError::WriterAdmissionRefused {
+                reason,
+            }) => Some(vsdd_hook_sdk::HookResult::Block {
+                reason: format!("BC-1.18.011 E-MAINTENANCE-001: {reason}"),
+            }),
+            Err(e) => Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!("BC-1.18.011: writer-admission check failed: {e}"),
+            }),
+        };
+    }
+
     let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
         Ok(state) => state,
         Err(e) => {
             return Some(vsdd_hook_sdk::HookResult::Error {
                 message: format!(
                     "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
+                ),
+            });
+        }
+    };
+    let active_txn = match crate::shard_manager::read_active_txn_record(&migration_state_dir) {
+        Ok(txn) => txn,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the active BC-INDEX migration txn record: {e}"
                 ),
             });
         }
@@ -543,6 +579,49 @@ pub fn bc_index_migration_admission_precheck(
         ),
     };
     Some(vsdd_hook_sdk::HookResult::Block { reason })
+}
+
+/// OBL-1 §5 (O-5 fold-in) — PostToolUse counterpart to
+/// [`bc_index_migration_admission_precheck`]: releases the writer
+/// reservation the SAME `tool_use_id`'s PreToolUse admission created (if
+/// any), so [`crate::shard_manager::drain_bc_index_writers`]'s quiescence
+/// poll sees this dispatch as complete.
+///
+/// Fire-and-forget, best-effort, NEVER produces a `HookResult` — a
+/// missing `tool_use_id`, a missing `.factory/migration-state/`
+/// directory, or a release I/O failure must never affect the tool
+/// dispatch's own already-completed outcome. The reservation is
+/// drain-procedure bookkeeping, not a correctness gate (mirrors
+/// [`crate::shard_manager::release_bc_index_writer_reservation`]'s own doc
+/// comment: "a missing file... is a no-op, not an error").
+pub fn bc_index_migration_reservation_release(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) {
+    if EventType::from_event_str(&payload.event_name) != EventType::PostToolUse {
+        return;
+    }
+    if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
+        return;
+    }
+    let migration_state_dir = cwd.join(".factory/migration-state");
+    if !migration_state_dir.exists() {
+        return;
+    }
+    let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if let Err(e) =
+        crate::shard_manager::release_bc_index_writer_reservation(&migration_state_dir, tool_use_id)
+    {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            error = %e,
+            "bc_index_migration_reservation_release: best-effort writer-reservation release \
+             failed (non-fatal) -- the reservation, if it still exists, will be reclaimed by \
+             drain_bc_index_writers's own TTL GC pass instead"
+        );
+    }
 }
 
 /// BC-1.18.011 Architect Ruling 1 (D-1232-OBL, S-25.02 cluster-5 T-11): the
