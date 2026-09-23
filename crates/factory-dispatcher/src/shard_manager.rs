@@ -14057,6 +14057,67 @@ pub fn resume_from_staging(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Second-level sub-shard chunk-boundary algorithm (ADR-051 §Decision 18;
+// BC-1.18.011 Postcondition 6; BC-1.18.010 Postcondition 4; VP-142).
+// RED-Gate stub surface only (BC-5.38.001) — cluster-5 spec-closure burst
+// D-1237. `chunk_subsystem_rows_into_sub_shards`'s body is `todo!()`
+// pending implementer's T-11 follow-on; the signature and `SubShardChunk`
+// shape are pinned by the architect's §Decision 18 item 4 design.
+// ---------------------------------------------------------------------------
+
+/// One completed chunk of a subsystem's second-level sub-split (ADR-051
+/// §Decision 18 item 4). Produced by
+/// [`chunk_subsystem_rows_into_sub_shards`]: `body` is the sub-shard's
+/// full, independently-openable, self-contained markdown content (the
+/// preamble replicated verbatim, followed by this chunk's packed rows,
+/// newline-joined) — exactly the bytes a caller stages to
+/// `shards/BC-INDEX-SS-NN<sub_shard_id>.md`. `range_start`/`range_end` are
+/// the first/last row's [`BcId`] in this chunk (canonical order), used to
+/// populate a [`SubShardRangeEntry`] in the sub-manifest.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubShardChunk {
+    /// e.g. `".a"`, `".b"`, ... `".z"`, then `".aa"`, `".ab"`, ...
+    /// (base-26 spreadsheet-column-style letter-exhaustion extension past
+    /// 26 chunks — ADR-051 §Decision 18 edge-case table).
+    pub sub_shard_id: String,
+    pub body: String,
+    pub range_start: BcId,
+    pub range_end: BcId,
+}
+
+/// **STUB SURFACE (BC-5.38.001): body is `todo!()`, pending implementer's
+/// T-11 follow-on.** Signature and behavior pinned by ADR-051 §Decision 18
+/// item 4 (cross-referenced by BC-1.18.011 Postcondition 6 and BC-1.18.010
+/// Postcondition 4): a PURE function of `(sorted_rows, preamble,
+/// shard_cap_bytes)` — canonical-BC-ID-sorted (via the already-canonical
+/// order [`extract_and_sort_bc_rows`] produces; this function does not
+/// itself re-sort), greedy-pack-until-cap, single left-to-right pass.
+/// `preamble`'s byte cost (`preamble.len()`) is counted as the starting
+/// `current_bytes` for every new chunk — an empty sub-shard is never
+/// "free." A row (`row_bytes = row.1.len() + 1` for the row-separating
+/// newline) closes the current non-empty chunk and starts a new one
+/// exactly when `current_bytes + row_bytes > shard_cap_bytes` (`<=`
+/// inclusive stays in the current chunk, matching BC-1.18.005
+/// Postcondition 3's `projected_size <= shard_cap_bytes -> Continue`
+/// convention). A single row that alone (with only the preamble) exceeds
+/// `shard_cap_bytes` is emitted as its own over-cap lone chunk — never
+/// split mid-row, never fail-loud (a non-blocking `tracing::warn!` is
+/// logged). `sub_shard_id` extends past 26 chunks via a base-26
+/// spreadsheet-column-style scheme (`.a`..`.z`, `.aa`..`.az`, `.ba`...) —
+/// never fail-loud on letter exhaustion. See ADR-051 §Decision 18's
+/// edge-case table for the full ruling set.
+pub fn chunk_subsystem_rows_into_sub_shards(
+    _sorted_rows: &[(BcId, String)],
+    _preamble: &str,
+    _shard_cap_bytes: u64,
+) -> Vec<SubShardChunk> {
+    todo!(
+        "BC-1.18.011 Postcondition 6 / ADR-051 §Decision 18 item 4 — implementer T-11 follow-on \
+         (cluster-5 spec-closure burst D-1237)"
+    )
+}
+
 /// The top-level governed-migration entry point (BC-1.18.011; invoked via
 /// the `migrate-bc-index` CLI subcommand — see [`run_migrate_bc_index_cli`]
 /// in this module and ADR-052 §Decision 3's closed argument grammar).
