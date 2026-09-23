@@ -14341,23 +14341,59 @@ pub fn stage_new_generation(
 /// parent directory. After this call returns `Ok(())` there is no turning
 /// back — forward recovery, never rollback, governs everything past this
 /// point (BC-1.18.011 Invariant 3).
+///
+/// OBL-1 FINDING 1 fix: previously this function wrote directly to
+/// `CURRENT.json` via `Fs::write_temp` — `Fs::pointer_swap` (defined and
+/// doc'd as "the sole commit-point") was never called, a dead seam neither
+/// Kani's commit-predicate assertions nor this suite's fault-injection
+/// could exercise. This now performs the THREE distinct steps this
+/// function's own doc comment already promised: (1) `Fs::write_temp` the
+/// new pointer content durably to a SEPARATE `CURRENT.tmp.json` path —
+/// this does not touch `CURRENT.json` itself, so a crash here leaves the
+/// prior `CURRENT.json` (or its absence) completely untouched; (2)
+/// `Fs::pointer_swap` — the actual atomic rename of the durable tmp
+/// pointer onto `CURRENT.json`, and the ONLY call in the whole migration
+/// that is both a rename AND the semantic commit event, now routed
+/// through the distinctly-named, fault-injectable `Fs` method instead of
+/// being buried inside `write_temp`'s opaque bundled primitive; (3)
+/// `Fs::fsync_dir` on the parent directory — the durability barrier for
+/// the rename's directory-entry change itself (`Fs::rename`/
+/// `Fs::pointer_swap`'s own doc comment: "NOT durable until the parent
+/// dir is fsynced"), mirroring the barrier `execute_canonical_path_moves`
+/// already performs after each of its own canonical-path renames
+/// (D-1232-OBL-2(a)). A crash between (2) and (3) leaves `CURRENT.json`
+/// already physically pointing at the new generation while the txn
+/// record still reads STAGING — `recover()`'s `ResumeFromStaging` arm
+/// handles this safely (§0.3: TXN-RECORD state is primary; it re-derives
+/// forward progress from durable ground truth rather than needing to
+/// re-read `CURRENT.json`'s own content) and this function's own
+/// idempotent re-invocation on resume converges (steps (1)/(2) both
+/// tolerate being repeated with the same content).
 pub fn commit_current_generation_pointer(
     fs: &impl Fs,
     _migration_state_dir: &Path,
     _pointer: &CurrentGenerationPointer,
 ) -> Result<(), BcIndexMigrationError> {
-    let path = _migration_state_dir.join("CURRENT.json");
+    let target = _migration_state_dir.join("CURRENT.json");
+    let tmp = _migration_state_dir.join("CURRENT.tmp.json");
     let json = serde_json::to_string_pretty(_pointer).map_err(|e| {
         BcIndexMigrationError::BinaryIntegrityFailure {
             message: format!("failed to serialize CURRENT.json pointer: {e}"),
         }
     })?;
-    // `Fs::write_temp` already performs the FULL bundled
-    // write+fsync+rename+dirsync sequence in production (see the
-    // `migration_fs` module doc's production-granularity note) — this call
-    // is the sole commit-point's actual rename onto `CURRENT.json`, exactly
-    // as `migration_durable_write` performed it before this seam existed.
-    fs.write_temp(&path, json.as_bytes())
+    // Step 1: durably stage the new pointer content at a path distinct
+    // from `CURRENT.json` -- `Fs::write_temp` performs the FULL bundled
+    // write+fsync+rename+dirsync sequence onto THIS tmp path only (see the
+    // `migration_fs` module doc's production-granularity note); it never
+    // touches `CURRENT.json`.
+    fs.write_temp(&tmp, json.as_bytes())?;
+    // Step 2 (the sole commit-point): atomic rename of the now-durable tmp
+    // pointer onto `CURRENT.json`, via the dedicated `Fs::pointer_swap`
+    // seam (not the general `Fs::rename`) so Kani/fault-injection harnesses
+    // can assert the commit predicate fires on exactly this call.
+    fs.pointer_swap(&tmp, &target)?;
+    // Step 3: durability barrier for the rename's directory-entry change.
+    fs.fsync_dir(_migration_state_dir)
 }
 
 /// OBL-1 WAL-ordering fix (research finding #4; ADR-052 §Decision 7b
