@@ -63,27 +63,28 @@
 //! rest of this crate's `sha2`-based hashing convention — flagging as an
 //! inferred, not confirmed, convention.
 //!
-//! Also: the current `main.rs` wiring (lines ~438-461 at commit `adbc795a`)
-//! computes `shard_cap_precheck` UNCONDITIONALLY, before computing
-//! `bc_index_migration_admission_precheck`, and only gives the migration
-//! verdict precedence in the OUTCOME via `.or(...)` — `main.rs`'s own doc
-//! comment there says this composition is "this stub's own reasonable
-//! default, not a spec-derived guarantee." This VIOLATES Ruling 1
-//! (`shard_cap_precheck` must be structurally SKIPPED, not merely
-//! outcome-discarded) as written today. `main::run` is private to the
-//! `factory-dispatcher` BINARY crate and unreachable from this integration
-//! test file (which links only the LIBRARY crate), so this file cannot
-//! directly assert against the real `main.rs` wiring bug — it instead
-//! encodes the CORRECT composition directly (see the gate-precedence tests
-//! below) and flags the `main.rs` ordering defect here for the implementer
-//! to fix as part of T-11 (restructure so `bc_index_migration_admission_precheck`
-//! is computed first and `shard_cap_precheck` is computed only in its
-//! `None` branch).
+//! **RESOLVED (F-C5-P1-006, S-25.02 cluster-5 fix-burst T-11 follow-up):**
+//! the `main.rs`-wiring ordering defect flagged in this paragraph's earlier
+//! revision has been fixed by extracting the precedence decision into
+//! `executor::resolve_shard_gate_precedence(migration_verdict, shard_cap)`
+//! — a pure, lib-testable helper (`shard_cap` is a lazy `FnOnce` closure
+//! specifically so "never invoked at all," not merely "outcome discarded,"
+//! is directly observable by a test). `main::run`'s `shard_gate_precheck_result`
+//! call site now delegates to this helper with an unchanged effective
+//! outcome. The gate-precedence tests immediately below (against the real
+//! precheck functions, filesystem side effects) remain load-bearing
+//! integration coverage; the `resolve_shard_gate_precedence_*` tests further
+//! below are the regression lock against the pure helper itself, closing
+//! F-C5-P1-006 (the helper was previously inlined at the binary-crate call
+//! site and unreachable from any integration test).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use factory_dispatcher::executor::{bc_index_migration_admission_precheck, shard_cap_precheck};
+use factory_dispatcher::executor::{
+    bc_index_migration_admission_precheck, resolve_shard_gate_precedence, shard_cap_precheck,
+};
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::shard_manager::{
     BcId, BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationOutcome,
@@ -1152,6 +1153,150 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_prec
         std::fs::read(&target).unwrap(),
         canonical_snapshot_before,
         "no roll/truncation side effect may occur while a txn record is COMMITTING either"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-C5-P1-006 (process-gap) regression lock — `resolve_shard_gate_precedence`
+// ---------------------------------------------------------------------------
+//
+// The two filesystem-level `RULING1` tests immediately above exercise
+// Ruling 1 end-to-end against the real `bc_index_migration_admission_precheck`
+// / `shard_cap_precheck` functions and a real on-disk canonical file. They
+// are valuable integration coverage, but they do NOT — and structurally
+// cannot — pin the precedence *contract* itself: their `match` block
+// hand-composes `bc_index_migration_admission_precheck` before
+// `shard_cap_precheck` inline, so a future regression that reintroduces the
+// pass-1-era `main.rs` defect (both prechecks computed eagerly, precedence
+// applied only via `.or(...)` on the two already-computed `Option`s) would
+// leave these two tests green — they never call the shared
+// `resolve_shard_gate_precedence` helper `main::run` actually delegates to.
+//
+// These tests close that gap directly: they call
+// `executor::resolve_shard_gate_precedence` itself and use a call-counter
+// closure to prove the `shard_cap` argument is STRUCTURALLY never invoked
+// (not merely "invoked but its result discarded") whenever the migration
+// verdict is `Some(_)`. This is the load-bearing guarantee `execute_roll`'s
+// destructive seal-and-truncate safety depends on.
+
+#[test]
+fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_block_shard_cap_never_invoked()
+ {
+    let migration_verdict = Some(HookResult::Block {
+        reason: "BC-1.18.011 E-MAINTENANCE-001: migration in flight".to_string(),
+    });
+
+    let shard_cap_call_count = AtomicUsize::new(0);
+    let result = resolve_shard_gate_precedence(migration_verdict, || {
+        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
+        // Deliberately a DIFFERENT verdict than the migration one, so a
+        // passing assertion on the returned value below can only be
+        // explained by the migration verdict winning, not by the closure's
+        // return value happening to coincide with it.
+        Some(HookResult::Block {
+            reason: "shard-cap: this must never be observed".to_string(),
+        })
+    });
+
+    assert_eq!(
+        shard_cap_call_count.load(Ordering::SeqCst),
+        0,
+        "Ruling 1: the shard_cap closure must be STRUCTURALLY SKIPPED — never invoked at all — \
+         when the migration verdict is Some(_). A nonzero count here is exactly the pass-1-era \
+         defect (both prechecks computed eagerly, precedence applied only via `.or(...)` after \
+         the destructive shard_cap_precheck/execute_roll path had already run) reintroduced."
+    );
+    match result {
+        Some(HookResult::Block { reason }) => {
+            assert_eq!(
+                reason, "BC-1.18.011 E-MAINTENANCE-001: migration in flight",
+                "the migration verdict must win unconditionally and be returned verbatim, not \
+                 the shard_cap closure's verdict"
+            );
+        }
+        other => {
+            panic!("expected the migration Block verdict to be returned verbatim, got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_error_variant_also_short_circuits()
+ {
+    // Ruling 1's "wins unconditionally" guarantee is on `Some(_)` generally,
+    // not merely the `Block` variant — pin an `Error` verdict too, since a
+    // future refactor narrowing the short-circuit to `matches!(_, Block)`
+    // would silently let a fired migration `Error` fall through to the
+    // destructive shard_cap path.
+    let migration_verdict = Some(HookResult::Error {
+        message: "BC-1.18.011: failed to read the active BC-INDEX migration txn record".to_string(),
+    });
+
+    let shard_cap_call_count = AtomicUsize::new(0);
+    let result = resolve_shard_gate_precedence(migration_verdict, || {
+        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
+        None
+    });
+
+    assert_eq!(
+        shard_cap_call_count.load(Ordering::SeqCst),
+        0,
+        "an Error-variant migration verdict must short-circuit shard_cap exactly like a Block \
+         verdict does — `Some(_)` wins unconditionally regardless of which HookResult variant it \
+         carries"
+    );
+    assert!(
+        matches!(result, Some(HookResult::Error { .. })),
+        "the migration Error verdict must be returned verbatim, got {result:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_none_invokes_shard_cap_once_returns_some()
+ {
+    let shard_cap_call_count = AtomicUsize::new(0);
+    let result = resolve_shard_gate_precedence(None, || {
+        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
+        Some(HookResult::Block {
+            reason: "shard-cap: genuinely over cap".to_string(),
+        })
+    });
+
+    assert_eq!(
+        shard_cap_call_count.load(Ordering::SeqCst),
+        1,
+        "when no migration is in flight (migration_verdict = None), the shard_cap closure must \
+         be invoked exactly once — never skipped, never invoked more than once"
+    );
+    match result {
+        Some(HookResult::Block { reason }) => {
+            assert_eq!(reason, "shard-cap: genuinely over cap");
+        }
+        other => panic!(
+            "expected the shard_cap closure's verdict to be returned verbatim, got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_none_invokes_shard_cap_once_returns_none()
+ {
+    let shard_cap_call_count = AtomicUsize::new(0);
+    let result = resolve_shard_gate_precedence(None, || {
+        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
+        None
+    });
+
+    assert_eq!(
+        shard_cap_call_count.load(Ordering::SeqCst),
+        1,
+        "the shard_cap closure must still be invoked exactly once even when it has nothing to \
+         report (the common case — no migration in flight AND the dispatch is under cap)"
+    );
+    assert!(
+        result.is_none(),
+        "with no migration verdict and a non-firing shard_cap check, the overall precedence \
+         result must be None (allow the dispatch to proceed), got {result:?}"
     );
 }
 
