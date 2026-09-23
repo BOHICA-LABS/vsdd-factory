@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-23T14:13:00Z","command":"cargo test --workspace --all-targets 2>&1 | grep -E \"test result|FAILED|^error\""}
+{"status":"pass","timestamp":"2026-09-23T14:39:09Z","command":"cargo test -p factory-dispatcher --all-targets 2>&1 | grep -E \"FAILED|test result:|error\\[|error:|^running\" | tail -20\necho \"---fmt check---\"\ncargo fmt --check --all 2>&1 | tail -20"}
