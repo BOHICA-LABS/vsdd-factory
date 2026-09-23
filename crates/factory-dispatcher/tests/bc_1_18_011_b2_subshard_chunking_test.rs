@@ -1,26 +1,28 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 //! BC-1.18.011 v1.9 Postcondition 6 / BC-1.18.010 v1.10 Postcondition 4 /
-//! ADR-051 §Decision 18 RED-Gate coverage for the B2 second-level sub-shard
-//! chunk-boundary algorithm (`chunk_subsystem_rows_into_sub_shards`) and its
-//! integration into `run_bc_index_migration` (SS-05/SS-06-class over-cap
-//! subsystems must actually be sub-split, with a sub-manifest produced,
-//! within the SAME one-time migration operation).
+//! ADR-051 §Decision 18 regression coverage for the B2 second-level
+//! sub-shard chunk-boundary algorithm (`chunk_subsystem_rows_into_sub_shards`)
+//! and its integration into `run_bc_index_migration` (SS-05/SS-06-class
+//! over-cap subsystems must actually be sub-split, with a sub-manifest
+//! produced, within the SAME one-time migration operation).
 //!
-//! # BC-5.38.001 Red Gate discipline — RED
+//! # BC-5.38.001 Red Gate discipline — GREEN (T-11 implemented)
 //!
-//! `chunk_subsystem_rows_into_sub_shards` is `todo!()` as of this burst
-//! (D-1237 spec-closure; stub added alongside this test file since no prior
-//! burst declared this symbol). Every unit test (PC6_UNIT_*) below panics
-//! against that stub today. The two integration tests (PC6_INTEGRATION_*)
-//! exercise `run_bc_index_migration`, which today performs ONLY the
-//! first-level split (hardcodes `sub_sharded: false, sub_manifest: None`
-//! for every subsystem, never calls the chunker) — they fail today on
-//! assertion (missing sub-shard files / manifest), not on `todo!()` panic.
-//! Each test asserts the REAL post-implementation expected outcome per
-//! ADR-051 §Decision 18 and the cited BC postconditions, so the same
-//! assertions are correct unchanged once T-11 implements both the chunker
-//! and its `run_bc_index_migration` call site.
+//! `chunk_subsystem_rows_into_sub_shards` was `todo!()` at RED-Gate
+//! authorship time (D-1237 spec-closure; stub added alongside this test file
+//! since no prior burst declared this symbol) — every unit test
+//! (PC6_UNIT_*) below panicked against that stub, and the two integration
+//! tests (PC6_INTEGRATION_*), which exercise `run_bc_index_migration`,
+//! failed on assertion (missing sub-shard files / manifest) because that
+//! function performed ONLY the first-level split (hardcoded
+//! `sub_sharded: false, sub_manifest: None` for every subsystem, never
+//! calling the chunker). T-11 implemented both the chunker and its
+//! `run_bc_index_migration` call site (`sub_sharded: true` wiring for
+//! genuinely over-cap subsystems); every assertion below is unchanged from
+//! RED-Gate authorship and is now GREEN — this file now serves as the
+//! regression guard for that implementation per ADR-051 §Decision 18 and the
+//! cited BC postconditions.
 //!
 //! VP classification: VP-142 (proptest; chunk-boundary determinism and
 //! correctness, hosted on BC-1.18.011 Postcondition 6, cross-referenced from
@@ -521,8 +523,8 @@ fn test_BC_1_18_011_PC6_run_bc_index_migration_produces_sub_shard_files_and_mani
     assert!(
         ss05_entry.sub_sharded,
         "SS-05 genuinely exceeds shard_cap_bytes in this fixture — the top-level manifest entry \
-         must have sub_sharded=true (today this is hardcoded false — the literal defect this \
-         test's Red-Gate failure targets)"
+         must have sub_sharded=true (T-11 wires this from the previously-hardcoded false; this \
+         assertion is now the GREEN regression guard for that fix)"
     );
     let sub_manifest_rel = ss05_entry
         .sub_manifest
