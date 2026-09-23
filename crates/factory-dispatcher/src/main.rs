@@ -39,7 +39,7 @@ use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
     ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck, execute_tiers,
-    shard_cap_precheck, spawn_async_plugin,
+    resolve_shard_gate_precedence, shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -461,10 +461,10 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // for them (its own real, non-stub existence/scope guards), so
     // `shard_cap_precheck` continues to run normally on exactly the same
     // inputs as before this restructure.
-    let shard_gate_precheck_result = match migration_gate_precheck_result {
-        Some(verdict) => Some(verdict),
-        None => shard_cap_precheck(&payload, &project_cwd),
-    };
+    let shard_gate_precheck_result =
+        resolve_shard_gate_precedence(migration_gate_precheck_result, || {
+            shard_cap_precheck(&payload, &project_cwd)
+        });
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
     // a fired shard-cap-gate verdict (`Some(_)`) must still reach

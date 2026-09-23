@@ -515,6 +515,37 @@ pub fn bc_index_migration_admission_precheck(
     None
 }
 
+/// BC-1.18.011 Architect Ruling 1 (D-1232-OBL, S-25.02 cluster-5 T-11): the
+/// native-gate PRECEDENCE decision between the migration-admission gate and
+/// the shard-cap gate, extracted as a pure, lib-testable helper (F-C5-P1-006
+/// — this function was previously inlined at `main.rs`'s
+/// `shard_gate_precheck_result` call site, unreachable from any integration
+/// test since it lives in the binary crate).
+///
+/// A fired migration-admission verdict (`migration_verdict = Some(_)`) wins
+/// unconditionally: `shard_cap` is STRUCTURALLY SKIPPED — never invoked at
+/// all, not merely evaluated and then discarded — because `shard_cap`'s
+/// fired branch reaches `shard_manager::execute_roll`, a DESTRUCTIVE seal-
+/// and-truncate-to-0 operation that must never run once a BC-INDEX-path
+/// write is already blocked by a STAGING/COMMITTING migration txn. This is
+/// why `shard_cap` is a lazy closure (`FnOnce`) rather than an
+/// eagerly-computed `Option` parameter: the "never invoked" guarantee is
+/// then something a caller (or a test, via a closure that records whether
+/// it ran) can observe directly, not merely infer from the returned value.
+///
+/// `main::run`'s `shard_gate_precheck_result` call site delegates to this
+/// function with an unchanged effective outcome — this extraction is wiring
+/// only, no behavior change.
+pub fn resolve_shard_gate_precedence(
+    migration_verdict: Option<vsdd_hook_sdk::HookResult>,
+    shard_cap: impl FnOnce() -> Option<vsdd_hook_sdk::HookResult>,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    match migration_verdict {
+        Some(verdict) => Some(verdict),
+        None => shard_cap(),
+    }
+}
+
 /// Synthesize a blocking [`PluginOutcome`] for the native shard-cap gate's
 /// own fail-loud verdict (F-C1-P2-001, S-25.02 Phase F4 LOCAL adversary
 /// pass-2 cluster-1, MEDIUM).
