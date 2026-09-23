@@ -28,6 +28,21 @@ path = "src/lib.rs"
 # DI-019 v1.6 preserved: release.yml builds factory-dispatcher WITHOUT this feature
 # so shipped artifacts always use ASYNC_DRAIN_WINDOW_MS = 100 ms.
 test-support = []
+# OBL-1 (D-1232-OBL-1): enables `fail`'s `fail_point!` macro at the B2
+# migration's `Fs`-trait boundaries (`shard_manager::migration_fs::StdFs`)
+# for the test-writer's crash-injection integration suite. OFF by default:
+# `fail = { optional = true }` below means the dependency is not even
+# compiled into a normal build, and `fail_point!` compiles to nothing
+# (`fail::fail_point!` requires BOTH the crate's own `failpoints` cargo
+# feature AND this workspace feature to have any effect) unless a caller
+# builds with `--features factory-dispatcher/failpoints` AND runtime-enables
+# the specific named failpoint via `fail::cfg(...)`/`FailScenario`.
+# `fail/failpoints` (the `fail` crate's OWN feature, distinct from this
+# crate's `failpoints` feature of the same name) is what actually flips
+# `fail_point!` from a compiled-out no-op to a live check — required in
+# addition to `dep:fail`, per the `fail` crate's own documented wiring
+# pattern.
+failpoints = ["dep:fail", "fail/failpoints"]
 
 [dependencies]
 serde.workspace = true
@@ -99,6 +114,10 @@ sink-file = { path = "../sink-file", version = "0.0.1" }
 sink-honeycomb = { path = "../sink-honeycomb", version = "0.0.1" }
 sink-http = { path = "../sink-http", version = "0.0.1" }
 sink-otel-grpc = { path = "../sink-otel-grpc", version = "0.0.1" }
+# OBL-1: optional, `failpoints`-feature-gated fault-injection points in
+# `shard_manager::migration_fs::StdFs` — see the `failpoints` feature
+# comment above and the workspace `fail` dependency comment.
+fail = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

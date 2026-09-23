@@ -122,6 +122,13 @@ use thiserror::Error;
 
 use vsdd_hook_sdk::HookResult;
 
+/// OBL-1 (D-1232-OBL-1): the `Fs` trait seam for the B2 migration's
+/// crash-recovery logic (Kani model-checking + fault-injection testability)
+/// — see `migration_fs`'s own module doc comment for the trait surface,
+/// the production-granularity note, and this burst's call-graph wiring
+/// status.
+pub mod migration_fs;
+
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
 // Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
