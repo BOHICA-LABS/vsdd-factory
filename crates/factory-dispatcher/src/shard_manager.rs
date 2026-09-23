@@ -14452,10 +14452,15 @@ fn split_original_body_into_subsystems(body: &str) -> Vec<(String, String)> {
     let mut sections: Vec<(String, String)> = Vec::new();
     let mut current_ss_id: Option<String> = None;
     let mut current_lines: Vec<&str> = Vec::new();
+    // O-4: fenced-code-block state guard -- see [`is_fence_delimiter_line`].
+    let mut in_fence = false;
 
     for line in body.lines() {
         let trimmed = line.trim_start();
-        if let Some(candidate) = parse_ss_heading_line(trimmed) {
+        if is_fence_delimiter_line(trimmed) {
+            in_fence = !in_fence;
+        }
+        if !in_fence && let Some(candidate) = parse_ss_heading_line(trimmed) {
             if let Some(ss_id) = current_ss_id.take() {
                 sections.push((ss_id, current_lines.join("\n")));
             }
@@ -14473,13 +14478,32 @@ fn split_original_body_into_subsystems(body: &str) -> Vec<(String, String)> {
     sections
 }
 
+/// O-4 defensive hardening: detects a fenced-code-block delimiter line
+/// (a line whose trimmed content starts with an ` ``` ` marker). Shared by
+/// [`split_original_body_into_subsystems`] and [`extract_bc_index_preamble`]
+/// (both track an `in_fence` toggle around their own `### SS-NN` heading
+/// checks) so a `### SS-NN`-shaped line that happens to appear INSIDE a
+/// fenced code block (e.g. a documentation example quoting the heading
+/// syntax) is never mistaken for a real section boundary. The real
+/// `BC-INDEX.md` carries no fenced code blocks today, so this guard is
+/// currently a no-op in production, but both callers must agree on fence
+/// state the same way `parse_ss_heading_line` requires them to agree on
+/// heading detection, so this toggle lives beside it rather than being
+/// inlined separately in each caller.
+fn is_fence_delimiter_line(trimmed: &str) -> bool {
+    trimmed.starts_with("```")
+}
+
 /// Detects whether `trimmed` (a line with leading whitespace already
 /// stripped) is a `### SS-NN` subsystem-heading boundary line, returning the
 /// `SS-NN` token when it is. Shared by [`split_original_body_into_subsystems`]
 /// and [`extract_bc_index_preamble`] so the two functions can never drift on
 /// what counts as the section-boundary — both must agree on exactly where
 /// the original document's preamble ends and the first per-subsystem
-/// section begins (BC-1.18.010 Postcondition 1 / F-C5-P1-001).
+/// section begins (BC-1.18.010 Postcondition 1 / F-C5-P1-001). Callers are
+/// responsible for gating this check on fence state themselves (see
+/// [`is_fence_delimiter_line`]) — this function is a pure per-line
+/// classifier with no cross-line state of its own.
 fn parse_ss_heading_line(trimmed: &str) -> Option<&str> {
     let rest = trimmed.strip_prefix("### ")?;
     let candidate = rest.split_whitespace().next().unwrap_or("");
@@ -14500,9 +14524,14 @@ fn parse_ss_heading_line(trimmed: &str) -> Option<&str> {
 /// preamble.
 fn extract_bc_index_preamble(original_content: &str) -> String {
     let mut preamble_lines: Vec<&str> = Vec::new();
+    // O-4: fenced-code-block state guard -- see [`is_fence_delimiter_line`].
+    let mut in_fence = false;
     for line in original_content.lines() {
         let trimmed = line.trim_start();
-        if parse_ss_heading_line(trimmed).is_some() {
+        if is_fence_delimiter_line(trimmed) {
+            in_fence = !in_fence;
+        }
+        if !in_fence && parse_ss_heading_line(trimmed).is_some() {
             break;
         }
         preamble_lines.push(line);
@@ -14795,7 +14824,16 @@ pub fn run_bc_index_migration(
     let shards_canonical_root = _cwd.join(".factory/specs/behavioral-contracts/shards");
 
     for (ss_id, section_body) in &sections {
-        let rows = extract_and_sort_bc_rows(section_body).unwrap_or_default();
+        // O-2: fail loud on a genuine parse error rather than silently
+        // defaulting to an empty row set, which would make an over-cap /
+        // `bc_prefix` decision on phantom-empty data instead of halting.
+        // `extract_and_sort_bc_rows` is Ok-only today (malformed rows are
+        // individually skipped, never surfaced as Err), but this call site
+        // must not assume that invariant forever -- a future parser
+        // change that legitimately returns Err here must halt the
+        // migration, not silently proceed as if the section had zero BC
+        // rows.
+        let rows = extract_and_sort_bc_rows(section_body)?;
         let bc_prefix = rows
             .first()
             .map(|(id, _)| format!("BC-{}", id.subsystem_major))
