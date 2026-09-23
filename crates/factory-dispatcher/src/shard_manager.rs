@@ -128,6 +128,7 @@ use vsdd_hook_sdk::HookResult;
 /// the production-granularity note, and this burst's call-graph wiring
 /// status.
 pub mod migration_fs;
+use migration_fs::{Fs, StdFs};
 
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
@@ -13593,8 +13594,16 @@ fn classify_txn_records(
 /// while one is in flight) -- finding more than one is a genuine integrity
 /// violation, surfaced fail-loud rather than silently picking one.
 pub fn read_active_txn_record(
+    fs: &impl Fs,
     _migration_state_dir: &Path,
 ) -> Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
+    // Directory-listing enumeration deliberately stays a thin,
+    // production-only `std::fs::read_dir` scan, NOT part of the `Fs` seam
+    // (OBL-1 design §1.2's own exclusion: "no generic directory-listing op
+    // beyond what exists/read need" — enumerating a glob is not itself a
+    // crash-recovery decision input, only the per-candidate CONTENT reads
+    // below are). This function gathers a `Vec<PathBuf>` and calls
+    // `Fs::read` per candidate, exactly as the design directs.
     let entries = match std::fs::read_dir(_migration_state_dir) {
         Ok(entries) => entries,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -13624,11 +13633,17 @@ pub fn read_active_txn_record(
 
     let mut records: Vec<BcIndexMigrationTxnRecord> = Vec::new();
     for path in &txn_paths {
-        let content =
-            std::fs::read_to_string(path).map_err(|source| BcIndexMigrationError::Io {
-                path: path.clone(),
-                source,
-            })?;
+        let bytes = fs.read(path)?.ok_or_else(|| BcIndexMigrationError::Io {
+            path: path.clone(),
+            source: io::Error::new(
+                io::ErrorKind::NotFound,
+                "txn record disappeared between directory listing and read",
+            ),
+        })?;
+        let content = String::from_utf8(bytes).map_err(|e| BcIndexMigrationError::Io {
+            path: path.clone(),
+            source: io::Error::new(io::ErrorKind::InvalidData, e),
+        })?;
         let record: BcIndexMigrationTxnRecord = serde_json::from_str(&content).map_err(|e| {
             BcIndexMigrationError::BinaryIntegrityFailure {
                 message: format!("malformed txn record at {}: {e}", path.display()),
@@ -13676,9 +13691,15 @@ fn archive_terminal_txn_record(migration_state_dir: &Path, activation_id: &str) 
     }
 }
 
-/// Atomically write (temp-file-then-rename, reusing
-/// `last_amended_migrate::atomic_write::write_atomic`) the txn record.
+/// Atomically write (temp-file-then-rename) the txn record. Threaded onto
+/// `Fs::write_temp` + `Fs::fsync_file` (OBL-1 seam) — see the `migration_fs`
+/// module doc comment's "Call-graph wiring status" section for why this
+/// deliberately STRENGTHENS the txn record's durability barrier from
+/// `last_amended_migrate::atomic_write::write_atomic` to the same STRICT
+/// `F_FULLFSYNC`-class primitive `CURRENT.json`/the intent log/
+/// `completed.json` already use, rather than leaving it on the weaker one.
 pub fn write_txn_record(
+    fs: &impl Fs,
     _migration_state_dir: &Path,
     _record: &BcIndexMigrationTxnRecord,
 ) -> Result<(), BcIndexMigrationError> {
@@ -13688,12 +13709,8 @@ pub fn write_txn_record(
             message: format!("failed to serialize txn record: {e}"),
         }
     })?;
-    last_amended_migrate::atomic_write::write_atomic(&path, &json).map_err(|e| {
-        BcIndexMigrationError::Io {
-            path: path.clone(),
-            source: migrate_err_to_io(e),
-        }
-    })
+    fs.write_temp(&path, json.as_bytes())?;
+    fs.fsync_file(&path)
 }
 
 /// The native admission-gate check the OPEN/DRAINING gate performs: is a
@@ -13771,8 +13788,14 @@ pub fn admit_or_block_bc_index_writer(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
+    // Production entry point (called from `executor.rs`'s PreToolUse
+    // admission precheck) — constructs its own `StdFs` rather than taking
+    // an `&impl Fs` parameter, so this function's public signature (and its
+    // `executor.rs`/test call sites) stays unchanged while its internal
+    // `read_active_txn_record` call is still routed through the OBL-1 seam.
+    let fs = StdFs;
     let gate_state = read_admission_gate_state(_migration_state_dir)?;
-    let active_txn = read_active_txn_record(_migration_state_dir)?;
+    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
     if !is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
         let detail = match &active_txn {
             Some(txn) => format!(
@@ -13839,6 +13862,13 @@ pub fn release_bc_index_writer_reservation(
 pub fn reconcile_stale_admission_gate(
     _migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
+    // No production or test caller exists today (see this function's own
+    // "never called from anywhere in the real dispatch path" doc note in
+    // `executor.rs::bc_index_migration_admission_precheck`) — constructs
+    // its own `StdFs` rather than taking an `&impl Fs` parameter, matching
+    // `admit_or_block_bc_index_writer`'s pattern, so a future wiring burst
+    // can call this with its existing 1-arg signature unchanged.
+    let fs = StdFs;
     let lock_path = _migration_state_dir.join("exclusive.lock");
     if !lock_path.exists() {
         std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
@@ -13855,7 +13885,7 @@ pub fn reconcile_stale_admission_gate(
         return Ok(current_state);
     };
 
-    let active_txn = read_active_txn_record(_migration_state_dir)?;
+    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
     let reconciled = match &active_txn {
         // Branch A: no active txn record at all -- the gate can only be
         // stuck due to a crash between "flip DRAINING/LOCKED" and
@@ -13872,7 +13902,7 @@ pub fn reconcile_stale_admission_gate(
             aborted.state = BcIndexMigrationTxnState::Aborted;
             aborted.updated_at =
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            write_txn_record(_migration_state_dir, &aborted)?;
+            write_txn_record(&fs, _migration_state_dir, &aborted)?;
             BcIndexAdmissionGateState::Open
         }
         // Branch C (F-C5-P2-003 follow-on): a STAGING txn WITH a
@@ -13893,7 +13923,7 @@ pub fn reconcile_stale_admission_gate(
                 Ok(()) => current_state,
                 Err(_) => {
                     let mut txn = txn.clone();
-                    discard_incomplete_staging(_migration_state_dir, &mut txn)?;
+                    discard_incomplete_staging(&fs, _migration_state_dir, &mut txn)?;
                     BcIndexAdmissionGateState::Open
                 }
             }
@@ -14018,6 +14048,7 @@ fn intent_log_checksum_input(record: &IntentLogRecord) -> String {
 }
 
 pub fn append_intent_log_record(
+    fs: &impl Fs,
     _intent_log_path: &Path,
     _record: &IntentLogRecord,
 ) -> Result<(), BcIndexMigrationError> {
@@ -14054,26 +14085,12 @@ pub fn append_intent_log_record(
     block.push_str(&format!("record_checksum={checksum}\n"));
     block.push_str(INTENT_LOG_RECORD_END);
 
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(_intent_log_path)
-        .map_err(|source| BcIndexMigrationError::Io {
-            path: _intent_log_path.to_path_buf(),
-            source,
-        })?;
-    file.write_all(block.as_bytes())
-        .map_err(|source| BcIndexMigrationError::Io {
-            path: _intent_log_path.to_path_buf(),
-            source,
-        })?;
-    // WAL boundary (ADR-052 §Decision 7b step 2/5): fsync before returning
-    // — the corresponding canonical-path rename is recoverable only after
-    // this call durably lands.
-    file.sync_all().map_err(|source| BcIndexMigrationError::Io {
-        path: _intent_log_path.to_path_buf(),
-        source,
-    })
+    // OBL-1 Fs-seam: `Fs::append` bundles the WAL boundary's
+    // open(append)+write+fsync sequence into one call (see its own doc
+    // comment) — routing through here makes `migration_fs::append`
+    // reachable as its own fault-injection boundary, distinct from
+    // `migration_fs::write_temp`.
+    fs.append(_intent_log_path, block.as_bytes())
 }
 
 fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
@@ -14128,18 +14145,16 @@ fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
 /// treated as absent, never as a partial INTENT or DONE (ADR-052 §Decision
 /// 7b).
 pub fn read_intent_log(
+    fs: &impl Fs,
     _intent_log_path: &Path,
 ) -> Result<Vec<IntentLogRecord>, BcIndexMigrationError> {
-    let content = match std::fs::read_to_string(_intent_log_path) {
-        Ok(content) => content,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(BcIndexMigrationError::Io {
-                path: _intent_log_path.to_path_buf(),
-                source,
-            });
-        }
+    let Some(bytes) = fs.read(_intent_log_path)? else {
+        return Ok(Vec::new());
     };
+    let content = String::from_utf8(bytes).map_err(|e| BcIndexMigrationError::Io {
+        path: _intent_log_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::InvalidData, e),
+    })?;
 
     let mut records = Vec::new();
     for raw_block in content.split(INTENT_LOG_RECORD_START).skip(1) {
@@ -14280,14 +14295,22 @@ fn sync_dir_durable(dir: &Path) -> Result<(), BcIndexMigrationError> {
 /// `generation_id` to the txn record ONLY AFTER the generation directory
 /// itself is durable (v1.13 LOW-1 ordering invariant — load-bearing for
 /// the corruption-detection check at resume time).
-pub fn stage_new_generation(_migration_state_dir: &Path) -> Result<String, BcIndexMigrationError> {
+pub fn stage_new_generation(
+    fs: &impl Fs,
+    _migration_state_dir: &Path,
+) -> Result<String, BcIndexMigrationError> {
     let generation_id = uuid::Uuid::new_v4().to_string();
     let gen_dir = _migration_state_dir.join(format!("gen-{generation_id}"));
+    // `mkdir` itself deliberately stays direct `std::fs` (OBL-1 design's
+    // "keep abstract domains tiny" — see the `migration_fs` module doc's
+    // "Call-graph wiring status" section): idempotent, not itself a
+    // crash-recovery decision input. Only the directory-entry durability
+    // barrier below is safety-critical, and that IS seamed.
     std::fs::create_dir_all(&gen_dir).map_err(|source| BcIndexMigrationError::Io {
         path: gen_dir.clone(),
         source,
     })?;
-    sync_dir_durable(_migration_state_dir)?;
+    fs.fsync_dir(_migration_state_dir)?;
     Ok(generation_id)
 }
 
@@ -14298,6 +14321,7 @@ pub fn stage_new_generation(_migration_state_dir: &Path) -> Result<String, BcInd
 /// back — forward recovery, never rollback, governs everything past this
 /// point (BC-1.18.011 Invariant 3).
 pub fn commit_current_generation_pointer(
+    fs: &impl Fs,
     _migration_state_dir: &Path,
     _pointer: &CurrentGenerationPointer,
 ) -> Result<(), BcIndexMigrationError> {
@@ -14307,7 +14331,12 @@ pub fn commit_current_generation_pointer(
             message: format!("failed to serialize CURRENT.json pointer: {e}"),
         }
     })?;
-    migration_durable_write(&path, json.as_bytes())
+    // `Fs::write_temp` already performs the FULL bundled
+    // write+fsync+rename+dirsync sequence in production (see the
+    // `migration_fs` module doc's production-granularity note) — this call
+    // is the sole commit-point's actual rename onto `CURRENT.json`, exactly
+    // as `migration_durable_write` performed it before this seam existed.
+    fs.write_temp(&path, json.as_bytes())
 }
 
 /// OBL-1 WAL-ordering fix (research finding #4; ADR-052 §Decision 7b
@@ -14346,6 +14375,7 @@ pub fn commit_current_generation_pointer(
 /// calls (the staging file is immutable until the rename step; the
 /// canonical target is untouched until then too).
 fn append_intent_records_for_pending_moves(
+    fs: &impl Fs,
     intent_log_path: &Path,
     txn_id: &str,
     fencing_generation: u64,
@@ -14355,23 +14385,18 @@ fn append_intent_records_for_pending_moves(
         let staging = PathBuf::from(&mv.staging_path);
         let canonical = PathBuf::from(&mv.canonical_path);
 
-        let staging_bytes =
-            std::fs::read(&staging).map_err(|source| BcIndexMigrationError::Io {
+        let staging_bytes = fs
+            .read(&staging)?
+            .ok_or_else(|| BcIndexMigrationError::Io {
                 path: staging.clone(),
-                source,
+                source: io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "staged file missing while computing its intent-log expected_post_hash",
+                ),
             })?;
         let expected_post_hash = sha256_hex(&staging_bytes);
 
-        let expected_pre_state = match std::fs::read(&canonical) {
-            Ok(bytes) => Some(sha256_hex(&bytes)),
-            Err(source) if source.kind() == io::ErrorKind::NotFound => None,
-            Err(source) => {
-                return Err(BcIndexMigrationError::Io {
-                    path: canonical.clone(),
-                    source,
-                });
-            }
-        };
+        let expected_pre_state = fs.read(&canonical)?.map(|bytes| sha256_hex(&bytes));
 
         let record = IntentLogRecord {
             txn_id: txn_id.to_string(),
@@ -14389,7 +14414,7 @@ fn append_intent_records_for_pending_moves(
             // below already uses (`record_checksum: String::new()`).
             record_checksum: String::new(),
         };
-        append_intent_log_record(intent_log_path, &record)?;
+        append_intent_log_record(fs, intent_log_path, &record)?;
     }
     Ok(())
 }
@@ -14418,10 +14443,11 @@ fn append_intent_records_for_pending_moves(
 /// "no matching record" arm below is retained for defense-in-depth (e.g. a
 /// legacy/corrupted intent log) but is no longer the common case.
 pub fn execute_canonical_path_moves(
+    fs: &impl Fs,
     _pending: &[PendingCanonicalMove],
     _intent_log_path: &Path,
 ) -> Result<u64, BcIndexMigrationError> {
-    let existing_intent_records = read_intent_log(_intent_log_path)?;
+    let existing_intent_records = read_intent_log(fs, _intent_log_path)?;
     let mut completed_count: u64 = 0;
     for mv in _pending {
         let staging = PathBuf::from(&mv.staging_path);
@@ -14436,8 +14462,8 @@ pub fn execute_canonical_path_moves(
             .rev()
             .find(|r| r.target_canonical == canonical)
         {
-            let canonical_hash = std::fs::read(&canonical).ok().map(|b| sha256_hex(&b));
-            let staging_hash = std::fs::read(&staging).ok().map(|b| sha256_hex(&b));
+            let canonical_hash = fs.read(&canonical).ok().flatten().map(|b| sha256_hex(&b));
+            let staging_hash = fs.read(&staging).ok().flatten().map(|b| sha256_hex(&b));
             match decide_intent_log_recovery(
                 canonical_hash.as_deref(),
                 staging_hash.as_deref(),
@@ -14480,7 +14506,7 @@ pub fn execute_canonical_path_moves(
             break;
         }
 
-        match std::fs::rename(&staging, &canonical) {
+        match fs.rename(&staging, &canonical) {
             Ok(()) => {}
             Err(source) => {
                 tracing::warn!(
@@ -14504,7 +14530,7 @@ pub fn execute_canonical_path_moves(
         // `decide_intent_log_recovery` rather than this call trusting an
         // unconfirmed rename.
         if let Some(parent) = canonical.parent()
-            && let Err(e) = sync_dir_durable(parent)
+            && let Err(e) = fs.fsync_dir(parent)
         {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
@@ -14528,8 +14554,18 @@ pub fn execute_canonical_path_moves(
         // durably completed, so `finish_committing_migration`'s
         // `completed_count < pending.len()` check surfaces a named
         // `BinaryIntegrityFailure` forward-recovery error to the caller.
-        let post_hash = match std::fs::read(&canonical) {
-            Ok(bytes) => sha256_hex(&bytes),
+        let post_hash = match fs.read(&canonical) {
+            Ok(Some(bytes)) => sha256_hex(&bytes),
+            Ok(None) => {
+                tracing::warn!(
+                    target: "bc_1_18_011_migration",
+                    canonical = %canonical.display(),
+                    "execute_canonical_path_moves: post-rename verification read of the \
+                     canonical file found it missing; halting further renames (forward recovery \
+                     resumes from here, never a silently-empty expected_post_hash)"
+                );
+                break;
+            }
             Err(source) => {
                 tracing::warn!(
                     target: "bc_1_18_011_migration",
@@ -14561,7 +14597,7 @@ pub fn execute_canonical_path_moves(
         // inconsistency with no principled justification: neither arm has
         // positive durable evidence of completion to hand the next
         // invocation).
-        if let Err(e) = append_intent_log_record(_intent_log_path, &record) {
+        if let Err(e) = append_intent_log_record(fs, _intent_log_path, &record) {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 error = %e,
@@ -14692,14 +14728,15 @@ pub fn resume_from_staging(
 /// swallowed, since failing to persist the ABORTED transition would
 /// itself leave the gate stuck.
 fn discard_incomplete_staging(
+    fs: &impl Fs,
     migration_state_dir: &Path,
     txn: &mut BcIndexMigrationTxnRecord,
 ) -> Result<(), BcIndexMigrationError> {
     if let Some(generation_id) = &txn.generation_id {
         let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
-        if let Err(source) = std::fs::remove_dir_all(&gen_dir)
-            && source.kind() != io::ErrorKind::NotFound
-        {
+        // `Fs::remove` already treats a missing path as `Ok(())` (its own
+        // doc comment), so no separate NotFound guard is needed here.
+        if let Err(source) = fs.remove(&gen_dir) {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 gen_dir = %gen_dir.display(),
@@ -14712,7 +14749,7 @@ fn discard_incomplete_staging(
     }
     txn.state = BcIndexMigrationTxnState::Aborted;
     txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    write_txn_record(migration_state_dir, txn)
+    write_txn_record(fs, migration_state_dir, txn)
 }
 
 // ---------------------------------------------------------------------------
@@ -15061,13 +15098,14 @@ fn extract_subsystem_section_preamble(section_body: &str) -> String {
 /// resume paths below (Postcondition 5 idempotency — resuming never
 /// re-runs the split itself, only the remaining publication steps).
 fn finish_committing_migration(
+    fs: &impl Fs,
     migration_state_dir: &Path,
     txn: &mut BcIndexMigrationTxnRecord,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     let generation_id = txn.generation_id.clone().unwrap_or_default();
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
     let completed_count =
-        execute_canonical_path_moves(&txn.pending_canonical_moves, &intent_log_path)?;
+        execute_canonical_path_moves(fs, &txn.pending_canonical_moves, &intent_log_path)?;
 
     if (completed_count as usize) < txn.pending_canonical_moves.len() {
         // Not every move completed — forward recovery (never rollback,
@@ -15092,7 +15130,7 @@ fn finish_committing_migration(
     write_completed_record(migration_state_dir, &record)?;
     txn.state = BcIndexMigrationTxnState::Completed;
     txn.updated_at = record.completed_at.clone();
-    let _ = write_txn_record(migration_state_dir, txn);
+    let _ = write_txn_record(fs, migration_state_dir, txn);
 
     // OBL-1 §5 (O-5 fold-in): once COMPLETED, the writer-admission gate
     // MUST return to OPEN — otherwise whichever caller flipped it to
@@ -15126,11 +15164,22 @@ fn finish_committing_migration(
 pub fn run_bc_index_migration(
     _cwd: &Path,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    // OBL-1 Fs seam: constructed once here and threaded through every
+    // migration-state-mutating/reading call this function makes (and every
+    // helper it calls) — production entry point, so the real
+    // `migration_fs::*` failpoints are reachable end-to-end from this call.
+    // `run_bc_index_migration`'s own PUBLIC signature stays `(_cwd: &Path)`
+    // unchanged (no `Fs` parameter) — callers (the `migrate-bc-index` CLI
+    // entry point, and every existing test) are unaffected; `StdFs` is
+    // injected at the top of this call graph rather than threaded through
+    // the public API, matching the OBL-1 design's own "production call
+    // sites pass &StdFs" framing.
+    let fs = StdFs;
     let migration_state_dir = _cwd.join(".factory/migration-state");
 
     // Branch 2 (EC-006/EC-061): completed.json is the permanent terminal
     // record — its mere presence is sufficient, no other file consulted.
-    if migration_state_dir.join("completed.json").exists() {
+    if fs.exists(&migration_state_dir.join("completed.json")) {
         return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
     }
 
@@ -15154,7 +15203,7 @@ pub fn run_bc_index_migration(
     })?;
 
     // Resume path: a prior attempt left a durable txn record.
-    if let Some(mut txn) = read_active_txn_record(&migration_state_dir)? {
+    if let Some(mut txn) = read_active_txn_record(&fs, &migration_state_dir)? {
         match txn.state {
             BcIndexMigrationTxnState::Staging => {
                 if let Err(e) = resume_from_staging(&txn, &migration_state_dir) {
@@ -15172,7 +15221,7 @@ pub fn run_bc_index_migration(
                     // uses for its other abort-path txn-record writes
                     // below, so the ORIGINAL resume failure `e` is always
                     // what's surfaced to the caller.
-                    let _ = discard_incomplete_staging(&migration_state_dir, &mut txn);
+                    let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
                     return Err(e);
                 }
                 let generation_id = txn.generation_id.clone().ok_or_else(|| {
@@ -15191,6 +15240,7 @@ pub fn run_bc_index_migration(
                 let resume_intent_log_path =
                     migration_state_dir.join(format!("intent-{generation_id}.log"));
                 append_intent_records_for_pending_moves(
+                    &fs,
                     &resume_intent_log_path,
                     &txn.txn_id,
                     txn.fencing_generation,
@@ -15209,13 +15259,13 @@ pub fn run_bc_index_migration(
                     status: "committing".to_string(),
                     txn_id: txn.txn_id.clone(),
                 };
-                commit_current_generation_pointer(&migration_state_dir, &pointer)?;
+                commit_current_generation_pointer(&fs, &migration_state_dir, &pointer)?;
                 txn.state = BcIndexMigrationTxnState::Committing;
-                write_txn_record(&migration_state_dir, &txn)?;
-                return finish_committing_migration(&migration_state_dir, &mut txn);
+                write_txn_record(&fs, &migration_state_dir, &txn)?;
+                return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
             }
             BcIndexMigrationTxnState::Committing => {
-                return finish_committing_migration(&migration_state_dir, &mut txn);
+                return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
             }
             BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
                 // Fall through to a fresh run below. F-C5-P2-001 follow-on:
@@ -15284,11 +15334,11 @@ pub fn run_bc_index_migration(
         created_at: now.clone(),
         updated_at: now,
     };
-    write_txn_record(&migration_state_dir, &txn)?;
+    write_txn_record(&fs, &migration_state_dir, &txn)?;
 
-    let generation_id = stage_new_generation(&migration_state_dir)?;
+    let generation_id = stage_new_generation(&fs, &migration_state_dir)?;
     txn.generation_id = Some(generation_id.clone());
-    write_txn_record(&migration_state_dir, &txn)?;
+    write_txn_record(&fs, &migration_state_dir, &txn)?;
 
     let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
     let shards_dir = gen_dir.join("shards");
@@ -15345,7 +15395,7 @@ pub fn run_bc_index_migration(
                 let sub_staging_path = shards_dir.join(&sub_filename);
                 // D-1232-OBL-2(a): staging publish of each sub-shard body —
                 // F_FULLFSYNC(temp) -> rename -> F_FULLFSYNC(dir), STRICT.
-                migration_durable_write(&sub_staging_path, chunk.body.as_bytes())?;
+                fs.write_temp(&sub_staging_path, chunk.body.as_bytes())?;
                 staged_bodies.push(chunk.body.clone());
                 let sub_canonical_path = shards_canonical_root.join(&sub_filename);
                 pending_moves.push(PendingCanonicalMove {
@@ -15373,7 +15423,7 @@ pub fn run_bc_index_migration(
             let sub_manifest_filename = format!("BC-INDEX-{ss_id}.manifest.toml");
             let sub_manifest_staging_path = shards_dir.join(&sub_manifest_filename);
             // D-1232-OBL-2(a): staging publish of the sub-shard manifest.
-            migration_durable_write(&sub_manifest_staging_path, sub_manifest_toml.as_bytes())?;
+            fs.write_temp(&sub_manifest_staging_path, sub_manifest_toml.as_bytes())?;
             let sub_manifest_canonical_path = shards_canonical_root.join(&sub_manifest_filename);
             pending_moves.push(PendingCanonicalMove {
                 staging_path: sub_manifest_staging_path.to_string_lossy().into_owned(),
@@ -15399,7 +15449,7 @@ pub fn run_bc_index_migration(
             );
             let stub_staging_path = shards_dir.join(&stub_filename);
             // D-1232-OBL-2(a): staging publish of the sub-sharded stub-pointer file.
-            migration_durable_write(&stub_staging_path, stub_body.as_bytes())?;
+            fs.write_temp(&stub_staging_path, stub_body.as_bytes())?;
             let stub_canonical_path = shards_canonical_root.join(&stub_filename);
             pending_moves.push(PendingCanonicalMove {
                 staging_path: stub_staging_path.to_string_lossy().into_owned(),
@@ -15420,7 +15470,7 @@ pub fn run_bc_index_migration(
         let staging_path = shards_dir.join(&shard_filename);
         // D-1232-OBL-2(a): the staging publish of each per-subsystem shard
         // body — F_FULLFSYNC(temp) -> rename -> F_FULLFSYNC(dir), STRICT.
-        migration_durable_write(&staging_path, section_body.as_bytes())?;
+        fs.write_temp(&staging_path, section_body.as_bytes())?;
         staged_bodies.push(section_body.clone());
         let canonical_path = shards_canonical_root.join(&shard_filename);
         pending_moves.push(PendingCanonicalMove {
@@ -15447,7 +15497,7 @@ pub fn run_bc_index_migration(
     })?;
     let top_manifest_staging_path = shards_dir.join("BC-INDEX.shard-manifest.toml");
     // D-1232-OBL-2(a): staging publish of the top-level shard manifest.
-    migration_durable_write(&top_manifest_staging_path, top_manifest_toml.as_bytes())?;
+    fs.write_temp(&top_manifest_staging_path, top_manifest_toml.as_bytes())?;
     pending_moves.push(PendingCanonicalMove {
         staging_path: top_manifest_staging_path.to_string_lossy().into_owned(),
         canonical_path: shards_canonical_root
@@ -15479,7 +15529,7 @@ pub fn run_bc_index_migration(
         .push_str("## Subsystem Shard Manifest\n\nSee `shards/BC-INDEX.shard-manifest.toml`.\n");
     let staged_bc_index_staging_path = gen_dir.join("BC-INDEX.md");
     // D-1232-OBL-2(a): staging publish of the lean staged BC-INDEX.md body.
-    migration_durable_write(
+    fs.write_temp(
         &staged_bc_index_staging_path,
         staged_bc_index_body.as_bytes(),
     )?;
@@ -15496,10 +15546,10 @@ pub fn run_bc_index_migration(
     let abort_staging = |migration_state_dir: &Path,
                          gen_dir: &Path,
                          txn: &mut BcIndexMigrationTxnRecord| {
-        let _ = std::fs::remove_dir_all(gen_dir);
+        let _ = fs.remove(gen_dir);
         txn.state = BcIndexMigrationTxnState::Aborted;
         txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = write_txn_record(migration_state_dir, txn);
+        let _ = write_txn_record(&fs, migration_state_dir, txn);
         // OBL-1 §5 (O-5 fold-in): every abort path resets the
         // writer-admission gate to OPEN — best-effort, mirroring the
         // established `let _ =` convention this closure already uses
@@ -15528,6 +15578,7 @@ pub fn run_bc_index_migration(
     // content-preservation/census gates immediately above.
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
     if let Err(e) = append_intent_records_for_pending_moves(
+        &fs,
         &intent_log_path,
         &txn.txn_id,
         txn.fencing_generation,
@@ -15545,14 +15596,14 @@ pub fn run_bc_index_migration(
     ) {
         txn.state = BcIndexMigrationTxnState::Aborted;
         txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = write_txn_record(&migration_state_dir, &txn);
+        let _ = write_txn_record(&fs, &migration_state_dir, &txn);
         // OBL-1 §5 (O-5 fold-in): fingerprint-abort resets gate→OPEN.
         let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
 
     txn.pending_canonical_moves = pending_moves;
-    write_txn_record(&migration_state_dir, &txn)?;
+    write_txn_record(&fs, &migration_state_dir, &txn)?;
 
     // The sole commit-point — after this call returns Ok(()), there is no
     // turning back (Invariant 3): forward recovery, never rollback.
@@ -15561,11 +15612,11 @@ pub fn run_bc_index_migration(
         status: "committing".to_string(),
         txn_id: txn.txn_id.clone(),
     };
-    commit_current_generation_pointer(&migration_state_dir, &pointer)?;
+    commit_current_generation_pointer(&fs, &migration_state_dir, &pointer)?;
     txn.state = BcIndexMigrationTxnState::Committing;
-    write_txn_record(&migration_state_dir, &txn)?;
+    write_txn_record(&fs, &migration_state_dir, &txn)?;
 
-    finish_committing_migration(&migration_state_dir, &mut txn)
+    finish_committing_migration(&fs, &migration_state_dir, &mut txn)
 }
 
 /// Maps a [`run_bc_index_migration`] result to the OS process exit code

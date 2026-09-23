@@ -569,7 +569,10 @@ pub fn bc_index_migration_admission_precheck(
         };
     }
 
-    let active_txn = match crate::shard_manager::read_active_txn_record(&migration_state_dir) {
+    let active_txn = match crate::shard_manager::read_active_txn_record(
+        &crate::shard_manager::migration_fs::StdFs,
+        &migration_state_dir,
+    ) {
         Ok(txn) => txn,
         Err(e) => {
             return Some(vsdd_hook_sdk::HookResult::Error {
