@@ -13249,6 +13249,20 @@ pub fn try_acquire_migration_lock(
 
 /// Read the durable txn record, if one exists, from
 /// `.factory/migration-state/txn-*.json`.
+///
+/// F-C5-P2-001: a stale terminal (COMPLETED/ABORTED) record can
+/// legitimately coexist on disk with a live (STAGING/COMMITTING) one -- a
+/// completed/aborted migration's `txn-<uuid>.json` is never deleted, and a
+/// fresh attempt writes its OWN NEW `txn-<new-uuid>.json` rather than
+/// overwriting the old one. Precondition 6(b)'s writer-exclusion guarantee
+/// ("regardless of whether the flock is currently held") depends on the
+/// admission gate always observing the LIVE txn when one exists, so this
+/// function selects deliberately among every `txn-*.json` file present
+/// rather than returning whichever one `std::fs::read_dir` happens to
+/// enumerate first. At most one LIVE record may exist at a time (the
+/// admission gate itself is what prevents a second migration from starting
+/// while one is in flight) -- finding more than one is a genuine integrity
+/// violation, surfaced fail-loud rather than silently picking one.
 pub fn read_active_txn_record(
     _migration_state_dir: &Path,
 ) -> Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
@@ -13262,6 +13276,8 @@ pub fn read_active_txn_record(
             });
         }
     };
+
+    let mut txn_paths: Vec<PathBuf> = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| BcIndexMigrationError::Io {
             path: _migration_state_dir.to_path_buf(),
@@ -13270,22 +13286,72 @@ pub fn read_active_txn_record(
         let file_name = entry.file_name();
         let name = file_name.to_string_lossy();
         if name.starts_with("txn-") && name.ends_with(".json") {
-            let content = std::fs::read_to_string(entry.path()).map_err(|source| {
-                BcIndexMigrationError::Io {
-                    path: entry.path(),
-                    source,
-                }
-            })?;
-            let record: BcIndexMigrationTxnRecord =
-                serde_json::from_str(&content).map_err(|e| {
-                    BcIndexMigrationError::BinaryIntegrityFailure {
-                        message: format!("malformed txn record at {}: {e}", entry.path().display()),
-                    }
-                })?;
-            return Ok(Some(record));
+            txn_paths.push(entry.path());
         }
     }
-    Ok(None)
+    // Deterministic tie-breaking among terminal records (when no live
+    // record exists) regardless of filesystem enumeration order.
+    txn_paths.sort();
+
+    let mut live: Vec<BcIndexMigrationTxnRecord> = Vec::new();
+    let mut terminal: Vec<BcIndexMigrationTxnRecord> = Vec::new();
+    for path in &txn_paths {
+        let content =
+            std::fs::read_to_string(path).map_err(|source| BcIndexMigrationError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        let record: BcIndexMigrationTxnRecord = serde_json::from_str(&content).map_err(|e| {
+            BcIndexMigrationError::BinaryIntegrityFailure {
+                message: format!("malformed txn record at {}: {e}", path.display()),
+            }
+        })?;
+        match record.state {
+            BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing => {
+                live.push(record);
+            }
+            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
+                terminal.push(record);
+            }
+        }
+    }
+
+    match live.len() {
+        0 => Ok(terminal.into_iter().next()),
+        1 => Ok(live.into_iter().next()),
+        n => Err(BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "found {n} coexisting LIVE (STAGING/COMMITTING) txn records in {} -- \
+                 Precondition 6(b)'s writer-exclusion invariant requires at most one active \
+                 migration in flight at a time",
+                _migration_state_dir.display()
+            ),
+        }),
+    }
+}
+
+/// Best-effort housekeeping: rename a stale terminal (COMPLETED/ABORTED)
+/// txn record out of the `txn-*.json` glob [`read_active_txn_record`]
+/// scans, so repeated migration attempts don't accumulate an unbounded
+/// number of terminal records for every future scan to read. The record is
+/// renamed, never deleted (audit trail retained), and a failure to archive
+/// is non-fatal -- it simply means this record is scanned (and correctly
+/// skipped, since it is never the LIVE selection) again next time.
+fn archive_terminal_txn_record(migration_state_dir: &Path, activation_id: &str) {
+    let path = migration_state_dir.join(format!("txn-{activation_id}.json"));
+    let archived_path = migration_state_dir.join(format!("txn-{activation_id}.json.archived"));
+    if let Err(source) = std::fs::rename(&path, &archived_path)
+        && source.kind() != io::ErrorKind::NotFound
+    {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            path = %path.display(),
+            error = %source,
+            "archive_terminal_txn_record: best-effort archive of a stale terminal txn record \
+             failed (non-fatal); it remains in the txn-*.json glob and will be re-scanned (and \
+             correctly skipped as non-live) on the next read_active_txn_record call"
+        );
+    }
 }
 
 /// Atomically write (temp-file-then-rename, reusing
@@ -13482,10 +13548,37 @@ pub fn reconcile_stale_admission_gate(
             write_txn_record(_migration_state_dir, &aborted)?;
             BcIndexAdmissionGateState::Open
         }
-        // Every other active-txn shape (STAGING with a generation_id
-        // already assigned, or COMMITTING) represents genuine in-flight
-        // migration work this reconciliation pass must NOT abandon --
-        // leave the gate's current state untouched.
+        // Branch C (F-C5-P2-003 follow-on): a STAGING txn WITH a
+        // generation_id assigned might still be a crash-truncated partial
+        // staging pass (EC-002) or a complete-but-corrupted one (EC-060) --
+        // since this function only reaches here after itself acquiring the
+        // exclusive migration lock (no live coordinator currently holds
+        // it), re-run the SAME mandatory resume-time census/PC1 check
+        // `run_bc_index_migration`'s own STAGING-resume branch consults
+        // ([`resume_from_staging`] is a pure read-and-verify, no
+        // canonical-path mutation) and reclaim via
+        // [`discard_incomplete_staging`] exactly like that branch does on
+        // failure. A genuinely still-valid staged generation
+        // (`resume_from_staging` succeeds) is left untouched -- it may yet
+        // be resumed to completion by a future migration invocation.
+        Some(txn) if txn.state == BcIndexMigrationTxnState::Staging => {
+            match resume_from_staging(txn, _migration_state_dir) {
+                Ok(()) => current_state,
+                Err(_) => {
+                    let mut txn = txn.clone();
+                    discard_incomplete_staging(_migration_state_dir, &mut txn)?;
+                    BcIndexAdmissionGateState::Open
+                }
+            }
+        }
+        // Every other active-txn shape (COMMITTING) represents genuine
+        // in-flight migration work: executing the real canonical-path
+        // renames is a materially heavier, more consequential action than
+        // this lighter-touch probe should trigger incidentally from an
+        // ordinary PreToolUse dispatch -- that recovery belongs to the
+        // explicit `migrate-bc-index` CLI entry point
+        // ([`run_bc_index_migration`]'s own COMMITTING-resume branch), not
+        // here. Leave the gate's current state untouched.
         Some(_) => current_state,
     };
     write_admission_gate_state(_migration_state_dir, reconciled)?;
@@ -13884,14 +13977,68 @@ pub fn commit_current_generation_pointer(
 /// this function MUST NOT abort the whole operation: it records the
 /// failure, halts further renames, and leaves the migration in a state
 /// [`decide_intent_log_recovery`]-driven forward recovery can resume from.
+///
+/// F-C5-P2-002: a resumed invocation must not blindly retry every pending
+/// move from index 0 -- a move the intent log already recorded as DONE in
+/// a prior (crashed) invocation has its own staging file already consumed
+/// (renamed away), so re-attempting it would halt on that now-expected
+/// ENOENT and never reach any genuinely still-pending move after it. This
+/// function reads the intent log ONCE up front and, for each pending move
+/// that already has a matching record, consults
+/// [`decide_intent_log_recovery`] against the target's CURRENT on-disk
+/// state before deciding whether to skip it (`TreatDone`), redo the rename
+/// (`RedoRename`), or halt (`FailClosed`) -- resuming forward from the
+/// first genuinely uncompleted move, per Invariant 3. A move with NO
+/// matching intent-log record (the common, non-resumed case) is attempted
+/// exactly as before.
 pub fn execute_canonical_path_moves(
     _pending: &[PendingCanonicalMove],
     _intent_log_path: &Path,
 ) -> Result<u64, BcIndexMigrationError> {
+    let existing_intent_records = read_intent_log(_intent_log_path)?;
     let mut completed_count: u64 = 0;
     for mv in _pending {
         let staging = PathBuf::from(&mv.staging_path);
         let canonical = PathBuf::from(&mv.canonical_path);
+
+        // F-C5-P2-002 forward-recovery check: the most recent intent-log
+        // record for THIS target, if any, decides whether the move is
+        // already done, must be redone, or is in an ambiguous state that
+        // must halt recovery -- consulted BEFORE attempting the rename.
+        if let Some(record) = existing_intent_records
+            .iter()
+            .rev()
+            .find(|r| r.target_canonical == canonical)
+        {
+            let canonical_hash = std::fs::read(&canonical).ok().map(|b| sha256_hex(&b));
+            let staging_hash = std::fs::read(&staging).ok().map(|b| sha256_hex(&b));
+            match decide_intent_log_recovery(
+                canonical_hash.as_deref(),
+                staging_hash.as_deref(),
+                Some(record),
+            ) {
+                IntentLogRecoveryDecision::TreatDone => {
+                    completed_count += 1;
+                    continue;
+                }
+                IntentLogRecoveryDecision::RedoRename => {
+                    // Fall through to the ordinary rename logic below --
+                    // staging still holds the post-move content and
+                    // canonical still holds the pre-move state, so redoing
+                    // the rename is safe and idempotent.
+                }
+                IntentLogRecoveryDecision::FailClosed { reason } => {
+                    tracing::warn!(
+                        target: "bc_1_18_011_migration",
+                        canonical = %canonical.display(),
+                        reason = %reason,
+                        "execute_canonical_path_moves: forward-recovery decision FAILED CLOSED \
+                         for this target; halting further renames"
+                    );
+                    break;
+                }
+            }
+        }
 
         if let Some(parent) = canonical.parent()
             && !parent.exists()
@@ -13980,14 +14127,21 @@ pub fn execute_canonical_path_moves(
             timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             record_checksum: String::new(),
         };
+        // O-6: reconciled with the dir-sync-failure arm above -- the rename
+        // itself already landed, but with NO durable DONE record for
+        // forward recovery to consult, this move is NOT counted as
+        // completed here either (previously this arm incremented
+        // `completed_count` while the dir-sync-failure arm did not, an
+        // inconsistency with no principled justification: neither arm has
+        // positive durable evidence of completion to hand the next
+        // invocation).
         if let Err(e) = append_intent_log_record(_intent_log_path, &record) {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 error = %e,
                 "execute_canonical_path_moves: failed to append DONE intent-log record after a \
-                 successful rename; halting further renames"
+                 successful rename; halting further renames (forward recovery resumes from here)"
             );
-            completed_count += 1;
             break;
         }
         completed_count += 1;
@@ -14091,6 +14245,48 @@ pub fn resume_from_staging(
     }
 
     Ok(())
+}
+
+/// F-C5-P2-003 (EC-002/EC-003 recovery action): discard a STAGING txn's
+/// generation directory and durably move the txn record to ABORTED. The
+/// shared recovery action for a [`resume_from_staging`] failure, whether
+/// the underlying cause was a crash-truncated partial staging pass
+/// (EC-002) or a complete-but-corrupted one (EC-060 duplicate/dropped
+/// row) -- both are "forward progress from this staged content is unsafe"
+/// verdicts that `resume_from_staging`'s own mandatory census/PC1 re-run
+/// already determined; this function's only job is to make sure that
+/// verdict doesn't leave the writer-admission gate deadlocked. Used by
+/// both [`run_bc_index_migration`]'s own STAGING-resume branch and
+/// [`reconcile_stale_admission_gate`]'s lighter-touch probe, so the two
+/// call sites can never drift on what "discard and restart cleanly" means.
+///
+/// Gen-dir removal is best-effort (an orphaned gen-dir left behind by a
+/// failed removal is inert and harmless -- it is simply never referenced
+/// again once the txn is ABORTED); the txn-record write itself is NOT
+/// swallowed, since failing to persist the ABORTED transition would
+/// itself leave the gate stuck.
+fn discard_incomplete_staging(
+    migration_state_dir: &Path,
+    txn: &mut BcIndexMigrationTxnRecord,
+) -> Result<(), BcIndexMigrationError> {
+    if let Some(generation_id) = &txn.generation_id {
+        let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+        if let Err(source) = std::fs::remove_dir_all(&gen_dir)
+            && source.kind() != io::ErrorKind::NotFound
+        {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                gen_dir = %gen_dir.display(),
+                error = %source,
+                "discard_incomplete_staging: failed to remove the incomplete/corrupted staged \
+                 generation directory (non-fatal -- the txn record still moves to ABORTED so \
+                 the writer-admission gate self-heals; the orphaned gen-dir is inert)"
+            );
+        }
+    }
+    txn.state = BcIndexMigrationTxnState::Aborted;
+    txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    write_txn_record(migration_state_dir, txn)
 }
 
 // ---------------------------------------------------------------------------
@@ -14482,7 +14678,24 @@ pub fn run_bc_index_migration(
     if let Some(mut txn) = read_active_txn_record(&migration_state_dir)? {
         match txn.state {
             BcIndexMigrationTxnState::Staging => {
-                resume_from_staging(&txn, &migration_state_dir)?;
+                if let Err(e) = resume_from_staging(&txn, &migration_state_dir) {
+                    // F-C5-P2-003 (EC-002/EC-003): the staged generation is
+                    // either crash-truncated (EC-002) or complete-but-
+                    // corrupted (EC-060) -- either way, forward progress
+                    // from it is unsafe, and leaving the txn record at
+                    // STAGING would deadlock the writer-admission gate
+                    // forever (every future read_active_txn_record call
+                    // keeps finding this same stuck record). Discard the
+                    // generation and move the txn to ABORTED so the gate
+                    // self-heals and the next invocation restarts cleanly
+                    // (EC-002 "restarts cleanly"); best-effort per the
+                    // established `let _ =` pattern this function already
+                    // uses for its other abort-path txn-record writes
+                    // below, so the ORIGINAL resume failure `e` is always
+                    // what's surfaced to the caller.
+                    let _ = discard_incomplete_staging(&migration_state_dir, &mut txn);
+                    return Err(e);
+                }
                 let generation_id = txn.generation_id.clone().ok_or_else(|| {
                     BcIndexMigrationError::BinaryIntegrityFailure {
                         message: "resumed STAGING txn record has no generation_id".to_string(),
@@ -14510,7 +14723,10 @@ pub fn run_bc_index_migration(
                 return finish_committing_migration(&migration_state_dir, &mut txn);
             }
             BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted => {
-                // Fall through to a fresh run below.
+                // Fall through to a fresh run below. F-C5-P2-001 follow-on:
+                // archive this stale terminal record first so it stops
+                // accumulating in future read_active_txn_record scans.
+                archive_terminal_txn_record(&migration_state_dir, &txn.activation_id);
             }
         }
     }
