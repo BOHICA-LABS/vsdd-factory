@@ -558,11 +558,11 @@ pub fn bc_index_migration_admission_precheck(
             tool_use_id,
         ) {
             Ok(()) => None,
-            Err(crate::shard_manager::BcIndexMigrationError::WriterAdmissionRefused {
-                reason,
-            }) => Some(vsdd_hook_sdk::HookResult::Block {
-                reason: format!("BC-1.18.011 E-MAINTENANCE-001: {reason}"),
-            }),
+            Err(crate::shard_manager::BcIndexMigrationError::WriterAdmissionRefused { reason }) => {
+                Some(vsdd_hook_sdk::HookResult::Block {
+                    reason: format!("BC-1.18.011 E-MAINTENANCE-001: {reason}"),
+                })
+            }
             Err(e) => Some(vsdd_hook_sdk::HookResult::Error {
                 message: format!("BC-1.18.011: writer-admission check failed: {e}"),
             }),

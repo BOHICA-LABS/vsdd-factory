@@ -15107,8 +15107,7 @@ fn finish_committing_migration(
     // migration's own COMPLETED outcome; `reconcile_stale_admission_gate`'s
     // Branch A self-heals a stuck-Locked gate with no live txn on the next
     // admission check regardless.
-    if let Err(e) =
-        write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)
+    if let Err(e) = write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)
     {
         tracing::warn!(
             target: "bc_1_18_011_migration",
@@ -15250,8 +15249,7 @@ pub fn run_bc_index_migration(
         DEFAULT_DRAIN_TIMEOUT,
         DEFAULT_MAX_RESERVATION_TTL,
     ) {
-        let _ =
-            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
+        let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
     write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Locked)?;
@@ -15495,18 +15493,19 @@ pub fn run_bc_index_migration(
     // the staging generation discarded and BC-INDEX.md's original body
     // completely untouched (Postcondition 4) — no rename has occurred at
     // this point.
-    let abort_staging =
-        |migration_state_dir: &Path, gen_dir: &Path, txn: &mut BcIndexMigrationTxnRecord| {
-            let _ = std::fs::remove_dir_all(gen_dir);
-            txn.state = BcIndexMigrationTxnState::Aborted;
-            txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            let _ = write_txn_record(migration_state_dir, txn);
-            // OBL-1 §5 (O-5 fold-in): every abort path resets the
-            // writer-admission gate to OPEN — best-effort, mirroring the
-            // established `let _ =` convention this closure already uses
-            // for its other cleanup writes.
-            let _ = write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open);
-        };
+    let abort_staging = |migration_state_dir: &Path,
+                         gen_dir: &Path,
+                         txn: &mut BcIndexMigrationTxnRecord| {
+        let _ = std::fs::remove_dir_all(gen_dir);
+        txn.state = BcIndexMigrationTxnState::Aborted;
+        txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let _ = write_txn_record(migration_state_dir, txn);
+        // OBL-1 §5 (O-5 fold-in): every abort path resets the
+        // writer-admission gate to OPEN — best-effort, mirroring the
+        // established `let _ =` convention this closure already uses
+        // for its other cleanup writes.
+        let _ = write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open);
+    };
     if let Err(e) = verify_content_preservation(&staged_bodies, &source_body_row_sha256) {
         abort_staging(&migration_state_dir, &gen_dir, &mut txn);
         return Err(e);
@@ -15548,8 +15547,7 @@ pub fn run_bc_index_migration(
         txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let _ = write_txn_record(&migration_state_dir, &txn);
         // OBL-1 §5 (O-5 fold-in): fingerprint-abort resets gate→OPEN.
-        let _ =
-            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
+        let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
 
