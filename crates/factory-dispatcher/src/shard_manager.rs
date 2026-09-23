@@ -14766,6 +14766,119 @@ pub fn resume_from_staging(
     Ok(())
 }
 
+/// OBL-1 FINDING 2 fix: recompute `pending_canonical_moves` from the
+/// staged generation directory's DURABLE ground truth, rather than
+/// trusting `txn.pending_canonical_moves` on a STAGING-resume.
+///
+/// The defect this closes: a crash between the staging writes landing and
+/// `txn.pending_canonical_moves` being persisted to the durable txn record
+/// (the WAL-ordering fix's own pre-swap prologue — see
+/// [`append_intent_records_for_pending_moves`]'s call site in
+/// [`run_bc_index_migration`]) leaves the on-disk txn record's
+/// `pending_canonical_moves` field at its `Vec::new()` default. If
+/// [`RecoveryDecision::ResumeFromStaging`]'s handling trusted that
+/// possibly-stale/empty field directly, [`finish_committing_migration`]
+/// would iterate ZERO moves, write `completed.json` with
+/// `canonical_paths_count: 0`, and report `Ok(Completed)` with NEITHER
+/// shard file ever canonicalized and `BC-INDEX.md` left unsplit — a
+/// silent false-success (recovery must NOT trust a possibly-stale summary
+/// field; it must derive forward-recovery inputs from durable ground
+/// truth, mirroring [`resume_from_staging`]'s own census re-run, which
+/// already re-reads the staged files directly rather than trusting any
+/// cached count).
+///
+/// This function derives the SAME `staging_path -> canonical_path`
+/// mapping [`run_bc_index_migration`]'s fresh-run path constructs (the
+/// "same derivation the fresh-run path uses"), purely from what is
+/// PHYSICALLY staged under `gen-<generation_id>/`:
+/// - every file directly under `gen-<generation_id>/shards/` (subsystem
+///   shard bodies, sub-shard bodies + their manifests, sub-sharded stub
+///   pointers, and the top-level shard manifest — all staged flat, no
+///   nested subdirectories, by `run_bc_index_migration`'s fresh-run loop)
+///   maps 1:1 by filename to `shards_canonical_root/<same filename>`;
+/// - the staged lean `BC-INDEX.md` body directly under
+///   `gen-<generation_id>/` maps to the canonical `BC-INDEX.md` path.
+///
+/// Order is irrelevant for correctness: every downstream consumer
+/// ([`append_intent_records_for_pending_moves`],
+/// [`execute_canonical_path_moves`]) matches intent-log records against a
+/// move's `target_canonical` path, never by list position.
+fn recompute_pending_canonical_moves_from_staged_generation(
+    _cwd: &Path,
+    migration_state_dir: &Path,
+    generation_id: &str,
+) -> Result<Vec<PendingCanonicalMove>, BcIndexMigrationError> {
+    let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+    let shards_dir = gen_dir.join("shards");
+    let shards_canonical_root = _cwd.join(".factory/specs/behavioral-contracts/shards");
+    let canonical_bc_index_path = _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(&shards_dir)
+        .map_err(|source| BcIndexMigrationError::Io {
+            path: shards_dir.clone(),
+            source,
+        })?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file())
+        .collect();
+    entries.sort();
+
+    let mut pending_moves: Vec<PendingCanonicalMove> = Vec::new();
+    for staging_path in &entries {
+        let Some(filename) = staging_path.file_name() else {
+            continue;
+        };
+        let canonical_path = shards_canonical_root.join(filename);
+        pending_moves.push(PendingCanonicalMove {
+            staging_path: staging_path.to_string_lossy().into_owned(),
+            canonical_path: canonical_path.to_string_lossy().into_owned(),
+        });
+    }
+
+    // The staged lean BC-INDEX.md body lives directly under `gen_dir`
+    // (NOT `shards_dir`) and maps to the canonical BC-INDEX.md path --
+    // see `run_bc_index_migration`'s fresh-run construction of
+    // `staged_bc_index_staging_path`. It carries zero BC rows, so
+    // `resume_from_staging`'s own PC2 census re-run (over `shards_dir`
+    // only) has no visibility into it and cannot detect its absence --
+    // this function is therefore the right, and only, place to enforce
+    // its presence as MANDATORY, not optional: `run_bc_index_migration`'s
+    // fresh-run path always writes this file STRICTLY LAST among its
+    // staging writes (after every subsystem/sub-shard/manifest write), so
+    // its absence here means the staged generation is genuinely
+    // partial/truncated (crashed before its LAST staging write landed)
+    // even though every per-subsystem shard body already re-verified fine
+    // against the census. Silently omitting it (treating it as "just
+    // another move that happens not to exist yet") would let this
+    // function return a NON-EMPTY but still-incomplete move list, and the
+    // migration would "complete" with every shard split out but the
+    // canonical BC-INDEX.md itself never replaced -- the exact defect
+    // FINDING 2 exists to close, narrowed rather than eliminated.
+    let staged_bc_index_path = gen_dir.join("BC-INDEX.md");
+    if !staged_bc_index_path.is_file() {
+        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "resume-from-staging recompute (FINDING 2 fix) found gen-{generation_id} \
+                 missing its staged lean BC-INDEX.md body -- the staged generation is \
+                 partial/truncated (crashed before its LAST staging write landed); forward \
+                 progress from it is unsafe even though {} other staged file(s) already \
+                 re-verified fine",
+                pending_moves.len()
+            ),
+        });
+    }
+    pending_moves.push(PendingCanonicalMove {
+        staging_path: staged_bc_index_path.to_string_lossy().into_owned(),
+        canonical_path: canonical_bc_index_path.to_string_lossy().into_owned(),
+    });
+    // `pending_moves` is guaranteed non-empty at this point (the staged
+    // BC-INDEX.md body above was just unconditionally pushed, or this
+    // function already returned `Err` if it was missing) -- no separate
+    // empty-check needed.
+
+    Ok(pending_moves)
+}
+
 /// F-C5-P2-003 (EC-002/EC-003 recovery action): discard a STAGING txn's
 /// generation directory and durably move the txn record to ABORTED. The
 /// shared recovery action for a [`resume_from_staging`] failure, whether
@@ -15460,6 +15573,45 @@ pub fn run_bc_index_migration(
                 let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
                 return Err(e);
             }
+            // OBL-1 FINDING 2 fix: `txn.pending_canonical_moves` as read
+            // from disk here may be stale/empty -- a crash between the
+            // staging writes landing and that field's own durable
+            // persistence (the fresh-run path's pre-swap prologue) leaves
+            // it at `Vec::new()`. Recompute it from the staged
+            // generation's durable ground truth (the SAME derivation the
+            // fresh-run path itself uses) rather than trusting the
+            // possibly-stale field, and persist the recomputed value
+            // BEFORE the intent-log append/fingerprint-recheck/pointer-
+            // swap sequence below, so every subsequent read of this txn
+            // record (including a further crash-and-resume) sees the
+            // correct, non-empty move set.
+            //
+            // `resume_from_staging`'s own PC2 census re-run above has no
+            // visibility into the staged BC-INDEX.md body's presence (it
+            // carries zero BC rows), so it can spuriously succeed on a
+            // staged generation this recompute step then correctly
+            // rejects as incomplete. Handle that failure identically to a
+            // `resume_from_staging` failure -- discard the incomplete
+            // staging and move the txn to ABORTED, so the gate self-heals
+            // and the NEXT invocation restarts cleanly, rather than
+            // letting the error propagate raw and leave the txn stuck at
+            // STAGING forever (every future call would hit this exact
+            // same ResumeFromStaging arm and fail the exact same way --
+            // a permanent deadlock, not forward progress).
+            let recomputed_pending_moves =
+                match recompute_pending_canonical_moves_from_staged_generation(
+                    _cwd,
+                    &migration_state_dir,
+                    &generation_id,
+                ) {
+                    Ok(moves) => moves,
+                    Err(e) => {
+                        let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
+                        return Err(e);
+                    }
+                };
+            txn.pending_canonical_moves = recomputed_pending_moves;
+            write_txn_record(&fs, &migration_state_dir, &txn)?;
             // OBL-1 WAL-ordering fix (§3): the intent log MUST be
             // durable for every pending move BEFORE the pointer swap —
             // including on this STAGING-resume path, where a prior
