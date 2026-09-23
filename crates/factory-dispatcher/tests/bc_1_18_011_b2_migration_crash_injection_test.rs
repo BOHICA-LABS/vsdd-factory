@@ -146,34 +146,40 @@
 //! lands exactly there, rather than merely re-confirming the historical
 //! unreachability defect.
 //!
-//! **FINDING 2 (real defect, HIGH severity -- silent false-success):** a
-//! crash ANYWHERE between "the 4 pending canonical moves are computed /
-//! staged" and "`pending_canonical_moves` is persisted to the durable txn
-//! record" (i.e. during the `append`#1-4 INTENT-record loop, the
-//! Postcondition 3a fingerprint recheck, or `write_temp`#6/#7) leaves the
-//! on-disk txn record's `pending_canonical_moves` field at its stale,
-//! EMPTY value. On the next invocation, `recover()` correctly classifies
-//! this as `ResumeFromStaging` (staging content re-verifies fine -- it's
-//! all durably present), but `run_bc_index_migration`'s `ResumeFromStaging`
-//! arm feeds the STALE (empty) `txn.pending_canonical_moves` into
+//! **FINDING 2 (RESOLVED -- was a real defect, HIGH severity -- silent
+//! false-success):** a crash ANYWHERE between "the 4 pending canonical
+//! moves are computed / staged" and "`pending_canonical_moves` is
+//! persisted to the durable txn record" (i.e. during the `append`#1-4
+//! INTENT-record loop, the Postcondition 3a fingerprint recheck, or
+//! `write_temp`#6/#7) used to leave the on-disk txn record's
+//! `pending_canonical_moves` field at its stale, EMPTY value. On the next
+//! invocation, `recover()` correctly classifies this as
+//! `ResumeFromStaging` (staging content re-verifies fine -- it's all
+//! durably present), but `run_bc_index_migration`'s `ResumeFromStaging`
+//! arm used to feed the STALE (empty) `txn.pending_canonical_moves` into
 //! `finish_committing_migration` instead of recomputing it, so
-//! `execute_canonical_path_moves` iterates zero moves, `completed_count
-//! (0) < pending.len() (0)` is FALSE (vacuously), and the migration writes
-//! `completed.json` with `canonical_paths_count: 0` and transitions the
+//! `execute_canonical_path_moves` iterated zero moves, `completed_count
+//! (0) < pending.len() (0)` was FALSE (vacuously), and the migration wrote
+//! `completed.json` with `canonical_paths_count: 0` and transitioned the
 //! txn to COMPLETED -- **while NONE of the shard files were ever created
-//! and the canonical `BC-INDEX.md` was never split.** This is a genuine
+//! and the canonical `BC-INDEX.md` was never split.** This was a genuine
 //! "old-or-new, never torn" violation at the SYSTEM level: `completed.json`
-//! (the reader-integration "is the split done" signal) says NEW while
-//! every canonical file on disk still says OLD. `test_BC_1_18_011_obl1_
-//! FINDING2_*` tests below reproduce this at the `write_temp`#6/#7 and
-//! `append`#1/#4 boundaries and assert the CORRECT invariant (which
-//! currently FAILS).
+//! (the reader-integration "is the split done" signal) said NEW while
+//! every canonical file on disk still said OLD. The fix
+//! (`recompute_pending_canonical_moves_from_staged_generation`) makes the
+//! `ResumeFromStaging` arm recompute the pending moves from the staged
+//! generation on resume instead of trusting the stale, empty field.
+//! `test_BC_1_18_011_obl1_FINDING2_*` tests below reproduce the crash
+//! points at the `write_temp`#6/#7 and `append`#1/#4 boundaries and assert
+//! the CORRECT invariant, which now PASSES -- these are load-bearing
+//! regression guards against FINDING 2 recurring.
 //!
-//! **FINDING 3 (real defect, MEDIUM severity -- permanent gate lockout):**
-//! a crash between `write_completed_record` (NOT `Fs`-seamed, so not
-//! itself fault-injectable, but sequenced immediately before `write_temp`
-//! occurrence #10 / `fsync_file` occurrence #5) succeeding and the
-//! subsequent `write_admission_gate_state(Open)` call leaves the on-disk
+//! **FINDING 3 (RESOLVED -- was a real defect, MEDIUM severity --
+//! permanent gate lockout):** a crash between `write_completed_record`
+//! (NOT `Fs`-seamed, so not itself fault-injectable, but sequenced
+//! immediately before `write_temp` occurrence #10 / `fsync_file`
+//! occurrence #5) succeeding and the subsequent
+//! `write_admission_gate_state(Open)` call used to leave the on-disk
 //! writer-admission gate at LOCKED forever: the NEXT (and every
 //! subsequent) `run_bc_index_migration` invocation hits the
 //! `completed.json`-presence short-circuit (`BcIndexMigrationOutcome::
@@ -183,18 +189,24 @@
 //! again. `reconcile_stale_admission_gate` cannot self-heal this either --
 //! its Branch A requires `active_txn == None`, but a live COMMITTING txn
 //! record still exists on disk in this exact scenario. The migration
-//! itself is 100% correct and complete; only the gate is permanently
-//! stuck, blocking every future writer via `admit_or_block_bc_index_writer`
-//! with no automatic recovery path. `test_BC_1_18_011_obl1_FINDING3_*`
-//! tests below reproduce this and assert the CORRECT invariant (which
-//! currently FAILS).
+//! itself was always 100% correct and complete; only the gate used to get
+//! permanently stuck, blocking every future writer via
+//! `admit_or_block_bc_index_writer` with no automatic recovery path. The
+//! fix gives the `completed.json` short-circuit its own best-effort
+//! convergence: it now converges the txn record to COMPLETED and resets
+//! the gate to OPEN inline, idempotently, every time the short-circuit is
+//! hit. `test_BC_1_18_011_obl1_FINDING3_*` tests below reproduce the
+//! crash points and assert the CORRECT invariant, which now PASSES --
+//! these are load-bearing regression guards against FINDING 3 recurring.
 //!
-//! All three findings are newly surfaced by this suite (distinct from, and
-//! in addition to, the four pass-2-era defects this refactor was built to
-//! close) and are NOT papered over: the `test_BC_1_18_011_obl1_FINDING*`
-//! tests assert the correct behavior and are therefore expected to FAIL
-//! under the current implementation, by design -- see this suite's final
-//! report for routing.
+//! All three findings were newly surfaced by this suite (distinct from,
+//! and in addition to, the four pass-2-era defects this refactor was
+//! built to close) and are NOT papered over: the
+//! `test_BC_1_18_011_obl1_FINDING*` tests assert the correct behavior.
+//! FINDING 1, FINDING 2, and FINDING 3 are all now RESOLVED -- every
+//! `FINDING*` assertion PASSES and serves as a load-bearing regression
+//! guard against its respective finding recurring -- see this suite's
+//! final report for routing.
 #![cfg(feature = "failpoints")]
 
 use std::path::{Path, PathBuf};
@@ -720,11 +732,14 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ6_staged_but_pending_moves
     );
 
     let outcome = run_recovery_to_convergence(dir.path(), 3);
-    // FINDING 2: this SHOULD converge to a genuine, content-correct
-    // completion (or a fail-closed error) -- it currently, incorrectly,
-    // reports Ok(Completed { canonical_paths_count: 0 }) with NEITHER
-    // shard file ever created. Asserting the CORRECT invariant here (not
-    // weakened) -- this assertion is expected to currently FAIL.
+    // FINDING 2 (RESOLVED): this converges to a genuine, content-correct
+    // completion -- prior to the fix it incorrectly reported
+    // Ok(Completed { canonical_paths_count: 0 }) with NEITHER shard file
+    // ever created. The `ResumeFromStaging` arm now recomputes
+    // `pending_canonical_moves` from the staged generation
+    // (`recompute_pending_canonical_moves_from_staged_generation`) instead
+    // of trusting the stale, empty on-disk field, so this assertion PASSES
+    // and is a load-bearing regression guard against FINDING 2 recurring.
     assert_genuinely_fully_migrated(dir.path());
     let _ = outcome;
 }
@@ -746,14 +761,17 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ7_pending_moves_not_yet_pe
     assert_eq!(txn.pending_canonical_moves.len(), 0);
 
     let outcome = run_recovery_to_convergence(dir.path(), 3);
-    // FINDING 2 (see module header): currently produces
-    // Ok(Completed { canonical_paths_count: 0 }) with completed.json
-    // present, canonical BC-INDEX.md UNCHANGED (still the monolithic
-    // original), and neither shard file created -- a false-success /
-    // "old-or-new, never torn" violation at the system level. This
-    // assertion is expected to currently FAIL; it is intentionally left
-    // asserting the CORRECT behavior, per this suite's mandate to not
-    // weaken assertions around real findings.
+    // FINDING 2 (RESOLVED -- see module header): prior to the fix, this
+    // boundary produced Ok(Completed { canonical_paths_count: 0 }) with
+    // completed.json present, canonical BC-INDEX.md UNCHANGED (still the
+    // monolithic original), and neither shard file created -- a
+    // false-success / "old-or-new, never torn" violation at the system
+    // level. The `ResumeFromStaging` arm now recomputes
+    // `pending_canonical_moves` from the staged generation on resume, so
+    // recovery produces both shards plus the split canonical body and
+    // reaches genuine COMPLETED. This assertion PASSES and is a
+    // load-bearing regression guard against FINDING 2 recurring, per this
+    // suite's mandate to not weaken assertions around real findings.
     assert_genuinely_fully_migrated(dir.path());
     let _ = outcome;
 }
@@ -883,15 +901,15 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_
         "recovery must report AlreadyMigrated once completed.json exists, per ADR-052 §7c step 8 \
          (\"no other file consulted\") -- got {outcome:?}"
     );
-    // FINDING 3 (see module header): the admission gate should self-heal
-    // to OPEN once the migration is genuinely, fully complete -- content
-    // is correct (shards exist, census holds) but the gate is currently
-    // left permanently LOCKED, because the AlreadyMigrated short-circuit
-    // at the top of run_bc_index_migration never reaches
-    // finish_committing_migration's gate-reset call, on this call OR any
-    // future call. Asserting the CORRECT invariant (expected to currently
-    // FAIL) rather than weakening it to match the observed stuck-LOCKED
-    // behavior.
+    // FINDING 3 (RESOLVED -- see module header): the admission gate
+    // self-heals to OPEN once the migration is genuinely, fully complete
+    // -- content is correct (shards exist, census holds), and the
+    // completed.json short-circuit now runs its own best-effort
+    // convergence of the txn record to COMPLETED and the gate to OPEN
+    // inline, rather than leaving both stuck because
+    // finish_committing_migration's own gate-reset call is never reached
+    // again from this short-circuit. This assertion PASSES and is a
+    // load-bearing regression guard against FINDING 3 recurring.
     assert_genuinely_fully_migrated(dir.path());
 }
 
@@ -929,9 +947,10 @@ fn test_BC_1_18_011_obl1_crash_fsync_file_occ1_redundant_barrier_is_harmless() {
     assert_recovery_is_idempotent(dir.path());
 }
 
-/// FINDING 3, occurrence B: same defect as the write_temp#10 case above,
-/// reached via the fsync_file boundary instead (the redundant re-fsync of
-/// the already-durable final COMPLETED-state txn record).
+/// FINDING 3, occurrence B: same (now-resolved) defect as the
+/// write_temp#10 case above, reached via the fsync_file boundary instead
+/// (the redundant re-fsync of the already-durable final COMPLETED-state
+/// txn record).
 #[test]
 fn test_BC_1_18_011_obl1_FINDING3_crash_fsync_file_occ5_completed_json_durable_gate_stuck() {
     let dir = tempfile::tempdir().unwrap();
@@ -1486,7 +1505,9 @@ fn test_BC_1_18_011_obl1_graceful_err_canonical_shard_directory_collision_pre_sw
         read_gate_state(&msd),
         BcIndexAdmissionGateState::Open,
         "abort_staging must reset the admission gate to OPEN on a pre-swap graceful failure -- \
-         unlike FINDING 3's post-completion scenario, this path correctly self-heals"
+         this path self-heals within the SAME call, unlike FINDING 3's post-completion scenario \
+         (now resolved via a dedicated best-effort convergence at the completed.json \
+         short-circuit rather than this same-call self-heal)"
     );
     // A fresh writer is admitted again immediately (no crash occurred, and
     // abort_staging's cleanup already ran to completion). Release the
