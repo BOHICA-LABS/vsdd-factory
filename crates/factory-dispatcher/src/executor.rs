@@ -422,14 +422,15 @@ pub fn shard_cap_precheck(
 /// that is not a genuine mutation-tool candidate against a BC-INDEX path
 /// with migration state present on disk.
 ///
-/// **STUB SURFACE (BC-5.38.001):** the body below is `todo!()` — this
-/// function's SIGNATURE and its call-site wiring (see `main.rs`, computed
-/// exactly once alongside `shard_gate_precheck_result`, before
-/// `build_engine()`) are the load-bearing artifact of this cluster's stub
-/// commit; the ADR-052 §Decision 5a admission logic itself
+/// **FULLY IMPLEMENTED (S-25.02 cluster-5, T-11):** this function's body is
+/// real, load-bearing production logic, not a stub — see the call-site
+/// wiring in `main.rs` (computed exactly once alongside
+/// `shard_gate_precheck_result`, before `build_engine()`, via
+/// [`crate::executor::resolve_shard_gate_precedence`]). The ADR-052
+/// §Decision 5a admission logic it delegates to
 /// (`shard_manager::admit_or_block_bc_index_writer`,
-/// `shard_manager::reconcile_stale_admission_gate`) is implemented (also
-/// as stubs) in `shard_manager.rs`.
+/// `shard_manager::reconcile_stale_admission_gate`) is likewise fully
+/// implemented in `shard_manager.rs`.
 ///
 /// Unlike `shard_cap_precheck`, this gate additionally covers `Bash`
 /// dispatches whose write effect targets `.factory/specs/behavioral-
@@ -439,21 +440,16 @@ pub fn shard_cap_precheck(
 /// implemented here; this function's own tool-kind guard below covers only
 /// the `Edit`/`Write`/`MultiEdit` admission path, matching
 /// `shard_cap_precheck`'s own scoping. The `Bash`-classifier arm is a
-/// distinct, not-yet-scheduled piece of this ADR's guard stack.
+/// distinct, not-yet-scheduled piece of this ADR's guard stack (S-25.02
+/// cluster-5 explicitly excludes it — see the cluster-5 fix-burst scope
+/// note; not reintroduced here).
 ///
-/// **Red-Gate safety note (stub-architect, this burst):** the
-/// `.factory/migration-state/` presence guard below is REAL code, not a
-/// stub — mirroring `shard_cap_precheck`'s own real `shard_config_path
-/// .exists()` short-circuit immediately above. Only the gate logic BEHIND
-/// that guard (reached exclusively once a real migration is in flight) is
-/// `todo!()`. This ordering is load-bearing: today, and for every existing
-/// test fixture, no `.factory/migration-state/` directory exists anywhere
-/// in the repository, so this function safely returns `None` on every
-/// dispatch without ever reaching the `todo!()` arm — an unguarded
-/// `todo!()` reachable from every ordinary `Edit`/`Write`/`MultiEdit`
-/// dispatch would panic the dispatcher binary for all callers, which is a
-/// regression the Red Gate must never introduce, not merely a "new test
-/// fails" outcome.
+/// The `.factory/migration-state/` presence guard below is the same real
+/// short-circuit `shard_cap_precheck`'s own real `shard_config_path
+/// .exists()` check mirrors immediately above it: for every dispatch with
+/// no `.factory/migration-state/` directory on disk (the common case — no
+/// migration ever activated), this function returns `None` immediately,
+/// without evaluating any admission logic at all.
 pub fn bc_index_migration_admission_precheck(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,

@@ -14096,10 +14096,11 @@ pub fn resume_from_staging(
 // ---------------------------------------------------------------------------
 // Second-level sub-shard chunk-boundary algorithm (ADR-051 §Decision 18;
 // BC-1.18.011 Postcondition 6; BC-1.18.010 Postcondition 4; VP-142).
-// RED-Gate stub surface only (BC-5.38.001) — cluster-5 spec-closure burst
-// D-1237. `chunk_subsystem_rows_into_sub_shards`'s body is `todo!()`
-// pending implementer's T-11 follow-on; the signature and `SubShardChunk`
-// shape are pinned by the architect's §Decision 18 item 4 design.
+// FULLY IMPLEMENTED (S-25.02 cluster-5, T-11): `chunk_subsystem_rows_into_
+// sub_shards` performs the real greedy-pack-until-cap chunking described by
+// its own doc comment below — the signature and `SubShardChunk` shape match
+// the architect's §Decision 18 item 4 design, and the body is load-bearing
+// production code, not a stub.
 // ---------------------------------------------------------------------------
 
 /// One completed chunk of a subsystem's second-level sub-split (ADR-051
