@@ -13944,9 +13944,31 @@ pub fn execute_canonical_path_moves(
             break;
         }
 
-        let post_hash = std::fs::read(&canonical)
-            .map(|bytes| sha256_hex(&bytes))
-            .unwrap_or_default();
+        // F-C5-P1-007: a post-rename read failure of a file this call just
+        // wrote is a real fault, not a "no hash available" degenerate case
+        // — silently defaulting to an empty `expected_post_hash` while still
+        // counting the move as done would corrupt the intent log's
+        // matching-destination-hash forward-recovery rule (a future resume
+        // would see a DONE record it can never verify). Fail loud instead:
+        // halt further renames the same way the rename-failure and
+        // dir-sync-failure arms above do — this move is NOT counted as
+        // durably completed, so `finish_committing_migration`'s
+        // `completed_count < pending.len()` check surfaces a named
+        // `BinaryIntegrityFailure` forward-recovery error to the caller.
+        let post_hash = match std::fs::read(&canonical) {
+            Ok(bytes) => sha256_hex(&bytes),
+            Err(source) => {
+                tracing::warn!(
+                    target: "bc_1_18_011_migration",
+                    canonical = %canonical.display(),
+                    error = %source,
+                    "execute_canonical_path_moves: post-rename verification read of the \
+                     canonical file failed; halting further renames (forward recovery resumes \
+                     from here, never a silently-empty expected_post_hash)"
+                );
+                break;
+            }
+        };
         let record = IntentLogRecord {
             txn_id: String::new(),
             fencing_generation: 0,
