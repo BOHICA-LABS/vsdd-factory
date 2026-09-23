@@ -495,24 +495,54 @@ pub fn bc_index_migration_admission_precheck(
         }
     };
 
-    let txn = active_txn?;
+    // OBL-1 §4 fail-open structural fix (TD-VSDD-060 sibling-site sweep):
+    // this precheck previously duplicated its own ad hoc
+    // `matches!(txn.state, Staging | Committing)` check and NEVER
+    // consulted the persisted OPEN/DRAINING/LOCKED gate state at all — a
+    // dispatch arriving during the drain window (gate flipped to DRAINING/
+    // LOCKED but no txn record created yet, e.g. a crash between
+    // `write_admission_gate_state(Draining)` and the txn-record write) was
+    // silently admitted. Routes through the SAME
+    // `is_bc_index_admission_open` classification
+    // `admit_or_block_bc_index_writer` itself consults, instead of a
+    // second, independently-maintained live/terminal scan.
+    let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
+        Ok(state) => state,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
+                ),
+            });
+        }
+    };
 
-    if matches!(
-        txn.state,
-        crate::shard_manager::BcIndexMigrationTxnState::Staging
-            | crate::shard_manager::BcIndexMigrationTxnState::Committing
-    ) {
-        return Some(vsdd_hook_sdk::HookResult::Block {
-            reason: format!(
+    if crate::shard_manager::is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
+        return None;
+    }
+
+    let reason = match &active_txn {
+        Some(txn)
+            if matches!(
+                txn.state,
+                crate::shard_manager::BcIndexMigrationTxnState::Staging
+                    | crate::shard_manager::BcIndexMigrationTxnState::Committing
+            ) =>
+        {
+            format!(
                 "BC-1.18.011 E-MAINTENANCE-001: a governed BC-INDEX migration (txn {}, \
                  state={:?}) is currently in flight — this write is refused; retry after the \
                  migration completes",
                 txn.txn_id, txn.state
-            ),
-        });
-    }
-
-    None
+            )
+        }
+        _ => format!(
+            "BC-1.18.011 E-MAINTENANCE-001: the BC-INDEX writer-admission gate is not OPEN \
+             (state={gate_state:?}) — this write is refused; retry once the gate self-heals or \
+             the current maintenance window completes"
+        ),
+    };
+    Some(vsdd_hook_sdk::HookResult::Block { reason })
 }
 
 /// BC-1.18.011 Architect Ruling 1 (D-1232-OBL, S-25.02 cluster-5 T-11): the

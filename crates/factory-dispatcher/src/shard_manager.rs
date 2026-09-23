@@ -13726,7 +13726,12 @@ pub fn is_bc_index_admission_open(
 /// `.factory/migration-state/gate-state.json` — absent file defaults to
 /// `Open` (the OPEN default case: no gate-state file and no txn record
 /// present).
-fn read_admission_gate_state(
+///
+/// `pub(crate)` (widened from private, OBL-1 §4 fail-open fix): consulted
+/// directly by `executor::bc_index_migration_admission_precheck`, which
+/// previously never checked gate state at all — see that function's own
+/// doc comment.
+pub(crate) fn read_admission_gate_state(
     migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
     let path = migration_state_dir.join("gate-state.json");
