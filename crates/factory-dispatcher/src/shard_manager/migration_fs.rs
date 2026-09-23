@@ -190,18 +190,91 @@ pub trait Fs {
 // mutating operation, so the test-writer's crash-injection suite can target
 // each by name via `fail::cfg("migration_fs::<op>", "abort")` /
 // `FailScenario`.
+//
+// Two-arg upgrade (test-writer's `return(Err)` coverage requirement): every
+// call site below now uses `fail_point!($name, $path)` rather than the
+// single-arg `fail_point!($name)` form. The single-arg form's own doc
+// comment (`fail` 0.5.1) states plainly: "Return is not supported for the
+// fail point" -- configuring a `"return"` action against a single-arg fail
+// point PANICS with that literal message rather than gracefully returning
+// an `Err`, which is useless for exercising this trait's ordinary `?`-
+// propagated error paths (disk-full, permission-denied, etc). The two-arg
+// form passes `fail::eval`'s `Option<String>` (the configured `return(tag)`
+// action's `tag` argument, `None` for a non-`Task::Return` action such as
+// `off`/`sleep`/`panic`/`callback`) through [`migration_failpoint_error`],
+// which maps `tag` to a concrete `BcIndexMigrationError::Io` variant
+// carrying `path`'s context. `fail`'s own two-arg macro only actually
+// returns early when `eval` yields `Some(..)` (i.e. only for a configured
+// `Task::Return` action) -- this suite's `abort()`-based crash-injection
+// scenarios (`cfg_callback`, a `Task::Callback`) are UNCHANGED by this
+// upgrade: `Callback` actions never produce a `Return` value, so `eval`
+// still yields `None` for them and this macro is still a no-op in that
+// configuration, exactly as the single-arg form was.
 // ---------------------------------------------------------------------------
+
+/// Maps a `fail_point!` two-arg `return(tag)` action's configured `tag`
+/// string to a concrete [`BcIndexMigrationError::Io`], carrying `path` for
+/// caller context. `None` (a fail point configured with a non-`Task::Return`
+/// action, e.g. `off`) is a `fail`/`eval` implementation detail this
+/// function never actually sees in practice (the two-arg `fail_point!`
+/// macro only invokes its closure argument -- this function -- when `eval`
+/// already yielded `Some(tag)`), but is accepted so the closure's signature
+/// matches `FnOnce(Option<String>) -> R` exactly; it maps to a generic
+/// `Other`-kind error rather than being treated as unreachable, so a future
+/// change to `fail`'s own evaluation semantics fails loud instead of
+/// panicking. An unrecognized `tag` also fails loud (a descriptive `Other`-
+/// kind error naming the bad tag) rather than silently defaulting to some
+/// specific `io::ErrorKind` that might mask a typo in test configuration.
+#[cfg(feature = "failpoints")]
+fn migration_failpoint_error(
+    name: &str,
+    tag: Option<String>,
+    path: &Path,
+) -> BcIndexMigrationError {
+    let kind = match tag.as_deref() {
+        Some("not_found") => std::io::ErrorKind::NotFound,
+        Some("permission_denied") => std::io::ErrorKind::PermissionDenied,
+        Some("already_exists") => std::io::ErrorKind::AlreadyExists,
+        Some("interrupted") => std::io::ErrorKind::Interrupted,
+        Some("out_of_memory") => std::io::ErrorKind::OutOfMemory,
+        Some("write_zero") => std::io::ErrorKind::WriteZero,
+        Some("unexpected_eof") => std::io::ErrorKind::UnexpectedEof,
+        Some("storage_full") => std::io::ErrorKind::StorageFull,
+        None => std::io::ErrorKind::Other,
+        Some(other) => {
+            return BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source: std::io::Error::other(format!(
+                    "migration_failpoint {name}: unrecognized return() tag {other:?} -- expected \
+                     one of not_found/permission_denied/already_exists/interrupted/\
+                     out_of_memory/write_zero/unexpected_eof/storage_full"
+                )),
+            };
+        }
+    };
+    BcIndexMigrationError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(
+            kind,
+            format!("migration_failpoint {name}: injected graceful return({tag:?})"),
+        ),
+    }
+}
 
 #[cfg(feature = "failpoints")]
 macro_rules! migration_failpoint {
-    ($name:expr) => {
-        fail::fail_point!($name)
+    ($name:expr, $path:expr) => {
+        fail::fail_point!($name, |tag: Option<String>| Err(migration_failpoint_error(
+            $name, tag, $path
+        )))
     };
 }
 
 #[cfg(not(feature = "failpoints"))]
 macro_rules! migration_failpoint {
-    ($name:expr) => {};
+    ($name:expr, $path:expr) => {
+        let _ = $path;
+    };
 }
 
 /// Production implementation of [`Fs`] — delegates to the EXISTING
@@ -214,12 +287,12 @@ pub struct StdFs;
 
 impl Fs for StdFs {
     fn write_temp(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::write_temp");
+        migration_failpoint!("migration_fs::write_temp", path);
         super::migration_durable_write(path, content)
     }
 
     fn fsync_file(&self, path: &Path) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::fsync_file");
+        migration_failpoint!("migration_fs::fsync_file", path);
         // See the module doc comment's production-granularity note: this
         // is a harmless best-effort re-fsync, not the sole durability
         // barrier (that already happened inside `write_temp`).
@@ -237,7 +310,7 @@ impl Fs for StdFs {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::rename");
+        migration_failpoint!("migration_fs::rename", to);
         std::fs::rename(from, to).map_err(|source| BcIndexMigrationError::Io {
             path: to.to_path_buf(),
             source,
@@ -245,7 +318,7 @@ impl Fs for StdFs {
     }
 
     fn fsync_dir(&self, dir: &Path) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::fsync_dir");
+        migration_failpoint!("migration_fs::fsync_dir", dir);
         super::sync_dir_durable(dir)
     }
 
@@ -265,7 +338,7 @@ impl Fs for StdFs {
     }
 
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::pointer_swap");
+        migration_failpoint!("migration_fs::pointer_swap", target);
         std::fs::rename(tmp, target).map_err(|source| BcIndexMigrationError::Io {
             path: target.to_path_buf(),
             source,
@@ -273,7 +346,7 @@ impl Fs for StdFs {
     }
 
     fn remove(&self, path: &Path) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::remove");
+        migration_failpoint!("migration_fs::remove", path);
         if path.is_dir() {
             match std::fs::remove_dir_all(path) {
                 Ok(()) => Ok(()),
@@ -296,7 +369,7 @@ impl Fs for StdFs {
     }
 
     fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::append");
+        migration_failpoint!("migration_fs::append", path);
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
