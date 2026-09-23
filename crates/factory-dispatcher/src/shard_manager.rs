@@ -12942,6 +12942,20 @@ pub enum BcIndexMigrationError {
     /// (BC-1.18.011 Architect Ruling 2).
     #[error("BC-INDEX writer admission refused: {reason}")]
     WriterAdmissionRefused { reason: String },
+
+    /// ADR-051 §Decision 18 item 1: the second-level sub-shard chunker
+    /// requires `shard_cap_bytes` from the SAME `[[shard]]` config entry
+    /// (`artifact_stem = "BC-INDEX"`) the live `executor::shard_cap_precheck`
+    /// gate reads — never a new formula or a separately-calibrated
+    /// migration-time cap. Fail-loud when that config entry is missing,
+    /// unparsable, or has no matching entry for the canonical BC-INDEX.md
+    /// path: an unset cap is never silently defaulted or inferred.
+    #[error(
+        "BC-INDEX migration: unable to resolve shard_cap_bytes for the B2 second-level \
+         sub-shard chunker (ADR-051 §Decision 18 item 1 — the SAME [[shard]] config entry the \
+         live shard_cap_precheck gate reads): {detail} (SHARD_CAP_CONFIG_UNAVAILABLE, exit 2)"
+    )]
+    ShardCapConfigUnavailable { detail: String },
 }
 
 impl BcIndexMigrationError {
@@ -14086,36 +14100,118 @@ pub struct SubShardChunk {
     pub range_end: BcId,
 }
 
-/// **STUB SURFACE (BC-5.38.001): body is `todo!()`, pending implementer's
-/// T-11 follow-on.** Signature and behavior pinned by ADR-051 §Decision 18
-/// item 4 (cross-referenced by BC-1.18.011 Postcondition 6 and BC-1.18.010
-/// Postcondition 4): a PURE function of `(sorted_rows, preamble,
-/// shard_cap_bytes)` — canonical-BC-ID-sorted (via the already-canonical
-/// order [`extract_and_sort_bc_rows`] produces; this function does not
-/// itself re-sort), greedy-pack-until-cap, single left-to-right pass.
-/// `preamble`'s byte cost (`preamble.len()`) is counted as the starting
-/// `current_bytes` for every new chunk — an empty sub-shard is never
-/// "free." A row (`row_bytes = row.1.len() + 1` for the row-separating
-/// newline) closes the current non-empty chunk and starts a new one
-/// exactly when `current_bytes + row_bytes > shard_cap_bytes` (`<=`
-/// inclusive stays in the current chunk, matching BC-1.18.005
+/// Base-26 spreadsheet-column-style letter-exhaustion suffix for a 0-based
+/// chunk index (ADR-051 §Decision 18 edge-case table): `.a`..`.z`,
+/// `.aa`..`.az`, `.ba`... Never fails loud — every `usize` has a
+/// well-defined suffix under this bijective base-26 numeral scheme.
+fn sub_shard_id_suffix(index0: usize) -> String {
+    let mut n = index0 + 1; // 1-based bijective numeral
+    let mut letters = Vec::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        letters.push((b'a' + rem as u8) as char);
+        n = (n - 1) / 26;
+    }
+    letters.reverse();
+    format!(".{}", letters.into_iter().collect::<String>())
+}
+
+/// Closes `current_rows` into a new [`SubShardChunk`] appended to `chunks`,
+/// then clears `current_rows` for the next chunk. A no-op when
+/// `current_rows` is empty (the trailing end-of-input call when the last
+/// row already closed a chunk on its own). Emits a non-blocking
+/// `tracing::warn!` when the closed chunk's body alone exceeds
+/// `shard_cap_bytes` — by construction (see
+/// [`chunk_subsystem_rows_into_sub_shards`]'s packing invariant) this only
+/// ever happens for a genuine lone-oversized-row chunk, never a multi-row
+/// chunk.
+fn close_sub_shard_chunk(
+    current_rows: &mut Vec<(BcId, String)>,
+    chunks: &mut Vec<SubShardChunk>,
+    preamble: &str,
+    shard_cap_bytes: u64,
+) {
+    if current_rows.is_empty() {
+        return;
+    }
+    let sub_shard_id = sub_shard_id_suffix(chunks.len());
+    let mut body = String::from(preamble);
+    for (_, content) in current_rows.iter() {
+        body.push_str(content);
+        body.push('\n');
+    }
+    let range_start = current_rows.first().expect("checked non-empty above").0;
+    let range_end = current_rows.last().expect("checked non-empty above").0;
+    if body.len() as u64 > shard_cap_bytes {
+        tracing::warn!(
+            target: "bc_1_18_011_subshard_chunking",
+            sub_shard_id = %sub_shard_id,
+            body_bytes = body.len(),
+            shard_cap_bytes,
+            range_start = %range_start,
+            range_end = %range_end,
+            "chunk_subsystem_rows_into_sub_shards: lone oversized row exceeds shard_cap_bytes; \
+             emitted as its own over-cap sub-shard rather than split mid-row or failed loud \
+             (ADR-051 §Decision 18 edge-case table)"
+        );
+    }
+    chunks.push(SubShardChunk {
+        sub_shard_id,
+        body,
+        range_start,
+        range_end,
+    });
+    current_rows.clear();
+}
+
+/// ADR-051 §Decision 18 item 4 (cross-referenced by BC-1.18.011
+/// Postcondition 6 and BC-1.18.010 Postcondition 4): a PURE function of
+/// `(sorted_rows, preamble, shard_cap_bytes)` — canonical-BC-ID-sorted (via
+/// the already-canonical order [`extract_and_sort_bc_rows`] produces; this
+/// function does not itself re-sort), greedy-pack-until-cap, single
+/// left-to-right pass. `preamble`'s byte cost (`preamble.len()`) is counted
+/// as the starting `current_bytes` for every new chunk — an empty sub-shard
+/// is never "free." A row (`row_bytes = row.1.len() + 1` for the
+/// row-separating newline) closes the current non-empty chunk and starts a
+/// new one exactly when `current_bytes + row_bytes > shard_cap_bytes`
+/// (`<=` inclusive stays in the current chunk, matching BC-1.18.005
 /// Postcondition 3's `projected_size <= shard_cap_bytes -> Continue`
 /// convention). A single row that alone (with only the preamble) exceeds
 /// `shard_cap_bytes` is emitted as its own over-cap lone chunk — never
 /// split mid-row, never fail-loud (a non-blocking `tracing::warn!` is
-/// logged). `sub_shard_id` extends past 26 chunks via a base-26
-/// spreadsheet-column-style scheme (`.a`..`.z`, `.aa`..`.az`, `.ba`...) —
-/// never fail-loud on letter exhaustion. See ADR-051 §Decision 18's
-/// edge-case table for the full ruling set.
+/// logged, see [`close_sub_shard_chunk`]). `sub_shard_id` extends past 26
+/// chunks via a base-26 spreadsheet-column-style scheme (`.a`..`.z`,
+/// `.aa`..`.az`, `.ba`...) — never fail-loud on letter exhaustion. See
+/// ADR-051 §Decision 18's edge-case table for the full ruling set.
+///
+/// Determinism (ADR-051 §Decision 18 item 7): this function is pure — no
+/// I/O, no hidden state, no RNG — so identical `(sorted_rows, preamble,
+/// shard_cap_bytes)` inputs always produce a byte-identical
+/// `Vec<SubShardChunk>`, whether invoked twice over the same slice or over
+/// an independently-reconstructed-but-content-identical row set (the future
+/// steady-state full-rebuild path).
 pub fn chunk_subsystem_rows_into_sub_shards(
-    _sorted_rows: &[(BcId, String)],
-    _preamble: &str,
-    _shard_cap_bytes: u64,
+    sorted_rows: &[(BcId, String)],
+    preamble: &str,
+    shard_cap_bytes: u64,
 ) -> Vec<SubShardChunk> {
-    todo!(
-        "BC-1.18.011 Postcondition 6 / ADR-051 §Decision 18 item 4 — implementer T-11 follow-on \
-         (cluster-5 spec-closure burst D-1237)"
-    )
+    let preamble_bytes = preamble.len() as u64;
+    let mut chunks: Vec<SubShardChunk> = Vec::new();
+    let mut current_rows: Vec<(BcId, String)> = Vec::new();
+    let mut current_bytes: u64 = preamble_bytes;
+
+    for row in sorted_rows {
+        let row_bytes = row.1.len() as u64 + 1;
+        if !current_rows.is_empty() && current_bytes + row_bytes > shard_cap_bytes {
+            close_sub_shard_chunk(&mut current_rows, &mut chunks, preamble, shard_cap_bytes);
+            current_bytes = preamble_bytes;
+        }
+        current_rows.push(row.clone());
+        current_bytes += row_bytes;
+    }
+    close_sub_shard_chunk(&mut current_rows, &mut chunks, preamble, shard_cap_bytes);
+
+    chunks
 }
 
 /// The top-level governed-migration entry point (BC-1.18.011; invoked via
@@ -14184,6 +14280,70 @@ fn read_total_bcs_frontmatter(content: &str) -> Result<usize, BcIndexMigrationEr
                    Precondition 3's independent count-oracle)"
             .to_string(),
     })
+}
+
+/// ADR-051 §Decision 18 item 1: resolve `shard_cap_bytes` for the B2
+/// second-level sub-shard chunker from the SAME `[[shard]]` config entry
+/// (`artifact_stem = "BC-INDEX"`) `executor::shard_cap_precheck` reads at
+/// [`crate::executor::SHARD_CONFIG_RELATIVE_PATH`] — never a new formula,
+/// never a separately-calibrated migration-time cap. Fail-loud
+/// ([`BcIndexMigrationError::ShardCapConfigUnavailable`]) when the config
+/// file is missing/unparsable or carries no entry matching
+/// `canonical_bc_index_path` — an unset cap is never silently defaulted.
+fn resolve_bc_index_shard_cap_bytes(
+    cwd: &Path,
+    canonical_bc_index_path: &Path,
+) -> Result<u64, BcIndexMigrationError> {
+    let shard_config_path = cwd.join(crate::executor::SHARD_CONFIG_RELATIVE_PATH);
+    let registry = ShardRegistry::load(&shard_config_path).map_err(|source| {
+        BcIndexMigrationError::ShardCapConfigUnavailable {
+            detail: format!(
+                "failed to load [[shard]] config at {}: {source}",
+                shard_config_path.display()
+            ),
+        }
+    })?;
+    let entry = find_matching_entry(&registry, canonical_bc_index_path).map_err(|source| {
+        BcIndexMigrationError::ShardCapConfigUnavailable {
+            detail: format!(
+                "[[shard]] config entry match for {} failed: {source}",
+                canonical_bc_index_path.display()
+            ),
+        }
+    })?;
+    entry.map(|e| e.shard_cap_bytes).ok_or_else(|| {
+        BcIndexMigrationError::ShardCapConfigUnavailable {
+            detail: format!(
+                "no [[shard]] config entry (artifact_stem = \"BC-INDEX\") matches {}",
+                canonical_bc_index_path.display()
+            ),
+        }
+    })
+}
+
+/// ADR-051 §Decision 18 item 3: extract a `### SS-NN` subsystem section's
+/// PREAMBLE — the `### SS-NN` heading plus its markdown table header/
+/// separator lines (and any blank lines between them), up to but excluding
+/// the first per-BC row line. Replicated VERBATIM into every one of that
+/// subsystem's sub-shards (§Decision 18 item 3: "the exact sub-shard
+/// preamble heading text... is a product-owner wording call, not an
+/// architecture concern" — sub-shards are distinguished by FILENAME
+/// suffix, e.g. `.a`/`.b`, never by a per-part heading variant), so this
+/// function performs no per-part rewriting of the heading text at all.
+fn extract_subsystem_section_preamble(section_body: &str) -> String {
+    let mut preamble_lines: Vec<&str> = Vec::new();
+    for line in section_body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('|') && trimmed.contains("[BC-") {
+            break;
+        }
+        preamble_lines.push(line);
+    }
+    let mut preamble = preamble_lines.join("\n");
+    if !preamble.is_empty() {
+        preamble.push('\n');
+    }
+    preamble
 }
 
 /// ADR-052 §Decision 7c step 7's follow-on: execute the canonical path
@@ -14341,18 +14501,19 @@ pub fn run_bc_index_migration(
     })?;
 
     // First-level split: one shard file per `### SS-NN` section
-    // (BC-1.18.010 Postcondition 1). NOTE (genuine spec gap, surfaced not
-    // guessed): automatic second-level (SS-05/SS-06-class) cap-triggered
-    // sub-splitting is intentionally NOT performed by this orchestration —
-    // BC-1.18.010 Postcondition 4 specifies the sub-shard boundary is
-    // "growth-based" but does not specify the chunking algorithm itself
-    // (only a worked example), and no RED-Gate test in this cluster
-    // exercises this orchestrator's own auto-split behavior (only the
-    // scoped `verify_independent_census` census-check primitive is unit-
-    // tested standalone at EC-004). Encoding an unverified heuristic here
-    // risks silently shipping an unspecified algorithm as fact; this is
-    // flagged for architect adjudication of the exact chunk-boundary
-    // algorithm, not silently guessed at.
+    // (BC-1.18.010 Postcondition 1). Second-level (SS-05/SS-06-class)
+    // cap-triggered sub-splitting (ADR-051 §Decision 18; BC-1.18.011
+    // Postcondition 6; BC-1.18.010 Postcondition 4) is now performed by
+    // this orchestration: a subsystem section whose byte size exceeds
+    // `shard_cap_bytes` (the SAME `[[shard]]` config entry
+    // `executor::shard_cap_precheck` reads for `artifact_stem = "BC-INDEX"`
+    // — §Decision 18 item 1, no separately-calibrated migration-time cap)
+    // is chunked via [`chunk_subsystem_rows_into_sub_shards`] into N
+    // sub-shard files plus a [`SubShardManifest`], all staged through the
+    // SAME OBL-2(a) durable-write primitive and the SAME
+    // `pending_canonical_moves`/txn/census/atomicity machinery as the
+    // first-level split.
+    let shard_cap_bytes = resolve_bc_index_shard_cap_bytes(_cwd, &canonical_bc_index_path)?;
     let sections = split_original_body_into_subsystems(&original_content);
     let mut staged_bodies: Vec<String> = Vec::new();
     let mut manifest_entries: Vec<SubsystemShardManifestEntry> = Vec::new();
@@ -14365,6 +14526,63 @@ pub fn run_bc_index_migration(
             .first()
             .map(|(id, _)| format!("BC-{}", id.subsystem_major))
             .unwrap_or_default();
+
+        if !rows.is_empty() && section_body.len() as u64 > shard_cap_bytes {
+            // Over-cap: second-level sub-split (ADR-051 §Decision 18).
+            let preamble = extract_subsystem_section_preamble(section_body);
+            let sub_chunks =
+                chunk_subsystem_rows_into_sub_shards(&rows, &preamble, shard_cap_bytes);
+
+            let mut sub_range_entries: Vec<SubShardRangeEntry> = Vec::new();
+            for chunk in &sub_chunks {
+                let sub_filename = format!("BC-INDEX-{ss_id}{}.md", chunk.sub_shard_id);
+                let sub_staging_path = shards_dir.join(&sub_filename);
+                // D-1232-OBL-2(a): staging publish of each sub-shard body —
+                // F_FULLFSYNC(temp) -> rename -> F_FULLFSYNC(dir), STRICT.
+                migration_durable_write(&sub_staging_path, chunk.body.as_bytes())?;
+                staged_bodies.push(chunk.body.clone());
+                let sub_canonical_path = shards_canonical_root.join(&sub_filename);
+                pending_moves.push(PendingCanonicalMove {
+                    staging_path: sub_staging_path.to_string_lossy().into_owned(),
+                    canonical_path: sub_canonical_path.to_string_lossy().into_owned(),
+                });
+                sub_range_entries.push(SubShardRangeEntry {
+                    sub_shard_id: chunk.sub_shard_id.clone(),
+                    path: format!("shards/{sub_filename}"),
+                    range_start: chunk.range_start.to_string(),
+                    range_end: chunk.range_end.to_string(),
+                });
+            }
+
+            let sub_manifest = SubShardManifest {
+                schema_version: 1,
+                ss_id: ss_id.clone(),
+                sub_shard: sub_range_entries,
+            };
+            let sub_manifest_toml = toml::to_string_pretty(&sub_manifest).map_err(|e| {
+                BcIndexMigrationError::BinaryIntegrityFailure {
+                    message: format!("failed to serialize {ss_id} sub-shard manifest: {e}"),
+                }
+            })?;
+            let sub_manifest_filename = format!("BC-INDEX-{ss_id}.manifest.toml");
+            let sub_manifest_staging_path = shards_dir.join(&sub_manifest_filename);
+            // D-1232-OBL-2(a): staging publish of the sub-shard manifest.
+            migration_durable_write(&sub_manifest_staging_path, sub_manifest_toml.as_bytes())?;
+            let sub_manifest_canonical_path = shards_canonical_root.join(&sub_manifest_filename);
+            pending_moves.push(PendingCanonicalMove {
+                staging_path: sub_manifest_staging_path.to_string_lossy().into_owned(),
+                canonical_path: sub_manifest_canonical_path.to_string_lossy().into_owned(),
+            });
+
+            manifest_entries.push(SubsystemShardManifestEntry {
+                ss_id: ss_id.clone(),
+                bc_prefix,
+                path: format!("shards/BC-INDEX-{ss_id}.md"),
+                sub_sharded: true,
+                sub_manifest: Some(format!("shards/{sub_manifest_filename}")),
+            });
+            continue;
+        }
 
         let shard_filename = format!("BC-INDEX-{ss_id}.md");
         let staging_path = shards_dir.join(&shard_filename);
