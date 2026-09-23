@@ -1,0 +1,72 @@
+name: kani
+
+# OBL-1 (D-1232-OBL-1) formal-verification gate: runs the Kani model-checking
+# harnesses for the B2 BC-INDEX shard-migration crash-recovery state machine
+# (crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs).
+#
+# Kani is a heavyweight bounded model checker (bundles its own nightly Rust
+# toolchain + the CBMC/cadical solver via `cargo kani setup`), so it runs as
+# its own job rather than inside the main `ci` cargo-host matrix. The harnesses
+# are `#[cfg(kani)]`-gated and never compile in a normal build, so this job is
+# the ONLY place they are exercised — a reviewer confirms the proofs here.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Cancel superseded runs on the same ref to conserve CI minutes (Kani solves
+# are CPU-bound).
+concurrency:
+  group: kani-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kani:
+    name: kani (OBL-1 crash-recovery proofs)
+    runs-on: ubuntu-latest
+    # All seven OBL-1 harnesses solve in well under a minute each (the
+    # recover-based ones mem::forget their String-heavy records to skip
+    # CBMC's drop-glue modeling — see obl1_kani_proofs.rs's "Solve-time
+    # note"). This budget is a generous margin over the ~2 min of solving
+    # plus Kani install + crate compile.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      # kani-verifier 0.68.0 bundles nightly-2026-08-21 (rustc 1.100.0-nightly),
+      # which is >= the workspace MSRV (1.95) — required, because `cargo kani`
+      # resolves the full workspace graph (including crates that pin
+      # rust-version = "1.95") and would otherwise be rejected by cargo's MSRV
+      # gate. Keep this version >= the workspace MSRV whenever it is bumped.
+      - name: Cache Kani toolchain + solver bundle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.kani
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+          key: kani-verifier-0.68.0-${{ runner.os }}
+
+      - name: Install Kani
+        run: |
+          set -euo pipefail
+          if ! cargo kani --version 2>/dev/null | grep -q '0.68.0'; then
+            cargo install --locked kani-verifier@0.68.0
+          fi
+          cargo kani setup
+          cargo kani --version
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+        with:
+          key: kani
+
+      # Run every OBL-1 crash-recovery harness (substring match on the shared
+      # `proof_obl1` prefix). Each `#[kani::proof]` must report VERIFICATION:-
+      # SUCCESSFUL; a counterexample (VERIFICATION:- FAILED) is a real
+      # crash-recovery defect and fails the job. Do NOT weaken a harness to make
+      # it pass — a failure is a finding to route to the implementer.
+      - name: Run OBL-1 Kani proofs
+        run: cargo kani -p factory-dispatcher --harness proof_obl1

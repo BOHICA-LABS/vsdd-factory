@@ -130,6 +130,13 @@ use vsdd_hook_sdk::HookResult;
 pub mod migration_fs;
 use migration_fs::{Fs, StdFs};
 
+/// OBL-1 (D-1232-OBL-1) Kani model-checking harnesses for the crash-
+/// recovery state machine. Compiled ONLY under `cargo kani` (`cfg(kani)`);
+/// the normal `cargo build`/`test`/`clippy` never sees this module, so it
+/// has zero effect on the normal build.
+#[cfg(kani)]
+mod obl1_kani_proofs;
+
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
 // Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
