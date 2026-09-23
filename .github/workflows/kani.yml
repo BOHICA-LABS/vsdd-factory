@@ -68,5 +68,45 @@ jobs:
       # SUCCESSFUL; a counterexample (VERIFICATION:- FAILED) is a real
       # crash-recovery defect and fails the job. Do NOT weaken a harness to make
       # it pass — a failure is a finding to route to the implementer.
+      #
+      # `--harness proof_obl1` is a SUBSTRING filter, not an exact-name pin
+      # (adversary finding F-C5-P3-001). If a future refactor renames, splits,
+      # or moves an OBL-1 harness so it no longer contains the `proof_obl1`
+      # prefix, Kani silently verifies only the survivors, prints
+      # "N successfully verified, 0 failures", and exits 0 GREEN — a
+      # false-green on a real partial-regression. (A *zero*-match filter does
+      # make Kani error; a *partial*-match filter does not.) Guard against
+      # this by asserting the full expected proof count ran and succeeded,
+      # independent of Kani's own exit code.
       - name: Run OBL-1 Kani proofs
-        run: cargo kani -p factory-dispatcher --harness proof_obl1
+        run: |
+          set -euo pipefail
+
+          EXPECTED_PROOFS=7
+
+          set +e
+          cargo kani -p factory-dispatcher --harness proof_obl1 2>&1 | tee kani-output.log
+          KANI_EXIT="${PIPESTATUS[0]}"
+          set -e
+
+          SUCCESS_COUNT=$(grep -c 'VERIFICATION:- SUCCESSFUL' kani-output.log || true)
+          BAD_COUNT=$(grep -cE 'VERIFICATION:- (FAILED|UNDETERMINED)' kani-output.log || true)
+
+          echo "cargo kani exit code: ${KANI_EXIT}"
+          echo "Successful proofs:    ${SUCCESS_COUNT} (expected ${EXPECTED_PROOFS})"
+          echo "Failed/undetermined:  ${BAD_COUNT}"
+
+          if [ "${KANI_EXIT}" -ne 0 ]; then
+            echo "FAIL: cargo kani exited non-zero (${KANI_EXIT})."
+            exit 1
+          fi
+          if [ "${BAD_COUNT}" -ne 0 ]; then
+            echo "FAIL: ${BAD_COUNT} OBL-1 harness(es) reported FAILED or UNDETERMINED."
+            exit 1
+          fi
+          if [ "${SUCCESS_COUNT}" -ne "${EXPECTED_PROOFS}" ]; then
+            echo "FAIL: expected ${EXPECTED_PROOFS} successful OBL-1 proofs but only ${SUCCESS_COUNT} ran. This means the --harness proof_obl1 substring filter no longer matches the full harness set (a harness was renamed, split, or moved out of the crate) -- a silent partial-verification false-green. If the harness count intentionally changed, update EXPECTED_PROOFS here to match."
+            exit 1
+          fi
+
+          echo "PASS: all ${EXPECTED_PROOFS} OBL-1 harnesses verified successfully."
