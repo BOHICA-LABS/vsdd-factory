@@ -86,6 +86,7 @@ use factory_dispatcher::executor::{
     bc_index_migration_admission_precheck, resolve_shard_gate_precedence, shard_cap_precheck,
 };
 use factory_dispatcher::payload::HookPayload;
+use factory_dispatcher::shard_manager::migration_fs::StdFs;
 use factory_dispatcher::shard_manager::{
     BcId, BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationOutcome,
     BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, CompletedMigrationRecord,
@@ -420,7 +421,7 @@ fn test_BC_1_18_011_PC3_stage_new_generation_creates_directory_and_returns_uuid(
     let migration_state_dir = dir.path().join(".factory/migration-state");
     std::fs::create_dir_all(&migration_state_dir).unwrap();
 
-    let generation_id = stage_new_generation(&migration_state_dir)
+    let generation_id = stage_new_generation(&StdFs, &migration_state_dir)
         .expect("staging a new generation against a fresh migration-state dir must succeed");
     assert!(
         migration_state_dir
@@ -440,7 +441,7 @@ fn test_BC_1_18_011_PC3_commit_current_generation_pointer_writes_current_json_at
         status: "committing".to_string(),
         txn_id: "txn-abc".to_string(),
     };
-    commit_current_generation_pointer(&migration_state_dir, &pointer)
+    commit_current_generation_pointer(&StdFs, &migration_state_dir, &pointer)
         .expect("the sole commit-point write must succeed");
     let written = std::fs::read_to_string(migration_state_dir.join("CURRENT.json")).unwrap();
     assert!(
@@ -491,7 +492,7 @@ fn test_BC_1_18_011_INV3_execute_canonical_path_moves_halts_not_aborts_on_single
         },
     ];
 
-    let completed_count = execute_canonical_path_moves(&pending, &intent_log_path).expect(
+    let completed_count = execute_canonical_path_moves(&StdFs, &pending, &intent_log_path).expect(
         "a single move's failure must HALT (not roll back/ABORT) — this function still returns \
          Ok with the count of moves completed before the halt",
     );
@@ -658,8 +659,9 @@ fn test_BC_1_18_011_INV1_write_txn_record_and_read_active_txn_record_round_trip(
     let migration_state_dir = dir.path().join(".factory/migration-state");
     std::fs::create_dir_all(&migration_state_dir).unwrap();
     let record = sample_txn_record(BcIndexMigrationTxnState::Staging);
-    write_txn_record(&migration_state_dir, &record).expect("writing the txn record must succeed");
-    let read_back = read_active_txn_record(&migration_state_dir)
+    write_txn_record(&StdFs, &migration_state_dir, &record)
+        .expect("writing the txn record must succeed");
+    let read_back = read_active_txn_record(&StdFs, &migration_state_dir)
         .expect("reading it back must succeed")
         .expect("a just-written txn record must be found");
     assert_eq!(read_back.txn_id, record.txn_id);
@@ -671,7 +673,7 @@ fn test_BC_1_18_011_INV1_read_active_txn_record_returns_none_when_absent() {
     let dir = tempfile::tempdir().unwrap();
     let migration_state_dir = dir.path().join(".factory/migration-state");
     std::fs::create_dir_all(&migration_state_dir).unwrap();
-    let result = read_active_txn_record(&migration_state_dir)
+    let result = read_active_txn_record(&StdFs, &migration_state_dir)
         .expect("an absent txn file must not itself be an error");
     assert!(result.is_none());
 }
@@ -703,9 +705,10 @@ fn test_BC_1_18_011_intent_log_append_and_read_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let intent_log_path = dir.path().join("intent-abc.log");
     let record = sample_intent_record("hash-post", Some("hash-pre"));
-    append_intent_log_record(&intent_log_path, &record)
+    append_intent_log_record(&StdFs, &intent_log_path, &record)
         .expect("appending a well-formed record must succeed");
-    let read_back = read_intent_log(&intent_log_path).expect("reading it back must succeed");
+    let read_back =
+        read_intent_log(&StdFs, &intent_log_path).expect("reading it back must succeed");
     assert_eq!(read_back.len(), 1);
     assert_eq!(read_back[0].expected_post_hash, "hash-post");
 }
@@ -715,7 +718,7 @@ fn test_BC_1_18_011_intent_log_torn_trailing_record_treated_as_absent_never_part
     let dir = tempfile::tempdir().unwrap();
     let intent_log_path = dir.path().join("intent-abc.log");
     let record = sample_intent_record("hash-post", Some("hash-pre"));
-    append_intent_log_record(&intent_log_path, &record).expect("append must succeed");
+    append_intent_log_record(&StdFs, &intent_log_path, &record).expect("append must succeed");
 
     // Truncate the file mid-record to simulate a crash during the append's
     // own write — a torn record MUST be treated as absent, never parsed as
@@ -724,7 +727,7 @@ fn test_BC_1_18_011_intent_log_torn_trailing_record_treated_as_absent_never_part
     let torn_len = full_bytes.len().saturating_sub(5).max(1);
     std::fs::write(&intent_log_path, &full_bytes[..torn_len]).unwrap();
 
-    let read_back = read_intent_log(&intent_log_path)
+    let read_back = read_intent_log(&StdFs, &intent_log_path)
         .expect("a torn trailing record must not itself be a parse error");
     assert!(
         read_back.is_empty(),
@@ -790,7 +793,7 @@ fn test_BC_1_18_011_EC059_crash_mid_staging_leaves_original_untouched_and_restar
     // nothing beyond stage_new_generation + partial file writes has run;
     // commit_current_generation_pointer (the sole commit point) was never
     // reached.
-    let generation_id = stage_new_generation(&migration_state_dir)
+    let generation_id = stage_new_generation(&StdFs, &migration_state_dir)
         .expect("staging the first generation must succeed");
     let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
     std::fs::create_dir_all(gen_dir.join("shards")).unwrap();
@@ -814,7 +817,7 @@ fn test_BC_1_18_011_EC059_crash_mid_staging_leaves_original_untouched_and_restar
     // Restart: the next attempt stages a FRESH generation rather than
     // resuming the abandoned partial one — the partial staged output is
     // discarded, not healed.
-    let restart_generation_id = stage_new_generation(&migration_state_dir)
+    let restart_generation_id = stage_new_generation(&StdFs, &migration_state_dir)
         .expect("a restart after an abandoned partial staging attempt must still succeed");
     assert_ne!(
         restart_generation_id, generation_id,
@@ -1549,6 +1552,17 @@ fn test_BC_1_18_010_PC1_FC5P1001_run_bc_index_migration_preserves_frontmatter_su
     );
 }
 
+// OBL-1 (D-1232-OBL-1) Fs-seam failpoint reachability is proven by a
+// DEDICATED, separate integration test binary
+// (`bc_1_18_011_b2_migration_obl1_failpoint_smoke_test.rs`), not a test in
+// this file — `fail::cfg` is PROCESS-GLOBAL state, and this file's 55+
+// tests run concurrently by default (`cargo test` multithreads within one
+// binary); a `panic`-action failpoint configured here would race every
+// other test that also happens to call `Fs::rename` and cause flaky
+// spurious failures. A separate `tests/*.rs` file compiles to its own
+// process, so it cannot race this file's tests no matter how `cargo test`
+// schedules threads.
+
 // ---------------------------------------------------------------------------
 // LOCAL adversary pass-2 (S-25.02 cluster-5) crash/multi-txn recovery
 // defects — F-C5-P2-001/002/003. Each test below asserts the REAL BC-1.18.011
@@ -1599,16 +1613,16 @@ fn test_BC_1_18_011_FC5P2_001_read_active_txn_record_returns_the_live_txn_not_a_
     let mut stale_aborted = sample_txn_record(BcIndexMigrationTxnState::Aborted);
     stale_aborted.txn_id = "txn-00000000-stale-aborted".to_string();
     stale_aborted.activation_id = "00000000-stale-aborted".to_string();
-    write_txn_record(&migration_state_dir, &stale_aborted)
+    write_txn_record(&StdFs, &migration_state_dir, &stale_aborted)
         .expect("writing the stale ABORTED record must succeed");
 
     let mut live_staging = sample_txn_record(BcIndexMigrationTxnState::Staging);
     live_staging.txn_id = "txn-ffffffff-live-staging".to_string();
     live_staging.activation_id = "ffffffff-live-staging".to_string();
-    write_txn_record(&migration_state_dir, &live_staging)
+    write_txn_record(&StdFs, &migration_state_dir, &live_staging)
         .expect("writing the live STAGING record must succeed");
 
-    let found = read_active_txn_record(&migration_state_dir)
+    let found = read_active_txn_record(&StdFs, &migration_state_dir)
         .expect("reading the migration-state dir must not itself error")
         .expect("with two txn-*.json files present, a record must be found");
 
@@ -1697,7 +1711,7 @@ fn test_BC_1_18_011_FC5P2_002_run_bc_index_migration_committing_resume_skips_don
         timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
         record_checksum: "checksum-placeholder".to_string(),
     };
-    append_intent_log_record(&intent_log_path, &move_1_record)
+    append_intent_log_record(&StdFs, &intent_log_path, &move_1_record)
         .expect("seeding the prior invocation's DONE record must succeed");
 
     let mut txn = sample_txn_record(BcIndexMigrationTxnState::Committing);
@@ -1714,7 +1728,8 @@ fn test_BC_1_18_011_FC5P2_002_run_bc_index_migration_committing_resume_skips_don
             canonical_path: canonical_2.to_string_lossy().into_owned(),
         },
     ];
-    write_txn_record(&migration_state_dir, &txn).expect("seeding the COMMITTING txn must succeed");
+    write_txn_record(&StdFs, &migration_state_dir, &txn)
+        .expect("seeding the COMMITTING txn must succeed");
 
     let outcome = run_bc_index_migration(dir.path());
     assert!(
@@ -1800,7 +1815,8 @@ fn test_BC_1_18_011_FC5P2_003_run_bc_index_migration_discards_incomplete_staged_
     // staged generation cannot match it, which is exactly what forces
     // EC-003's mandatory resume-time PC1 re-check to fail here.
     txn.source_body_row_sha256 = Some(full_source_body_row_sha256);
-    write_txn_record(&migration_state_dir, &txn).expect("seeding the STAGING txn must succeed");
+    write_txn_record(&StdFs, &migration_state_dir, &txn)
+        .expect("seeding the STAGING txn must succeed");
 
     let outcome = run_bc_index_migration(dir.path());
 
@@ -1816,7 +1832,7 @@ fn test_BC_1_18_011_FC5P2_003_run_bc_index_migration_discards_incomplete_staged_
             // can retry cleanly, per EC-002's "restarts cleanly" and
             // Precondition 6(b)'s writer-exclusion scope (STAGING/COMMITTING
             // ONLY, not ABORTED).
-            let persisted_state = read_active_txn_record(&migration_state_dir)
+            let persisted_state = read_active_txn_record(&StdFs, &migration_state_dir)
                 .expect("reading back the txn record must not itself error")
                 .map(|t| t.state);
             assert_ne!(
