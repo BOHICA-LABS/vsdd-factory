@@ -1228,3 +1228,178 @@ fn test_BC_1_18_011_PRECOND6_admit_or_block_bc_index_writer_creates_reservation_
         "admission must create the writer reservation file for this tool_use_id"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-C5-P1-001 (cycle-5 pass-1 adversary finding) — BC-1.18.010 Postcondition
+// 1: the post-migration canonical BC-INDEX.md lean body MUST retain the
+// ORIGINAL YAML frontmatter (`total_bcs` et al.), the real `## Summary`
+// subsystem-registry table, and any cross-cutting invariants — it inserts
+// `## Subsystem Shard Manifest` and removes ONLY the per-subsystem
+// `### SS-NN` BC tables. `run_bc_index_migration`'s `staged_bc_index_body`
+// is currently a hardcoded literal (`"## Summary\n\n## Subsystem Shard
+// Manifest\n\nSee \`shards/BC-INDEX.shard-manifest.toml\`.\n"`) that
+// discards EVERYTHING before the first `### SS-NN` heading wholesale —
+// frontmatter, the real §Summary table, and any cross-cutting invariants —
+// replacing it with a 4-line stub.
+//
+// This is a fresh-run END-TO-END test against a realistic fixture, driving
+// `run_bc_index_migration` for real — NOT the PC1/PC2 unit helpers in
+// isolation above, which cannot see this defect: `verify_content_preservation`
+// and `verify_independent_census` only ever compare STRUCTURED PER-BC ROWS,
+// never the frontmatter/§Summary/invariant prose surrounding them, so the
+// migration completes with `Ok(Completed)` both before and after this fix —
+// the defect is only observable by reading the actual post-migration
+// canonical file content, which is what this test does.
+// ---------------------------------------------------------------------------
+
+/// A realistic pre-split `BC-INDEX.md`: YAML frontmatter with a known
+/// `total_bcs`, a real `## Summary` subsystem-registry table, a
+/// cross-cutting-invariant line, and two `### SS-NN` sections — SS-01 (1
+/// row, deliberately small) and SS-05 (5 rows, deliberately large) — so the
+/// same fixture exercises both the flat first-level split (SS-01, stays
+/// under `shard_cap_bytes`) and the ADR-051 §Decision 18 second-level
+/// sub-split (SS-05, exceeds `shard_cap_bytes`).
+const FC5P1001_ORIGINAL_CONTENT: &str = "\
+---
+document_type: bc-index
+version: \"1.7\"
+total_bcs: 6
+---
+
+## Summary
+
+| Subsystem | BC-S Prefix | Count | Directory |
+|-----------|------------|-------|-----------|
+| SS-01 Hook Dispatcher Core | BC-1 | 1 | ss-01/ |
+| SS-05 Pipeline Orchestration | BC-5 | 5 | ss-05/ |
+
+## Cross-Cutting Invariants
+
+- INV-BC-INDEX-001: Every BC ID referenced in a story file MUST exist in this index.
+
+## Index by subsystem
+
+### SS-01 — Hook Dispatcher Core (BC-1) — 1 BC
+
+| BC ID | Title | Status | Capability | Stories |
+|-------|-------|--------|-----------|---------|
+| [BC-1.01.001](ss-01/BC-1.01.001.md) | Registry rejects unknown schema version | draft | CAP-TBD | S-15.01 |
+
+### SS-05 — Pipeline Orchestration (BC-5) — 5 BCs
+
+| BC ID | Title | Status | Capability | Stories |
+|-------|-------|--------|-----------|---------|
+| [BC-5.01.001](ss-05/BC-5.01.001.md) | First SS-05 row with a longer descriptive title text | draft | CAP-TBD | TBD |
+| [BC-5.02.001](ss-05/BC-5.02.001.md) | Second SS-05 row with a longer descriptive title text | draft | CAP-TBD | TBD |
+| [BC-5.03.001](ss-05/BC-5.03.001.md) | Third SS-05 row with a longer descriptive title text | draft | CAP-TBD | TBD |
+| [BC-5.04.001](ss-05/BC-5.04.001.md) | Fourth SS-05 row with a longer descriptive title text | draft | CAP-TBD | TBD |
+| [BC-5.05.001](ss-05/BC-5.05.001.md) | Fifth SS-05 row with a longer descriptive title text | draft | CAP-TBD | TBD |
+";
+
+/// A `[[shard]]` config entry whose `shard_cap_bytes` (400) sits strictly
+/// between the fixture's captured SS-01 section size (~265 bytes, under cap
+/// — stays a single flat shard) and its captured SS-05 section size (~755
+/// bytes, over cap — triggers the second-level sub-split), so this single
+/// fixture exercises BOTH split paths in the same migration run.
+const FC5P1001_SHARD_CONFIG: &str = "\
+[[shard]]
+artifact_stem = \"BC-INDEX\"
+artifact_path = \".factory/specs/behavioral-contracts/BC-INDEX.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 400
+shape = \"flat\"
+";
+
+#[test]
+fn test_BC_1_18_010_PC1_FC5P1001_run_bc_index_migration_preserves_frontmatter_summary_and_invariants()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), FC5P1001_SHARD_CONFIG);
+    let canonical_path = bc_index_target(dir.path());
+    std::fs::create_dir_all(canonical_path.parent().unwrap()).unwrap();
+    std::fs::write(&canonical_path, FC5P1001_ORIGINAL_CONTENT).unwrap();
+
+    let outcome = run_bc_index_migration(dir.path())
+        .expect("a well-formed fresh-run migration against this fixture must succeed");
+    assert!(
+        matches!(outcome, BcIndexMigrationOutcome::Completed { .. }),
+        "expected a Completed outcome (the migration itself succeeds even with today's \
+         content-destroying bug — PC1/PC2 only check structured BC rows, not \
+         frontmatter/§Summary/invariants), got {outcome:?}"
+    );
+
+    let lean_body = std::fs::read_to_string(&canonical_path)
+        .expect("the canonical BC-INDEX.md must still exist post-migration");
+
+    // --- YAML frontmatter must survive verbatim (BC-1.18.010 PC1) ---
+    assert!(
+        lean_body.starts_with("---\n"),
+        "F-C5-P1-001: the post-migration lean body must still open with the original YAML \
+         frontmatter delimiter, not a bare \"## Summary\" stub; got:\n{lean_body}"
+    );
+    assert!(
+        lean_body.contains("total_bcs: 6"),
+        "F-C5-P1-001: the frontmatter's total_bcs field must survive VERBATIM into the lean \
+         body, not be discarded by the hardcoded staged_bc_index_body stub; got:\n{lean_body}"
+    );
+    assert!(
+        lean_body.contains("document_type: bc-index"),
+        "F-C5-P1-001: the frontmatter's document_type field must survive; got:\n{lean_body}"
+    );
+
+    // --- the real `## Summary` subsystem-registry table must survive ---
+    assert!(
+        lean_body.contains("SS-01 Hook Dispatcher Core"),
+        "F-C5-P1-001: the §Summary subsystem-registry table's real row content must survive \
+         into the lean body, not be replaced by a bare \"## Summary\\n\\n\" heading with no \
+         rows; got:\n{lean_body}"
+    );
+    assert!(
+        lean_body.contains("SS-05 Pipeline Orchestration"),
+        "F-C5-P1-001: the §Summary table's SS-05 registry row must survive; got:\n{lean_body}"
+    );
+
+    // --- cross-cutting invariants must survive ---
+    assert!(
+        lean_body.contains("INV-BC-INDEX-001"),
+        "F-C5-P1-001: cross-cutting invariant content must survive into the lean body, not be \
+         discarded along with everything else before the first ### SS-NN heading; \
+         got:\n{lean_body}"
+    );
+
+    // --- the inserted §Subsystem Shard Manifest section must be present ---
+    assert!(
+        lean_body.contains("## Subsystem Shard Manifest"),
+        "the migration must still insert the §Subsystem Shard Manifest section; got:\n{lean_body}"
+    );
+
+    // --- the per-subsystem BC tables must be REMOVED from the lean body
+    // (BC-1.18.010 Invariant 3 removes ONLY these, per this test's other
+    // assertions that everything else survives) ---
+    assert!(
+        !lean_body.contains("[BC-1.01.001]"),
+        "the per-subsystem BC row for BC-1.01.001 must have MOVED to its shard file, not \
+         remain in the lean canonical body; got:\n{lean_body}"
+    );
+    assert!(
+        !lean_body.contains("[BC-5.01.001]"),
+        "the per-subsystem BC row for BC-5.01.001 must have MOVED to its shard file, not \
+         remain in the lean canonical body; got:\n{lean_body}"
+    );
+
+    // --- and the rows must have actually landed in SS-01's shard file, not
+    // simply vanished (SS-01 stays flat — under shard_cap_bytes) ---
+    let ss01_shard = std::fs::read_to_string(
+        dir.path()
+            .join(".factory/specs/behavioral-contracts/shards/BC-INDEX-SS-01.md"),
+    )
+    .expect("SS-01's shard file must exist post-migration");
+    assert!(
+        ss01_shard.contains("[BC-1.01.001]"),
+        "SS-01's BC row content must have moved into its own shard file, confirming the row \
+         was relocated (not lost) even though it is correctly absent from the lean body above"
+    );
+}
