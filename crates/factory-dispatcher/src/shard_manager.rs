@@ -13972,6 +13972,90 @@ pub fn commit_current_generation_pointer(
     migration_durable_write(&path, json.as_bytes())
 }
 
+/// OBL-1 WAL-ordering fix (research finding #4; ADR-052 §Decision 7b
+/// "Durable ordering (WAL boundary)" / §Decision 7c step 3): append one
+/// INTENT record for EVERY pending canonical-path move, computed from the
+/// ALREADY-STAGED staging file's content (`expected_post_hash`) and the
+/// current canonical target's content if any (`expected_pre_state`,
+/// `None` = the `missing` sentinel) — BEFORE the `CURRENT.json` pointer
+/// swap and BEFORE the Postcondition 3a TOCTOU fingerprint recheck.
+///
+/// This is the fix for the previously-confirmed code-vs-spec deviation: the
+/// migration used to construct+append its ONLY intent-log records (as
+/// `DONE`, never `INTENT`) *inside* [`execute_canonical_path_moves`], i.e.
+/// entirely AFTER the pointer swap and interleaved with (and, per-target,
+/// strictly after) each `std::fs::rename` — leaving a crash between a
+/// rename and its intent-log append with NO durable record explaining the
+/// renamed file at all (the ARIES WAL-ordering violation ADR-052 §7b's own
+/// ratified sequence already forbids).
+///
+/// [`append_intent_log_record`] already calls `file.sync_all()` before
+/// returning (its own doc comment: "WAL boundary... fsync before
+/// returning"), so by the time THIS function returns `Ok(())`, every
+/// target's forward-recovery intent is durable on disk and
+/// [`decide_intent_log_recovery`] can safely classify a crash at ANY later
+/// point in the publication sequence — including before the pointer swap
+/// ever runs.
+///
+/// Idempotent to call twice for the same generation (e.g. a STAGING-resume
+/// invocation re-running this step after a crash that happened before the
+/// pointer swap on a prior attempt): the intent log is append-only and
+/// [`execute_canonical_path_moves`]'s own recovery lookup always consults
+/// the MOST RECENT record per target (`.rev().find(...)`), so a duplicate
+/// `INTENT` record for the same target is harmless — it carries the exact
+/// same `expected_post_hash`/`expected_pre_state` pair both times, since
+/// both are derived from content that does not change between the two
+/// calls (the staging file is immutable until the rename step; the
+/// canonical target is untouched until then too).
+fn append_intent_records_for_pending_moves(
+    intent_log_path: &Path,
+    txn_id: &str,
+    fencing_generation: u64,
+    pending: &[PendingCanonicalMove],
+) -> Result<(), BcIndexMigrationError> {
+    for mv in pending {
+        let staging = PathBuf::from(&mv.staging_path);
+        let canonical = PathBuf::from(&mv.canonical_path);
+
+        let staging_bytes =
+            std::fs::read(&staging).map_err(|source| BcIndexMigrationError::Io {
+                path: staging.clone(),
+                source,
+            })?;
+        let expected_post_hash = sha256_hex(&staging_bytes);
+
+        let expected_pre_state = match std::fs::read(&canonical) {
+            Ok(bytes) => Some(sha256_hex(&bytes)),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+            Err(source) => {
+                return Err(BcIndexMigrationError::Io {
+                    path: canonical.clone(),
+                    source,
+                });
+            }
+        };
+
+        let record = IntentLogRecord {
+            txn_id: txn_id.to_string(),
+            fencing_generation,
+            record_type: IntentLogRecordType::Intent,
+            target_canonical: canonical,
+            staging_path: staging,
+            expected_post_hash,
+            expected_pre_state,
+            timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            // Unused on write -- `append_intent_log_record` computes and
+            // writes its own checksum from the other fields (never trusts
+            // a caller-supplied one), matching the existing convention
+            // `execute_canonical_path_moves`'s own DONE-record construction
+            // below already uses (`record_checksum: String::new()`).
+            record_checksum: String::new(),
+        };
+        append_intent_log_record(intent_log_path, &record)?;
+    }
+    Ok(())
+}
+
 /// ADR-052 §Decision 7c step 7 — execute the canonical path moves,
 /// forward-recoverable via the intent log. On any single move's failure,
 /// this function MUST NOT abort the whole operation: it records the
@@ -13990,7 +14074,11 @@ pub fn commit_current_generation_pointer(
 /// (`RedoRename`), or halt (`FailClosed`) -- resuming forward from the
 /// first genuinely uncompleted move, per Invariant 3. A move with NO
 /// matching intent-log record (the common, non-resumed case) is attempted
-/// exactly as before.
+/// exactly as before. As of the OBL-1 WAL-ordering fix
+/// ([`append_intent_records_for_pending_moves`]), every move normally DOES
+/// have a matching (`INTENT`) record by the time this function runs — the
+/// "no matching record" arm below is retained for defense-in-depth (e.g. a
+/// legacy/corrupted intent log) but is no longer the common case.
 pub fn execute_canonical_path_moves(
     _pending: &[PendingCanonicalMove],
     _intent_log_path: &Path,
@@ -14730,6 +14818,22 @@ pub fn run_bc_index_migration(
                         message: "resumed STAGING txn record has no generation_id".to_string(),
                     }
                 })?;
+                // OBL-1 WAL-ordering fix (§3): the intent log MUST be
+                // durable for every pending move BEFORE the pointer swap —
+                // including on this STAGING-resume path, where a prior
+                // (crashed) attempt may never have reached the intent-append
+                // step at all. Idempotent (see
+                // `append_intent_records_for_pending_moves`'s own doc
+                // comment) — safe to re-run even if the prior attempt did
+                // already append these same records.
+                let resume_intent_log_path =
+                    migration_state_dir.join(format!("intent-{generation_id}.log"));
+                append_intent_records_for_pending_moves(
+                    &resume_intent_log_path,
+                    &txn.txn_id,
+                    txn.fencing_generation,
+                    &txn.pending_canonical_moves,
+                )?;
                 if let Some(source_sha256) = txn.source_sha256.clone() {
                     let canonical_bc_index_path =
                         _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
@@ -15013,6 +15117,26 @@ pub fn run_bc_index_migration(
     if let Err(e) =
         verify_independent_census(&original_census, &staged_bodies, &staged_bc_index_body)
     {
+        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(e);
+    }
+
+    // OBL-1 WAL-ordering fix (§3, fixes research finding #4): append one
+    // durable INTENT record per pending canonical-path move BEFORE the
+    // Postcondition 3a fingerprint recheck and BEFORE the CURRENT.json
+    // pointer swap — matching ADR-052 §Decision 7b's ratified WAL boundary
+    // ("after this fsync, every rename is recoverable"). See
+    // `append_intent_records_for_pending_moves`'s own doc comment. No
+    // rename has occurred yet at this point (Postcondition 4), so a
+    // failure here aborts the staging generation exactly like the
+    // content-preservation/census gates immediately above.
+    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
+    if let Err(e) = append_intent_records_for_pending_moves(
+        &intent_log_path,
+        &txn.txn_id,
+        txn.fencing_generation,
+        &pending_moves,
+    ) {
         abort_staging(&migration_state_dir, &gen_dir, &mut txn);
         return Err(e);
     }
