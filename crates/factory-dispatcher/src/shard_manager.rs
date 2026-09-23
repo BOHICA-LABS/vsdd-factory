@@ -15260,7 +15260,53 @@ pub fn run_bc_index_migration(
 
     // Branch 2 (EC-006/EC-061): completed.json is the permanent terminal
     // record — its mere presence is sufficient, no other file consulted.
+    //
+    // OBL-1 FINDING 3 fix: a crash between `write_completed_record`
+    // durably landing and `finish_committing_migration`'s own
+    // state=Completed txn-record write + gate-reset-to-OPEN calls leaves
+    // BOTH artifacts stuck forever — the txn record at COMMITTING and the
+    // writer-admission gate at LOCKED/DRAINING — because every subsequent
+    // invocation hits THIS short-circuit (completed.json already exists)
+    // and returns before ever reaching `recover()`'s dispatch or
+    // `finish_committing_migration`'s own state/gate writes again, and
+    // `reconcile_stale_admission_gate`'s Branch A cannot self-heal the
+    // gate either (its precondition is `active_txn == None`, but a live
+    // COMMITTING txn record still exists on disk in exactly this
+    // scenario). Give this short-circuit its OWN best-effort convergence
+    // of both: mirroring `finish_committing_migration`'s existing
+    // state=Completed write and gate-reset, idempotent and safe to run
+    // even when both are already converged (the common case), so every
+    // future writer is correctly admitted again AND the txn record itself
+    // reaches its genuine terminal state once the migration has
+    // genuinely, durably completed.
     if fs.exists(&migration_state_dir.join("completed.json")) {
+        if let Ok(Some(mut txn)) = read_active_txn_record(&fs, &migration_state_dir)
+            && txn.state != BcIndexMigrationTxnState::Completed
+        {
+            txn.state = BcIndexMigrationTxnState::Completed;
+            txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            if let Err(e) = write_txn_record(&fs, &migration_state_dir, &txn) {
+                tracing::warn!(
+                    target: "bc_1_18_011_migration",
+                    error = %e,
+                    "run_bc_index_migration: best-effort txn-record convergence to COMPLETED at \
+                     the completed.json short-circuit failed (non-fatal -- this outcome is \
+                     already AlreadyMigrated regardless; a future invocation retries this same \
+                     write)"
+                );
+            }
+        }
+        if let Err(e) =
+            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open)
+        {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                error = %e,
+                "run_bc_index_migration: best-effort gate-state reset to OPEN at the \
+                 completed.json short-circuit failed (non-fatal -- this outcome is already \
+                 AlreadyMigrated regardless; a future invocation retries this same reset)"
+            );
+        }
         return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
     }
 
