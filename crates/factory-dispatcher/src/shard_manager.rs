@@ -14631,10 +14631,36 @@ pub fn run_bc_index_migration(
                 canonical_path: sub_manifest_canonical_path.to_string_lossy().into_owned(),
             });
 
+            // F-C5-P1-005: BC-1.18.010 Postcondition 3's schema annotation
+            // says a sub-sharded subsystem's top-level manifest entry `path`
+            // "becomes a stub pointer once sub_sharded=true" — that must be
+            // an actual file on disk, not a dangling reference. Stage it
+            // through the SAME `migration_durable_write` primitive and the
+            // SAME `pending_canonical_moves` machinery as every other
+            // migration artifact (never a bespoke write path). It carries no
+            // per-BC rows, so it is deliberately NOT added to `staged_bodies`
+            // — like `top_manifest_toml`/`sub_manifest_toml`, it is manifest/
+            // pointer content, not shard row content subject to PC1/PC2.
+            let stub_filename = format!("BC-INDEX-{ss_id}.md");
+            let stub_body = format!(
+                "### {ss_id}\n\nThis subsystem has been sub-sharded (ADR-051 §Decision 18): \
+                 its BC rows now live across multiple sub-shard files instead of a single \
+                 `{stub_filename}` body. See `shards/{sub_manifest_filename}` for the ordered \
+                 list of sub-shards and their BC-ID ranges.\n"
+            );
+            let stub_staging_path = shards_dir.join(&stub_filename);
+            // D-1232-OBL-2(a): staging publish of the sub-sharded stub-pointer file.
+            migration_durable_write(&stub_staging_path, stub_body.as_bytes())?;
+            let stub_canonical_path = shards_canonical_root.join(&stub_filename);
+            pending_moves.push(PendingCanonicalMove {
+                staging_path: stub_staging_path.to_string_lossy().into_owned(),
+                canonical_path: stub_canonical_path.to_string_lossy().into_owned(),
+            });
+
             manifest_entries.push(SubsystemShardManifestEntry {
                 ss_id: ss_id.clone(),
                 bc_prefix,
-                path: format!("shards/BC-INDEX-{ss_id}.md"),
+                path: format!("shards/{stub_filename}"),
                 sub_sharded: true,
                 sub_manifest: Some(format!("shards/{sub_manifest_filename}")),
             });
