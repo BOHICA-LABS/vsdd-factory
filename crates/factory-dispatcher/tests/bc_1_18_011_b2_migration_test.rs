@@ -1548,3 +1548,289 @@ fn test_BC_1_18_010_PC1_FC5P1001_run_bc_index_migration_preserves_frontmatter_su
          was relocated (not lost) even though it is correctly absent from the lean body above"
     );
 }
+
+// ---------------------------------------------------------------------------
+// LOCAL adversary pass-2 (S-25.02 cluster-5) crash/multi-txn recovery
+// defects — F-C5-P2-001/002/003. Each test below asserts the REAL BC-1.18.011
+// contract (Precondition 6(b) writer exclusion "regardless of whether the
+// flock is currently held"; Invariant 3 forward recovery "resumes from the
+// first uncompleted move" and "never partially applied"; Postcondition 5
+// idempotency; EC-002 "the partial staged output is discarded ... restarts
+// cleanly"; EC-003 "resume ... MUST re-run the full census") against the
+// CURRENT implementation, which does not yet honor it. All three MUST FAIL
+// against HEAD `893719bf`.
+// ---------------------------------------------------------------------------
+
+fn sha256_hex_of_bytes(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+#[test]
+fn test_BC_1_18_011_FC5P2_001_read_active_txn_record_returns_the_live_txn_not_a_stale_terminal_one()
+{
+    // F-C5-P2-001: a stale ABORTED txn record and a live STAGING txn record
+    // can legitimately coexist on disk (a completed/aborted migration's
+    // txn-<uuid>.json is never deleted; a fresh attempt writes its OWN NEW
+    // txn-<new-uuid>.json rather than overwriting the old one). Precondition
+    // 6(b) requires ALL mutation tool calls to be blocked "regardless of
+    // whether the flock is currently held" whenever a STAGING/COMMITTING txn
+    // exists — but `read_active_txn_record` today returns whichever
+    // txn-*.json file `std::fs::read_dir` enumerates FIRST, not the live one
+    // specifically. If the stale ABORTED record enumerates first,
+    // `is_bc_index_admission_open` sees `Some(Aborted)` and reports the gate
+    // OPEN even though a STAGING migration is genuinely in flight — silently
+    // defeating Precondition 6(b)'s writer-exclusion guarantee.
+    //
+    // The two txn filenames below are deliberately chosen so the ABORTED
+    // record sorts BOTH alphabetically-first (verified empirically on this
+    // dev platform, macOS/APFS: `read_dir` returns entries in sorted-by-name
+    // order for a freshly created directory) AND is created chronologically
+    // first (ext4/tmpfs's typical small-directory `read_dir` order, which
+    // tracks insertion order below the htree-indexing threshold) — so this
+    // test deterministically reproduces the defect regardless of which
+    // specific ordering rule the underlying filesystem/CI platform uses.
+    let dir = tempfile::tempdir().unwrap();
+    let migration_state_dir = dir.path().join(".factory/migration-state");
+    std::fs::create_dir_all(&migration_state_dir).unwrap();
+
+    let mut stale_aborted = sample_txn_record(BcIndexMigrationTxnState::Aborted);
+    stale_aborted.txn_id = "txn-00000000-stale-aborted".to_string();
+    stale_aborted.activation_id = "00000000-stale-aborted".to_string();
+    write_txn_record(&migration_state_dir, &stale_aborted)
+        .expect("writing the stale ABORTED record must succeed");
+
+    let mut live_staging = sample_txn_record(BcIndexMigrationTxnState::Staging);
+    live_staging.txn_id = "txn-ffffffff-live-staging".to_string();
+    live_staging.activation_id = "ffffffff-live-staging".to_string();
+    write_txn_record(&migration_state_dir, &live_staging)
+        .expect("writing the live STAGING record must succeed");
+
+    let found = read_active_txn_record(&migration_state_dir)
+        .expect("reading the migration-state dir must not itself error")
+        .expect("with two txn-*.json files present, a record must be found");
+
+    assert_eq!(
+        found.state,
+        BcIndexMigrationTxnState::Staging,
+        "read_active_txn_record must return the LIVE (STAGING/COMMITTING) txn record when one \
+         coexists with a stale terminal (ABORTED/COMPLETED) record — never whichever file \
+         std::fs::read_dir happens to enumerate first. Precondition 6(b)'s writer-exclusion \
+         guarantee ('regardless of whether the flock is currently held') depends on the \
+         admission gate always seeing the live txn, not a stale terminal one that happens to \
+         sort/enumerate first. Got state={:?} (txn_id={})",
+        found.state,
+        found.txn_id
+    );
+
+    // The downstream admission-gate consequence — the observable
+    // writer-exclusion guarantee the BC actually cares about.
+    assert!(
+        !is_bc_index_admission_open(BcIndexAdmissionGateState::Open, Some(&found)),
+        "a live STAGING txn coexisting with a stale ABORTED one must still BLOCK writer \
+         admission — got is_bc_index_admission_open == true for state={:?}",
+        found.state
+    );
+}
+
+#[test]
+fn test_BC_1_18_011_FC5P2_002_run_bc_index_migration_committing_resume_skips_done_move_and_reaches_completed()
+ {
+    // F-C5-P2-002: forward recovery (Invariant 3) from a COMMITTING txn must
+    // resume from the FIRST UNCOMPLETED canonical-path move, skipping any
+    // move the intent log + on-disk canonical content together prove is
+    // already DONE (`decide_intent_log_recovery`'s TreatDone row) — never
+    // re-attempting it and never treating its now-consumed
+    // (already-renamed-away) staging file as a hard failure.
+    // `execute_canonical_path_moves` (called by the private
+    // `finish_committing_migration`, itself reachable only through
+    // `run_bc_index_migration`'s public COMMITTING-resume branch — this
+    // test therefore drives the resume through that public entry point)
+    // today ignores the intent log entirely and blindly retries
+    // `std::fs::rename` for every pending move IN ORDER, HALTING on the
+    // first ENOENT — so a crash after move #1 legitimately completed makes
+    // every subsequent resume attempt fail on move #1's own
+    // already-consumed staging path and never reach move #2, which is
+    // genuinely still pending and doable. The migration gets permanently
+    // stuck in COMMITTING (a `BinaryIntegrityFailure` on every resume)
+    // instead of completing.
+    let dir = tempfile::tempdir().unwrap();
+    let migration_state_dir = dir.path().join(".factory/migration-state");
+    std::fs::create_dir_all(&migration_state_dir).unwrap();
+    let generation_id = "fc5p2002";
+    let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+    std::fs::create_dir_all(gen_dir.join("shards")).unwrap();
+    let shards_canonical_root = dir
+        .path()
+        .join(".factory/specs/behavioral-contracts/shards");
+    std::fs::create_dir_all(&shards_canonical_root).unwrap();
+
+    // Move #1: ALREADY COMPLETE from a prior (crashed) invocation —
+    // canonical #1 holds its final content; staging #1 was already consumed
+    // by that prior successful rename (deliberately never re-created here —
+    // ENOENT is the realistic post-crash state).
+    let canonical_1 = shards_canonical_root.join("BC-INDEX-SS-01.md");
+    let already_moved_content = b"already-moved-shard-content";
+    std::fs::write(&canonical_1, already_moved_content).unwrap();
+    let staging_1 = gen_dir.join("shards/BC-INDEX-SS-01.md");
+
+    // Move #2: genuinely still pending.
+    let staging_2 = gen_dir.join("shards/BC-INDEX-SS-05.md");
+    std::fs::write(&staging_2, b"pending-shard-content").unwrap();
+    let canonical_2 = shards_canonical_root.join("BC-INDEX-SS-05.md");
+
+    // Seed the intent log with move #1's DONE record from the prior
+    // invocation, matching canonical #1's actual current content — exactly
+    // what a correct forward-recovery check consults to recognize "this
+    // move is already done."
+    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
+    let move_1_record = IntentLogRecord {
+        txn_id: "txn-fc5p2002".to_string(),
+        fencing_generation: 1,
+        record_type: IntentLogRecordType::Done,
+        target_canonical: canonical_1.clone(),
+        staging_path: staging_1.clone(),
+        expected_post_hash: sha256_hex_of_bytes(already_moved_content),
+        expected_pre_state: None,
+        timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
+        record_checksum: "checksum-placeholder".to_string(),
+    };
+    append_intent_log_record(&intent_log_path, &move_1_record)
+        .expect("seeding the prior invocation's DONE record must succeed");
+
+    let mut txn = sample_txn_record(BcIndexMigrationTxnState::Committing);
+    txn.txn_id = "txn-fc5p2002".to_string();
+    txn.activation_id = "fc5p2002".to_string();
+    txn.generation_id = Some(generation_id.to_string());
+    txn.pending_canonical_moves = vec![
+        PendingCanonicalMove {
+            staging_path: staging_1.to_string_lossy().into_owned(),
+            canonical_path: canonical_1.to_string_lossy().into_owned(),
+        },
+        PendingCanonicalMove {
+            staging_path: staging_2.to_string_lossy().into_owned(),
+            canonical_path: canonical_2.to_string_lossy().into_owned(),
+        },
+    ];
+    write_txn_record(&migration_state_dir, &txn).expect("seeding the COMMITTING txn must succeed");
+
+    let outcome = run_bc_index_migration(dir.path());
+    assert!(
+        matches!(
+            outcome,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 2
+            })
+        ),
+        "COMMITTING-resume must SKIP the already-done move #1 and COMPLETE the \
+         genuinely-pending move #2, reaching Ok(Completed {{ canonical_paths_count: 2 }}) — \
+         today's implementation halts on move #1's already-consumed (ENOENT) staging path and \
+         returns a BinaryIntegrityFailure Err, permanently stuck in COMMITTING instead. Got: \
+         {outcome:?}"
+    );
+    assert!(
+        migration_state_dir.join("completed.json").exists(),
+        "reaching COMPLETED must write the permanent completed.json terminal record"
+    );
+    assert_eq!(
+        std::fs::read(&canonical_2).unwrap(),
+        b"pending-shard-content",
+        "move #2's content must have landed at its canonical path"
+    );
+}
+
+#[test]
+fn test_BC_1_18_011_FC5P2_003_run_bc_index_migration_discards_incomplete_staged_generation_instead_of_sticking_in_staging()
+ {
+    // F-C5-P2-003: EC-002 requires that "the partial staged output is
+    // discarded on the next attempt, which restarts cleanly" when a prior
+    // attempt crashed mid-staging. Here a STAGING txn's generation_id points
+    // at a gen-dir whose shard set is PARTIAL (only SS-01's shard file was
+    // written before the simulated crash; SS-05's is entirely missing) —
+    // EC-003's mandatory resume-time census/PC1 re-run correctly detects
+    // this (the staged 1-row hash cannot match the txn record's captured
+    // 6-row `source_body_row_sha256`) and `resume_from_staging` correctly
+    // returns a `ContentPreservationAbort` Err. The defect is what
+    // `run_bc_index_migration` does with that Err TODAY: it propagates the
+    // Err via `?` with NO cleanup whatsoever — the txn record on disk is
+    // NEVER rewritten off STAGING, and the partial gen-dir is never removed.
+    // Because `is_bc_index_admission_open`/`admit_or_block_bc_index_writer`
+    // treat ANY STAGING txn record as gate-closed, this leaves the
+    // migration-state permanently deadlocked: every future writer is
+    // blocked, and every future `run_bc_index_migration` invocation will
+    // find the SAME stuck STAGING record and fail the SAME way forever —
+    // never discarding the partial generation, never restarting.
+    let dir = tempfile::tempdir().unwrap();
+    write_shard_config(dir.path(), FC5P1001_SHARD_CONFIG);
+    let canonical_path = bc_index_target(dir.path());
+    std::fs::create_dir_all(canonical_path.parent().unwrap()).unwrap();
+    std::fs::write(&canonical_path, FC5P1001_ORIGINAL_CONTENT).unwrap();
+
+    let migration_state_dir = dir.path().join(".factory/migration-state");
+    std::fs::create_dir_all(&migration_state_dir).unwrap();
+    let generation_id = "partial-gen";
+    let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+    std::fs::create_dir_all(gen_dir.join("shards")).unwrap();
+
+    // Only SS-01's shard was staged before the simulated crash — SS-05's
+    // shard file (5 of the fixture's 6 total rows) is simply absent, the
+    // realistic on-disk shape of an interrupted staging pass (EC-002's "6 of
+    // 10" scenario, scaled to this fixture's 2 subsystems).
+    std::fs::write(
+        gen_dir.join("shards/BC-INDEX-SS-01.md"),
+        "### SS-01 — Hook Dispatcher Core (BC-1) — 1 BC\n\n\
+         | BC ID | Title | Status | Capability | Stories |\n\
+         |-------|-------|--------|-----------|---------|\n\
+         | [BC-1.01.001](ss-01/BC-1.01.001.md) | Registry rejects unknown schema version | draft | CAP-TBD | S-15.01 |\n",
+    )
+    .unwrap();
+
+    let full_source_rows = extract_and_sort_bc_rows(FC5P1001_ORIGINAL_CONTENT)
+        .expect("the fixture's full original content must extract cleanly");
+    let full_source_body_row_sha256 = compute_body_row_sha256(&full_source_rows);
+
+    let mut txn = sample_txn_record(BcIndexMigrationTxnState::Staging);
+    txn.txn_id = "txn-partial-gen".to_string();
+    txn.activation_id = "partial-gen".to_string();
+    txn.generation_id = Some(generation_id.to_string());
+    txn.source_sha256 = Some(sha256_hex_of_bytes(FC5P1001_ORIGINAL_CONTENT.as_bytes()));
+    // The FULL (6-row) hash captured at quiescence — the partial (1-row)
+    // staged generation cannot match it, which is exactly what forces
+    // EC-003's mandatory resume-time PC1 re-check to fail here.
+    txn.source_body_row_sha256 = Some(full_source_body_row_sha256);
+    write_txn_record(&migration_state_dir, &txn).expect("seeding the STAGING txn must succeed");
+
+    let outcome = run_bc_index_migration(dir.path());
+
+    match &outcome {
+        Ok(BcIndexMigrationOutcome::Completed { .. }) => {
+            // Best outcome: the partial generation was discarded and a
+            // fresh run completed within this same call.
+        }
+        _ => {
+            // Whatever else `outcome` is (today: an Err), the persisted txn
+            // record must have moved OFF Staging — e.g. to Aborted — so the
+            // writer-admission gate self-heals and a follow-up invocation
+            // can retry cleanly, per EC-002's "restarts cleanly" and
+            // Precondition 6(b)'s writer-exclusion scope (STAGING/COMMITTING
+            // ONLY, not ABORTED).
+            let persisted_state = read_active_txn_record(&migration_state_dir)
+                .expect("reading back the txn record must not itself error")
+                .map(|t| t.state);
+            assert_ne!(
+                persisted_state,
+                Some(BcIndexMigrationTxnState::Staging),
+                "F-C5-P2-003 (EC-002): an incomplete/corrupted staged generation discovered on \
+                 resume must cause the txn record to move OFF Staging (e.g. to Aborted) so the \
+                 writer-admission gate (Precondition 6(b)) self-heals — a STAGING record left \
+                 on disk after a failed resume permanently blocks EVERY future writer and EVERY \
+                 future migration attempt, since read_active_txn_record will keep finding this \
+                 same stuck STAGING record forever, never discarding the partial generation and \
+                 never restarting. run_bc_index_migration outcome was: {outcome:?}, persisted \
+                 txn state: {persisted_state:?}"
+            );
+        }
+    }
+}
