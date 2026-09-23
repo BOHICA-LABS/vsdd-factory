@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.16"
+version: "1.17"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -28,7 +28,7 @@ inputs:
   - crates/factory-dispatcher/src/main.rs
   - plugins/vsdd-factory/hooks-registry.toml
   - .factory/cycles/v1.0-brownfield-backfill/adv-local-adr052-pass3.md
-input-hash: "a9d309a"
+input-hash: "02d5adb"
 # input-hash: run compute-input-hash --update at state-manager registration burst
 ---
 
@@ -1674,6 +1674,121 @@ do ONE of the following:
 
 Both acknowledgments MUST be recorded in the D-1232 entry that ratifies ADR-052.
 
+### Decision 12 — OBL-1 verification architecture: `Fs` trait seam + two-pronged Kani/fault-injection discharge (NEW — discharges [D-1232-OBL-1])
+
+**Status: REFINES/IMPLEMENTS — does not reopen or amend §Decision 4e/5a/7c.** This
+Decision documents how [D-1232-OBL-1] — the implementation-phase Kani + fault-injection
+obligation that the §Verification Strategy subsection above (D-386 Option C accept-at-floor
+ratification) already mandated as a condition of POLICY 22 ratification, and that explicitly
+blocks cluster-5 TDD *completion* — is discharged in code. It adds documentation of a
+verification harness architecture; it is not a change to the frozen drain/gate/txn state
+machine, so it does not trigger the "formal-finding exception or superseding ADR" bar in
+§Status. The governance analysis establishing this (clause-by-clause cross-check against
+§Decision 4e/5a/7c, finding zero design gaps — only code-vs-spec deviations, principally the
+WAL-ordering defect closed by §Decision 7b conformance below) is on file as
+`obl1-recover-refactor-design.md` (architect work product, cluster-5 F4 scope).
+
+**Problem: the ratified state machine's crash-safety and liveness properties were asserted
+by 10 prose adversary passes but not mechanically proven, and its I/O effects were not
+independently fault-injectable.** Kani cannot model real filesystem I/O; a decision function
+that calls `std::fs::rename`/`fsync`/`F_FULLFSYNC` directly is neither Kani-provable nor
+independently crash-testable without conflating the abstract decision logic with the real
+OS's actual (and platform-varying) durability semantics.
+
+**Fix — the `Fs` trait seam.** `crates/factory-dispatcher/src/shard_manager/migration_fs.rs`
+defines a trait of 7 core filesystem operations (`write_temp`, `fsync_file`, `rename`,
+`fsync_dir`, `read`, `exists`, `pointer_swap`, `remove` — the distinct `pointer_swap` op is
+kept separate from `rename` solely so a proof harness can assert the commit predicate fires
+on exactly that call, never on a canonical-path-move rename) plus a separate `append` op (for
+intent-log record writes). Every I/O effect the migration's crash-recovery decision logic
+performs — `recover()`, `execute_canonical_path_moves`, and the §Decision 7c atomic-publication
+sequence — goes through this seam; no direct `std::fs::*` call remains inline in the decision
+functions. This single abstraction boundary is what makes the same decision logic simultaneously:
+- **Kani-modelable:** an in-memory, two-namespace (`live`/`durable`) abstract implementation
+  models POSIX crash semantics (`crash()` collapses `live` into `durable`, i.e. "anything
+  fsynced survives; anything only in `live` is lost") without requiring Kani to reason about
+  real syscalls.
+- **Fault-injectable:** a `fail`-crate-instrumented implementation (feature-gated behind
+  `factory-dispatcher/failpoints`, a no-op under the default feature set) inserts `abort()`
+  crash points at real `rename`/`F_FULLFSYNC`/`fsync` syscall boundaries in a child process,
+  exercising the actual OS.
+
+`StdFs` (the production implementation, same file) delegates `write_temp`/`fsync_file`/
+`fsync_dir` to the existing `last_amended_migrate` `F_FULLFSYNC`-on-macOS /
+`fsync`-elsewhere durable-write primitives (§Decision 7d), and `rename`/`pointer_swap`/`read`/
+`exists`/`remove` to the corresponding unchanged `std::fs`/`Path` calls. This is a pure
+extraction with **zero behavioral change to production I/O** — the same underlying syscalls
+run in the same order (once the §Decision 7b conformance fix below is also applied); the seam
+exists so one decision-logic implementation can run against three call-through targets
+(production, Kani model, fault-injection double) rather than duplicating the logic three times.
+
+**The two-pronged verification split.** Kani and fault-injection are deliberately
+complementary, not redundant — each proves what the other structurally cannot:
+
+- **Kani proves the finite/sequential/pure core** — 7 `#[kani::proof]` harnesses in
+  `crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs`, all PROVED (executed via
+  the `kani` CI job, `.github/workflows/kani.yml`, `#[cfg(kani)]`-gated so it never compiles
+  into a normal build and this job is the only place the harnesses run):
+  1. `recover()` totality — the recovery-decision match, driven against arbitrary bounded
+     inputs, always terminates in exactly one `RecoveryDecision` variant; never panics, never
+     `unreachable!()`.
+  2. Recovery safety predicate — every reachable durable outcome resolves old-or-new-committed,
+     never torn/partial.
+  3. Transition inductive-invariant preservation for the txn-record state machine (one harness
+     for the single-step inductive case, one for a bounded multi-step sequence) — the state
+     enum itself is unchanged from §Decision 7a; this proves totality/safety of transitions
+     already specified there.
+  4. Admission-gate quiescence — re-proves and extends **INV-GATE-TXN**
+     (`gate_state=OPEN ⟹ no txn record in {STAGING, COMMITTING}`, the invariant the v1.14
+     DEF-1 formal-finding exception above introduced) against the model as extended with the
+     drain/reservation wiring now reachable in the implementation.
+  5. Bounded pointer-swap crash-atomicity + WAL ordering — a symbolic bounded crash-trace
+     harness (nondeterministic crash point across the write/fsync/rename/fsync/pointer-swap/
+     append sequence) proving `recover()` applied to the post-crash durable state always
+     converges to exactly the OLD or NEW generation, never torn — run as a before/after
+     regression pair against the pre-fix and post-fix call ordering, the same
+     "prove the fix actually fixes it" form this ADR's DEF-1/INV-GATE-TXN precedent already
+     established.
+  6. Recovery idempotence — `recover()` → apply decision → `recover()` again converges to the
+     same (or next-table-row-deterministic) decision; never a repeated destructive action.
+- **Fault-injection covers the real-OS refinement Kani cannot** — 30 tests in
+  `crates/factory-dispatcher/tests/bc_1_18_011_b2_migration_crash_injection_test.rs`, all
+  green, feature-gated behind `factory-dispatcher/failpoints` (a no-op under the default
+  feature set). Each test restores an identical fixture directory, runs the migration in a
+  **child process** with a named `migration_fs::*` failpoint configured to call
+  `std::process::abort()` (a genuine SIGABRT crash — no stack unwinding, no destructors run;
+  deliberately never `fail`'s own `"panic"` action, which is not power-loss-equivalent) at a
+  real `rename`/`F_FULLFSYNC`/`fsync` syscall boundary, then runs `recover()` via `StdFs`
+  against the crashed on-disk state and asserts: resolution is exactly OLD or NEW generation;
+  every referenced shard parses and passes its recorded hash; the txn record reaches a
+  terminal state; a second recovery pass is idempotent. This is the empirical confirmation
+  that the real filesystem satisfies the abstract `Fs` model's axioms (the two-namespace
+  live/durable model and the atomic-rename axiom) — a separate refinement obligation from the
+  Kani safety proof itself, not a re-derivation of it.
+
+**§Decision 7b WAL-ordering conformance (not a spec change).** §Decision 7b's durable-ordering
+sequence was always specified as: sync staging files → append+fsync the INTENT record for
+every target (the WAL boundary — "after this fsync, every rename is recoverable") →
+pre-commit fingerprint recheck → pointer swap → per-target rename → fsync parent dir →
+append DONE record. The implementation had deviated from this by constructing and appending
+each target's INTENT record only after that target's `rename` (inside
+`execute_canonical_path_moves`, post-swap), leaving a crash window between rename and its
+recovery record with no durable explanation — a code-vs-spec conflict, not a spec gap (per
+CLAUDE.md's Standing Rule: spec wins). The OBL-1 discharge moves INTENT-record
+construction+append+fsync to a new pre-swap loop over all pending targets, strictly before
+the pre-commit fingerprint recheck and pointer swap, exactly matching the sequence §Decision
+7b already specifies; `execute_canonical_path_moves` is unchanged in its post-swap
+rename→fsync-dir→append-DONE sequence. Kani harness 5 above is the before/after regression
+proof that this reorder closes the gap.
+
+**Discharges [D-1232-OBL-1].** With 7/7 Kani harnesses PROVED and 30/30 fault-injection tests
+green, both verification arms this ADR's own §Verification Strategy subsection specified —
+"Kani model-checking harnesses on the Rust state machine (executor.rs + shard_manager.rs)...
+Exhaustive crash-interleaving fault-injection tests" — are complete. This closes the cluster-5
+TDD completion blocker [D-1232-OBL-1] set by the ratification. §Decision 4e/5a/7c's frozen
+text is unchanged; the prose-freeze clause in §Consequences → Verification Strategy remains in
+force for any future amendment not grounded in a formal/model-check finding.
+
 ---
 
 ## Error Code Semantics
@@ -2424,6 +2539,7 @@ it is not expanded or narrowed by this fix.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.17 | 2026-09-23 | architect | Adds §Decision 12 — OBL-1 verification architecture (documentary; discharges [D-1232-OBL-1], the implementation-phase Kani + fault-injection obligation this ADR's own §Verification Strategy subsection mandated). Documents the `Fs` trait seam (`crates/factory-dispatcher/src/shard_manager/migration_fs.rs`, 7 core ops + `append`) as the abstraction boundary enabling both Kani model-checking (in-memory two-namespace `live`/`durable` model) and real-filesystem fault-injection (feature-gated `fail`-instrumented crash points), with `StdFs` delegating to the existing §Decision 7d `F_FULLFSYNC`/`fsync` durable-write primitives — zero behavioral change to production I/O. Records the two-pronged verification split: 7/7 `#[kani::proof]` harnesses PROVED in `crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs` (recover() totality, recovery-safety predicate, transition inductive invariants, INV-GATE-TXN admission-gate quiescence re-verification, bounded pointer-swap crash-atomicity + WAL-ordering before/after regression, recovery idempotence), executed via the `kani` CI job (`.github/workflows/kani.yml`); 30/30 green fault-injection tests in `crates/factory-dispatcher/tests/bc_1_18_011_b2_migration_crash_injection_test.rs` (child-process `abort()`-based crash injection at real syscall boundaries, empirically confirming the `Fs` model's axioms against the real OS). Cross-references the §Decision 7b WAL-ordering conformance fix: the implementation had deviated from the always-ratified INTENT-before-pointer-swap ordering (constructing/appending INTENT records post-rename instead of pre-swap); the fix brings code into conformance with the unchanged §Decision 7b text (spec wins, per CLAUDE.md Standing Rule) — Kani harness 5 is the before/after regression proof. **Governance verdict: REFINES/IMPLEMENTS, not CHANGES-RATIFIED** — §Decision 4e/5a/7c's frozen state-machine text is unchanged by this entry; it documents an already-mandated verification harness architecture, not a new design decision, so it does not trigger the "formal-finding exception or superseding ADR" bar in §Status. Full governance analysis on file as `obl1-recover-refactor-design.md` (architect work product). No BC-1.18.011/BC-1.18.010/error-taxonomy amendment required — this entry changes how the ratified behavior is verified and how the already-ratified ordering is correctly implemented, not what any BC promises callers. ARCH-INDEX / VP-INDEX / BC-INDEX / STATE.md cross-document propagations are out of scope for this edit (state-manager owns those). |
 | 1.16 | 2026-09-22 | architect | In-place clarification (S-25.02 cluster-5 F4 stub-architect ambiguity adjudication; no design/substance change — the §Decision 4e/5a/7c state-machine freeze is unaffected). §Decision 5c's "Negative tests (cluster-5 TDD scope)" label was internally inconsistent with this ADR's own §Status block, which (since v1.15's D-1232 ratification) explicitly tracks the §5c classifier and its 4 dispatcher-guard amendments as "[D-1232-OBL-4] devops-engineer implements the 4 dispatcher-guard amendments specified in §Decision 5b/5c against this ADR's frozen spec text" — a post-ratification cluster-5 F4 ACTIVATION-boundary deliverable, distinct from cluster-5 TDD (contrast [D-1232-OBL-1], which explicitly DOES block cluster-5 TDD completion) — and with the §Files-to-Change table, where `validate-factory-path-staging`/`validate-factory-path-staged` are both explicitly devops-engineer/cluster-5-activation rows, never an implementer/cluster-5-TDD row. The stale label (predating the D-1232 OBL split) risked test-writer authoring Bash-admission Red Gate tests inside cluster-5's T-10/T-11 TDD scope for logic that `bc_index_migration_admission_precheck` (BC-1.18.011 Precondition 6(b), Edit/Write/MultiEdit only) does not and should not implement. Fixed: label corrected to attribute the negative-test list to devops-engineer's OBL-4 activation deliverable; the test list itself (REJECTED/BRANCH-2/H1 assertions) is unchanged — it remains this classifier's own acceptance criteria, just correctly attributed. No change to §Decision 1–11 substance, the ratified state machine, or any BC/error-taxonomy content. |
 | 1.15 | 2026-09-20 | architect | Status flip: `proposed` → `accepted`, per POLICY 22 ratification (D-1232, 2026-09-20). Basis = the D-1231 mechanical Kani proof: DEF-1 (HIGH) concurrency regression fixed in v1.14 via the Option-B structural drain reorder (initial txn-record write moved to step 3a, strictly after the step-3 DRAINING flip); re-verification confirmed 7/7 VP proofs PROVED, INV-GATE-TXN invariant (`gate_state=OPEN ⟹ no txn record in {STAGING, COMMITTING}`) UNSAT under the corrected model, non-vacuity CONFIRMED, and 5/5 regression + 7/7 fault-injection tests PASS. §Status block updated from the v1.13/v1.14 "PROPOSED" narrative to an ACCEPTED disposition reflecting this ratification; the two outstanding v1.13 human sign-off items ((i) macOS exec-TOCTOU sub-instruction stat→execve gap residual window, (ii) APFS darwin-arm64 directory-fsync durability test) and the remaining cluster-5 activation-boundary obligations ([D-1232-OBL-3] CLAUDE.md §Decision 8 amendment application, [D-1232-OBL-4] the 4 dispatcher-guard amendments per §Decision 5b) are UNCHANGED by this burst and remain tracked as post-ratification activation-boundary work, not ratification blockers. No content change to §Decision 1–11 substance; this is a status/lifecycle-only amendment. ARCH-INDEX / VP-INDEX / BC-INDEX / STATE.md updates are out of scope for this edit (state-manager owns those cross-document propagations). |
 | 1.14 | 2026-09-20 | architect | Fix-burst (Kani model-checking pass-1, DEF-1, human-directed spec/design convergence per D-386 Option C — "more convergence before accept-at-floor ratification"; pipeline PAUSED, cluster-5 TDD BLOCKED, unaffected by this burst). DEF-1 (HIGH) — uncovered self-heal window: v1.11's step-2.5 reordering (writing the initial txn record BEFORE the DRAINING flip, as a stated "defense-in-depth" measure) opened a NEW crash sub-window that did not exist before v1.11 — a coordinator crash strictly between the old step 2.5 (txn written, gate STILL OPEN) and step 3 (DRAINING flip) left durable state `gate=OPEN, txn=STAGING(generation_id=null), flock released, no gen dir, dead coordinator`. §5a step 3.5's self-heal predicate (gated on `gate_state ∈ {LOCKED, DRAINING}`) never matched this state; the ordinary admission check blocked the writer on the active STAGING txn regardless of gate_state; §4e's DISCARD row for this sub-state is reachable only via migration-binary re-invocation, contradicting this ADR's own v1.10/v1.13 guarantee that E-MAINTENANCE-001 always self-heals by the next PreToolUse. Root cause: v1.11's own rationale for the pre-DRAINING txn write was that the flock check (step 3.5 sub-step a) was already the primary/sufficient exclusion guard — the pre-DRAINING write was redundant defense-in-depth that introduced this regression without adding real safety. Three candidate fixes were evaluated: (A) extend step 3.5 Branch B to also cover `gate=OPEN` (adds another special-case branch — the exact anti-pattern behind the pass-8/9/13 regressions); (B) reorder the drain so the DRAINING flip (step 3) precedes the txn write (structural fix, chosen); (C) make the txn-write and gate-flip a single atomic critical section across two separate files (rejected — the two writes are already effectively serialized by the coordinator's continuous hold on `exclusive.lock`, so "atomicity" does not address the actual defect, which is a *durable-state reachability* problem, not a concurrency-atomicity problem, and cross-file atomic writes would be a materially larger redesign for no additional safety). Fixed (Option B): §Decision 5a drain procedure reordered — the initial txn-record write moves from "step 2.5" to new step **3a**, strictly AFTER step 3 (DRAINING flip) completes, restoring the pre-v1.11 ordering guarantee (`gate_state = OPEN` implies no active STAGING/COMMITTING txn record can exist) while KEEPING the v1.11 flock-gated step-3.5 sub-step-a check as the sole load-bearing writer-exclusion mechanism, unchanged. No new step-3.5 predicate branch was added; Branch A and Branch B are unchanged, and Branch B's precondition (`gate ∈ {LOCKED, DRAINING}`) is now provably always true whenever `txn=STAGING(generation_id=null)` exists, closing the gap by construction rather than by enumeration. Drain-timeout abort (step 4) simplified: the txn record now always exists by step 4 (step 3a is unconditional and precedes it), removing a conditional branch. Swept: §4e scope note, step-3.5 Branch B text and non-reconciliation Note, "Applied same-burst" self-heal description, fault-injection test mandate (2 new DEF-1 tests: step-3/step-3a interstitial-crash test and a construct-and-assert-UNSAT regression test proving `gate=OPEN` with an active txn is unconstructible), §Files-to-Change `executor.rs` and `tests/` rows, Status block. §Consequences → Verification Strategy: added the v1.14 DEF-1 sanctioned formal-finding exception to the §Decision 4e/5a/7c prose-freeze clause, plus a precise re-verification directive (model-order change, crash-point enumeration, and the INV-GATE-TXN invariant statement — `gate_state=OPEN ⟹ no txn record in {STAGING, COMMITTING}` — that the formal-verifier's next Kani pass, labeled VP-M7, must re-prove) for the formal-verifier follow-up pass. §BC Impact: added v1.14 note confirming no BC or error-taxonomy changes are required (the fix is purely an internal step-ordering change; `E-MAINTENANCE-001`'s trigger condition was already accurate and remains unchanged). §Source/Origin and §References updated with Kani pass-1 provenance (D-1231). In-place v1.14 correction (unrelated stale citation found while restructuring §Decision 5a): "Abort gate-reset obligation" list item "Drain-timeout abort (step 3 above)" corrected to "(step 4 above)" — the drain-timeout abort has always been the step-4 reservation-poll-timeout path, not the step-3 DRAINING flip; this was a pre-existing stale citation unrelated to DEF-1, fixed in-scope per the mechanical-fix production-grade default. |
