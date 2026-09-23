@@ -48,20 +48,60 @@
 //!
 //! # Call-graph wiring status
 //!
-//! This module defines the trait and its production adapter as a
-//! compiling, independently unit-testable seam. Threading `&impl Fs`
-//! through the full existing call graph (`execute_canonical_path_moves`,
-//! `commit_current_generation_pointer`, `stage_new_generation`,
-//! `append_intent_log_record`, `read_intent_log`, `read_active_txn_record`,
-//! `write_txn_record`, `run_bc_index_migration`'s own body) is NOT done in
-//! this burst — those functions still call `std::fs`/
-//! `migration_durable_write` directly, unchanged, zero behavioral
-//! difference from before this module existed. `recover()`
-//! ([`super::recover`]) is built as a pure function over already-gathered
-//! data (no `Fs` parameter) rather than requiring the full thread-through,
-//! so the fail-open structural fix (finding #1) does not depend on this
-//! wiring gap. See the OBL-1 discharge report for the explicit remaining-
-//! work boundary.
+//! `&impl Fs` is now threaded through the real migration call graph:
+//! `execute_canonical_path_moves`, `commit_current_generation_pointer`,
+//! `stage_new_generation`, `append_intent_log_record`, `read_intent_log`,
+//! `read_active_txn_record`, `write_txn_record`,
+//! `append_intent_records_for_pending_moves`, `discard_incomplete_staging`,
+//! `finish_committing_migration`, `admit_or_block_bc_index_writer`,
+//! `reconcile_stale_admission_gate`, and `run_bc_index_migration`'s own
+//! body all take (or, for `run_bc_index_migration`, construct and thread)
+//! an `&impl Fs` — production call sites pass `&StdFs`. This makes every
+//! `migration_fs::*` failpoint reachable from real execution (see this
+//! module's own `failpoints`-feature smoke test in
+//! `bc_1_18_011_b2_migration_test.rs`, which exercises
+//! `migration_fs::rename` via `run_bc_index_migration`).
+//!
+//! Deliberately left OUTSIDE the `Fs` seam (per the OBL-1 design's own
+//! "keep abstract domains tiny" guidance, §1.2/§1.4): directory-listing
+//! enumeration (`read_active_txn_record`'s `std::fs::read_dir` glob scan —
+//! the design's own §1.2 exclusion note), `mkdir` calls
+//! (`std::fs::create_dir_all` for the migration-state/reservations/gen
+//! directories — idempotent, not itself a crash-recovery decision input;
+//! only the subsequent directory-entry `fsync_dir` durability barrier is
+//! safety-critical, and that IS seamed), one-time infra bootstrap (the
+//! `exclusive.lock` sentinel file, the reservations directory), and reads
+//! of the pre-migration canonical source file
+//! (`run_bc_index_migration`'s initial `std::fs::read_to_string` of
+//! `BC-INDEX.md` — the migration's INPUT, not its own crash-atomicity
+//! state). `pre_commit_fingerprint_recheck` and `resume_from_staging` are
+//! also left unthreaded — neither is named in the OBL-1 implementer scope
+//! (§6.1 item 1's explicit function list), and both read the same
+//! pre-existing canonical/staged content rather than mutating migration
+//! state.
+//!
+//! `write_txn_record` is threaded onto `Fs::write_temp` +
+//! `Fs::fsync_file`, which — because `StdFs::write_temp` delegates to the
+//! STRICT `F_FULLFSYNC`-class `super::migration_durable_write` primitive —
+//! is a deliberate STRENGTHENING of the txn record's durability barrier
+//! from `last_amended_migrate::atomic_write::write_atomic` (the lighter,
+//! Unix-best-effort-dir-fsync primitive it used before this burst) to the
+//! same STRICT primitive `CURRENT.json`/the intent log/`completed.json`
+//! already use. Surfaced explicitly here rather than silently changed: the
+//! txn record is exactly as crash-recovery-critical as those three
+//! artifacts (the WHOLE `recover()` decision tree is keyed off it), so
+//! leaving it on the weaker primitive while everything else in the same
+//! recovery protocol uses the STRICT one was itself an inconsistency: this
+//! is a correctness improvement, not a silent behavioral regression — it
+//! makes the on-disk txn record durable, never fsync-weaker than the
+//! CURRENT.json pointer whose commit it gates. Every other threaded
+//! function keeps its EXACT prior underlying primitive (zero behavioral
+//! change) — this is the one intentional exception, and it is additive
+//! (stronger guarantee), never weaker.
+//!
+//! `recover()` ([`super::recover`]) remains a pure function over
+//! already-gathered data (no `Fs` parameter) as designed — it performs no
+//! I/O itself.
 
 use std::path::Path;
 
@@ -120,6 +160,26 @@ pub trait Fs {
     /// failure here must never be treated as migration-correctness
     /// failure (ADR-052 §7c step 9: cleanup is optional housekeeping).
     fn remove(&self, path: &Path) -> Result<(), BcIndexMigrationError>;
+
+    /// Durably append `content` to `path` (creating it if absent) — the
+    /// intent log's own I/O pattern (ADR-052 §Decision 7b), which is
+    /// fundamentally an append-only WAL, not a whole-file replace. Added
+    /// alongside [`Fs::write_temp`]/[`Fs::fsync_file`] rather than modeled
+    /// as one of them: the OBL-1 design's own fault-injection boundary list
+    /// (research §6.3) names `append+fsync(intent, ...)` as ITS OWN
+    /// boundary, distinct from `write(temp) -> fsync(temp)`, so collapsing
+    /// it onto `write_temp` would both be semantically wrong (an append is
+    /// never a temp-then-rename publish) and would silently merge two
+    /// fault-injection boundaries the design treats as separate. Production
+    /// bundles the write+fsync into one call (mirroring the
+    /// `write_temp`/`fsync_file` granularity note above) — delegates to the
+    /// SAME `OpenOptions::append(true)` + `write_all` + `sync_all` sequence
+    /// [`super::append_intent_log_record`] already performed before this
+    /// seam existed. Model (Kani, formal-verifier's harness): appends to
+    /// the abstract `live` namespace's content for `path`'s `FileId`, not
+    /// yet `durable` until a harness-level promotion (mirrors
+    /// `write_temp`'s own live/durable split).
+    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +294,31 @@ impl Fs for StdFs {
             }
         }
     }
+
+    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
+        migration_failpoint!("migration_fs::append");
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|source| BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        use std::io::Write as _;
+        file.write_all(content)
+            .map_err(|source| BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        // WAL boundary (ADR-052 §Decision 7b step 2/5): fsync before
+        // returning, same discipline `write_temp`'s bundled durable-write
+        // primitive already provides for staging publishes.
+        file.sync_all().map_err(|source| BcIndexMigrationError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -306,5 +391,15 @@ mod tests {
         let fs = StdFs;
         fs.remove(&sub).unwrap();
         assert!(!fs.exists(&sub));
+    }
+
+    #[test]
+    fn test_OBL1_std_fs_append_creates_file_then_appends_subsequent_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("intent.log");
+        let fs = StdFs;
+        fs.append(&path, b"first-").unwrap();
+        fs.append(&path, b"second").unwrap();
+        assert_eq!(fs.read(&path).unwrap(), Some(b"first-second".to_vec()));
     }
 }
