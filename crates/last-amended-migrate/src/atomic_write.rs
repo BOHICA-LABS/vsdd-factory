@@ -129,15 +129,39 @@ const RENAME_RETRY_BASE_DELAY: Duration = Duration::from_millis(20);
 /// bound before propagating, which is a harmless (if slightly redundant)
 /// no-op path, never a masked failure.
 pub fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    rename_with_retry_impl(
+        from,
+        to,
+        |f: &Path, t: &Path| std::fs::rename(f, t),
+        std::thread::sleep,
+    )
+}
+
+/// Testable core of [`rename_with_retry`]: identical retry-with-backoff
+/// logic, but with the rename operation and the sleep function injected
+/// rather than hardcoded to `std::fs::rename`/`std::thread::sleep`, so the
+/// retry loop itself (attempt counting, backoff sequence, which errors are
+/// retried) can be unit-tested deterministically and instantly — without a
+/// real filesystem race or real `Duration`-length sleeps.
+fn rename_with_retry_impl<R, S>(
+    from: &Path,
+    to: &Path,
+    mut rename_fn: R,
+    mut sleep_fn: S,
+) -> std::io::Result<()>
+where
+    R: FnMut(&Path, &Path) -> std::io::Result<()>,
+    S: FnMut(Duration),
+{
     let mut attempt = 0u32;
     loop {
-        match std::fs::rename(from, to) {
+        match rename_fn(from, to) {
             Ok(()) => return Ok(()),
             Err(source)
                 if source.kind() == std::io::ErrorKind::PermissionDenied
                     && attempt + 1 < RENAME_RETRY_MAX_ATTEMPTS =>
             {
-                std::thread::sleep(RENAME_RETRY_BASE_DELAY * (1 << attempt));
+                sleep_fn(RENAME_RETRY_BASE_DELAY * (1 << attempt));
                 attempt += 1;
             }
             Err(source) => return Err(source),
@@ -427,4 +451,170 @@ fn write_and_sync_temp_strict(tmp_path: &Path, content: &str) -> std::io::Result
     let mut file = File::create(tmp_path)?;
     file.write_all(content.as_bytes())?;
     sync_file_durable(&file)
+}
+
+// ---------------------------------------------------------------------------
+// PR #842 fix-burst (pr-reviewer REQUEST_CHANGES) — unit tests for
+// `rename_with_retry`'s retry-with-backoff mechanism, exercised through the
+// injectable `rename_with_retry_impl` core so the retry loop itself (attempt
+// counting, backoff sequence, which error conditions are retried) is
+// verified deterministically and instantly, with no real filesystem race and
+// no real `Duration`-length sleeps.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A scripted rename error: either a plain `ErrorKind` (portable, what a
+    /// non-Windows caller would actually observe) or a raw OS error code
+    /// (used to simulate Windows-specific codes like `ERROR_SHARING_VIOLATION`
+    /// (32) / `ERROR_LOCK_VIOLATION` (33) regardless of the host platform this
+    /// test suite actually runs on — `std::io::Error::from_raw_os_error` is a
+    /// portable *constructor*, even though the numeric code it wraps is only
+    /// ever produced by a real Windows syscall in production).
+    #[derive(Clone, Copy)]
+    enum ScriptedError {
+        Kind(std::io::ErrorKind),
+        Raw(i32),
+    }
+
+    impl ScriptedError {
+        fn make(self) -> std::io::Error {
+            match self {
+                ScriptedError::Kind(kind) => std::io::Error::from(kind),
+                ScriptedError::Raw(code) => std::io::Error::from_raw_os_error(code),
+            }
+        }
+    }
+
+    /// Builds a `rename_fn` double that fails with `err` for the first
+    /// `fail_count` calls, then succeeds on every call after that. Returns
+    /// the closure plus a shared call counter the test can inspect
+    /// afterward, since the closure itself is moved into
+    /// `rename_with_retry_impl`.
+    fn scripted_rename(
+        fail_count: u32,
+        err: ScriptedError,
+    ) -> (
+        impl FnMut(&Path, &Path) -> std::io::Result<()>,
+        Rc<RefCell<u32>>,
+    ) {
+        let calls = Rc::new(RefCell::new(0u32));
+        let calls_inner = Rc::clone(&calls);
+        let rename_fn = move |_from: &Path, _to: &Path| -> std::io::Result<()> {
+            let mut n = calls_inner.borrow_mut();
+            *n += 1;
+            if *n <= fail_count {
+                Err(err.make())
+            } else {
+                Ok(())
+            }
+        };
+        (rename_fn, calls)
+    }
+
+    /// Finding 1: fails `PermissionDenied` twice, then succeeds — the retry
+    /// loop must absorb both failures and return `Ok`, having called the
+    /// underlying rename exactly 3 times (2 failures + 1 success), never
+    /// more.
+    #[test]
+    fn test_rename_with_retry_impl_retries_then_succeeds() {
+        let (rename_fn, calls) =
+            scripted_rename(2, ScriptedError::Kind(std::io::ErrorKind::PermissionDenied));
+        let mut sleeps = Vec::new();
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |d| {
+            sleeps.push(d)
+        });
+
+        assert!(
+            result.is_ok(),
+            "must succeed once the underlying rename does: {result:?}"
+        );
+        assert_eq!(
+            *calls.borrow(),
+            3,
+            "must call the underlying rename exactly N+1 times (2 failures + 1 success)"
+        );
+    }
+
+    /// Finding 1: a `PermissionDenied` that NEVER clears must propagate the
+    /// original error after exactly `RENAME_RETRY_MAX_ATTEMPTS` attempts —
+    /// not more (bounded), not fewer (the full retry budget is spent before
+    /// giving up).
+    #[test]
+    fn test_rename_with_retry_impl_exhausts_retries_then_propagates_original_error() {
+        let (rename_fn, calls) = scripted_rename(
+            RENAME_RETRY_MAX_ATTEMPTS + 5,
+            ScriptedError::Kind(std::io::ErrorKind::PermissionDenied),
+        );
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |_| {});
+
+        let err = result.expect_err("must propagate an error once retries are exhausted");
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "the original error kind must be propagated unchanged"
+        );
+        assert_eq!(
+            *calls.borrow(),
+            RENAME_RETRY_MAX_ATTEMPTS,
+            "must attempt exactly RENAME_RETRY_MAX_ATTEMPTS times total, not more or fewer"
+        );
+    }
+
+    /// Finding 1: a non-retried error kind (e.g. `NotFound`) must propagate
+    /// immediately after exactly one attempt — a genuinely different failure
+    /// reason must never be masked behind the transient-lock retry budget.
+    #[test]
+    fn test_rename_with_retry_impl_does_not_retry_non_retried_error_kinds() {
+        let (rename_fn, calls) = scripted_rename(
+            RENAME_RETRY_MAX_ATTEMPTS + 5,
+            ScriptedError::Kind(std::io::ErrorKind::NotFound),
+        );
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |_| {});
+
+        let err = result.expect_err("must propagate a non-retried error");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(
+            *calls.borrow(),
+            1,
+            "a non-retried error kind must return immediately after exactly 1 attempt"
+        );
+    }
+
+    /// Finding 1: the sleep durations passed to the injected `sleep_fn` must
+    /// follow the documented backoff exactly: `20ms * (1 << attempt)` for
+    /// attempts 0..3, i.e. 20ms, 40ms, 80ms, 160ms between the 5 permitted
+    /// attempts.
+    #[test]
+    fn test_rename_with_retry_impl_backoff_sequence_matches_documented_formula() {
+        let (rename_fn, _calls) = scripted_rename(
+            RENAME_RETRY_MAX_ATTEMPTS - 1,
+            ScriptedError::Kind(std::io::ErrorKind::PermissionDenied),
+        );
+        let mut sleeps = Vec::new();
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |d| {
+            sleeps.push(d)
+        });
+
+        assert!(result.is_ok());
+        assert_eq!(
+            sleeps,
+            vec![
+                Duration::from_millis(20),
+                Duration::from_millis(40),
+                Duration::from_millis(80),
+                Duration::from_millis(160),
+            ],
+            "backoff must follow 20ms * (1 << attempt) for attempts 0..3"
+        );
+    }
 }
