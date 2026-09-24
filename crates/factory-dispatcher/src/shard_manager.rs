@@ -14608,9 +14608,18 @@ pub fn commit_current_generation_pointer(
 ///
 /// Reads `.factory/migration-state/CURRENT.json` through the SAME `Fs`
 /// seam every other crash-recovery-decision-driving read in this module
-/// goes through (never a raw `std::fs::read_to_string`), so this check is
-/// itself reachable from a fault-injection scenario like every other input
-/// [`recover`]'s decision tree consumes.
+/// goes through (never a raw `std::fs::read_to_string`) — swappable for a
+/// mock in a unit test the same way every other `Fs` call site is.
+/// **Correction (F3, cluster-5 cycle-4 review):** unlike
+/// `write_temp`/`fsync_file`/`rename`/`fsync_dir`/`pointer_swap`/`remove`/
+/// `append`, [`StdFs::read`](migration_fs::StdFs)'s production
+/// implementation carries NO `migration_failpoint!` instrumentation, so
+/// this call is NOT reachable from this crate's process-level
+/// `fail`-based crash-injection suites the way those other seams are — a
+/// genuine I/O fault at this exact read (e.g. the SEC-004 regression
+/// coverage) is exercised by deleting the real underlying file at a
+/// deterministic upstream `write_temp` hook instead, not by configuring a
+/// `migration_fs::*` failpoint on `read` itself.
 ///
 /// `Ok(None)` covers BOTH "the file does not exist" and "the file exists
 /// but is not valid JSON matching [`CurrentGenerationPointer`]'s wire
