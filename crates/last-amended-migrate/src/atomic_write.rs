@@ -223,13 +223,21 @@ fn sync_dir_durable(dir: &Path) -> std::io::Result<()> {
     sync_file_durable(&dir_file)
 }
 
-/// Windows: see the doc comment on the `#[cfg(unix)]` sibling above for the
-/// full rationale — a directory cannot be opened via `std::fs::File::open`
-/// on Windows, and NTFS's `$LogFile` metadata journal already durably
-/// covers directory-entry mutations without a separate flush operation, so
-/// this is a documented no-op rather than a hard failure or an unsound
-/// weakening of a guarantee NTFS provides some other way.
-#[cfg(windows)]
+/// Non-Unix (Windows, and any other non-Unix target such as
+/// `wasm32-wasip1`): see the doc comment on the `#[cfg(unix)]` sibling
+/// above for the full Windows rationale — a directory cannot be opened via
+/// `std::fs::File::open` on Windows, and NTFS's `$LogFile` metadata journal
+/// already durably covers directory-entry mutations without a separate
+/// flush operation, so this is a documented no-op rather than a hard
+/// failure or an unsound weakening of a guarantee NTFS provides some other
+/// way. Gated on `not(unix)` rather than `windows` specifically so every
+/// non-Unix compilation target — including the `wasm32-wasip1` hook-plugin
+/// target, which is neither `unix` nor `windows` — still has a function
+/// body; a bare `#[cfg(windows)]` complement to `#[cfg(unix)]` leaves
+/// `wasm32-wasip1` (and any other future non-Unix, non-Windows target)
+/// with no definition of `sync_dir_durable` at all, a hard compile error
+/// for every caller (here, `write_atomic_strict_durable`).
+#[cfg(not(unix))]
 fn sync_dir_durable(_dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
