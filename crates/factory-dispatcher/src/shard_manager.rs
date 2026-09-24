@@ -14388,6 +14388,8 @@ pub fn commit_current_generation_pointer(
     fs: &impl Fs,
     _migration_state_dir: &Path,
     _pointer: &CurrentGenerationPointer,
+    _fingerprint_source_paths: &[PathBuf],
+    _expected_source_sha256: Option<&str>,
 ) -> Result<(), BcIndexMigrationError> {
     let target = _migration_state_dir.join("CURRENT.json");
     let tmp = _migration_state_dir.join("CURRENT.tmp.json");
@@ -14407,6 +14409,9 @@ pub fn commit_current_generation_pointer(
     // seam (not the general `Fs::rename`) so Kani/fault-injection harnesses
     // can assert the commit predicate fires on exactly this call.
     fs.pointer_swap(&tmp, &target)?;
+    // TODO(SEC-001): post-swap fingerprint recheck not yet implemented --
+    // plumbing only at this commit.
+    let _ = (_fingerprint_source_paths, _expected_source_sha256);
     // Step 3: durability barrier for the rename's directory-entry change.
     fs.fsync_dir(_migration_state_dir)
 }
@@ -15644,12 +15649,12 @@ pub fn run_bc_index_migration(
                 txn.fencing_generation,
                 &txn.pending_canonical_moves,
             )?;
-            if let Some(source_sha256) = txn.source_sha256.clone() {
-                let canonical_bc_index_path =
-                    _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+            let canonical_bc_index_path =
+                _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+            if let Some(source_sha256) = txn.source_sha256.as_deref() {
                 pre_commit_fingerprint_recheck(
                     std::slice::from_ref(&canonical_bc_index_path),
-                    &source_sha256,
+                    source_sha256,
                 )?;
             }
             let pointer = CurrentGenerationPointer {
@@ -15657,7 +15662,13 @@ pub fn run_bc_index_migration(
                 status: "committing".to_string(),
                 txn_id: txn.txn_id.clone(),
             };
-            commit_current_generation_pointer(&fs, &migration_state_dir, &pointer)?;
+            commit_current_generation_pointer(
+                &fs,
+                &migration_state_dir,
+                &pointer,
+                std::slice::from_ref(&canonical_bc_index_path),
+                txn.source_sha256.as_deref(),
+            )?;
             txn.state = BcIndexMigrationTxnState::Committing;
             write_txn_record(&fs, &migration_state_dir, &txn)?;
             return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
@@ -16038,7 +16049,13 @@ pub fn run_bc_index_migration(
         status: "committing".to_string(),
         txn_id: txn.txn_id.clone(),
     };
-    commit_current_generation_pointer(&fs, &migration_state_dir, &pointer)?;
+    commit_current_generation_pointer(
+        &fs,
+        &migration_state_dir,
+        &pointer,
+        std::slice::from_ref(&canonical_bc_index_path),
+        Some(source_sha256.as_str()),
+    )?;
     txn.state = BcIndexMigrationTxnState::Committing;
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 

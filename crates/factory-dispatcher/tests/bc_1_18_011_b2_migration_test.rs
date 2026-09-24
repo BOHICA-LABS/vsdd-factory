@@ -86,7 +86,7 @@ use factory_dispatcher::executor::{
     bc_index_migration_admission_precheck, resolve_shard_gate_precedence, shard_cap_precheck,
 };
 use factory_dispatcher::payload::HookPayload;
-use factory_dispatcher::shard_manager::migration_fs::StdFs;
+use factory_dispatcher::shard_manager::migration_fs::{Fs, StdFs};
 use factory_dispatcher::shard_manager::{
     BcId, BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationOutcome,
     BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, CompletedMigrationRecord,
@@ -441,12 +441,156 @@ fn test_BC_1_18_011_PC3_commit_current_generation_pointer_writes_current_json_at
         status: "committing".to_string(),
         txn_id: "txn-abc".to_string(),
     };
-    commit_current_generation_pointer(&StdFs, &migration_state_dir, &pointer)
+    commit_current_generation_pointer(&StdFs, &migration_state_dir, &pointer, &[], None)
         .expect("the sole commit-point write must succeed");
     let written = std::fs::read_to_string(migration_state_dir.join("CURRENT.json")).unwrap();
     assert!(
         written.contains("gen-abc") && written.contains("committing"),
         "CURRENT.json must carry the pointer's generation_id and committing status: {written}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SEC-001 (CWE-367/CWE-362) — post-swap TOCTOU widening. `rename_with_retry`
+// (PR #842's Windows-CI transient-rename-denial fix) can retry the
+// `CURRENT.json` pointer-swap rename up to 5 times over ~300ms on Windows,
+// widening the gap between the Postcondition 3a pre-swap fingerprint
+// recheck and the swap's actual completion. A non-participating writer (one
+// bypassing the migration's advisory `exclusive.lock` flock) that mutates
+// the canonical `BC-INDEX.md` inside that widened window must still be
+// caught -- `commit_current_generation_pointer` now re-verifies the
+// fingerprint immediately AFTER a successful (possibly-retried)
+// `Fs::pointer_swap`, reusing `pre_commit_fingerprint_recheck` itself (same
+// computation, same comparison, same `FingerprintMismatchAbort` error) so
+// the post-swap check is a genuine mirror of the pre-swap one, not a
+// superficially-similar but differently-behaved check.
+// ---------------------------------------------------------------------------
+
+/// Wraps `StdFs`, delegating every operation unchanged EXCEPT
+/// `pointer_swap`, which performs the REAL atomic rename via `StdFs` and
+/// then immediately mutates `mutate_path` -- simulating a
+/// non-participating concurrent writer landing its change strictly AFTER
+/// the swap completes (the exact race `rename_with_retry`'s bounded retry
+/// loop can widen) but before `commit_current_generation_pointer` itself
+/// returns.
+struct MutateAfterSwapFs {
+    mutate_path: PathBuf,
+    mutate_content: &'static [u8],
+}
+
+impl Fs for MutateAfterSwapFs {
+    fn write_temp(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
+        StdFs.write_temp(path, content)
+    }
+
+    fn fsync_file(&self, path: &Path) -> Result<(), BcIndexMigrationError> {
+        StdFs.fsync_file(path)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), BcIndexMigrationError> {
+        StdFs.rename(from, to)
+    }
+
+    fn fsync_dir(&self, dir: &Path) -> Result<(), BcIndexMigrationError> {
+        StdFs.fsync_dir(dir)
+    }
+
+    fn read(&self, path: &Path) -> Result<Option<Vec<u8>>, BcIndexMigrationError> {
+        StdFs.read(path)
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        StdFs.exists(path)
+    }
+
+    fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
+        StdFs.pointer_swap(tmp, target)?;
+        std::fs::write(&self.mutate_path, self.mutate_content)
+            .expect("SEC-001 fixture: simulated concurrent-writer mutation must succeed");
+        Ok(())
+    }
+
+    fn remove(&self, path: &Path) -> Result<(), BcIndexMigrationError> {
+        StdFs.remove(path)
+    }
+
+    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
+        StdFs.append(path, content)
+    }
+}
+
+#[test]
+fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_detects_post_swap_concurrent_writer_mutation()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let migration_state_dir = dir.path().join(".factory/migration-state");
+    std::fs::create_dir_all(&migration_state_dir).unwrap();
+
+    let canonical_bc_index_path = dir.path().join("BC-INDEX.md");
+    std::fs::write(&canonical_bc_index_path, ORIGINAL_BODY).unwrap();
+    let expected_source_sha256 = sha256_hex_of_file(&canonical_bc_index_path);
+
+    let pointer = CurrentGenerationPointer {
+        generation_id: "gen-sec001".to_string(),
+        status: "committing".to_string(),
+        txn_id: "txn-sec001".to_string(),
+    };
+    let fs = MutateAfterSwapFs {
+        mutate_path: canonical_bc_index_path.clone(),
+        mutate_content: b"## a non-participating writer's mutation, bypassing exclusive.lock\n",
+    };
+
+    let result = commit_current_generation_pointer(
+        &fs,
+        &migration_state_dir,
+        &pointer,
+        std::slice::from_ref(&canonical_bc_index_path),
+        Some(&expected_source_sha256),
+    );
+
+    assert!(
+        matches!(result, Err(BcIndexMigrationError::FingerprintMismatchAbort)),
+        "SEC-001: a concurrent writer mutating the canonical BC-INDEX.md strictly AFTER a \
+         (possibly-retried) pointer_swap must be caught by a post-swap fingerprint recheck, \
+         mirroring the pre-swap Postcondition 3a check's own class of error -- got {result:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_passes_when_source_unchanged_across_swap()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let migration_state_dir = dir.path().join(".factory/migration-state");
+    std::fs::create_dir_all(&migration_state_dir).unwrap();
+
+    let canonical_bc_index_path = dir.path().join("BC-INDEX.md");
+    std::fs::write(&canonical_bc_index_path, ORIGINAL_BODY).unwrap();
+    let expected_source_sha256 = sha256_hex_of_file(&canonical_bc_index_path);
+
+    let pointer = CurrentGenerationPointer {
+        generation_id: "gen-sec001-ok".to_string(),
+        status: "committing".to_string(),
+        txn_id: "txn-sec001-ok".to_string(),
+    };
+
+    let result = commit_current_generation_pointer(
+        &StdFs,
+        &migration_state_dir,
+        &pointer,
+        std::slice::from_ref(&canonical_bc_index_path),
+        Some(&expected_source_sha256),
+    );
+
+    assert!(
+        result.is_ok(),
+        "an unchanged source across a real (non-retried) pointer_swap must still pass the new \
+         post-swap recheck: {result:?}"
+    );
+    let written = std::fs::read_to_string(migration_state_dir.join("CURRENT.json")).unwrap();
+    assert!(
+        written.contains("gen-sec001-ok") && written.contains("committing"),
+        "CURRENT.json must still carry the pointer's generation_id and committing status even \
+         with the post-swap recheck enabled: {written}"
     );
 }
 
