@@ -71,14 +71,22 @@
 //!  6. staged lean `BC-INDEX.md` body staging write
 //!  7. txn record write (`pending_canonical_moves` populated) -- AFTER the
 //!     WAL-boundary intent-log INTENT append (occurrences 1-4 of `append`,
-//!     below) and the Postcondition 3a fingerprint recheck
+//!     below); the Postcondition 3a fingerprint recheck now runs LATER
+//!     (SEC-001 REDESIGN, see below) -- immediately before each
+//!     `Fs::pointer_swap` attempt (occurrence 8's `CURRENT.tmp.json` write
+//!     already having happened first)
 //!  8. `CURRENT.tmp.json` staging write -- durably stages the new pointer
 //!     content at a path DISTINCT from `CURRENT.json` itself (OBL-1
 //!     FINDING 1 fix: `commit_current_generation_pointer` now performs
 //!     THREE separate steps -- this write, then the actual sole commit-point
 //!     rename via `Fs::pointer_swap` below, then a dedicated `Fs::fsync_dir`
 //!     durability barrier -- rather than committing `CURRENT.json` directly
-//!     through this call the way it used to; see FINDING 1 (RESOLVED)
+//!     through this call the way it used to; see FINDING 1 (RESOLVED). SEC-001
+//!     REDESIGN: the Postcondition 3a fingerprint recheck now runs
+//!     IMMEDIATELY BEFORE EVERY individual `Fs::pointer_swap` attempt
+//!     (including a retry), never after a successful one -- see
+//!     `shard_manager::swap_current_generation_pointer_with_precommit_recheck`'s
+//!     own doc comment and this file's own SEC-001 test section near the end
 //!  9. txn record write (`state=Committing`)
 //!  10. txn record write (`state=Completed`) -- AFTER `completed.json` is
 //!      ALREADY durably written (that write is NOT `Fs`-seamed -- see
@@ -1828,8 +1836,27 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_dir_return_unexpected_eof_discards()
 /// `write_temp` occurrences earlier -- the graceful-path counterpart of the
 /// `write_temp`-occurrence-8 CRASH test's "exactly at the sole commit
 /// point" scenario.
+/// SEC-001 REDESIGN: before the redesign, `StdFs::pointer_swap` was backed
+/// by `rename_with_retry`, which is a bare, non-retrying passthrough to
+/// `std::fs::rename` on every non-Windows target (see that function's own
+/// `#[cfg(not(windows))]` arm) -- so on THIS test's platform, a single
+/// injected `PermissionDenied` always propagated immediately, with no
+/// retry at all, requiring a SECOND, separate `run_bc_index_migration`
+/// invocation to resume from STAGING (hence this test's original name).
+///
+/// Post-redesign, `swap_current_generation_pointer_with_precommit_recheck`
+/// drives its OWN retry-with-precommit-recheck loop around
+/// `Fs::pointer_swap` -- deliberately platform-uniform, not
+/// `#[cfg(windows)]`-gated (see that function's own doc comment for why) --
+/// so a single retryable `PermissionDenied` is now transparently retried
+/// and self-heals WITHIN the same `run_bc_index_migration` call, on every
+/// platform, never surfacing to the caller at all. This is a genuine,
+/// intended behavioral improvement (the whole point of moving the retry
+/// loop to this layer), not a regression: this test is renamed and rewritten
+/// to assert the new, stronger guarantee.
 #[test]
-fn test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_resumes_from_staging() {
+fn test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_retries_and_converges_within_one_call()
+ {
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::pointer_swap", "1*return(permission_denied)")
@@ -1841,37 +1868,13 @@ fn test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_resu
     assert!(
         matches!(
             outcome,
-            Err(BcIndexMigrationError::Io { ref source, .. })
-                if source.kind() == std::io::ErrorKind::PermissionDenied
-        ),
-        "expected a graceful PermissionDenied Io error injected at the sole commit-point, got \
-         {outcome:?}"
-    );
-
-    let msd = migration_state_dir(dir.path());
-    let txn = read_live_txn_record(&msd).unwrap();
-    assert_eq!(
-        txn.state,
-        BcIndexMigrationTxnState::Staging,
-        "a graceful failure exactly AT the sole commit point must never advance the txn state \
-         past STAGING -- the ? propagation exits before Step 3's fsync_dir or the caller's own \
-         state=Committing write ever run"
-    );
-    assert_eq!(txn.pending_canonical_moves.len(), 4);
-    assert_admission_blocked(dir.path(), "probe");
-
-    // ResumeFromStaging safely re-invokes commit_current_generation_pointer
-    // on the next call -- this time the (now-cleared) failpoint lets the
-    // real rename land.
-    let outcome2 = run_recovery_to_convergence(dir.path(), 3);
-    assert!(
-        matches!(
-            outcome2,
             Ok(BcIndexMigrationOutcome::Completed {
                 canonical_paths_count: 4
             })
         ),
-        "got {outcome2:?}"
+        "a single transient (retryable) PermissionDenied at the sole commit-point must now be \
+         absorbed by swap_current_generation_pointer_with_precommit_recheck's own retry loop \
+         WITHIN this one call -- no second invocation should be needed; got {outcome:?}"
     );
     assert_genuinely_fully_migrated(dir.path());
     assert_recovery_is_idempotent(dir.path());
@@ -1931,6 +1934,181 @@ fn test_BC_1_18_011_obl1_graceful_err_remove_return_out_of_memory_best_effort_cl
             })
         ),
         "got {outcome2:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
+
+// ===========================================================================
+// SEC-001 REDESIGN (CWE-367/CWE-362) -- through-`run_bc_index_migration`
+// proof that the fingerprint-precheck-before-every-attempt redesign closes
+// the permanent-deadlock defect a fresh-eyes pr-reviewer pass found in PR
+// #842's original post-swap-recheck fix. See
+// `shard_manager::swap_current_generation_pointer_with_precommit_recheck`'s
+// own doc comment for the full mechanism, and
+// `bc_1_18_011_b2_migration_test.rs`'s own
+// `test_BC_1_18_011_SEC001_commit_current_generation_pointer_catches_mutation_between_retried_swap_attempts`
+// for the fully deterministic proof (via a hand-rolled `Fs`) that the
+// precommit recheck specifically re-runs before a SECOND (retried)
+// `Fs::pointer_swap` attempt, catching a mutation landing in that exact
+// gap. THIS test instead proves the same abort-routing end-to-end through
+// the REAL `run_bc_index_migration` production entry point, which cannot
+// inject a custom `Fs` (its `StdFs` is constructed internally).
+//
+// # Deterministic mutation timing -- no wall-clock race
+//
+// A first attempt at this test used a background thread with a fixed sleep
+// before mutating the canonical file, racing it against
+// `run_bc_index_migration`'s own internal timing. That was unreliable in
+// practice: the fresh-run path's staging phase (reading the original
+// content, splitting sections, running PC1/PC2 census checks, appending
+// WAL intent-log records -- several real, individually-fsynced writes)
+// has no fixed upper bound, so a short sleep can land the mutation BEFORE
+// the migration ever reads its own original content, corrupting the
+// fixture instead of exercising the intended race.
+//
+// This test instead exploits `migration_fs::write_temp`'s own occurrence
+// numbering (documented at the top of this file): occurrence 8, for this
+// file's standard 2-subsystem fixture, is ALWAYS the `CURRENT.tmp.json`
+// staging write -- the LAST write `swap_current_generation_pointer_with_
+// precommit_recheck` performs before its retry loop runs its FIRST
+// precommit fingerprint recheck. A `fail::cfg_callback` that mutates the
+// canonical file on exactly that occurrence lands the mutation
+// synchronously, on the SAME thread, guaranteed strictly AFTER every prior
+// staging step (which already consumed the untouched original content)
+// and strictly BEFORE the first precommit recheck -- zero race, no sleep,
+// no thread. This exercises the identical downstream abort-routing code
+// path as the retry-widened race (the SAME `pre_commit_fingerprint_recheck`
+// call, inside the SAME loop, feeding the SAME `abort_staging` closure) --
+// which loop iteration first detects the mismatch does not change what is
+// being proven here: that detection anywhere in this loop correctly aborts
+// and reopens the gate, rather than deadlocking.
+// ===========================================================================
+
+/// A non-participating writer (one bypassing the migration's advisory
+/// `exclusive.lock` flock) mutates the canonical `BC-INDEX.md` after every
+/// staging step has completed but strictly before the first precommit
+/// fingerprint recheck (see this section's own header comment for why
+/// `write_temp` occurrence 8 is the deterministic hook). Proves, through
+/// the REAL `run_bc_index_migration` entry point (not a direct
+/// `commit_current_generation_pointer`/`swap_current_generation_pointer_
+/// with_precommit_recheck` unit call): (1) the migration detects this and
+/// returns a genuine abort, never a silent success and never a hang; (2)
+/// `txn.state` reaches `Aborted`, not stuck at `Staging`; (3) the
+/// admission gate is reopened to `Open`, not left `Locked`; (4)
+/// `CURRENT.json` never exists at all for the mutated generation (no
+/// reader is ever exposed to a partially-committed `status:"committing"`
+/// pointer); and (5) -- the property that actually distinguishes this
+/// from the broken PR #842 fix -- a SUBSEQUENT `run_bc_index_migration`
+/// invocation against the SAME `.factory/` fixture genuinely converges,
+/// proving the deadlock this redesign closes is gone, not merely that the
+/// mismatch check fires once.
+#[test]
+fn test_BC_1_18_011_SEC001_run_bc_index_migration_detects_concurrent_writer_mutation_before_pointer_swap()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let canonical_path = bc_index_target(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    let occurrence = AtomicUsize::new(0);
+    let mutate_path = canonical_path.clone();
+    fail::cfg_callback("migration_fs::write_temp", move || {
+        let n = occurrence.fetch_add(1, Ordering::SeqCst) + 1;
+        // Occurrence 8 (this file's own fixture/occurrence table, module
+        // doc comment) is the `CURRENT.tmp.json` staging write -- the
+        // deterministic hook this section's header comment explains.
+        if n == 8 {
+            std::fs::write(
+                &mutate_path,
+                "## a non-participating writer's mutation, bypassing exclusive.lock\n",
+            )
+            .expect("SEC-001 fixture: simulated concurrent-writer mutation must succeed");
+        }
+    })
+    .expect("configuring the write_temp callback failpoint must succeed");
+
+    let outcome = run_bc_index_migration(dir.path());
+    fail::cfg("migration_fs::write_temp", "off")
+        .expect("resetting the write_temp failpoint must succeed");
+
+    // (1) genuine abort, never a silent success or a hang.
+    assert!(
+        matches!(
+            outcome,
+            Err(BcIndexMigrationError::FingerprintMismatchAbort)
+        ),
+        "SEC-001: a concurrent writer's mutation landing strictly before the first pointer-swap \
+         attempt's precommit recheck must be caught before ANY swap attempt commits -- got \
+         {outcome:?}"
+    );
+
+    // (2) txn.state reaches Aborted, never stuck at Staging.
+    let txn = read_live_txn_record(&msd)
+        .expect("a txn record must exist -- the fresh-run path's abort_staging still writes it");
+    assert_eq!(
+        txn.state,
+        BcIndexMigrationTxnState::Aborted,
+        "SEC-001 REDESIGN: a fingerprint mismatch detected inside \
+         swap_current_generation_pointer_with_precommit_recheck must route through the SAME \
+         abort_staging cleanup as every other pre-swap Postcondition 3a gate -- a txn stuck at \
+         STAGING here is exactly the permanent-deadlock defect this redesign closes"
+    );
+
+    // (3) the admission gate is reopened, never left LOCKED.
+    assert_eq!(
+        read_gate_state(&msd),
+        BcIndexAdmissionGateState::Open,
+        "SEC-001 REDESIGN: the writer-admission gate must be reopened to OPEN on this abort path, \
+         not left LOCKED forever"
+    );
+    // Release the probe's own writer reservation immediately afterward --
+    // otherwise it would sit in the reservations dir and cause the NEXT
+    // migration attempt's own drain procedure (step (5) below) to time out
+    // waiting for quiescence, which would be a self-inflicted test
+    // artifact, not a product defect (see the equivalent pattern in this
+    // file's own `graceful_err_current_json_directory_collision_at_commit`
+    // test).
+    let admit = shard_manager::admit_or_block_bc_index_writer(&msd, "post-abort-probe");
+    assert!(
+        admit.is_ok(),
+        "a fresh ordinary writer must be admitted once the gate has genuinely reopened -- got \
+         {admit:?}"
+    );
+    shard_manager::release_bc_index_writer_reservation(&msd, "post-abort-probe")
+        .expect("releasing the probe's own writer reservation must succeed");
+
+    // (4) CURRENT.json never exists at all for the mutated generation -- no
+    // reader was ever exposed to a partially-committed pointer.
+    assert!(
+        !msd.join("CURRENT.json").exists(),
+        "SEC-001: the pointer swap must never have landed for the mutated generation -- \
+         CURRENT.json must not exist (readers switch to \"committing\" the instant it does, per \
+         the reader-state function's own doc comment, so its mere absence here is the load-\
+         bearing assertion, not merely its content)"
+    );
+
+    // (5) the property that actually distinguishes this from the broken PR
+    // #842 fix: a SUBSEQUENT invocation against the SAME fixture genuinely
+    // converges. The concurrent writer's own (deliberately malformed,
+    // non-BC-INDEX-shaped) mutation is restored to a well-formed body first
+    // -- this test isolates "does the migration SYSTEM (txn/gate state)
+    // converge" from "can a fresh migration parse this writer's arbitrary
+    // content", which is an orthogonal, already-covered concern elsewhere
+    // in this suite.
+    std::fs::write(&canonical_path, ORIGINAL_CONTENT).unwrap();
+    let outcome2 = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome2,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "SEC-001 REDESIGN: a further run_bc_index_migration invocation against the same \
+         .factory/ fixture must genuinely converge -- a permanent deadlock here (every future \
+         call hitting the exact same abort forever) is exactly what the broken PR #842 fix \
+         produced; got {outcome2:?}"
     );
     assert_genuinely_fully_migrated(dir.path());
     assert_recovery_is_idempotent(dir.path());

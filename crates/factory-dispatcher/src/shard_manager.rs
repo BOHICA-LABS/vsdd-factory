@@ -14350,80 +14350,147 @@ pub fn stage_new_generation(
     Ok(generation_id)
 }
 
-/// ADR-052 §Decision 7c step 6 — the SOLE commit-point for the entire
-/// multi-file migration: write `CURRENT.tmp.json`, sync it, then
-/// `rename()` it onto `CURRENT.json` (atomic on POSIX/APFS), then sync the
-/// parent directory. After this call returns `Ok(())` there is no turning
-/// back — forward recovery, never rollback, governs everything past this
-/// point (BC-1.18.011 Invariant 3).
+/// Bounded attempt count for
+/// [`swap_current_generation_pointer_with_precommit_recheck`]'s own
+/// retry-with-precheck loop around the `CURRENT.json` pointer swap —
+/// SEC-001 REDESIGN (CWE-367/CWE-362; fresh-eyes pr-reviewer pass on PR
+/// #842's original post-swap-recheck fix found it structurally broken —
+/// see that function's own doc comment). Same attempt count as
+/// `last_amended_migrate::atomic_write::RENAME_RETRY_MAX_ATTEMPTS` (PR
+/// #842's Windows-CI transient-rename-denial fix), but this is this
+/// module's OWN, independent constant: the retry loop itself had to move
+/// out of `last_amended_migrate::atomic_write::rename_with_retry` (whose
+/// loop is opaque to callers -- there is no hook to run caller logic
+/// between its internal attempts) and into this function, so that the
+/// Postcondition 3a fingerprint recheck can re-run immediately before
+/// EVERY individual attempt. `rename_with_retry`/`rename_with_retry_impl`/
+/// `is_retryable_rename_error` in `last_amended_migrate::atomic_write`
+/// remain completely unchanged by this redesign.
+const POINTER_SWAP_RETRY_MAX_ATTEMPTS: u32 = 5;
+
+/// Base backoff delay for
+/// [`swap_current_generation_pointer_with_precommit_recheck`]'s retry
+/// loop — identical schedule to `last_amended_migrate::atomic_write::
+/// RENAME_RETRY_BASE_DELAY` (20ms, 40ms, 80ms, 160ms between the 5
+/// attempts, ~300ms worst case), chosen for parity with the mechanism
+/// this redesign replaces at this one call site, not independently
+/// recalibrated.
+const POINTER_SWAP_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Same transient-rename-failure classification as
+/// `last_amended_migrate::atomic_write::is_retryable_rename_error` (PR
+/// #842 Finding 3) — necessarily duplicated here rather than imported:
+/// that function is private to its own crate, and (per this redesign) the
+/// retry loop it used to serve for the pointer-swap call site now lives in
+/// THIS crate, at a call site that also needs a caller-supplied
+/// fingerprint precheck run before every attempt (see
+/// [`swap_current_generation_pointer_with_precommit_recheck`]'s own doc
+/// comment for why `rename_with_retry`'s opaque loop cannot host that
+/// hook). Deliberately NOT `#[cfg(windows)]`-gated the way the upstream
+/// classification's retry-loop *caller* (`rename_with_retry`) is: this
+/// loop guards exactly ONE call site (the sole migration commit point,
+/// invoked at most once per migration attempt), never a per-target rename
+/// inside a hot loop, so the bounded ~300ms worst-case latency
+/// `rename_with_retry`'s own Finding 4 correctly scoped away from every
+/// OTHER rename call site is a negligible, one-time cost here — and
+/// keeping this loop platform-uniform is what makes its own core
+/// correctness property (fingerprint-precheck-before-every-attempt,
+/// including retries) unit-testable via dependency injection and via this
+/// module's real `migration_fs::pointer_swap` failpoint on every target,
+/// not just Windows CI.
+fn is_retryable_pointer_swap_error(err: &BcIndexMigrationError) -> bool {
+    let BcIndexMigrationError::Io { source, .. } = err else {
+        return false;
+    };
+    if source.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        matches!(source.raw_os_error(), Some(32) | Some(33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// SEC-001 REDESIGN (CWE-367/CWE-362) — a fresh-eyes pr-reviewer pass on
+/// PR #842's original fix (which re-ran
+/// [`pre_commit_fingerprint_recheck`] AFTER a successful, possibly-retried
+/// `Fs::pointer_swap` and returned `Err` on mismatch) found it structurally
+/// broken, not merely incomplete: by the time that post-swap check ran,
+/// the irreversible commit ([`Fs::pointer_swap`] is documented as "the
+/// SOLE commit-point... after this call returns Ok(()), there is no
+/// turning back") had already physically happened, and every reader
+/// switches to the new generation the instant `CURRENT.json` shows
+/// `status:"committing"` — so a post-swap abort protected nobody. Worse,
+/// that post-swap failure path left `txn.state` at STAGING with the
+/// admission gate LOCKED (unlike every OTHER Postcondition 3a mismatch
+/// path in this module, which sets `txn.state = Aborted` and reopens the
+/// gate), so [`recover`]'s `ResumeFromStaging` arm would resume against
+/// the SAME still-mutated source on the next invocation and fail
+/// identically forever — a permanent deadlock, the opposite of the
+/// TOCTOU-closing fix it was meant to be.
 ///
-/// OBL-1 FINDING 1 fix: previously this function wrote directly to
-/// `CURRENT.json` via `Fs::write_temp` — `Fs::pointer_swap` (defined and
-/// doc'd as "the sole commit-point") was never called, a dead seam neither
-/// Kani's commit-predicate assertions nor this suite's fault-injection
-/// could exercise. This now performs the THREE distinct steps this
-/// function's own doc comment already promised: (1) `Fs::write_temp` the
-/// new pointer content durably to a SEPARATE `CURRENT.tmp.json` path —
-/// this does not touch `CURRENT.json` itself, so a crash here leaves the
-/// prior `CURRENT.json` (or its absence) completely untouched; (2)
-/// `Fs::pointer_swap` — the actual atomic rename of the durable tmp
-/// pointer onto `CURRENT.json`, and the ONLY call in the whole migration
-/// that is both a rename AND the semantic commit event, now routed
-/// through the distinctly-named, fault-injectable `Fs` method instead of
-/// being buried inside `write_temp`'s opaque bundled primitive; (3)
-/// `Fs::fsync_dir` on the parent directory — the durability barrier for
-/// the rename's directory-entry change itself (`Fs::rename`/
-/// `Fs::pointer_swap`'s own doc comment: "NOT durable until the parent
-/// dir is fsynced"), mirroring the barrier `execute_canonical_path_moves`
-/// already performs after each of its own canonical-path renames
-/// (D-1232-OBL-2(a)). A crash between (2) and (3) leaves `CURRENT.json`
-/// already physically pointing at the new generation while the txn
-/// record still reads STAGING — `recover()`'s `ResumeFromStaging` arm
-/// handles this safely (§0.3: TXN-RECORD state is primary; it re-derives
-/// forward progress from durable ground truth rather than needing to
-/// re-read `CURRENT.json`'s own content) and this function's own
-/// idempotent re-invocation on resume converges (steps (1)/(2) both
-/// tolerate being repeated with the same content).
+/// This function is the corrected replacement: it stages the new pointer
+/// content, then re-runs [`pre_commit_fingerprint_recheck`] IMMEDIATELY
+/// BEFORE EVERY individual `Fs::pointer_swap` attempt — the first, and
+/// every retry — never after a successful swap. `StdFs::pointer_swap` is
+/// now a single, non-retrying rename (see that impl's own doc comment);
+/// THIS loop is the sole retry authority for the pointer-swap commit
+/// point, so a mismatch caused by a concurrent writer's mutation landing
+/// during the backoff between two attempts is caught strictly before the
+/// attempt that would have committed it, preserving Postcondition 3a's
+/// "immediately before [commit]" invariant for whichever attempt actually
+/// succeeds.
 ///
-/// SEC-001 fix (CWE-367/CWE-362, security review of PR #842): `Fs::
-/// pointer_swap` is now backed by `last_amended_migrate::atomic_write::
-/// rename_with_retry` (PR #842's Windows-CI transient-rename-denial fix),
-/// which can retry the rename up to 5 times over ~300ms on a transient
-/// `PermissionDenied`/sharing-violation error. That retry window sits
-/// strictly AFTER callers' own Postcondition 3a pre-swap
-/// `pre_commit_fingerprint_recheck` call and strictly BEFORE this
-/// function previously returned -- widening the gap in which a
-/// non-participating writer (one bypassing the migration's advisory
-/// `exclusive.lock` flock) could mutate the canonical `BC-INDEX.md`
-/// without being caught, beyond what Postcondition 3a's "immediately
-/// before [commit]" invariant intends. `_fingerprint_source_paths`/
-/// `_expected_source_sha256` (`None` preserves the pre-fix behavior --
-/// no recheck -- for callers that have no fingerprint to verify, mirroring
-/// the STAGING-resume call site's own `txn.source_sha256: Option<String>`
-/// conditionality) let this function re-run the EXACT SAME
-/// `pre_commit_fingerprint_recheck` (same hash computation, same
-/// byte-equality comparison, same `FingerprintMismatchAbort` error
-/// variant) immediately after a successful (possibly-retried)
-/// `Fs::pointer_swap`, restoring "exactly-once, immediately before
-/// completion" semantics even when the rename was retried. A mismatch
-/// here is surfaced identically to a pre-swap mismatch -- via `?`, to the
-/// same error-handling call sites that already handle
-/// `commit_current_generation_pointer`'s other failure modes (a plain `?`
-/// at both the fresh-run and STAGING-resume call sites in
-/// `run_bc_index_migration`) -- so the txn record is never advanced to
-/// `Committing` when this fires. `rename_with_retry` itself is
-/// deliberately UNCHANGED by this fix; only this function's own
-/// surrounding logic is affected.
-pub fn commit_current_generation_pointer(
+/// # Postcondition
+///
+/// If this function returns `Err`, the `CURRENT.json` pointer swap has
+/// DEFINITELY NOT happened: every error variant it can produce
+/// ([`BcIndexMigrationError::FingerprintMismatchAbort`] from the precheck,
+/// or an `Io` error from `Fs::write_temp`/`Fs::pointer_swap` once retries
+/// are exhausted) occurs strictly before a successful swap by this
+/// function's own control flow -- it returns immediately on `Ok(())` from
+/// `Fs::pointer_swap`, never re-checking afterward.
+///
+/// Callers, however, must NOT treat every `Err` from this function
+/// identically -- the two error classes mean semantically different
+/// things about the STAGED generation itself, not just about the swap:
+/// - [`BcIndexMigrationError::FingerprintMismatchAbort`] means the SOURCE
+///   content genuinely changed since quiescence -- the staged generation
+///   is now stale and can never become committable no matter how many
+///   times it is retried. Callers route this through the SAME
+///   abort-and-reopen-gate handling as every other pre-swap Postcondition
+///   3a gate in [`run_bc_index_migration`] (content-preservation/census/
+///   intent-log): `txn.state = Aborted`, admission gate reopened to
+///   `Open`.
+/// - Any OTHER error (an `Io` fault from `Fs::write_temp`/`Fs::
+///   pointer_swap`, e.g. a genuine disk-full or permission-denied
+///   condition, unrelated to content staleness) leaves the staged
+///   generation itself perfectly valid -- callers propagate this
+///   UNCHANGED (never abort), so `txn.state` stays at `STAGING` and a
+///   later resume can retry the SAME staged content once the transient
+///   fault clears, exactly as this module did before the SEC-001
+///   redesign.
+///
+/// This is separately distinct from
+/// [`commit_current_generation_pointer`]'s own subsequent `Fs::fsync_dir`
+/// call, whose failure means the swap DID already happen — see that
+/// function's doc comment for why that case must NEVER be routed through
+/// the abort handling either (Invariant 3: forward recovery, never
+/// rollback).
+fn swap_current_generation_pointer_with_precommit_recheck(
     fs: &impl Fs,
-    _migration_state_dir: &Path,
-    _pointer: &CurrentGenerationPointer,
-    _fingerprint_source_paths: &[PathBuf],
-    _expected_source_sha256: Option<&str>,
+    migration_state_dir: &Path,
+    pointer: &CurrentGenerationPointer,
+    fingerprint_source_paths: &[PathBuf],
+    expected_source_sha256: Option<&str>,
 ) -> Result<(), BcIndexMigrationError> {
-    let target = _migration_state_dir.join("CURRENT.json");
-    let tmp = _migration_state_dir.join("CURRENT.tmp.json");
-    let json = serde_json::to_string_pretty(_pointer).map_err(|e| {
+    let target = migration_state_dir.join("CURRENT.json");
+    let tmp = migration_state_dir.join("CURRENT.tmp.json");
+    let json = serde_json::to_string_pretty(pointer).map_err(|e| {
         BcIndexMigrationError::BinaryIntegrityFailure {
             message: format!("failed to serialize CURRENT.json pointer: {e}"),
         }
@@ -14434,20 +14501,87 @@ pub fn commit_current_generation_pointer(
     // `migration_fs` module doc's production-granularity note); it never
     // touches `CURRENT.json`.
     fs.write_temp(&tmp, json.as_bytes())?;
-    // Step 2 (the sole commit-point): atomic rename of the now-durable tmp
-    // pointer onto `CURRENT.json`, via the dedicated `Fs::pointer_swap`
-    // seam (not the general `Fs::rename`) so Kani/fault-injection harnesses
-    // can assert the commit predicate fires on exactly this call.
-    fs.pointer_swap(&tmp, &target)?;
-    // Step 2a (SEC-001 fix): re-verify the Postcondition 3a fingerprint
-    // immediately after the (possibly-retried) swap above, closing the
-    // TOCTOU window `rename_with_retry`'s bounded retry loop can widen.
-    // Reuses `pre_commit_fingerprint_recheck` verbatim so this is a
-    // genuine mirror of the pre-swap check, not a differently-behaved
-    // one -- see this function's own doc comment.
-    if let Some(expected_source_sha256) = _expected_source_sha256 {
-        pre_commit_fingerprint_recheck(_fingerprint_source_paths, expected_source_sha256)?;
+
+    // Step 2 (the sole commit-point, retried as a unit with its own
+    // precommit recheck): re-verify Postcondition 3a immediately before
+    // EVERY individual `Fs::pointer_swap` attempt, then attempt the swap.
+    // A retryable failure (the same Windows AV/indexer transient-lock
+    // class PR #842's `rename_with_retry` absorbed) backs off and loops;
+    // any other failure -- including a fingerprint mismatch -- returns
+    // immediately, per this function's own Postcondition doc comment
+    // above.
+    let mut attempt: u32 = 0;
+    loop {
+        if let Some(expected_source_sha256) = expected_source_sha256 {
+            pre_commit_fingerprint_recheck(fingerprint_source_paths, expected_source_sha256)?;
+        }
+        match fs.pointer_swap(&tmp, &target) {
+            Ok(()) => return Ok(()),
+            Err(e)
+                if is_retryable_pointer_swap_error(&e)
+                    && attempt + 1 < POINTER_SWAP_RETRY_MAX_ATTEMPTS =>
+            {
+                std::thread::sleep(POINTER_SWAP_RETRY_BASE_DELAY * (1 << attempt));
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
     }
+}
+
+/// ADR-052 §Decision 7c step 6 — the SOLE commit-point for the entire
+/// multi-file migration: stage and atomically swap `CURRENT.json` via
+/// [`swap_current_generation_pointer_with_precommit_recheck`] (see that
+/// function's own doc comment for the SEC-001 redesign this now performs),
+/// then sync the parent directory. After this call returns `Ok(())` there
+/// is no turning back — forward recovery, never rollback, governs
+/// everything past this point (BC-1.18.011 Invariant 3).
+///
+/// OBL-1 FINDING 1 fix: previously this function wrote directly to
+/// `CURRENT.json` via `Fs::write_temp` — `Fs::pointer_swap` (defined and
+/// doc'd as "the sole commit-point") was never called, a dead seam neither
+/// Kani's commit-predicate assertions nor this suite's fault-injection
+/// could exercise. This performs the THREE distinct steps this function's
+/// own doc comment already promised: (1)/(2)
+/// [`swap_current_generation_pointer_with_precommit_recheck`]'s own
+/// `Fs::write_temp` + `Fs::pointer_swap` sequence; (3) `Fs::fsync_dir` on
+/// the parent directory — the durability barrier for the rename's
+/// directory-entry change itself (`Fs::rename`/`Fs::pointer_swap`'s own
+/// doc comment: "NOT durable until the parent dir is fsynced"), mirroring
+/// the barrier `execute_canonical_path_moves` already performs after each
+/// of its own canonical-path renames (D-1232-OBL-2(a)). A crash between
+/// (2) and (3) leaves `CURRENT.json` already physically pointing at the
+/// new generation while the txn record still reads STAGING — `recover()`'s
+/// `ResumeFromStaging` arm handles this safely (§0.3: TXN-RECORD state is
+/// primary; it re-derives forward progress from durable ground truth
+/// rather than needing to re-read `CURRENT.json`'s own content) and this
+/// function's own idempotent re-invocation on resume converges (steps
+/// (1)/(2) both tolerate being repeated with the same content).
+///
+/// **A failure from this function's OWN `Fs::fsync_dir` call (as opposed
+/// to a failure from
+/// [`swap_current_generation_pointer_with_precommit_recheck`]) means the
+/// swap already durably happened — callers MUST NOT route that case
+/// through the same abort-and-reopen-gate handling used for a pre-swap
+/// failure.** [`run_bc_index_migration`]'s own two call sites call the two
+/// phases separately for exactly this reason, rather than calling this
+/// composed convenience function; this function itself remains available
+/// (and is exercised directly by this module's own unit tests) for
+/// callers that don't need the distinction.
+pub fn commit_current_generation_pointer(
+    fs: &impl Fs,
+    _migration_state_dir: &Path,
+    _pointer: &CurrentGenerationPointer,
+    _fingerprint_source_paths: &[PathBuf],
+    _expected_source_sha256: Option<&str>,
+) -> Result<(), BcIndexMigrationError> {
+    swap_current_generation_pointer_with_precommit_recheck(
+        fs,
+        _migration_state_dir,
+        _pointer,
+        _fingerprint_source_paths,
+        _expected_source_sha256,
+    )?;
     // Step 3: durability barrier for the rename's directory-entry change.
     fs.fsync_dir(_migration_state_dir)
 }
@@ -15687,24 +15821,63 @@ pub fn run_bc_index_migration(
             )?;
             let canonical_bc_index_path =
                 _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
-            if let Some(source_sha256) = txn.source_sha256.as_deref() {
-                pre_commit_fingerprint_recheck(
-                    std::slice::from_ref(&canonical_bc_index_path),
-                    source_sha256,
-                )?;
-            }
             let pointer = CurrentGenerationPointer {
                 generation_id,
                 status: "committing".to_string(),
                 txn_id: txn.txn_id.clone(),
             };
-            commit_current_generation_pointer(
+            // SEC-001 REDESIGN: the Postcondition 3a fingerprint recheck
+            // now runs INSIDE
+            // `swap_current_generation_pointer_with_precommit_recheck`,
+            // immediately before EVERY individual pointer-swap attempt --
+            // never after a successful swap (see that function's own doc
+            // comment). Its own Postcondition guarantees any `Err` here
+            // means the swap definitely never happened, so a
+            // `FingerprintMismatchAbort` specifically -- the source
+            // content genuinely changed, so the SAME staged generation can
+            // never become committable again no matter how many times this
+            // is retried -- is routed through `discard_incomplete_staging`
+            // (Aborted + best-effort gen-dir cleanup) AND the admission
+            // gate is reopened, matching this SAME ResumeFromStaging arm's
+            // own established handling of a `resume_from_staging`/recompute
+            // failure just above, rather than a bare `?` that would leave
+            // `txn.state` stuck at STAGING forever: every future
+            // `run_bc_index_migration` invocation would hit this exact
+            // same arm and fail the exact same way against the exact same
+            // (still-mutated) source -- a permanent deadlock, not forward
+            // progress. Any OTHER error (a generic transient `Fs::
+            // write_temp`/`Fs::pointer_swap` I/O fault, unrelated to
+            // content staleness) is deliberately NOT routed through this
+            // abort path -- the staged generation itself is still
+            // perfectly valid, so leaving `txn.state` at STAGING lets a
+            // later resume retry the SAME staged content once the
+            // transient fault clears, exactly as it already did before
+            // this redesign.
+            match swap_current_generation_pointer_with_precommit_recheck(
                 &fs,
                 &migration_state_dir,
                 &pointer,
                 std::slice::from_ref(&canonical_bc_index_path),
                 txn.source_sha256.as_deref(),
-            )?;
+            ) {
+                Ok(()) => {}
+                Err(e @ BcIndexMigrationError::FingerprintMismatchAbort) => {
+                    let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
+                    let _ = write_admission_gate_state(
+                        &migration_state_dir,
+                        BcIndexAdmissionGateState::Open,
+                    );
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
+            }
+            // A subsequent `Fs::fsync_dir` failure means the swap DID
+            // already happen -- Invariant 3 forbids treating that as an
+            // abort; propagate unchanged, exactly as
+            // `commit_current_generation_pointer`'s own doc comment
+            // describes (`recover()`'s `ResumeFromStaging` arm picks up a
+            // crash in that exact window on a future invocation).
+            fs.fsync_dir(&migration_state_dir)?;
             txn.state = BcIndexMigrationTxnState::Committing;
             write_txn_record(&fs, &migration_state_dir, &txn)?;
             return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
@@ -16061,37 +16234,56 @@ pub fn run_bc_index_migration(
         return Err(e);
     }
 
-    // Postcondition 3a: EXACTLY-ONCE TOCTOU pre-commit fingerprint recheck,
-    // immediately before the pointer swap.
-    if let Err(e) = pre_commit_fingerprint_recheck(
-        std::slice::from_ref(&canonical_bc_index_path),
-        &source_sha256,
-    ) {
-        txn.state = BcIndexMigrationTxnState::Aborted;
-        txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = write_txn_record(&fs, &migration_state_dir, &txn);
-        // OBL-1 §5 (O-5 fold-in): fingerprint-abort resets gate→OPEN.
-        let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
-        return Err(e);
-    }
-
     txn.pending_canonical_moves = pending_moves;
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 
-    // The sole commit-point — after this call returns Ok(()), there is no
-    // turning back (Invariant 3): forward recovery, never rollback.
+    // The sole commit-point — after the swap phase below returns Ok(()),
+    // there is no turning back (Invariant 3): forward recovery, never
+    // rollback.
+    //
+    // SEC-001 REDESIGN: Postcondition 3a's EXACTLY-ONCE TOCTOU pre-commit
+    // fingerprint recheck now runs INSIDE
+    // `swap_current_generation_pointer_with_precommit_recheck`, immediately
+    // before EVERY individual pointer-swap attempt (never after a
+    // successful swap) — see that function's own doc comment. Its own
+    // Postcondition guarantees any `Err` here means the swap definitely
+    // never happened, so a `FingerprintMismatchAbort` specifically — the
+    // source content genuinely changed, so the SAME staged generation can
+    // never become committable again no matter how many times this is
+    // retried — is routed through the SAME `abort_staging` closure used
+    // for the content-preservation/census/intent-log gates immediately
+    // above, rather than a bare `?`. Any OTHER error (a generic transient
+    // `Fs::write_temp`/`Fs::pointer_swap` I/O fault, unrelated to content
+    // staleness — e.g. a real disk-full/permission-denied condition) is
+    // deliberately NOT routed through this abort path: the staged
+    // generation itself is still perfectly valid, so leaving `txn.state`
+    // at STAGING lets a later resume retry the SAME staged content once
+    // the transient fault clears, exactly as it already did before this
+    // redesign. A subsequent `Fs::fsync_dir` failure, separately, means
+    // the swap DID already happen — Invariant 3 forbids treating that as
+    // an abort either; it is propagated unchanged (`recover()`'s
+    // `ResumeFromStaging` arm is what picks up a crash in that exact
+    // window on a future invocation).
     let pointer = CurrentGenerationPointer {
         generation_id: generation_id.clone(),
         status: "committing".to_string(),
         txn_id: txn.txn_id.clone(),
     };
-    commit_current_generation_pointer(
+    match swap_current_generation_pointer_with_precommit_recheck(
         &fs,
         &migration_state_dir,
         &pointer,
         std::slice::from_ref(&canonical_bc_index_path),
         Some(source_sha256.as_str()),
-    )?;
+    ) {
+        Ok(()) => {}
+        Err(e @ BcIndexMigrationError::FingerprintMismatchAbort) => {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(e);
+        }
+        Err(e) => return Err(e),
+    }
+    fs.fsync_dir(&migration_state_dir)?;
     txn.state = BcIndexMigrationTxnState::Committing;
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 

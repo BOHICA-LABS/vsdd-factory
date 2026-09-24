@@ -451,34 +451,48 @@ fn test_BC_1_18_011_PC3_commit_current_generation_pointer_writes_current_json_at
 }
 
 // ---------------------------------------------------------------------------
-// SEC-001 (CWE-367/CWE-362) — post-swap TOCTOU widening. `rename_with_retry`
-// (PR #842's Windows-CI transient-rename-denial fix) can retry the
-// `CURRENT.json` pointer-swap rename up to 5 times over ~300ms on Windows,
-// widening the gap between the Postcondition 3a pre-swap fingerprint
-// recheck and the swap's actual completion. A non-participating writer (one
-// bypassing the migration's advisory `exclusive.lock` flock) that mutates
-// the canonical `BC-INDEX.md` inside that widened window must still be
-// caught -- `commit_current_generation_pointer` now re-verifies the
-// fingerprint immediately AFTER a successful (possibly-retried)
-// `Fs::pointer_swap`, reusing `pre_commit_fingerprint_recheck` itself (same
-// computation, same comparison, same `FingerprintMismatchAbort` error) so
-// the post-swap check is a genuine mirror of the pre-swap one, not a
-// superficially-similar but differently-behaved check.
+// SEC-001 REDESIGN (CWE-367/CWE-362) — a fresh-eyes pr-reviewer pass on PR
+// #842 found the ORIGINAL fix here (re-verifying the fingerprint AFTER a
+// successful, possibly-retried `Fs::pointer_swap`) structurally broken: by
+// the time a post-swap check could run, the irreversible commit had already
+// happened and every reader had already switched to the new generation, so
+// a post-swap abort protected nobody -- and it left `txn.state` stuck at
+// STAGING forever (a permanent deadlock), unlike every other Postcondition
+// 3a mismatch path in this module. The corrected design re-verifies the
+// fingerprint IMMEDIATELY BEFORE EVERY individual pointer-swap attempt
+// (never after a successful one) inside
+// `swap_current_generation_pointer_with_precommit_recheck`, so a mismatch
+// caused by a concurrent writer's mutation landing during the backoff
+// between two retried attempts is caught strictly BEFORE the attempt that
+// would have committed it. See that function's own doc comment for the
+// full redesign rationale, and
+// `bc_1_18_011_b2_migration_crash_injection_test.rs`'s own SEC-001 section
+// for the through-`run_bc_index_migration` proof that this also closes the
+// deadlock (this file's test below exercises the mechanism directly and
+// deterministically, at the `commit_current_generation_pointer` layer).
 // ---------------------------------------------------------------------------
 
 /// Wraps `StdFs`, delegating every operation unchanged EXCEPT
-/// `pointer_swap`, which performs the REAL atomic rename via `StdFs` and
-/// then immediately mutates `mutate_path` -- simulating a
-/// non-participating concurrent writer landing its change strictly AFTER
-/// the swap completes (the exact race `rename_with_retry`'s bounded retry
-/// loop can widen) but before `commit_current_generation_pointer` itself
-/// returns.
-struct MutateAfterSwapFs {
+/// `pointer_swap`, whose FIRST invocation mutates `mutate_path` (simulating
+/// a non-participating concurrent writer, one bypassing the migration's
+/// advisory `exclusive.lock` flock) and then returns a retryable
+/// `PermissionDenied` `Io` error (simulating the transient Windows
+/// AV/indexer lock `rename_with_retry` was built to absorb — PR #842) —
+/// deterministically reproducing "a concurrent writer's mutation lands
+/// during the retry backoff window" with no wall-clock race at all, since
+/// the mutation happens synchronously on the FIRST call, strictly before
+/// `swap_current_generation_pointer_with_precommit_recheck`'s retry loop
+/// ever sleeps or re-invokes its precommit recheck for the second attempt.
+/// Every subsequent invocation delegates straight to `StdFs::pointer_swap`
+/// (never reached by this test, since the redesign is expected to abort on
+/// the SECOND attempt's precheck before ever calling `pointer_swap` again).
+struct MutateThenFailFirstSwapAttemptFs {
     mutate_path: PathBuf,
     mutate_content: &'static [u8],
+    attempts: std::cell::Cell<u32>,
 }
 
-impl Fs for MutateAfterSwapFs {
+impl Fs for MutateThenFailFirstSwapAttemptFs {
     fn write_temp(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
         StdFs.write_temp(path, content)
     }
@@ -504,10 +518,20 @@ impl Fs for MutateAfterSwapFs {
     }
 
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
-        StdFs.pointer_swap(tmp, target)?;
-        std::fs::write(&self.mutate_path, self.mutate_content)
-            .expect("SEC-001 fixture: simulated concurrent-writer mutation must succeed");
-        Ok(())
+        let n = self.attempts.get() + 1;
+        self.attempts.set(n);
+        if n == 1 {
+            std::fs::write(&self.mutate_path, self.mutate_content)
+                .expect("SEC-001 fixture: simulated concurrent-writer mutation must succeed");
+            return Err(BcIndexMigrationError::Io {
+                path: target.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "SEC-001 fixture: simulated transient Windows AV/indexer lock",
+                ),
+            });
+        }
+        StdFs.pointer_swap(tmp, target)
     }
 
     fn remove(&self, path: &Path) -> Result<(), BcIndexMigrationError> {
@@ -520,7 +544,7 @@ impl Fs for MutateAfterSwapFs {
 }
 
 #[test]
-fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_detects_post_swap_concurrent_writer_mutation()
+fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_catches_mutation_between_retried_swap_attempts()
  {
     let dir = tempfile::tempdir().unwrap();
     let migration_state_dir = dir.path().join(".factory/migration-state");
@@ -535,9 +559,10 @@ fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_detects_post_swap_c
         status: "committing".to_string(),
         txn_id: "txn-sec001".to_string(),
     };
-    let fs = MutateAfterSwapFs {
+    let fs = MutateThenFailFirstSwapAttemptFs {
         mutate_path: canonical_bc_index_path.clone(),
         mutate_content: b"## a non-participating writer's mutation, bypassing exclusive.lock\n",
+        attempts: std::cell::Cell::new(0),
     };
 
     let result = commit_current_generation_pointer(
@@ -550,9 +575,19 @@ fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_detects_post_swap_c
 
     assert!(
         matches!(result, Err(BcIndexMigrationError::FingerprintMismatchAbort)),
-        "SEC-001: a concurrent writer mutating the canonical BC-INDEX.md strictly AFTER a \
-         (possibly-retried) pointer_swap must be caught by a post-swap fingerprint recheck, \
-         mirroring the pre-swap Postcondition 3a check's own class of error -- got {result:?}"
+        "SEC-001 REDESIGN: a concurrent writer's mutation landing strictly between the first \
+         (failed, retried) and second pointer-swap attempt must be caught by the precommit \
+         recheck BEFORE the second attempt ever calls Fs::pointer_swap again -- got {result:?}"
+    );
+    assert_eq!(
+        fs.attempts.get(),
+        1,
+        "the fingerprint mismatch must be caught by the precommit recheck BEFORE a second \
+         Fs::pointer_swap call is ever made -- exactly 1 attempt, not 2, must have occurred"
+    );
+    assert!(
+        !migration_state_dir.join("CURRENT.json").exists(),
+        "the pointer swap must never have landed at all -- CURRENT.json must not exist"
     );
 }
 
@@ -583,14 +618,15 @@ fn test_BC_1_18_011_SEC001_commit_current_generation_pointer_passes_when_source_
 
     assert!(
         result.is_ok(),
-        "an unchanged source across a real (non-retried) pointer_swap must still pass the new \
-         post-swap recheck: {result:?}"
+        "an unchanged source across a real (non-retried) pointer_swap must still pass the \
+         SEC-001 REDESIGN's precommit recheck (run immediately before the swap attempt, not \
+         after): {result:?}"
     );
     let written = std::fs::read_to_string(migration_state_dir.join("CURRENT.json")).unwrap();
     assert!(
         written.contains("gen-sec001-ok") && written.contains("committing"),
-        "CURRENT.json must still carry the pointer's generation_id and committing status even \
-         with the post-swap recheck enabled: {written}"
+        "CURRENT.json must still carry the pointer's generation_id and committing status with \
+         the precommit recheck enabled: {written}"
     );
 }
 

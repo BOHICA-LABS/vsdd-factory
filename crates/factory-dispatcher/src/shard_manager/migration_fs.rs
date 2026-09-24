@@ -153,10 +153,24 @@ pub trait Fs {
     /// multi-file migration (ADR-052 §Decision 7c step 6). Kept distinct
     /// from [`Fs::rename`] so a Kani harness can assert the commit
     /// predicate fires on exactly this call, never on a canonical-path
-    /// move rename. Production: identical
-    /// `last_amended_migrate::atomic_write::rename_with_retry` call as
-    /// [`Fs::rename`] — the distinction is in the CALLER's protocol role,
-    /// not the underlying operation.
+    /// move rename.
+    ///
+    /// # SEC-001 redesign (CWE-367/CWE-362) — single attempt, no retry
+    ///
+    /// Production: a single, non-retrying `std::fs::rename` — UNLIKE
+    /// [`Fs::rename`], this is deliberately NOT backed by
+    /// `last_amended_migrate::atomic_write::rename_with_retry`. This call
+    /// is the ONE place in the whole migration where the Postcondition 3a
+    /// fingerprint recheck must re-run immediately before every physical
+    /// rename attempt (including a retry after a transient Windows
+    /// AV/indexer lock, PR #842) — `rename_with_retry`'s own retry loop is
+    /// opaque to its caller, so it cannot host that recheck between its
+    /// internal attempts. The bounded retry-with-precheck loop that used
+    /// to live inside `rename_with_retry` for this call site now lives in
+    /// `shard_manager::swap_current_generation_pointer_with_precommit_recheck`,
+    /// which calls THIS method (a single bare attempt) once per loop
+    /// iteration. See that function's own doc comment for the full
+    /// redesign rationale.
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError>;
 
     /// Remove a file or empty/non-empty directory tree (staging-generation
@@ -348,14 +362,14 @@ impl Fs for StdFs {
 
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
         migration_failpoint!("migration_fs::pointer_swap", target);
-        // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
-        // Windows-CI transient-rename-denial fix) rather than a bare
-        // `std::fs::rename`.
-        last_amended_migrate::atomic_write::rename_with_retry(tmp, target).map_err(|source| {
-            BcIndexMigrationError::Io {
-                path: target.to_path_buf(),
-                source,
-            }
+        // SEC-001 redesign: deliberately a single bare `std::fs::rename`,
+        // NOT `rename_with_retry` -- see this trait method's own doc
+        // comment for why the bounded retry now lives one layer up, in
+        // `shard_manager::swap_current_generation_pointer_with_precommit_recheck`,
+        // wrapped around a caller-supplied precommit fingerprint recheck.
+        std::fs::rename(tmp, target).map_err(|source| BcIndexMigrationError::Io {
+            path: target.to_path_buf(),
+            source,
         })
     }
 
