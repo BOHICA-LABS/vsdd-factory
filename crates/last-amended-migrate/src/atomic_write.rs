@@ -69,12 +69,23 @@ use std::time::Duration;
 
 /// Bounded attempt count for [`rename_with_retry`]'s Windows-transient-lock
 /// mitigation (initial attempt + up to 4 retries = 5 total).
+///
+/// Production code only reaches this constant via the `#[cfg(windows)]` arm
+/// of [`rename_with_retry`] (Finding 4) — on every other target it is only
+/// referenced by this module's own cross-platform unit tests (exercised
+/// through [`rename_with_retry_impl`]), hence `allow(dead_code)` on
+/// non-Windows targets rather than a false "unused" warning.
+#[cfg_attr(not(windows), allow(dead_code))]
 const RENAME_RETRY_MAX_ATTEMPTS: u32 = 5;
 
 /// Base backoff delay for [`rename_with_retry`]'s exponential backoff:
 /// 20ms, 40ms, 80ms, 160ms between the 5 attempts (~300ms worst-case total),
 /// short enough to be invisible in normal operation but long enough to
 /// outlast a transient Windows Defender/indexer post-write scan handle.
+///
+/// See [`RENAME_RETRY_MAX_ATTEMPTS`]'s doc comment for why this is
+/// `allow(dead_code)`-gated on non-Windows targets.
+#[cfg_attr(not(windows), allow(dead_code))]
 const RENAME_RETRY_BASE_DELAY: Duration = Duration::from_millis(20);
 
 /// `std::fs::rename` wrapped in a bounded retry-with-backoff for
@@ -116,18 +127,30 @@ const RENAME_RETRY_BASE_DELAY: Duration = Duration::from_millis(20);
 /// problem, or a caller-held handle that never closes) still fails after
 /// every retry is exhausted and propagates the final, unmodified error.
 ///
-/// # Cross-platform, not `cfg(windows)`-gated
+/// # Windows-only — `#[cfg(windows)]`-gated, not applied on Unix (Finding 4)
 ///
-/// Applied uniformly on every platform rather than Windows-only: on Unix,
-/// `rename(2)` never returns `EACCES` for the "open handle" reason (Unix
-/// permits renaming a file with open handles unconditionally), so a Unix
-/// rename either succeeds on the first attempt or fails for a genuinely
-/// different, non-transient reason that this function's retry condition
-/// does not match — zero added latency, zero behavioral change on Unix's
-/// hot path. An `EACCES` a Unix caller genuinely hits for an unrelated
-/// permission reason (e.g. a read-only directory) is retried up to the same
-/// bound before propagating, which is a harmless (if slightly redundant)
-/// no-op path, never a masked failure.
+/// This retry mechanism exists ONLY for the Windows AV/indexer transient-
+/// lock symptom documented above; it is scoped to `#[cfg(windows)]` and, on
+/// every other target, this function is a direct, zero-overhead passthrough
+/// to `std::fs::rename` with no retry loop and no sleep at all — see the
+/// `#[cfg(not(windows))]` definition below.
+///
+/// An earlier revision of this fix applied the retry loop uniformly on
+/// every platform, reasoning that `rename(2)` never returns `EACCES` for
+/// the "open handle" reason on Unix (Unix permits renaming a file with
+/// open handles unconditionally) so a genuine Unix `PermissionDenied`
+/// would only be retried, never masked. That reasoning missed a real,
+/// measurable cost: Unix `EACCES`/`EPERM` (e.g. a caller-induced read-only
+/// directory, or an unrelated permission misconfiguration) DOES map to
+/// `io::ErrorKind::PermissionDenied` in Rust's std, so the uniform version
+/// silently retried genuine Unix permission failures too — adding up to
+/// ~300ms of pointless delay before a real, non-transient permission error
+/// ever reached the caller, for a race this module's own doc comment (see
+/// above) establishes is Windows-only. Scoping the mechanism to
+/// `#[cfg(windows)]` removes that latency entirely on Unix, which has no
+/// use for this retry: a Unix rename either succeeds on the first attempt
+/// or fails for a reason retrying can never fix.
+#[cfg(windows)]
 pub fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     rename_with_retry_impl(
         from,
@@ -137,12 +160,31 @@ pub fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     )
 }
 
+/// Non-Windows: a direct, zero-overhead passthrough to `std::fs::rename`.
+/// This platform has no equivalent of the Windows AV/indexer transient-lock
+/// race [`rename_with_retry`] exists to absorb (see the `#[cfg(windows)]`
+/// sibling's doc comment above), so there is no retry loop, no sleep, and
+/// no added latency on any Unix (or other non-Windows target's) hot path —
+/// same public signature as the Windows arm, so none of this module's own
+/// or `factory-dispatcher`'s 6 call sites need to change.
+#[cfg(not(windows))]
+pub fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// Testable core of [`rename_with_retry`]: identical retry-with-backoff
 /// logic, but with the rename operation and the sleep function injected
 /// rather than hardcoded to `std::fs::rename`/`std::thread::sleep`, so the
 /// retry loop itself (attempt counting, backoff sequence, which errors are
 /// retried) can be unit-tested deterministically and instantly — without a
 /// real filesystem race or real `Duration`-length sleeps.
+///
+/// Deliberately compiled on every target, not just `#[cfg(windows)]`: this
+/// keeps the retry logic itself unit-testable cross-platform (Finding 1/3),
+/// even though production code on non-Windows targets never calls it (the
+/// `#[cfg(not(windows))]` arm of [`rename_with_retry`] bypasses it entirely
+/// — Finding 4) — hence `allow(dead_code)` there.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn rename_with_retry_impl<R, S>(
     from: &Path,
     to: &Path,
@@ -189,6 +231,10 @@ where
 /// own scope — whether it should apply on non-Windows targets at all — is
 /// addressed separately by [`rename_with_retry`]'s own `cfg(windows)` split,
 /// Finding 4).
+///
+/// See [`rename_with_retry_impl`]'s doc comment for why this is
+/// `allow(dead_code)`-gated on non-Windows targets.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_retryable_rename_error(err: &std::io::Error) -> bool {
     if err.kind() == std::io::ErrorKind::PermissionDenied {
         return true;
