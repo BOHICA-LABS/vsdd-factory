@@ -127,9 +127,12 @@ pub trait Fs {
     fn fsync_file(&self, path: &Path) -> Result<(), BcIndexMigrationError>;
 
     /// Atomic rename, same filesystem (staging and canonical targets are
-    /// both under `.factory/`). Production: `std::fs::rename`. Model:
-    /// atomic namespace move within `live`; NOT durable until the parent
-    /// dir is fsynced.
+    /// both under `.factory/`). Production:
+    /// `last_amended_migrate::atomic_write::rename_with_retry` (a bounded
+    /// retry-with-backoff wrapper around `std::fs::rename` — PR #842
+    /// Windows-CI transient-rename-denial fix; see that function's own doc
+    /// comment). Model: atomic namespace move within `live`; NOT durable
+    /// until the parent dir is fsynced.
     fn rename(&self, from: &Path, to: &Path) -> Result<(), BcIndexMigrationError>;
 
     /// Durability barrier for a DIRECTORY's entries. Production:
@@ -150,9 +153,10 @@ pub trait Fs {
     /// multi-file migration (ADR-052 §Decision 7c step 6). Kept distinct
     /// from [`Fs::rename`] so a Kani harness can assert the commit
     /// predicate fires on exactly this call, never on a canonical-path
-    /// move rename. Production: identical `rename(2)` syscall to
+    /// move rename. Production: identical
+    /// `last_amended_migrate::atomic_write::rename_with_retry` call as
     /// [`Fs::rename`] — the distinction is in the CALLER's protocol role,
-    /// not the syscall.
+    /// not the underlying operation.
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError>;
 
     /// Remove a file or empty/non-empty directory tree (staging-generation
@@ -311,9 +315,14 @@ impl Fs for StdFs {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), BcIndexMigrationError> {
         migration_failpoint!("migration_fs::rename", to);
-        std::fs::rename(from, to).map_err(|source| BcIndexMigrationError::Io {
-            path: to.to_path_buf(),
-            source,
+        // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
+        // Windows-CI transient-rename-denial fix) rather than a bare
+        // `std::fs::rename`.
+        last_amended_migrate::atomic_write::rename_with_retry(from, to).map_err(|source| {
+            BcIndexMigrationError::Io {
+                path: to.to_path_buf(),
+                source,
+            }
         })
     }
 
@@ -339,9 +348,14 @@ impl Fs for StdFs {
 
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
         migration_failpoint!("migration_fs::pointer_swap", target);
-        std::fs::rename(tmp, target).map_err(|source| BcIndexMigrationError::Io {
-            path: target.to_path_buf(),
-            source,
+        // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
+        // Windows-CI transient-rename-denial fix) rather than a bare
+        // `std::fs::rename`.
+        last_amended_migrate::atomic_write::rename_with_retry(tmp, target).map_err(|source| {
+            BcIndexMigrationError::Io {
+                path: target.to_path_buf(),
+                source,
+            }
         })
     }
 

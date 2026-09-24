@@ -4550,7 +4550,11 @@ pub fn archive_overflow_shards(
 
         // Invariant 1: move, never delete -- `rename` relocates the file's
         // content byte-for-byte; nothing is read into memory and rewritten.
-        std::fs::rename(&old_path, &new_path).map_err(to_error)?;
+        // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
+        // Windows-CI transient-rename-denial fix) rather than a bare
+        // `std::fs::rename`.
+        last_amended_migrate::atomic_write::rename_with_retry(&old_path, &new_path)
+            .map_err(to_error)?;
 
         // Invariant 3: the moved entry's own index record is rewritten IN
         // PLACE (never removed) to reflect the new archived location.
@@ -13705,7 +13709,11 @@ fn read_all_txn_records(
 fn archive_terminal_txn_record(migration_state_dir: &Path, activation_id: &str) {
     let path = migration_state_dir.join(format!("txn-{activation_id}.json"));
     let archived_path = migration_state_dir.join(format!("txn-{activation_id}.json.archived"));
-    if let Err(source) = std::fs::rename(&path, &archived_path)
+    // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
+    // Windows-CI transient-rename-denial fix) rather than a bare
+    // `std::fs::rename`.
+    if let Err(source) =
+        last_amended_migrate::atomic_write::rename_with_retry(&path, &archived_path)
         && source.kind() != io::ErrorKind::NotFound
     {
         tracing::warn!(
