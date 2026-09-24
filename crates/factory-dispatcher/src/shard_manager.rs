@@ -14384,6 +14384,36 @@ pub fn stage_new_generation(
 /// re-read `CURRENT.json`'s own content) and this function's own
 /// idempotent re-invocation on resume converges (steps (1)/(2) both
 /// tolerate being repeated with the same content).
+///
+/// SEC-001 fix (CWE-367/CWE-362, security review of PR #842): `Fs::
+/// pointer_swap` is now backed by `last_amended_migrate::atomic_write::
+/// rename_with_retry` (PR #842's Windows-CI transient-rename-denial fix),
+/// which can retry the rename up to 5 times over ~300ms on a transient
+/// `PermissionDenied`/sharing-violation error. That retry window sits
+/// strictly AFTER callers' own Postcondition 3a pre-swap
+/// `pre_commit_fingerprint_recheck` call and strictly BEFORE this
+/// function previously returned -- widening the gap in which a
+/// non-participating writer (one bypassing the migration's advisory
+/// `exclusive.lock` flock) could mutate the canonical `BC-INDEX.md`
+/// without being caught, beyond what Postcondition 3a's "immediately
+/// before [commit]" invariant intends. `_fingerprint_source_paths`/
+/// `_expected_source_sha256` (`None` preserves the pre-fix behavior --
+/// no recheck -- for callers that have no fingerprint to verify, mirroring
+/// the STAGING-resume call site's own `txn.source_sha256: Option<String>`
+/// conditionality) let this function re-run the EXACT SAME
+/// `pre_commit_fingerprint_recheck` (same hash computation, same
+/// byte-equality comparison, same `FingerprintMismatchAbort` error
+/// variant) immediately after a successful (possibly-retried)
+/// `Fs::pointer_swap`, restoring "exactly-once, immediately before
+/// completion" semantics even when the rename was retried. A mismatch
+/// here is surfaced identically to a pre-swap mismatch -- via `?`, to the
+/// same error-handling call sites that already handle
+/// `commit_current_generation_pointer`'s other failure modes (a plain `?`
+/// at both the fresh-run and STAGING-resume call sites in
+/// `run_bc_index_migration`) -- so the txn record is never advanced to
+/// `Committing` when this fires. `rename_with_retry` itself is
+/// deliberately UNCHANGED by this fix; only this function's own
+/// surrounding logic is affected.
 pub fn commit_current_generation_pointer(
     fs: &impl Fs,
     _migration_state_dir: &Path,
@@ -14409,9 +14439,15 @@ pub fn commit_current_generation_pointer(
     // seam (not the general `Fs::rename`) so Kani/fault-injection harnesses
     // can assert the commit predicate fires on exactly this call.
     fs.pointer_swap(&tmp, &target)?;
-    // TODO(SEC-001): post-swap fingerprint recheck not yet implemented --
-    // plumbing only at this commit.
-    let _ = (_fingerprint_source_paths, _expected_source_sha256);
+    // Step 2a (SEC-001 fix): re-verify the Postcondition 3a fingerprint
+    // immediately after the (possibly-retried) swap above, closing the
+    // TOCTOU window `rename_with_retry`'s bounded retry loop can widen.
+    // Reuses `pre_commit_fingerprint_recheck` verbatim so this is a
+    // genuine mirror of the pre-swap check, not a differently-behaved
+    // one -- see this function's own doc comment.
+    if let Some(expected_source_sha256) = _expected_source_sha256 {
+        pre_commit_fingerprint_recheck(_fingerprint_source_paths, expected_source_sha256)?;
+    }
     // Step 3: durability barrier for the rename's directory-entry change.
     fs.fsync_dir(_migration_state_dir)
 }
