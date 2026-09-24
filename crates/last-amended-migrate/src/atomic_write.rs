@@ -158,7 +158,7 @@ where
         match rename_fn(from, to) {
             Ok(()) => return Ok(()),
             Err(source)
-                if source.kind() == std::io::ErrorKind::PermissionDenied
+                if is_retryable_rename_error(&source)
                     && attempt + 1 < RENAME_RETRY_MAX_ATTEMPTS =>
             {
                 sleep_fn(RENAME_RETRY_BASE_DELAY * (1 << attempt));
@@ -166,6 +166,40 @@ where
             }
             Err(source) => return Err(source),
         }
+    }
+}
+
+/// Returns `true` when `err` represents the class of transient Windows
+/// AV/indexer lock contention [`rename_with_retry`] absorbs with a bounded
+/// retry, rather than a genuine, persistent failure that must propagate
+/// immediately.
+///
+/// # Finding 3 — PR #842 fix-burst
+///
+/// The original condition checked only `io::ErrorKind::PermissionDenied`
+/// (the `ERROR_ACCESS_DENIED` / `os error 5` symptom verified in CI). On
+/// Windows, `ERROR_SHARING_VIOLATION` (raw OS error 32) and
+/// `ERROR_LOCK_VIOLATION` (raw OS error 33) are the same class of transient
+/// AV/indexer lock race, but Rust's std does not map either one to
+/// `ErrorKind::PermissionDenied` — they fall into an uncategorized kind, so
+/// the original condition silently missed them. `raw_os_error()` is not a
+/// meaningful or portable check off Windows (the numeric codes are a Win32
+/// convention), so that half of the condition is `#[cfg(windows)]`-gated;
+/// the `PermissionDenied` check continues to apply on every platform (its
+/// own scope — whether it should apply on non-Windows targets at all — is
+/// addressed separately by [`rename_with_retry`]'s own `cfg(windows)` split,
+/// Finding 4).
+fn is_retryable_rename_error(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        matches!(err.raw_os_error(), Some(32) | Some(33))
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -615,6 +649,66 @@ mod tests {
                 Duration::from_millis(160),
             ],
             "backoff must follow 20ms * (1 << attempt) for attempts 0..3"
+        );
+    }
+
+    /// Finding 3: on Windows, raw OS error 32 (`ERROR_SHARING_VIOLATION`) is
+    /// the same class of transient AV/indexer lock contention as
+    /// `PermissionDenied`, but Rust's std does not categorize it as
+    /// `ErrorKind::PermissionDenied` — it must still be retried.
+    /// Windows-only: `is_retryable_rename_error`'s raw-os-error check is
+    /// itself `#[cfg(windows)]`-gated (raw_os_error is not a meaningful,
+    /// portable check off Windows — Finding 3's own rationale), so this
+    /// assertion only holds on that platform.
+    #[cfg(windows)]
+    #[test]
+    fn test_rename_with_retry_impl_retries_raw_os_error_32_then_succeeds() {
+        let (rename_fn, calls) = scripted_rename(2, ScriptedError::Raw(32));
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |_| {});
+
+        assert!(
+            result.is_ok(),
+            "raw OS error 32 must be retried: {result:?}"
+        );
+        assert_eq!(*calls.borrow(), 3);
+    }
+
+    /// Finding 3: raw OS error 33 (`ERROR_LOCK_VIOLATION`) is likewise
+    /// retried, and exhausts the same bounded retry budget as any other
+    /// retryable condition when it never clears. Windows-only, see above.
+    #[cfg(windows)]
+    #[test]
+    fn test_rename_with_retry_impl_exhausts_retries_on_raw_os_error_33() {
+        let (rename_fn, calls) =
+            scripted_rename(RENAME_RETRY_MAX_ATTEMPTS + 5, ScriptedError::Raw(33));
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |_| {});
+
+        assert!(result.is_err(), "must propagate once retries are exhausted");
+        assert_eq!(*calls.borrow(), RENAME_RETRY_MAX_ATTEMPTS);
+    }
+
+    /// Finding 3: a raw OS error that is NOT 32 or 33 (and not
+    /// `PermissionDenied`-kind) must NOT be retried — the widened predicate
+    /// is specific to the two documented lock-contention codes, not "any
+    /// raw OS error." This holds on every platform: off Windows, the
+    /// raw-os-error branch of `is_retryable_rename_error` never applies at
+    /// all (Finding 4), so a non-32/33 raw code is unretried everywhere.
+    #[test]
+    fn test_rename_with_retry_impl_does_not_retry_unrelated_raw_os_error() {
+        let (rename_fn, calls) = scripted_rename(
+            RENAME_RETRY_MAX_ATTEMPTS + 5,
+            ScriptedError::Raw(2), // ERROR_FILE_NOT_FOUND — unrelated code
+        );
+
+        let result = rename_with_retry_impl(Path::new("from"), Path::new("to"), rename_fn, |_| {});
+
+        assert!(result.is_err());
+        assert_eq!(
+            *calls.borrow(),
+            1,
+            "an unrelated raw OS error must not be retried"
         );
     }
 }
