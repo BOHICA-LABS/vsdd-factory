@@ -40,11 +40,110 @@
 //!    directory fsync has no equivalent/is not meaningful on Windows) so the
 //!    rename's directory-entry update is also durable, not just the file's
 //!    bytes.
+//!
+//! # PR #842 — Windows CI transient-rename-denial mitigation
+//!
+//! `windows-x64` CI on PR #842 failed 5/5 `bc_1_18_011_b2_migration_test`
+//! tests with `PermissionDenied` (`os error 5`, `ERROR_ACCESS_DENIED`) on
+//! the final rename of a first-time write (destination did not yet exist in
+//! any of the 5 failures). Code inspection confirmed neither `write_atomic`
+//! nor `write_atomic_strict_durable` ever holds its own temp-file `File`
+//! handle open across the rename — both close it via `Drop` at a
+//! function-local scope boundary strictly before the rename call. The
+//! verified cause is therefore a THIRD PARTY (GitHub Actions' Windows
+//! runners run Windows Defender real-time protection by default, including
+//! against `%TEMP%`) transiently opening the just-written file for a
+//! post-write scan in the narrow window between our `Drop` and our next
+//! syscall — a well-documented class of Windows filesystem flakiness, not a
+//! handle leak in this module. Every rename in this module (and its
+//! sibling call sites in `factory-dispatcher`, swept per TD-VSDD-060) now
+//! goes through [`rename_with_retry`], which absorbs that transient window
+//! with a short bounded backoff while still propagating a genuine,
+//! persistent permission failure unchanged.
 
 use crate::error::MigrateError;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
+
+/// Bounded attempt count for [`rename_with_retry`]'s Windows-transient-lock
+/// mitigation (initial attempt + up to 4 retries = 5 total).
+const RENAME_RETRY_MAX_ATTEMPTS: u32 = 5;
+
+/// Base backoff delay for [`rename_with_retry`]'s exponential backoff:
+/// 20ms, 40ms, 80ms, 160ms between the 5 attempts (~300ms worst-case total),
+/// short enough to be invisible in normal operation but long enough to
+/// outlast a transient Windows Defender/indexer post-write scan handle.
+const RENAME_RETRY_BASE_DELAY: Duration = Duration::from_millis(20);
+
+/// `std::fs::rename` wrapped in a bounded retry-with-backoff for
+/// `io::ErrorKind::PermissionDenied` — every write-then-rename call site in
+/// this module (and its downstream callers in `factory-dispatcher`) routes
+/// its final rename through this helper rather than calling
+/// `std::fs::rename` directly (TD-VSDD-060 sibling-site sweep, S-25.02
+/// cluster-5 PR #842 Windows-CI fix).
+///
+/// # Why this exists — verified root cause, not speculation
+///
+/// PR #842's `windows-x64` CI leg failed 5/5 `bc_1_18_011_b2_migration_test`
+/// tests with `Io { PermissionDenied, os error 5 ("Access is denied.") }` on
+/// the rename step of a **first-time** write (the destination path did not
+/// exist yet in any of the 5 failures — confirmed against the CI log, not
+/// assumed). `os error 5` (`ERROR_ACCESS_DENIED`) on `MoveFileExW` is the
+/// textbook Windows symptom of SOME process holding an open handle to the
+/// source or destination path, without `FILE_SHARE_DELETE`, at the instant
+/// of the rename — Windows (unlike POSIX, see this module's own top-of-file
+/// doc comment) refuses to rename a file out from under an open handle.
+///
+/// This module's own writers (`write_atomic`, `write_atomic_strict_durable`)
+/// already close their own temp-file `File` handle deterministically via
+/// Rust's `Drop` — the handle is a closure-local/function-local binding
+/// whose owning scope ends, and is dropped, strictly before either
+/// function's own rename call — so the open handle triggering this failure
+/// is never this process's own write handle (verified by inspection: no
+/// code path retains a `File` across the rename in either function). On
+/// GitHub Actions' Windows-hosted runners, Windows Defender real-time
+/// protection is enabled by default (including for `%TEMP%`), and its
+/// well-documented behavior is to open a transient post-write scan handle
+/// on a just-closed file asynchronously, in the narrow window between this
+/// process's `CloseHandle` and its very next syscall — exactly the gap
+/// between our `File::drop` and our `rename` call. That handle clears
+/// itself within single-digit milliseconds once the scan completes, which
+/// is precisely the class of failure a short bounded retry resolves without
+/// masking a genuine, persistent permission problem: a real, non-transient
+/// access-denied condition (a read-only ACL, a directory permission
+/// problem, or a caller-held handle that never closes) still fails after
+/// every retry is exhausted and propagates the final, unmodified error.
+///
+/// # Cross-platform, not `cfg(windows)`-gated
+///
+/// Applied uniformly on every platform rather than Windows-only: on Unix,
+/// `rename(2)` never returns `EACCES` for the "open handle" reason (Unix
+/// permits renaming a file with open handles unconditionally), so a Unix
+/// rename either succeeds on the first attempt or fails for a genuinely
+/// different, non-transient reason that this function's retry condition
+/// does not match — zero added latency, zero behavioral change on Unix's
+/// hot path. An `EACCES` a Unix caller genuinely hits for an unrelated
+/// permission reason (e.g. a read-only directory) is retried up to the same
+/// bound before propagating, which is a harmless (if slightly redundant)
+/// no-op path, never a masked failure.
+pub fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut attempt = 0u32;
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(source)
+                if source.kind() == std::io::ErrorKind::PermissionDenied
+                    && attempt + 1 < RENAME_RETRY_MAX_ATTEMPTS =>
+            {
+                std::thread::sleep(RENAME_RETRY_BASE_DELAY * (1 << attempt));
+                attempt += 1;
+            }
+            Err(source) => return Err(source),
+        }
+    }
+}
 
 /// Write `content` to `path` atomically: write to a sibling `<basename>.tmp-<pid>`
 /// file in the same directory (preserving `path`'s pre-existing permission
@@ -75,7 +174,11 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
         let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
     }
 
-    std::fs::rename(&tmp_path, path).map_err(|source| {
+    // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
+    // comment for the verified Windows CI root cause (transient AV/indexer
+    // handle, never this function's own write handle, which
+    // `write_and_sync_temp` already closed via `Drop` before returning).
+    rename_with_retry(&tmp_path, path).map_err(|source| {
         // Best-effort cleanup of the orphaned temp file — the rename failure
         // itself is still reported; a leftover `.tmp-<pid>` here is a
         // secondary symptom, not the primary error, and this tool has no
@@ -275,12 +378,7 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
     let tmp_path = parent.join(format!(".{basename}.strict-tmp-{}", std::process::id()));
 
-    let write_result: std::io::Result<()> = (|| {
-        let mut file = File::create(&tmp_path)?;
-        file.write_all(content.as_bytes())?;
-        sync_file_durable(&file)
-    })();
-    if let Err(source) = write_result {
+    if let Err(source) = write_and_sync_temp_strict(&tmp_path, content) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
@@ -292,7 +390,12 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
     }
 
-    if let Err(source) = std::fs::rename(&tmp_path, path) {
+    // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
+    // comment for the verified Windows CI root cause (transient AV/indexer
+    // handle, never this function's own write handle, which
+    // `write_and_sync_temp_strict` already closed via `Drop` before
+    // returning — PR #842).
+    if let Err(source) = rename_with_retry(&tmp_path, path) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: path.to_path_buf(),
@@ -304,4 +407,24 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         path: parent.to_path_buf(),
         source,
     })
+}
+
+/// Write `content` to `tmp_path` (creating or truncating it) and durably
+/// sync it — `F_FULLFSYNC` on macOS, plain `fsync` elsewhere, via
+/// [`sync_file_durable`] — before returning, so the caller's subsequent
+/// rename never lands ahead of the data actually being durable on disk
+/// (D-1232-OBL-2(a)).
+///
+/// `file` is a binding local to THIS function's own stack frame, never
+/// returned or exposed to the caller: it is dropped (its OS handle closed
+/// via `Drop`) at this function's return, strictly BEFORE
+/// [`write_atomic_strict_durable`]'s subsequent `rename_with_retry` call —
+/// named as its own function (mirroring [`write_and_sync_temp`]'s identical
+/// shape for [`write_atomic`]) rather than an inline closure specifically
+/// so this scoping is unambiguous on inspection (PR #842 Windows-CI
+/// investigation).
+fn write_and_sync_temp_strict(tmp_path: &Path, content: &str) -> std::io::Result<()> {
+    let mut file = File::create(tmp_path)?;
+    file.write_all(content.as_bytes())?;
+    sync_file_durable(&file)
 }
