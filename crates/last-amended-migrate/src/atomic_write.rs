@@ -190,17 +190,48 @@ fn sync_file_durable(file: &File) -> std::io::Result<()> {
 
 /// Directory-entry durability barrier after a rename. Issues the
 /// strongest available barrier for the platform (`F_FULLFSYNC` on macOS
-/// via [`sync_file_durable`], `fsync(2)` elsewhere) and propagates a hard
-/// I/O failure — but, per BC-1.18.011 Postcondition 3's own
+/// via [`sync_file_durable`], `fsync(2)` on other Unix) and propagates a
+/// hard I/O failure — but, per BC-1.18.011 Postcondition 3's own
 /// platform-branched durability language, does not claim a stronger
 /// guarantee than macOS/APFS actually provides for directory fsync
 /// (Apple's docs do not guarantee APFS directory-fsync itself survives
 /// power loss, even under `F_FULLFSYNC`); this function still issues the
-/// call and still propagates a hard failure, it just does not oversell
-/// what the underlying platform call durably promises.
+/// call and still propagates a hard failure on Unix, it just does not
+/// oversell what the underlying platform call durably promises.
+///
+/// # Windows
+///
+/// `std::fs::File::open` cannot open a directory on Windows at all: the
+/// underlying `CreateFileW` call fails (`ERROR_ACCESS_DENIED`) unless the
+/// caller passes `FILE_FLAG_BACKUP_SEMANTICS`, which `std` never sets —
+/// so the Unix `File::open(dir)?` implementation is not merely weaker on
+/// Windows, it is a hard, unconditional `Err` on every call, which would
+/// make every OBL-2(a) durable write fail outright on Windows regardless
+/// of whether the actual write succeeded. This is cfg-gated to a
+/// documented no-op instead, which is the CORRECT Windows equivalent, not
+/// a weakened fallback: NTFS durably logs directory-entry mutations
+/// (create/rename/delete) through its own `$LogFile` metadata transaction
+/// journal as part of the mutation itself, so — unlike POSIX filesystems,
+/// where an explicit `fsync(dir_fd)` is required for a rename's directory
+/// entry to survive a crash — there is no separate "flush the directory"
+/// operation NTFS exposes or requires for this guarantee (this is also
+/// why practice elsewhere, e.g. SQLite's Windows VFS, does not attempt a
+/// directory-handle flush). The Unix branch's guarantee is unchanged.
+#[cfg(unix)]
 fn sync_dir_durable(dir: &Path) -> std::io::Result<()> {
     let dir_file = File::open(dir)?;
     sync_file_durable(&dir_file)
+}
+
+/// Windows: see the doc comment on the `#[cfg(unix)]` sibling above for the
+/// full rationale — a directory cannot be opened via `std::fs::File::open`
+/// on Windows, and NTFS's `$LogFile` metadata journal already durably
+/// covers directory-entry mutations without a separate flush operation, so
+/// this is a documented no-op rather than a hard failure or an unsound
+/// weakening of a guarantee NTFS provides some other way.
+#[cfg(windows)]
+fn sync_dir_durable(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Public wrapper around this module's own `F_FULLFSYNC`-on-macOS
