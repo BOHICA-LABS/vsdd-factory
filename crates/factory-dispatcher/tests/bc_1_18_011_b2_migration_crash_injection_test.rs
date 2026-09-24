@@ -2113,3 +2113,355 @@ fn test_BC_1_18_011_SEC001_run_bc_index_migration_detects_concurrent_writer_muta
     assert_genuinely_fully_migrated(dir.path());
     assert_recovery_is_idempotent(dir.path());
 }
+
+// ===========================================================================
+// SEC-001 v3 (fresh-eyes pr-reviewer finding on PR #842's v2 redesign
+// above): the STAGING-resume arm's forward-recovery-vs-abort
+// disambiguation. `shard_manager::read_current_generation_pointer_if_
+// present` -- called at the very top of `run_bc_index_migration`'s
+// `ResumeFromStaging` arm, before `resume_from_staging`'s census re-run and
+// before the recompute/recheck/swap sequence -- disambiguates "the swap for
+// THIS generation genuinely never happened yet" (the pre-existing
+// recheck-before-swap-then-abort-on-mismatch logic remains correct) from
+// "a PRIOR (crashed) invocation already drove `Fs::pointer_swap` to success
+// before crashing strictly before `Fs::fsync_dir`/`state=Committing`" (which
+// must proceed via forward recovery ONLY -- Invariant 3, "no turning back"
+// -- never through `discard_incomplete_staging`'s gen-dir deletion).
+// ===========================================================================
+
+/// Requirement (1) of the v3 regression suite: a STAGING-resume where the
+/// pointer swap has NOT yet happened for this generation (crashed strictly
+/// before `write_temp` occurrence 8's `CURRENT.tmp.json` staging write ever
+/// ran -- see this file's own module-doc occurrence table; occurrence 7 is
+/// the boundary FINDING 2's own `test_BC_1_18_011_obl1_FINDING2_crash_
+/// write_temp_occ7_pending_moves_not_yet_persisted` test already proves
+/// resumes correctly WITHOUT a mutation), followed by a non-participating
+/// writer's mutation of the canonical `BC-INDEX.md` before the resume
+/// attempt. `read_current_generation_pointer_if_present` must find NO
+/// `CURRENT.json` at all for this generation (the swap was never attempted)
+/// and correctly fall through to the pre-existing recheck-before-swap
+/// logic, which must still abort exactly as it always has -- this is the
+/// REGRESSION GUARD proving the v3 fix's new early-return branch does not
+/// accidentally widen to cover the "genuinely not yet committed" case too.
+#[test]
+fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_no_prior_swap_aborts_and_converges() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let canonical_path = bc_index_target(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    // Crash strictly BEFORE the pointer swap is ever attempted (write_temp
+    // occurrence 7 -- the txn record write persisting pending_canonical_
+    // moves, itself strictly before occurrence 8's CURRENT.tmp.json write).
+    let crash = spawn_crash_child("migration_fs::write_temp", 7, dir.path());
+    assert_child_aborted(&crash, "migration_fs::write_temp", 7);
+    assert_admission_blocked(dir.path(), "probe");
+
+    let txn = read_live_txn_record(&msd).unwrap();
+    assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
+    assert!(
+        !msd.join("CURRENT.json").exists(),
+        "precondition: the pointer swap must never have been attempted at this crash point"
+    );
+
+    // Simulate a non-participating writer's mutation landing between the
+    // crash and the resume attempt.
+    std::fs::write(
+        &canonical_path,
+        "## a non-participating writer's mutation, bypassing exclusive.lock\n",
+    )
+    .unwrap();
+
+    let outcome = run_bc_index_migration(dir.path());
+    assert!(
+        matches!(
+            outcome,
+            Err(BcIndexMigrationError::FingerprintMismatchAbort)
+        ),
+        "SEC-001 v3: a STAGING-resume where the swap genuinely never happened yet must still \
+         detect the mutated source and abort exactly as before the v3 fix -- got {outcome:?}"
+    );
+
+    let txn = read_live_txn_record(&msd)
+        .expect("a txn record must exist -- discard_incomplete_staging still writes it");
+    assert_eq!(
+        txn.state,
+        BcIndexMigrationTxnState::Aborted,
+        "SEC-001 v3: the not-yet-committed case must still route through discard_incomplete_\
+         staging -- txn.state stuck at STAGING here would be the permanent-deadlock defect this \
+         module's SEC-001 REDESIGN section already closed"
+    );
+    assert_eq!(
+        read_gate_state(&msd),
+        BcIndexAdmissionGateState::Open,
+        "SEC-001 v3: the admission gate must be reopened on this genuinely-not-committed abort \
+         path"
+    );
+    assert!(
+        !msd.join("CURRENT.json").exists(),
+        "SEC-001 v3: no live CURRENT.json for this generation -- the swap never landed"
+    );
+
+    // A subsequent invocation, once the mutation is corrected, genuinely
+    // converges.
+    std::fs::write(&canonical_path, ORIGINAL_CONTENT).unwrap();
+    let outcome2 = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome2,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "got {outcome2:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
+
+/// Requirement (2) of the v3 regression suite -- the actual defect under
+/// test: a STAGING-resume where the pointer swap ALREADY landed in a prior
+/// crashed invocation (crashed strictly between `Fs::pointer_swap`
+/// succeeding and `Fs::fsync_dir`/`state=Committing` durably landing -- the
+/// SAME crash window `test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_
+/// pointer_swap_barrier_resumes_via_staging_reinvocation` above exercises),
+/// followed by a non-participating writer's mutation of the canonical
+/// `BC-INDEX.md` before the resume attempt.
+///
+/// Before the v3 fix, this scenario made the `ResumeFromStaging` arm
+/// re-run the pre-swap fingerprint recheck against the now-mutated
+/// canonical content, observe a mismatch, and route through
+/// `discard_incomplete_staging` -- DELETING the already-committed
+/// generation directory while `CURRENT.json` still pointed at it, a
+/// rollback-after-the-commit-point Invariant 3 forbids (empirically
+/// reproduced by a fresh-eyes pr-reviewer pass on PR #842's v2 redesign).
+/// `read_current_generation_pointer_if_present` must detect that
+/// `CURRENT.json` already names this transaction's generation and txn, and
+/// skip the recheck/swap entirely, proceeding straight to forward recovery.
+///
+/// # Honest scope note on this test's own final-outcome assertion
+///
+/// The mutated canonical `BC-INDEX.md` is ALSO one of this migration's own
+/// pending canonical-path-move TARGETS (the lean split body). Once forward
+/// recovery reaches `execute_canonical_path_moves`, `decide_intent_log_
+/// recovery`'s own (separate, pre-existing, correct) fail-closed table
+/// legitimately halts THAT one target's rename -- the on-disk canonical
+/// content now matches neither the recorded `expected_pre_state` nor
+/// `expected_post_hash`, exactly as it would for ANY concurrently-mutated
+/// rename target, v3 fix or not (this is `execute_canonical_path_moves`'s
+/// own, separate, already-correct fail-closed contract -- not something the
+/// v3 fix changes or needs to change). This test therefore asserts the
+/// property the v3 fix actually controls on the FIRST resume call (no
+/// abort, no gen-dir deletion, `CURRENT.json` stays intact and correct),
+/// then clears the interference and asserts genuine, full convergence on a
+/// SECOND call -- rather than asserting a same-call full `Completed`
+/// outcome that the system's own concurrent-writer-safety contract (a
+/// separate, correct behavior) does not promise while the interference is
+/// still physically present on disk.
+#[test]
+fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_after_prior_swap_forward_recovers_never_deletes_generation()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let canonical_path = bc_index_target(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    let crash = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
+    assert_child_aborted(&crash, "migration_fs::fsync_dir", 2);
+    assert_admission_blocked(dir.path(), "probe");
+
+    let txn_before = read_live_txn_record(&msd).unwrap();
+    assert_eq!(
+        txn_before.state,
+        BcIndexMigrationTxnState::Staging,
+        "precondition: the txn record is stale (still STAGING) at this crash point even though \
+         CURRENT.json already durably points at the new generation"
+    );
+    let generation_id = txn_before
+        .generation_id
+        .clone()
+        .expect("precondition: generation_id must already be durable at this crash point");
+    let gen_dir = msd.join(format!("gen-{generation_id}"));
+    assert!(
+        gen_dir.exists(),
+        "precondition: the staged generation directory must still exist"
+    );
+    let current_before: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(msd.join("CURRENT.json"))
+            .expect("precondition: CURRENT.json must already exist -- the swap already landed"),
+    )
+    .unwrap();
+    assert_eq!(
+        current_before.get("generation_id").and_then(|v| v.as_str()),
+        Some(generation_id.as_str()),
+        "precondition: CURRENT.json must already name this generation"
+    );
+
+    // Simulate a non-participating writer's mutation landing between the
+    // crash and the resume attempt.
+    std::fs::write(
+        &canonical_path,
+        "## a non-participating writer's mutation, bypassing exclusive.lock\n",
+    )
+    .unwrap();
+
+    let outcome = run_bc_index_migration(dir.path());
+    assert!(
+        !matches!(
+            outcome,
+            Err(BcIndexMigrationError::FingerprintMismatchAbort)
+        ),
+        "SEC-001 v3 REGRESSION: a swap that ALREADY committed in a prior crashed invocation must \
+         NEVER be re-classified as \"never happened\" just because the canonical source was \
+         mutated afterward -- got {outcome:?}"
+    );
+
+    // The generation directory must NEVER be deleted -- this is the actual
+    // defect the v3 fix closes (a rollback-after-the-commit-point).
+    assert!(
+        gen_dir.exists(),
+        "SEC-001 v3 REGRESSION: the already-committed generation directory must never be \
+         deleted just because a later fingerprint recheck against MUTATED content would (if \
+         mistakenly re-run) report a mismatch"
+    );
+
+    // CURRENT.json must still exist and still correctly name this exact
+    // generation and transaction -- never reverted, never left dangling.
+    let current_after_content = std::fs::read_to_string(msd.join("CURRENT.json"))
+        .expect("SEC-001 v3 REGRESSION: CURRENT.json must still exist after this resume attempt");
+    let current_after: serde_json::Value = serde_json::from_str(&current_after_content).unwrap();
+    assert_eq!(
+        current_after.get("generation_id").and_then(|v| v.as_str()),
+        Some(generation_id.as_str()),
+        "SEC-001 v3 REGRESSION: CURRENT.json must still correctly point at the already-committed \
+         generation"
+    );
+    assert_eq!(
+        current_after.get("txn_id").and_then(|v| v.as_str()),
+        Some(txn_before.txn_id.as_str()),
+        "SEC-001 v3 REGRESSION: CURRENT.json's txn_id must be unchanged"
+    );
+
+    // The txn record must have advanced FORWARD (to Committing), never
+    // backward to Aborted -- Invariant 3, "no turning back".
+    let txn_after = read_live_txn_record(&msd).unwrap();
+    assert_ne!(
+        txn_after.state,
+        BcIndexMigrationTxnState::Aborted,
+        "SEC-001 v3 REGRESSION: forward recovery from an already-committed swap must never reach \
+         the Aborted state -- got {:?}",
+        txn_after.state
+    );
+
+    // Once the interfering mutation is corrected, a further invocation
+    // genuinely, fully converges -- proving this is forward recovery, not a
+    // stuck halt or a silently-lost generation.
+    std::fs::write(&canonical_path, ORIGINAL_CONTENT).unwrap();
+    let outcome2 = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome2,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "SEC-001 v3: forward recovery must genuinely converge once the interfering mutation \
+         clears -- got {outcome2:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
+
+// ===========================================================================
+// SEC-004 (CWE-703, LOW/advisory) -- an `Io` error from the fingerprint
+// recheck's OWN read of the canonical source (as opposed to a write-side
+// `Fs::write_temp`/`Fs::pointer_swap` fault) must be routed through the
+// same abort-and-reopen-gate handling as a genuine `FingerprintMismatchAbort`
+// -- never left at STAGING with the gate LOCKED forever, restoring parity
+// with the pre-v2 baseline's uniform treatment of any fingerprint-recheck
+// failure.
+// ===========================================================================
+
+/// Deletes the canonical `BC-INDEX.md` (rather than mutating its content)
+/// at the exact same deterministic hook this file's own SEC-001 section
+/// uses (`write_temp` occurrence 8, the `CURRENT.tmp.json` staging write --
+/// the last write before the precommit recheck loop's first iteration), so
+/// `pre_commit_fingerprint_recheck`'s own `std::fs::read` fails with a
+/// genuine `NotFound` `Io` error rather than a content mismatch. Proves the
+/// SEC-004 fix routes this the SAME way `FingerprintMismatchAbort` already
+/// is, through the REAL `run_bc_index_migration` fresh-run path.
+#[test]
+fn test_BC_1_18_011_SEC004_run_bc_index_migration_recheck_source_read_io_error_aborts_like_mismatch()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let canonical_path = bc_index_target(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    let occurrence = AtomicUsize::new(0);
+    let delete_path = canonical_path.clone();
+    fail::cfg_callback("migration_fs::write_temp", move || {
+        let n = occurrence.fetch_add(1, Ordering::SeqCst) + 1;
+        // Occurrence 8 (this file's own fixture/occurrence table, module
+        // doc comment) is the `CURRENT.tmp.json` staging write -- the
+        // deterministic hook this section's header comment explains.
+        if n == 8 {
+            std::fs::remove_file(&delete_path)
+                .expect("SEC-004 fixture: deleting the canonical source must succeed");
+        }
+    })
+    .expect("configuring the write_temp callback failpoint must succeed");
+
+    let outcome = run_bc_index_migration(dir.path());
+    fail::cfg("migration_fs::write_temp", "off")
+        .expect("resetting the write_temp failpoint must succeed");
+
+    assert!(
+        matches!(outcome, Err(BcIndexMigrationError::Io { .. })),
+        "SEC-004: a source-read I/O fault at the precommit recheck moment must surface as an Io \
+         error (never silently swallowed, never a hang) -- got {outcome:?}"
+    );
+    if let Err(BcIndexMigrationError::Io { path, .. }) = &outcome {
+        assert_eq!(
+            path, &canonical_path,
+            "SEC-004: the Io error must be the recheck's OWN read of the canonical source, not \
+             some other path"
+        );
+    }
+
+    let txn = read_live_txn_record(&msd)
+        .expect("a txn record must exist -- the fresh-run path's abort_staging still writes it");
+    assert_eq!(
+        txn.state,
+        BcIndexMigrationTxnState::Aborted,
+        "SEC-004: a source-read Io error at the recheck moment must be routed through the SAME \
+         abort_staging cleanup as a fingerprint mismatch -- leaving txn.state stuck at STAGING \
+         here would wedge the migration with the gate LOCKED forever, exactly the pre-v2-parity \
+         gap SEC-004 closes"
+    );
+    assert_eq!(
+        read_gate_state(&msd),
+        BcIndexAdmissionGateState::Open,
+        "SEC-004: the writer-admission gate must be reopened, not left LOCKED forever"
+    );
+    assert!(
+        !msd.join("CURRENT.json").exists(),
+        "SEC-004: the pointer swap must never have landed"
+    );
+
+    // A subsequent invocation, once the source is restored, genuinely
+    // converges.
+    std::fs::write(&canonical_path, ORIGINAL_CONTENT).unwrap();
+    let outcome2 = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome2,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "got {outcome2:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
