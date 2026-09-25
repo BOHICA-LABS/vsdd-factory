@@ -330,3 +330,101 @@ fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_accumulates_across_rota
          Found {live_count}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// PR #842 item 2 — ambiguous archive-existence check must not silently
+// discard prior archive content
+// ---------------------------------------------------------------------------
+
+/// End-to-end safety-net test: a failed `rotate_changelog_at` attempt must
+/// never corrupt or discard existing archive content, even when the failure
+/// is triggered by an ambiguous/non-`NotFound` I/O error on the archive path.
+///
+/// Setup: the archive file already holds real prior content from an earlier
+/// rotation. We then make the archive's containing directory unsearchable
+/// (`chmod 000`), so a subsequent `std::fs::metadata`/`exists()`-style check
+/// on the archive path fails with `PermissionDenied` — NOT `NotFound` — even
+/// though the archive file genuinely, physically still exists on disk. Under
+/// this setup, `write_atomic` also cannot create its temp file in the
+/// unsearchable directory, so the rotation attempt fails regardless of which
+/// archive-existence-check implementation is active — this test verifies the
+/// resulting safety property (`result.is_err()` and the archive is left
+/// byte-for-byte unchanged), not the specific ambiguous-existence-check
+/// defect fix itself.
+///
+/// The test that actually discriminates the ambiguous-existence-check defect
+/// (i.e. genuinely fails against the old `archive_path.exists()` call site
+/// and passes only with the fix) is
+/// `crates/last-amended-migrate/src/rotate.rs`'s
+/// `test_check_archive_exists_permission_denied_is_not_collapsed_to_absent`,
+/// which exercises `check_archive_exists` directly and is unaffected by
+/// `write_atomic`'s own directory-access requirements.
+///
+/// This test is `#[cfg(unix)]` because it relies on POSIX directory-execute
+/// permission semantics (removing search/traverse permission on the
+/// containing directory) to synthesize a non-`NotFound` I/O error on a path
+/// that genuinely exists — there is no portable Windows equivalent using
+/// only `std::fs`. Precedent for this exact permission-based error-injection
+/// technique already exists in this workspace (e.g.
+/// `crates/factory-dispatcher/src/indeterminate_marker.rs`'s
+/// `test_BC_1_18_002_block_if_marker_check_io_error_allows`-style tests).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_009_rotate_changelog_at_ambiguous_archive_check_does_not_discard_prior_content() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("BC-INDEX.md");
+    let archive_dir = dir.path().join("archive-dir");
+    let archive_path = archive_dir.join("BC-INDEX-changelog-archive.md");
+
+    // First rotation: creates the archive directory and populates the
+    // archive with real, genuine prior content (25 items).
+    let fixture_1 = bc_index_fixture(50);
+    common::write_file(dir.path(), "BC-INDEX.md", &fixture_1);
+    rotate_changelog_at(&source_path, &archive_path, 25, MigrationMode::Apply)
+        .expect("first rotation must succeed and populate the archive");
+
+    let archive_content_before = std::fs::read_to_string(&archive_path)
+        .expect("archive must exist with real content after the first rotation");
+    assert!(
+        !archive_content_before.is_empty(),
+        "test precondition: archive must hold real prior content before the ambiguous-check attempt"
+    );
+
+    // Second rotation source: fresh 50-item fixture so the call would
+    // otherwise proceed past the no-op/threshold checks.
+    let fixture_2 = bc_index_fixture(50);
+    common::write_file(dir.path(), "BC-INDEX.md", &fixture_2);
+
+    // Make the archive's containing directory unsearchable: any attempt to
+    // stat a path INSIDE it (including the archive file itself) now fails
+    // with `PermissionDenied`, not `NotFound` -- the archive file is still
+    // physically present and untouched.
+    std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
+        .expect("chmod 000 on archive_dir");
+
+    let result = rotate_changelog_at(&source_path, &archive_path, 25, MigrationMode::Apply);
+
+    // Restore permissions unconditionally (even on an unexpected panic path
+    // above this would leak, but assert!/expect! below run after restore so
+    // tempdir cleanup on Drop always succeeds).
+    std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
+        .expect("restore archive_dir permissions for cleanup");
+
+    assert!(
+        result.is_err(),
+        "PR #842 item 2: rotate_changelog_at must fail loud (Err) when the archive-existence \
+         check hits an ambiguous/non-NotFound I/O error, rather than silently treating it as \
+         'archive absent' and overwriting the archive. Got: {result:?}"
+    );
+
+    let archive_content_after = std::fs::read_to_string(&archive_path)
+        .expect("archive file must still be readable after permissions are restored");
+    assert_eq!(
+        archive_content_after, archive_content_before,
+        "PR #842 item 2: the archive's prior content must be UNCHANGED after a failed \
+         ambiguous-existence-check rotation attempt -- a silent overwrite here would be \
+         irrecoverable data loss of every previously-archived changelog item"
+    );
+}

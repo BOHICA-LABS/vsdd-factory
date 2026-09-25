@@ -163,7 +163,12 @@ pub fn write_indeterminate_marker(fields: &MarkerFields, marker_path: &Path) -> 
     // just wrote — best-effort cleanup before propagating the rename error. The
     // temp path is unique per writer (plugin_name + pid + nonce), so removal here
     // can never race a DIFFERENT writer's own temp file.
-    if let Err(e) = std::fs::rename(&tmp_path, marker_path) {
+    //
+    // `rename_with_retry` (not a bare `std::fs::rename`) — TD-VSDD-060
+    // sibling-site sweep from PR #842's Windows-CI transient-rename-denial
+    // fix; see `last_amended_migrate::atomic_write::rename_with_retry`'s own
+    // doc comment for the verified root cause.
+    if let Err(e) = last_amended_migrate::atomic_write::rename_with_retry(&tmp_path, marker_path) {
         if let Err(cleanup_err) = std::fs::remove_file(&tmp_path) {
             tracing::warn!(
                 tmp_path = %tmp_path.display(),

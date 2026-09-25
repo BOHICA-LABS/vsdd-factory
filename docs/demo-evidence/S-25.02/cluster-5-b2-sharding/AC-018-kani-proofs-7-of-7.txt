@@ -1,0 +1,102 @@
+S-25.02 cluster-5 AC-018 (BC-1.18.011) formal-verification evidence
+=====================================================================
+
+This is REAL captured stdout from an actual local run of the OBL-1 Kani
+model-checking harnesses (crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs),
+the same harness set .github/workflows/kani.yml runs in CI on every PR to
+develop/main. Nothing below was hand-typed or fabricated -- it is a curated
+excerpt (per-harness SUMMARY + VERIFICATION line) of the full run's output,
+captured because a full Kani transcript is tens of thousands of lines (raw
+log retained locally, not committed -- see Reproduction below) and VHS is
+not a fit for an ~85s CBMC solve (no interactive terminal action to show
+beyond "wait").
+
+Command (identical to the CI gate step "Run OBL-1 Kani proofs" in
+.github/workflows/kani.yml):
+
+    $ cargo kani -p factory-dispatcher --harness proof_obl1
+
+Environment: kani-verifier 0.68.0 (cargo plugin), CBMC 6.11.0, run locally
+against this worktree's HEAD at capture time.
+
+---------------------------------------------------------------------------
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h6_recovery_idempotence...
+SUMMARY:
+ ** 0 of 1149 failed (18 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h5_pointer_swap_crash_atomicity...
+SUMMARY:
+ ** 0 of 703 failed (25 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h4_admission_gate_invariant...
+SUMMARY:
+ ** 0 of 168 failed (2 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_bounded_sequence...
+SUMMARY:
+ ** 0 of 46 failed (1 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_inductive_step...
+SUMMARY:
+ ** 0 of 16 failed
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h2_recovery_safety_predicate...
+SUMMARY:
+ ** 0 of 910 failed (13 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h1_recover_totality...
+SUMMARY:
+ ** 0 of 1199 failed (14 unreachable)
+VERIFICATION:- SUCCESSFUL
+
+Complete - 7 successfully verified harnesses, 0 failures, 7 total.
+---------------------------------------------------------------------------
+
+7 of 7 harnesses report VERIFICATION:- SUCCESSFUL with zero failed checks
+(only "unreachable" markers, which are CBMC's own dead-branch pruning, not
+failures). This matches EXPECTED_PROOFS=7 in the CI gate's own
+false-green guard (kani.yml asserts the harness count AND the success
+count independently, so a future rename/split that silently dropped a
+harness from the `proof_obl1` substring filter would fail CI even though
+`cargo kani`'s own exit code stayed 0).
+
+## What each harness proves (per obl1_kani_proofs.rs's own header, research
+   report §5a items 1-6)
+
+- proof_obl1_h1_recover_totality: the crash-recovery `recover` function is
+  TOTAL over every reachable txn-record + intent-log state -- it never
+  panics and never returns an unhandled state for any input in its bounded
+  domain.
+- proof_obl1_h2_recovery_safety_predicate: recovery never produces an
+  unsafe outcome (e.g. treats a move as "done" only when the canonical
+  post-hash actually matches).
+- proof_obl1_h3_transition_bounded_sequence / h3_transition_inductive_step:
+  the txn state machine's transitions are bounded and the inductive step
+  (one valid transition from any reachable state leads only to another
+  valid state) holds.
+- proof_obl1_h4_admission_gate_invariant: the BC-INDEX admission gate's
+  open/closed invariant (INV per PRECOND6BC) holds across every txn state.
+- proof_obl1_h5_pointer_swap_crash_atomicity: the pointer-swap commit point
+  is atomic across a crash at every modeled interruption point -- there is
+  no reachable state where a crash mid-swap leaves a torn/ambiguous
+  canonical pointer.
+- proof_obl1_h6_recovery_idempotence: running `recover` twice from the same
+  on-disk state is idempotent (second call is a no-op / converges to the
+  same terminal state as the first).
+
+## Reproduction
+
+    cargo install --locked kani-verifier@0.68.0   # if not already installed
+    cargo kani setup
+    cargo kani -p factory-dispatcher --harness proof_obl1
+
+Expect ~85s of CBMC solving total across the 7 harnesses (well under the CI
+job's 20-minute budget) and `Complete - 7 successfully verified harnesses,
+0 failures, 7 total.` as the final line. Also runs automatically in CI on
+every PR to develop/main via .github/workflows/kani.yml.

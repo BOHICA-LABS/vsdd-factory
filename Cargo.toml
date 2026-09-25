@@ -120,6 +120,17 @@ wasmparser = "0.248"
 # transitively present in the dependency graph via other RustCrypto crates
 # this workspace pulls in, so this is not a novel supply-chain addition.
 sha2 = "0.10.8"
+# OBL-1 (D-1232-OBL-1, S-25.02 cluster-5 T-11 discharge): fault-injection
+# harness for the B2 migration's crash-recovery `Fs` seam
+# (`crates/factory-dispatcher/src/migration_fs.rs`). Feature-gated behind
+# `factory-dispatcher/failpoints` (OFF by default — compiles out of every
+# production/shipped binary; `fail_point!` becomes a no-op macro without the
+# `fail/failpoints` cargo feature enabled). `abort`/`_exit`-style fail
+# actions model a true power-loss crash (never the `panic` fail action,
+# which unwinds and runs destructors — not a crash). Pinned per the
+# architect's OBL-1 discharge design (obl1-recover-refactor-design.md §6.1
+# item 6 / §6.3).
+fail = "0.5.1"
 
 [workspace.lints.rust]
 # VSDD traceability convention uses uppercase BC-N.NN.NNN and TV-NNN ids

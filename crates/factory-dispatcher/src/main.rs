@@ -38,7 +38,9 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, execute_tiers, shard_cap_precheck, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck,
+    bc_index_migration_reservation_release, execute_tiers, resolve_shard_gate_precedence,
+    shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -95,6 +97,26 @@ const ENV_FORCE_ENGINE_BUILD_FAILURE: &str = "VSDD_FORCE_ENGINE_BUILD_FAILURE";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    // BC-1.18.011 / ADR-052 §Decision 3 (S-25.02 cluster-5, T-11) —
+    // `migrate-bc-index` CLI subcommand scaffold. ADR-052 §Decision 3's
+    // closed argument grammar sanctions exactly this one-argument
+    // invocation form, absolute-path-pinned, via the Bash-tool allowlist
+    // guard (a SEPARATE guard, not implemented by this check): `{project-
+    // root}/target/release/factory-dispatcher migrate-bc-index`. This
+    // check MUST run BEFORE the ordinary hook-envelope stdin read below —
+    // the migration subcommand is a distinct invocation mode, never a hook
+    // dispatch, and must never attempt to parse a hook envelope from
+    // stdin. WIRING-EXEMPT (BC-5.38.003): pure argv-routing delegation to
+    // a single call, zero branching beyond the one dispatch condition —
+    // see the stub commit report WIRING-EXEMPT table. The real migration
+    // logic behind `run_migrate_bc_index_cli` is `todo!()`.
+    if std::env::args().nth(1).as_deref() == Some("migrate-bc-index") {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        std::process::exit(factory_dispatcher::shard_manager::run_migrate_bc_index_cli(
+            &cwd,
+        ));
+    }
+
     // ONLY an explicit VSDD_LOG_DIR (resolution level A) bypasses the #206
     // mount gate: the operator said exactly where to log, and suppressing
     // that would override the override (the bats harness points VSDD_LOG_DIR
@@ -414,7 +436,45 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // gated behind `build_engine()`, which that path never reaches at all**;
     // see the empty-tier-groups guard immediately below for the full
     // rationale.
-    let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
+    // BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a (S-25.02 cluster-5,
+    // T-11) — the native OPEN/DRAINING writer-admission gate for the B2
+    // governed one-time migration. Computed FIRST, before
+    // `shard_cap_precheck`, per BC-1.18.011 Architect Ruling 1
+    // (D-1232-OBL, this burst): `shard_cap_precheck`'s fired branch reaches
+    // `shard_manager::execute_roll` — a DESTRUCTIVE seal-and-truncate-to-0
+    // operation — so it must be STRUCTURALLY SKIPPED (never invoked at
+    // all) when a BC-INDEX-path write is already blocked by a
+    // STAGING/COMMITTING migration txn, never merely evaluated and then
+    // outcome-discarded via `.or(...)` after both already ran (the prior
+    // revision's defect: it computed `shard_gate_precheck_result` via
+    // `shard_cap_precheck` UNCONDITIONALLY above, before the migration
+    // check ever ran, so a fired migration-admission verdict would have
+    // "won" only in the RETURNED value, after `execute_roll`'s destructive
+    // side effect had already landed on disk).
+    let migration_gate_precheck_result =
+        bc_index_migration_admission_precheck(&payload, &project_cwd);
+
+    // OBL-1 §5 (O-5 fold-in): the PostToolUse release counterpart to the
+    // admission precheck above. No-ops internally for every dispatch that
+    // isn't a genuine PostToolUse Edit/Write/MultiEdit with migration state
+    // present (mirrors `bc_index_migration_admission_precheck`'s own
+    // real, non-stub existence/scope guards) — fire-and-forget, never
+    // produces a verdict, never affects `shard_gate_precheck_result` or
+    // any downstream exit-code aggregation below.
+    bc_index_migration_reservation_release(&payload, &project_cwd);
+
+    // `shard_cap_precheck` is reachable ONLY in the `None` arm below — this
+    // `match`'s control flow IS Ruling 1's "structurally skipped" guarantee.
+    // Non-BC-INDEX-path dispatches (decision-log/burst-log/lessons/session-
+    // checkpoints) and every dispatch while no migration is in flight are
+    // UNAFFECTED: `bc_index_migration_admission_precheck` returns `None`
+    // for them (its own real, non-stub existence/scope guards), so
+    // `shard_cap_precheck` continues to run normally on exactly the same
+    // inputs as before this restructure.
+    let shard_gate_precheck_result =
+        resolve_shard_gate_precedence(migration_gate_precheck_result, || {
+            shard_cap_precheck(&payload, &project_cwd)
+        });
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
     // a fired shard-cap-gate verdict (`Some(_)`) must still reach
