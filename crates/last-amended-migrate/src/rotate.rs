@@ -369,7 +369,11 @@ mod tests {
         let locked_dir = dir.path().join("locked");
         std::fs::create_dir_all(&locked_dir).unwrap();
         let archive = locked_dir.join("archive.md");
-        std::fs::write(&archive, "prior content that must not be silently discarded").unwrap();
+        std::fs::write(
+            &archive,
+            "prior content that must not be silently discarded",
+        )
+        .unwrap();
 
         // Remove search/traverse permission on the containing directory:
         // `std::fs::metadata(archive)` now fails with `PermissionDenied`,
