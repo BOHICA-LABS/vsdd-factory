@@ -1854,7 +1854,9 @@ fn plugin_fail_closed(result: &PluginResult, on_error: OnError) -> bool {
 /// 3. a non-expired `.factory/unvalidated-mutation.marker` exists under `cwd`.
 ///
 /// All other combinations return `false` (allow). I/O errors reading the marker are
-/// treated as allow (fail-open on infra fault — CWE-636 balance).
+/// treated as BLOCK (fail closed — PR #842 item 3 fix; see
+/// [`crate::indeterminate_marker::block_if_marker_check`]'s own doc comment
+/// for the full CWE-636 rationale correction).
 fn plugin_block_if_marker(
     result: &PluginResult,
     on_error: OnError,

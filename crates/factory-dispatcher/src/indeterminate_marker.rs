@@ -388,8 +388,15 @@ pub fn should_write_marker(outcome: &DispatchOutcome, policy: FailurePolicy) -> 
 /// - Marker present, expired (`expires_at <= now`) → `false` (Allow).
 /// - Marker present, missing/unparseable `expires_at` (legacy pre-ADR-048) → `true` (Block,
 ///   conservative).
-/// - Marker unreadable due to I/O error other than NotFound → `false` (Allow, fail-open
-///   on infra fault per CWE-636 balance).
+/// - Marker unreadable due to I/O error other than NotFound → `true` (Block,
+///   fail CLOSED — PR #842 item 3 fix). This is a security/quarantine gate:
+///   when the marker's state cannot be determined, silently defaulting to
+///   Allow would let a transient filesystem fault (permission hiccup,
+///   corrupted mount, etc.) disable the whole quarantine mechanism. Only a
+///   genuine, unambiguous `NotFound` is treated as "no marker" — every other
+///   error is treated as "indeterminate, so block" (CWE-636 corrected: the
+///   PRIOR "fail-open on infra fault" framing balanced availability over
+///   safety for a fail-CLOSED gate, which is backwards).
 ///
 /// # Parameters
 ///
@@ -406,9 +413,10 @@ pub fn block_if_marker_check(factory_root: &Path, now: DateTime<Utc>) -> bool {
             tracing::warn!(
                 error = %e,
                 path = %marker_path.display(),
-                "block_if_marker: marker read I/O error — allowing (fail-open on infra fault)"
+                "block_if_marker: marker read I/O error — blocking (fail CLOSED; gate state \
+                 indeterminate, PR #842 item 3 fix)"
             );
-            return false;
+            return true;
         }
     };
     // TTL check (ADR-048 §Decision 2): expired marker → allow (treat as absent).
@@ -1214,11 +1222,18 @@ mod tests {
         );
     }
 
-    /// BC-1.18.002 I/O error path: directory at marker path triggers a non-NotFound I/O error
-    /// on read_to_string → block_if_marker_check returns false (fail-open per CWE-636 balance).
+    /// BC-1.18.002 I/O error path (PR #842 item 3 fix): a non-`NotFound` I/O
+    /// error on the marker read (here, `IsADirectory`) MUST fail CLOSED
+    /// (`true` / block) — the gate's state could not be determined, so the
+    /// quarantine gate must not be silently disabled by a filesystem hiccup.
+    ///
+    /// Prior to this fix, `block_if_marker_check` returned `false` (Allow)
+    /// on ANY read error other than `NotFound`, meaning a transient I/O
+    /// fault silently disabled the whole quarantine mechanism — the opposite
+    /// of the fail-safe posture a security gate requires.
     #[cfg(unix)]
     #[test]
-    fn test_BC_1_18_002_block_if_marker_check_io_error_allows() {
+    fn test_BC_1_18_002_block_if_marker_check_io_error_blocks() {
         let dir = tempfile::tempdir().expect("tempdir");
         let factory_dir = dir.path().join(".factory");
         std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
@@ -1227,9 +1242,10 @@ mod tests {
         std::fs::create_dir_all(&marker_path).expect("create dir-as-marker-path");
         let now = Utc::now();
         assert!(
-            !block_if_marker_check(dir.path(), now),
-            "BC-1.18.002: non-NotFound I/O error on marker read MUST return false \
-             (fail-open on infra fault per CWE-636 balance)"
+            block_if_marker_check(dir.path(), now),
+            "PR #842 item 3: a non-NotFound I/O error on the marker read MUST return true \
+             (fail CLOSED / Block) — the gate's state is indeterminate, so it must not be \
+             silently disabled by a filesystem hiccup (CWE-636 corrected)."
         );
     }
 
