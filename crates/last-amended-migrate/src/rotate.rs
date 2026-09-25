@@ -55,6 +55,36 @@ fn resolve_archive_path(path: &Path, cycle_name: &str) -> Result<PathBuf, Migrat
         .join(archive_filename))
 }
 
+/// Determine whether `archive_path` exists, distinguishing a genuine
+/// "does not exist" (`NotFound`) from any other, ambiguous filesystem error
+/// (e.g. `PermissionDenied` on an unreadable/unsearchable ancestor
+/// directory).
+///
+/// PR #842 item 2 fix: a bare `archive_path.exists()` check (which collapses
+/// EVERY failure mode — `NotFound`, `PermissionDenied`, or anything else —
+/// to a single `false`) cannot be distinguished from a genuine absence by
+/// its caller. Treating an ambiguous/ERROR result as "absent, safe to
+/// proceed with an empty archive" causes [`rotate_changelog_at`] to silently
+/// OVERWRITE an archive file that may hold real prior content it simply
+/// could not read right now — irrecoverable data loss, not a parse failure.
+///
+/// Returns:
+/// - `Ok(false)` — the path genuinely does not exist (`NotFound`); safe to
+///   proceed with an empty `archive_content`.
+/// - `Ok(true)` — the path exists; the caller must read it.
+/// - `Err(_)` — the existence could not be determined for any other reason;
+///   the caller MUST fail loud rather than guess.
+fn check_archive_exists(archive_path: &Path) -> Result<bool, MigrateError> {
+    match std::fs::metadata(archive_path) {
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(MigrateError::Io {
+            path: archive_path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
 /// Remove every line starting with `prefix` from `text` — used to drop a
 /// pre-existing `changelog_archive:` discoverability-pointer line before
 /// writing a fresh one, so repeated genuine rotations never accumulate
@@ -221,7 +251,7 @@ pub fn rotate_changelog_at(
         })?;
     }
 
-    let mut archive_content = if archive_path.exists() {
+    let mut archive_content = if check_archive_exists(archive_path)? {
         std::fs::read_to_string(archive_path).map_err(|source| MigrateError::Io {
             path: archive_path.to_path_buf(),
             source,
@@ -295,4 +325,67 @@ pub fn rotate_changelog(
 ) -> Result<RotationReport, MigrateError> {
     let archive_path = resolve_archive_path(path, cycle_name)?;
     rotate_changelog_at(path, &archive_path, keep_recent, mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PR #842 item 2: a genuinely absent archive path must report
+    /// `Ok(false)` — the `NotFound` case is the one place `rotate_changelog_at`
+    /// is correct to proceed with an empty `archive_content`.
+    #[test]
+    fn test_check_archive_exists_returns_ok_false_for_genuinely_absent_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist-archive.md");
+        assert_eq!(check_archive_exists(&missing).unwrap(), false);
+    }
+
+    /// PR #842 item 2: an existing path reports `Ok(true)`.
+    #[test]
+    fn test_check_archive_exists_returns_ok_true_for_present_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let present = dir.path().join("present-archive.md");
+        std::fs::write(&present, "prior content").unwrap();
+        assert_eq!(check_archive_exists(&present).unwrap(), true);
+    }
+
+    /// PR #842 item 2 (the actual defect): a non-`NotFound` I/O error (here,
+    /// `PermissionDenied` from an unsearchable containing directory) on a
+    /// path that GENUINELY, PHYSICALLY exists must be reported as `Err`, not
+    /// collapsed to `Ok(false)` the way `Path::exists()` would. This is the
+    /// discriminating test for the fix: the OLD call site used
+    /// `archive_path.exists()` directly, which returns a bare `bool` and can
+    /// never distinguish this case from genuine absence — silently causing
+    /// `rotate_changelog_at` to treat a real, unreadable archive as empty and
+    /// overwrite it. `check_archive_exists` must return `Err` here so the
+    /// caller fails loud instead.
+    #[cfg(unix)]
+    #[test]
+    fn test_check_archive_exists_permission_denied_is_not_collapsed_to_absent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let locked_dir = dir.path().join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        let archive = locked_dir.join("archive.md");
+        std::fs::write(&archive, "prior content that must not be silently discarded").unwrap();
+
+        // Remove search/traverse permission on the containing directory:
+        // `std::fs::metadata(archive)` now fails with `PermissionDenied`,
+        // NOT `NotFound` — the file is still physically present.
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = check_archive_exists(&archive);
+
+        // Restore permissions unconditionally before any assertion so the
+        // tempdir can always be cleaned up on Drop.
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            matches!(result, Err(MigrateError::Io { .. })),
+            "PermissionDenied on an existing archive path must surface as Err, not be \
+             silently treated as absent. Got: {result:?}"
+        );
+    }
 }
