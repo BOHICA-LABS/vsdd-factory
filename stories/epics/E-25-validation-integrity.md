@@ -3,13 +3,13 @@ document_type: epic
 level: L3
 traces_to: .factory/stories/STORY-INDEX.md
 epic_id: "E-25"
-version: "v1.1"
+version: "v1.2"
 status: draft
 title: "Validation Integrity and Large-Artifact Resilience"
 prd_capabilities: [CAP-041]
 subsystems_affected: [SS-01, SS-03, SS-04, SS-07]
 target_release: "v1.0.0-rc.25"
-story_count: 5
+story_count: 7
 producer: story-writer
 timestamp: "2026-08-30T00:00:00Z"
 phase: 3
@@ -26,9 +26,10 @@ inputs:
   - .factory/stories/S-25.01-dispatcher-indeterminate-outcome-layer1.md
   - .factory/stories/S-25.02-artifact-sharding-layer2.md
   - .factory/stories/S-25.03-bounded-validator-windows-layer3.md
-input-hash: "feb39e0"
-last_amended: "2026-09-11 (v1.1) — S-25.04 + S-25.05 registered (state-manager, S-25.02 cluster-4 Obs-B REVERT propagation; D-1209): story_count 3→5; S-25.04 (Close validate-factory-path-staging Zero-Enforcement Gap, 8 pts, P1, MERGED) + S-25.05 (Rotate Changelog Crash Atomicity — proper B1 cross-file crash-atomicity, 8 pts, P2, BACKLOG — deferred from S-25.02 Obs-B REVERT) added to Stories table and Sequencing section."
+input-hash: "4a29767"
+last_amended: "2026-09-25 (v1.2) — S-25.07 registered + S-25.06 backfilled (state-manager, single-commit TD-VSDD-053; D-1240, post-merge burst for PR #842/S-25.02 cluster-5): story_count corrected 5→7 in one motion. S-25.06 (Append-Log Artifact Class — Sanctioned Backfill-Split Executor, 8 pts, P1, draft) was registered in STORY-INDEX.md at D-1209/2026-09-12 but the propagation to THIS epic file's own Stories table + story_count was never applied — backfilled now (sibling-gap fix, TD-VSDD-060 class). S-25.07 (Revisit BC-1.18.002 INV2/EC-030 Marker-Read I/O-Error Fail-Open Posture, 8 pts, P2, draft) NEWLY registered — human-directed deferral (Canonical Principle Rule 3) from PR #842's revert of a fail-closed change to indeterminate_marker::block_if_marker_check that violated BC-1.18.002 v1.8 INV2/EC-030."
 modified:
+  - "v1.2 2026-09-25: S-25.07 registered; S-25.06 backfilled into Stories table (never propagated at its 2026-09-12 registration); story_count 5→7 (state-manager, D-1240)"
   - "v1.1 2026-09-11: S-25.04 + S-25.05 registered; story_count 3→5 (state-manager, D-1209)"
   - "v1.0 2026-08-30: Initial authoring"
 ---
@@ -139,8 +140,10 @@ Next-Advance Gate** (SS-01 primary; SS-03, SS-04, SS-07 secondary):
 | S-25.03 | Bounded Validator Windows Layer 3: Validators Read from Shards via Bounded Lookups | Layer 3 | TBD (after S-25.02 merges) | backlog | ~12 est. | TBD (pending PO authorship at activation) |
 | S-25.04 | Close validate-factory-path-staging Zero-Enforcement Gap — Real Layer-1 Production Trigger | E-25 add-on | — | merged | 8 | BC-4.16.002, BC-1.18.001, BC-1.18.004 |
 | S-25.05 | Rotate Changelog Crash Atomicity — Proper Cross-File Crash-Atomicity for B1 Archive Boundary | Layer 2 add-on | TBD (after S-25.02 merges) | backlog | 8 | BC-1.18.009 (pending v1.8), BC-10.13.001 (pending v1.6) |
+| S-25.06 | Append-Log Artifact Class — Sanctioned Backfill-Split Executor + ShardRegistry Enrollment + Cap-Triggered Rotation | Layer 2 add-on | W3 | draft | 8 | (pending PO authorship — Spec-First Gate S-7.01 OPEN) |
+| S-25.07 | Revisit BC-1.18.002 INV2/EC-030 Marker-Read I/O-Error Fail-Open Posture | E-25 add-on | — | draft | 8 | BC-1.18.002 (v1.8, existing) |
 
-**Total (current):** 5 stories, ~85 story points (12 + 45 + ~12 est. + 8 + 8).
+**Total (current):** 7 stories, ~101 story points (12 + 45 + ~12 est. + 8 + 8 + 8 + 8).
 
 S-25.02 and S-25.03 point estimates are preliminary; they will be refined when stories are
 elaborated (BCs authored, architecture sections evolved) at activation time.
@@ -220,5 +223,6 @@ Linear dependency chain. Acyclic confirmed. Each layer depends strictly on the p
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| v1.2 | 2026-09-25 | state-manager | S-25.07 registered (D-1240, post-merge burst for PR #842/S-25.02 cluster-5): human-directed deferral (Canonical Principle Rule 3) re-evaluating BC-1.18.002 v1.8 INV2/EC-030's fail-open posture, following the revert of a fail-closed change to `indeterminate_marker::block_if_marker_check` made during PR #842. S-25.06 BACKFILLED into this table (registered in STORY-INDEX.md at D-1209/2026-09-12 but never propagated to this epic file — sibling-gap fix, TD-VSDD-060 class). story_count corrected 5→7 in one motion. Stories table totals updated to ~101 pts. |
 | v1.1 | 2026-09-11 | state-manager | S-25.04 + S-25.05 registered; story_count 3→5. S-25.04 (Close validate-factory-path-staging Zero-Enforcement Gap, 8 pts, MERGED) added. S-25.05 (Rotate Changelog Crash Atomicity — proper B1 cross-file crash-atomicity, 8 pts, BACKLOG) deferred from S-25.02 cluster-4 Obs-B REVERT per D-1209. Stories table totals updated to ~85 pts. |
 | v1.0 | 2026-08-30 | story-writer | Initial authoring. E-25 HOLDING EPIC. 3 stories: S-25.01 active (Layer 1, 12 pts), S-25.02 backlog (Layer 2, ~15 pts est.), S-25.03 backlog (Layer 3, ~12 pts est.). CAP-041. ADR-047 (human-ratified). BC-1.18.001–004 + BC-3.08.001 amendment. VP-102–106. |

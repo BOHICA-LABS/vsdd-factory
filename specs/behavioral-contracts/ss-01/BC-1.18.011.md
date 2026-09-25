@@ -2,7 +2,7 @@
 document_type: behavioral-contract
 level: L3
 version: "1.10"
-status: draft
+status: active
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
 phase: F2
@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
-input-hash: "84b5f96"
+input-hash: "15bedba"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
