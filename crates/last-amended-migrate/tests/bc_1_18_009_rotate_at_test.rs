@@ -367,7 +367,7 @@ fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_accumulates_across_rota
 /// only `std::fs`. Precedent for this exact permission-based error-injection
 /// technique already exists in this workspace (e.g.
 /// `crates/factory-dispatcher/src/indeterminate_marker.rs`'s
-/// `test_BC_1_18_002_block_if_marker_check_io_error_blocks`-style tests).
+/// `test_BC_1_18_002_block_if_marker_check_io_error_allows`-style tests).
 #[cfg(unix)]
 #[test]
 fn test_BC_1_18_009_rotate_changelog_at_ambiguous_archive_check_does_not_discard_prior_content() {
