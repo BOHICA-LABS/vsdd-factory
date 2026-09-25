@@ -336,20 +336,29 @@ fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_accumulates_across_rota
 // discard prior archive content
 // ---------------------------------------------------------------------------
 
-/// `rotate_changelog_at` must NOT treat an ambiguous/ERROR result from its
-/// archive-existence check the same as a clean "genuinely does not exist."
+/// End-to-end safety-net test: a failed `rotate_changelog_at` attempt must
+/// never corrupt or discard existing archive content, even when the failure
+/// is triggered by an ambiguous/non-`NotFound` I/O error on the archive path.
 ///
 /// Setup: the archive file already holds real prior content from an earlier
 /// rotation. We then make the archive's containing directory unsearchable
 /// (`chmod 000`), so a subsequent `std::fs::metadata`/`exists()`-style check
 /// on the archive path fails with `PermissionDenied` — NOT `NotFound` — even
-/// though the archive file genuinely, physically still exists on disk.
+/// though the archive file genuinely, physically still exists on disk. Under
+/// this setup, `write_atomic` also cannot create its temp file in the
+/// unsearchable directory, so the rotation attempt fails regardless of which
+/// archive-existence-check implementation is active — this test verifies the
+/// resulting safety property (`result.is_err()` and the archive is left
+/// byte-for-byte unchanged), not the specific ambiguous-existence-check
+/// defect fix itself.
 ///
-/// A bare `.exists()` check (which collapses every failure mode to `false`)
-/// would read this ambiguous state as "archive absent," fall through to an
-/// empty `archive_content`, and then overwrite the archive file with ONLY
-/// the new rotation's items — silently destroying the prior content. The
-/// correct behavior is to fail loud (propagate an error) rather than guess.
+/// The test that actually discriminates the ambiguous-existence-check defect
+/// (i.e. genuinely fails against the old `archive_path.exists()` call site
+/// and passes only with the fix) is
+/// `crates/last-amended-migrate/src/rotate.rs`'s
+/// `test_check_archive_exists_permission_denied_is_not_collapsed_to_absent`,
+/// which exercises `check_archive_exists` directly and is unaffected by
+/// `write_atomic`'s own directory-access requirements.
 ///
 /// This test is `#[cfg(unix)]` because it relies on POSIX directory-execute
 /// permission semantics (removing search/traverse permission on the
@@ -358,7 +367,7 @@ fn test_BC_1_18_009_AC016_VP125_single_evergreen_archive_accumulates_across_rota
 /// only `std::fs`. Precedent for this exact permission-based error-injection
 /// technique already exists in this workspace (e.g.
 /// `crates/factory-dispatcher/src/indeterminate_marker.rs`'s
-/// `test_BC_1_18_002_block_if_marker_check_io_error_allows`-style tests).
+/// `test_BC_1_18_002_block_if_marker_check_io_error_blocks`-style tests).
 #[cfg(unix)]
 #[test]
 fn test_BC_1_18_009_rotate_changelog_at_ambiguous_archive_check_does_not_discard_prior_content() {
