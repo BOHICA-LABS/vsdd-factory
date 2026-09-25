@@ -314,7 +314,21 @@ impl Fs for StdFs {
         // See the module doc comment's production-granularity note: this
         // is a harmless best-effort re-fsync, not the sole durability
         // barrier (that already happened inside `write_temp`).
-        match std::fs::File::open(path) {
+        //
+        // PR #842 Windows-CI fix: `sync_all()`'s underlying syscall
+        // (`FlushFileBuffers` on Windows) requires the handle to have been
+        // opened with write access — Microsoft's own documented contract for
+        // `FlushFileBuffers` demands a handle with `GENERIC_WRITE`. A bare
+        // `File::open` (read-only on every platform, and on Windows granting
+        // only `GENERIC_READ`) makes `sync_all()` fail unconditionally with
+        // `ERROR_ACCESS_DENIED` there — confirmed as the deterministic (5/5,
+        // not intermittent) root cause of the windows-x64 CI failures in
+        // `bc_1_18_011_b2_migration_test` (run 36051725979), all of which
+        // failed with `Io{PermissionDenied}` on the very first
+        // `write_txn_record` call. Opening with `.write(true)` grants the
+        // access `sync_all()` needs; the file is never read here, so no read
+        // access is required.
+        match std::fs::OpenOptions::new().write(true).open(path) {
             Ok(file) => file.sync_all().map_err(|source| BcIndexMigrationError::Io {
                 path: path.to_path_buf(),
                 source,
@@ -434,6 +448,29 @@ mod tests {
         fs.write_temp(&path, b"hello").unwrap();
         assert_eq!(fs.read(&path).unwrap(), Some(b"hello".to_vec()));
         assert!(fs.exists(&path));
+    }
+
+    /// PR #842 Windows-CI fix regression test: `fsync_file` MUST succeed on a
+    /// file that was durably written via `write_temp`. This is exactly the
+    /// `write_txn_record` call sequence (`write_temp` then `fsync_file`) that
+    /// failed deterministically on windows-x64 CI (run 36051725979, 5/5
+    /// `Io{PermissionDenied}` on the first `write_txn_record` of every test)
+    /// because the OLD implementation opened the file read-only before
+    /// calling `sync_all()`. On this platform `File::open` is also read-only,
+    /// but `sync_all()`'s `fsync(2)`/`fdatasync`-class syscall does not
+    /// require write access on Unix the way `FlushFileBuffers` does on
+    /// Windows, so the old code passed here while failing there — this test
+    /// exists to keep `fsync_file` correct for BOTH platforms going forward,
+    /// not to reproduce the Windows failure locally (see this module's doc
+    /// comment discussion in the PR for the Windows-specific reasoning).
+    #[test]
+    fn test_OBL1_std_fs_fsync_file_after_write_temp_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("txn.json");
+        let fs = StdFs;
+        fs.write_temp(&path, b"{\"txn\":\"record\"}").unwrap();
+        fs.fsync_file(&path)
+            .expect("fsync_file must succeed on a file just written via write_temp");
     }
 
     #[test]
