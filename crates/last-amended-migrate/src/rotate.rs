@@ -328,6 +328,7 @@ pub fn rotate_changelog(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -338,7 +339,7 @@ mod tests {
     fn test_check_archive_exists_returns_ok_false_for_genuinely_absent_path() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist-archive.md");
-        assert_eq!(check_archive_exists(&missing).unwrap(), false);
+        assert!(!check_archive_exists(&missing).unwrap());
     }
 
     /// PR #842 item 2: an existing path reports `Ok(true)`.
@@ -347,7 +348,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let present = dir.path().join("present-archive.md");
         std::fs::write(&present, "prior content").unwrap();
-        assert_eq!(check_archive_exists(&present).unwrap(), true);
+        assert!(check_archive_exists(&present).unwrap());
     }
 
     /// PR #842 item 2 (the actual defect): a non-`NotFound` I/O error (here,
