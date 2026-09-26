@@ -211,6 +211,11 @@ artifacts:
     description: Reference manifest for brownfield ingestion
     enforcement_level: block
 
+  - artifact_type: shard-config
+    canonical_path_pattern: ".factory/shard-config.toml"
+    description: "[[shard]] registry consumed by shard_cap_precheck/shard_cap_gate_check (BC-1.18.005/006) — declares every shard-cap-gated artifact, its shape, and its shard_cap_bytes ceiling"
+    enforcement_level: block
+
   # ── Holdout Evaluations ──────────────────────────────────────────────────
   - artifact_type: holdout-evaluation
     canonical_path_pattern: ".factory/holdout-evaluations/{filename}.md"
