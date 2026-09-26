@@ -3,7 +3,7 @@ document_type: epic
 level: L3
 traces_to: .factory/stories/STORY-INDEX.md
 epic_id: "E-25"
-version: "v1.2"
+version: "v1.3"
 status: draft
 title: "Validation Integrity and Large-Artifact Resilience"
 prd_capabilities: [CAP-041]
@@ -27,20 +27,26 @@ inputs:
   - .factory/stories/S-25.02-artifact-sharding-layer2.md
   - .factory/stories/S-25.03-bounded-validator-windows-layer3.md
 input-hash: "4a29767"
-last_amended: "2026-09-25 (v1.2) — S-25.07 registered + S-25.06 backfilled (state-manager, single-commit TD-VSDD-053; D-1240, post-merge burst for PR #842/S-25.02 cluster-5): story_count corrected 5→7 in one motion. S-25.06 (Append-Log Artifact Class — Sanctioned Backfill-Split Executor, 8 pts, P1, draft) was registered in STORY-INDEX.md at D-1209/2026-09-12 but the propagation to THIS epic file's own Stories table + story_count was never applied — backfilled now (sibling-gap fix, TD-VSDD-060 class). S-25.07 (Revisit BC-1.18.002 INV2/EC-030 Marker-Read I/O-Error Fail-Open Posture, 8 pts, P2, draft) NEWLY registered — human-directed deferral (Canonical Principle Rule 3) from PR #842's revert of a fail-closed change to indeterminate_marker::block_if_marker_check that violated BC-1.18.002 v1.8 INV2/EC-030."
+last_amended: "2026-09-25 (v1.3) — E-25 file-drift reconciliation (story-writer, same burst as S-25.06 Spec-First Gate closure). (1) S-25.03 Stories-table status corrected `backlog` -> `draft` to align with STORY-INDEX.md (the catalog authority per CLAUDE.md Architectural Authority #9) — STORY-INDEX.md already carries S-25.03 as `draft`; this epic file's own table had drifted. (2) Dependency Graph mermaid rebuilt: previously showed only the S-25.01->S-25.02->S-25.03 linear chain and omitted S-25.04/S-25.05/S-25.06/S-25.07 entirely; now shows all 7 stories with their real edges, including the S-25.06->S-25.02 prerequisite (S-25.06 `blocks: [S-25.02]` — S-25.02's cluster-7 Cohort-B fail-closed flip must not dispatch until S-25.06's backfill completes), S-25.02->S-25.03, S-25.02->S-25.05, and S-25.04/S-25.07 as independent (no epic-internal dependency edge). (3) Description narrative corrected: the \"HOLDING EPIC ... collects one active story ... and two registered-backlog stories\" framing was stale from v1.0 (3-story epic) and never updated across the v1.1/v1.2 story-count growth to 7; now reflects the actual 7-story composition. (4) S-25.06 Stories-table row status updated `draft` -> `ready` to match its Spec-First Gate S-7.01 closure (BC-1.18.013 v1.1 authored, VP-143/144/145 allocated) in this same burst."
 modified:
-  - "v1.2 2026-09-25: S-25.07 registered; S-25.06 backfilled into Stories table (never propagated at its 2026-09-12 registration); story_count 5→7 (state-manager, D-1240)"
-  - "v1.1 2026-09-11: S-25.04 + S-25.05 registered; story_count 3→5 (state-manager, D-1209)"
   - "v1.0 2026-08-30: Initial authoring"
+  - "v1.1 2026-09-11: S-25.04 + S-25.05 registered; story_count 3→5 (state-manager, D-1209)"
+  - "v1.2 2026-09-25: S-25.07 registered; S-25.06 backfilled into Stories table (never propagated at its 2026-09-12 registration); story_count 5→7 (state-manager, D-1240)"
+  - "v1.3 2026-09-25: S-25.03 status backlog->draft (STORY-INDEX parity); Dependency Graph mermaid rebuilt for all 7 stories + real edges (S-25.06->S-25.02 prerequisite added); Description narrative updated from stale 3-story framing to 7-story composition; S-25.06 row status draft->ready (story-writer)"
 ---
 
 # Epic E-25: Validation Integrity and Large-Artifact Resilience
 
 ## Description
 
-E-25 is a HOLDING EPIC for the three-layer validation-integrity architecture ratified in
-ADR-047 (human-ratified 2026-08-30). It collects one active story (S-25.01 — Layer 1) and
-two registered-backlog stories (S-25.02 — Layer 2, S-25.03 — Layer 3).
+E-25 is the epic for the three-layer validation-integrity architecture ratified in ADR-047
+(human-ratified 2026-08-30), plus four add-on stories discovered during Layer 2 delivery. It now
+holds **7 stories** (corrected 2026-09-25, sibling-gap fix — this narrative had drifted from the
+original v1.0 "3-story holding epic" framing across the v1.1/v1.2 story-count growth): the
+three-layer core — S-25.01 (Layer 1, MERGED), S-25.02 (Layer 2, READY), S-25.03 (Layer 3,
+DRAFT/backlog) — and four Layer-2-adjacent add-on stories discovered during S-25.02's
+implementation and adversarial review: S-25.04 (MERGED), S-25.05 (backlog), S-25.06 (READY as of
+2026-09-25 — Spec-First Gate S-7.01 closed), and S-25.07 (draft).
 
 **Root problem:** PostToolUse WASM validators run in fuel-bounded and epoch-bounded sandboxes.
 Forensic analysis of the dispatcher event log reveals ~11,262 fuel-exhaustion timeouts,
@@ -56,7 +62,7 @@ symptom treatment, not a permanent fix.
 
 ### Three-Layer Architecture
 
-**Layer 1 (S-25.01 — ACTIVE this cycle):**
+**Layer 1 (S-25.01 — MERGED):**
 Make "couldn't validate" a first-class, fail-LOUD dispatcher outcome. The INDETERMINATE outcome
 class (distinct from PASS/FAIL) is emitted when a plugin cannot complete due to fuel exhaustion,
 epoch timeout, or host-function OutputTooLarge. For `failure_policy = "fail-closed"` plugins,
@@ -64,22 +70,24 @@ INDETERMINATE writes a durable `.factory/unvalidated-mutation.marker` and blocks
 state-advancing Agent dispatch and `git commit`/`git push` until the artifact is re-validated.
 Existing fail-open plugins (all ~76 current production plugins) are completely unchanged.
 
-**Layer 2 (S-25.02 — REGISTERED BACKLOG, deliberate feature-ordering per CLAUDE.md
+**Layer 2 (S-25.02 — READY, W2, deliberate feature-ordering per CLAUDE.md
 Canonical Principle §2):**
 Continuous size-triggered sharding of append-only cycle artifacts (decision-log, burst-log,
 lessons) into capped shards with a shard cap derived from the fuel budget. Removes the
 validator-incompletion dark zone BY CONSTRUCTION: no single shard can exceed the
 validator-completion envelope.
 
-**Layer 3 (S-25.03 — REGISTERED BACKLOG, deliberate feature-ordering per CLAUDE.md
+**Layer 3 (S-25.03 — REGISTERED BACKLOG (draft), deliberate feature-ordering per CLAUDE.md
 Canonical Principle §2):**
 Validators read BOUNDED WINDOWS from shards rather than whole files. Trusted-boundary-checkpoint
 carry-forward for cross-shard invariants. Regression-gate own state-file bounded/rotated +
 fail-loud. OutputTooLarge read-path elimination.
 
-**S-25.02 and S-25.03 are REGISTERED BACKLOG under E-25 — they are features deliberately ordered
-after Layer 1, NOT tech-debt-register entries. They MUST NOT be silently deferred. Both have
-explicit story IDs and will be elaborated (BCs authored, specs evolved) when S-25.01 merges.**
+**S-25.03 is REGISTERED BACKLOG under E-25 — a feature deliberately ordered after Layer 2 merges,
+NOT a tech-debt-register entry. It MUST NOT be silently deferred; it has an explicit story ID and
+will be elaborated (BCs authored, specs evolved) when S-25.02 merges. S-25.02 itself has since
+progressed to READY (2026-09-25) — see the Stories table below for current status of all 7
+stories, including the four Layer-2-adjacent add-ons (S-25.04–S-25.07).**
 
 ## Trigger / Motivation
 
@@ -137,10 +145,10 @@ Next-Advance Gate** (SS-01 primary; SS-03, SS-04, SS-07 secondary):
 |----------|-------|-------|------|--------|--------|-----|
 | S-25.01 | Dispatcher INDETERMINATE Outcome Layer 1: Fail-Loud on Cannot-Complete — durable marker + next-advance gate | Layer 1 | W1 | merged | 12 | BC-1.18.001, BC-1.18.002, BC-1.18.003, BC-1.18.004, BC-3.08.001 |
 | S-25.02 | Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Artifacts | Layer 2 | W2 | ready | 45 | BC-1.18.005–BC-1.18.012, BC-7.08.001 |
-| S-25.03 | Bounded Validator Windows Layer 3: Validators Read from Shards via Bounded Lookups | Layer 3 | TBD (after S-25.02 merges) | backlog | ~12 est. | TBD (pending PO authorship at activation) |
+| S-25.03 | Bounded Validator Windows Layer 3: Validators Read from Shards via Bounded Lookups | Layer 3 | TBD (after S-25.02 merges) | draft | ~12 est. | TBD (pending PO authorship at activation) |
 | S-25.04 | Close validate-factory-path-staging Zero-Enforcement Gap — Real Layer-1 Production Trigger | E-25 add-on | — | merged | 8 | BC-4.16.002, BC-1.18.001, BC-1.18.004 |
 | S-25.05 | Rotate Changelog Crash Atomicity — Proper Cross-File Crash-Atomicity for B1 Archive Boundary | Layer 2 add-on | TBD (after S-25.02 merges) | backlog | 8 | BC-1.18.009 (pending v1.8), BC-10.13.001 (pending v1.6) |
-| S-25.06 | Append-Log Artifact Class — Sanctioned Backfill-Split Executor + ShardRegistry Enrollment + Cap-Triggered Rotation | Layer 2 add-on | W3 | draft | 8 | (pending PO authorship — Spec-First Gate S-7.01 OPEN) |
+| S-25.06 | Append-Log Artifact Class — Sanctioned Backfill-Split Executor + ShardRegistry Enrollment + Cap-Triggered Rotation | Layer 2 add-on | W3 | ready | 8 | BC-1.18.013 |
 | S-25.07 | Revisit BC-1.18.002 INV2/EC-030 Marker-Read I/O-Error Fail-Open Posture | E-25 add-on | — | draft | 8 | BC-1.18.002 (v1.8, existing) |
 
 **Total (current):** 7 stories, ~101 story points (12 + 45 + ~12 est. + 8 + 8 + 8 + 8).
@@ -156,30 +164,56 @@ elaborated (BCs authored, architecture sections evolved) at activation time.
   Independent of S-21.19–S-21.24 (enforcement seams — full operational effect requires S-21.24
   but Layer 1 is independently deliverable per ADR-047 Integration Ordering Recommendation).
 
-- S-25.02 (backlog — ~15 pts est.): REGISTERED BACKLOG. `depends_on: [S-25.01]`. Activated
-  when S-25.01 merges. Requires product-owner BC authorship and architect elaboration before
-  wave scheduling.
+- S-25.02 (READY — 45 pts): `depends_on: [S-25.01]` (S-25.01 MERGED). Delivers the Layer 2
+  size-triggered shard rotation. `blocks: [S-25.03]`. Also `blocked_by: [S-25.06]` (S-25.06's
+  live one-time backfill must complete before S-25.02's cluster-7 Cohort-B fail-closed flip can
+  dispatch — see Dependency Graph below).
 
-- S-25.03 (backlog — ~12 pts est.): REGISTERED BACKLOG. `depends_on: [S-25.02]`. Activated
+- S-25.03 (draft/backlog — ~12 pts est.): REGISTERED BACKLOG. `depends_on: [S-25.02]`. Activated
   when S-25.02 merges. Requires product-owner BC authorship and architect elaboration before
   wave scheduling.
+
+- S-25.06 (READY — 8 pts, W3): `depends_on: []` (mechanism delivered in S-25.02 cluster-3,
+  PR #831 MERGED — no unmet story-level prerequisite); `blocks: [S-25.02]` (S-25.02's cluster-7
+  Cohort-B fail-closed flip capstone must not dispatch until S-25.06 has executed the live
+  backfill against the four append-log files). This is the acyclic representation: S-25.02
+  cluster-3 delivers the mechanism (DONE) -> S-25.06 wires + executes it -> S-25.02 cluster-7
+  activates.
+
+- S-25.04 (MERGED — 8 pts) and S-25.07 (draft — 8 pts): independent add-on stories with no
+  epic-internal story dependency edge.
+
+- S-25.05 (backlog — 8 pts): `depends_on` S-25.02 merging (Layer 2 add-on, same activation
+  gating as S-25.03).
 
 ## Dependency Graph
 
 ```mermaid
 graph LR
   S21_10[S-21.10 MERGED]
-  S25_01[S-25.01 Layer 1 active]
-  S25_02[S-25.02 Layer 2 backlog]
-  S25_03[S-25.03 Layer 3 backlog]
+  S25_01[S-25.01 Layer 1 merged]
+  S25_02[S-25.02 Layer 2 ready]
+  S25_03[S-25.03 Layer 3 draft/backlog]
+  S25_04[S-25.04 add-on merged]
+  S25_05[S-25.05 Layer 2 add-on backlog]
+  S25_06[S-25.06 Layer 2 add-on ready]
+  S25_07[S-25.07 add-on draft]
 
   S21_10 --> S25_01
   S25_01 --> S25_02
+  S25_06 -->|blocks: cluster-7 Cohort-B flip| S25_02
   S25_02 --> S25_03
+  S25_02 --> S25_05
 ```
 
-Linear dependency chain. Acyclic confirmed. Each layer depends strictly on the prior layer
-(shard existence required before validators can read from shards).
+S-25.04 and S-25.07 are independent add-on stories with no epic-internal dependency edge (shown
+without incoming/outgoing arrows). Acyclic confirmed (topological order:
+S-21.10, S-25.01, S-25.06, S-25.04, S-25.07 -> S-25.02 -> S-25.03, S-25.05). The
+S-25.06 -> S-25.02 edge is a `blocks` relationship (not a `depends_on`): S-25.06 has no unmet
+prerequisite of its own (the mechanism it wires, `run_mechanism_a_backfill_split`, already
+merged in S-25.02 cluster-3), but S-25.02's own cluster-7 capstone (the Cohort-B fail-closed
+flip) is gated on S-25.06 completing its live backfill execution — see S-25.06 frontmatter
+`blocks: [S-25.02]` and BC-1.18.013 Postcondition 7 / Invariant 4.
 
 ## Dependencies (External)
 
@@ -223,6 +257,7 @@ Linear dependency chain. Acyclic confirmed. Each layer depends strictly on the p
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| v1.3 | 2026-09-25 | story-writer | E-25 file-drift reconciliation (same burst as S-25.06 Spec-First Gate closure). S-25.03 Stories-table status corrected `backlog` -> `draft` (STORY-INDEX.md parity — the catalog authority). Dependency Graph mermaid rebuilt: was S-25.01->S-25.02->S-25.03 only, omitting S-25.04/S-25.05/S-25.06/S-25.07; now shows all 7 stories with real edges, including the S-25.06->S-25.02 `blocks` prerequisite (S-25.02's cluster-7 Cohort-B fail-closed flip gated on S-25.06's live backfill completing), S-25.02->S-25.03, S-25.02->S-25.05, and S-25.04/S-25.07 shown independent. Description narrative corrected from the stale v1.0 "3-story holding epic" framing (never updated across the v1.1/v1.2 story-count growth) to the actual 7-story composition; Layer 1/2 status labels in the Three-Layer Architecture subsection corrected (S-25.01 active->MERGED, S-25.02 backlog->READY). S-25.06 Stories-table row status updated `draft` -> `ready` and BCs cell `(pending PO authorship)` -> `BC-1.18.013`, matching its Spec-First Gate S-7.01 closure (BC-1.18.013 v1.1 authored by product-owner; VP-143/144/145 allocated by architect) in this same burst. |
 | v1.2 | 2026-09-25 | state-manager | S-25.07 registered (D-1240, post-merge burst for PR #842/S-25.02 cluster-5): human-directed deferral (Canonical Principle Rule 3) re-evaluating BC-1.18.002 v1.8 INV2/EC-030's fail-open posture, following the revert of a fail-closed change to `indeterminate_marker::block_if_marker_check` made during PR #842. S-25.06 BACKFILLED into this table (registered in STORY-INDEX.md at D-1209/2026-09-12 but never propagated to this epic file — sibling-gap fix, TD-VSDD-060 class). story_count corrected 5→7 in one motion. Stories table totals updated to ~101 pts. |
 | v1.1 | 2026-09-11 | state-manager | S-25.04 + S-25.05 registered; story_count 3→5. S-25.04 (Close validate-factory-path-staging Zero-Enforcement Gap, 8 pts, MERGED) added. S-25.05 (Rotate Changelog Crash Atomicity — proper B1 cross-file crash-atomicity, 8 pts, BACKLOG) deferred from S-25.02 cluster-4 Obs-B REVERT per D-1209. Stories table totals updated to ~85 pts. |
 | v1.0 | 2026-08-30 | story-writer | Initial authoring. E-25 HOLDING EPIC. 3 stories: S-25.01 active (Layer 1, 12 pts), S-25.02 backlog (Layer 2, ~15 pts est.), S-25.03 backlog (Layer 3, ~12 pts est.). CAP-041. ADR-047 (human-ratified). BC-1.18.001–004 + BC-3.08.001 amendment. VP-102–106. |
