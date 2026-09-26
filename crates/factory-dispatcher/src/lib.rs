@@ -19,6 +19,7 @@
 #![deny(unsafe_code)]
 
 pub mod aggregator;
+pub mod append_log_markers;
 pub mod engine;
 pub mod executor;
 pub mod host;

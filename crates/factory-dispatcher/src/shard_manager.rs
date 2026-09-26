@@ -16494,3 +16494,363 @@ pub fn run_migrate_bc_index_cli(_cwd: &Path) -> i32 {
     }
     migration_process_exit_code(&outcome)
 }
+
+// ============================================================================
+// S-25.06 / BC-1.18.013 — Governed one-time migration for mechanism-A's
+// backfill-split of the four `v1.0-brownfield-backfill` append-log files
+// (`backfill-append-logs`), activated via ADR-052's sanctioned execution
+// path.
+//
+// This is the NEW multi-file crash-atomicity envelope BC-1.18.013 Invariant
+// 1 calls for: it wraps four independent invocations of
+// `run_mechanism_a_backfill_split` (Architecture Compliance Rule 3 — that
+// per-file algorithm is REUSED UNMODIFIED, never reimplemented here) in
+// ADR-052 §Decision 7a/7b/7c's advisory-flock + durable-txn-record +
+// framed-intent-log + single-CURRENT.json-pointer-swap + `completed.json`
+// machinery.
+//
+// Placed in `shard_manager.rs` (NOT `executor.rs`) per architect
+// adjudication (S-25.06 stub-architect activation-decision review): the
+// story's own Architecture Mapping table had placed this envelope in
+// `executor.rs`, but that contradicts both ADR-052's own §Files to Change
+// table — whose `shard_manager.rs` row is explicitly "Full v1.7 migration
+// implementation: advisory flock; txn record; intent log; ...;
+// CURRENT.json pointer swap; completed.json" (the `executor.rs` row is
+// scoped to the OPEN/DRAINING native admission *gate* only) — and the
+// shipped B2 sibling precedent: `BcIndexMigrationTxnRecord`,
+// `IntentLogRecord`, the `CURRENT.json` pointer-swap functions, and
+// `completed.json` handling all live here, in `shard_manager.rs`;
+// `executor.rs` holds only the thin `bc_index_migration_admission_precheck`
+// / `bc_index_migration_reservation_release` pair. `main.rs` already
+// dispatches `migrate-bc-index` to
+// `factory_dispatcher::shard_manager::run_migrate_bc_index_cli` — the exact
+// precedent `run_backfill_append_logs_cli` below follows. The two
+// `backfill-append-logs`-scoped admission-precheck functions
+// (`append_log_backfill_admission_precheck` /
+// `append_log_backfill_reservation_release`) remain in `executor.rs`,
+// mirroring `bc_index_migration_admission_precheck`'s shape, and delegate
+// to the gate-state types defined here.
+//
+// The types and functions below are named distinctly (`AppendLog*` /
+// `backfill_append_logs_*`) so the two governed-migration state machines
+// never collide on a symbol, matching BC-1.18.013's own framing of itself
+// as B2's structural sibling, not an extension of B2's own code.
+//
+// STUB-ARCHITECT NOTE (BC-5.38.001 / BC-5.38.005): every non-trivial body
+// below is `todo!()`. The shape below mirrors BC-1.18.011's already-shipped
+// sibling state machine in STRUCTURE only (field-for-field where BC-1.18.013
+// specifies the same schema, e.g. Precondition 4/5's activation-manifest and
+// txn-record fields) — no logic is copied from that implementation; per the
+// Stub Architect contract, a historical sibling's real implementation is
+// anti-precedent, not a template to replicate as real code. Test-writer
+// (T-5) and implementer (T-6/T-7/T-8/T-9/T-10) own everything from here.
+// ============================================================================
+
+/// STAGING → COMMITTING → COMPLETED (or ABORTED) — the
+/// `backfill-append-logs` txn-record state machine (BC-1.18.013
+/// Precondition 5; ADR-052 §Decision 7a). Distinct type from
+/// [`BcIndexMigrationTxnState`] (B2's sibling) even though the variant set
+/// is identical — the two governed migrations never share a txn record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AppendLogMigrationTxnState {
+    Staging,
+    Committing,
+    Completed,
+    Aborted,
+}
+
+/// A `{staging_path, canonical_path}` pair not yet moved (ADR-052
+/// §Decision 7a `pending_canonical_moves` field, mechanism-A's four-file
+/// instance — see BC-1.18.013 EC-002).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct AppendLogPendingCanonicalMove {
+    pub staging_path: String,
+    pub canonical_path: String,
+}
+
+/// The durable transaction record for `backfill-append-logs` at
+/// `.factory/migration-state/txn-<activation_uuid>.json` (BC-1.18.013
+/// Precondition 5; ADR-052 §Decision 7a). Tracks the migration through its
+/// full STAGING → COMMITTING → COMPLETED lifecycle for the FOUR
+/// independent target files sharing this ONE txn record (BC-1.18.013
+/// Postcondition 3 — the atomic unit is the four files, not one file's
+/// internal partition).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct AppendLogMigrationTxnRecord {
+    pub txn_id: String,
+    pub activation_id: String,
+    /// Monotonic; starts at 1; incremented by each recovery-owner claim.
+    /// AUDIT-ONLY — the advisory flock is the actual mutual-exclusion
+    /// mechanism, exactly as BC-1.18.011's sibling field documents.
+    pub fencing_generation: u64,
+    pub state: AppendLogMigrationTxnState,
+    /// `None` until assigned at ADR-052 §Decision 7c step 1.
+    pub generation_id: Option<String>,
+    /// SHA-256 over the four target files' concatenated bytes, in the
+    /// FIXED order `decision-log.md`, `burst-log.md`, `lessons.md`,
+    /// `session-checkpoints.md` (BC-1.18.013 Postcondition 3a) — used ONLY
+    /// by the once-only pre-commit fingerprint recheck (AC-005), NEVER by
+    /// per-file content-preservation (Postcondition 1, which is delegated
+    /// entirely to BC-1.18.008 Postcondition 6(a)).
+    ///
+    /// BC-1.18.013 Precondition 5 explicitly nulls B2's own
+    /// `source_body_row_sha256` field for this migration (mechanism A has
+    /// no per-BC-row content-preservation analogue) — that field is
+    /// therefore intentionally absent from this record, not merely `None`.
+    pub source_sha256: Option<String>,
+    pub intent_log_path: Option<String>,
+    pub pending_canonical_moves: Vec<AppendLogPendingCanonicalMove>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One framed, checksummed record of the `backfill-append-logs` intent log
+/// (`.factory/migration-state/intent-<generation_uuid>.log`, ADR-052
+/// §Decision 7b). A torn record (truncated, checksum mismatch, missing
+/// terminator) MUST be treated as absent, never as a partial INTENT/DONE —
+/// enforced by the (stubbed) parser, not by this data type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendLogIntentLogRecordType {
+    Intent,
+    Done,
+    Aborted,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppendLogIntentLogRecord {
+    pub txn_id: String,
+    pub fencing_generation: u64,
+    pub record_type: AppendLogIntentLogRecordType,
+    pub target_canonical: PathBuf,
+    pub staging_path: PathBuf,
+    pub expected_post_hash: String,
+    /// `None` represents the `missing` sentinel (target did not exist at
+    /// intent-write time).
+    pub expected_pre_state: Option<String>,
+    pub timestamp_utc: String,
+    /// SHA-256 of all the above fields concatenated — the record's own
+    /// tamper/torn-record checksum.
+    pub record_checksum: String,
+}
+
+/// The atomic pointer file `.factory/migration-state/CURRENT.json` for
+/// `backfill-append-logs` (ADR-052 §Decision 7c step 6 — the sole
+/// commit-point for all four target files at once, BC-1.18.013
+/// Invariant 3).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct AppendLogCurrentGenerationPointer {
+    pub generation_id: String,
+    /// Always `"committing"` while this file exists (ADR-052 §Decision 7c
+    /// step 6's wire schema, matched verbatim).
+    pub status: String,
+    pub txn_id: String,
+}
+
+/// The permanent terminal record
+/// `.factory/migration-state/completed.json` for `backfill-append-logs`
+/// (ADR-052 §Decision 7c step 8; BC-1.18.013 Postcondition 5/EC-004). NEVER
+/// deleted, NEVER archived — its mere presence is sufficient for any
+/// reader or rerun to know the migration is done (`ALREADY_MIGRATED`, exit
+/// 0), and is also the AC-009/Invariant 4 signal BC-7.08.001's own gate
+/// check consults.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct AppendLogCompletedMigrationRecord {
+    pub generation_id: String,
+    pub txn_id: String,
+    pub completed_at: String,
+    /// Always `4` for a successfully completed `backfill-append-logs` run
+    /// (BC-1.18.013 Postcondition 6's fixed four-file scope) — carried as a
+    /// field rather than hardcoded so a reader can assert on it without
+    /// re-deriving the constant.
+    pub file_count: u64,
+}
+
+/// The OPEN/DRAINING/LOCKED native admission-gate state for
+/// `backfill-append-logs`, persisted to
+/// `.factory/migration-state/gate-state` (ADR-052 §Decision 5a, scoped to
+/// `.factory/cycles/` paths for this migration per BC-1.18.013
+/// Precondition 6(b) — unlike B2's sibling gate, which scopes to
+/// `.factory/specs/behavioral-contracts/`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AppendLogAdmissionGateState {
+    Open,
+    Draining,
+    Locked,
+}
+
+/// The armed-activation manifest written by state-manager to
+/// `.factory/activation/backfill-append-logs-YYYY-MM-DD.json` at the
+/// human-directed F4 activation step (BC-1.18.013 Precondition 4; ADR-052
+/// §Decision 4a's manifest schema). `approved_arch_index_sha` and
+/// `expected_total_bcs` are B2-only fields per ADR-052 §Decision 10's
+/// three-way ARCH-INDEX parity check — always `None` here, since
+/// `ARCH_INDEX_PARITY_ABORT` is unreachable for `backfill-append-logs`
+/// (Precondition 4).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct BackfillAppendLogsActivationManifest {
+    pub activation_id: String,
+    /// Always `"backfill-append-logs"` (ADR-052 §Decision 4a).
+    pub migration_id: String,
+    pub repo_root_sha: String,
+    /// Always `"human-F4-interactive"` (BC-1.18.013 Precondition 4 — no
+    /// standing `.claude/settings.json` allowlist entry).
+    pub approved_by: String,
+    /// Always `24` (BC-1.18.013 Precondition 4).
+    pub expires_after_hours: u64,
+    /// B2-only field; always `None` for `backfill-append-logs`.
+    pub approved_arch_index_sha: Option<String>,
+    /// B2-only field; always `None` for `backfill-append-logs`.
+    pub expected_total_bcs: Option<u64>,
+}
+
+/// `backfill-append-logs` migration-binary PROCESS EXIT CODES (BC-1.18.013
+/// Postconditions/Edge-Cases; ADR-052 §Error Code Semantics) — distinct
+/// from, and never surfaced as, a `HookResult`/`E-SHD-005` value (that
+/// code is scoped exclusively to the steady-state native admission gate).
+/// Every MIG-category variant here MUST keep its `Display` string in sync
+/// with `error-taxonomy.md`'s Message Format column verbatim (S-25.06
+/// Previous Story Intelligence — error-taxonomy display drift is a
+/// recurring finding class).
+#[derive(Debug, Error)]
+pub enum AppendLogMigrationError {
+    #[error("backfill-append-logs: {message} (BINARY_INTEGRITY_FAILURE, exit 2)")]
+    BinaryIntegrityFailure { message: String },
+
+    /// AC-002/EC-001: BC-1.18.008 Postcondition 6(a)'s per-file
+    /// content-preservation check failed for `relative_path` — the WHOLE
+    /// migration aborts (Postcondition 4/AC-006), not just this file.
+    #[error(
+        "backfill-append-logs: content-preservation check failed for {relative_path} \
+         (CONTENT_PRESERVATION_ABORT, exit 2); the entire migration aborted per Postcondition 4 \
+         — all four canonical files remain untouched"
+    )]
+    ContentPreservationAbort { relative_path: String },
+
+    /// AC-003/EC-001: BC-1.18.008 Postcondition 6(b)'s per-file
+    /// independent-census check failed for `relative_path` — the WHOLE
+    /// migration aborts (Postcondition 4/AC-006), not just this file.
+    #[error(
+        "backfill-append-logs: independent census check failed for {relative_path} \
+         (CENSUS_MISMATCH_ABORT, exit 2); the entire migration aborted per Postcondition 4 — \
+         all four canonical files remain untouched"
+    )]
+    CensusMismatchAbort { relative_path: String },
+
+    /// AC-005: the once-only, pre-pointer-swap TOCTOU fingerprint recheck
+    /// over all four files' concatenated bytes diverged from
+    /// `AppendLogMigrationTxnRecord::source_sha256`.
+    #[error(
+        "backfill-append-logs: pre-commit source fingerprint diverged from the txn record's \
+         source_sha256 (FINGERPRINT_MISMATCH_ABORT, exit 2); all four canonical files remain \
+         untouched; re-activation required"
+    )]
+    FingerprintMismatchAbort,
+
+    /// A prior activation's manifest has expired at STAGING resume with no
+    /// valid completion-only recovery manifest (mirrors BC-1.18.011's
+    /// sibling `ExpiryAbort`).
+    #[error(
+        "backfill-append-logs: activation manifest expired or absent at STAGING resume \
+         (EXPIRY_ABORT, exit 1); the staged generation was discarded and the txn record moved \
+         to ABORTED so the writer-admission gate self-heals; no canonical paths were changed; \
+         re-activation required"
+    )]
+    ExpiryAbort,
+
+    /// AC-012/EC-005: one of the four canonical target files does not
+    /// exist, or is unreadable, at activation time — the migration ABORTS
+    /// before acquiring the flock or building any staging generation.
+    #[error(
+        "backfill-append-logs: target file {relative_path} does not exist or is unreadable at \
+         activation time (SOURCE_FILE_UNAVAILABLE_ABORT, exit 2); no partial state was written \
+         for any of the four files (EC-005)"
+    )]
+    SourceFileUnavailableAbort { relative_path: String },
+
+    /// AC-001/EC-008/VP-145: an invocation form outside the closed
+    /// argument grammar (`backfill-append-logs` / `backfill-append-logs
+    /// --census`) reached the binary itself (the pre-shell classifier is a
+    /// separate, earlier guard — this variant covers the binary's own
+    /// defense-in-depth rejection if that guard is somehow bypassed).
+    #[error(
+        "backfill-append-logs: invocation outside the closed argument grammar \
+         (`backfill-append-logs` / `backfill-append-logs --census` only) rejected \
+         (CLOSED_GRAMMAR_REJECTED, exit 2; EC-008)"
+    )]
+    ClosedGrammarRejected,
+
+    /// A governed `backfill-append-logs` migration is already
+    /// STAGING/COMMITTING (advisory-flock contention).
+    #[error(
+        "backfill-append-logs: a governed migration is already in progress (LOCK_CONTENTION, exit 1)"
+    )]
+    LockContention,
+
+    /// EC-003 resume-from-STAGING path: recovery encountered a COMMITTING
+    /// txn whose manifest has expired and no valid completion-only
+    /// recovery manifest is present.
+    #[error(
+        "backfill-append-logs: recovery encountered a COMMITTING txn whose manifest has expired \
+         and no valid completion-only recovery manifest is present \
+         (RECOVERY_REQUIRES_REAUTHORIZATION, exit 2)"
+    )]
+    RecoveryRequiresReauthorization,
+
+    /// EC-007: `record_boundary_offsets` yielded zero boundaries for
+    /// non-empty content in one of the four files — BC-1.18.008
+    /// Postcondition 6's fail-loud content-preservation gate, surfaced by
+    /// this migration as `CONTENT_PRESERVATION_ABORT` for the WHOLE
+    /// migration (never a silent empty-oracle partition).
+    #[error(
+        "backfill-append-logs: record_boundary_offsets yielded zero boundaries for non-empty \
+         content in {relative_path} (CONTENT_PRESERVATION_ABORT, exit 2; EC-007)"
+    )]
+    EmptyBoundaryOracleAbort { relative_path: String },
+
+    #[error("backfill-append-logs: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+}
+
+/// The `backfill-append-logs` / `backfill-append-logs --census` CLI entry
+/// point (BC-1.18.013; ADR-052 §Decision 1/3/9). Called from `main.rs`'s
+/// single-condition, WIRING-EXEMPT argv-routing dispatch — this function,
+/// NOT `main.rs`, owns validating `argv_rest` against the closed argument
+/// grammar (AC-001/EC-008/VP-145: exactly `[]` or `["--census"]`; any other
+/// token, including a path argument, a `--cycle` flag, or an extra flag,
+/// is rejected here with a non-zero exit).
+///
+/// Once past grammar validation, orchestrates the full governed-migration
+/// lifecycle for the two-argv-form default case: `completed.json`
+/// short-circuit (EC-004, checked BEFORE any lock is acquired) → advisory
+/// flock → admission-gate DRAINING → txn-record STAGING → per-file
+/// pre-lock existence/readability validation (AC-012/EC-005) → per-file
+/// `run_mechanism_a_backfill_split` invocation for each of
+/// [`crate::append_log_markers::APPEND_LOG_TARGET_FILES_IN_ORDER`]
+/// (Architecture Compliance Rule 3 — reused unmodified) → Postcondition
+/// 1/2 gate (AC-002/AC-003, whole-migration rollback on any single-file
+/// failure per AC-006) → Postcondition 3a once-only fingerprint recheck
+/// (AC-005) → `CURRENT.json` pointer swap (the commit point, Invariant 3)
+/// → canonical path moves with EC-002 forward-recovery support → durability
+/// barrier (fsync/F_FULLFSYNC per ADR-052 §Decision 7d) →
+/// `completed.json` (AC-009's BC-7.08.001 gating dependency) → stdout
+/// census report.
+///
+/// For the `--census` form: read-only census report to stdout reproducing
+/// the original activation's per-file record counts and content hashes —
+/// no lock, no manifest, no mutation (BC-1.18.013 Canonical Test Vectors,
+/// final row).
+pub fn run_backfill_append_logs_cli(_cwd: &Path, _argv_rest: &[String]) -> i32 {
+    todo!(
+        "BC-1.18.013 / ADR-052 §Decision 1/3/7/9: validate _argv_rest against the closed \
+         grammar (`[]` or [\"--census\"] only -- AC-001/EC-008/VP-145), then orchestrate the \
+         full four-file governed-migration lifecycle for backfill-append-logs (completed.json \
+         short-circuit, flock, txn record, per-file run_mechanism_a_backfill_split invocations, \
+         PC1/PC2 gate, fingerprint recheck, CURRENT.json pointer swap, completed.json) or the \
+         read-only --census report"
+    )
+}

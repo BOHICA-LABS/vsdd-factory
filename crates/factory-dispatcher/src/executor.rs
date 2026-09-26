@@ -2032,6 +2032,91 @@ fn emit_indeterminate(
     base_ctx.emit_internal(ev);
 }
 
+// ============================================================================
+// S-25.06 / BC-1.18.013 — Governed one-time migration for mechanism-A's
+// backfill-split of the four `v1.0-brownfield-backfill` append-log files
+// (`backfill-append-logs`), activated via ADR-052's sanctioned execution
+// path.
+//
+// ARCHITECTURE PLACEMENT (architect adjudication, same burst as this
+// comment): the full migration state machine — `AppendLogMigrationTxnRecord`
+// / `AppendLogIntentLogRecord` / `AppendLogCurrentGenerationPointer` /
+// `AppendLogCompletedMigrationRecord` / `AppendLogAdmissionGateState` /
+// `BackfillAppendLogsActivationManifest` / `AppendLogMigrationError` / the
+// `run_backfill_append_logs_cli` entry point — lives in
+// [`crate::shard_manager`], NOT here. This corrects the story's Architecture
+// Mapping table, which had placed the envelope in `executor.rs`. Per
+// ADR-052's own §Files to Change table, the row for
+// `crates/factory-dispatcher/src/shard_manager.rs` is explicitly "Full v1.7
+// migration implementation: advisory flock; txn record; intent log; ...;
+// CURRENT.json pointer swap; completed.json" — the SAME machinery this
+// story's envelope needs — while the `executor.rs` row is scoped to the
+// OPEN/DRAINING native admission *gate* (writer reservations, PreToolUse
+// admission, txn-record STATE reads for admission purposes only). The B2
+// sibling migration (BC-1.18.011) confirms this split in shipped code:
+// `BcIndexMigrationTxnRecord`, `IntentLogRecord`, the `CURRENT.json`
+// pointer-swap functions, and `completed.json` handling all live in
+// `shard_manager.rs`; `executor.rs` holds only the thin
+// `bc_index_migration_admission_precheck` / `bc_index_migration_reservation_
+// release` precheck pair that delegates to `shard_manager`'s gate-state
+// functions (`read_admission_gate_state`, `is_bc_index_admission_open`,
+// `reconcile_stale_admission_gate`). `main.rs` already dispatches
+// `migrate-bc-index` to `factory_dispatcher::shard_manager::
+// run_migrate_bc_index_cli` — the exact precedent `run_backfill_append_logs_
+// cli` follows. This file (`executor.rs`) therefore keeps ONLY the two
+// `backfill-append-logs`-scoped admission-precheck functions below, mirroring
+// `bc_index_migration_admission_precheck`/`bc_index_migration_reservation_
+// release`'s shape and delegating to `crate::shard_manager::AppendLog*`
+// gate-state types.
+//
+// STUB-ARCHITECT NOTE (BC-5.38.001 / BC-5.38.005): every non-trivial body
+// below is `todo!()`. Test-writer (T-5) and implementer (T-6/T-7/T-8/T-9/
+// T-10) own everything from here.
+// ============================================================================
+
+/// The native admission gate scoped to `.factory/cycles/` paths for
+/// `backfill-append-logs` (BC-1.18.013 Precondition 6(b); ADR-052
+/// §Decision 5a). Blocks `Edit`/`Write`/`MultiEdit`/`Bash` dispatches
+/// targeting `.factory/cycles/` while a `backfill-append-logs` txn record
+/// exists in STAGING or COMMITTING state, regardless of PID liveness —
+/// mirrors [`bc_index_migration_admission_precheck`]'s shape but with a
+/// distinct scope (`.factory/cycles/` only, not `.factory/specs/behavioral-
+/// contracts/`) and, per BC-1.18.013 Precondition 6's explicit note, MUST
+/// additionally cover `Bash` dispatches (unlike B2's sibling gate, whose
+/// `Bash` leg is a separately-tracked, not-yet-scheduled piece). Delegates
+/// all gate-state reads/writes to [`crate::shard_manager`]'s
+/// `AppendLogAdmissionGateState` machinery, exactly as
+/// `bc_index_migration_admission_precheck` delegates to
+/// `crate::shard_manager::BcIndexAdmissionGateState`'s equivalent functions.
+pub fn append_log_backfill_admission_precheck(
+    _payload: &crate::payload::HookPayload,
+    _cwd: &std::path::Path,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    todo!(
+        "BC-1.18.013 Precondition 6(b): native admission gate over Edit/Write/MultiEdit/Bash \
+         dispatches targeting .factory/cycles/ paths, consulting \
+         crate::shard_manager::AppendLogAdmissionGateState + \
+         crate::shard_manager::AppendLogMigrationTxnRecord exactly as \
+         bc_index_migration_admission_precheck does for its own \
+         .factory/specs/behavioral-contracts/ + .factory/cycles/ scope"
+    )
+}
+
+/// Releases a writer reservation created by
+/// [`append_log_backfill_admission_precheck`]'s admission path (BC-1.18.013
+/// Precondition 6(c); ADR-052 §Decision 5a writer-reservation model),
+/// mirroring [`bc_index_migration_reservation_release`]'s shape for the
+/// `backfill-append-logs` gate.
+pub fn append_log_backfill_reservation_release(
+    _cwd: &std::path::Path,
+    _tool_use_id: &str,
+) -> Result<(), crate::shard_manager::AppendLogMigrationError> {
+    todo!(
+        "BC-1.18.013 Precondition 6(c): remove this tool_use_id's writer-reservation file under \
+         .factory/migration-state/reservations/, mirroring bc_index_migration_reservation_release"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

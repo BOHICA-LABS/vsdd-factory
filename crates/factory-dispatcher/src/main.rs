@@ -117,6 +117,33 @@ async fn main() {
         ));
     }
 
+    // BC-1.18.013 / ADR-052 §Decision 2/3/9 (S-25.06, T-6) —
+    // `backfill-append-logs` CLI subcommand scaffold. Mirrors the
+    // `migrate-bc-index` wiring above (BC-1.18.011): ADR-052 §Decision 3's
+    // closed argument grammar sanctions exactly two invocation forms —
+    // `backfill-append-logs` and `backfill-append-logs --census` (S-25.06
+    // AC-001 / BC-1.18.013 EC-008) — via the Bash-tool allowlist guard (a
+    // SEPARATE guard, not implemented by this check). This check MUST run
+    // BEFORE the ordinary hook-envelope stdin read below — the migration
+    // subcommand is a distinct invocation mode, never a hook dispatch, and
+    // must never attempt to parse a hook envelope from stdin.
+    // WIRING-EXEMPT (BC-5.38.003): pure argv-routing delegation to a single
+    // call, zero branching beyond the one dispatch condition — see the
+    // stub commit report WIRING-EXEMPT table. ALL closed-grammar
+    // validation (rejecting a path argument, a `--cycle` flag, or any
+    // other extra token; AC-001/EC-008/VP-145) is deferred to
+    // `run_backfill_append_logs_cli` itself, which is `todo!()` — main.rs
+    // performs no grammar validation of its own so that Red Gate coverage
+    // for AC-001/EC-008/VP-145 stays with the migration binary's own
+    // logic, not with this dispatch shim.
+    if std::env::args().nth(1).as_deref() == Some("backfill-append-logs") {
+        let argv_rest: Vec<String> = std::env::args().skip(2).collect();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        std::process::exit(
+            factory_dispatcher::shard_manager::run_backfill_append_logs_cli(&cwd, &argv_rest),
+        );
+    }
+
     // ONLY an explicit VSDD_LOG_DIR (resolution level A) bypasses the #206
     // mount gate: the operator said exactly where to log, and suppressing
     // that would override the override (the bats harness points VSDD_LOG_DIR
