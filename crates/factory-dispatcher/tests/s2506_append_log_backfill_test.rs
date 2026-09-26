@@ -1032,12 +1032,21 @@ fn test_BC_1_18_013_PC3A_AC005_run_backfill_append_logs_cli_aborts_with_fingerpr
 // running test in this binary.
 // ---------------------------------------------------------------------------
 
+// Both constants below are consumed ONLY by the `#[cfg(feature =
+// "failpoints")]`-gated child-process entrypoint and its parent test further
+// down this section; `#[cfg(feature = "failpoints")]` on the declarations
+// themselves keeps `cargo clippy --workspace --all-targets -- -D warnings`
+// (the default, non-failpoints feature set) from flagging them as dead code
+// -- a mechanical compile-gate fix, not a change to any test assertion or
+// coverage.
+#[cfg(feature = "failpoints")]
 const S2506_ENV_CWD: &str = "VSDD_S2506_CRASH_CWD";
 /// Sentinel exit code the child uses when `run_backfill_append_logs_cli`
 /// returned WITHOUT the failpoint ever firing an abort — distinguishes "the
 /// failpoint name never fired" (see this section's shared-seam ASSUMPTION,
 /// module doc comment) from a genuine crash (no ordinary exit code — the
 /// process dies by signal).
+#[cfg(feature = "failpoints")]
 const S2506_CHILD_DID_NOT_ABORT_EXIT_CODE: i32 = 66;
 
 /// The child-process entrypoint. A no-op under ordinary `cargo test`

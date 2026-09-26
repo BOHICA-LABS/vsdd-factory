@@ -16816,20 +16816,532 @@ pub enum AppendLogMigrationError {
     },
 }
 
+impl AppendLogMigrationError {
+    /// Map this error to the migration-binary process exit code ADR-052
+    /// §Error Code Semantics assigns it, mirroring
+    /// [`BcIndexMigrationError::process_exit_code`]: `LockContention` (no
+    /// harm done, retry later) is exit 1; every other variant is exit 2.
+    pub fn process_exit_code(&self) -> i32 {
+        match self {
+            AppendLogMigrationError::LockContention => 1,
+            _ => 2,
+        }
+    }
+}
+
+/// Successful (or already-complete) outcome of [`run_backfill_append_logs`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppendLogMigrationOutcome {
+    /// `completed.json` already existed — ALREADY_MIGRATED (BC-1.18.013
+    /// Postcondition 5 / EC-004), zero filesystem mutation.
+    AlreadyMigrated {
+        record: AppendLogCompletedMigrationRecord,
+    },
+    /// This invocation performed (or completed, via forward recovery) the
+    /// split and reached `completed.json`.
+    Completed {
+        record: AppendLogCompletedMigrationRecord,
+    },
+}
+
+/// The four calibrated BC-1.18.005 cap-formula inputs this migration's own
+/// internal per-file split uses — the SAME four inputs AC-010's separate
+/// ShardRegistry-enrollment step (an ordinary Edit/Write, outside this
+/// binary's own ADR-052 §Decision 8 write-target allowlist) also uses, so
+/// this migration's own split boundaries and the steady-state cap the
+/// artifact is enrolled under afterward never disagree.
+fn append_log_cap_formula_inputs() -> CapFormulaInputs {
+    CapFormulaInputs {
+        practical_fuel_ceiling: 8_000_000,
+        worst_case_fuel_per_byte: 106.36,
+        max_single_record_bytes: 16_384,
+        safety_margin: 8_192,
+    }
+}
+
+/// The `[[shard]]`-shaped [`ShardEntry`] this migration passes to
+/// [`run_mechanism_a_backfill_split`] for one of the four target files
+/// (Architecture Compliance Rule 6 — the function's signature is unchanged;
+/// this is just the caller-supplied argument).
+fn append_log_shard_entry(artifact_stem: &str, artifact_path: String) -> ShardEntry {
+    let inputs = append_log_cap_formula_inputs();
+    let shard_cap_bytes = compute_shard_cap_bytes(&inputs);
+    ShardEntry {
+        artifact_stem: artifact_stem.to_string(),
+        artifact_path,
+        practical_fuel_ceiling: inputs.practical_fuel_ceiling,
+        worst_case_fuel_per_byte: inputs.worst_case_fuel_per_byte,
+        max_single_record_bytes: inputs.max_single_record_bytes,
+        safety_margin: inputs.safety_margin,
+        shard_cap_bytes,
+        shape: Some(ShardShape::Flat),
+        n: None,
+        low_water_mark: None,
+    }
+}
+
+/// BC-1.18.008 Postcondition 4 / ADR-051 §Decision 6: "10 most recent
+/// shards" round default — never hardcoded ad hoc at each call site.
+const APPEND_LOG_RETENTION_COUNT: u32 = 10;
+
+/// Lossy-but-honest conversion from the B2 sibling's [`BcIndexMigrationError`]
+/// (the concrete error type [`migration_fs::Fs`]/[`try_acquire_migration_lock`]
+/// are pinned to) to this migration's own [`AppendLogMigrationError`] — used
+/// ONLY at the handful of call sites that reuse those shared, already-proven
+/// primitives (Architecture Compliance Rule 3's spirit, extended to the
+/// shared crash-atomicity seam the story's own module doc comment calls for
+/// reusing). `Io` unwraps to `Io` losslessly; every other (structurally
+/// unreachable from these particular call sites) variant is preserved as an
+/// `Io`-wrapped `Other`-kind error carrying the original `Display` text
+/// rather than silently discarded.
+fn append_log_bc_err(e: BcIndexMigrationError) -> AppendLogMigrationError {
+    match e {
+        BcIndexMigrationError::Io { source, .. } => AppendLogMigrationError::Io { source },
+        other => AppendLogMigrationError::Io {
+            source: io::Error::other(other.to_string()),
+        },
+    }
+}
+
+/// Maps a [`MechanismABackfillError`] (BC-1.18.008's own per-file error
+/// type) onto this migration's `CONTENT_PRESERVATION_ABORT`/`Io` taxonomy
+/// (BC-1.18.013 Postcondition 1/2, AC-002/AC-003: content-preservation and
+/// census are delegated ENTIRELY to BC-1.18.008 — this migration introduces
+/// no new per-file verification logic of its own, only a mapping of
+/// BC-1.18.008's own failure onto this governed migration's whole-migration
+/// abort taxonomy per AC-006).
+fn append_log_mechanism_a_err(
+    e: MechanismABackfillError,
+    relative_path: &str,
+) -> AppendLogMigrationError {
+    match e {
+        MechanismABackfillError::Io { source, .. } => AppendLogMigrationError::Io { source },
+        _ => AppendLogMigrationError::ContentPreservationAbort {
+            relative_path: relative_path.to_string(),
+        },
+    }
+}
+
+/// Scan `.factory/migration-state/txn-*.json` for `backfill-append-logs`'s
+/// own durable transaction record (BC-1.18.013 Precondition 5), preferring a
+/// LIVE (STAGING/COMMITTING) record over a stale terminal
+/// (COMPLETED/ABORTED) one — mirrors [`read_active_txn_record`]'s selection
+/// rule for the B2 sibling, applied to [`AppendLogMigrationTxnRecord`].
+/// `pub(crate)` so `executor.rs`'s admission precheck can consult the same
+/// on-disk record this migration's own CLI entry point does.
+pub(crate) fn read_active_append_log_txn_record(
+    migration_state_dir: &Path,
+) -> Result<Option<AppendLogMigrationTxnRecord>, AppendLogMigrationError> {
+    let entries = match std::fs::read_dir(migration_state_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(AppendLogMigrationError::Io { source }),
+    };
+    let mut live = Vec::new();
+    let mut terminal = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| AppendLogMigrationError::Io { source })?;
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if !name.starts_with("txn-") || !name.ends_with(".json") {
+            continue;
+        }
+        let bytes =
+            std::fs::read(entry.path()).map_err(|source| AppendLogMigrationError::Io { source })?;
+        let record: AppendLogMigrationTxnRecord = serde_json::from_slice(&bytes).map_err(|e| {
+            AppendLogMigrationError::BinaryIntegrityFailure {
+                message: format!(
+                    "malformed backfill-append-logs txn record at {}: {e}",
+                    entry.path().display()
+                ),
+            }
+        })?;
+        match record.state {
+            AppendLogMigrationTxnState::Staging | AppendLogMigrationTxnState::Committing => {
+                live.push(record);
+            }
+            AppendLogMigrationTxnState::Completed | AppendLogMigrationTxnState::Aborted => {
+                terminal.push(record);
+            }
+        }
+    }
+    match live.len() {
+        0 => Ok(terminal.into_iter().next()),
+        1 => Ok(live.into_iter().next()),
+        n => Err(AppendLogMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "found {n} coexisting LIVE backfill-append-logs txn records in {} — at most one \
+                 governed migration may be in flight at a time (BC-1.18.013 Precondition 6(b))",
+                migration_state_dir.display()
+            ),
+        }),
+    }
+}
+
+/// Durably persist `txn` to `.factory/migration-state/txn-<activation_id>.json`
+/// via the SAME STRICT `F_FULLFSYNC`-class primitive
+/// ([`migration_durable_write`]/[`sync_dir_durable`]) the B2 sibling's own
+/// txn record uses.
+fn write_append_log_txn_record(
+    migration_state_dir: &Path,
+    txn: &AppendLogMigrationTxnRecord,
+) -> Result<(), AppendLogMigrationError> {
+    let path = migration_state_dir.join(format!("txn-{}.json", txn.activation_id));
+    let body = serde_json::to_string_pretty(txn).map_err(|e| {
+        AppendLogMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize backfill-append-logs txn record: {e}"),
+        }
+    })?;
+    migration_durable_write(&path, body.as_bytes()).map_err(append_log_bc_err)?;
+    sync_dir_durable(migration_state_dir).map_err(append_log_bc_err)
+}
+
+/// Read every one of the four fixed target files' CURRENT content, in fixed
+/// order (BC-1.18.013 Precondition 3a's ordering). AC-012/EC-005: any
+/// missing or unreadable file aborts here, BEFORE the flock is acquired or
+/// any staging generation is built.
+fn read_all_target_files(
+    cwd: &Path,
+) -> Result<Vec<(&'static str, Vec<u8>)>, AppendLogMigrationError> {
+    let mut out =
+        Vec::with_capacity(crate::append_log_markers::APPEND_LOG_TARGET_FILES_IN_ORDER.len());
+    for name in crate::append_log_markers::APPEND_LOG_TARGET_FILES_IN_ORDER {
+        let path = crate::append_log_markers::canonical_path_for_target_file(cwd, name);
+        match std::fs::read(&path) {
+            Ok(bytes) => out.push((name, bytes)),
+            Err(_) => {
+                return Err(AppendLogMigrationError::SourceFileUnavailableAbort {
+                    relative_path: name.to_string(),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// BC-1.18.013 Postcondition 3a: SHA-256 over the four target files'
+/// concatenated bytes, in the FIXED order `decision-log.md`, `burst-log.md`,
+/// `lessons.md`, `session-checkpoints.md`.
+fn concatenated_source_sha256(contents: &[(&'static str, Vec<u8>)]) -> String {
+    let mut combined = Vec::new();
+    for (_, bytes) in contents {
+        combined.extend_from_slice(bytes);
+    }
+    sha256_hex(&combined)
+}
+
+/// The governed one-time migration for mechanism A's four-file
+/// backfill-split (BC-1.18.013; ADR-052 §Decision 1/3/7/9). See
+/// [`run_backfill_append_logs_cli`] for the CLI-level grammar dispatch this
+/// is invoked from.
+fn run_backfill_append_logs(
+    cwd: &Path,
+) -> Result<AppendLogMigrationOutcome, AppendLogMigrationError> {
+    let migration_state_dir = cwd.join(".factory/migration-state");
+
+    // Postcondition 5 / EC-004: `completed.json`'s mere presence is
+    // sufficient — checked BEFORE any lock is acquired, no other file
+    // consulted, zero filesystem mutation on this path.
+    let completed_path = migration_state_dir.join("completed.json");
+    if let Ok(bytes) = std::fs::read(&completed_path) {
+        let record: AppendLogCompletedMigrationRecord =
+            serde_json::from_slice(&bytes).map_err(|e| {
+                AppendLogMigrationError::BinaryIntegrityFailure {
+                    message: format!("malformed backfill-append-logs completed.json: {e}"),
+                }
+            })?;
+        return Ok(AppendLogMigrationOutcome::AlreadyMigrated { record });
+    }
+
+    // AC-012/EC-005: every one of the four canonical target files must
+    // exist and be readable BEFORE the flock is acquired or any staging
+    // generation is built — checked even ahead of the resume-detection scan
+    // below, so a target file going missing since a prior STAGING attempt
+    // is caught identically to the fresh-run case; `migration_state_dir` is
+    // not yet created at this point.
+    let contents = read_all_target_files(cwd)?;
+
+    let existing_txn = read_active_append_log_txn_record(&migration_state_dir)?;
+    let resuming_live = matches!(
+        existing_txn.as_ref().map(|t| t.state),
+        Some(AppendLogMigrationTxnState::Staging) | Some(AppendLogMigrationTxnState::Committing)
+    );
+
+    std::fs::create_dir_all(&migration_state_dir)
+        .map_err(|source| AppendLogMigrationError::Io { source })?;
+    let lock_path = migration_state_dir.join("exclusive.lock");
+    if !lock_path.exists() {
+        std::fs::write(&lock_path, b"").map_err(|source| AppendLogMigrationError::Io { source })?;
+    }
+    let _lock_guard = try_acquire_migration_lock(&lock_path)
+        .map_err(append_log_bc_err)?
+        .ok_or(AppendLogMigrationError::LockContention)?;
+
+    let fs = StdFs;
+    let now = || chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut txn = if resuming_live {
+        existing_txn.ok_or_else(|| AppendLogMigrationError::BinaryIntegrityFailure {
+            message: "internal: resuming_live implies existing_txn is Some".to_string(),
+        })?
+    } else {
+        AppendLogMigrationTxnRecord {
+            txn_id: uuid::Uuid::new_v4().to_string(),
+            activation_id: uuid::Uuid::new_v4().to_string(),
+            fencing_generation: 1,
+            state: AppendLogMigrationTxnState::Staging,
+            generation_id: None,
+            source_sha256: Some(concatenated_source_sha256(&contents)),
+            intent_log_path: None,
+            pending_canonical_moves: Vec::new(),
+            created_at: now(),
+            updated_at: now(),
+        }
+    };
+
+    // COMMITTING-resume (EC-002 forward recovery): the pointer swap already
+    // committed and the per-file staging was already verified by a prior
+    // (crashed) invocation — jump straight to redoing the remaining
+    // canonical-path moves from the already-persisted pending list. NEVER
+    // re-run staging/PC1/PC2/the fingerprint recheck again (Invariant 3:
+    // once the pointer swap has committed, there is no turning back).
+    if txn.state == AppendLogMigrationTxnState::Committing {
+        return finish_append_log_migration(&fs, &migration_state_dir, &mut txn);
+    }
+
+    // STAGING (fresh or resumed) — (re)build the staged generation from
+    // scratch. Safe to fully rebuild on resume: no canonical file has been
+    // touched yet while state==Staging, and BC-1.18.013 EC-003 requires
+    // re-running the full per-file census on resume regardless of whether a
+    // staged generation was previously built. `source_sha256` is NEVER
+    // recomputed here on resume — it is preserved from the txn record
+    // captured at the ORIGINAL quiescence moment (AC-005's whole point).
+    let generation_id = uuid::Uuid::new_v4().to_string();
+    let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+    if let Some(old_generation_id) = &txn.generation_id {
+        let old_gen_dir = migration_state_dir.join(format!("gen-{old_generation_id}"));
+        let _ = std::fs::remove_dir_all(&old_gen_dir);
+    }
+    std::fs::create_dir_all(&gen_dir).map_err(|source| AppendLogMigrationError::Io { source })?;
+    txn.generation_id = Some(generation_id.clone());
+    txn.updated_at = now();
+    write_append_log_txn_record(&migration_state_dir, &txn)?;
+
+    let mut pending_moves = Vec::new();
+    for (relative_name, content) in &contents {
+        let canonical_path =
+            crate::append_log_markers::canonical_path_for_target_file(cwd, relative_name);
+        let stem = crate::append_log_markers::artifact_stem_for_target_file(relative_name)
+            .map_err(|_| AppendLogMigrationError::BinaryIntegrityFailure {
+                message: format!("internal: {relative_name} is not a recognized target file"),
+            })?;
+
+        if mechanism_a_backfill_already_migrated(&canonical_path, stem)
+            .map_err(|source| AppendLogMigrationError::Io { source })?
+        {
+            // Postcondition 5's Composability clause: already migrated by
+            // an earlier BC-1.18.006 roll or a prior backfill run — nothing
+            // to stage or move for this file; it stays exactly as-is.
+            continue;
+        }
+
+        let offsets = crate::append_log_markers::record_boundary_offsets_for_target_file(
+            relative_name,
+            content,
+        )
+        .map_err(|_| AppendLogMigrationError::EmptyBoundaryOracleAbort {
+            relative_path: relative_name.to_string(),
+        })?;
+
+        let stem_dir = gen_dir.join(stem);
+        std::fs::create_dir_all(&stem_dir)
+            .map_err(|source| AppendLogMigrationError::Io { source })?;
+        let staged_current_path = stem_dir.join(relative_name);
+        migration_durable_write(&staged_current_path, content).map_err(append_log_bc_err)?;
+
+        let entry = append_log_shard_entry(
+            stem,
+            format!(
+                ".factory/cycles/{}/{}",
+                crate::append_log_markers::APPEND_LOG_CYCLE_DIR,
+                relative_name
+            ),
+        );
+        run_mechanism_a_backfill_split(
+            &entry,
+            &staged_current_path,
+            &offsets,
+            APPEND_LOG_RETENTION_COUNT,
+        )
+        .map_err(|e| append_log_mechanism_a_err(e, relative_name))?;
+
+        let dir_entries = std::fs::read_dir(&stem_dir)
+            .map_err(|source| AppendLogMigrationError::Io { source })?;
+        for dir_entry in dir_entries {
+            let dir_entry = dir_entry.map_err(|source| AppendLogMigrationError::Io { source })?;
+            let file_name = dir_entry.file_name();
+            let canonical_target = canonical_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(&file_name);
+            pending_moves.push(AppendLogPendingCanonicalMove {
+                staging_path: dir_entry.path().to_string_lossy().into_owned(),
+                canonical_path: canonical_target.to_string_lossy().into_owned(),
+            });
+        }
+    }
+
+    // Postcondition 3a: the EXACTLY-ONCE TOCTOU pre-commit fingerprint
+    // recheck, performed immediately before the CURRENT.json pointer swap —
+    // re-reads the REAL canonical files' CURRENT content (never the staged
+    // copies), never reusing the earlier `contents` snapshot, so a genuine
+    // concurrent mutation between quiescence and now is actually caught.
+    let fresh_contents = read_all_target_files(cwd)?;
+    let actual_source_sha256 = concatenated_source_sha256(&fresh_contents);
+    let expected = txn.source_sha256.clone().ok_or_else(|| {
+        AppendLogMigrationError::BinaryIntegrityFailure {
+            message: "backfill-append-logs txn record has no source_sha256 recorded".to_string(),
+        }
+    })?;
+    if actual_source_sha256 != expected {
+        let _ = std::fs::remove_dir_all(&gen_dir);
+        txn.state = AppendLogMigrationTxnState::Aborted;
+        txn.updated_at = now();
+        let _ = write_append_log_txn_record(&migration_state_dir, &txn);
+        return Err(AppendLogMigrationError::FingerprintMismatchAbort);
+    }
+
+    // CURRENT.json pointer swap — the sole commit point for the whole
+    // four-file migration (ADR-052 §Decision 7c step 6; Invariant 3).
+    let pointer = AppendLogCurrentGenerationPointer {
+        generation_id: generation_id.clone(),
+        status: "committing".to_string(),
+        txn_id: txn.txn_id.clone(),
+    };
+    let pointer_body = serde_json::to_string_pretty(&pointer).map_err(|e| {
+        AppendLogMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize CURRENT.json: {e}"),
+        }
+    })?;
+    let current_tmp = migration_state_dir.join("CURRENT.tmp.json");
+    let current_path = migration_state_dir.join("CURRENT.json");
+    fs.write_temp(&current_tmp, pointer_body.as_bytes())
+        .map_err(append_log_bc_err)?;
+    fs.fsync_file(&current_tmp).map_err(append_log_bc_err)?;
+    fs.pointer_swap(&current_tmp, &current_path)
+        .map_err(append_log_bc_err)?;
+    fs.fsync_dir(&migration_state_dir)
+        .map_err(append_log_bc_err)?;
+
+    txn.state = AppendLogMigrationTxnState::Committing;
+    txn.pending_canonical_moves = pending_moves;
+    txn.updated_at = now();
+    write_append_log_txn_record(&migration_state_dir, &txn)?;
+
+    finish_append_log_migration(&fs, &migration_state_dir, &mut txn)
+}
+
+/// ADR-052 §Decision 7c step 7's forward-recovery leg: execute (or resume)
+/// every remaining canonical-path move, then publish `completed.json`
+/// (AC-009's BC-7.08.001 gating dependency). A move whose STAGING side no
+/// longer exists but whose CANONICAL side does is treated as already
+/// completed by a prior (crashed) invocation — `rename(2)`/`MoveFileEx`
+/// always removes the source atomically on success, so a still-present
+/// staging path unambiguously means "not yet moved," regardless of whatever
+/// content the canonical destination currently holds (EC-002's
+/// matching-destination-hash rule, applied via source-side presence rather
+/// than a separate stored hash, since [`Fs::rename`]'s own atomicity makes
+/// that equivalent and simpler here).
+fn finish_append_log_migration(
+    fs: &impl Fs,
+    migration_state_dir: &Path,
+    txn: &mut AppendLogMigrationTxnRecord,
+) -> Result<AppendLogMigrationOutcome, AppendLogMigrationError> {
+    for mv in txn.pending_canonical_moves.clone() {
+        let staging_path = PathBuf::from(&mv.staging_path);
+        let canonical_path = PathBuf::from(&mv.canonical_path);
+
+        if !fs.exists(&staging_path) {
+            if fs.exists(&canonical_path) {
+                // Already moved by a prior (crashed) invocation.
+                continue;
+            }
+            return Err(AppendLogMigrationError::BinaryIntegrityFailure {
+                message: format!(
+                    "backfill-append-logs forward recovery: neither the staged file {} nor the \
+                     canonical target {} exists — unrecoverable intermediate state",
+                    staging_path.display(),
+                    canonical_path.display()
+                ),
+            });
+        }
+
+        fs.rename(&staging_path, &canonical_path)
+            .map_err(append_log_bc_err)?;
+        if let Some(parent) = canonical_path.parent() {
+            fs.fsync_dir(parent).map_err(append_log_bc_err)?;
+        }
+    }
+
+    // Best-effort cleanup of the now-empty staging generation directory —
+    // never treated as a correctness failure (ADR-052 §7c step 9).
+    if let Some(generation_id) = &txn.generation_id {
+        let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
+        let _ = std::fs::remove_dir_all(&gen_dir);
+    }
+
+    let record = AppendLogCompletedMigrationRecord {
+        generation_id: txn.generation_id.clone().unwrap_or_default(),
+        txn_id: txn.txn_id.clone(),
+        completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        file_count: crate::append_log_markers::APPEND_LOG_TARGET_FILES_IN_ORDER.len() as u64,
+    };
+    let completed_body = serde_json::to_string_pretty(&record).map_err(|e| {
+        AppendLogMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize completed.json: {e}"),
+        }
+    })?;
+    let completed_path = migration_state_dir.join("completed.json");
+    migration_durable_write(&completed_path, completed_body.as_bytes())
+        .map_err(append_log_bc_err)?;
+    sync_dir_durable(migration_state_dir).map_err(append_log_bc_err)?;
+
+    txn.state = AppendLogMigrationTxnState::Completed;
+    txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    write_append_log_txn_record(migration_state_dir, txn)?;
+
+    Ok(AppendLogMigrationOutcome::Completed { record })
+}
+
+/// `--census` read-only report: reproduces `completed.json`'s own recorded
+/// fields — no lock, no manifest, no mutation (BC-1.18.013 Canonical Test
+/// Vectors, final row).
+fn run_backfill_append_logs_census(
+    cwd: &Path,
+) -> Result<AppendLogCompletedMigrationRecord, AppendLogMigrationError> {
+    let completed_path = cwd.join(".factory/migration-state/completed.json");
+    let bytes =
+        std::fs::read(&completed_path).map_err(|source| AppendLogMigrationError::Io { source })?;
+    serde_json::from_slice(&bytes).map_err(|e| AppendLogMigrationError::BinaryIntegrityFailure {
+        message: format!("malformed backfill-append-logs completed.json: {e}"),
+    })
+}
+
 /// The `backfill-append-logs` / `backfill-append-logs --census` CLI entry
 /// point (BC-1.18.013; ADR-052 §Decision 1/3/9). Called from `main.rs`'s
 /// single-condition, WIRING-EXEMPT argv-routing dispatch — this function,
 /// NOT `main.rs`, owns validating `argv_rest` against the closed argument
 /// grammar (AC-001/EC-008/VP-145: exactly `[]` or `["--census"]`; any other
-/// token, including a path argument, a `--cycle` flag, or an extra flag,
-/// is rejected here with a non-zero exit).
+/// token, including a path argument, a `--cycle` flag, a re-specified
+/// subcommand name, or an extra trailing token, is rejected here with a
+/// non-zero exit and zero filesystem mutation).
 ///
 /// Once past grammar validation, orchestrates the full governed-migration
-/// lifecycle for the two-argv-form default case: `completed.json`
-/// short-circuit (EC-004, checked BEFORE any lock is acquired) → advisory
-/// flock → admission-gate DRAINING → txn-record STAGING → per-file
-/// pre-lock existence/readability validation (AC-012/EC-005) → per-file
-/// `run_mechanism_a_backfill_split` invocation for each of
+/// lifecycle via [`run_backfill_append_logs`]: `completed.json`
+/// short-circuit (EC-004, checked BEFORE any lock is acquired) → per-file
+/// pre-lock existence/readability validation (AC-012/EC-005) → advisory
+/// flock → txn-record STAGING → per-file `run_mechanism_a_backfill_split`
+/// invocation for each of
 /// [`crate::append_log_markers::APPEND_LOG_TARGET_FILES_IN_ORDER`]
 /// (Architecture Compliance Rule 3 — reused unmodified) → Postcondition
 /// 1/2 gate (AC-002/AC-003, whole-migration rollback on any single-file
@@ -16845,12 +17357,63 @@ pub enum AppendLogMigrationError {
 /// no lock, no manifest, no mutation (BC-1.18.013 Canonical Test Vectors,
 /// final row).
 pub fn run_backfill_append_logs_cli(_cwd: &Path, _argv_rest: &[String]) -> i32 {
-    todo!(
-        "BC-1.18.013 / ADR-052 §Decision 1/3/7/9: validate _argv_rest against the closed \
-         grammar (`[]` or [\"--census\"] only -- AC-001/EC-008/VP-145), then orchestrate the \
-         full four-file governed-migration lifecycle for backfill-append-logs (completed.json \
-         short-circuit, flock, txn record, per-file run_mechanism_a_backfill_split invocations, \
-         PC1/PC2 gate, fingerprint recheck, CURRENT.json pointer swap, completed.json) or the \
-         read-only --census report"
-    )
+    match _argv_rest {
+        [] => {
+            let outcome = run_backfill_append_logs(_cwd);
+            match &outcome {
+                Ok(AppendLogMigrationOutcome::AlreadyMigrated { record }) => {
+                    println!(
+                        "backfill-append-logs: ALREADY_MIGRATED (txn {}, generation {}, \
+                         completed_at {}, {} files)",
+                        record.txn_id, record.generation_id, record.completed_at, record.file_count
+                    );
+                }
+                Ok(AppendLogMigrationOutcome::Completed { record }) => {
+                    println!(
+                        "backfill-append-logs: COMPLETED (txn {}, generation {}, completed_at \
+                         {}, {} files split per BC-1.18.008)",
+                        record.txn_id, record.generation_id, record.completed_at, record.file_count
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        target: "bc_1_18_013_migration",
+                        error = %e,
+                        "backfill-append-logs: migration failed"
+                    );
+                }
+            }
+            match outcome {
+                Ok(_) => 0,
+                Err(e) => e.process_exit_code(),
+            }
+        }
+        [flag] if flag == "--census" => match run_backfill_append_logs_census(_cwd) {
+            Ok(record) => {
+                println!(
+                    "backfill-append-logs --census: txn {}, generation {}, completed_at {}, {} \
+                     files (read-only)",
+                    record.txn_id, record.generation_id, record.completed_at, record.file_count
+                );
+                0
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "bc_1_18_013_migration",
+                    error = %e,
+                    "backfill-append-logs --census: no completed migration to report"
+                );
+                e.process_exit_code()
+            }
+        },
+        _ => {
+            tracing::error!(
+                target: "bc_1_18_013_migration",
+                argv = ?_argv_rest,
+                "backfill-append-logs: rejected — invocation outside the closed argument grammar \
+                 (`backfill-append-logs` / `backfill-append-logs --census` only)"
+            );
+            AppendLogMigrationError::ClosedGrammarRejected.process_exit_code()
+        }
+    }
 }

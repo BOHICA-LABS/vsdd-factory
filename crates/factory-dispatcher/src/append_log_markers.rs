@@ -76,11 +76,15 @@ pub enum AppendLogMarkerError {
 pub fn artifact_stem_for_target_file(
     relative_path: &str,
 ) -> Result<&'static str, AppendLogMarkerError> {
-    todo!(
-        "BC-1.18.013 Postcondition 6: map relative_path={relative_path:?} to its BC-1.18.008 \
-         artifact stem, rejecting anything outside APPEND_LOG_TARGET_FILES_IN_ORDER as \
-         AppendLogMarkerError::UnknownTargetFile"
-    )
+    match relative_path {
+        "decision-log.md" => Ok("decision-log"),
+        "burst-log.md" => Ok("burst-log"),
+        "lessons.md" => Ok("lessons"),
+        "session-checkpoints.md" => Ok("session-checkpoints"),
+        _ => Err(AppendLogMarkerError::UnknownTargetFile {
+            relative_path: relative_path.to_string(),
+        }),
+    }
 }
 
 /// Computes `record_boundary_offsets` for one target file's content by
@@ -93,14 +97,16 @@ pub fn artifact_stem_for_target_file(
 /// zero boundaries for non-empty `content`.
 pub fn record_boundary_offsets_for_target_file(
     relative_path: &str,
-    _content: &[u8],
+    content: &[u8],
 ) -> Result<Vec<usize>, AppendLogMarkerError> {
-    todo!(
-        "BC-1.18.013 / BC-1.18.008: resolve relative_path={relative_path:?} via \
-         artifact_stem_for_target_file, invoke \
-         shard_manager::mechanism_a_record_boundary_offsets on _content, and raise EC-007 \
-         (AppendLogMarkerError::EmptyBoundaryOracle) on an empty-oracle non-empty-content result"
-    )
+    let stem = artifact_stem_for_target_file(relative_path)?;
+    let offsets = crate::shard_manager::mechanism_a_record_boundary_offsets(stem, content);
+    if offsets.is_empty() && !content.is_empty() {
+        return Err(AppendLogMarkerError::EmptyBoundaryOracle {
+            relative_path: relative_path.to_string(),
+        });
+    }
+    Ok(offsets)
 }
 
 /// Resolves a target file's relative name to its absolute canonical path

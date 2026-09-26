@@ -2089,17 +2089,65 @@ fn emit_indeterminate(
 /// `bc_index_migration_admission_precheck` delegates to
 /// `crate::shard_manager::BcIndexAdmissionGateState`'s equivalent functions.
 pub fn append_log_backfill_admission_precheck(
-    _payload: &crate::payload::HookPayload,
-    _cwd: &std::path::Path,
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
 ) -> Option<vsdd_hook_sdk::HookResult> {
-    todo!(
-        "BC-1.18.013 Precondition 6(b): native admission gate over Edit/Write/MultiEdit/Bash \
-         dispatches targeting .factory/cycles/ paths, consulting \
-         crate::shard_manager::AppendLogAdmissionGateState + \
-         crate::shard_manager::AppendLogMigrationTxnRecord exactly as \
-         bc_index_migration_admission_precheck does for its own \
-         .factory/specs/behavioral-contracts/ + .factory/cycles/ scope"
-    )
+    if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
+        return None;
+    }
+
+    // BC-1.18.013 Precondition 6(b)'s own delivery cross-reference: the
+    // Edit/Write/MultiEdit legs ship with this story's TDD; the `Bash`
+    // pre-shell-classifier leg ships separately as part of [D-1232-OBL-4]
+    // (mirrors BC-1.18.011's own Ruling 3 for the B2 sibling gate).
+    let tool_name = payload.tool_name.as_str();
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit") {
+        return None;
+    }
+
+    let migration_state_dir = cwd.join(".factory/migration-state");
+    if !migration_state_dir.exists() {
+        return None;
+    }
+
+    // Scoped to `.factory/cycles/` only (unlike the B2 sibling gate, which
+    // additionally covers `.factory/specs/behavioral-contracts/` — that
+    // path is out of scope for this migration).
+    let target_path = payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)?;
+    let normalized = target_path.to_string_lossy().replace('\\', "/");
+    if !normalized.contains(".factory/cycles") {
+        return None;
+    }
+
+    match crate::shard_manager::read_active_append_log_txn_record(&migration_state_dir) {
+        Ok(Some(txn))
+            if matches!(
+                txn.state,
+                crate::shard_manager::AppendLogMigrationTxnState::Staging
+                    | crate::shard_manager::AppendLogMigrationTxnState::Committing
+            ) =>
+        {
+            Some(vsdd_hook_sdk::HookResult::Block {
+                reason: format!(
+                    "BC-1.18.013 E-MAINTENANCE-001: a governed backfill-append-logs migration \
+                     (txn {}, state={:?}) is currently in flight — this write is refused; retry \
+                     after the migration completes",
+                    txn.txn_id, txn.state
+                ),
+            })
+        }
+        Ok(_) => None,
+        Err(e) => Some(vsdd_hook_sdk::HookResult::Error {
+            message: format!(
+                "BC-1.18.013: failed to read the active backfill-append-logs migration txn \
+                 record: {e}"
+            ),
+        }),
+    }
 }
 
 /// Releases a writer reservation created by
@@ -2108,13 +2156,19 @@ pub fn append_log_backfill_admission_precheck(
 /// mirroring [`bc_index_migration_reservation_release`]'s shape for the
 /// `backfill-append-logs` gate.
 pub fn append_log_backfill_reservation_release(
-    _cwd: &std::path::Path,
-    _tool_use_id: &str,
+    cwd: &std::path::Path,
+    tool_use_id: &str,
 ) -> Result<(), crate::shard_manager::AppendLogMigrationError> {
-    todo!(
-        "BC-1.18.013 Precondition 6(c): remove this tool_use_id's writer-reservation file under \
-         .factory/migration-state/reservations/, mirroring bc_index_migration_reservation_release"
-    )
+    let path = cwd
+        .join(".factory/migration-state/reservations")
+        .join(format!("{tool_use_id}.reservation"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        // A missing reservation file is a no-op, not an error — mirrors
+        // release_bc_index_writer_reservation's own doc comment.
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::shard_manager::AppendLogMigrationError::Io { source }),
+    }
 }
 
 #[cfg(test)]
