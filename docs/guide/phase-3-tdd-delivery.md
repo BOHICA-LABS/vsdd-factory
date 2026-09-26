@@ -23,7 +23,11 @@ graph TD
         RG -->|Fail| S3FIX[Fix tests]
         S3FIX --> RG
         RG -->|Pass| S4[Step 4: Implement via TDD]
-        S4 --> S5[Step 5: Record demos]
+        S4 --> S4A[Step 4A: Adversarial convergence]
+        S4A --> S4B{Step 4B: Story holdout gate}
+        S4B -->|FAIL: observed behavior gap| S4BFIX[Implementer fix + streak reset]
+        S4BFIX --> S4A
+        S4B -->|PASS| S5[Step 5: Record demos]
         S5 --> S6[Step 6: Push branch]
         S6 --> S7[Step 7: PR lifecycle]
         S7 --> S8[Step 8: Cleanup worktree]
@@ -81,6 +85,12 @@ graph LR
     subgraph "Step 4"
         IMP[implementer]
     end
+    subgraph "Step 4A"
+        ADV[adversary<br/>3-CLEAN convergence]
+    end
+    subgraph "Step 4B"
+        HE[holdout-evaluator<br/>story scenarios]
+    end
     subgraph "Step 5"
         DR[demo-recorder]
     end
@@ -97,13 +107,16 @@ graph LR
     DE1 -->|worktree| TW1
     TW1 -->|stubs| TW2
     TW2 -->|RED GATE| IMP
-    IMP -->|green tests| DR
+    IMP -->|green tests| ADV
+    ADV -->|3-CLEAN| HE
+    HE -->|PASS| DR
     DR -->|demos| IMP2
     IMP2 -->|pushed| PM
     PM -->|merged| DE2
 
     style TW2 fill:#f8d7da
     style IMP fill:#d4edda
+    style HE fill:#fff3cd
 ```
 
 ### Step 1: Create Worktree (devops-engineer)
@@ -180,6 +193,26 @@ For each test:
 #### Gene Transfusion
 
 When a story has `implementation_strategy: gene-transfusion`, the implementer reads `.factory/semport/<module>/<module>-target-design.md` and the reference source files listed in the story. It uses the translation strategy from semport analysis. Uncertain translations are marked `// SEMPORT-REVIEW` for human inspection.
+
+### Step 4B: Story-Level Holdout Gate (holdout-evaluator)
+
+After adversarial convergence and before demo recording, the holdout-evaluator runs 2–4 hidden, single-use scenarios authored by the product-owner at story-materialization time against the built binary.
+
+**Why this gate exists.** Unit tests and code-diff adversarial review both operate on the implementation's internal structure. They miss a class of defects that only manifest when the implementation is exercised end-to-end through its public surface: wire-shape mismatches, unreachable spec arms (postconditions that exist in the BC but are only reached through code paths that tests never drive), and composition failures where two individually-correct subsystems interact incorrectly. Field evidence from prism: 3 such defects escaped a 5,483-test suite and 40+ adversarial passes, and were caught only by a live holdout-style audit of observed output. Story-level holdout closes that gap per-story rather than per-wave.
+
+**Three-tier holdout architecture:**
+
+| Tier | When | Scope | Pool | Consumed |
+|------|------|-------|------|---------|
+| **Story** (this gate) | After adversarial convergence, before demo | Story's touched surface only | 2–4 per story, `story-scenarios/STORY-NNN/` | Yes — single-use |
+| **Wave** | After all wave stories merge (wave gate) | Full wave behavioral surface | Wave-scoped `wave-scenarios/<wave>/` | No — cycle-reset |
+| **Final** (Phase 4) | After all waves complete | Full pipeline behavioral surface | Main `HS-NNN` lifecycle pool | No — rotated 80% |
+
+**Information asymmetry wall:** The holdout-evaluator sees ONLY the story's scenario files, the product brief, and the running binary. It cannot read specs, source code, behavioral contracts, or adversarial review history. This is the same wall that applies at the wave and final tiers.
+
+**BLOCKING semantics:** Any unsatisfied scenario (score < 0.80) blocks demo recording. The holdout-evaluator sends OBSERVED_BEHAVIOR_ONLY descriptions to the orchestrator — it never quotes or paraphrases scenario text (contamination control). The orchestrator dispatches the implementer with only the behavioral gap description. After the fix, the adversary convergence streak resets to 0/3 and must reach 3-CLEAN before the next holdout attempt.
+
+**Exit condition:** Every scenario score >= 0.80 AND mean >= 0.80. Consumed scenarios are marked `lifecycle_status: consumed` and moved to `.factory/holdout-scenarios/evaluations/story-STORY-NNN/`.
 
 ### Step 5: Record Demos (demo-recorder)
 
@@ -360,6 +393,12 @@ If the implementer hits bugs during TDD, the `/vsdd-factory:systematic-debugging
 | "I'll skip demo-recording and do it after the merge" | Demos are part of the merge gate. Dispatch demo-recorder before pr-manager. |
 | "Red Gate failed because the tests are too strict" | Red Gate failure means the test or the contract understanding is wrong. Investigate. |
 | "This feels like a lot of context switching" | That is the feature. Fresh context per specialist prevents single-agent drift. |
+| "The story holdout only has 2 scenarios, they're probably not catching anything new" | Each scenario tests a BC arm that unit tests reach only via mocks. Even 1 unsatisfied scenario has blocked ship. |
+| "I'll show the holdout-evaluator the spec so it can test more accurately" | That breaks the asymmetry wall. Evaluator gets only product-brief.md + scenarios + binary. |
+| "The holdout scenario is wrong, let me fix it before running" | Scenarios are authored before implementation. A failing scenario is a finding. Investigate whether the scenario or the implementation is wrong. |
+| "Story holdout scored 0.78, basically 0.80" | 0.80 is the threshold. 0.78 fails. No rounding. |
+| "I'll tell the holdout-evaluator which tests pass so it can focus" | Test pass/fail from the test-writer leaks implementation knowledge. Evaluator runs its own behavioral exercises. |
+| "The story holdout found a gap — I'll just note it and proceed to demos" | Story holdout is BLOCKING. Fix the gap, reset adversary streak, re-gate before demos. |
 
 ### Wave Gate
 
