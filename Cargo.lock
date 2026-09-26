@@ -814,6 +814,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "factory-artifact-leak-scan"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "factory-dispatcher"
 version = "0.0.1"
 dependencies = [
