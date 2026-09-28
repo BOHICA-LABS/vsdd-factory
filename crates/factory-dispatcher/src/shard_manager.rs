@@ -17127,37 +17127,94 @@ fn run_backfill_append_logs(
     txn.updated_at = now();
     write_append_log_txn_record(&migration_state_dir, &txn)?;
 
+    // S-25.06 failure-path-cleanup fix: mirrors B2's own `abort_staging`
+    // closure (see the `run_bc_index_migration` Step 3b gate comment)
+    // EXACTLY in shape, retyped for `AppendLog*`. Prior to this fix, NONE of
+    // the per-file staging steps below (the already-migrated I/O check, the
+    // boundary-oracle lookup, the staged-copy durable write, or
+    // `run_mechanism_a_backfill_split`'s own delegated content-preservation
+    // (PC1) / independent-census (PC2) checks — BC-1.18.008 Postcondition
+    // 6(a)/6(b)) had ANY cleanup on failure: a mid-loop error propagated via
+    // a bare `?` straight out of this function, leaving `txn.state` stuck at
+    // STAGING forever and the incomplete `gen-<uuid>/` staging dir on disk —
+    // an availability/self-lock smell, since `append_log_backfill_admission_
+    // precheck` blocks EVERY `Edit`/`Write`/`MultiEdit` against
+    // `.factory/cycles/` for as long as a LIVE (STAGING/COMMITTING) txn
+    // record exists, with no clean recovery path short of a future
+    // successful retry.
+    //
+    // No canonical file has been touched anywhere in this loop — every
+    // per-file split/verify step operates entirely on `staged_current_path`
+    // inside `gen_dir`, never on `canonical_path` — so this is pure
+    // discard-and-reopen, never a rollback of committed work, exactly like
+    // B2's own Step 3b gate.
+    //
+    // Unlike B2's sibling closure, this one does NOT separately write a
+    // `gate-state.json`: `backfill-append-logs` has no such file (see this
+    // section's own module doc comment / `AppendLogAdmissionGateState`'s doc
+    // comment) — its writer-admission gate is derived ENTIRELY from the live
+    // txn record's `state` (`read_active_append_log_txn_record`'s
+    // STAGING/COMMITTING-vs-terminal selection rule). Transitioning
+    // `txn.state` to ABORTED and persisting it here IS the gate-reopen.
+    let abort_staging =
+        |migration_state_dir: &Path, gen_dir: &Path, txn: &mut AppendLogMigrationTxnRecord| {
+            let _ = std::fs::remove_dir_all(gen_dir);
+            txn.state = AppendLogMigrationTxnState::Aborted;
+            txn.updated_at = now();
+            let _ = write_append_log_txn_record(migration_state_dir, txn);
+        };
+
     let mut pending_moves = Vec::new();
     for (relative_name, content) in &contents {
         let canonical_path =
             crate::append_log_markers::canonical_path_for_target_file(cwd, relative_name);
-        let stem = crate::append_log_markers::artifact_stem_for_target_file(relative_name)
-            .map_err(|_| AppendLogMigrationError::BinaryIntegrityFailure {
-                message: format!("internal: {relative_name} is not a recognized target file"),
-            })?;
+        let stem = match crate::append_log_markers::artifact_stem_for_target_file(relative_name) {
+            Ok(stem) => stem,
+            Err(_) => {
+                abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+                return Err(AppendLogMigrationError::BinaryIntegrityFailure {
+                    message: format!("internal: {relative_name} is not a recognized target file"),
+                });
+            }
+        };
 
-        if mechanism_a_backfill_already_migrated(&canonical_path, stem)
-            .map_err(|source| AppendLogMigrationError::Io { source })?
-        {
+        let already_migrated = match mechanism_a_backfill_already_migrated(&canonical_path, stem) {
+            Ok(flag) => flag,
+            Err(source) => {
+                abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+                return Err(AppendLogMigrationError::Io { source });
+            }
+        };
+        if already_migrated {
             // Postcondition 5's Composability clause: already migrated by
             // an earlier BC-1.18.006 roll or a prior backfill run — nothing
             // to stage or move for this file; it stays exactly as-is.
             continue;
         }
 
-        let offsets = crate::append_log_markers::record_boundary_offsets_for_target_file(
+        let offsets = match crate::append_log_markers::record_boundary_offsets_for_target_file(
             relative_name,
             content,
-        )
-        .map_err(|_| AppendLogMigrationError::EmptyBoundaryOracleAbort {
-            relative_path: relative_name.to_string(),
-        })?;
+        ) {
+            Ok(offsets) => offsets,
+            Err(_) => {
+                abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+                return Err(AppendLogMigrationError::EmptyBoundaryOracleAbort {
+                    relative_path: relative_name.to_string(),
+                });
+            }
+        };
 
         let stem_dir = gen_dir.join(stem);
-        std::fs::create_dir_all(&stem_dir)
-            .map_err(|source| AppendLogMigrationError::Io { source })?;
+        if let Err(source) = std::fs::create_dir_all(&stem_dir) {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(AppendLogMigrationError::Io { source });
+        }
         let staged_current_path = stem_dir.join(relative_name);
-        migration_durable_write(&staged_current_path, content).map_err(append_log_bc_err)?;
+        if let Err(e) = migration_durable_write(&staged_current_path, content) {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(append_log_bc_err(e));
+        }
 
         let entry = append_log_shard_entry(
             stem,
@@ -17167,18 +17224,36 @@ fn run_backfill_append_logs(
                 relative_name
             ),
         );
-        run_mechanism_a_backfill_split(
+        // BC-1.18.008's own per-file split + delegated content-preservation
+        // (PC1) / independent-census (PC2) checks — the primary scenario
+        // this fix's own disclosed gap names (AC-002/AC-003). A failure here
+        // aborts the WHOLE migration via the same closure as every other
+        // per-file staging step above/below, never a partial per-file abort.
+        if let Err(e) = run_mechanism_a_backfill_split(
             &entry,
             &staged_current_path,
             &offsets,
             APPEND_LOG_RETENTION_COUNT,
-        )
-        .map_err(|e| append_log_mechanism_a_err(e, relative_name))?;
+        ) {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(append_log_mechanism_a_err(e, relative_name));
+        }
 
-        let dir_entries = std::fs::read_dir(&stem_dir)
-            .map_err(|source| AppendLogMigrationError::Io { source })?;
+        let dir_entries = match std::fs::read_dir(&stem_dir) {
+            Ok(entries) => entries,
+            Err(source) => {
+                abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+                return Err(AppendLogMigrationError::Io { source });
+            }
+        };
         for dir_entry in dir_entries {
-            let dir_entry = dir_entry.map_err(|source| AppendLogMigrationError::Io { source })?;
+            let dir_entry = match dir_entry {
+                Ok(dir_entry) => dir_entry,
+                Err(source) => {
+                    abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+                    return Err(AppendLogMigrationError::Io { source });
+                }
+            };
             let file_name = dir_entry.file_name();
             let canonical_target = canonical_path
                 .parent()

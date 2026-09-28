@@ -183,6 +183,51 @@ fn completed_json_path(cwd: &Path) -> PathBuf {
     migration_state_dir(cwd).join("completed.json")
 }
 
+/// Scans `.factory/migration-state/` for every `txn-*.json` record and
+/// parses each one — mirrors [`read_active_append_log_txn_record`]'s own
+/// discovery glob, but (unlike that `pub(crate)` production function, not
+/// visible from this external integration-test crate) returns EVERY record
+/// found, live or terminal, so a test can assert on the full audit trail
+/// across more than one invocation (e.g. an ABORTED record from a failed run
+/// coexisting with a COMPLETED record from a later clean re-run).
+fn read_all_txn_records(cwd: &Path) -> Vec<AppendLogMigrationTxnRecord> {
+    let dir = migration_state_dir(cwd);
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("txn-") && name.ends_with(".json") {
+            let bytes = std::fs::read(entry.path()).unwrap();
+            out.push(serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                panic!(
+                    "txn record {} must deserialize as AppendLogMigrationTxnRecord: {e}",
+                    entry.path().display()
+                )
+            }));
+        }
+    }
+    out
+}
+
+/// Lists every `gen-<uuid>/` staging directory still present under
+/// `.factory/migration-state/` — used to assert a mid-staging-loop abort
+/// actually discards the incomplete staging generation rather than leaving
+/// it orphaned on disk.
+fn leftover_gen_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let dir = migration_state_dir(cwd);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("gen-"))
+        .map(|e| e.path())
+        .collect()
+}
+
 fn write_completed_json(cwd: &Path, record: &AppendLogCompletedMigrationRecord) {
     let dir = migration_state_dir(cwd);
     std::fs::create_dir_all(&dir).unwrap();
@@ -780,6 +825,187 @@ fn test_BC_1_18_013_EC007_AC014_PC4_AC006_run_backfill_append_logs_cli_whole_mig
              not merely the failing one"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Failure-path-cleanup fix (S-25.06 post-hoc hardening, disclosed gap): a
+// mid-staging-loop failure MUST mirror B2's own `abort_staging` closure --
+// transition the txn to ABORTED, remove the incomplete `gen-<uuid>/` staging
+// dir, and reopen the writer-admission gate -- rather than leaving
+// `txn.state` stuck at STAGING forever (an availability/self-lock smell: the
+// gate stays LOCKED for every `.factory/cycles/` writer with no clean
+// recovery path).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_013_MIDLOOP_run_backfill_append_logs_cli_mid_staging_loop_failure_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_target_file(dir.path(), "decision-log.md", DECISION_LOG_CONTENT);
+    // burst-log.md is file 2 of the 4 `APPEND_LOG_TARGET_FILES_IN_ORDER` --
+    // decision-log.md (file 1) stages successfully first, THEN this file's
+    // own per-file staging step (the boundary-oracle lookup, ahead of
+    // `run_mechanism_a_backfill_split`'s own PC1/PC2 delegation) fails
+    // mid-loop, with lessons.md/session-checkpoints.md (files 3/4) never
+    // even attempted.
+    write_target_file(
+        dir.path(),
+        "burst-log.md",
+        "prose with no h2/h3 headings at all -- zero record boundaries (EC-007)\n",
+    );
+    write_target_file(dir.path(), "lessons.md", LESSONS_CONTENT);
+    write_target_file(
+        dir.path(),
+        "session-checkpoints.md",
+        SESSION_CHECKPOINTS_CONTENT,
+    );
+    let originals = snapshot_all_four(dir.path());
+
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(
+        exit_code, 2,
+        "a mid-staging-loop per-file failure must still abort the whole migration (exit 2)"
+    );
+    assert!(
+        !completed_json_path(dir.path()).exists(),
+        "an abort must never write completed.json"
+    );
+    for (name, original_bytes) in &originals {
+        assert_eq!(
+            &read_target_file(dir.path(), name),
+            original_bytes,
+            "staging failures are pre-commit: no canonical file may be mutated, including {name}"
+        );
+    }
+
+    // The disclosed gap itself: prior to this fix, the txn record stayed at
+    // STAGING forever after a mid-loop failure.
+    let txns = read_all_txn_records(dir.path());
+    assert_eq!(
+        txns.len(),
+        1,
+        "exactly one txn record must exist after a single failed run; got {txns:?}"
+    );
+    assert_eq!(
+        txns[0].state,
+        AppendLogMigrationTxnState::Aborted,
+        "a mid-staging-loop failure must transition the txn to ABORTED, mirroring B2's own \
+         abort_staging path -- leaving it STAGING forever is the disclosed availability/\
+         self-lock gap; got {:?}",
+        txns[0].state
+    );
+
+    // The incomplete gen-<uuid>/ staging dir must be discarded, not
+    // orphaned on disk.
+    let leftover = leftover_gen_dirs(dir.path());
+    assert!(
+        leftover.is_empty(),
+        "the incomplete gen-<uuid>/ staging dir must be removed on abort, not left behind: \
+         {leftover:?}"
+    );
+
+    // Critically: the writer-admission gate must REOPEN -- a direct
+    // Edit/Write/MultiEdit dispatch against .factory/cycles/ must no longer
+    // be blocked now that the txn is ABORTED (terminal), not STAGING (live).
+    let payload = append_log_target_payload(
+        dir.path(),
+        "Write",
+        "decision-log.md",
+        serde_json::json!({ "content": "a writer retrying after the abort" }),
+    );
+    let result = append_log_backfill_admission_precheck(&payload, dir.path());
+    assert!(
+        result.is_none(),
+        "BC-1.18.013 Precondition 6(b): the admission gate must reopen after a mid-staging-loop \
+         abort -- writers must never stay blocked with no clean recovery path; got {result:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_013_MIDLOOP_run_backfill_append_logs_cli_subsequent_invocation_after_abort_starts_clean_and_completes()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_target_file(dir.path(), "decision-log.md", DECISION_LOG_CONTENT);
+    write_target_file(
+        dir.path(),
+        "burst-log.md",
+        "prose with no h2/h3 headings at all -- zero record boundaries (EC-007)\n",
+    );
+    write_target_file(dir.path(), "lessons.md", LESSONS_CONTENT);
+    write_target_file(
+        dir.path(),
+        "session-checkpoints.md",
+        SESSION_CHECKPOINTS_CONTENT,
+    );
+
+    let first_exit = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(
+        first_exit, 2,
+        "setup precondition: the first invocation must abort on burst-log.md's empty boundary \
+         oracle"
+    );
+
+    // Fix the broken file and retry. Composability with the STAGING-resume
+    // recovery path (BC-1.18.013 EC-002/EC-003): this second invocation must
+    // NOT try to "resume" the now-ABORTED (terminal, not live) generation --
+    // `read_active_append_log_txn_record`'s own selection rule only treats
+    // STAGING/COMMITTING as live, so this starts an entirely fresh
+    // generation_id/txn_id/fingerprint from scratch, exactly like a
+    // brand-new first-ever invocation would.
+    write_target_file(dir.path(), "burst-log.md", BURST_LOG_CONTENT);
+    let originals = snapshot_all_four(dir.path());
+
+    let second_exit = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(
+        second_exit, 0,
+        "a subsequent clean invocation after an abort must complete successfully -- the abort \
+         path must compose correctly with the STAGING-resume recovery machinery rather than \
+         leaving the migration permanently wedged"
+    );
+    assert!(
+        completed_json_path(dir.path()).exists(),
+        "the clean re-run must reach COMPLETED"
+    );
+    assert!(
+        leftover_gen_dirs(dir.path()).is_empty(),
+        "a successfully COMPLETED run must not leave any gen-<uuid>/ staging dir behind either"
+    );
+
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "Postcondition 1: {name}'s (shards + current) reconstruction must reproduce the \
+             fixed original content byte-for-byte on the clean re-run after the abort"
+        );
+    }
+
+    // The ABORTED txn record from the first run remains as an audit trail
+    // (never deleted/rewritten), alongside a SEPARATE, freshly-created
+    // COMPLETED txn record from this second, clean run.
+    let txns = read_all_txn_records(dir.path());
+    assert_eq!(
+        txns.len(),
+        2,
+        "the first run's ABORTED txn record must remain as an audit trail, and the second, \
+         clean run must produce its own distinct txn record; got {txns:?}"
+    );
+    assert_eq!(
+        txns.iter()
+            .filter(|t| t.state == AppendLogMigrationTxnState::Aborted)
+            .count(),
+        1,
+        "exactly one ABORTED txn record (from the first, failed run) must be present; got \
+         {txns:?}"
+    );
+    assert_eq!(
+        txns.iter()
+            .filter(|t| t.state == AppendLogMigrationTxnState::Completed)
+            .count(),
+        1,
+        "exactly one COMPLETED txn record (from the second, clean run) must be present; got \
+         {txns:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
