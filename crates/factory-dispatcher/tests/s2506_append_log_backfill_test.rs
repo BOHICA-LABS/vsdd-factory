@@ -85,13 +85,16 @@ use factory_dispatcher::executor::{
     append_log_backfill_admission_precheck, append_log_backfill_reservation_release,
 };
 use factory_dispatcher::payload::HookPayload;
+use factory_dispatcher::shard_manager::migration_fs::StdFs;
 use factory_dispatcher::shard_manager::{
     AppendLogAdmissionGateState, AppendLogCompletedMigrationRecord,
-    AppendLogCurrentGenerationPointer, AppendLogMigrationError, AppendLogMigrationTxnRecord,
+    AppendLogCurrentGenerationPointer, AppendLogIntentLogRecord, AppendLogIntentLogRecordType,
+    AppendLogIntentLogRecoveryDecision, AppendLogMigrationError, AppendLogMigrationTxnRecord,
     AppendLogMigrationTxnState, AppendLogPendingCanonicalMove,
     BackfillAppendLogsActivationManifest, ShardEntry, ShardIndex, ShardShape,
-    mechanism_a_backfill_already_migrated, mechanism_a_record_boundary_offsets,
-    run_backfill_append_logs_cli, run_mechanism_a_backfill_split,
+    decide_append_log_recovery, mechanism_a_backfill_already_migrated,
+    mechanism_a_record_boundary_offsets, read_append_log_intent_log, run_backfill_append_logs_cli,
+    run_mechanism_a_backfill_split, write_append_log_intent_record,
 };
 use vsdd_hook_sdk::HookResult;
 
@@ -1017,6 +1020,330 @@ fn test_BC_1_18_013_PC3A_AC005_run_backfill_append_logs_cli_aborts_with_fingerpr
 }
 
 // ---------------------------------------------------------------------------
+// BC-1.18.013 Precondition 5 (PC5) — content-verified recovery hardening.
+//
+// Prior to this hardening, `finish_append_log_migration`'s recovery oracle
+// was existence-only: `!exists(staging) && exists(canonical) => "already
+// moved"`, with ZERO content verification -- unable to distinguish "this
+// migration's own completed move" from "canonical merely holds SOME
+// (possibly stale/foreign) content", exactly the class of defect B2's own
+// crash-recovery history (F-C5-P2-002) already proved insufficient for an
+// existence-only oracle. These tests cover the fix: a real, checksummed,
+// framed intent log (`AppendLogIntentLogRecord`) plus a pure
+// `decide_append_log_recovery` decision function, mirroring B2's own
+// `IntentLogRecord`/`decide_intent_log_recovery`.
+// ---------------------------------------------------------------------------
+
+fn sha256_hex_of(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn sample_append_log_intent_record(
+    expected_post_hash: &str,
+    expected_pre_state: Option<&str>,
+) -> AppendLogIntentLogRecord {
+    AppendLogIntentLogRecord {
+        txn_id: "txn-s2506-pc5".to_string(),
+        fencing_generation: 1,
+        record_type: AppendLogIntentLogRecordType::Intent,
+        target_canonical: PathBuf::from("/tmp/s2506-pc5/canonical/decision-log.md"),
+        staging_path: PathBuf::from("/tmp/s2506-pc5/staging/decision-log.md"),
+        expected_post_hash: expected_post_hash.to_string(),
+        expected_pre_state: expected_pre_state.map(|s| s.to_string()),
+        timestamp_utc: "2026-09-27T00:00:00Z".to_string(),
+        record_checksum: String::new(),
+    }
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_treat_done_when_canonical_matches_expected_post_hash()
+ {
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    let decision =
+        decide_append_log_recovery(Some("hash-post"), Some("irrelevant-staging"), Some(&record));
+    assert_eq!(decision, AppendLogIntentLogRecoveryDecision::TreatDone);
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_redo_rename_when_staging_has_post_hash_and_canonical_has_pre_state()
+ {
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    let decision = decide_append_log_recovery(Some("hash-pre"), Some("hash-post"), Some(&record));
+    assert_eq!(decision, AppendLogIntentLogRecoveryDecision::RedoRename);
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_fail_closed_on_absent_record() {
+    let decision = decide_append_log_recovery(Some("some-hash"), Some("some-hash"), None);
+    assert!(matches!(
+        decision,
+        AppendLogIntentLogRecoveryDecision::FailClosed { .. }
+    ));
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_fail_closed_both_absent_never_declares_success()
+{
+    // Neither the staging file nor the canonical target exists anywhere --
+    // an unrecoverable intermediate state. Must halt, never be silently
+    // treated as done.
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    let decision = decide_append_log_recovery(None, None, Some(&record));
+    assert!(
+        matches!(
+            decision,
+            AppendLogIntentLogRecoveryDecision::FailClosed { .. }
+        ),
+        "both-absent must fail closed, never be silently declared a success: {decision:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_fail_closed_both_present_stale_foreign_canonical_content()
+ {
+    // THE DEFECT THIS FIX CLOSES: canonical exists AND staging exists, but
+    // canonical's content matches NEITHER the recorded expected_post_hash
+    // NOR expected_pre_state -- it holds SOME stale/foreign content. The
+    // pre-fix existence-only oracle could not even express this case (it
+    // only ever asked "does staging exist" / "does canonical exist"); the
+    // content-verified oracle must reject it outright rather than guessing
+    // which side is authoritative.
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    let decision =
+        decide_append_log_recovery(Some("hash-FOREIGN"), Some("hash-post"), Some(&record));
+    assert!(
+        matches!(
+            decision,
+            AppendLogIntentLogRecoveryDecision::FailClosed { .. }
+        ),
+        "stale/foreign content at canonical must never be treated as done or safely redone: \
+         {decision:?}"
+    );
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_decide_append_log_recovery_fail_closed_on_ambiguous_mixed_state() {
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    // Canonical matches neither expected_post_hash nor expected_pre_state,
+    // and staging is absent -- an untrustworthy state with no safe row.
+    let decision = decide_append_log_recovery(Some("hash-unexpected"), None, Some(&record));
+    assert!(matches!(
+        decision,
+        AppendLogIntentLogRecoveryDecision::FailClosed { .. }
+    ));
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_intent_log_round_trips_and_torn_trailing_record_treated_as_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let intent_log_path = dir.path().join("intent-pc5-roundtrip.log");
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    write_append_log_intent_record(&StdFs, &intent_log_path, &record).expect("append must succeed");
+
+    let read_back = read_append_log_intent_log(&StdFs, &intent_log_path)
+        .expect("reading a well-formed intent log must succeed");
+    assert_eq!(
+        read_back.len(),
+        1,
+        "one appended record must round-trip as exactly one parsed record"
+    );
+    assert_eq!(read_back[0].txn_id, record.txn_id);
+    assert_eq!(read_back[0].expected_post_hash, record.expected_post_hash);
+    assert_eq!(read_back[0].expected_pre_state, record.expected_pre_state);
+    assert_eq!(
+        read_back[0].record_type,
+        AppendLogIntentLogRecordType::Intent
+    );
+
+    // Truncate the file mid-record to simulate a crash during the append's
+    // own write -- a torn record MUST be treated as absent, never parsed as
+    // a partial INTENT/DONE (mirrors B2's own
+    // `test_BC_1_18_011_intent_log_torn_trailing_record_treated_as_absent_never_partial`).
+    let full_bytes = std::fs::read(&intent_log_path).unwrap();
+    let torn_len = full_bytes.len().saturating_sub(5).max(1);
+    std::fs::write(&intent_log_path, &full_bytes[..torn_len]).unwrap();
+
+    let read_back_torn = read_append_log_intent_log(&StdFs, &intent_log_path)
+        .expect("a torn trailing record must not itself be a parse error");
+    assert!(
+        read_back_torn.is_empty(),
+        "a single record truncated mid-write must be discarded entirely, not surfaced as a \
+         partial record"
+    );
+}
+
+#[test]
+fn test_BC_1_18_013_PC5_intent_log_tampered_checksum_treated_as_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let intent_log_path = dir.path().join("intent-pc5-tamper.log");
+    let record = sample_append_log_intent_record("hash-post", Some("hash-pre"));
+    write_append_log_intent_record(&StdFs, &intent_log_path, &record).expect("append must succeed");
+
+    // Corrupt one byte of the on-disk content (not the trailing bytes, to
+    // keep the record framed/terminated) -- the checksum recomputation
+    // must catch this and discard the record, mirroring B2's own tamper
+    // handling.
+    let content = std::fs::read_to_string(&intent_log_path).unwrap();
+    let tampered = content.replacen("hash-post", "hash-XXXX", 1);
+    std::fs::write(&intent_log_path, tampered).unwrap();
+
+    let read_back = read_append_log_intent_log(&StdFs, &intent_log_path)
+        .expect("a checksum-mismatched record must not itself be a parse error");
+    assert!(
+        read_back.is_empty(),
+        "a record whose recomputed checksum does not match its stored checksum must be \
+         discarded, never trusted"
+    );
+}
+
+/// Reads the four staged files' content directly and hand-plants a
+/// COMMITTING-state txn record with ONE pending canonical move whose
+/// canonical target is overwritten with FOREIGN content unrelated to
+/// either the original pre-image or the intended post-image -- exactly the
+/// ambiguous state the pre-fix existence-only oracle
+/// (`!exists(staging) && exists(canonical) => "already moved"`) could not
+/// detect (staging still exists in this scenario, so the pre-fix oracle
+/// would not even take its existence-only shortcut -- but a REAL crash
+/// history that deletes/consumes staging through some OTHER means while
+/// leaving foreign content at canonical is exactly the F-C5-P2-002 class
+/// this fix closes; this test drives the same content-mismatch state
+/// through the full production `finish_append_log_migration` recovery path
+/// via a hand-seeded, serde-round-trippable txn + intent-log record, per
+/// this file's own documented ambiguity #1 about the lack of granular
+/// resume hooks).
+#[test]
+fn test_BC_1_18_013_PC5_content_verified_recovery_rejects_stale_foreign_canonical_content_never_declares_false_success()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_all_four_valid(dir.path());
+    let originals = snapshot_all_four(dir.path());
+    let original_decision_log_hash = sha256_hex_of(&originals[0].1);
+
+    let msd = migration_state_dir(dir.path());
+    std::fs::create_dir_all(&msd).unwrap();
+
+    let staging_dir = msd.join("gen-s2506-pc5-conflict");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+    let staging_path = staging_dir.join("decision-log.md");
+    let staged_content = b"STAGED CONTENT -- the real migrated payload for decision-log.md";
+    std::fs::write(&staging_path, staged_content).unwrap();
+    let expected_post_hash = sha256_hex_of(staged_content);
+
+    let canonical_path = canonical_path_for_target_file(dir.path(), "decision-log.md");
+    let foreign_content = b"FOREIGN CONTENT unrelated to this migration's pre- or post-image";
+    std::fs::write(&canonical_path, foreign_content).unwrap();
+
+    let txn = AppendLogMigrationTxnRecord {
+        txn_id: "txn-s2506-pc5-conflict".to_string(),
+        activation_id: "activation-s2506-pc5-conflict".to_string(),
+        fencing_generation: 1,
+        state: AppendLogMigrationTxnState::Committing,
+        generation_id: Some("s2506-pc5-conflict".to_string()),
+        source_sha256: None,
+        intent_log_path: None,
+        pending_canonical_moves: vec![AppendLogPendingCanonicalMove {
+            staging_path: staging_path.to_string_lossy().into_owned(),
+            canonical_path: canonical_path.to_string_lossy().into_owned(),
+        }],
+        created_at: "2026-09-27T00:00:00Z".to_string(),
+        updated_at: "2026-09-27T00:00:00Z".to_string(),
+    };
+    std::fs::write(
+        msd.join(format!("txn-{}.json", txn.activation_id)),
+        serde_json::to_string_pretty(&txn).unwrap(),
+    )
+    .unwrap();
+
+    // Hand-write the matching INTENT record so recovery has a real record
+    // to consult -- mirrors BC-1.18.013 Precondition 5: the framed intent
+    // log is maintained across the lifecycle, exactly as a genuine
+    // pre-pointer-swap invocation would have left it.
+    let intent_log_path = msd.join(format!("intent-{}.log", "s2506-pc5-conflict"));
+    let intent_record = AppendLogIntentLogRecord {
+        txn_id: txn.txn_id.clone(),
+        fencing_generation: txn.fencing_generation,
+        record_type: AppendLogIntentLogRecordType::Intent,
+        target_canonical: canonical_path.clone(),
+        staging_path: staging_path.clone(),
+        expected_post_hash,
+        expected_pre_state: Some(original_decision_log_hash),
+        timestamp_utc: "2026-09-27T00:00:00Z".to_string(),
+        record_checksum: String::new(),
+    };
+    write_append_log_intent_record(&StdFs, &intent_log_path, &intent_record)
+        .expect("seeding the intent log must succeed");
+
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_ne!(
+        exit_code, 0,
+        "content-verified recovery must FAIL CLOSED when canonical holds stale/foreign content \
+         matching neither the recorded pre- nor post-image -- never silently declared as \
+         already-migrated (BC-1.18.013 Precondition 5)"
+    );
+    assert!(
+        !completed_json_path(dir.path()).exists(),
+        "completed.json must never be written when content-verified recovery fails closed"
+    );
+    assert_eq!(
+        std::fs::read(&canonical_path).unwrap(),
+        foreign_content,
+        "the foreign canonical content must remain untouched -- the fix must never blindly \
+         rename/overwrite it either"
+    );
+}
+
+/// A pending move whose staging AND canonical sides are BOTH absent is an
+/// unrecoverable intermediate state -- recovery must halt (never declare
+/// success), exercised end-to-end through the production
+/// `finish_append_log_migration` path via a hand-seeded COMMITTING txn.
+#[test]
+fn test_BC_1_18_013_PC5_content_verified_recovery_halts_when_both_staging_and_canonical_are_absent()
+{
+    let dir = tempfile::tempdir().unwrap();
+    setup_all_four_valid(dir.path());
+
+    let msd = migration_state_dir(dir.path());
+    std::fs::create_dir_all(&msd).unwrap();
+
+    let staging_path = msd.join("gen-s2506-pc5-both-absent/decision-log.md");
+    let canonical_path = canonical_path_for_target_file(dir.path(), "decision-log.md");
+    // Neither side is ever written -- both absent from the start.
+
+    let txn = AppendLogMigrationTxnRecord {
+        txn_id: "txn-s2506-pc5-both-absent".to_string(),
+        activation_id: "activation-s2506-pc5-both-absent".to_string(),
+        fencing_generation: 1,
+        state: AppendLogMigrationTxnState::Committing,
+        generation_id: Some("s2506-pc5-both-absent".to_string()),
+        source_sha256: None,
+        intent_log_path: None,
+        pending_canonical_moves: vec![AppendLogPendingCanonicalMove {
+            staging_path: staging_path.to_string_lossy().into_owned(),
+            canonical_path: canonical_path.to_string_lossy().into_owned(),
+        }],
+        created_at: "2026-09-27T00:00:00Z".to_string(),
+        updated_at: "2026-09-27T00:00:00Z".to_string(),
+    };
+    std::fs::write(
+        msd.join(format!("txn-{}.json", txn.activation_id)),
+        serde_json::to_string_pretty(&txn).unwrap(),
+    )
+    .unwrap();
+    // Deliberately no intent-log file at all for this scenario -- exercises
+    // the defense-in-depth "no matching record" fallback in
+    // `finish_append_log_migration`.
+
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_ne!(
+        exit_code, 0,
+        "both staging and canonical absent must halt recovery (BINARY_INTEGRITY_FAILURE), never \
+         be silently declared a success"
+    );
+    assert!(!completed_json_path(dir.path()).exists());
+}
+
+// ---------------------------------------------------------------------------
 // AC-011 / EC-002 — crash / forward-recovery via genuine process crash
 // injection. `--features factory-dispatcher/failpoints` only; both tests
 // below are no-ops under the default feature set.
@@ -1041,6 +1368,16 @@ fn test_BC_1_18_013_PC3A_AC005_run_backfill_append_logs_cli_aborts_with_fingerpr
 // coverage.
 #[cfg(feature = "failpoints")]
 const S2506_ENV_CWD: &str = "VSDD_S2506_CRASH_CWD";
+/// Which occurrence of the `migration_fs::rename` failpoint should trigger
+/// the abort -- mirrors `bc_1_18_011_b2_migration_crash_injection_test.rs`'s
+/// own `VSDD_OBL1_CRASH_OCCURRENCE` counting-callback pattern (`fail`'s own
+/// per-call counting only supports a max-count-then-`off` transition, not
+/// "fire exactly once, at reach N, on a callback action", so this suite
+/// rolls its own counter exactly as that sibling harness does). Defaults to
+/// `1` (the original, pre-extension behavior: crash on the very FIRST
+/// canonical-path rename, 0 of 4 files moved) when unset.
+#[cfg(feature = "failpoints")]
+const S2506_ENV_OCCURRENCE: &str = "VSDD_S2506_CRASH_OCCURRENCE";
 /// Sentinel exit code the child uses when `run_backfill_append_logs_cli`
 /// returned WITHOUT the failpoint ever firing an abort — distinguishes "the
 /// failpoint name never fired" (see this section's shared-seam ASSUMPTION,
@@ -1051,19 +1388,37 @@ const S2506_CHILD_DID_NOT_ABORT_EXIT_CODE: i32 = 66;
 
 /// The child-process entrypoint. A no-op under ordinary `cargo test`
 /// execution (the env var is absent, so this returns immediately); becomes
-/// the crash-injection child only when spawned by the parent test below,
-/// which sets it.
+/// the crash-injection child only when spawned by a parent test below,
+/// which sets it. Aborts on the `VSDD_S2506_CRASH_OCCURRENCE`-th reach of
+/// `migration_fs::rename` (default `1`), so the SAME entrypoint drives
+/// every scenario in this section -- crashing on the first canonical move
+/// (0 of 4 files migrated) as well as mid-sequence (BC-1.18.013 EC-002's
+/// own worked example: "completing canonical path moves for 2 of the 4
+/// files").
 #[cfg(feature = "failpoints")]
 #[test]
 fn test_s2506_crash_injection_child_entrypoint() {
     let Ok(cwd) = std::env::var(S2506_ENV_CWD) else {
         return; // not the child -- ordinary `cargo test` run, no-op
     };
+    let occurrence: usize = std::env::var(S2506_ENV_OCCURRENCE)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
     // True no-unwind crash semantics — never `fail`'s own `"panic"` action
     // (which unwinds and runs destructors), mirroring the B2 sibling
-    // harness's own documented rationale.
-    fail::cfg_callback("migration_fs::rename", || {
-        std::process::abort();
+    // harness's own documented rationale. A plain `AtomicUsize` counter
+    // inside the callback fires the abort on exactly the requested
+    // occurrence -- `fail`'s own per-call counting only supports a
+    // max-count-then-`off` transition, not "fire exactly once, at reach N,
+    // on a callback action".
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    fail::cfg_callback("migration_fs::rename", move || {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if n == occurrence {
+            std::process::abort();
+        }
     })
     .expect("configuring the migration_fs::rename crash-injection callback must succeed");
 
@@ -1073,16 +1428,15 @@ fn test_s2506_crash_injection_child_entrypoint() {
     std::process::exit(S2506_CHILD_DID_NOT_ABORT_EXIT_CODE);
 }
 
+/// Spawns the crash-injection child (re-execing this same test binary) at
+/// the given `occurrence`, waits (bounded, 30s) for it to genuinely abort
+/// (`SIGABRT`) via the `migration_fs::rename` failpoint, and asserts that it
+/// did -- shared by every scenario in this section so each one only needs
+/// to state its own `occurrence` and post-recovery assertions.
 #[cfg(feature = "failpoints")]
-#[test]
-fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recovery_resumes_cleanly_after_a_crashed_canonical_move()
- {
+fn run_s2506_crash_child_and_assert_aborted(occurrence: usize, cwd: &Path) {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
-
-    let dir = tempfile::tempdir().unwrap();
-    setup_all_four_valid(dir.path());
-    let originals = snapshot_all_four(dir.path());
 
     let exe = std::env::current_exe().expect("current_exe must resolve for a test binary");
     let mut child = Command::new(exe)
@@ -1090,7 +1444,8 @@ fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recove
         .arg("test_s2506_crash_injection_child_entrypoint")
         .arg("--test-threads=1")
         .arg("--nocapture")
-        .env(S2506_ENV_CWD, dir.path().as_os_str())
+        .env(S2506_ENV_CWD, cwd.as_os_str())
+        .env(S2506_ENV_OCCURRENCE, occurrence.to_string())
         .env("RUST_BACKTRACE", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1111,10 +1466,10 @@ fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recove
             let _ = child.kill();
             let _ = child.wait();
             panic!(
-                "AC-011/EC-002 crash-injection child did not exit within the 30s timeout — \
-                 killed. Either the migration_fs::rename failpoint never fired (see this \
-                 section's shared-seam ASSUMPTION, module doc comment), or the migration \
-                 deadlocked."
+                "AC-011/EC-002 crash-injection child (occurrence={occurrence}) did not exit \
+                 within the 30s timeout — killed. Either the migration_fs::rename failpoint \
+                 never fired the requested number of times (see this section's shared-seam \
+                 ASSUMPTION, module doc comment), or the migration deadlocked."
             );
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -1133,13 +1488,26 @@ fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recove
 
     assert!(
         aborted,
-        "AC-011/EC-002 fixture setup: the child process must genuinely crash (SIGABRT) via the \
-         migration_fs::rename failpoint mid-migration, not exit normally — got status={:?}, \
-         stdout={:?}, stderr={:?}",
+        "AC-011/EC-002 fixture setup (occurrence={occurrence}): the child process must genuinely \
+         crash (SIGABRT) via the migration_fs::rename failpoint mid-migration, not exit normally \
+         — got status={:?}, stdout={:?}, stderr={:?}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recovery_resumes_cleanly_after_a_crashed_canonical_move()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_all_four_valid(dir.path());
+    let originals = snapshot_all_four(dir.path());
+
+    // Crash on the FIRST canonical-path rename -- 0 of 4 files migrated
+    // before the abort.
+    run_s2506_crash_child_and_assert_aborted(1, dir.path());
 
     // Recovery pass -- ordinary, unmodified production code, in THIS
     // (parent) process, which never itself configures a failpoint.
@@ -1149,6 +1517,65 @@ fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recove
         "AC-011/EC-002/Invariant 3: forward recovery after a crash mid canonical-path-move must \
          reach a clean COMPLETED state on the next invocation, resuming from the intent log's \
          first uncompleted move rather than re-moving an already-migrated file or deadlocking"
+    );
+    assert!(
+        completed_json_path(dir.path()).exists(),
+        "AC-011/EC-002: forward recovery must reach completed.json"
+    );
+
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "Postcondition 1, generalized across the crash boundary: {name}'s (shards + \
+             current) reconstruction must reproduce the original content byte-for-byte \
+             regardless of whether its own canonical move happened before or after the crash"
+        );
+    }
+}
+
+/// BC-1.18.013 EC-002's own worked example, exercised literally: "Migration
+/// crashes after completing canonical path moves for 2 of the 4 files
+/// (post-pointer-swap, mid-step-7)". With the default small fixtures (each
+/// of the four files stays under its own shard cap, so
+/// `run_mechanism_a_backfill_split` produces exactly one canonical move per
+/// file, in the fixed `decision-log.md`, `burst-log.md`, `lessons.md`,
+/// `session-checkpoints.md` order), aborting on the THIRD
+/// `migration_fs::rename` reach means the first two files (decision-log.md,
+/// burst-log.md) have ALREADY been durably moved (their own DONE intent-log
+/// records, per this fix's content-verified recovery, would already be
+/// on-disk) when the crash hits lessons.md's rename; session-checkpoints.md
+/// is never attempted. This is the scenario the PRE-FIX existence-only
+/// oracle (`!exists(staging) && exists(canonical) => "already moved"`)
+/// would have handled by coincidence for the two ALREADY-moved files (their
+/// own staging truly is gone), but never verified WHY canonical held what
+/// it held -- this test's job is to prove forward recovery still converges
+/// end-to-end under this fix's real content verification, not merely under
+/// the degenerate first-move-only crash point the original test covered.
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_INV3_AC011_EC002_run_backfill_append_logs_cli_forward_recovery_resumes_cleanly_after_two_of_four_moves_complete()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_all_four_valid(dir.path());
+    let originals = snapshot_all_four(dir.path());
+
+    // Crash on the THIRD canonical-path rename -- 2 of 4 files (decision-
+    // log.md, burst-log.md) already durably moved before the abort
+    // (`run_s2506_crash_child_and_assert_aborted` already confirms the
+    // child genuinely reached and aborted at this occurrence, not merely
+    // that it exited).
+    run_s2506_crash_child_and_assert_aborted(3, dir.path());
+
+    // Recovery pass -- ordinary, unmodified production code.
+    let recovery_exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(
+        recovery_exit_code, 0,
+        "AC-011/EC-002/Invariant 3: forward recovery after a crash mid canonical-path-move, \
+         partway through the 4-file sequence, must reach a clean COMPLETED state -- the \
+         content-verified TreatDone decision must recognize the 2 already-moved files without \
+         re-attempting their rename, and RedoRename/ordinary-attempt must complete the remaining \
+         2"
     );
     assert!(
         completed_json_path(dir.path()).exists(),

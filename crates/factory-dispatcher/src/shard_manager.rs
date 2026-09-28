@@ -17191,6 +17191,30 @@ fn run_backfill_append_logs(
         }
     }
 
+    // BC-1.18.013 Precondition 5 (PC5) / ADR-052 §Decision 7b -- mirrors
+    // B2's own OBL-1 WAL-ordering fix EXACTLY: one durable INTENT record
+    // per pending canonical-path move MUST be appended (and fsynced, via
+    // `Fs::append`'s own durability contract) BEFORE the Postcondition 3a
+    // fingerprint recheck and BEFORE the CURRENT.json pointer swap -- no
+    // rename has occurred yet at this point, so every target's
+    // forward-recovery intent is durable on disk before this migration's
+    // sole commit-point is even reached. Prior to this fix,
+    // `AppendLogIntentLogRecord`/`AppendLogMigrationTxnRecord::
+    // intent_log_path` were dead code and `finish_append_log_migration`'s
+    // own recovery oracle trusted bare path existence
+    // (`!exists(staging) && exists(canonical) => "already moved"`) --
+    // unsound, per B2's own F-C5-P2-002 history, because it cannot
+    // distinguish this migration's own completed move from a canonical
+    // path that merely holds SOME (possibly stale or foreign) content.
+    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
+    append_intent_records_for_append_log_pending_moves(
+        &fs,
+        &intent_log_path,
+        &txn.txn_id,
+        txn.fencing_generation,
+        &pending_moves,
+    )?;
+
     // Postcondition 3a: the EXACTLY-ONCE TOCTOU pre-commit fingerprint
     // recheck, performed immediately before the CURRENT.json pointer swap —
     // re-reads the REAL canonical files' CURRENT content (never the staged
@@ -17241,35 +17265,426 @@ fn run_backfill_append_logs(
     finish_append_log_migration(&fs, &migration_state_dir, &mut txn)
 }
 
+// ---------------------------------------------------------------------------
+// Intent log for `backfill-append-logs` (BC-1.18.013 Precondition 5) --
+// mirrors B2's own framed, checksummed, per-target expected-hash recovery
+// machinery
+// ([`append_intent_log_record`]/[`read_intent_log`]/[`decide_intent_log_recovery`])
+// EXACTLY in shape, retyped for [`AppendLogIntentLogRecord`]/
+// [`AppendLogPendingCanonicalMove`] -- reusing the SAME
+// `INTENT_LOG_RECORD_V1`/`END_INTENT_LOG_RECORD` framing markers and the
+// SAME `Fs::append` durable-append-plus-fsync seam. Prior to this fix,
+// `AppendLogIntentLogRecord`/`AppendLogMigrationTxnRecord::intent_log_path`
+// were DEAD CODE: `finish_append_log_migration` used a bare `Fs::exists`
+// existence-only oracle
+// (`!exists(staging) && exists(canonical) => "already moved"`), which B2's
+// own crash-recovery history (F-C5-P2-002) already proved UNSOUND -- it
+// cannot distinguish this migration's own completed move from a canonical
+// path that merely holds SOME (possibly stale or foreign) content. This
+// block makes the intent log load-bearing for mechanism-A too.
+// ---------------------------------------------------------------------------
+
+fn append_log_intent_log_record_type_str(
+    record_type: AppendLogIntentLogRecordType,
+) -> &'static str {
+    match record_type {
+        AppendLogIntentLogRecordType::Intent => "INTENT",
+        AppendLogIntentLogRecordType::Done => "DONE",
+        AppendLogIntentLogRecordType::Aborted => "ABORTED",
+    }
+}
+
+/// The exact byte sequence an [`AppendLogIntentLogRecord`]'s own
+/// `record_checksum` is computed over -- mirrors
+/// [`intent_log_checksum_input`] exactly, retyped.
+fn append_log_intent_log_checksum_input(record: &AppendLogIntentLogRecord) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}",
+        record.txn_id,
+        record.fencing_generation,
+        append_log_intent_log_record_type_str(record.record_type),
+        record.target_canonical.display(),
+        record.staging_path.display(),
+        record.expected_post_hash,
+        record.expected_pre_state.as_deref().unwrap_or("MISSING"),
+        record.timestamp_utc,
+    )
+}
+
+/// Append one framed record to `backfill-append-logs`'s own intent log --
+/// mirrors [`append_intent_log_record`] exactly, retyped. Public so both
+/// this migration's own call sites and its RED-gate/regression test suite
+/// can seed/round-trip records directly, mirroring B2's own sibling test
+/// coverage.
+pub fn write_append_log_intent_record(
+    fs: &impl Fs,
+    intent_log_path: &Path,
+    record: &AppendLogIntentLogRecord,
+) -> Result<(), AppendLogMigrationError> {
+    let checksum = sha256_hex(append_log_intent_log_checksum_input(record).as_bytes());
+
+    let mut block = String::new();
+    block.push_str(INTENT_LOG_RECORD_START);
+    block.push_str(&format!("txn_id={}\n", record.txn_id));
+    block.push_str(&format!(
+        "fencing_generation={}\n",
+        record.fencing_generation
+    ));
+    block.push_str(&format!(
+        "record_type={}\n",
+        append_log_intent_log_record_type_str(record.record_type)
+    ));
+    block.push_str(&format!(
+        "target_canonical={}\n",
+        record.target_canonical.display()
+    ));
+    block.push_str(&format!("staging_path={}\n", record.staging_path.display()));
+    block.push_str(&format!(
+        "expected_post_hash={}\n",
+        record.expected_post_hash
+    ));
+    block.push_str(&format!(
+        "expected_pre_state={}\n",
+        record.expected_pre_state.as_deref().unwrap_or("MISSING")
+    ));
+    block.push_str(&format!("timestamp_utc={}\n", record.timestamp_utc));
+    block.push_str(&format!("record_checksum={checksum}\n"));
+    block.push_str(INTENT_LOG_RECORD_END);
+
+    fs.append(intent_log_path, block.as_bytes())
+        .map_err(append_log_bc_err)
+}
+
+fn parse_append_log_intent_log_block(body: &str) -> Option<AppendLogIntentLogRecord> {
+    let mut fields: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for line in body.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            fields.insert(k, v);
+        }
+    }
+    let txn_id = (*fields.get("txn_id")?).to_string();
+    let fencing_generation = fields.get("fencing_generation")?.parse::<u64>().ok()?;
+    let record_type = match *fields.get("record_type")? {
+        "INTENT" => AppendLogIntentLogRecordType::Intent,
+        "DONE" => AppendLogIntentLogRecordType::Done,
+        "ABORTED" => AppendLogIntentLogRecordType::Aborted,
+        _ => return None,
+    };
+    let target_canonical = PathBuf::from(*fields.get("target_canonical")?);
+    let staging_path = PathBuf::from(*fields.get("staging_path")?);
+    let expected_post_hash = (*fields.get("expected_post_hash")?).to_string();
+    let pre_state_raw = *fields.get("expected_pre_state")?;
+    let expected_pre_state = if pre_state_raw == "MISSING" {
+        None
+    } else {
+        Some(pre_state_raw.to_string())
+    };
+    let timestamp_utc = (*fields.get("timestamp_utc")?).to_string();
+    let record_checksum = (*fields.get("record_checksum")?).to_string();
+
+    let record = AppendLogIntentLogRecord {
+        txn_id,
+        fencing_generation,
+        record_type,
+        target_canonical,
+        staging_path,
+        expected_post_hash,
+        expected_pre_state,
+        timestamp_utc,
+        record_checksum: record_checksum.clone(),
+    };
+    let expected_checksum = sha256_hex(append_log_intent_log_checksum_input(&record).as_bytes());
+    if expected_checksum != record_checksum {
+        // Corrupted/tampered record -- treated identically to a torn one.
+        return None;
+    }
+
+    Some(record)
+}
+
+/// Parse `backfill-append-logs`'s own intent log, discarding any torn
+/// (truncated, checksum-mismatched, or unterminated) trailing record -- a
+/// torn record MUST be treated as absent, never as a partial INTENT/DONE.
+/// Mirrors [`read_intent_log`] exactly, retyped.
+pub fn read_append_log_intent_log(
+    fs: &impl Fs,
+    intent_log_path: &Path,
+) -> Result<Vec<AppendLogIntentLogRecord>, AppendLogMigrationError> {
+    let Some(bytes) = fs.read(intent_log_path).map_err(append_log_bc_err)? else {
+        return Ok(Vec::new());
+    };
+    let content = String::from_utf8(bytes).map_err(|e| AppendLogMigrationError::Io {
+        source: io::Error::new(io::ErrorKind::InvalidData, e),
+    })?;
+
+    let mut records = Vec::new();
+    for raw_block in content.split(INTENT_LOG_RECORD_START).skip(1) {
+        let Some(body) = raw_block.strip_suffix(INTENT_LOG_RECORD_END) else {
+            // Torn (truncated mid-write, missing terminator) -- discard.
+            continue;
+        };
+        if let Some(record) = parse_append_log_intent_log_block(body) {
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+/// The recovery decision for one `backfill-append-logs` canonical-path move
+/// -- mirrors [`IntentLogRecoveryDecision`] exactly, retyped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendLogIntentLogRecoveryDecision {
+    /// Canonical already holds `expected_post_hash`; this move is done
+    /// (whether or not the staging side happens to still exist).
+    TreatDone,
+    /// Staging holds `expected_post_hash` and canonical still holds
+    /// `expected_pre_state` (or is legitimately missing): redo the rename,
+    /// sync the parent dir.
+    RedoRename,
+    /// Every other combination -- ambiguous or untrustworthy state;
+    /// recovery MUST halt for this target, NEVER declared as success.
+    FailClosed { reason: String },
+}
+
+/// Content-verified recovery decision for ONE `backfill-append-logs`
+/// canonical-path move -- mirrors [`decide_intent_log_recovery`] exactly,
+/// retyped for [`AppendLogIntentLogRecord`]. THE PURE CORE of this fix:
+/// unlike the pre-fix existence-only oracle
+/// (`!exists(staging) && exists(canonical) => "already moved"`), this
+/// function NEVER trusts bare path existence -- every branch is keyed off
+/// SHA-256 content hashes of what is ACTUALLY on disk, cross-checked
+/// against the intent-log record's own `expected_post_hash`/
+/// `expected_pre_state`. Deliberately free of `std::fs`/[`Fs`] so a Kani
+/// harness can exhaustively enumerate `(canonical_hash, staging_hash,
+/// record)` without any filesystem model at all (ADR-052 §Decision 12 /
+/// this migration's own OBL prerequisite for formal-verifier's next Kani
+/// harness).
+///
+/// Explicit conflict/error states (never inferred implicitly by a caller --
+/// this function names them):
+///
+/// - **Both absent** (`canonical_hash == None && staging_hash == None`):
+///   neither copy of the content exists anywhere -- an unrecoverable
+///   intermediate state. Falls into the [`FailClosed`] arm with a dedicated
+///   "both absent" reason string; the caller maps this to
+///   `BinaryIntegrityFailure`, NEVER to a declared success.
+/// - **Both present with foreign/stale content**: canonical exists but
+///   matches neither `expected_post_hash` nor `expected_pre_state`, while
+///   staging also still exists. A genuine conflict -- canonical holds SOME
+///   content, but not verifiably either this move's completed state or its
+///   pristine pre-image. Falls into the [`FailClosed`] arm with a dedicated
+///   "conflicting content" reason string, investigate-then-reactivate
+///   rather than guessing which side is authoritative.
+/// - Every other on-disk combination that matches neither the `TreatDone`
+///   nor `RedoRename` safe rows also fails closed via the generic
+///   catch-all arm (e.g. canonical present with foreign content while
+///   staging is genuinely absent).
+///
+/// The [`RedoRename`] arm is this design's application-level analogue of
+/// `RENAME_NOREPLACE`: it is the ONLY arm that leads its caller to rename
+/// over `canonical`, and it fires ONLY once `canonical`'s content is
+/// content-verified to still equal the recorded `expected_pre_state`
+/// exactly -- the rename never proceeds against unverified destination
+/// content.
+pub fn decide_append_log_recovery(
+    canonical_hash: Option<&str>,
+    staging_hash: Option<&str>,
+    record: Option<&AppendLogIntentLogRecord>,
+) -> AppendLogIntentLogRecoveryDecision {
+    let Some(record) = record else {
+        return AppendLogIntentLogRecoveryDecision::FailClosed {
+            reason: "no intent-log record exists for this target (torn or absent) -- ambiguous \
+                      recovery state, cannot proceed safely"
+                .to_string(),
+        };
+    };
+
+    if canonical_hash == Some(record.expected_post_hash.as_str()) {
+        return AppendLogIntentLogRecoveryDecision::TreatDone;
+    }
+
+    let expected_pre = record.expected_pre_state.as_deref();
+    if staging_hash == Some(record.expected_post_hash.as_str()) && canonical_hash == expected_pre {
+        return AppendLogIntentLogRecoveryDecision::RedoRename;
+    }
+
+    if canonical_hash.is_none() && staging_hash.is_none() {
+        return AppendLogIntentLogRecoveryDecision::FailClosed {
+            reason: format!(
+                "neither the staging file nor the canonical target exists for this move \
+                 (expected_post_hash={}) -- unrecoverable intermediate state, never treated as \
+                 success",
+                record.expected_post_hash
+            ),
+        };
+    }
+
+    if canonical_hash.is_some() && staging_hash.is_some() {
+        return AppendLogIntentLogRecoveryDecision::FailClosed {
+            reason: format!(
+                "both the staging file and the canonical target exist for this move, but their \
+                 content matches neither the recorded expected_post_hash={} nor \
+                 expected_pre_state={:?} -- conflicting/foreign content, halting rather than \
+                 guessing which side is authoritative",
+                record.expected_post_hash, expected_pre
+            ),
+        };
+    }
+
+    AppendLogIntentLogRecoveryDecision::FailClosed {
+        reason: format!(
+            "canonical/staging on-disk state matches neither safe recovery row for this move \
+             (expected_post_hash={}) -- ambiguous or untrustworthy state",
+            record.expected_post_hash
+        ),
+    }
+}
+
+/// Populate one durable INTENT record per pending canonical-path move for
+/// `backfill-append-logs`, mirroring [`append_intent_records_for_pending_moves`]
+/// exactly, retyped for [`AppendLogPendingCanonicalMove`]/
+/// [`AppendLogIntentLogRecord`]. Callers MUST invoke this BEFORE the
+/// Postcondition 3a fingerprint recheck and BEFORE the CURRENT.json pointer
+/// swap (BC-1.18.013 Precondition 5 / ADR-052 §Decision 7b's WAL boundary).
+/// Idempotent to call twice for the same generation -- the intent log is
+/// append-only and [`decide_append_log_recovery`]'s caller always consults
+/// the MOST RECENT record per target.
+fn append_intent_records_for_append_log_pending_moves(
+    fs: &impl Fs,
+    intent_log_path: &Path,
+    txn_id: &str,
+    fencing_generation: u64,
+    pending: &[AppendLogPendingCanonicalMove],
+) -> Result<(), AppendLogMigrationError> {
+    for mv in pending {
+        let staging = PathBuf::from(&mv.staging_path);
+        let canonical = PathBuf::from(&mv.canonical_path);
+
+        let staging_bytes = fs
+            .read(&staging)
+            .map_err(append_log_bc_err)?
+            .ok_or_else(|| AppendLogMigrationError::Io {
+                source: io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "staged file {} missing while computing its intent-log \
+                         expected_post_hash",
+                        staging.display()
+                    ),
+                ),
+            })?;
+        let expected_post_hash = sha256_hex(&staging_bytes);
+
+        let expected_pre_state = fs
+            .read(&canonical)
+            .map_err(append_log_bc_err)?
+            .map(|bytes| sha256_hex(&bytes));
+
+        let record = AppendLogIntentLogRecord {
+            txn_id: txn_id.to_string(),
+            fencing_generation,
+            record_type: AppendLogIntentLogRecordType::Intent,
+            target_canonical: canonical,
+            staging_path: staging,
+            expected_post_hash,
+            expected_pre_state,
+            timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            record_checksum: String::new(),
+        };
+        write_append_log_intent_record(fs, intent_log_path, &record)?;
+    }
+    Ok(())
+}
+
 /// ADR-052 §Decision 7c step 7's forward-recovery leg: execute (or resume)
 /// every remaining canonical-path move, then publish `completed.json`
-/// (AC-009's BC-7.08.001 gating dependency). A move whose STAGING side no
-/// longer exists but whose CANONICAL side does is treated as already
-/// completed by a prior (crashed) invocation — `rename(2)`/`MoveFileEx`
-/// always removes the source atomically on success, so a still-present
-/// staging path unambiguously means "not yet moved," regardless of whatever
-/// content the canonical destination currently holds (EC-002's
-/// matching-destination-hash rule, applied via source-side presence rather
-/// than a separate stored hash, since [`Fs::rename`]'s own atomicity makes
-/// that equivalent and simpler here).
+/// (AC-009's BC-7.08.001 gating dependency). CONTENT-VERIFIED recovery
+/// (BC-1.18.013 Precondition 5) -- mirrors B2's own
+/// [`execute_canonical_path_moves`] exactly: reads the intent log ONCE up
+/// front, and for each pending move consults
+/// [`decide_append_log_recovery`] against the target's CURRENT on-disk
+/// SHA-256 content hashes (never bare path existence) before deciding
+/// whether to skip it (`TreatDone`), redo the rename (`RedoRename`), or
+/// halt (`FailClosed`, surfaced as `BinaryIntegrityFailure` -- NEVER a
+/// declared success). A move with no matching intent-log record (e.g. a
+/// legacy/corrupted log predating BC-1.18.013's PC5 wiring) falls through
+/// to the ordinary rename attempt unchanged -- retained for
+/// defense-in-depth, mirroring B2's own fallback, but no longer the common
+/// case now that [`append_intent_records_for_append_log_pending_moves`] is
+/// called before every pointer swap that leads here.
 fn finish_append_log_migration(
     fs: &impl Fs,
     migration_state_dir: &Path,
     txn: &mut AppendLogMigrationTxnRecord,
 ) -> Result<AppendLogMigrationOutcome, AppendLogMigrationError> {
+    let generation_id_for_log = txn.generation_id.clone().unwrap_or_default();
+    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id_for_log}.log"));
+    let existing_intent_records = read_append_log_intent_log(fs, &intent_log_path)?;
+
     for mv in txn.pending_canonical_moves.clone() {
         let staging_path = PathBuf::from(&mv.staging_path);
         let canonical_path = PathBuf::from(&mv.canonical_path);
 
-        if !fs.exists(&staging_path) {
-            if fs.exists(&canonical_path) {
-                // Already moved by a prior (crashed) invocation.
-                continue;
+        // F-C5-P2-002-style forward-recovery check: the most recent
+        // intent-log record for THIS target, if any, decides whether the
+        // move is already done, must be redone, or is in an ambiguous/
+        // conflicting state that must halt recovery -- consulted BEFORE
+        // ever attempting (or skipping) the rename, and keyed on ACTUAL
+        // on-disk SHA-256 content, never on `Fs::exists` alone.
+        if let Some(record) = existing_intent_records
+            .iter()
+            .rev()
+            .find(|r| r.target_canonical == canonical_path)
+        {
+            let canonical_hash = fs
+                .read(&canonical_path)
+                .ok()
+                .flatten()
+                .map(|b| sha256_hex(&b));
+            let staging_hash = fs
+                .read(&staging_path)
+                .ok()
+                .flatten()
+                .map(|b| sha256_hex(&b));
+
+            match decide_append_log_recovery(
+                canonical_hash.as_deref(),
+                staging_hash.as_deref(),
+                Some(record),
+            ) {
+                AppendLogIntentLogRecoveryDecision::TreatDone => {
+                    continue;
+                }
+                AppendLogIntentLogRecoveryDecision::RedoRename => {
+                    // Fall through to the ordinary rename logic below --
+                    // canonical is content-verified to still hold exactly
+                    // the pre-image state recorded at intent-write time
+                    // (this IS the application-level RENAME_NOREPLACE
+                    // guard: the rename below never proceeds against
+                    // unverified destination content), so redoing it is
+                    // safe and idempotent.
+                }
+                AppendLogIntentLogRecoveryDecision::FailClosed { reason } => {
+                    return Err(AppendLogMigrationError::BinaryIntegrityFailure {
+                        message: format!(
+                            "backfill-append-logs forward recovery: content-verified recovery \
+                             FAILED CLOSED for canonical target {} (staging {}): {reason}",
+                            canonical_path.display(),
+                            staging_path.display()
+                        ),
+                    });
+                }
             }
+        } else if !fs.exists(&staging_path) && !fs.exists(&canonical_path) {
+            // Defense-in-depth fallback for a move with NO matching
+            // intent-log record at all (see this function's own doc
+            // comment) -- even here, "both absent" is never silently
+            // treated as anything but a hard failure.
             return Err(AppendLogMigrationError::BinaryIntegrityFailure {
                 message: format!(
                     "backfill-append-logs forward recovery: neither the staged file {} nor the \
-                     canonical target {} exists — unrecoverable intermediate state",
+                     canonical target {} exists, and no intent-log record covers this move -- \
+                     unrecoverable intermediate state",
                     staging_path.display(),
                     canonical_path.display()
                 ),
@@ -17278,9 +17693,46 @@ fn finish_append_log_migration(
 
         fs.rename(&staging_path, &canonical_path)
             .map_err(append_log_bc_err)?;
+
+        // D-1232-OBL-2(a) STRICT: the directory-entry durability barrier
+        // MUST be checked and propagated as a hard failure -- a swallowed
+        // `fsync_dir` error here would leave a move whose rename landed
+        // but whose durability is unconfirmed, silently treated as
+        // complete. Never silently proceed past this.
         if let Some(parent) = canonical_path.parent() {
             fs.fsync_dir(parent).map_err(append_log_bc_err)?;
         }
+
+        // F-C5-P1-007-style check: verify (not assume) the rename's
+        // outcome before recording DONE -- a post-rename read failure of a
+        // file this call just wrote is a real fault, never silently
+        // treated as "no hash available" while still recording an
+        // unverifiable completion.
+        let post_bytes = fs
+            .read(&canonical_path)
+            .map_err(append_log_bc_err)?
+            .ok_or_else(|| AppendLogMigrationError::BinaryIntegrityFailure {
+                message: format!(
+                    "backfill-append-logs: post-rename verification read of {} found it missing \
+                     immediately after a successful rename -- halting rather than recording an \
+                     unverifiable DONE",
+                    canonical_path.display()
+                ),
+            })?;
+        let post_hash = sha256_hex(&post_bytes);
+
+        let done_record = AppendLogIntentLogRecord {
+            txn_id: txn.txn_id.clone(),
+            fencing_generation: txn.fencing_generation,
+            record_type: AppendLogIntentLogRecordType::Done,
+            target_canonical: canonical_path.clone(),
+            staging_path: staging_path.clone(),
+            expected_post_hash: post_hash,
+            expected_pre_state: None,
+            timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            record_checksum: String::new(),
+        };
+        write_append_log_intent_record(fs, &intent_log_path, &done_record)?;
     }
 
     // Best-effort cleanup of the now-empty staging generation directory —
