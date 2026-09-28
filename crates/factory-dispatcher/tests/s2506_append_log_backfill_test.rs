@@ -1246,6 +1246,404 @@ fn test_BC_1_18_013_PC3A_AC005_run_backfill_append_logs_cli_aborts_with_fingerpr
 }
 
 // ---------------------------------------------------------------------------
+// S-25.06 post-hoc hardening (follow-up to f9db5857's per-file-loop
+// abort_staging fix): a comprehensive audit of every fallible operation
+// between `txn.state = Staging` and the CURRENT.json pointer-swap commit
+// point found FOUR more pre-commit sites that propagated a bare `?` without
+// routing through `abort_staging` -- the SAME bug class (txn stuck STAGING +
+// orphaned gen-<uuid>/ dir + admission gate LOCKED forever) f9db5857 fixed
+// for the per-file staging loop:
+//
+//   1. the post-loop intent-log append
+//      (`append_intent_records_for_append_log_pending_moves`) -- the
+//      originally-flagged gap this burst was scoped to close;
+//   2. the post-loop PC3a fresh fingerprint reread (`read_all_target_files`);
+//   3. the defensive missing-`source_sha256` invariant check;
+//   4. the CURRENT.tmp.json pointer-content write (`Fs::write_temp`) and its
+//      paired fsync (`Fs::fsync_file`), immediately BEFORE the commit-point
+//      rename.
+//
+// The commit-point rename itself (`Fs::pointer_swap`) is deliberately left
+// OUT of `abort_staging`'s scope (Invariant 3: once reached, no turning
+// back), mirroring B2's own identical treatment of its own commit-point
+// rename -- unchanged by this burst.
+//
+// Tests 2/4/5 below require `--features failpoints` (`fail::cfg`/
+// `fail::cfg_callback` are no-ops otherwise, per `migration_fs.rs`'s own
+// `migration_failpoint!` macro) and must be run with `--test-threads=1`
+// (this suite's own process-isolation discipline -- see the AC-011/EC-002
+// crash-injection section's module-level doc comment further down this
+// file): `fail`'s failpoint registry is process-global, and this file runs
+// 30+ other tests concurrently by default.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_BC_1_18_013_POSTLOOP_run_backfill_append_logs_cli_missing_source_sha256_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    setup_all_four_valid(dir.path());
+    let originals = snapshot_all_four(dir.path());
+
+    // A resumed STAGING txn with `source_sha256: None` (e.g. a hand-
+    // authored, legacy, or otherwise corrupted record) must still be caught
+    // by the defensive PC3a invariant check AFTER the per-file staging loop
+    // and the intent-log append have both already completed successfully --
+    // proving this site aborts cleanly rather than propagating a bare `?`
+    // out of the function with the txn left stuck STAGING.
+    let txn = AppendLogMigrationTxnRecord {
+        txn_id: "txn-s2506-postloop-sha".to_string(),
+        activation_id: "activation-s2506-postloop-sha".to_string(),
+        fencing_generation: 1,
+        state: AppendLogMigrationTxnState::Staging,
+        generation_id: Some("gen-s2506-postloop-sha-stale".to_string()),
+        source_sha256: None,
+        intent_log_path: None,
+        pending_canonical_moves: vec![],
+        created_at: "2026-09-25T00:00:00Z".to_string(),
+        updated_at: "2026-09-25T00:00:00Z".to_string(),
+    };
+    let msd = migration_state_dir(dir.path());
+    std::fs::create_dir_all(&msd).unwrap();
+    std::fs::write(
+        msd.join(format!("txn-{}.json", txn.activation_id)),
+        serde_json::to_string_pretty(&txn).unwrap(),
+    )
+    .unwrap();
+
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(
+        exit_code, 2,
+        "a resumed STAGING txn with no recorded source_sha256 must abort the whole migration \
+         (exit 2), never silently proceed to the pointer swap"
+    );
+    for (name, original_bytes) in &originals {
+        assert_eq!(
+            &read_target_file(dir.path(), name),
+            original_bytes,
+            "a missing-source_sha256 abort must leave {name} completely untouched -- it is a \
+             pre-commit failure, no rename has happened yet"
+        );
+    }
+
+    let txns = read_all_txn_records(dir.path());
+    assert_eq!(
+        txns.len(),
+        1,
+        "exactly one txn record must exist after a single failed run; got {txns:?}"
+    );
+    assert_eq!(
+        txns[0].state,
+        AppendLogMigrationTxnState::Aborted,
+        "the missing-source_sha256 defensive check must transition the txn to ABORTED via the \
+         same abort_staging closure as every other pre-commit site -- leaving it STAGING forever \
+         is the disclosed availability/self-lock gap this burst closes; got {:?}",
+        txns[0].state
+    );
+
+    let leftover = leftover_gen_dirs(dir.path());
+    assert!(
+        leftover.is_empty(),
+        "the staging generation built while resuming this txn must be removed on abort, not \
+         orphaned: {leftover:?}"
+    );
+
+    let payload = append_log_target_payload(
+        dir.path(),
+        "Write",
+        "decision-log.md",
+        serde_json::json!({ "content": "a writer retrying after the abort" }),
+    );
+    let result = append_log_backfill_admission_precheck(&payload, dir.path());
+    assert!(
+        result.is_none(),
+        "the admission gate must reopen after this abort -- writers must never stay blocked with \
+         no clean recovery path; got {result:?}"
+    );
+}
+
+/// Builds a resumed-STAGING fixture whose `source_sha256` correctly matches
+/// the four files' current concatenated content, so the migration proceeds
+/// all the way past the per-file staging loop into the post-loop sites this
+/// burst hardens (intent-log append, PC3a fresh reread, CURRENT.tmp.json
+/// write/fsync) rather than short-circuiting at an earlier check. Shared by
+/// every `--features failpoints` test in this section.
+#[cfg(feature = "failpoints")]
+fn seed_resumable_staging_txn_with_correct_fingerprint(dir: &Path) -> Vec<(&'static str, Vec<u8>)> {
+    setup_all_four_valid(dir);
+    let originals = snapshot_all_four(dir);
+    let concatenated: Vec<u8> = originals.iter().flat_map(|(_, b)| b.clone()).collect();
+    let correct_source_sha256 = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(&concatenated))
+    };
+    let txn = AppendLogMigrationTxnRecord {
+        txn_id: "txn-s2506-postloop-fp".to_string(),
+        activation_id: "activation-s2506-postloop-fp".to_string(),
+        fencing_generation: 1,
+        state: AppendLogMigrationTxnState::Staging,
+        generation_id: Some("gen-s2506-postloop-fp-stale".to_string()),
+        source_sha256: Some(correct_source_sha256),
+        intent_log_path: None,
+        pending_canonical_moves: vec![],
+        created_at: "2026-09-25T00:00:00Z".to_string(),
+        updated_at: "2026-09-25T00:00:00Z".to_string(),
+    };
+    let msd = migration_state_dir(dir);
+    std::fs::create_dir_all(&msd).unwrap();
+    std::fs::write(
+        msd.join(format!("txn-{}.json", txn.activation_id)),
+        serde_json::to_string_pretty(&txn).unwrap(),
+    )
+    .unwrap();
+    originals
+}
+
+/// Shared post-abort assertions for every `--features failpoints` test in
+/// this section: exactly one ABORTED txn record, no leftover gen-<uuid>/
+/// dir, the admission gate reopened, and (given `originals`) every one of
+/// the four canonical files completely untouched.
+#[cfg(feature = "failpoints")]
+fn assert_postloop_abort_cleanup_and_gate_reopened(
+    dir: &Path,
+    originals: &[(&'static str, Vec<u8>)],
+) {
+    for (name, original_bytes) in originals {
+        assert_eq!(
+            &read_target_file(dir, name),
+            original_bytes,
+            "a pre-commit abort must leave {name} completely untouched -- no rename has happened \
+             yet"
+        );
+    }
+    let txns = read_all_txn_records(dir);
+    assert_eq!(
+        txns.len(),
+        1,
+        "exactly one txn record must exist after a single failed run; got {txns:?}"
+    );
+    assert_eq!(
+        txns[0].state,
+        AppendLogMigrationTxnState::Aborted,
+        "a post-loop pre-commit failure must transition the txn to ABORTED via abort_staging, \
+         never leave it stuck STAGING; got {:?}",
+        txns[0].state
+    );
+    let leftover = leftover_gen_dirs(dir);
+    assert!(
+        leftover.is_empty(),
+        "the staging generation must be removed on abort, not orphaned: {leftover:?}"
+    );
+    let payload = append_log_target_payload(
+        dir,
+        "Write",
+        "decision-log.md",
+        serde_json::json!({ "content": "a writer retrying after the abort" }),
+    );
+    let result = append_log_backfill_admission_precheck(&payload, dir);
+    assert!(
+        result.is_none(),
+        "the admission gate must reopen after this abort; got {result:?}"
+    );
+}
+
+/// Site 1 (the originally-flagged gap): a graceful, non-crash failure in the
+/// post-loop intent-log append (`Fs::append`, occurrence 1 -- the ONLY
+/// `Fs::append` reachable from `run_backfill_append_logs`'s own call graph,
+/// so `"1*"` deterministically targets this exact site) must abort through
+/// `abort_staging`, not propagate a bare `?`.
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_POSTLOOP_run_backfill_append_logs_cli_intent_log_append_failure_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let originals = seed_resumable_staging_txn_with_correct_fingerprint(dir.path());
+
+    fail::cfg("migration_fs::append", "1*return(storage_full)")
+        .expect("configuring the append return(storage_full) failpoint must succeed");
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    fail::cfg("migration_fs::append", "off").expect("resetting the append failpoint must succeed");
+
+    assert_eq!(
+        exit_code, 2,
+        "an injected graceful failure in the post-loop intent-log append must abort the whole \
+         migration (exit 2), never leave the txn stuck STAGING with the admission gate LOCKED \
+         forever"
+    );
+    assert_postloop_abort_cleanup_and_gate_reopened(dir.path(), &originals);
+
+    // Subsequent clean run (fresh, since the prior txn is now terminally
+    // ABORTED) completes.
+    let recovery_exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(recovery_exit_code, 0, "got {recovery_exit_code}");
+    assert!(completed_json_path(dir.path()).exists());
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "{name} reconstruction mismatch"
+        );
+    }
+}
+
+/// Site 2: a target file vanishing between the initial quiescence snapshot
+/// and the PC3a fresh fingerprint reread (`read_all_target_files`, called a
+/// SECOND time post-loop) must abort through `abort_staging`. Injected via a
+/// `fail::cfg_callback` SIDE EFFECT (not a crash) on `migration_fs::append`:
+/// since `append_intent_records_for_append_log_pending_moves` reads each
+/// target's CURRENT canonical content only to compute `expected_pre_state`
+/// (`Fs::read`'s `Ok(None)` clean-not-found semantics tolerate a missing
+/// file there without failing), removing `session-checkpoints.md`'s
+/// canonical file as a side effect of reaching the FIRST `Fs::append` call
+/// lets the intent-log append step complete successfully, then makes the
+/// immediately-following `read_all_target_files(cwd)` call fail exactly as
+/// intended -- entirely in-process, no child-process crash needed.
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_POSTLOOP_run_backfill_append_logs_cli_fresh_fingerprint_reread_failure_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let originals = seed_resumable_staging_txn_with_correct_fingerprint(dir.path());
+    let session_checkpoints_path =
+        canonical_path_for_target_file(dir.path(), "session-checkpoints.md");
+    let session_checkpoints_path_for_callback = session_checkpoints_path.clone();
+
+    fail::cfg_callback("migration_fs::append", move || {
+        let _ = std::fs::remove_file(&session_checkpoints_path_for_callback);
+    })
+    .expect("configuring the migration_fs::append side-effect callback must succeed");
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    fail::cfg("migration_fs::append", "off").expect("resetting the append failpoint must succeed");
+
+    assert_eq!(
+        exit_code, 2,
+        "a target file vanishing before the PC3a fresh fingerprint reread must abort the whole \
+         migration (exit 2), never leave the txn stuck STAGING with the admission gate LOCKED \
+         forever"
+    );
+
+    // session-checkpoints.md is legitimately gone (that IS the injected
+    // fault) -- restore it before the shared cleanup helper's untouched-file
+    // assertions, which apply to the OTHER three files here.
+    let session_checkpoints_original = originals
+        .iter()
+        .find(|(name, _)| *name == "session-checkpoints.md")
+        .map(|(_, bytes)| bytes.clone())
+        .expect("session-checkpoints.md must be present in originals");
+    assert!(
+        !session_checkpoints_path.exists(),
+        "session-checkpoints.md must genuinely be missing -- that is this test's own injected \
+         fault, confirming the PC3a reread really did hit a real absence, not some other failure"
+    );
+    let others: Vec<_> = originals
+        .iter()
+        .filter(|(name, _)| *name != "session-checkpoints.md")
+        .cloned()
+        .collect();
+    assert_postloop_abort_cleanup_and_gate_reopened(dir.path(), &others);
+
+    // Clear the fault and retry -- a subsequent clean run (fresh, since the
+    // prior txn is now terminally ABORTED) completes.
+    std::fs::write(&session_checkpoints_path, &session_checkpoints_original).unwrap();
+    let recovery_exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(recovery_exit_code, 0, "got {recovery_exit_code}");
+    assert!(completed_json_path(dir.path()).exists());
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "{name} reconstruction mismatch"
+        );
+    }
+}
+
+/// Site 4a: a graceful failure writing `CURRENT.tmp.json` itself
+/// (`Fs::write_temp`, occurrence 1 -- the ONLY `Fs::write_temp` reachable
+/// from `run_backfill_append_logs`'s own call graph) must abort through
+/// `abort_staging`. This is still strictly pre-commit: `CURRENT.json` itself
+/// is never touched until the SEPARATE `Fs::pointer_swap` call.
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_POSTLOOP_run_backfill_append_logs_cli_current_tmp_json_write_failure_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let originals = seed_resumable_staging_txn_with_correct_fingerprint(dir.path());
+
+    fail::cfg("migration_fs::write_temp", "1*return(storage_full)")
+        .expect("configuring the write_temp return(storage_full) failpoint must succeed");
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    fail::cfg("migration_fs::write_temp", "off")
+        .expect("resetting the write_temp failpoint must succeed");
+
+    assert_eq!(
+        exit_code, 2,
+        "an injected graceful failure writing CURRENT.tmp.json must abort the whole migration \
+         (exit 2), never leave the txn stuck STAGING with the admission gate LOCKED forever"
+    );
+    assert!(
+        !migration_state_dir(dir.path())
+            .join("CURRENT.json")
+            .exists(),
+        "CURRENT.json itself must never be touched -- the failure is in staging its own \
+         temp-file content, strictly before the separate commit-point pointer_swap call"
+    );
+    assert_postloop_abort_cleanup_and_gate_reopened(dir.path(), &originals);
+
+    let recovery_exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(recovery_exit_code, 0, "got {recovery_exit_code}");
+    assert!(completed_json_path(dir.path()).exists());
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "{name} reconstruction mismatch"
+        );
+    }
+}
+
+/// Site 4b: a graceful failure fsyncing `CURRENT.tmp.json` (`Fs::fsync_file`,
+/// occurrence 1 -- the ONLY `Fs::fsync_file` reachable from
+/// `run_backfill_append_logs`'s own call graph) must abort through
+/// `abort_staging`, exactly like its paired `write_temp` call above.
+#[cfg(feature = "failpoints")]
+#[test]
+fn test_BC_1_18_013_POSTLOOP_run_backfill_append_logs_cli_current_tmp_json_fsync_failure_aborts_txn_removes_gen_dir_and_reopens_admission_gate()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let originals = seed_resumable_staging_txn_with_correct_fingerprint(dir.path());
+
+    fail::cfg("migration_fs::fsync_file", "1*return(interrupted)")
+        .expect("configuring the fsync_file return(interrupted) failpoint must succeed");
+    let exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    fail::cfg("migration_fs::fsync_file", "off")
+        .expect("resetting the fsync_file failpoint must succeed");
+
+    assert_eq!(
+        exit_code, 2,
+        "an injected graceful failure fsyncing CURRENT.tmp.json must abort the whole migration \
+         (exit 2), never leave the txn stuck STAGING with the admission gate LOCKED forever"
+    );
+    assert!(
+        !migration_state_dir(dir.path())
+            .join("CURRENT.json")
+            .exists(),
+        "CURRENT.json itself must never be touched -- the failure is fsyncing its own staged \
+         temp-file content, strictly before the separate commit-point pointer_swap call"
+    );
+    assert_postloop_abort_cleanup_and_gate_reopened(dir.path(), &originals);
+
+    let recovery_exit_code = run_backfill_append_logs_cli(dir.path(), &[]);
+    assert_eq!(recovery_exit_code, 0, "got {recovery_exit_code}");
+    assert!(completed_json_path(dir.path()).exists());
+    for (name, original_bytes) in &originals {
+        let reconstructed = reconstruct_from_split_or_unsplit(dir.path(), name);
+        assert_eq!(
+            &reconstructed, original_bytes,
+            "{name} reconstruction mismatch"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // BC-1.18.013 Precondition 5 (PC5) — content-verified recovery hardening.
 //
 // Prior to this hardening, `finish_append_log_migration`'s recovery oracle

@@ -17282,31 +17282,63 @@ fn run_backfill_append_logs(
     // distinguish this migration's own completed move from a canonical
     // path that merely holds SOME (possibly stale or foreign) content.
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
-    append_intent_records_for_append_log_pending_moves(
+    // S-25.06 failure-path-cleanup fix (follow-up to f9db5857's per-file-loop
+    // fix): this post-loop intent-log-append step is itself a pre-commit
+    // fallible operation -- a mid-write failure here (disk-full, permission
+    // denied, etc.) must abort through the SAME `abort_staging` closure as
+    // every per-file staging step above, not propagate via a bare `?` that
+    // leaves `txn.state` stuck at STAGING with the writer-admission gate
+    // LOCKED and no clean recovery path. This is the specific gap this
+    // burst closes (see this function's own module-level audit note).
+    if let Err(e) = append_intent_records_for_append_log_pending_moves(
         &fs,
         &intent_log_path,
         &txn.txn_id,
         txn.fencing_generation,
         &pending_moves,
-    )?;
+    ) {
+        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(e);
+    }
 
     // Postcondition 3a: the EXACTLY-ONCE TOCTOU pre-commit fingerprint
     // recheck, performed immediately before the CURRENT.json pointer swap —
     // re-reads the REAL canonical files' CURRENT content (never the staged
     // copies), never reusing the earlier `contents` snapshot, so a genuine
     // concurrent mutation between quiescence and now is actually caught.
-    let fresh_contents = read_all_target_files(cwd)?;
-    let actual_source_sha256 = concatenated_source_sha256(&fresh_contents);
-    let expected = txn.source_sha256.clone().ok_or_else(|| {
-        AppendLogMigrationError::BinaryIntegrityFailure {
-            message: "backfill-append-logs txn record has no source_sha256 recorded".to_string(),
+    //
+    // Still pre-commit (no rename has happened yet) -- a read failure here
+    // (e.g. a target file vanishing or becoming unreadable between
+    // quiescence and now) must abort through `abort_staging` exactly like
+    // every other pre-commit site, never leave the txn stuck at STAGING.
+    let fresh_contents = match read_all_target_files(cwd) {
+        Ok(contents) => contents,
+        Err(e) => {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(e);
         }
-    })?;
+    };
+    let actual_source_sha256 = concatenated_source_sha256(&fresh_contents);
+    // Defensive internal-invariant check (a persisted txn record --
+    // hand-authored, legacy, or otherwise corrupted -- could in principle
+    // carry `source_sha256: null` while STAGING/resumable): also routed
+    // through `abort_staging` rather than a bare `?`, for the same reason
+    // as every other pre-commit site in this window.
+    let expected = match txn.source_sha256.clone() {
+        Some(sha) => sha,
+        None => {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(AppendLogMigrationError::BinaryIntegrityFailure {
+                message: "backfill-append-logs txn record has no source_sha256 recorded"
+                    .to_string(),
+            });
+        }
+    };
     if actual_source_sha256 != expected {
-        let _ = std::fs::remove_dir_all(&gen_dir);
-        txn.state = AppendLogMigrationTxnState::Aborted;
-        txn.updated_at = now();
-        let _ = write_append_log_txn_record(&migration_state_dir, &txn);
+        // Pre-existing fingerprint-mismatch abort -- now routed through the
+        // SAME `abort_staging` closure (was a hand-inlined replica of it)
+        // for consistency; behavior is unchanged.
+        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
         return Err(AppendLogMigrationError::FingerprintMismatchAbort);
     }
 
@@ -17317,16 +17349,35 @@ fn run_backfill_append_logs(
         status: "committing".to_string(),
         txn_id: txn.txn_id.clone(),
     };
-    let pointer_body = serde_json::to_string_pretty(&pointer).map_err(|e| {
-        AppendLogMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize CURRENT.json: {e}"),
+    // Still pre-commit -- serializing/staging the pointer content itself
+    // (never yet swapped into CURRENT.json) is routed through
+    // `abort_staging` on failure, same as every other pre-commit site.
+    let pointer_body = match serde_json::to_string_pretty(&pointer) {
+        Ok(body) => body,
+        Err(e) => {
+            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(AppendLogMigrationError::BinaryIntegrityFailure {
+                message: format!("failed to serialize CURRENT.json: {e}"),
+            });
         }
-    })?;
+    };
     let current_tmp = migration_state_dir.join("CURRENT.tmp.json");
     let current_path = migration_state_dir.join("CURRENT.json");
-    fs.write_temp(&current_tmp, pointer_body.as_bytes())
-        .map_err(append_log_bc_err)?;
-    fs.fsync_file(&current_tmp).map_err(append_log_bc_err)?;
+    if let Err(e) = fs.write_temp(&current_tmp, pointer_body.as_bytes()) {
+        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(append_log_bc_err(e));
+    }
+    if let Err(e) = fs.fsync_file(&current_tmp) {
+        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(append_log_bc_err(e));
+    }
+    // COMMIT POINT (Invariant 3): no `abort_staging` past this line. A
+    // failure from `pointer_swap` itself means the atomic rename never
+    // landed (it either fully happens or it doesn't), but per this
+    // migration's own scope boundary -- mirroring B2's identical treatment
+    // of its own commit-point rename -- the sole commit-point call is
+    // deliberately left as a bare `?`, out of `abort_staging`'s scope,
+    // exactly as it was before this fix.
     fs.pointer_swap(&current_tmp, &current_path)
         .map_err(append_log_bc_err)?;
     fs.fsync_dir(&migration_state_dir)
