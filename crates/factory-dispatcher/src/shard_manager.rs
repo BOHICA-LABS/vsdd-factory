@@ -137,6 +137,14 @@ use migration_fs::{Fs, StdFs};
 #[cfg(kani)]
 mod obl1_kani_proofs;
 
+/// Mechanism-A (`backfill-append-logs`, S-25.06 / BC-1.18.013) Kani
+/// model-checking harnesses for the content-verified crash-recovery guarantee.
+/// Compiled ONLY under `cargo kani` (`cfg(kani)`); the normal `cargo build`/
+/// `test`/`clippy` never sees this module, so it has zero effect on the normal
+/// build.
+#[cfg(kani)]
+mod append_log_kani_proofs;
+
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
 // Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
@@ -16560,6 +16568,66 @@ pub enum AppendLogMigrationTxnState {
     Aborted,
 }
 
+/// A lifecycle event of the `backfill-append-logs` txn-record state machine
+/// (ADR-052 §Decision 7a). Every production state change of
+/// [`AppendLogMigrationTxnRecord::state`] after record creation goes through
+/// [`append_log_txn_transition`] with one of these events, so the legal
+/// transition relation exists in exactly ONE place (the function the
+/// `append_log_kani_proofs` a3 harness proves, never a harness-local copy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendLogTxnEvent {
+    /// The CURRENT.json pointer swap committed (ADR-052 §Decision 7c step 6):
+    /// STAGING -> COMMITTING.
+    BeginCommitting,
+    /// Every canonical-path move finished and `completed.json` is durable
+    /// (ADR-052 §Decision 7c step 8): COMMITTING -> COMPLETED.
+    Complete,
+    /// A pre-commit failure discarded the staged generation: STAGING ->
+    /// ABORTED (COMMITTING -> ABORTED is also legal per ADR-052 §Decision 7a).
+    Abort,
+}
+
+/// The ADR-052 §Decision 7a legal-transition relation for the
+/// `backfill-append-logs` txn record (BC-1.18.013 Invariant 3, "no turning
+/// back"). Pure and total: returns the next state for a legal
+/// `(state, event)` pair and `None` for every illegal one — in particular,
+/// the terminal states COMPLETED/ABORTED accept no event, and COMMITTING can
+/// never return to STAGING. Callers turn `None` into a hard error (or, on the
+/// best-effort abort-cleanup path, leave the state untouched); a txn state is
+/// never assigned by a bare literal outside record creation.
+pub fn append_log_txn_transition(
+    state: AppendLogMigrationTxnState,
+    event: AppendLogTxnEvent,
+) -> Option<AppendLogMigrationTxnState> {
+    use AppendLogMigrationTxnState::{Aborted, Committing, Completed, Staging};
+    match (state, event) {
+        (Staging, AppendLogTxnEvent::BeginCommitting) => Some(Committing),
+        (Staging, AppendLogTxnEvent::Abort) | (Committing, AppendLogTxnEvent::Abort) => {
+            Some(Aborted)
+        }
+        (Committing, AppendLogTxnEvent::Complete) => Some(Completed),
+        (Staging, AppendLogTxnEvent::Complete)
+        | (Committing, AppendLogTxnEvent::BeginCommitting)
+        | (Completed, _)
+        | (Aborted, _) => None,
+    }
+}
+
+/// The pure admission rule of the `backfill-append-logs` writer-admission
+/// gate (BC-1.18.013 Precondition 6(b); ADR-052 §Decision 5a): a write to a
+/// `.factory/cycles/` path is admissible unless the ACTIVE txn record (as
+/// selected by `read_active_append_log_txn_record`) is LIVE — STAGING or
+/// COMMITTING. `None` means no txn record exists. This is the exact predicate
+/// `executor::append_log_backfill_admission_precheck` applies (it calls this
+/// function), kept free of I/O so the `append_log_kani_proofs` a4 harness
+/// proves the real rule rather than a copy of it.
+pub fn is_append_log_admission_open(active_txn_state: Option<AppendLogMigrationTxnState>) -> bool {
+    !matches!(
+        active_txn_state,
+        Some(AppendLogMigrationTxnState::Staging) | Some(AppendLogMigrationTxnState::Committing)
+    )
+}
+
 /// A `{staging_path, canonical_path}` pair not yet moved (ADR-052
 /// §Decision 7a `pending_canonical_moves` field, mechanism-A's four-file
 /// instance — see BC-1.18.013 EC-002).
@@ -16978,6 +17046,25 @@ pub(crate) fn read_active_append_log_txn_record(
     }
 }
 
+/// Apply one ADR-052 §Decision 7a lifecycle event to a `backfill-append-logs`
+/// txn state via the single legal-transition relation
+/// [`append_log_txn_transition`], turning an illegal `(state, event)` pair
+/// into a hard [`AppendLogMigrationError::BinaryIntegrityFailure`] instead of
+/// silently forcing the state (BC-1.18.013 Invariant 3, "no turning back").
+fn advance_append_log_txn_state(
+    state: AppendLogMigrationTxnState,
+    event: AppendLogTxnEvent,
+) -> Result<AppendLogMigrationTxnState, AppendLogMigrationError> {
+    append_log_txn_transition(state, event).ok_or_else(|| {
+        AppendLogMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "illegal backfill-append-logs txn transition: event {event:?} from state \
+                 {state:?} (ADR-052 §Decision 7a)"
+            ),
+        }
+    })
+}
+
 /// Durably persist `txn` to `.factory/migration-state/txn-<activation_id>.json`
 /// via the SAME STRICT `F_FULLFSYNC`-class primitive
 /// ([`migration_durable_write`]/[`sync_dir_durable`]) the B2 sibling's own
@@ -17159,9 +17246,16 @@ fn run_backfill_append_logs(
     let abort_staging =
         |migration_state_dir: &Path, gen_dir: &Path, txn: &mut AppendLogMigrationTxnRecord| {
             let _ = std::fs::remove_dir_all(gen_dir);
-            txn.state = AppendLogMigrationTxnState::Aborted;
-            txn.updated_at = now();
-            let _ = write_append_log_txn_record(migration_state_dir, txn);
+            // Every caller of this closure runs while `txn.state ==
+            // Staging` (the COMMITTING-resume branch returned above), so
+            // the ADR-052 §7a relation always yields ABORTED here; on the
+            // structurally unreachable illegal pair the state is left
+            // untouched rather than forced (never a backwards move).
+            if let Some(next) = append_log_txn_transition(txn.state, AppendLogTxnEvent::Abort) {
+                txn.state = next;
+                txn.updated_at = now();
+                let _ = write_append_log_txn_record(migration_state_dir, txn);
+            }
         };
 
     let mut pending_moves = Vec::new();
@@ -17383,7 +17477,7 @@ fn run_backfill_append_logs(
     fs.fsync_dir(&migration_state_dir)
         .map_err(append_log_bc_err)?;
 
-    txn.state = AppendLogMigrationTxnState::Committing;
+    txn.state = advance_append_log_txn_state(txn.state, AppendLogTxnEvent::BeginCommitting)?;
     txn.pending_canonical_moves = pending_moves;
     txn.updated_at = now();
     write_append_log_txn_record(&migration_state_dir, &txn)?;
@@ -17884,7 +17978,7 @@ fn finish_append_log_migration(
         .map_err(append_log_bc_err)?;
     sync_dir_durable(migration_state_dir).map_err(append_log_bc_err)?;
 
-    txn.state = AppendLogMigrationTxnState::Completed;
+    txn.state = advance_append_log_txn_state(txn.state, AppendLogTxnEvent::Complete)?;
     txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     write_append_log_txn_record(migration_state_dir, txn)?;
 

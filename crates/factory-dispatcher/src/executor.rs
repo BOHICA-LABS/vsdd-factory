@@ -2124,13 +2124,7 @@ pub fn append_log_backfill_admission_precheck(
     }
 
     match crate::shard_manager::read_active_append_log_txn_record(&migration_state_dir) {
-        Ok(Some(txn))
-            if matches!(
-                txn.state,
-                crate::shard_manager::AppendLogMigrationTxnState::Staging
-                    | crate::shard_manager::AppendLogMigrationTxnState::Committing
-            ) =>
-        {
+        Ok(Some(txn)) if !crate::shard_manager::is_append_log_admission_open(Some(txn.state)) => {
             Some(vsdd_hook_sdk::HookResult::Block {
                 reason: format!(
                     "BC-1.18.013 E-MAINTENANCE-001: a governed backfill-append-logs migration \
