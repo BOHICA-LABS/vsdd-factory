@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-09-25T00:00:00Z
@@ -15,7 +15,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.011.md
   - .factory/specs/prd-supplements/error-taxonomy.md
   - .factory/stories/S-25.06-append-log-backfill-split-executor.md
-input-hash: "7b17750"
+input-hash: "41c4730"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -300,14 +300,14 @@ below specifies that closure. This BC directly discharges S-25.06's Spec-First G
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
-| VP-143 | Four-file all-or-nothing atomicity invariant — a simulated crash at any staging/pivot/canonical-move step leaves ALL FOUR target files either fully original or fully split, never a state with some of the four migrated and others not | fault-injection / integration test (simulated crash at each step across all four files; assert post-recovery state is one of exactly two valid whole-migration states) |
+| VP-143 | (a) Four-file all-or-nothing atomicity invariant — a simulated crash at any staging/pivot/canonical-move step leaves ALL FOUR target files either fully original or fully split, never a state with some of the four migrated and others not; AND (b) idempotency two-layer consistency invariant — `completed.json` presence and BC-1.18.008's per-file manifest presence never disagree in a way that causes either a false `ALREADY_MIGRATED` before all four files are actually split, or a re-split of a file whose manifest already exists | fault-injection / integration test ((a) simulated crash at each step across all four files; assert post-recovery state is one of exactly two valid whole-migration states; (b) resume-from-STAGING and roll-before-backfill fixtures per file, cross-checked against top-level `completed.json` state) |
 | VP-144 | Per-file delegation invariant — this BC's content-preservation/census checks for each file are byte-identical in outcome to invoking BC-1.18.008's own Postcondition 6(a)/(b) checks directly against that file in isolation (no divergent or duplicated verification logic) | property test (differential test: governed-migration per-file check vs. direct BC-1.18.008 invocation on the same fixture, asserting identical PASS/FAIL and identical failure detail) |
 | VP-145 | Closed-grammar rejection invariant — every invocation form outside the two accepted forms (`backfill-append-logs`, `backfill-append-logs --census`) is rejected before any filesystem mutation, by either the pre-shell classifier or the binary itself | integration test (fixture table of rejected forms: path arguments, extra flags, shell metacharacters, compound commands) |
-| VP-143 | Idempotency two-layer consistency invariant — `completed.json` presence and BC-1.18.008's per-file manifest presence never disagree in a way that causes either a false `ALREADY_MIGRATED` before all four files are actually split, or a re-split of a file whose manifest already exists | integration test (resume-from-STAGING and roll-before-backfill fixtures per file, cross-checked against top-level `completed.json` state) |
+| VP-146 | Governed mechanism-A migration crash-recovery decision core — six Kani obligations (seven `#[kani::proof]` functions, `proof_obl_a1`..`a6` in `append_log_kani_proofs.rs`): a1 recovery totality (§Precondition 5, §Invariant 3, §EC-002); a2 recovery safety / content-verified old-or-new-never-torn (§Precondition 5, §Invariant 3, §Postcondition 3, §EC-002); a3 txn state-machine inductive step + bounded sequence (§Precondition 5, §Postcondition 3, §Postcondition 4, §Invariant 3); a4 admission-gate quiescence INV-GATE-TXN (§Precondition 6(b), §Precondition 6(c)); a5 pointer-swap + canonical-move crash atomicity over the abstract `Fs` model (§Precondition 5, §Postcondition 3, §Postcondition 3a, §Invariant 3, §EC-002); a6 recovery idempotence (§Precondition 5, §Invariant 3, §EC-002, §EC-003). Kani prong of ADR-052 §Decision 12; VP-143 remains the real-filesystem fault-injection prong | kani-proof (`cargo kani`, `kani-mechanism-a` CI job, `EXPECTED_PROOFS=7`) |
 
 VP IDs allocated by architect (S-25.06 Spec-First Gate closure, POLICY 9 propagation, 2026-09-25;
 VP-INDEX v3.24): **VP-143** (integration; four-file all-or-nothing atomicity + idempotency
-two-layer consistency — candidates 1 and 4 above consolidated into ONE VP per the
+two-layer consistency — candidates 1 and 4 consolidated into the single VP-143 row above (facets (a) and (b)) per the
 single-method-per-VP convention BC-1.18.011's VP-133/VP-124 established, since both are
 same-method integration/fault-injection safety obligations of the SAME governed-migration state
 machine), **VP-144** (proptest; per-file delegation-correctness — candidate 2, a differential test
@@ -415,6 +415,19 @@ Enrollment + Cap-Triggered Rotation
   2026-09-25) — closed-grammar rejection invariant for `backfill-append-logs`; two-layer
   defense-in-depth (pre-shell classifier + binary argument parser); no direct sibling in
   BC-1.18.011's VP set.
+- **VP-146** (kani-proof; allocated by architect, S-25.06 Kani traceability-gap closure, POLICY 9,
+  2026-09-26) — Kani prong of ADR-052 §Decision 12 for the governed mechanism-A migration's pure
+  crash-recovery decision core (`decide_append_log_recovery`, txn state machine, modeled admission
+  predicate, abstract `Fs` crash model). Six obligations, seven `#[kani::proof]` functions
+  (`proof_obl_a1`..`a6`, a3 carrying two) in
+  `crates/factory-dispatcher/src/shard_manager/append_log_kani_proofs.rs`. Clause mapping:
+  a1 recovery totality — §Precondition 5, §Invariant 3, §EC-002; a2 recovery safety
+  (content-verified, old-or-new-never-torn) — §Precondition 5, §Invariant 3, §Postcondition 3,
+  §EC-002; a3 txn state-machine inductive step + bounded sequence — §Precondition 5,
+  §Postcondition 3, §Postcondition 4, §Invariant 3; a4 admission-gate quiescence (INV-GATE-TXN) —
+  §Precondition 6(b), §Precondition 6(c); a5 pointer-swap + canonical-move crash atomicity —
+  §Precondition 5, §Postcondition 3, §Postcondition 3a, §Invariant 3, §EC-002; a6 recovery
+  idempotence — §Precondition 5, §Invariant 3, §EC-002, §EC-003. Complements (does not replace) VP-143's real-filesystem fault-injection prong.
 
 ## Traceability
 
@@ -433,5 +446,6 @@ Enrollment + Cap-Triggered Rotation
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.2 | 2026-09-26 | product-owner | VP-citation-only amendment (POLICY 9 propagation; anchor-back for architect's NEW VP-146, kani-proof, SS-01, anchor story S-25.06). Added VP-146 to §Verification Properties (new table row) and §VP Anchors (new bullet) with the clause mapping a1..a6 -> §Precondition 5 / §Precondition 6(b)/(c) / §Postcondition 3 / §Postcondition 3a / §Postcondition 4 / §Invariant 3 / §EC-002 / §EC-003 (a1/a2/a5/a6 each cite Precondition 5 plus Invariant 3; a3 adds Postconditions 3/4; a4 anchors solely to Precondition 6(b)/(c); all clause IDs verified to exist in this BC; mapping mirrors architect's corrected VP-146). VP-146 is the Kani prong of ADR-052 §Decision 12 (seven `#[kani::proof]` functions in `append_log_kani_proofs.rs`); VP-143 remains the real-filesystem fault-injection prong. Also consolidated the duplicate "VP-143" rows in §Verification Properties (a pre-existing v1.1 artifact of merging candidates 1 and 4) into ONE row with facets (a) atomicity and (b) idempotency two-layer consistency, no information lost; explanatory paragraph adjusted. No Precondition, Postcondition, Invariant, Edge Case, or Canonical Test Vector content changed. **VP citations changed in: BC-1.18.013.** Architect propagates to VP-INDEX/verification-architecture/verification-coverage-matrix. **Stories affected by BC changes:** none via `bcs:` array (BC-1.18.013 already anchored); S-25.06 body VP references -> story-writer. |
 | 1.1 | 2026-09-25 | architect | Spec-First Gate 2 closure for S-25.06 (POLICY 9 propagation): allocated VP-143 (integration; four-file all-or-nothing atomicity + idempotency two-layer consistency, consolidating candidates 1 and 4 of the Verification Properties table per the single-method-per-VP convention BC-1.18.011's VP-133/VP-124 established), VP-144 (proptest; per-file delegation-correctness differential test against BC-1.18.008 §PC6(a)/(b), candidate 2), and VP-145 (integration/safety; closed-grammar rejection invariant, candidate 3, no direct sibling in BC-1.18.011's VP set). Replaced the four `VP-NNN (pending)` placeholders in the Verification Properties table with these real IDs; updated VP Anchors accordingly. Full VP files authored at `.factory/specs/verification-properties/VP-143.md`/`VP-144.md`/`VP-145.md`. Propagated same-burst to `VP-INDEX.md` (v3.23→v3.24), `verification-architecture.md` (v1.36→v1.37), and `verification-coverage-matrix.md` (v1.34→v1.35) per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9). No change to any Postcondition, Precondition, Invariant, Edge Case, or Canonical Test Vector — VP-citation-only amendment. input-hash recompute owed to state-manager (`compute-input-hash BC-1.18.013.md --update`). |
 | 1.0 | 2026-09-25 | product-owner | Initial creation (NEW BC — closes S-25.06's Spec-First Gate, S-7.01). Allocated as BC-1.18.013, confirmed as the next free slot against the live `ss-01/` directory (BC-1.18.001–012 all pre-existing) and BC-INDEX.md at authoring time; no collision. Governed one-time migration for mechanism A's backfill-split of the four `v1.0-brownfield-backfill` append-log files, invoked via ADR-052's sanctioned execution path (`backfill-append-logs`, `Bash`-tool one-time interactive approval, closed argument grammar, armed-activation manifest, native admission gate, multi-file crash-atomicity across four independent files rather than one file's internal partition). Resolves the S-25.06 Architecture Compliance Rule 7 POL-3/native-CLI contradiction by direct reference to ADR-052 §Decision 9 (already ratified, D-1232, 2026-09-20) — NO new architecture decision was required; ADR-052 was authored with S-25.06 explicitly as an input and already generalizes its governed-migration state machine to mechanism-A migrations throughout (`migration_id: "backfill-append-logs"`, B2-only fields nulled for mechanism-A). Supersedes S-25.06's provisional AC-001(b) auto-discovery assumption with the ratified closed-grammar, fixed-four-file design (Precondition 3/Postcondition 6) — story-writer must update AC-001 accordingly. Adds Postcondition 8 specifying ShardRegistry enrollment (S-25.06 AC-005) as a SEPARATE ordinary Edit/Write step outside ADR-052's migration-binary write-target allowlist, using BC-1.18.005's existing `[[shard]]` schema, gated on a pre-existing `.factory/shard-config.toml` artifact-path-registry gap already identified by ADR-053 (routed to devops-engineer/architect, not blocking this BC's own dispatch-readiness). CAP-043 capability anchor. VP citations left `(pending)` for formal-verifier per the established project convention (BC-1.18.011 v1.0 precedent). **Sibling BC updated in the same burst (Anchor-Back Rule):** BC-1.18.008 Related BCs gains a reciprocal reference to this BC (v1.9→v1.10, documentary-only, no semantic change). **error-taxonomy.md updated in the same burst:** `CENSUS_MISMATCH_ABORT` and `CONTENT_PRESERVATION_ABORT` MIG-category rows widened to explicitly cover the mechanism-A/`backfill-append-logs` trigger case (previously worded exclusively in B2/BC-INDEX per-row terms) — not deferred. **Stories affected by this BC (→ story-writer, per `bc_array_changes_propagate_to_body_and_acs`):** S-25.06 — add `BC-1.18.013` to `behavioral_contracts:` frontmatter array; propagate BC table, AC traces (superseding provisional AC-001–AC-008 with BC-1.18.013-anchored ACs), Token Budget, and Architecture Compliance Rule 7's OPEN-gate banner (now CLOSED, citing ADR-052 §Decision 9) in the SAME burst. **VP citations changed in: BC-1.18.013 (new).** Architect must propagate to `VP-INDEX.md`, `verification-architecture.md`, and `verification-coverage-matrix.md` per `vp_index_is_vp_catalog_source_of_truth` (POLICY 9). |
