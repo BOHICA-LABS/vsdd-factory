@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "669bd1e"
+input-hash: "e2f61e1"
 traces_to: STATE.md
 ---
 
@@ -2365,4 +2365,12 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 
 **Cluster-5's OWN fresh F4-code LOCAL adversary cascade CONVERGED this session: pass-4 CLEAN.** Full cascade: pass-1 (BLOCKER data-loss, fixed), pass-2 (2 HIGH crash-recovery, fixed), pass-3 (1 MED + 1 LOW, fixed), pass-4 (CLEAN — zero findings). Accept-at-floor declared per D-386 Option C, human-approved 2026-09-24 (the D-1240 decision-log codification of this declaration is itself DEFERRED to the post-merge burst — see §2/§4). LOCAL cluster-5 prose/spec-cascade remains separately CLOSED at accept-at-floor (D-1230), UNCHANGED. Cycle-level streak: 3/3 CONVERGED, unchanged. All prior cluster cascades CLOSED: cluster-1 (D-1172/D-1173), cluster-2 (D-1184), cluster-3 (D-1204), cluster-4 (D-1211), cluster-5 prose cascade CLOSED at accept-at-floor (D-1230), cluster-5 MECHANICAL re-verification CLOSED at D-1231, ADR-052 formally ACCEPTED at D-1233, cluster-5 F4-code LOCAL adversary cascade CLOSED this session at pass-4 CLEAN. **PIPELINE PAUSED — CLUSTER-5 F4 DELIVERY IN FLIGHT AT PR #842, CI 16/17 GREEN, WINDOWS FIX PENDING; NEXT = land Windows fix → CI green → human merge sign-off → squash-merge → post-merge burst.**
 
-**See STATE.md v10.74 for the current checkpoint.**
+**Superseded by STATE.md v10.75/v10.76 checkpoint; see below.**
+
+---
+
+## Archived checkpoint — S2506-SPEC-AUTHORING-READY-BURST (v10.74→v10.75), superseded by v10.77 (D-1242)
+
+Condensed archive (full verbatim text recoverable via `git -C .factory show ff43c0da:STATE.md`, section "Session Resume Checkpoint"). Position at the time: develop `ddd99212` (PR #842 merged), main `51023185`, merged_count 123; S-25.06 Spec-First Gate S-7.01 CLOSED (draft→ready), NEW BC-1.18.013, VP-143/144/145, [CV-DIR-F2-OPEN] RESOLVED per ADR-052 §Decision 9; BC-INDEX v5.100, STORY-INDEX v4.478, VP-INDEX v3.24, ARCH-INDEX v4.47, E-25 v1.3. NEXT at the time: cluster-6 F1 delta analysis OR S-25.06 TDD. Activation-boundary obligations [D-1232-OBL-2]/[D-1232-OBL-3]/[D-1232-OBL-4] OPEN, unchanged.
+
+**See STATE.md v10.77 for the current checkpoint.**
