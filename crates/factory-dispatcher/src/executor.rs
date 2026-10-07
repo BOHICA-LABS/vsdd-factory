@@ -436,8 +436,11 @@ pub struct MigrationAdmission {
 ///
 /// This is a thin, non-WASM native entry point: every decision lives in the
 /// ONE shared admission core ([`crate::shard_manager::admit_protected_write`]),
-/// which both governed migrations share. Scope guards (all cheap, no I/O beyond
-/// one `exists()`):
+/// which both governed migrations share. Scope guards, in order (cheap checks
+/// first; the only filesystem access before the core is the `.factory`
+/// directory `metadata()` check and the symlink-aware `lstat` walk of
+/// `resolve_target_path`; no migration-state read happens for an out-of-scope
+/// write):
 ///
 /// * PreToolUse only;
 /// * tools `Edit` / `Write` / `MultiEdit` ONLY — `Bash` is left UNPROCESSED

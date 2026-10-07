@@ -496,8 +496,10 @@ pub enum StaleGateReconciliation {
     /// Branch B: STAGING with `generation_id = null` -> txn ABORTED
     /// (`abort_reason: "null_generation"`, retained), then gate OPEN.
     NullGenerationTxnAborted,
-    /// Branch C: the live txn belongs to ANOTHER migration (or an unknown
-    /// `migration_id`); never finalized. Plain `E-MAINTENANCE-001`.
+    /// Branch C: the live txn's `migration_id` is not in the known set K
+    /// (`migrate-bc-index`, `backfill-append-logs`; an absent field reads as
+    /// `migrate-bc-index`) — a "foreign" txn; never finalized, never aborted.
+    /// Plain `E-MAINTENANCE-001`, no mismatch suffix.
     ForeignMigrationRefused,
     /// Branch C: the live txn's own terminal record is present but the txn is
     /// not provably finished (STAGING + record is always fail-closed; the

@@ -14023,9 +14023,12 @@ pub enum TerminalReconcileDecision {
 /// wins:
 ///
 /// 1. lock NOT acquired (live coordinator) or no live txn -> `NoOp`;
-/// 2. live txn is not the evaluating migration's own -> `RefuseForeignMigration`
-///    (precedence over every record check);
-/// 3. own migration, record ABSENT -> `NoOp` (STAGING and COMMITTING alike);
+/// 2. live txn's `migration_id` is not a known migration (`txn_migration_known`
+///    is false: `migration_id` ∉ K) -> `RefuseForeignMigration` (precedence over
+///    every record check); a live txn of EITHER known migration is decided
+///    against its OWN terminal record, selected by `migration_id`;
+/// 3. known migration, its own record ABSENT -> `NoOp` (STAGING and COMMITTING
+///    alike);
 /// 4. record present, txn COMMITTING and every check passes ->
 ///    `FinalizeThenOpenGate`;
 /// 5. record present otherwise (STAGING of any generation, or any failed
@@ -14080,10 +14083,10 @@ pub enum StaleGateReconciliationPlan {
     /// terminal record absent (any gate state, incl. an absent gate file
     /// that reads OPEN) -> txn ABORTED (marker), THEN gate OPEN.
     AbortNullGenerationThenReopenGate,
-    /// Branch C: the live txn is not the evaluating build's own migration ->
-    /// never finalized, never aborted; plain block.
+    /// Branch C: the live txn's `migration_id` is not a known migration
+    /// (`migration_id` ∉ K) -> never finalized, never aborted; plain block.
     RefuseForeignMigration,
-    /// Branch C: own live txn + its terminal record, not provably finished
+    /// Branch C: known-migration live txn + its own terminal record, not provably finished
     /// (STAGING + record always; COMMITTING with any failed check) -> no txn
     /// write, no gate write; mismatch block.
     FailClosedMismatch,

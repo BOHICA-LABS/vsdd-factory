@@ -372,10 +372,10 @@ async fn run(
         partition.async_group.len(),
     );
 
-    // Resolved ONCE, here — see `resolve_project_cwd`'s own doc comment for
-    // why this must happen before the early-return guard immediately below,
-    // rather than at `base_host_ctx.cwd`'s own (later) assignment site.
-    // `project_cwd` was resolved at the top of `run` (registry-independent gate).
+    // `project_cwd` is resolved ONCE, at the top of `run`, immediately after the
+    // payload parse (the registry-independent admission gate needs it) — see
+    // `resolve_project_cwd`'s own doc comment. It is reused here (before the
+    // early-return guard below) and at `base_host_ctx.cwd`'s later assignment.
 
     // BC-1.18.006 Postcondition 7 catch point (i) / story AC-024 (ADR-051
     // §Decision 15 point 4 — LOAD-BEARING placement caveat; §Decision 17
