@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, execute_tiers, migration_reservation_release,
+    ExecutorInputs, NativeGate, PluginOutcome, execute_tiers, migration_reservation_release,
     migration_writer_admission, shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
@@ -193,6 +193,7 @@ async fn run(
         // exit mapping the empty-tier short-circuit uses, without loading the
         // registry. (The admitter's own reservation is already removed.)
         return Ok(exit_code_for_native_gate_verdict(
+            NativeGate::MigrationAdmission,
             &payload,
             migration_admission.verdict,
         ));
@@ -547,6 +548,7 @@ async fn run(
         }
 
         return Ok(exit_code_for_native_gate_verdict(
+            NativeGate::ShardCap,
             &payload,
             shard_gate_precheck_result,
         ));
@@ -1035,12 +1037,13 @@ async fn run(
 /// registry-driven path prints. Shared by the registry-independent admission
 /// leg and the empty-tier `shard_cap_precheck` short-circuit.
 fn exit_code_for_native_gate_verdict(
+    gate: NativeGate,
     payload: &HookPayload,
     verdict: Option<vsdd_hook_sdk::HookResult>,
 ) -> i32 {
     let plugin_version = env!("CARGO_PKG_VERSION").to_string();
     let (outcomes, block_intent) =
-        factory_dispatcher::executor::shard_gate_verdict_outcomes(verdict, plugin_version);
+        factory_dispatcher::executor::shard_gate_verdict_outcomes(gate, verdict, plugin_version);
 
     // BC-1.15.001 PC2: PostCompact is advisory-only regardless of native-gate
     // verdict — same suppression the normal (post-`execute_tiers`) path applies.

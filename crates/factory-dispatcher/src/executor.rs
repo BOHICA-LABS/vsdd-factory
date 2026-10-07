@@ -693,10 +693,40 @@ pub fn migration_reservation_release(payload: &crate::payload::HookPayload, cwd:
 /// suggestion to exclude this outcome from the count: doing so would
 /// actually be the INCONSISTENT choice, singling out this one native check
 /// while leaving the other three sentinel-outcome sites uncorrected.)
-fn shard_gate_block_outcome(reason: String, plugin_version: String) -> PluginOutcome {
+/// The native (non-WASM) gate whose verdict is being surfaced. CLOSED: the
+/// `blocking_plugins=` label an operator sees must name the gate that actually
+/// blocked (ADR-052 §5a "Admission verdict surface label") — a migration-window
+/// `E-MAINTENANCE-001/002` must not send them chasing the shard-cap gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeGate {
+    /// The BC-1.18.005 shard-cap gate (`shard_cap_precheck`).
+    ShardCap,
+    /// The governed-migration writer-admission gate.
+    MigrationAdmission,
+}
+
+/// `plugin_name` reported for the migration-admission gate's verdicts.
+pub const MIGRATION_ADMISSION_GATE_NAME: &str = "migration-admission";
+
+impl NativeGate {
+    /// The `blocking_plugins=` token (closed; no free-form strings).
+    #[must_use]
+    pub fn plugin_name(self) -> &'static str {
+        match self {
+            Self::ShardCap => "shard-cap-gate",
+            Self::MigrationAdmission => MIGRATION_ADMISSION_GATE_NAME,
+        }
+    }
+}
+
+fn shard_gate_block_outcome(
+    gate: NativeGate,
+    reason: String,
+    plugin_version: String,
+) -> PluginOutcome {
     let stdout = serde_json::json!({ "outcome": "block", "reason": reason }).to_string();
     PluginOutcome {
-        plugin_name: "shard-cap-gate".to_string(),
+        plugin_name: gate.plugin_name().to_string(),
         plugin_version,
         on_error: OnError::Block,
         result: PluginResult::Ok {
@@ -730,10 +760,14 @@ fn shard_gate_block_outcome(reason: String, plugin_version: String) -> PluginOut
 ///   `wasi_block = exit_code == 2 && on_error == Block` path still marks this
 ///   outcome as blocking; `block_intent = true` is set independently in
 ///   `shard_gate_verdict_outcomes` for the same reason (belt-and-suspenders).
-fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOutcome {
+fn shard_gate_error_outcome(
+    gate: NativeGate,
+    message: String,
+    plugin_version: String,
+) -> PluginOutcome {
     let stdout = serde_json::json!({ "outcome": "error", "message": message }).to_string();
     PluginOutcome {
-        plugin_name: "shard-cap-gate".to_string(),
+        plugin_name: gate.plugin_name().to_string(),
         plugin_version,
         on_error: OnError::Block,
         result: PluginResult::Ok {
@@ -817,6 +851,7 @@ fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOu
 /// full rationale.
 /// Returns `(outcomes, block_intent)`.
 pub fn shard_gate_verdict_outcomes(
+    gate: NativeGate,
     verdict: Option<vsdd_hook_sdk::HookResult>,
     plugin_version: String,
 ) -> (Vec<PluginOutcome>, bool) {
@@ -839,14 +874,14 @@ pub fn shard_gate_verdict_outcomes(
             // never the HookResult::Block retry variant, NOT non-blocking.
             vsdd_hook_sdk::HookResult::Error { message } => {
                 block_intent = true;
-                outcomes.push(shard_gate_error_outcome(message, plugin_version));
+                outcomes.push(shard_gate_error_outcome(gate, message, plugin_version));
             }
             // Successful rotate_changelog_at (BC-1.18.009 PC2) OR successful
             // execute_roll (BC-1.18.006 PC1): gate returns the retry instruction.
             // Serialized as {"outcome":"block","reason":"..."}.
             vsdd_hook_sdk::HookResult::Block { reason } => {
                 block_intent = true;
-                outcomes.push(shard_gate_block_outcome(reason, plugin_version));
+                outcomes.push(shard_gate_block_outcome(gate, reason, plugin_version));
             }
             vsdd_hook_sdk::HookResult::Continue => {}
         }
@@ -866,6 +901,7 @@ pub async fn execute_tiers(
     // doc comment for the full translation rationale (shared with
     // `main::run`'s MINOR-N1 empty-tier-groups short-circuit).
     let (mut all_outcomes, mut block_intent) = shard_gate_verdict_outcomes(
+        NativeGate::ShardCap,
         shard_gate_precheck_result,
         inputs.base_host_ctx.plugin_version.clone(),
     );
