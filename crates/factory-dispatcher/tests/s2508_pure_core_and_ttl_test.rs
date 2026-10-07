@@ -802,102 +802,120 @@ fn write_reservation_raw(dir: &Path, id: &str, body: &str, mtime: filetime::File
 /// text, mtime, expect_reclaimed)`.
 #[test]
 fn test_BC_1_18_011_EC025_drain_gc_reservation_timestamp_vectors() {
-    let now = chrono::Utc::now();
-    let fresh = filetime::FileTime::from_system_time(std::time::SystemTime::now());
-    let old = filetime::FileTime::from_system_time(
-        std::time::SystemTime::now() - Duration::from_secs(4000),
-    );
-    let future = filetime::FileTime::from_system_time(
-        std::time::SystemTime::now() + Duration::from_secs(5000),
-    );
-    let pre_epoch = filetime::FileTime::from_unix_time(-1000, 0);
-    let rfc = |d: chrono::Duration| {
-        format!(
-            "\"{}\"",
-            (now + d).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        )
-    };
-    let vectors: Vec<(&str, Option<String>, filetime::FileTime, bool)> = vec![
+    // Deterministic (no second-boundary flake): every wall-clock-relative value
+    // is computed IMMEDIATELY before its fixture is written and sits well clear
+    // of the +300 s skew-tolerance boundary (+270 within, +330 beyond), and of
+    // the 3,600 s TTL (mtime ages 0 / 4,000 s).
+    enum Created {
+        /// RFC 3339 UTC, `secs` relative to now (computed at write time).
+        Rel(i64),
+        /// RFC 3339 with a +05:00 offset, `secs` relative to now.
+        RelOffset(i64),
+        Raw(&'static str),
+        Absent,
+    }
+    #[derive(Clone, Copy)]
+    enum Mt {
+        Fresh,
+        Old,
+        Future,
+        PreEpoch,
+    }
+    let vectors: Vec<(&str, Created, Mt, bool)> = vec![
         (
-            "(a) created_at now+299, mtime old => retained (age 0)",
-            Some(rfc(chrono::Duration::seconds(299))),
-            old,
+            "(a) created_at now+270 (within tolerance), mtime old => retained (age 0)",
+            Created::Rel(270),
+            Mt::Old,
             false,
         ),
         (
-            "(b) created_at now+301, mtime old => mtime basis => reclaimed",
-            Some(rfc(chrono::Duration::seconds(301))),
-            old,
+            "(b) created_at now+330 (beyond tolerance), mtime old => mtime basis => reclaimed",
+            Created::Rel(330),
+            Mt::Old,
             true,
         ),
         (
             "(c) created_at pre-1970, mtime old => reclaimed",
-            Some("\"1969-12-31T23:59:59Z\"".into()),
-            old,
+            Created::Raw("\"1969-12-31T23:59:59Z\""),
+            Mt::Old,
             true,
         ),
         (
             "(d) created_at 'yesterday', mtime old => reclaimed",
-            Some("\"yesterday\"".into()),
-            old,
+            Created::Raw("\"yesterday\""),
+            Mt::Old,
             true,
         ),
         (
             "(d) created_at '2026-13-45', mtime old => reclaimed",
-            Some("\"2026-13-45\"".into()),
-            old,
+            Created::Raw("\"2026-13-45\""),
+            Mt::Old,
             true,
         ),
         (
             "(e) created_at year 9999, mtime old => reclaimed",
-            Some("\"9999-12-31T23:59:59Z\"".into()),
-            old,
+            Created::Raw("\"9999-12-31T23:59:59Z\""),
+            Mt::Old,
             true,
         ),
         (
             "(f) created_at outside u64 (number), mtime old => reclaimed",
-            Some("99999999999999999999999".into()),
-            old,
+            Created::Raw("99999999999999999999999"),
+            Mt::Old,
             true,
         ),
         (
             "(g) non-UTC offset 4000 s ago, mtime fresh => reclaimed (UTC-normalised)",
-            Some(format!(
-                "\"{}\"",
-                (now - chrono::Duration::seconds(4000))
-                    .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600).unwrap())
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
-            )),
-            fresh,
+            Created::RelOffset(-4000),
+            Mt::Fresh,
             true,
         ),
         (
             "(h) created_at unusable, mtime in the future => retained",
-            Some("\"nope\"".into()),
-            future,
+            Created::Raw("\"nope\""),
+            Mt::Future,
             false,
         ),
         (
             "(i) created_at unusable AND mtime pre-epoch => age unknown => retained",
-            Some("\"nope\"".into()),
-            pre_epoch,
+            Created::Raw("\"nope\""),
+            Mt::PreEpoch,
             false,
         ),
         (
             "(i) created_at absent AND mtime pre-epoch => retained",
-            None,
-            pre_epoch,
+            Created::Absent,
+            Mt::PreEpoch,
             false,
         ),
     ];
     let mut failures = Vec::new();
-    for (label, created, mtime, expect_reclaimed) in vectors {
+    for (label, created, mt, expect_reclaimed) in vectors {
+        let now = chrono::Utc::now();
+        let sys_now = std::time::SystemTime::now();
+        let mtime = match mt {
+            Mt::Fresh => filetime::FileTime::from_system_time(sys_now),
+            Mt::Old => filetime::FileTime::from_system_time(sys_now - Duration::from_secs(4000)),
+            Mt::Future => filetime::FileTime::from_system_time(sys_now + Duration::from_secs(5000)),
+            Mt::PreEpoch => filetime::FileTime::from_unix_time(-1000, 0),
+        };
+        let body = match created {
+            Created::Rel(d) => format!(
+                r#"{{"created_at":"{}","tool_use_id":"T1"}}"#,
+                (now + chrono::Duration::seconds(d))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            ),
+            Created::RelOffset(d) => format!(
+                r#"{{"created_at":"{}","tool_use_id":"T1"}}"#,
+                (now + chrono::Duration::seconds(d))
+                    .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600).unwrap())
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+            ),
+            Created::Raw(c) => format!(r#"{{"created_at":{c},"tool_use_id":"T1"}}"#),
+            Created::Absent => r#"{"tool_use_id":"T1"}"#.to_string(),
+        };
         let dir = tempfile::tempdir().unwrap();
         let res_dir = dir.path().join("reservations");
-        let body = match created {
-            Some(c) => format!(r#"{{"created_at":{c},"tool_use_id":"T1"}}"#),
-            None => r#"{"tool_use_id":"T1"}"#.to_string(),
-        };
         write_reservation_raw(&res_dir, "T1", &body, mtime);
         let r = drain_bc_index_writers(
             &res_dir,
