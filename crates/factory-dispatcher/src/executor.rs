@@ -497,12 +497,19 @@ pub fn bc_index_migration_admission(
     // There is NO `.factory/migration-state/` existence guard: the namespace is
     // created idempotently by the core (BC-1.18.013 EC-020), so a pre-directory
     // writer is tracked and visible to a coordinator's first drain.
-    let Some(mut factory_root) = crate::shard_manager::resolve_factory_root(cwd) else {
-        tracing::debug!(
-            target: "bc_1_18_011_migration",
-            "no .factory directory under the project root: admission gate out of scope"
-        );
-        return out_of_scope();
+    let mut factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
+        Ok(Some(root)) => root,
+        Ok(None) => {
+            tracing::debug!(
+                target: "bc_1_18_011_migration",
+                "no .factory directory under the project root: admission gate out of scope"
+            );
+            return out_of_scope();
+        }
+        // Unstatable `<project_root>/.factory` (ADR-052 v1.23 §5a): whether the
+        // directory exists is UNKNOWN -> fail closed `E-MAINTENANCE-002 (io)`; no
+        // reservation exists yet and none is created.
+        Err(e) => return admission_error(&e),
     };
     // The harness spells `file_path`s with the project directory exactly as it
     // gave it to us; when that differs lexically from the canonical `cwd` (a
@@ -618,8 +625,21 @@ pub fn bc_index_migration_reservation_release(
         return;
     }
     // Anchored on the SAME session factory root as admission (never created).
-    let Some(factory_root) = crate::shard_manager::resolve_factory_root(cwd) else {
-        return;
+    let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
+        Ok(Some(root)) => root,
+        Ok(None) => return,
+        // Unstatable `.factory`: release is never a verdict (ADR-052 v1.23 §5a);
+        // no-op, and the reservation, if any, is reclaimed by the drain-start TTL GC.
+        Err(e) => {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                error = %e,
+                "bc_index_migration_reservation_release: .factory is unstatable (non-fatal) -- \
+                 the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
+                 own TTL GC pass instead"
+            );
+            return;
+        }
     };
     let migration_state_dir = factory_root.migration_state_dir();
     if !migration_state_dir.exists() {

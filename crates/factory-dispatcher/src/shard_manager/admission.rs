@@ -391,22 +391,51 @@ pub fn sanitize_diagnostic_id(input: &str) -> String {
     sanitize_diagnostic(input, DIAGNOSTIC_ID_MAX_CHARS)
 }
 
-/// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`.
-/// `None` when that does not exist as a directory — the gate is then OUT OF SCOPE
-/// for the dispatch (no migration can be in flight without it) and NEVER creates
-/// `.factory` itself.
-#[must_use]
-pub fn resolve_factory_root(project_root: &Path) -> Option<FactoryRoot> {
+/// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`
+/// (ADR-052 v1.23 §5a "Factory-root lookup mapping"). ONE symlink-following
+/// `stat` is classified three ways and an OS failure is never collapsed into
+/// "absent":
+///
+/// * a directory -> `Ok(Some(_))`;
+/// * Absent (closed set) — a non-directory target (including a symlink to one),
+///   `ENOENT` (including a dangling symlink) or `ENOTDIR` -> `Ok(None)`: the
+///   gate is OUT OF SCOPE for the dispatch (no migration can be in flight
+///   without it); `.factory` is NEVER created;
+/// * Unstatable — every other `stat` failure (whether the directory exists is
+///   unknown) -> `Err(Io { path: <project_root>/.factory, source })`.
+///
+/// # Errors
+/// [`BcIndexMigrationError::Io`] for an unstatable `<project_root>/.factory`.
+pub fn resolve_factory_root(
+    project_root: &Path,
+) -> Result<Option<FactoryRoot>, BcIndexMigrationError> {
     let dot_factory = project_root.join(".factory");
-    if !std::fs::metadata(&dot_factory).is_ok_and(|m| m.is_dir()) {
-        return None;
+    match std::fs::metadata(&dot_factory) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Ok(None),
+        Err(source) if is_factory_root_absent_error(&source) => return Ok(None),
+        Err(source) => {
+            return Err(BcIndexMigrationError::Io {
+                path: dot_factory,
+                source,
+            });
+        }
     }
     let (real, lex) = resolve_target_path(&dot_factory);
-    Some(FactoryRoot {
+    Ok(Some(FactoryRoot {
         real,
         lex,
         lex_aliases: Vec::new(),
-    })
+    }))
+}
+
+/// The closed Absent set of `stat` failures for `<project_root>/.factory`:
+/// `ENOENT` and `ENOTDIR` (a prefix component is not a directory).
+fn is_factory_root_absent_error(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
 }
 
 /// ADR-052 v1.20 §5a "`tool_use_id` presence and validity": an ABSENT key or JSON
