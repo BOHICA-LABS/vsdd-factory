@@ -524,13 +524,17 @@ Refs: BC-3.08.001 v1.8 (Event 3); BC-7.06.001 Invariants 1, 7; F-P14-001 Path B.
 
 ### WASI preopened directories
 
-All plugins receive a single WASI preopened directory: the project root
-(the dispatcher's `host_ctx.cwd`, derived from `CLAUDE_PROJECT_DIR`), mounted
-as `.` in the guest with `FsPerms::ReadWrite` (wasmtime-wasi 48; formerly
+When a project directory is available, every plugin receives a single WASI
+preopened directory: the project root (the dispatcher's `host_ctx.cwd`,
+derived from `CLAUDE_PROJECT_DIR`), mounted as `.` in the guest with
+`FsPerms::ReadWrite` (wasmtime-wasi 48; formerly
 `DirPerms::all() | FilePerms::all()` — semantics unchanged). No other
 directory is preopened. This means any plugin can read and write within the
 project root using native WASI filesystem calls (`std::fs::read`,
 `std::fs::write`, etc.) — no capability declaration required.
+
+If `host_ctx.cwd` is empty, or the preopen fails (non-fatal; logged at debug
+level), the plugin runs with no preopen and its `std::fs` calls fail.
 
 ### host::write_file capability
 
@@ -544,7 +548,7 @@ list). Plugins that declare a `write_file` capability block in
 WASI preopened access is the **sandbox boundary**. The `host::write_file`
 capability gate controls only the host function — it does NOT constrain native
 WASI filesystem calls. A plugin with no `write_file` capability declared can
-still read and write the preopened directories via standard Rust `std::fs`.
+still read and write the preopened project root via standard Rust `std::fs`.
 
 ### v1.1 roadmap
 
