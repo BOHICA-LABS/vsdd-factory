@@ -80,6 +80,16 @@ pub enum RegistryError {
     },
 }
 
+/// S-25.08 Red-Gate STUB (BC-7.06.001 v1.13 §Fail-Closed Symmetry; BC-1.08.001
+/// v1.4 Invariants 1/2): the dispatcher exit code for a registry load error.
+/// `SchemaVersion`, `AsyncBlockConflict` and `DuplicateEntry` fail CLOSED (2);
+/// `NotFound`, `Io`, `Toml` and `ToolRegex` fail OPEN (0) as an EXPLICIT variant
+/// list -- NO wildcard arm, so a future variant must be classified here at
+/// compile time (the merged `main.rs::run` ends its inline match in `_ => 0`).
+pub fn registry_error_exit_code(_error: &RegistryError) -> i32 {
+    todo!("S-25.08: registry_error_exit_code (explicit variant mapping, no wildcard)")
+}
+
 /// Outcome for a plugin that returns `Error` or crashes. `Continue` is
 /// the default; operators opt into hard-stop behavior per plugin.
 ///
