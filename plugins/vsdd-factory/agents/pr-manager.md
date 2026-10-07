@@ -203,7 +203,7 @@ b. After pr-reviewer returns, YOU must read its verdict. Do NOT treat the sub-ag
 
 c. Spawn github-ops to post triage summary as PR comment:
 ```
-Agent(subagent_type="vsdd-factory:github-ops", prompt="cd <project-path> && TMPFILE=$(mktemp /tmp/pr-comment-XXXXXX.md) && cat > \"$TMPFILE\" << 'BODY'\n## Review Cycle N Triage\n\n| Finding | Severity | Routed To | Status |\n...\nBODY\ngh pr comment <PR_NUMBER> --body-file \"$TMPFILE\" && rm -f \"$TMPFILE\"")
+Agent(subagent_type="vsdd-factory:github-ops", prompt="cd <project-path> && TMPFILE=$(mktemp \"${TMPDIR:-/tmp}/pr-comment-XXXXXX\") && cat > \"$TMPFILE\" << 'BODY'\n## Review Cycle N Triage\n\n| Finding | Severity | Routed To | Status |\n...\nBODY\ngh pr comment <PR_NUMBER> --body-file \"$TMPFILE\" && rm -f \"$TMPFILE\"")
 ```
 Note: `--body-file <tempfile>` is used instead of `--body '...'` to avoid shell
 injection when finding text contains single quotes or other special characters
