@@ -135,6 +135,21 @@ pub const INTERNAL_FILE_NOT_FOUND: &str = "internal.file_not_found";
 /// literals in emit_event.rs (D21, F-WG-002, S-19.09).
 pub const PLUGIN_ABANDONED: &str = "plugin.abandoned";
 
+/// Event type for a governed-migration writer-admission `E-MAINTENANCE-001`
+/// block verdict (BC-3.08.001 v1.35 Event 11; BC-1.18.013 Postcondition 10(a)).
+/// Written by `main.rs` directly through `InternalLog::write` (no `HostContext`
+/// exists at the registry-independent admission position), exactly once per
+/// verdict, before the early return.
+pub const MIGRATION_ADMISSION_BLOCKED: &str = "migration.admission_blocked";
+
+/// Event type for a writer-admission `E-MAINTENANCE-002` fail-closed error
+/// verdict (BC-3.08.001 v1.35 Event 12; BC-1.18.013 Postcondition 10(b)).
+pub const MIGRATION_ADMISSION_FAILED: &str = "migration.admission_failed";
+
+/// Event type for a non-verdict admission/reconciliation/release anomaly
+/// (BC-3.08.001 v1.35 Event 13; BC-1.18.013 Postcondition 10(c)).
+pub const MIGRATION_ADMISSION_ADVISORY: &str = "migration.admission_advisory";
+
 /// One line in `dispatcher-internal-YYYY-MM-DD.jsonl`.
 ///
 /// The top-level fields form the stable shape every log line carries;

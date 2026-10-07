@@ -144,10 +144,11 @@ mod admission;
 #[cfg(test)]
 mod ttl_seam_tests;
 pub use admission::{
-    ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
-    MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily, StaleGateReconciliation,
-    admit_protected_write, as_given_factory_root_spelling, classify_tool_use_id,
-    e_maintenance_block_message, is_valid_tool_use_id, project_root_source,
+    ABORT_REASON_NULL_GENERATION, AdmissionAdvisory, AdmissionDiagnostic, AdmissionOutcome,
+    AdvisoryReason, BlockBranch, BlockedDiagnostic, FactoryRoot, FailedDiagnostic,
+    MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily,
+    StaleGateReconciliation, admit_protected_write, as_given_factory_root_spelling,
+    classify_tool_use_id, e_maintenance_block_message, is_valid_tool_use_id, project_root_source,
     reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
     resolve_session_project_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
 };
@@ -13976,7 +13977,7 @@ pub fn admit_or_block_bc_index_writer(
         ProtectedPathFamily::BcIndex,
     )? {
         AdmissionOutcome::Admitted { .. } => Ok(()),
-        AdmissionOutcome::Blocked { message } => {
+        AdmissionOutcome::Blocked { message, .. } => {
             Err(BcIndexMigrationError::WriterAdmissionRefused { reason: message })
         }
     }
@@ -14324,6 +14325,13 @@ fn log_reservation_timestamp_fallback(
         }
     }
     for reason in reasons {
+        // The coordinator is a CLI process with no `tracing` subscriber: its
+        // stderr is the operator surface for the timestamp-fallback tokens (they
+        // are NOT dispatcher events — admission never reads reservation files).
+        eprintln!(
+            "drain_bc_index_writers: reservation timestamp fallback ({reason}): {}",
+            sanitize_diagnostic(&path.display().to_string(), 256)
+        );
         tracing::warn!(
             target: "bc_1_18_011_migration",
             path = sanitize_diagnostic(&path.display().to_string(), 256),

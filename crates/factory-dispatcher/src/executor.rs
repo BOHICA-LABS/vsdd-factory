@@ -426,6 +426,12 @@ pub struct MigrationAdmission {
     /// if a LATER stage of the same dispatch blocks or errors (release-on-block,
     /// ADR-052 v1.18 §5a); otherwise PostToolUse removes it.
     pub reservation: Option<std::path::PathBuf>,
+    /// Structured diagnostics of this evaluation, returned as DATA (the core and
+    /// this entry point stay free of the log): exactly one `Blocked` per
+    /// `E-MAINTENANCE-001` verdict, exactly one `Failed` per `E-MAINTENANCE-002`
+    /// verdict, plus any non-verdict `Advisory` anomalies. `main.rs` writes each
+    /// as an `InternalLog` event before its early return.
+    pub diagnostics: Vec<crate::shard_manager::AdmissionDiagnostic>,
 }
 
 /// BC-1.18.011 Precondition 6(b)/(c)/(d) + BC-1.18.013 Precondition 6(b)/(c) —
@@ -469,11 +475,12 @@ pub fn migration_writer_admission(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
 ) -> MigrationAdmission {
-    let admitted = |reservation| MigrationAdmission {
+    let admitted = |reservation, diagnostics| MigrationAdmission {
         verdict: None,
         reservation,
+        diagnostics,
     };
-    let out_of_scope = || admitted(None);
+    let out_of_scope = || admitted(None, Vec::new());
 
     if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
         return out_of_scope();
@@ -554,14 +561,19 @@ pub fn migration_writer_admission(
         tool_use_id,
         family,
     ) {
-        Ok(crate::shard_manager::AdmissionOutcome::Admitted { reservation }) => {
-            admitted(reservation)
-        }
-        Ok(crate::shard_manager::AdmissionOutcome::Blocked { message }) => MigrationAdmission {
+        Ok(crate::shard_manager::AdmissionOutcome::Admitted {
+            reservation,
+            diagnostics,
+        }) => admitted(reservation, diagnostics),
+        Ok(crate::shard_manager::AdmissionOutcome::Blocked {
+            message,
+            diagnostics,
+        }) => MigrationAdmission {
             verdict: Some(vsdd_hook_sdk::HookResult::Block {
                 reason: format!("E-MAINTENANCE-001: {message}"),
             }),
             reservation: None,
+            diagnostics,
         },
         Err(e) => admission_error(&e),
     }
@@ -569,23 +581,52 @@ pub fn migration_writer_admission(
 
 /// The fail-closed `E-MAINTENANCE-002` verdict (error-taxonomy v1.37): the
 /// single-line message carries only the `<cause>` token; the underlying detail
-/// (path, `io::Error`, byte length — never a raw `tool_use_id` or record
-/// content) goes to `tracing::warn!`.
+/// (path, `io::Error` kind+message, byte length — never a raw `tool_use_id` or
+/// record content) is returned as the `Failed` diagnostic DATA that `main.rs`
+/// writes as a `migration.admission_failed` event.
 fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> MigrationAdmission {
-    let cause = e.admission_failure_cause().token();
-    tracing::warn!(
-        target: "bc_1_18_011_migration",
-        cause,
-        // The error text can embed untrusted record content (e.g. a serde
-        // variant name): escape control characters and cap its length.
-        detail = crate::shard_manager::sanitize_diagnostic(&e.to_string(), 256),
-        "E-MAINTENANCE-002: writer-admission check failed"
-    );
+    use crate::shard_manager::{
+        AdmissionDiagnostic, AdmissionFailureCause, BcIndexMigrationError, FailedDiagnostic,
+        sanitize_diagnostic,
+    };
+    let cause = e.admission_failure_cause();
+    let kind = match e {
+        BcIndexMigrationError::AdmissionStateIntegrity { kind, .. } => Some(*kind),
+        _ => None,
+    };
+    // `detail` NEVER carries the raw `tool_use_id` or record content: an invalid
+    // id is its byte length only; an `Io` is the path plus the `io::Error`
+    // kind+message (the reservation path is built from a placeholder, never the
+    // raw id); an integrity failure carries its already-sanitized `detail`.
+    let detail = match e {
+        BcIndexMigrationError::InvalidToolUseId { len } => {
+            format!("tool_use_id byte length {len}")
+        }
+        BcIndexMigrationError::Io { path, source } => format!(
+            "{}: {:?}: {}",
+            sanitize_diagnostic(&path.display().to_string(), 256),
+            source.kind(),
+            sanitize_diagnostic(&source.to_string(), 256)
+        ),
+        BcIndexMigrationError::AdmissionStateIntegrity { detail, .. } => {
+            sanitize_diagnostic(detail, 256)
+        }
+        other => sanitize_diagnostic(&other.to_string(), 256),
+    };
+    let _: AdmissionFailureCause = cause;
     MigrationAdmission {
         verdict: Some(vsdd_hook_sdk::HookResult::Error {
-            message: format!("E-MAINTENANCE-002: writer-admission check failed ({cause})"),
+            message: format!(
+                "E-MAINTENANCE-002: writer-admission check failed ({})",
+                cause.token()
+            ),
         }),
         reservation: None,
+        diagnostics: vec![AdmissionDiagnostic::Failed(FailedDiagnostic {
+            cause,
+            kind,
+            detail,
+        })],
     }
 }
 
@@ -613,18 +654,21 @@ pub fn migration_writer_admission_precheck(
 /// drain-procedure bookkeeping, not a correctness gate (mirrors
 /// [`crate::shard_manager::release_bc_index_writer_reservation`]'s own doc
 /// comment: "a missing file... is a no-op, not an error").
-pub fn migration_reservation_release(payload: &crate::payload::HookPayload, cwd: &std::path::Path) {
+pub fn migration_reservation_release(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Vec<crate::shard_manager::AdmissionDiagnostic> {
     // Release on BOTH `PostToolUse` and `PostToolUseFailure`, keyed ONLY on the
     // `tool_use_id` shared with the PreToolUse admission (no `tool_name` filter:
     // a `PostToolUseFailure` envelope may omit or reshape it, and an id that was
     // never reserved is a no-op anyway — ADR-052 v1.20 §5a F-001).
     if !crate::invoke::is_tool_completion_event(&payload.event_name) {
-        return;
+        return Vec::new();
     }
     // Anchored on the SAME session factory root as admission (never created).
     let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
         Ok(Some(root)) => root,
-        Ok(None) => return,
+        Ok(None) => return Vec::new(),
         // Unstatable `.factory`: release is never a verdict (ADR-052 v1.23 §5a);
         // no-op, and the reservation, if any, is reclaimed by the drain-start TTL GC.
         Err(e) => {
@@ -635,13 +679,13 @@ pub fn migration_reservation_release(payload: &crate::payload::HookPayload, cwd:
                  the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
                  own TTL GC pass instead"
             );
-            return;
+            return Vec::new();
         }
     };
     let migration_state_dir = factory_root.migration_state_dir();
     match probe_release_migration_state_dir(&migration_state_dir) {
         Ok(true) => {}
-        Ok(false) => return,
+        Ok(false) => return Vec::new(),
         // BC-1.18.013 EC-021 / AC-011: a non-ENOENT stat error (EACCES/EIO/ELOOP) is a
         // non-fatal warn, never a verdict and never silently collapsed into "absent".
         Err(e) => {
@@ -654,22 +698,38 @@ pub fn migration_reservation_release(payload: &crate::payload::HookPayload, cwd:
                  the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
                  own TTL GC pass instead"
             );
-            return;
+            return Vec::new();
         }
     }
     let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
-        return;
+        return Vec::new();
     };
-    if let Err(e) =
-        crate::shard_manager::release_bc_index_writer_reservation(&migration_state_dir, tool_use_id)
-    {
-        tracing::warn!(
-            target: "bc_1_18_011_migration",
-            error = %e,
-            "migration_reservation_release: best-effort writer-reservation release \
-             failed (non-fatal) -- the reservation, if it still exists, will be reclaimed by \
-             drain_bc_index_writers's own TTL GC pass instead"
-        );
+    match crate::shard_manager::release_bc_index_writer_reservation(
+        &migration_state_dir,
+        tool_use_id,
+    ) {
+        Ok(()) => Vec::new(),
+        Err(e) => {
+            // Best-effort, never a verdict: the reservation, if it still exists,
+            // is reclaimed by `drain_bc_index_writers`'s TTL GC. Recorded as ONE
+            // `migration.admission_advisory` (`reservation_release_failed`) with
+            // the error kind+message and the id's byte length only (the error's
+            // path embeds the raw id and is deliberately NOT echoed).
+            use crate::shard_manager::{
+                AdmissionAdvisory, AdmissionDiagnostic, AdvisoryReason, sanitize_diagnostic,
+            };
+            let mut advisory = AdmissionAdvisory::new(AdvisoryReason::ReservationReleaseFailed);
+            advisory.detail = Some(match &e {
+                crate::shard_manager::BcIndexMigrationError::Io { source, .. } => format!(
+                    "{:?}: {}",
+                    source.kind(),
+                    sanitize_diagnostic(&source.to_string(), 256)
+                ),
+                other => sanitize_diagnostic(&other.to_string(), 256),
+            });
+            advisory.tool_use_id_len = Some(tool_use_id.len() as u64);
+            vec![AdmissionDiagnostic::Advisory(advisory)]
+        }
     }
 }
 
