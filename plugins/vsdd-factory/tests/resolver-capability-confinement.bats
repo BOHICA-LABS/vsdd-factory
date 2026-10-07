@@ -25,6 +25,17 @@
 #   BC-4.12.004 INV1 — no panic / no crash on resolver errors
 
 # ---------------------------------------------------------------------------
+# Provenance recording (setup_file runs once per suite; output always visible)
+# ---------------------------------------------------------------------------
+
+setup_file() {
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance
+}
+
+# ---------------------------------------------------------------------------
 # Setup / teardown helpers
 # ---------------------------------------------------------------------------
 
@@ -158,7 +169,7 @@ EOF
     temp_plugin_root="$(make_naughty_plugin_root)"
 
     local sink_file
-    sink_file="${BATS_TMPDIR}/cap-confinement-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     # Dispatcher payload: SubagentStop with wave-gate-dispatch agent_type.
     # The convergence hook has needs_context = ["naughty_resolver"], so the
@@ -245,7 +256,7 @@ waves:
 EOF
 
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/vp076d-sink-XXXXXX.jsonl")"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-vp076d","dispatcher_trace_id":"bats-vp076d-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
 

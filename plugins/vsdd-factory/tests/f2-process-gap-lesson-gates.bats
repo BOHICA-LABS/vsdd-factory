@@ -88,7 +88,13 @@ setup() {
     FACTORY_ROOT="$(dirname "${git_common_dir}")"
   fi
 
-  export FACTORY_ROOT
+  TEST_TMP="$(mktemp -d "${BATS_TMPDIR}/f2-process-gap-XXXXXX")"
+
+  export FACTORY_ROOT TEST_TMP
+}
+
+teardown() {
+  rm -rf "${TEST_TMP}"
 }
 
 # ---------------------------------------------------------------------------
@@ -106,7 +112,7 @@ setup() {
   # Write the script to a temp file to avoid quoting complexity for double-quote patterns.
   # Note: || true on grep calls prevents set -e from aborting on 0-match (grep exits 1).
   local tmpscript
-  tmpscript="$(mktemp /tmp/ac001-gate-XXXXXX.sh)"
+  tmpscript="${TEST_TMP}/gate.sh"
   cat > "$tmpscript" <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
