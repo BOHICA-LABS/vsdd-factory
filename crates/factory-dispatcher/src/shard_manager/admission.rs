@@ -358,7 +358,7 @@ pub fn reconcile_stale_admission_gate(
         }
         (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, Some(live)) => {
             // Branch B (terminal record ABSENT; STAGING with generation_id =
-            // null, gate stuck).
+            // null; any gate state).
             abort_null_generation_txn(migration_state_dir, live)?;
             Ok(StaleGateReconciliation::NullGenerationTxnAborted)
         }

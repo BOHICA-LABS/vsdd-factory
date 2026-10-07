@@ -972,10 +972,12 @@ fn proof_obl1_h4_admission_gate_invariant() {
 // arbitrary interleavings — including a writer that read OPEN before the
 // coordinator's C1.
 //
-// The initial state is an arbitrary post-crash state constrained only by the
-// inductive invariant's base case (S1) and "no coordinator / no writer
-// running": any gate, any txn (incl. a FOREIGN-migration txn), any terminal
-// record, any leaked reservations of any age. This covers the stuck states
+// The initial state is an arbitrary post-crash state constrained only by
+// "no coordinator / no writer running": any gate, any txn (incl. a
+// FOREIGN-migration txn), any terminal record, any leaked reservations of
+// any age — including gate OPEN beside a live txn (an absent/lost
+// `gate-state.json` reads OPEN), so S1 is checked as an inductive property
+// and the admission dual check's txn half is load-bearing. This covers the stuck states
 // self-heal exists for (crashed coordinator in DRAINING / LOCKED,
 // null-generation STAGING, COMMITTING + terminal record, ...).
 //
@@ -999,9 +1001,10 @@ fn proof_obl1_h4_admission_gate_invariant() {
 // visibility are carried by the black-box suites (VP-133 facets 6/7).
 //
 // Safety, asserted after EVERY step / at the named op:
-//   S1 INV-GATE-TXN: gate OPEN => no live txn;
-//      no writer admitted while a txn is STAGING/COMMITTING or the gate is
-//      LOCKED.
+//   S1 INV-GATE-TXN: gate OPEN => no live txn, inductively (once it holds
+//      it keeps holding); no writer admitted while a txn is
+//      STAGING/COMMITTING or the gate is LOCKED (unconditionally, from every
+//      initial state).
 //   S2 quiescence precedes snapshot: at the snapshot no writer is admitted
 //      and no writer holds an OPEN gate observation that could still admit.
 //   S3 no admit while live: admission happens only with a reservation
@@ -1105,7 +1108,13 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
         None
     };
     let mut terminal_record: bool = kani::any();
-    kani::assume(!(gate == BcIndexAdmissionGateState::Open && h4x_txn_live(txn)));
+    // NO S1 assumption on the initial state: `gate-state.json` absent
+    // (deleted / lost) reads OPEN (`read_admission_gate_state`), so "gate
+    // OPEN beside a live txn" is a real starting state. The admission dual
+    // check's txn half and Branch B must cope with it; S1 is asserted
+    // INDUCTIVELY (once it holds it must keep holding) below.
+    let mut s1_holds = !(gate == BcIndexAdmissionGateState::Open && h4x_txn_live(txn));
+    let lost_gate_file_initially = !s1_holds;
     let mut coord = H4xCoord::Absent;
     let idle = H4xWriter {
         phase: H4xWriterPhase::Idle,
@@ -1149,6 +1158,8 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
     let mut plan_mismatch = false;
     let mut plan_foreign = false;
     let mut plan_live_coordinator = false;
+    let mut blocked_by_txn_half_of_dual_check = false;
+    let mut lost_gate_state_healed = false;
 
     let steps: usize = kani::any();
     kani::assume(steps <= 10);
@@ -1201,6 +1212,11 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                             admitted_after_selfheal = true;
                         }
                     } else if !writers[w].reconciled {
+                        if writers[w].gate_seen == BcIndexAdmissionGateState::Open {
+                            // Gate read OPEN, yet refused: only the txn half
+                            // of the dual check can have decided this.
+                            blocked_by_txn_half_of_dual_check = true;
+                        }
                         writers[w].phase = H4xWriterPhase::Reconcile;
                     } else {
                         // Release-on-block: the admitter removes its OWN
@@ -1487,11 +1503,18 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             }
         }
 
-        // ---- S1 / INV-GATE-TXN after every step --------------------------
-        kani::assert(
-            !(gate == BcIndexAdmissionGateState::Open && h4x_txn_live(txn)),
-            "H4b/S1 INV-GATE-TXN: the gate is never OPEN while a txn is STAGING/COMMITTING",
-        );
+        // ---- S1 / INV-GATE-TXN after every step (inductive) --------------
+        let s1_now = !(gate == BcIndexAdmissionGateState::Open && h4x_txn_live(txn));
+        if s1_holds {
+            kani::assert(
+                s1_now,
+                "H4b/S1 INV-GATE-TXN (inductive): once the gate is never-OPEN-while-live it stays so",
+            );
+        }
+        if lost_gate_file_initially && s1_now {
+            lost_gate_state_healed = true;
+        }
+        s1_holds = s1_now;
         for wr in writers.iter() {
             if wr.phase == H4xWriterPhase::Admitted {
                 kani::assert(
@@ -1508,6 +1531,14 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
 
     // ---- Non-vacuity witnesses -------------------------------------------
     kani::cover!(ever_admitted, "H4b non-vacuity: a writer is admitted");
+    kani::cover!(
+        blocked_by_txn_half_of_dual_check,
+        "H4b non-vacuity: a writer that read OPEN was refused by the txn half of the dual check"
+    );
+    kani::cover!(
+        lost_gate_state_healed,
+        "H4b non-vacuity: a lost-gate-file state (OPEN beside a live txn) is resolved"
+    );
     kani::cover!(
         admitted_after_selfheal,
         "H4b non-vacuity: a writer is admitted after a step-3.5 self-heal"
@@ -2002,16 +2033,19 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
             "H6b: a txn-bearing plan is produced only for a live txn under the lock (shell contract)",
         );
     }
-    if p1 == StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate {
-        kani::assert(
-            i.txn_state == Some(BcIndexMigrationTxnState::Staging)
+    // BC-1.18.011 v1.13 Precondition 6(d) row-3 caller contract: Branch B
+    // applies IF AND ONLY IF the lock is held and the live txn is the own
+    // migration's STAGING with `generation_id = null` and its terminal record
+    // absent — with NO gate condition (an absent gate file reads OPEN).
+    kani::assert(
+        (p1 == StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate)
+            == (i.lock_acquired
+                && i.txn_state == Some(BcIndexMigrationTxnState::Staging)
                 && gen_null
                 && i.txn_is_own_migration
-                && !i.record_present
-                && gate != BcIndexAdmissionGateState::Open,
-            "H6b: Branch B fires only for own null-generation STAGING, record absent, gate not OPEN",
-        );
-    }
+                && !i.record_present),
+        "H6b: Branch B iff lock + own null-generation STAGING + own terminal record absent (no gate condition)",
+    );
     let (gate2, state2) = match p1 {
         StaleGateReconciliationPlan::ReopenGate => (BcIndexAdmissionGateState::Open, i.txn_state),
         StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate => (
@@ -2063,6 +2097,11 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
     kani::cover!(
         p1 == StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate,
         "H6b non-vacuity: Branch B then nothing"
+    );
+    kani::cover!(
+        p1 == StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate
+            && gate == BcIndexAdmissionGateState::Open,
+        "H6b non-vacuity: Branch B with the gate reading OPEN (absent gate file)"
     );
     kani::cover!(
         p1 == StaleGateReconciliationPlan::FinalizeThenOpenGate,

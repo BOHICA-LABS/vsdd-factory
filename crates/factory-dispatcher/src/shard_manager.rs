@@ -14018,8 +14018,8 @@ pub enum StaleGateReconciliationPlan {
     /// Branch A: gate ∈ {LOCKED, DRAINING} and no live txn -> gate OPEN.
     ReopenGate,
     /// Branch B: live own STAGING txn with `generation_id = null`, its
-    /// terminal record absent, gate not OPEN -> txn ABORTED (marker), THEN
-    /// gate OPEN.
+    /// terminal record absent (any gate state, incl. an absent gate file
+    /// that reads OPEN) -> txn ABORTED (marker), THEN gate OPEN.
     AbortNullGenerationThenReopenGate,
     /// Branch C: the live txn is not the evaluating build's own migration ->
     /// never finalized, never aborted; plain block.
