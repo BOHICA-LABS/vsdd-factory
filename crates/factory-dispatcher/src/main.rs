@@ -110,9 +110,12 @@ async fn main() {
     // see the stub commit report WIRING-EXEMPT table. The real migration
     // logic behind `run_migrate_bc_index_cli` is `todo!()`.
     if std::env::args().nth(1).as_deref() == Some("migrate-bc-index") {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // ADR-052 §5a "Single anchoring rule": the coordinator operates on the
+        // SESSION project root (CLAUDE_PROJECT_DIR, else the process cwd) — the
+        // same rule admission uses — never on the bare process cwd.
+        let project_root = resolve_project_cwd();
         std::process::exit(factory_dispatcher::shard_manager::run_migrate_bc_index_cli(
-            &cwd,
+            &project_root,
         ));
     }
 
@@ -1299,27 +1302,14 @@ fn resolve_log_dir() -> PathBuf {
 /// own env after start, so this is a determinism/duplication cleanup, not a
 /// correctness fix for an observed bug).
 fn resolve_project_cwd() -> PathBuf {
-    std::env::var(ENV_PROJECT_DIR)
-        .map(PathBuf::from)
-        .ok()
-        .filter(|p| !p.as_os_str().is_empty())
-        // Canonicalize the project directory to resolve OS-level symlinks
-        // (e.g., macOS /var → /private/var). This ensures host::cwd() returns
-        // the same physical path that `git worktree list --porcelain` reports,
-        // preventing false-positive DURABILITY DEGRADED from Tier 2 path-mismatch
-        // checks in precompact-flush and similar plugins. Canonicalize failure is
-        // non-fatal: fall back to the raw path (better than no cwd at all).
-        //
-        // SEC-004 TOCTOU ACCEPTED: the canonicalize call here resolves symlinks at
-        // dispatcher startup, but the resolved path is used as a label (host::cwd()
-        // for path-comparison in plugins), not for filesystem access. Any TOCTOU
-        // window between canonicalize and plugin use is therefore inconsequential:
-        // the worst outcome is a false-positive DURABILITY DEGRADED advisory (fail-open).
-        // This is explicitly accepted under the same-user local trust model; the
-        // `unwrap_or(p)` fallback is fail-safe (raw path beats no path at all).
-        .map(|p| p.canonicalize().unwrap_or(p))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    // The ONE session-project-root rule (ADR-052 §5a "Single anchoring rule"):
+    // env read here in the shell, the rule in the pure library function shared
+    // with admission, release and both coordinator binaries.
+    let process_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    factory_dispatcher::shard_manager::resolve_session_project_root(
+        std::env::var_os(ENV_PROJECT_DIR).as_deref(),
+        &process_cwd,
+    )
 }
 
 // flush_sink_file is now in factory_dispatcher::vsdd_sink (S-19.05 AC-004).
