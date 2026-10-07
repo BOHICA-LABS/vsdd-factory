@@ -13,9 +13,10 @@
 //! `staging_with_terminal_record` (1), `terminal_record_unverified` (8),
 //! `finalize_unwired` (9). Tokens (2)-(7) belong to S-25.06's verifier and are
 //! deliberately NOT asserted here. The nine-token domain is not exposed by the
-//! crate as a type or constant (the emitting sites are string literals), so the
-//! set-membership test below carries the BC's nine tokens as the SPEC and checks
-//! every token this build emits against them.
+//! crate as a type or constant today (the emitting sites are string literals); the
+//! BC requires a closed `enum BranchCCheck`, so the set-membership test below
+//! derives the closed domain from the PRODUCTION enum, pins it to the BC-spec
+//! constant `NINE_TOKENS`, and checks every token this build emits against it.
 //!
 //! Every EC-037 vector drives the REAL `factory-dispatcher` binary (a PreToolUse
 //! `Edit` envelope on stdin, stdin then closed, per-command timeout) and reads the
@@ -39,8 +40,8 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use factory_dispatcher::shard_manager::{
-    BcIndexMigrationError, ProjectRootSource, SessionProjectRoot, run_bc_index_migration,
-    run_bc_index_migration_for_session,
+    BcIndexMigrationError, BranchCCheck, ProjectRootSource, SessionProjectRoot,
+    run_bc_index_migration, run_bc_index_migration_for_session,
 };
 
 const MISMATCH_SUFFIX: &str =
@@ -509,8 +510,17 @@ fn test_BC_1_18_013_EC037_every_emitted_check_token_is_in_the_closed_nine_token_
         }
     }
 
+    // The closed domain comes from the production enum and must equal the spec.
+    let production_domain: Vec<&'static str> =
+        BranchCCheck::ALL.iter().map(|c| c.token()).collect();
+    if production_domain != NINE_TOKENS {
+        failures.push(format!(
+            "BranchCCheck::ALL tokens {production_domain:?} != BC-spec NINE_TOKENS {NINE_TOKENS:?}"
+        ));
+    }
+
     for t in &emitted {
-        if !NINE_TOKENS.contains(&t.as_str()) {
+        if !production_domain.contains(&t.as_str()) {
             failures.push(format!(
                 "emitted check {t:?} is not in the closed nine-token domain"
             ));
