@@ -1558,3 +1558,107 @@ fn test_BC_1_18_011_PC6c_b2_delegates_to_shared_core_no_check_then_reserve_race(
         failures,
     );
 }
+
+// ---------------------------------------------------------------------------
+// BC-1.18.011 Precondition 6(d) row 3: Branch B applies WITHOUT any gate
+// condition (absent / explicitly-OPEN gate-state.json)
+// ---------------------------------------------------------------------------
+
+/// Branch B must apply iff the live own-migration txn is STAGING with
+/// `generation_id = null` (no terminal record, lock acquirable) -- regardless of
+/// the gate. An absent `gate-state.json` reads as OPEN, so a gate-conditioned
+/// Branch B leaves the null-generation STAGING txn undiscarded and EVERY
+/// protected write blocked forever (VP-147 S6 no-permanent-self-lock).
+#[test]
+fn test_BC_1_18_011_PC6d_branch_b_applies_with_absent_or_open_gate_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+
+    for (gate_variant, label) in [
+        (None, "gate-state.json ABSENT"),
+        (Some("OPEN"), "gate explicitly OPEN"),
+    ] {
+        for (rel, mig) in [
+            (BC_PATH, Some("migrate-bc-index")),
+            (BC_PATH, None),
+            (CYCLES_PATH, Some("backfill-append-logs")),
+        ] {
+            let p = Project::new();
+            match gate_variant {
+                None => std::fs::remove_file(p.ms().join("gate-state.json")).unwrap(),
+                Some(g) => write_gate(&p.ms(), g),
+            }
+            write_txn(&p.ms(), "STAGING", None, mig);
+            let txn_path = p.ms().join("txn-act-s2508.json");
+            let target = p.abs(rel);
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("TBO"), edit_input(&target)),
+            );
+            let txn = p.txn_json();
+            let bytes_after_first = std::fs::read(&txn_path).unwrap_or_default();
+            if out.status.code() != Some(0)
+                || txn["state"] != "ABORTED"
+                || txn["abort_reason"] != "null_generation"
+                || !txn["generation_id"].is_null()
+                || !txn["source_sha256"].is_null()
+                || bytes_after_first.is_empty()
+            {
+                failures.push(format!(
+                    "[{label}, {rel}, migration_id={mig:?}] Branch B must apply with no gate \
+                     condition: expected admit (exit 0) and the SAME txn file rewritten in place \
+                     to ABORTED + abort_reason=null_generation, generation_id/source_sha256 null; \
+                     got exit {:?}, txn={txn}, stderr={}",
+                    out.status.code(),
+                    stderr_of(&out)
+                ));
+            }
+            // Second PreToolUse: txn byte-identical.
+            let out2 = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("TBO2"), edit_input(&target)),
+            );
+            if out2.status.code() != Some(0)
+                || std::fs::read(&txn_path).unwrap_or_default() != bytes_after_first
+            {
+                failures.push(format!(
+                    "[{label}, {rel}] second PreToolUse must admit and leave the txn \
+                     byte-identical; exit {:?}",
+                    out2.status.code()
+                ));
+            }
+        }
+
+        // EWOULDBLOCK negative control: live coordinator holds the lock => no action.
+        let p = Project::new();
+        match gate_variant {
+            None => std::fs::remove_file(p.ms().join("gate-state.json")).unwrap(),
+            Some(g) => write_gate(&p.ms(), g),
+        }
+        write_txn(&p.ms(), "STAGING", None, Some("migrate-bc-index"));
+        let _live = p.hold_lock();
+        let txn_path = p.ms().join("txn-act-s2508.json");
+        let before = std::fs::read(&txn_path).unwrap();
+        let target = p.abs(BC_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TBL"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains(&plain_msg("BC-INDEX"))
+            || std::fs::read(&txn_path).unwrap() != before
+            || p.reservation("TBL").exists()
+        {
+            failures.push(format!(
+                "[{label}] EWOULDBLOCK control: live coordinator => no action, plain BC-INDEX \
+                 block, txn untouched, no reservation; got exit {:?}, stderr={err}",
+                out.status.code()
+            ));
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_011_PC6d_branch_b_applies_with_absent_or_open_gate_blackbox",
+        failures,
+    );
+}

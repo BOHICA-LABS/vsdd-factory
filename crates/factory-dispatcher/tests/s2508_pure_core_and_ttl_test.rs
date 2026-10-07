@@ -496,3 +496,51 @@ fn test_BC_1_18_011_PC9_terminal_reconcile_record_absent_is_noop_for_staging_and
         }
     }
 }
+
+/// BC-1.18.011 v1.13 Pre 6(d) row 3: Branch B has NO gate condition. With the
+/// gate OPEN (an absent gate-state.json reads as OPEN), an own live
+/// null-generation STAGING txn, lock acquired and terminal record absent must
+/// still plan the Branch B abort-then-reopen; a lock-held (live coordinator)
+/// control plans no action.
+#[test]
+fn test_BC_1_18_011_PC6d_plan_branch_b_applies_with_gate_open() {
+    use factory_dispatcher::shard_manager::{
+        BcIndexAdmissionGateState, StaleGateReconciliationPlan, plan_stale_gate_reconciliation,
+    };
+    let inputs = TerminalReconcileInputs {
+        lock_acquired: true,
+        record_present: false,
+        txn_state: Some(BcIndexMigrationTxnState::Staging),
+        record_parses: false,
+        txn_id_eq: false,
+        generation_id_eq: false,
+        count_eq_n: false,
+        hashes_eq: [false; 4],
+        txn_is_own_migration: true,
+    };
+    for gate in [
+        BcIndexAdmissionGateState::Open,
+        BcIndexAdmissionGateState::Draining,
+        BcIndexAdmissionGateState::Locked,
+    ] {
+        assert_eq!(
+            plan_stale_gate_reconciliation(gate, &inputs, true),
+            StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate,
+            "Branch B must apply for gate {gate:?} (no gate condition)"
+        );
+    }
+    // generation assigned => not Branch B, regardless of gate.
+    assert_eq!(
+        plan_stale_gate_reconciliation(BcIndexAdmissionGateState::Open, &inputs, false),
+        StaleGateReconciliationPlan::NothingToReconcile
+    );
+    // live coordinator => no action.
+    let held = TerminalReconcileInputs {
+        lock_acquired: false,
+        ..inputs
+    };
+    assert_eq!(
+        plan_stale_gate_reconciliation(BcIndexAdmissionGateState::Open, &held, true),
+        StaleGateReconciliationPlan::LiveCoordinator
+    );
+}
