@@ -1,23 +1,26 @@
 ---
 document_type: epic
 epic_id: "E-6"
-version: "1.1"
+version: "1.2"
 prd_capabilities: [CAP-017]
 prd_frs: [FR-041]
 status: open
-story_count: 1
+story_count: 2
 producer: story-writer
 timestamp: 2026-04-25T00:00:00
 phase: 2
 inputs:
   - .factory/STATE.md
   - .factory/stories/S-6.01-create-adr-skill.md
-input-hash: "9f6e347"
+  - .factory/stories/S-6.02-workspace-toolchain-1-96-and-wasmtime-49-upgrade.md
+input-hash: "ac8cece"
 level: L3
 traces_to: .factory/STATE.md#D-005
-last_amended: "2026-08-30 (v1.1) — frontmatter normalization: add level: L3 (story-writer spec-hygiene sweep)"
+last_amended: "2026-10-07 (v1.2) — S-6.02 registered (story-writer): story_count 1→2; Stories table +S-6.02 row (draft, 8 pts, P2; workspace toolchain rustc 1.96 + wasmtime 49 upgrade, carved out of ADR-035 v1.2 §Decision 6); S-6.01 row status ready→merged (confirmed: STORY-INDEX S-6.01 merged; story file status: merged v1.6; develop commit 9dcc52b1 PR #7 'feat: create-adr skill ... (S-6.01)'); inputs +S-6.02. [Prior: 2026-08-30 (v1.1)]"
 modified:
   - "v1.0-initial"
+  - "v1.1 2026-08-30: frontmatter normalization (level: L3)"
+  - "v1.2 2026-10-07: S-6.02 registered (story_count 1→2); S-6.01 row ready→merged; inputs +S-6.02"
 ---
 
 # Epic E-6: VSDD Self-Improvement / Tooling Backlog
@@ -94,7 +97,8 @@ is complete with no gaps.
 
 | Story ID | Title | Points | Depends On | Status |
 |----------|-------|--------|-----------|--------|
-| S-6.01 | Add create-adr skill for ADR authoring | 3 | — | ready |
+| S-6.01 | Add create-adr skill for ADR authoring | 3 | — | merged |
+| S-6.02 | Workspace toolchain upgrade to rustc 1.96 + wasmtime 49 (carved out of ADR-035 v1.2 §Decision 6; predecessor is the wasmtime-48 security fix branch, not a story) | 8 | — | draft |
 | *(future)* | Additional tooling backlog stories TBD | — | — | — |
 
 ## Dependencies (External)
