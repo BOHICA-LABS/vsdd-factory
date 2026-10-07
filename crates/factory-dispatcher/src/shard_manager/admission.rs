@@ -54,8 +54,9 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnState,
-    StaleGateReconciliationPlan, TerminalReconcileInputs, WriterReservation, migrate_err_to_io,
+    AdmissionStateIntegrityKind, BcIndexAdmissionGateState, BcIndexMigrationError,
+    BcIndexMigrationTxnState, StaleGateReconciliationPlan, TerminalReconcileInputs,
+    WriterReservation, migrate_err_to_io,
     plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
     write_admission_gate_state,
 };
@@ -364,6 +365,20 @@ pub fn as_given_factory_root_spelling(raw: &std::ffi::OsStr) -> Option<PathBuf> 
         return None;
     }
     Some(lexical_normalize(&project_dir.join(".factory")))
+}
+
+/// The `detail` of a malformed-record failure: path plus the parse error's
+/// CATEGORY and position — never the serde message, which can echo record
+/// content (an unknown variant name, a literal) into the diagnostic.
+#[must_use]
+pub(crate) fn parse_failure_detail(path: &Path, e: &serde_json::Error) -> String {
+    format!(
+        "{}: {:?} error at line {} column {}",
+        sanitize_diagnostic(&path.display().to_string(), 256),
+        e.classify(),
+        e.line(),
+        e.column()
+    )
 }
 
 /// Maximum characters of an untrusted identifier echoed into a diagnostic.
@@ -886,8 +901,12 @@ pub(super) fn abort_null_generation_txn(
 ) -> Result<(), BcIndexMigrationError> {
     let mut raw = txn_raw.clone();
     let Some(object) = raw.as_object_mut() else {
-        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("txn record {} is not a JSON object", txn_path.display()),
+        return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
+                "{}: not a JSON object",
+                sanitize_diagnostic(&txn_path.display().to_string(), 256)
+            ),
         });
     };
     object.insert("state".to_string(), serde_json::json!("ABORTED"));
@@ -896,8 +915,12 @@ pub(super) fn abort_null_generation_txn(
         serde_json::json!(ABORT_REASON_NULL_GENERATION),
     );
     let json = serde_json::to_string_pretty(&raw).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize aborted txn record: {e}"),
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
+                "failed to serialize aborted txn record ({:?})",
+                e.classify()
+            ),
         }
     })?;
     // ONE atomic write-temp + fsync + rename + dir-sync (§7d): no observable
@@ -977,8 +1000,9 @@ impl AdmissionSnapshot {
         let first = live.next();
         if live.next().is_some() {
             let count = self.txns.iter().filter(|t| t.is_live()).count();
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!(
+            return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
+                detail: format!(
                     "found {count} coexisting LIVE (STAGING/COMMITTING) txn records -- the \
                      writer-exclusion invariant requires at most one active migration in flight \
                      at a time across both governed migrations"
@@ -1032,13 +1056,18 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
             source,
         })?;
         let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-            BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!("malformed txn record at {}: {e}", path.display()),
+            BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+                detail: parse_failure_detail(&path, &e),
             }
         })?;
         // Tier 0: a JSON object with a known `state` ...
-        let malformed = |detail: &str| BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("malformed txn record at {}: {detail}", path.display()),
+        let malformed = |detail: &str| BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
+                "{}: {detail}",
+                sanitize_diagnostic(&path.display().to_string(), 256)
+            ),
         };
         let Some(object) = raw.as_object() else {
             return Err(malformed("not a JSON object"));
@@ -1049,12 +1078,21 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
             .and_then(|v| serde_json::from_value(v).ok())
             .ok_or_else(|| malformed("state is absent or not a known txn state"))?;
         // ... and, if PRESENT, a string `migration_id` (a present non-string,
-        // including JSON `null`, is MALFORMED — never "foreign"; BC-1.18.013
-        // v1.8 EC-030). An ABSENT key reads as B2.
+        // including JSON `null`, is MALFORMED -- `E-MAINTENANCE-002`
+        // `state_integrity` -- never "foreign"; BC-1.18.013 v1.8 EC-030). An
+        // ABSENT key reads as B2.
         let migration_id = match object.get("migration_id") {
             None => MIGRATION_ID_B2.to_string(),
             Some(serde_json::Value::String(id)) => id.clone(),
-            Some(_) => return Err(malformed("migration_id is not a JSON string")),
+            Some(_) => {
+                return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                    kind: AdmissionStateIntegrityKind::TxnMigrationIdNotString,
+                    detail: format!(
+                        "{}: migration_id is not a JSON string",
+                        sanitize_diagnostic(&path.display().to_string(), 256)
+                    ),
+                });
+            }
         };
         files.push(TxnFile {
             path,
@@ -1087,8 +1125,12 @@ fn create_writer_reservation(
         tool_use_id: tool_use_id.to_string(),
     };
     let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize writer reservation: {e}"),
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::ReservationSerialization,
+            detail: format!(
+                "failed to serialize writer reservation ({:?})",
+                e.classify()
+            ),
         }
     })?;
     let path = reservations_dir.join(format!("{tool_use_id}.reservation"));
