@@ -544,3 +544,68 @@ fn test_BC_1_18_011_PC6d_plan_branch_b_applies_with_gate_open() {
         StaleGateReconciliationPlan::LiveCoordinator
     );
 }
+
+/// F-S2508-L1-005 (BC-1.18.011 Precondition 6(c): the coordinator waits for ALL
+/// in-flight admitted writers; since v1.7 `reservations/` exists before draining,
+/// so every read error is genuine): an UNREADABLE `reservations/` holding a live
+/// writer reservation must NOT be treated as quiescent. The drain must fail
+/// closed (not `Ok`), so the coordinator never proceeds to LOCKED/snapshot.
+/// Skipped (loudly) only as root, where chmod 000 does not restrict reads.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_011_PC6c_drain_fails_closed_on_reservations_read_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let uid = std::process::Command::new("id")
+        .arg("-u")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("id -u");
+    if String::from_utf8_lossy(&uid.stdout).trim() == "0" {
+        eprintln!(
+            "SKIP: running as root; chmod 000 does not restrict reads, so the read-error path is unobservable"
+        );
+        return;
+    }
+
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let ms = dir.path().join("migration-state");
+    let res_dir = ms.join("reservations");
+    // A live (fresh) admitted-writer reservation.
+    write_reservation(&res_dir, "T1", Some(&iso_ago(0)), 0);
+    // The coordinator has flipped DRAINING; the drain must never lead to LOCKED.
+    std::fs::write(ms.join("gate-state.json"), "\"DRAINING\"").unwrap();
+    let _restore = Restore(res_dir.clone());
+    std::fs::set_permissions(&res_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let r = drain_bc_index_writers(
+        &res_dir,
+        Duration::from_millis(150),
+        Duration::from_secs(3600),
+    );
+
+    assert!(
+        r.is_err(),
+        "an unreadable reservations/ with a live writer present must NOT be reported \
+         quiescent (drain returned {r:?}) -- the coordinator would proceed to LOCKED + \
+         snapshot while an admitted writer may be in flight"
+    );
+    // The drain itself never advances the gate, and the live reservation survives.
+    assert_eq!(
+        std::fs::read_to_string(ms.join("gate-state.json")).unwrap(),
+        "\"DRAINING\"",
+        "gate must never leave DRAINING (never LOCKED) on a failed drain"
+    );
+    std::fs::set_permissions(&res_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        res_dir.join("T1.reservation").exists(),
+        "the live writer's reservation must be untouched"
+    );
+}
