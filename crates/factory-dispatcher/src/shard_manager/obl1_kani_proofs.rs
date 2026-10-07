@@ -1020,6 +1020,18 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      ignored; with it absent the mtime is judged exactly as a created_at
 //      of that value; the drain GC never reclaims a live writer's
 //      reservation.
+//   S9 (VP-147 v1.2) the reservation namespace exists from the first
+//      protected write: the initial state may be the never-migrated project
+//      (no `.factory/migration-state/`); the admitter creates the namespace
+//      before its reservation; every admitted writer has a reservation
+//      inside an existing namespace, so a subsequent drain sees it.
+//      Claim boundary: this is a property of the MODELED admitter protocol.
+//      The scope guard that once short-circuited on an absent namespace sits
+//      in the effectful `executor::bc_index_migration_admission` (std::fs),
+//      outside Kani's domain; that call site, real `create_dir_all`
+//      idempotence, concurrent first-ever creation and EACCES/EROFS/ENOSPC
+//      fail-closed are carried by the black-box suite (VP-133 facet 7(d):
+//      `test_BC_1_18_013_EC020_*`).
 // ===========================================================================
 
 /// The SHIPPED reservation TTL (3,600 s) — the model checks the production
@@ -1142,8 +1154,25 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             mtime: h4x_time_at_most(now),
         },
     ];
+    // S9 (VP-147 v1.2): `.factory/migration-state/` (and so `reservations/`)
+    // may not exist yet — the never-migrated project. Then nothing under it
+    // exists either: no reservation, no txn, no terminal record, and the
+    // absent gate file reads OPEN.
+    let mut namespace_exists: bool = kani::any();
+    let never_migrated_initially = !namespace_exists;
+    if never_migrated_initially {
+        kani::assume(
+            !res[0].present
+                && !res[1].present
+                && txn.is_none()
+                && !terminal_record
+                && gate == BcIndexAdmissionGateState::Open,
+        );
+    }
 
     // Ghost state for the non-vacuity witnesses.
+    let mut first_ever_admission = false;
+    let mut drain_after_first_ever_admission = false;
     let mut ever_admitted = false;
     let mut admitted_after_selfheal = false;
     let mut snapshot_after_admission = false;
@@ -1171,6 +1200,11 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             // ---- W1: reserve FIRST ---------------------------------------
             0 => {
                 if writers[w].phase == H4xWriterPhase::Idle && !res[w].present {
+                    // S9: the admitter creates the namespace idempotently
+                    // (`create_dir_all`) BEFORE inserting its reservation;
+                    // there is no "namespace absent => admit without a
+                    // reservation" transition.
+                    namespace_exists = true;
                     res[w] = H4xReservation {
                         present: true,
                         created_at: if kani::any() { Some(now) } else { None },
@@ -1206,6 +1240,9 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                             !h4x_txn_live(txn),
                             "H4b/S3: no writer is admitted while a txn is STAGING/COMMITTING",
                         );
+                        if never_migrated_initially && !ever_admitted {
+                            first_ever_admission = true;
+                        }
                         writers[w].phase = H4xWriterPhase::Admitted;
                         ever_admitted = true;
                         if writers[w].reconciled {
@@ -1339,6 +1376,9 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             // ---- Coordinator start (acquire exclusive.lock) ---------------
             6 => {
                 if coord == H4xCoord::Absent && !terminal_record {
+                    // `run_bc_index_migration` creates the namespace (and
+                    // `reservations/`) before draining.
+                    namespace_exists = true;
                     if !h4x_txn_live(txn) {
                         coord = H4xCoord::LockHeld; // fresh run
                     } else if let Some(t) = txn
@@ -1358,12 +1398,19 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                 H4xCoord::Absent => {}
                 H4xCoord::LockHeld => {
                     // C1: durable DRAINING flip.
+                    if first_ever_admission {
+                        drain_after_first_ever_admission = true;
+                    }
                     gate = BcIndexAdmissionGateState::Draining;
                     coord = H4xCoord::Draining;
                 }
                 H4xCoord::Draining => {
                     // C2: read reservations/; LOCKED only when empty.
-                    if !res[0].present && !res[1].present {
+                    // A reservation is visible to the drain only inside the
+                    // namespace.
+                    if !(namespace_exists && res[0].present)
+                        && !(namespace_exists && res[1].present)
+                    {
                         gate = BcIndexAdmissionGateState::Locked;
                         coord = H4xCoord::Locked;
                     } else {
@@ -1515,8 +1562,12 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             lost_gate_state_healed = true;
         }
         s1_holds = s1_now;
-        for wr in writers.iter() {
+        for (i, wr) in writers.iter().enumerate() {
             if wr.phase == H4xWriterPhase::Admitted {
+                kani::assert(
+                    res[i].present && namespace_exists,
+                    "H4b/S9: every admitted writer has a reservation inside an existing namespace, visible to a subsequent drain",
+                );
                 kani::assert(
                     !h4x_txn_live(txn),
                     "H4b/S1 INV-GATE-TXN: no writer is admitted while a txn is STAGING/COMMITTING",
@@ -1531,6 +1582,10 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
 
     // ---- Non-vacuity witnesses -------------------------------------------
     kani::cover!(ever_admitted, "H4b non-vacuity: a writer is admitted");
+    kani::cover!(
+        drain_after_first_ever_admission,
+        "H4b/S9 non-vacuity: first-ever admission on a never-migrated project, then the coordinator's DRAINING flip"
+    );
     kani::cover!(
         blocked_by_txn_half_of_dual_check,
         "H4b non-vacuity: a writer that read OPEN was refused by the txn half of the dual check"
