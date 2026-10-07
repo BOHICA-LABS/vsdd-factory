@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 level: L3
 adr_id: ADR-047
-version: "1.6"
+version: "1.7"
 title: "ADR-047: INDETERMINATE Outcome Model — First-Class Cannot-Complete Outcome, Durable Mutation Marker, and Next-Advance Gate (Three-Layer Validation Integrity Architecture)"
 status: accepted
 date: 2026-08-30
@@ -15,7 +15,7 @@ supersedes: null
 superseded_by: ADR-048
 extends: ADR-039
 traces_to: .factory/specs/architecture/ARCH-INDEX.md
-last_amended: "2026-09-05 (v1.6) — Erratum-class plugin-name correction to §Decision 8a's Cohort B table (S-25.02 F2 architecture elaboration, architect-authored per orchestrator dispatch, co-amended in the same burst as ADR-051; NOT a POLICY 22 design/security-model change — no decision content, threshold, or normative prescription is altered, using the same erratum-class amendment process ADR-047 v1.5 itself set as precedent): the non-existent plugin name `validate-burst-log-structure` is corrected to the actual registered plugin `validate-burst-log` (specifically its `event=\"PostToolUse\" tool=\"^(Edit|Write|MultiEdit)$\"` arm, which scans burst-log.md content; the plugin's separate `tool=\"^Bash$\"` arm is an unrelated, exec-free git-commit chain-detection gate and is explicitly out of Cohort B scope). S-25.02's own AC-006 carries the same citation drift and is flagged as a product-owner BC-authorship input in ADR-051 and the companion S-25.02 F2 architecture-delta doc; this ADR does not modify the story body."
+last_amended: "2026-10-07 (v1.7) — Erratum-class factual refresh (architect; wasmtime security move per ADR-035 v1.2): Decision 1 implementation note's version statement updated (project now on wasmtime 48.x, >= 48.0.4; the `Trap::OutOfFuel`/`Trap::Interrupt` variants are unchanged). No decision altered. [Prior: 2026-09-05 (v1.6) — Erratum-class plugin-name correction to §Decision 8a's Cohort B table (S-25.02 F2 architecture elaboration, architect-authored per orchestrator dispatch, co-amended in the same burst as ADR-051; NOT a POLICY 22 design/security-model change — no decision content, threshold, or normative prescription is altered, using the same erratum-class amendment process ADR-047 v1.5 itself set as precedent): the non-existent plugin name `validate-burst-log-structure` is corrected to the actual registered plugin `validate-burst-log` (specifically its `event=\"PostToolUse\" tool=\"^(Edit|Write|MultiEdit)$\"` arm, which scans burst-log.md content; the plugin's separate `tool=\"^Bash$\"` arm is an unrelated, exec-free git-commit chain-detection gate and is explicitly out of Cohort B scope). S-25.02's own AC-006 carries the same citation drift and is flagged as a product-owner BC-authorship input in ADR-051 and the companion S-25.02 F2 architecture-delta doc; this ADR does not modify the story body.]"
 modified:
   - "2026-08-30 (v1.0) — Initial authoring"
   - "2026-08-30 (v1.1) — Human ratification: D9 extended gate to git commit/push Bash arm; D8a confirmed as-authored"
@@ -24,6 +24,7 @@ modified:
   - "2026-09-03 (v1.4) — Factual correction: Layer-1 effective fail-closed count corrected from ONE to ZERO for validate-factory-path-staging (structural PreToolUse/PostToolUse marker-write mismatch, BC-1.18.001 INV4); EFFECTIVE-NOW label softened to avoid overclaiming enforcement; v1.3 tool-pattern-fix changelog entry completed (event-type half was already correct in the body, only the changelog description was incomplete); ZERO-enforcement gap anchored to recommended follow-up story S-25.04. Not a POLICY 22 change — pure factual correction, no design content altered."
   - "2026-09-04 (v1.5) — Erratum-class clarification note appended to §Decision 8a's 'Known Gap' paragraph: corrects the loose 'artifact-write side' phrasing to cite BC-4.16.001 as validate-factory-path-staging's authoritative narrow git-staging-exclusivity behavior (not a content validator), and identifies the Known Gap's closure as new companion validate-factory-path-staged (BC-4.16.002, SS-04/CAP-034) under the human-ratified BROAD (unconditional, no command-text pre-filter) trigger scope. Not a POLICY 22 change — no decision content altered, wording/citation correction only."
   - "2026-09-05 (v1.6) — Erratum-class plugin-name correction to §Decision 8a's Cohort B table: `validate-burst-log-structure` (non-existent) corrected to `validate-burst-log` (Edit/Write arm only). Discovered during S-25.02 F1 delta analysis; co-amended alongside new ADR-051 (Layer-2 two-mechanism shard-rotation architecture). Not a POLICY 22 change — no decision content, threshold, or normative prescription altered, citation correction only."
+  - "2026-10-07 (v1.7) — Erratum-class factual refresh: Decision 1 implementation note wasmtime version statement 46.0.2 -> 48.x (>= 48.0.4) per ADR-035 v1.2 security move (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327); no decision altered"
 ---
 
 # ADR-047: INDETERMINATE Outcome Model — First-Class Cannot-Complete Outcome, Durable Mutation Marker, and Next-Advance Gate
@@ -612,7 +613,7 @@ The executor's classification of `PluginResult::Timeout` causes (fuel vs epoch) 
 the wasmtime `Trap` variant downcast, NOT a post-invocation `get_fuel()` check:
 
 - **Fuel exhaustion:** `trap.downcast_ref::<Trap>() == Some(Trap::OutOfFuel)` (wasmtime
-  `Trap::OutOfFuel` variant, stable across wasmtime 20.x–47.0.3; the project is on 46.0.2).
+  `Trap::OutOfFuel` variant, stable across wasmtime 20.x–48.x; the project is on 48.x (>= 48.0.4) per ADR-035 §Decision 6 v1.2, formerly 46.0.2).
 - **Epoch timeout:** `trap.downcast_ref::<Trap>() == Some(Trap::Interrupt)` (wasmtime
   `Trap::Interrupt` variant; corresponds to epoch deadline exceeded).
 - **Neither:** Any other `Trap` variant is NOT an INDETERMINATE signal for the

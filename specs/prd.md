@@ -1,10 +1,10 @@
 ---
 document_type: prd
 level: L3
-version: "1.5"
+version: "1.6"
 status: draft
 producer: product-owner
-timestamp: 2026-05-07T00:00:00Z
+timestamp: 2026-10-07T00:00:00Z
 phase: 1.5
 origin: brownfield
 inputs:
@@ -14,13 +14,11 @@ inputs:
   - .factory/specs/domain-spec/business-rules.md
   - .factory/specs/domain-spec/edge-cases.md
   - .factory/specs/architecture/ARCH-INDEX.md
-  - .factory/specs/behavioral-contracts/BC-INDEX.md
   - .factory/specs/dtu-assessment.md
   - .factory/phase-0-ingestion/pass-4-nfr-catalog.md
   - .factory/phase-0-ingestion/pass-8-final-synthesis.md
   - .factory/legacy-design-docs/2026-04-24-v1.0-factory-plugin-kit-design.md
-  - .factory/stories/ (48 stories, 9 epics)
-input-hash: "185754e"
+input-hash: "e75f6e1"
 traces_to: .factory/specs/domain-spec/L2-INDEX.md
 supplements: []
 # Supplements deferred — PRD body contains summary versions:
@@ -1381,7 +1379,7 @@ See `.factory/specs/prd-supplements/test-vectors.md` for tables with explicit in
 ### 9.1 Technical Constraints
 
 - **Rust compiler:** Edition 2024, rust-version 1.95 minimum (enforced in `rust-toolchain.toml`)
-- **wasmtime:** pinned at 44.0; WASI preview-1 only for v1.0 (preview-2 deferred to v2.0 per ADR-003)
+- **wasmtime:** pinned at the 48.x LTS line, minimum 48.0.4 (`wasmtime` and `wasmtime-wasi` in lockstep) per ADR-035 v1.2 Decision 6, clearing RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327; WASI preview-1 only for v1.0 (preview-2 deferred to v2.0 per ADR-003)
 - **opentelemetry-* crates:** pinned in lockstep at 0.31 (documented in Cargo.toml)
 - **Schema versioning:** `hooks-registry.toml` carries `schema_version = 2` (post-ADR-019; was 1 pre-2026-05-07); `observability-config.toml` carries `schema_version = 2` (post-ADR-015); `INTERNAL_EVENT_SCHEMA_VERSION = 1`; mismatch is a hard error
 - **HOST_ABI_VERSION = 1:** frozen at v1.0; breaking ABI change requires major version bump on dispatcher AND SDK simultaneously
@@ -1399,7 +1397,7 @@ Supported platforms: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x
 
 - **ASM-01:** Claude Code hook envelope format remains stable at PreToolUse/PostToolUse/SessionStart/Stop/SubagentStop event schema. The SDK's dual `event_name`/`hook_event_name` alias (BC-1.02.002) handles the known v0.79.x/v1.x spelling difference; future format changes require dispatcher update.
 - **ASM-02:** Operators have a working Rust toolchain ≥1.95 for plugin authoring; they do NOT need Rust to use the dispatcher (binaries are pre-built).
-- **ASM-03:** The wasmtime 44.x API surface is stable for the plugin ABI contract (HOST_ABI_VERSION = 1). A major wasmtime upgrade requires an ABI version bump.
+- **ASM-03:** The wasmtime 48.x API surface (minimum 48.0.4) is stable for the plugin ABI contract (HOST_ABI_VERSION = 1). A major wasmtime upgrade requires an ABI version bump. Rationale: ADR-035 v1.2 Decision 6 moves both `wasmtime` and `wasmtime-wasi` to the 48.x LTS line to clear RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 (46.x is EOL with no patch).
 - **ASM-04:** The legacy bash hooks will eventually be ported to native WASM; until then, `legacy-bash-adapter` remains the routing backbone. The two-routing-table state (DRIFT-004) is an accepted transitional anti-pattern resolved at 1.0 GA.
 
 ---
@@ -1584,7 +1582,7 @@ The following features must NOT appear in any story acceptance criteria or imple
 | FRs defined | 48 |
 | NFRs cataloged | 76 |
 | DTU status | DTU_REQUIRED: false |
-| PRD version | 1.5 (2026-09-13 — D-1222-DRIFT-001 pre-ratification cleanup: added Migration binary exit codes (MIG) and Migration window guards (MAINTENANCE) categories to §5.1 Error Category Summary to match prd-supplements/error-taxonomy.md. Previous: 1.4 (2026-05-13 — D-466 E-10 pass-12 fix burst F-3+F-6 closure (HH-4 regex-alternation discipline): §2.3 heading `Observability Sinks (SS-03)` → `Event Emission (OTel-Aligned) (SS-03)` per POLICY 6 canonical-name SoT). |
+| PRD version | 1.6 (2026-10-07 — wasmtime currency: §9.1 pin and ASM-03 updated from stale 44.x to the 48.x LTS line (min 48.0.4) per ADR-035 v1.2 Decision 6 / RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327. inputs: dropped two downstream entries (stories, non-path; behavioral-contracts/BC-INDEX.md) to restore a computable acyclic input-hash. Previous: 1.5 (2026-09-13 — D-1222-DRIFT-001 pre-ratification cleanup: added Migration binary exit codes (MIG) and Migration window guards (MAINTENANCE) categories to §5.1 Error Category Summary to match prd-supplements/error-taxonomy.md. Previous: 1.4 (2026-05-13 — D-466 E-10 pass-12 fix burst F-3+F-6 closure (HH-4 regex-alternation discipline): §2.3 heading `Observability Sinks (SS-03)` → `Event Emission (OTel-Aligned) (SS-03)` per POLICY 6 canonical-name SoT). |
 
 This PRD should be updated when:
 - A Tier E/F/G story ships and its FR status changes from `pending` to `shipped`

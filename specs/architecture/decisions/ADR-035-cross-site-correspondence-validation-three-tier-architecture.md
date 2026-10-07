@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 level: L3
 adr_id: ADR-035
-version: "1.1"
+version: "1.2"
 title: "ADR-035: Cross-site correspondence validation — three-tier architecture, fuel error taxonomy, and wasmtime version target"
 status: proposed
 date: 2026-07-30
@@ -24,10 +24,11 @@ anchors:
 subsystems_affected:
   - SS-01
   - SS-05
-last_amended: "2026-08-08 (v1.1) — AMENDED (architect, ADR-042): §Decision 5 fuel error taxonomy corrected — O(n) linear scan confirmed (R²=0.998790); ~100KB threshold corrected to ~136KB (10M cap) / ~327KB (20M cap); fuel budget raised to 20M per ADR-042 §Decision 1; loud exhaustion signaling mandated per ADR-042 §Decision 3; D-945 discharged. [Prior: 2026-07-30 (v1.0) — initial ruling (architect): three-tier cross-site correspondence validation architecture; fuel error taxonomy; wasmtime version target. Addresses 19 production failures across passes 28-30.]"
+last_amended: "2026-10-07 (v1.2) — AMENDED (architect; wasmtime security move): §Decision 6 rewritten — target 48.x (>= 48.0.4; 48 is an LTS major) for BOTH wasmtime and wasmtime-wasi, clearing RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 (46.x EOL, no patch; cargo-deny gate failing on every PR); 49.x deferred to a separate planned toolchain-upgrade (needs rustc 1.96 vs pinned 1.95); the v1.0/v1.1 \"47\" immediate target is superseded (workspace actually moved 44 -> 46.0.2/46.0.3 via S-21.12/E-22); §Alternatives LTS-pin entry re-targeted from 47.0.x to 48.x. [Prior: 2026-08-08 (v1.1) — AMENDED (architect, ADR-042): §Decision 5 fuel error taxonomy corrected — O(n) linear scan confirmed (R²=0.998790); ~100KB threshold corrected to ~136KB (10M cap) / ~327KB (20M cap); fuel budget raised to 20M per ADR-042 §Decision 1; loud exhaustion signaling mandated per ADR-042 §Decision 3; D-945 discharged. [Prior: 2026-07-30 (v1.0) — initial ruling (architect): three-tier cross-site correspondence validation architecture; fuel error taxonomy; wasmtime version target. Addresses 19 production failures across passes 28-30.]"
 modified:
   - "2026-07-30 (v1.0)"
   - "2026-08-08 (v1.1)"
+  - "2026-10-07 (v1.2)"
 ---
 
 # ADR-035: Cross-site correspondence validation — three-tier architecture, fuel error taxonomy, and wasmtime version target
@@ -222,23 +223,43 @@ already implemented via `EpochTicker` at 10ms/tick in `crates/factory-dispatcher
 
 ### Decision 6 — wasmtime version target
 
-`wasmtime = "44.0"` in the `[workspace.dependencies]` section of root `Cargo.toml` is out of
-support. The LTS cadence is major versions divisible by 12 at 24-month intervals (24.0.x,
-36.0.x, 48.0.x). Current stable is 47.0.2; next LTS is 48.0.x (not yet released as of this
-ADR).
+**v1.2 (2026-10-07) — current ruling.** Workspace `wasmtime` and `wasmtime-wasi` move to the
+**48.x line, minimum 48.0.4** (`"48.0.4"`, resolving to the latest 48.0.x patch; lockstep for both
+crates). 48 is an LTS major (LTS cadence: majors divisible by 12 at 24-month intervals — 24.x, 36.x,
+48.x), so the dispatcher's release-bundle longevity requirement is met.
 
-**Target line:**
-- **Immediate:** bump `wasmtime` and `wasmtime-wasi` workspace dependencies to `"47"` (current
-  stable; resolves out-of-support exposure; 3-major-version gap from 44 to 47 is manageable).
-- **Next LTS:** migrate to `"48"` when released (~2 months at 2-month cadence); 48.0.x carries
-  24-month LTS support and aligns with the dispatcher binary's release-bundle longevity
-  requirement.
+**Why:** 46.x is end-of-life with no patch release, and it carries open advisories
+RUSTSEC-2026-0316, -0314, -0321, -0322, -0323, -0324 and -0327. The `cargo-deny` advisories CI gate
+(added by S-21.12) fails on every PR while 46.x is pinned. 48.0.4+ clears all seven. Moving to 48
+rather than 47 skips a non-LTS interim major, which would itself reach EOL within the cadence window
+and require another forced move.
 
-Route to implementer. Not an architectural decision — a dependency version bump. Commission as
-a maintenance story. Required verification before merge: confirm no breaking API changes
-between 44 and 47 in the WASI preview-1 surface used by the dispatcher
-(`wasmtime-wasi`, store setup, fuel/epoch configuration surface used by `build_engine` and
-`invoke_plugin`).
+**Why not 49.x:** 49.x requires rustc 1.96; the workspace toolchain is pinned at 1.95
+(`rust-toolchain.toml` / per-crate `rust-version`; single-workspace-MSRV rule). Moving the toolchain
+is a cross-cutting change (CI images, MSRV, ASM-02 operator toolchain floor, hook-plugin WASM
+builds) and is a **separate planned toolchain-upgrade story**, not part of this security fix.
+
+**API migration (46 -> 48), sandbox semantics MUST be unchanged:**
+- `wasmtime_wasi::FilePerms` is renamed `FsPerms`.
+- `WasiCtxBuilder::preopened_dir` takes 3 args (`host_path`, `guest_path`, `FsPerms`) instead of 4
+  (`host_path`, `guest_path`, `DirPerms`, `FilePerms`).
+- Behavior-preservation rule: the preopen grant remains the exact equivalent of the prior
+  `DirPerms::all()` + `FilePerms::all()` (full read/write on the preopened directory). Widening or
+  narrowing the plugin filesystem capability is NOT part of this change; any future SEC-001 preopen
+  hardening (read-only preopens) is a separate decision and builds on the `FsPerms` API.
+- Fuel/epoch surface (`build_engine`, `invoke_plugin`, `Trap::OutOfFuel` / `Trap::Interrupt`
+  classification per ADR-047) must be re-verified green; no ABI change (`HOST_ABI_VERSION` stays 1).
+
+Route to implementer (dependency bump + mechanical API rename) with the existing S-21.12
+`Cargo.lock` version-gate test floor raised to `>= 48.0.4` (story-writer amends AC-008 / floor
+references). Required verification before merge: `cargo test --workspace --all-targets`, the bats
+suite, and `cargo deny check advisories` all green.
+
+**History (superseded rulings).** v1.0/v1.1 ruled "bump `44.0` to `47`, then 48 LTS when released"
+(RUSTSEC-2026-0149 out-of-support exposure). The workspace instead moved `44.0` -> `46.0.2` under
+S-21.12 / E-22 (RUSTSEC-2026-0188 + RUSTSEC-2026-0222) and then `46.0.3`; the 47 target was never
+adopted. This v1.2 ruling realizes the "migrate to 48 LTS" half of the original decision and makes
+it the target directly.
 
 ## Rationale
 
@@ -282,7 +303,7 @@ and requires no change.
 - Tier 2B generation provides a future path to eliminating the manual obligation entirely
   without requiring it to be built before shipping the validator.
 - Fuel exhaustion becomes observable (advisory log) rather than a silent validation bypass.
-- wasmtime upgrade resolves out-of-support exposure and aligns the dispatcher with the LTS
+- wasmtime upgrade to 48.x (LTS) resolves out-of-support exposure (and, per v1.2, RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327) and aligns the dispatcher with the LTS
   release track.
 - STORY-INDEX BC-version-pin exclusion from generation preserves reconciliation semantics,
   preventing a class of false "reconciled" appearances.
@@ -292,8 +313,9 @@ and requires no change.
 - Tier 2B requires future development effort (Rust binary, story TBD).
 - Tier 3 requires POLICY 21-compliant Rust workspace tests alongside gate specifications
   (Class C per-file fixtures, Class D-semantic scan logic).
-- wasmtime 44→47 migration requires verification of the WASI preview-1 API surface before
-  release; may require minor source updates in `crates/factory-dispatcher`.
+- wasmtime 46→48 migration (v1.2; originally 44→47) requires the `FilePerms`→`FsPerms` /
+  3-arg `preopened_dir` source update in `crates/factory-dispatcher` and verification that sandbox
+  semantics are unchanged; 49.x remains blocked on a separate rustc 1.96 toolchain upgrade.
 - Per-plugin `fuel_cap` registry field requires a TOML schema extension before it can be used
   without source changes.
 
@@ -319,12 +341,13 @@ validation results. Operators would have no way to distinguish "validator found 
 violation" from "validator ran out of fuel." The correct fix is observable advisory emission
 (§Decision 5), not a severity escalation that misrepresents the failure type.
 
-**Pin to wasmtime LTS 36.0.x instead of upgrading to 47.0.x:**
-Downgrade 8 major versions to the prior LTS for maximum support window. Rejected for the
-immediate step. A downgrade introduces API regression risk (8 majors of WASI preview-1 surface
-change) with uncertain gain — 36.0.x support is already well into its 24-month window.
-Upgrade to 47.0.x (current stable, 3-major gap) is the lower-risk path; LTS 48.0.x provides
-the long-term stable track in ~2 months.
+**Pin to wasmtime LTS 36.0.x instead of upgrading to 48.x (v1.2: re-targeted from 47.0.x):**
+Downgrade to the prior LTS for maximum support window. Rejected. A downgrade introduces API
+regression risk (multiple majors of WASI preview-1 surface change) with uncertain gain — 36.0.x
+support is already well into its 24-month window and would not clear the RUSTSEC-2026-0316/0314/
+0321/0322/0323/0324/0327 advisories on the upgrade path the workspace already took (44 -> 46).
+Upgrade to 48.0.4+ (the current LTS major) is the lower-risk path and provides the long-term
+stable track directly.
 
 **Use a narrow `list_matching(glob)` WASM host import for directory enumeration in Tier 2A:**
 Allow the WASM hook to enumerate BC files directly for Arm2. Rejected. BC-5.39.010 v1.1 Arm2
@@ -339,7 +362,7 @@ solution IF enumeration were required, but it is not required for the current de
 | BC-5.39.010 v1.1 Honest Gap section | Add note: fuel exhaustion silences the hook silently via `on_error = "continue"` at registry level; `max_bytes` limits are calibrated to keep artifact reads within 10M fuel budget for typical artifacts; fuel-exhausted invocation produces `TimeoutCause::Fuel` (no finding emitted, no block) — advisory emission added by implementer per §Decision 5 | product-owner (assess whether warrants v1.2 bump) |
 | `crates/factory-dispatcher/src/invoke.rs` | In `handle_plugin_err`, when `TimeoutCause::Fuel` is produced, emit host-level advisory log before returning `PluginResult::Timeout` | implementer |
 | `plugins/vsdd-factory/hooks-registry.toml` | (1) Audit `validate-factory-path-root` and `validate-input-hash` for large-artifact fuel risk; (2) add optional `fuel_cap` integer field to `[[hooks]]` schema | implementer |
-| Root `Cargo.toml` workspace dependencies | Bump `wasmtime` and `wasmtime-wasi` from `"44.0"` to `"47"` | implementer |
+| Root `Cargo.toml` workspace dependencies | Bump `wasmtime` and `wasmtime-wasi` to `"48.0.4"` (v1.2; was `"44.0"` -> `"47"` in v1.0/v1.1; workspace currently `"46.0.3"`), with `FilePerms`→`FsPerms` + 3-arg `preopened_dir` migration | implementer |
 | Tier 2B generator | New story: `generate-index-rows` Rust binary for BC-INDEX + STORY-INDEX derived cells | story-writer (TBD story ID) |
 | Tier 3 bats suite | New story: Class C count/enumeration + Class D-semantic finding-ID Rust workspace tests invoked by bats-full-suite | story-writer (TBD story ID) |
 | ARCH-INDEX.md | Insert ADR-035 row in decisions table | state-manager (post-ruling burst) |
@@ -356,6 +379,6 @@ solution IF enumeration were required, but it is not required for the current de
   exhaustion already distinct in code from wall-clock timeout
 - `InvokeLimits::default()` in `crates/factory-dispatcher/src/invoke.rs`:
   `fuel_cap: 10_000_000` default — per-plugin tuning not yet exposed in registry
-- `[workspace.dependencies]` in root `Cargo.toml`: `wasmtime = "44.0"`, out of support
+- `[workspace.dependencies]` in root `Cargo.toml`: `wasmtime = "44.0"` (v1.0 observation; out of support at the time — workspace subsequently moved to 46.0.3 and, per v1.2, to 48.0.4+)
 - `plugins/vsdd-factory/hooks-registry.toml`: `on_error = "block"` on
   `validate-factory-path-root` and `validate-input-hash`

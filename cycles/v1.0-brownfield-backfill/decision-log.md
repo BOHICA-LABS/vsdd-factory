@@ -2847,3 +2847,27 @@ Registration (state-manager): STORY-INDEX v4.479→v4.480 (S-25.08 row; S-25.06 
 **Registered versions:** BC-1.18.011 v1.14, BC-INDEX v5.104 (2,007 BCs), S-12.13 v1.1, E-25 epic v1.5, STORY-INDEX v4.482.
 
 | D-1247 | D-1247-BC-1.18.011-INPUTS-DELOOP-HYGIENE-S1213-V11-E25-V15-DRIFT-SCAN-TOTALS | BC-1.18.011 v1.14 drops downstream BC-INDEX.md from inputs (loop fix); 6 other BCs with the same loop (BC-1.18.012, BC-4.13.001, BC-5.39.009, BC-5.39.010, BC-5.40.001, BC-6.23.001) left for the pending drift-backlog human decision; S-12.13 v1.1, E-25 epic v1.5 registered; read-only drift scan TOTAL=2593 MATCH=1407 STALE=889 UNCOMPUTED=54 NOINPUT=243 PARTIAL~56 (OWED #2). | Hygiene / drift backlog | 2026-10-06 |
+
+## D-1248 — wasmtime 46→48.x security decision (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327) + NEW S-6.02 (rustc 1.96 + wasmtime 49) + third architect Edit/Write bypass (L-BB-D1245 recurrence x3)
+
+**Date:** 2026-10-07 (STATE.md v10.82→v10.83).
+
+**Context:** Seven RUSTSEC advisories against wasmtime 46.x (RUSTSEC-2026-0316, -0314, -0321, -0322, -0323, -0324, -0327) fail the cargo-deny advisories gate (added by S-21.12) on every PR; 46.x is end-of-life. The 49.x line requires rustc 1.96, which the workspace toolchain does not yet pin.
+
+**Decision (orchestrator-routed; architect/product-owner/story-writer-authored; state-manager registration):** (1) Move the wasmtime target to 48.x (>= 48.0.4) as the security fix; 49.x is DEFERRED to a separate toolchain-upgrade story. (2) ADR-035 v1.2 §Decision 6 is authoritative for the target; ADR-002 v1.1, ADR-003 v1.1, ADR-047 v1.7 (erratum) and ARCH-INDEX v4.49 aligned; prd.md v1.6 (ASM-03 + §9.1 -> 48.x; inputs de-cycled by dropping downstream stories + BC-INDEX entries). (3) Stories re-aligned: S-21.07 v1.23, S-21.19 v1.12, S-21.21 v1.11, S-21.22 v1.11, S-23.01 v1.1, S-25.03 v1.1, S-26.01/02/03 v1.1. (4) NEW S-6.02 (E-6; rustc 1.96 + wasmtime 49 upgrade; draft; 8 pts; v1.0; hash 603b573) carries the deferred 49.x move; its real predecessor is the wasmtime-48 fix branch `fix/wasmtime-48-rustsec-2026-0316` (local, in progress), not a story. (5) The cargo-deny advisories gate failure on develop blocks every PR's CI until the fix branch merges — recorded as an open Blocking Issue. (6) Process: the architect bypassed Edit/Write with a Python script a THIRD time this session (ADR-035; prior two VP-146/VP-133, D-1245); remediated by full Write re-validation; recurrence x3 appended to L-BB-D1245; S-12.16 recurrence count recorded, priority UNCHANGED pending human decision.
+
+**Registered versions:** ADR-035 v1.2, ADR-002 v1.1, ADR-003 v1.1, ADR-047 v1.7, ARCH-INDEX v4.49, prd.md v1.6, S-6.02 v1.0 (NEW), STORY-INDEX v4.483 (247 registered), BC-INDEX v5.105 (2,007 BCs; ARCH-INDEX BC-count cell synced 2,006->2,007).
+
+| D-1248 | D-1248-WASMTIME-48-SECURITY-DECISION-S602-NEW-ARCHITECT-BYPASS-X3 | wasmtime 46->48.x (>= 48.0.4) clears RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327; 49.x deferred to NEW S-6.02 (rustc 1.96); ADR-035 v1.2 Decision 6 authoritative; ADR-002/003/047/ARCH-INDEX/prd + 9 stories aligned; third architect Edit/Write bypass recorded (L-BB-D1245 x3). | wasmtime security fix | 2026-10-07 |
+
+## D-1249 — S-25.08 first-activation reservation gap closed (PO option (a): admitter always ensures `migration-state/reservations/` exists and reserves)
+
+**Date:** 2026-10-07 (STATE.md v10.82→v10.83).
+
+**Context:** S-25.08 first-activation race: the admission path's directory-absent no-op bypass left the first activation without a reservation namespace, so reserve-then-verify admission could be skipped when `migration-state/reservations/` did not yet exist.
+
+**Decision (product-owner option (a), architect-aligned):** the admitter ALWAYS idempotently ensures `migration-state/reservations/` exists before W1 and reserves; the directory-absent no-op bypass is removed; creation failure is fail-closed. BC-1.18.011 v1.15 (Precondition 6(c) unconditional reservation namespace; EC-015 + 2 test vectors), BC-1.18.013 v1.7 (EC-020 + 3 test vectors), ADR-052 v1.19 (§5a step 0), VP-133 v1.3, VP-146 v1.3, VP-147 v1.2, VP-INDEX v3.27, verification-architecture v1.40, verification-coverage-matrix v1.38; error-taxonomy hash-only refresh. [D-1244-REVERIFY] scope unchanged (re-verification of B2 obl1 Kani VP-147 + VP-146 + VP-143 against the amended model remains required before merge).
+
+**Registered versions:** BC-1.18.011 v1.15, BC-1.18.013 v1.7, ADR-052 v1.19, VP-133 v1.3, VP-146 v1.3, VP-147 v1.2, VP-INDEX v3.27, verification-architecture v1.40, verification-coverage-matrix v1.38, BC-INDEX v5.105.
+
+| D-1249 | D-1249-S2508-FIRST-ACTIVATION-RESERVATION-GAP-OPTION-A | S-25.08 first-activation reservation gap: admitter always ensures `migration-state/reservations/` exists and reserves (no directory-absent bypass; fail-closed). BC-1.18.011 v1.15 (EC-015), BC-1.18.013 v1.7 (EC-020), ADR-052 v1.19, VP-133 v1.3, VP-146 v1.3, VP-147 v1.2, VP-INDEX v3.27. | S-25.08 F4 TDD | 2026-10-07 |

@@ -1,8 +1,13 @@
 ---
 document_type: adr
 adr_id: ADR-002
+version: "1.1"
 status: accepted
 date: 2026-04-24
+last_amended: "2026-10-07 (v1.1) — architect: wasmtime / wasmtime-wasi pin updated 44.0 -> 48.x (>= 48.0.4) per security fix (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327); see ADR-035 §Decision 6 v1.2. [Prior: 2026-04-24 (v1.0) — initial ruling.]"
+modified:
+  - "2026-04-24 (v1.0)"
+  - "2026-10-07 (v1.1)"
 subsystems_affected: [SS-01, SS-02, SS-04]
 supersedes: null
 superseded_by: null
@@ -23,8 +28,10 @@ rebuild and release, blocking third-party experimentation.
 ## Decision
 
 Each hook plugin is a `.wasm` module compiled to `wasm32-wasip1`. The dispatcher
-loads and executes plugins via `wasmtime = "44.0"` + `wasmtime-wasi = "44.0"`
-(pinned lockstep in `Cargo.toml [workspace.dependencies]`). Rust is the reference
+loads and executes plugins via `wasmtime = "48.0.4"` + `wasmtime-wasi = "48.0.4"`
+(minimum 48.0.4, resolving to the latest 48.0.x patch; pinned lockstep in
+`Cargo.toml [workspace.dependencies]`; the concrete line is governed by ADR-035
+§Decision 6 v1.2 — the pin was `"44.0"` at v1.0, then `"46.0.3"` before the 48.x security move). Rust is the reference
 plugin authoring language via the `hook-sdk` crate and the `#[hook]` proc-macro.
 The plugin ABI is the WASI preview-1 stdio boundary plus `vsdd::*` host function
 imports registered by the dispatcher's wasmtime `Linker`.
@@ -59,7 +66,9 @@ surface for plugin authors and adds cognitive overhead.
 ### Negative / Trade-offs
 - Plugins cannot access the network directly; must use cap-gated `exec_subprocess`
   to shell out. WASI preview-2 (wasi-http, wasi-sockets) deferred to v2.0 per ADR-003.
-- `wasmtime = "44.0"` pinning creates upgrade friction when wasmtime makes breaking changes.
+- Exact-line wasmtime pinning (`"48.0.4"`; was `"44.0"` at v1.0) creates upgrade friction when wasmtime makes
+  breaking changes — realized in the 46 -> 48 move (WASI `FilePerms` renamed `FsPerms`;
+  `WasiCtxBuilder::preopened_dir` 4 -> 3 args; sandbox semantics unchanged — see ADR-035 §Decision 6 v1.2).
 - Plugin debugging requires WASI-aware tooling.
 
 ### Status as of v1.0.0-beta.4
@@ -74,6 +83,13 @@ triple `wasm32-wasip1` confirmed in `crates/hook-sdk/` and `crates/hook-plugins/
 - **Monolithic Rust:** Rejected: inhibits third-party hooks; requires dispatcher rebuild
   per hook change.
 - **Embedded scripting (Rhai/Lua):** Rejected: unfamiliar language for plugin authors.
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| 1.1 | 2026-10-07 | Pin updated to `wasmtime`/`wasmtime-wasi` 48.x (>= 48.0.4) — clears RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 (46.x is EOL, no patch). 49.x deferred to a separate toolchain-upgrade story (requires rustc 1.96; pinned 1.95). Decision rationale: ADR-035 §Decision 6 v1.2. Plugin ABI (`wasm32-wasip1` + `vsdd::*` imports) and `HOST_ABI_VERSION` unchanged. |
+| 1.0 | 2026-04-24 | Initial ruling; `wasmtime = "44.0"` + `wasmtime-wasi = "44.0"` |
 
 ## Source / Origin
 
