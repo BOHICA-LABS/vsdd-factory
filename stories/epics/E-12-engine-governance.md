@@ -1,7 +1,7 @@
 ---
 document_type: epic
 epic_id: "E-12"
-version: "1.5"
+version: "1.6"
 title: "Engine Governance — Per-Story Adversarial Convergence Discipline + WASM-Plugin Context Resolver Platform"
 status: draft
 prd_capabilities: [CAP-008, CAP-016, CAP-026]
@@ -9,7 +9,7 @@ prd_frs: []
 anchor_strategy: greenfield-discipline-gap-codification
 priority: P1
 target_release: "v1.0-feature-engine-discipline-pass-1"
-story_count: 10
+story_count: 12
 subsystems_affected: [SS-01, SS-04, SS-05]
 producer: product-owner
 timestamp: 2026-05-06T00:00:00Z
@@ -17,13 +17,13 @@ phase: 2
 level: L3
 traces_to: .factory/specs/architecture/decisions/ADR-017-per-story-adversary-phasing.md
 depends_on: ["E-7"]
-last_amended: "2026-09-11 (v1.5) — story_count 9→10: S-12.13 registered (E-SHD Display-parity lint gate + stale-narrative gate, 5 pts, P1, backlog; supersedes S-12.11 stub; cluster-4 re-cascade fix-wave-2, D-1210)"
+last_amended: "2026-10-07 (v1.6) — story_count 10→12 (story-writer; human decisions 2026-10-07): S-12.16 authored in full (Block Bash-mediated writes to governed `.factory/` artifacts — hook-level enforcement; 8 pts, P1, draft; lesson L-BB-D1245 / process-gap D-1245-PG-001; sequenced immediately after S-25.08 merges, ahead of S-25.06 and S-25.02 cluster 6) and S-12.17 registered (Single-writer guard: no concurrent `.factory/` writers during a state-manager burst; 5 pts, P1, draft; process-gap D-1251-PG-001 / lesson L-BB-D1251-concurrent-spec-writers-during-state-burst). Both Stories Planned rows added. NOTE: S-12.09..S-12.15 are tracked in STORY-INDEX only and are not rows of this table (pre-existing omission; story_count here counts S-12.01..S-12.08, S-15.03, S-12.13 + the two new rows). Changelog rows v1.4/v1.5 backfilled for the frontmatter versions that advanced without rows. | (v1.5) — story_count 9→10: S-12.13 registered (E-SHD Display-parity lint gate + stale-narrative gate, 5 pts, P1, backlog; supersedes S-12.11 stub; cluster-4 re-cascade fix-wave-2, D-1210)"
 inputs:
   - .factory/specs/architecture/decisions/ADR-017-per-story-adversary-phasing.md
   - .factory/specs/architecture/ARCH-INDEX.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
   - .factory/stories/epics/E-7-process-codification.md
-input-hash: "11a7203"
+input-hash: "cb0e8ce"
 modified:
   - "v1.3 2026-05-08: F-P22-003/004/005 subsystem swap fixed, frontmatter synced"
 ---
@@ -111,6 +111,8 @@ SS-05 artifacts (`plugins/vsdd-factory/agents/`, `plugins/vsdd-factory/workflows
 | S-12.07 | vsdd-context-resolvers crate + WaveContextResolver (first concrete resolver) | M | SS-04 | S-12.04, S-12.05 | draft |
 | S-12.08 | Migrate validate-per-story-adversary-convergence to consume plugin_config.wave_context.stories (closes F-P2-001) | M | SS-04 | S-12.07 | draft |
 | S-15.03 | ARCH-INDEX Cite-Refresh Hook + Lessons Retroactive-Sweep Verification (validate-index-cite-refresh hook; validate-lesson-retroactive-sweep hook) | M | SS-01, SS-04 | — | draft |
+| S-12.16 | Block Bash-mediated writes to governed `.factory/` artifacts — dispatcher-native Bash write-effect guard reusing S-25.08's `resolve_target_path` + sibling agent-prompt sweep (POL-3 / TD-FACTORY-HOOK-BYPASS-001 enforcement; human-directed priority: runs immediately after S-25.08 merges, ahead of S-25.06 and S-25.02 cluster 6) | L (8 pts) | SS-01, SS-07 | S-25.08 | draft |
+| S-12.17 | Single-writer guard — no concurrent `.factory/` writers during a state-manager burst (burst-in-flight marker + PreToolUse:Agent / SubagentStop hook + orchestrator/state-manager prompt amendments; POLICY 3 enforcement; process-gap D-1251-PG-001) | M (5 pts) | SS-04, SS-05, SS-07 | — | draft |
 
 ## Dependency Topology (Intra-epic)
 
@@ -196,6 +198,9 @@ The pattern is identical; the discipline gap is distinct.
 | v1.1 | 2026-05-07 | F3-amendment (D-366): scope widened from 'per-story adversary workflow' to 'engine governance platform'. 6 new stories added (S-12.03..S-12.08; WASM-plugin Context Resolver platform). story_count 2→8. New BCs: BC-1.13.001 (SS-01) + BC-4.12.001-005 (SS-04). New ADR: ADR-018. New VPs: VP-073-076. subsystems_affected expanded to include SS-01. Dependency graph established: S-12.06 → {S-12.03, S-12.05} → S-12.04 → S-12.07 → S-12.08. Bootstrap pattern flipping right-side-up: S-12.03..S-12.08 are first stories in cycle history subject to Step 4.5 per-story adversary convergence. |
 | v1.2 | 2026-05-08 | F-P21-003 (fix-burst-20): S-15.03 re-anchored from E-15 (Plugin Async Semantics — incorrect) to E-12 (Engine Governance — correct per governance/discipline scope alignment). S-15.03 subsystems [SS-04] → [SS-01, SS-04]. story_count 8→9. No change to subsystems_affected (SS-01 already present from v1.1). Refs: F-P21-003, L-P21-002. |
 | v1.3 | 2026-05-08 | F-P22-003/004/005 + L-P21-002 retroactive sweep: Stories Planned table subsystem swap corrected for S-12.03 (SS-04→SS-01) and S-12.06 (SS-01→SS-04). Frontmatter `version:` bumped 1.0→1.3 (was stale; body already at 1.2 in fix-burst-20). Frontmatter `title:` synced to match H1 (added "+ WASM-Plugin Context Resolver Platform" suffix from v1.1 F3-amendment). L-P21-002 retroactive sweep on all 9 stories: S-12.01/02/04/05/06/07/08/S-15.03 verified clean; S-12.03 SS drift was the sole finding (covered by F-P22-003 fix above). Refs: F-P22-003, F-P22-004, F-P22-005, L-P21-002, L-P19-001. |
+| v1.4 | (backfill, date not recorded) | Frontmatter `version:` advanced to 1.4 with no changelog row (pre-existing gap recorded by the v1.6 propagation; content of the v1.4 change is not recoverable from this file — see git history of `.factory/stories/epics/E-12-engine-governance.md`). |
+| v1.5 | 2026-09-11 | story_count 9→10: S-12.13 registered (E-SHD Display-parity lint gate + stale-narrative gate, 5 pts, P1, backlog; supersedes S-12.11 stub; cluster-4 re-cascade fix-wave-2, D-1210) — row backfilled from the frontmatter `last_amended`. |
+| v1.6 | 2026-10-07 | story_count 10→12 (story-writer; human decisions 2026-10-07): S-12.16 authored in full (Bash-mediated-write guard; sequenced after S-25.08, ahead of S-25.06 / S-25.02 cluster 6) and S-12.17 registered (single-writer guard during state-manager bursts; D-1251-PG-001). Stories Planned rows added; S-12.09..S-12.15 remain STORY-INDEX-only (pre-existing omission noted). |
 
 ## Amendment 2026-05-08 (v1.2 → v1.3)
 

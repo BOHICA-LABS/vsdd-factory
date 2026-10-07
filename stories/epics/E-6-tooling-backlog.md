@@ -1,11 +1,11 @@
 ---
 document_type: epic
 epic_id: "E-6"
-version: "1.2"
+version: "1.3"
 prd_capabilities: [CAP-017]
 prd_frs: [FR-041]
 status: open
-story_count: 2
+story_count: 3
 producer: story-writer
 timestamp: 2026-04-25T00:00:00
 phase: 2
@@ -13,14 +13,16 @@ inputs:
   - .factory/STATE.md
   - .factory/stories/S-6.01-create-adr-skill.md
   - .factory/stories/S-6.02-workspace-toolchain-1-96-and-wasmtime-49-upgrade.md
-input-hash: "ac8cece"
+  - .factory/stories/S-6.03-input-hash-drift-backlog-owner-review-then-recompute.md
+input-hash: "998c011"
 level: L3
 traces_to: .factory/STATE.md#D-005
-last_amended: "2026-10-07 (v1.2) — S-6.02 registered (story-writer): story_count 1→2; Stories table +S-6.02 row (draft, 8 pts, P2; workspace toolchain rustc 1.96 + wasmtime 49 upgrade, carved out of ADR-035 v1.2 §Decision 6); S-6.01 row status ready→merged (confirmed: STORY-INDEX S-6.01 merged; story file status: merged v1.6; develop commit 9dcc52b1 PR #7 'feat: create-adr skill ... (S-6.01)'); inputs +S-6.02. [Prior: 2026-08-30 (v1.1)]"
+last_amended: "2026-10-07 (v1.3) — S-6.03 registered (story-writer; human decision 2026-10-07, STATE.md OWED #2): story_count 2→3; Stories table +S-6.03 row (draft, 13 pts, P2; input-hash drift backlog — owner-review-then-recompute of ~1,000 stale/partial artifacts split by owner, plus de-looping the six BCs that list BC-INDEX.md as an input; depends_on the non-merged E-25 stories S-25.02/03/05/06/07/08 — scheduled after E-25 completes); inputs +S-6.03. E-6 chosen over E-13 (single-ADR-016 path-discipline epic) because the work is tooling + process hygiene about the factory's own authoring workflow (`compute-input-hash`, `check-input-drift`). | (v1.2) — S-6.02 registered (story-writer): story_count 1→2; Stories table +S-6.02 row (draft, 8 pts, P2; workspace toolchain rustc 1.96 + wasmtime 49 upgrade, carved out of ADR-035 v1.2 §Decision 6); S-6.01 row status ready→merged (confirmed: STORY-INDEX S-6.01 merged; story file status: merged v1.6; develop commit 9dcc52b1 PR #7 'feat: create-adr skill ... (S-6.01)'); inputs +S-6.02. [Prior: 2026-08-30 (v1.1)]"
 modified:
   - "v1.0-initial"
   - "v1.1 2026-08-30: frontmatter normalization (level: L3)"
   - "v1.2 2026-10-07: S-6.02 registered (story_count 1→2); S-6.01 row ready→merged; inputs +S-6.02"
+  - "v1.3 2026-10-07: S-6.03 registered (story_count 2→3); Stories table +S-6.03 row; inputs +S-6.03"
 ---
 
 # Epic E-6: VSDD Self-Improvement / Tooling Backlog
@@ -99,6 +101,7 @@ is complete with no gaps.
 |----------|-------|--------|-----------|--------|
 | S-6.01 | Add create-adr skill for ADR authoring | 3 | — | merged |
 | S-6.02 | Workspace toolchain upgrade to rustc 1.96 + wasmtime 49 (carved out of ADR-035 v1.2 §Decision 6; predecessor is the wasmtime-48 security fix branch, not a story) | 8 | — | draft |
+| S-6.03 | Input-hash drift backlog — owner-review-then-recompute of ~1,000 stale/partial artifacts (split by owner) + de-loop the six BCs listing BC-INDEX.md as an input; scheduled after E-25 completes | 13 | S-25.02, S-25.03, S-25.05, S-25.06, S-25.07, S-25.08 | draft |
 | *(future)* | Additional tooling backlog stories TBD | — | — | — |
 
 ## Dependencies (External)

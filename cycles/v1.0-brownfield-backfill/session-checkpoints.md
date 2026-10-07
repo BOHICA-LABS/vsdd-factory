@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "51919eb"
+input-hash: "e51cc48"
 traces_to: STATE.md
 ---
 
@@ -2390,3 +2390,9 @@ Full verbatim text recoverable via `git -C .factory show 4043e128:STATE.md` (sec
 Full verbatim text recoverable via `git -C .factory show ee19219d:STATE.md` (section "Session Resume Checkpoint"). Position at the time: develop `117dafdf`, main `51023185`, merged_count 123; S-25.06 SPLIT into NEW S-25.08 (8 pts, ready) + S-25.06 v1.6 (13 pts); ADR-052 v1.18 formal-finding exception approved (D-1244); BC-1.18.013 v1.5, BC-1.18.011 v1.12, VP-147 NEW, VP-INDEX v3.26, BC-INDEX v5.102, STORY-INDEX v4.480, error-taxonomy v1.34; NEXT was S-25.08 delivery (worktree from develop; test-writer T-1/T-2).
 
 **See STATE.md v10.81 for the current checkpoint.**
+
+## Session Resume Checkpoint (2026-10-07 — S2508-LOCAL-ADV-PASS1-ADR052-V120-REGISTRATION v10.84→v10.85), superseded by v10.86 (D-1252)
+
+Full verbatim text recoverable via `git -C .factory show f3537cd6:STATE.md` (section "Session Resume Checkpoint"). Position at the time: develop `ce2421be`, main `51023185`, merged_count 123; S-25.08 TDD in progress on local `feature/S-25.08` (`.worktrees/S-25.08`, HEAD `c5c72585`) with LOCAL adversary pass 1 NOT CLEAN (9 findings, streak 0/3) and the implementer green batch in progress; S-25.06 blocked on S-25.08; ADR-052 v1.20, BC-1.18.013 v1.9, BC-1.18.011 v1.17, error-taxonomy v1.38, BC-INDEX v5.106, VP-INDEX v3.29, ARCH-INDEX v4.50, STORY-INDEX v4.485; NEXT was the implementer green batch then adversary pass 2.
+
+**See STATE.md v10.86 for the current checkpoint.**

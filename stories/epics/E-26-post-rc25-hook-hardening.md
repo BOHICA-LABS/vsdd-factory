@@ -3,13 +3,13 @@ document_type: epic
 level: L3
 traces_to: .factory/stories/STORY-INDEX.md
 epic_id: "E-26"
-version: "v1.0"
+version: "v1.1"
 status: draft
 title: "Post-rc.25 Hook Hardening — deployment-drift release (#837) + three current-source hook defects (#838/#839/#840) + verify-state-timestamp-refresh Stage-2 crate removal (ADR-046 §Decision 5) + fuel-cap release carry (ADR-042), shipped via rc.26"
 prd_capabilities: []
 subsystems_affected: [SS-01, SS-04, SS-05]
 target_release: "v1.0.0-rc.26"
-story_count: 5
+story_count: 6
 producer: story-writer
 timestamp: "2026-09-19T00:00:00Z"
 phase: 3
@@ -21,6 +21,7 @@ inputs:
   - .factory/stories/S-26.03-pr-manager-completion-guard-dispatch-mode-awareness.md
   - .factory/stories/S-26.04-remove-verify-state-timestamp-refresh-crate.md
   - .factory/stories/S-26.05-cut-rc26-release.md
+  - .factory/stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md
   - .factory/specs/architecture/decisions/ADR-046-posttooluse-hook-authored-statemd-wall-clock-stamping-timestamp-lock-keep-alive.md
   - .factory/specs/architecture/decisions/ADR-042-validate-cross-site-correspondence-fuel-budget-raise-and-loud-exhaustion-signaling.md
   - .factory/specs/behavioral-contracts/ss-04/BC-4.17.001.md
@@ -30,10 +31,11 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-07/BC-7.03.047.md
   - .factory/specs/behavioral-contracts/ss-07/BC-7.03.048.md
   - .factory/specs/behavioral-contracts/ss-05/BC-5.40.001.md
-input-hash: "65ca8f9"
-last_amended: "2026-09-19 (v1.0) — Initial authoring (story-writer, planning/authoring dispatch, human-directed): epic created from four GitHub issues (#837/#838/#839/#840) filed 2026-09-19 against the live jira-cli product running the vsdd-factory plugin at 1.0.0-rc.25. Two-axis defect classification; rc.26 release vehicle; 5 child stories registered as draft stubs pending BC authorship and sequencing dispatch. input-hash \"65ca8f9\" is the value the validate-input-hash PostToolUse guard itself computed and reported at write time (story-writer's tool access is Read/Write/Edit/apply_patch only — no exec/process — and cannot run `compute-input-hash` directly; the value was taken verbatim from the guard's block_reason drift report). State-manager should still re-run `compute-input-hash E-26-post-rc25-hook-hardening.md --update` at the registration burst to confirm/refresh it."
+input-hash: "8f68a2c"
+last_amended: "2026-10-07 (v1.1) — S-26.06 registered (story-writer; human decision 2026-10-07): story_count 5→6; Stories table +S-26.06 (Route dispatcher diagnostics through InternalLog — ~65 `tracing::*!` sites in `crates/factory-dispatcher` are discarded in production because no subscriber is installed; 8 pts, P1, draft; depends_on S-25.08, which establishes the InternalLog admission pattern); inputs +S-26.06; Dependencies (External) records the cross-epic S-25.08 edge. E-26 chosen over E-6 (SS-06/08/10 tooling backlog) because the defect is a shipped dispatcher/hook-chain hardening defect (silent loss of operator diagnostics). S-26.06 is intentionally NOT added to S-26.05's depends_on — whether it rides rc.26 or the next release train is a human release-planning decision. | (v1.0) — Initial authoring (story-writer, planning/authoring dispatch, human-directed): epic created from four GitHub issues (#837/#838/#839/#840) filed 2026-09-19 against the live jira-cli product running the vsdd-factory plugin at 1.0.0-rc.25. Two-axis defect classification; rc.26 release vehicle; 5 child stories registered as draft stubs pending BC authorship and sequencing dispatch. input-hash \"65ca8f9\" is the value the validate-input-hash PostToolUse guard itself computed and reported at write time (story-writer's tool access is Read/Write/Edit/apply_patch only — no exec/process — and cannot run `compute-input-hash` directly; the value was taken verbatim from the guard's block_reason drift report). State-manager should still re-run `compute-input-hash E-26-post-rc25-hook-hardening.md --update` at the registration burst to confirm/refresh it."
 modified:
   - "v1.0 2026-09-19: Initial creation (story-writer, planning-only dispatch)"
+  - "v1.1 2026-10-07: S-26.06 registered (story_count 5→6); Stories table +S-26.06; inputs +S-26.06; cross-epic dependency on S-25.08 recorded"
 ---
 
 # Epic E-26: Post-rc.25 Hook Hardening
@@ -189,6 +191,7 @@ NOT YET AUTHORED — each is called out in the owning story below and must land
 | S-26.03 | `pr-manager-completion-guard` dispatch-mode awareness + stop-loop fix | W1 | 8 | #838 | BC-7.03.045, BC-7.03.046, BC-7.03.047, BC-7.03.048 |
 | S-26.04 | Remove dormant `verify-state-timestamp-refresh` crate (ADR-046 §Decision 5 Stage 2) | W1 | 3 | — (ADR-046 follow-up, no GH issue) | BC-5.40.001 (VP retirement only) |
 | S-26.05 | Cut rc.26 release (ships #837 + AXIS-2 batch + removal + fuel-cap) | W2 | 3 | #837 (release alone); full batch requires S-26.01..S-26.04 merged first | — (release-process story, no BC) |
+| S-26.06 | Route dispatcher diagnostics through InternalLog (~65 discarded `tracing::*!` sites; no subscriber installed) — depends_on S-25.08 (cross-epic; follows S-25.08 merge) | W2-parallel (independent of S-26.01..S-26.05; NOT a dependency of S-26.05) | 8 | — (human decision 2026-10-07; ADR-052 §5a (6) follow-up, no GH issue) | pending PO amendment (BC-3.08.001 event catalog + a dispatcher-diagnostics contract) |
 
 **Total:** 5 stories, 27 story points.
 
@@ -239,6 +242,7 @@ parallel-eligible) → W2 {S-26.05}.
 | System | Capability Needed | Readiness |
 |--------|------------------|-----------|
 | None | E-26 is self-contained within the vsdd-factory codebase (`crates/hook-plugins/`, `crates/factory-dispatcher/`, `plugins/vsdd-factory/`). No external systems, APIs, or third-party services are required. | N/A |
+| S-25.08 (E-25; internal cross-epic edge, v1.1) | S-26.06 generalizes the InternalLog admission-diagnostics pattern S-25.08 AC-022 establishes (constants in `internal_log.rs`, diagnostics-as-data, `main.rs` drain) | S-25.08 in progress (local adversary cascade); S-26.06 starts after it merges |
 
 ## Out of Scope
 
@@ -282,4 +286,5 @@ sole authoritative title (POLICY 7); abbreviations are non-normative.
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| v1.1 | 2026-10-07 | story-writer | S-26.06 registered (human decision 2026-10-07): story_count 5→6; Stories table row; inputs +S-26.06; cross-epic dependency S-25.08 recorded in Dependencies (External); NOT added to S-26.05's dependencies. |
 | v1.0 | 2026-09-19 | story-writer | Initial creation. Planning/authoring-only dispatch (human-directed). 5 stories S-26.01..S-26.05 spanning SS-01/SS-04/SS-05. 2 waves; 27 pts. No new PRD capabilities. BC-4.17.001, BC-4.16.001, BC-7.03.045..048 amendments flagged for PO routing (S-26.01/S-26.02/S-26.03); BC-5.40.001 directed reconciliation flagged for S-26.04. |

@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "ef88a4f"
+input-hash: "e51cc48"
 traces_to: STATE.md
 ---
 
@@ -2303,3 +2303,64 @@ D-1251, v10.84→v10.85. Single-commit TD-VSDD-053 registration burst (state-man
 **Closes:** none (registration only; pass-1 findings remain open until pass-2/3-CLEAN).
 
 Summary: Persisted the S-25.08 LOCAL adversary pass-1 review (`code-delivery/S-25.08/adv-local-pass-1.md`; NOT CLEAN, 9 findings 2H/4M/3L, streak 0/3). Registered specialist work: ADR-052 v1.20, ARCH-INDEX v4.50, VP-133 v1.5, VP-143 v1.4, VP-147 v1.4, VP-INDEX v3.29, verification-architecture v1.42, verification-coverage-matrix v1.40, BC-1.18.013 v1.9, BC-1.18.011 v1.17, BC-1.08.001 v1.4, BC-7.06.001 v1.13, error-taxonomy v1.38, prd.md, BC-INDEX v5.106, S-25.08 v1.3, S-25.06 v1.9, S-25.02 v5.1, E-25 epic hash 213dad1, STORY-INDEX v4.485. Applied sanctioned `last-amended-migrate migrate --path` recovery to VP-INDEX.md (PriorChainSplit, entries_relocated=1); `migrate --check` clean on all 5 governed files. L-BB-D1245 recurrence x4 appended (product-owner `sed -i` on BC-1.18.013); S-12.16 row recurrence 4. Decision: D-1251.
+
+## Burst: SESSION-WRAP-PAUSE-2026-10-07 (2026-10-07)
+
+D-1252, v10.85→v10.86. Single-commit TD-VSDD-053 session-wrap burst (state-manager; Parts 1-4 of the wrap request).
+
+**Parent-commit:** `f3537cd6` (factory-artifacts HEAD immediately prior, v10.85 / D-1251). Code parent: `feature/S-25.08` @ `39e89c59` (unchanged by this burst).
+
+**Adversary verdict:** LOCAL S-25.08 adversary pass-2 = **NOT CLEAN**: 0 CRITICAL, 2 HIGH (F-S2508-L2-001, F-S2508-L2-002), 7 MEDIUM (F-S2508-L2-003..009), 5 LOW (F-S2508-L2-010..014); 2 deferred (D-1 dispatcher installs no tracing subscriber; D-2 coordinator cwd vs `CLAUDE_PROJECT_DIR` anchoring); novelty MEDIUM; streak 0/3. Full Part A persisted at `code-delivery/S-25.08/adv-local-pass-2.md`.
+
+**Files touched (Dim-1):** 37 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, blocking-issues-resolved.md, adv-local-pass-2.md, BC-INDEX.md, STORY-INDEX.md; the remaining 28 are specialist-authored or auto-telemetry files committed as-is with hash currency verified):
+- STATE.md (v10.85→v10.86)
+- cycles/v1.0-brownfield-backfill/blocking-issues-resolved.md ([D-1163] closed)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1252)
+- cycles/v1.0-brownfield-backfill/lessons.md (L-BB-D1245 x5; L-BB-D1251 follow-up S-12.17)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.85 checkpoint archived)
+- regression-state.json
+- sidecar-learning.md
+- specs/architecture/ARCH-INDEX.md (v4.51)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.21)
+- specs/architecture/verification-architecture.md (v1.43)
+- specs/architecture/verification-coverage-matrix.md (v1.41)
+- specs/behavioral-contracts/BC-INDEX.md (v5.106→v5.107)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.18)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.10)
+- specs/behavioral-contracts/ss-03/BC-3.08.001.md (v1.35)
+- specs/prd-supplements/error-taxonomy.md (v1.39)
+- specs/verification-properties/VP-028.md (v1.1)
+- specs/verification-properties/VP-079.md (v1.24)
+- specs/verification-properties/VP-133.md (v1.6)
+- specs/verification-properties/VP-143.md (v1.5)
+- specs/verification-properties/VP-146.md (v1.4)
+- specs/verification-properties/VP-INDEX.md (v3.30)
+- stories/S-25.02-artifact-sharding-layer2.md (v5.2)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.10)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.4)
+- stories/STORY-INDEX.md (v4.485→v4.486)
+- stories/epics/E-12-engine-governance.md (v1.6)
+- stories/epics/E-25-validation-integrity.md
+- stories/epics/E-26-post-rc25-hook-hardening.md (v1.1)
+- stories/epics/E-6-tooling-backlog.md (v1.3)
+- code-delivery/PR-769/pr-review.md (NEW)
+- code-delivery/S-25.08/adv-local-pass-2.md (NEW)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (NEW, full)
+- stories/S-12.17-single-writer-guard-no-concurrent-factory-writers-during-state-burst.md (NEW)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (NEW)
+- stories/S-6.03-input-hash-drift-backlog-owner-review-then-recompute.md (NEW)
+
+**Codifications:** D-1252 (human decisions 2026-10-07 (a)-(f); S-25.08/S-25.09 split registered, not executed).
+
+**Dim-2 (hash currency):** literal `compute-input-hash <file> --update` run in dependency order (VP-028, VP-079, S-25.08, S-25.06, S-25.02, S-26.06, E-25 epic, E-6 epic; then E-26 epic and S-12.16 on the cascade) until a final `--check` loop over every changed file printed no DRIFT line. `cargo run -q -p last-amended-migrate -- migrate --check` clean on all 5 governed files (literal output in the commit report).
+
+**Dim-5:** Count-propagation: total_bcs 2007, total_vps 147 UNCHANGED. STORY-INDEX Status Summary recount draft 110→113, Total (active) 226→229, registered 247→250 (S-12.17, S-26.06, S-6.03 new; S-12.16 stub→file, status unchanged).
+
+**Dim-6:** No new adversary findings in this burst; no new tech-debt-register entries.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution.
+
+**Closes:** Blocking item [D-1163] (develop branch protection applied); Drift Item [D-1251-PG-001] -> S-12.17.
+
+Summary: Session wrap. Persisted S-25.08 LOCAL adversary pass-2; registered ADR-052 v1.21 and specialist spec/story work; recorded human decisions D-1252(a)-(f); STORY-INDEX v4.486, BC-INDEX v5.107; archived the v10.85 checkpoint; paused the pipeline.
