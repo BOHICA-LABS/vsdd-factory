@@ -4330,40 +4330,76 @@ fn test_BC_1_18_013_EC033_coordinator_anchors_on_claude_project_dir_not_cwd_blac
     );
 }
 
-/// BC-1.18.013 v1.10 EC-035: no `.factory` directory (absent, or a regular file)
-/// under the resolved project root => the coordinator exits 2
-/// `FACTORY_ROOT_NOT_FOUND`; nothing is created or mutated anywhere (project root
-/// AND process cwd trees byte-identical).
+/// BC-1.18.013 v1.10 EC-035 / ADR-052 v1.21 item 33(e): no `.factory` directory
+/// (absent, or a regular file) under the resolved project root => the coordinator
+/// exits 2 and prints EXACTLY ONE stderr line (nothing on stdout)
+/// `migrate-bc-index: FACTORY_ROOT_NOT_FOUND: no .factory directory under project root <P>
+/// (resolved from CLAUDE_PROJECT_DIR)` -- `(resolved from process cwd)` when
+/// `CLAUDE_PROJECT_DIR` is unset/empty. Nothing is created or mutated anywhere.
 #[test]
 fn test_BC_1_18_013_EC035_coordinator_factory_root_not_found_exit_2_nothing_created_blackbox() {
     let mut failures: Vec<String> = Vec::new();
-    for variant in ["no .factory", ".factory is a regular file"] {
+    // (variant, env-mode): env-mode "set" | "empty" | "unset"
+    for (variant, env_mode) in [
+        ("no .factory", "set"),
+        (".factory is a regular file", "set"),
+        ("no .factory", "empty"),
+        ("no .factory", "unset"),
+    ] {
         let p = Project::new_bare();
         std::fs::remove_dir_all(p.root().join(".factory")).unwrap();
         if variant != "no .factory" {
             std::fs::write(p.root().join(".factory"), b"i am a file").unwrap();
         }
         let other = tempfile::tempdir().unwrap();
+        // the project root the coordinator resolves
+        let (resolved, source) = match env_mode {
+            "set" => (p.root().canonicalize().unwrap(), "CLAUDE_PROJECT_DIR"),
+            _ => (other.path().canonicalize().unwrap(), "process cwd"),
+        };
         let before = (tree_snapshot(p.root()), tree_snapshot(other.path()));
-        let child = spawn_coordinator(p.root(), other.path());
-        let out = finish(child, Duration::from_secs(30));
+        let mut cmd = Command::new(binary_path());
+        cmd.arg("migrate-bc-index")
+            .current_dir(other.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        match env_mode {
+            "set" => {
+                cmd.env("CLAUDE_PROJECT_DIR", p.root());
+            }
+            "empty" => {
+                cmd.env("CLAUDE_PROJECT_DIR", "");
+            }
+            _ => {
+                cmd.env_remove("CLAUDE_PROJECT_DIR");
+            }
+        }
+        let out = finish(cmd.spawn().unwrap(), Duration::from_secs(30));
         let err = stderr_of(&out);
-        if out.status.code() != Some(2) || !err.contains("FACTORY_ROOT_NOT_FOUND") {
+        let want = format!(
+            "migrate-bc-index: FACTORY_ROOT_NOT_FOUND: no .factory directory under project root {} \
+             (resolved from {source})",
+            resolved.display()
+        );
+        let lines: Vec<&str> = err.lines().collect();
+        if out.status.code() != Some(2)
+            || lines.len() != 1
+            || lines[0] != want
+            || !out.stdout.is_empty()
+        {
             failures.push(format!(
-                "[{variant}] expected exit 2 with `FACTORY_ROOT_NOT_FOUND` on stderr; got exit \
-                 {:?}, stderr: {err}",
-                out.status.code()
+                "[{variant}, CLAUDE_PROJECT_DIR {env_mode}] expected exit 2, exactly ONE stderr line \
+                 `{want}` and empty stdout; got exit {:?}, stderr lines {lines:?}, stdout {} bytes",
+                out.status.code(),
+                out.stdout.len()
             ));
         }
         let after = (tree_snapshot(p.root()), tree_snapshot(other.path()));
         if before != after {
             failures.push(format!(
-                "[{variant}] nothing may be created or mutated (project root + cwd trees must be \
-                 byte-identical); project {:?} -> {:?}, cwd {:?} -> {:?}",
-                before.0.keys().collect::<Vec<_>>(),
-                after.0.keys().collect::<Vec<_>>(),
-                before.1.keys().collect::<Vec<_>>(),
-                after.1.keys().collect::<Vec<_>>()
+                "[{variant}, CLAUDE_PROJECT_DIR {env_mode}] nothing may be created or mutated \
+                 (project root + cwd trees byte-identical)"
             ));
         }
     }
@@ -4588,6 +4624,48 @@ fn test_BC_1_18_013_EC037_admission_blocked_event_per_branch_blackbox() {
                 c.label
             ));
         }
+        const RECON: [&str; 6] = [
+            "live_coordinator",
+            "nothing_to_reconcile",
+            "gate_reopened",
+            "null_generation_txn_aborted",
+            "foreign_migration_refused",
+            "completion_record_mismatch",
+        ];
+        match v["reconciliation"].as_str() {
+            Some(r) if RECON.contains(&r) => {}
+            other => failures.push(format!(
+                "[{}] `reconciliation` must be exactly one of the six effectful-outcome tokens (never `none` / NoOp / RefuseForeignMigration / FinalizeThenOpenGate / FailClosedMismatch); got {other:?}",
+                c.label
+            )),
+        }
+        // branch <=> reconciliation (item 33(b))
+        let pair_ok = match v["branch"].as_str() {
+            Some("live_coordinator") => v["reconciliation"] == "live_coordinator",
+            Some("foreign_migration") => v["reconciliation"] == "foreign_migration_refused",
+            Some("completion_record_mismatch") => {
+                v["reconciliation"] == "completion_record_mismatch"
+            }
+            Some("gate_only" | "live_txn") => !matches!(
+                v["reconciliation"].as_str(),
+                Some(
+                    "live_coordinator" | "foreign_migration_refused" | "completion_record_mismatch"
+                )
+            ),
+            _ => false,
+        };
+        if !pair_ok {
+            failures.push(format!(
+                "[{}] branch/reconciliation pair violates the derivation table: {v}",
+                c.label
+            ));
+        }
+        if c.label.starts_with("foreign_migration")
+            && (v["branch"] != "foreign_migration"
+                || v["reconciliation"] != "foreign_migration_refused")
+        {
+            failures.push(format!("[{}] foreign id => branch=foreign_migration, reconciliation=foreign_migration_refused: {v}", c.label));
+        }
         if v.get("plugin_name").is_some() {
             failures.push(format!(
                 "[{}] `plugin_name` MUST NOT appear: {line}",
@@ -4792,26 +4870,69 @@ fn test_BC_1_18_013_EC038_admission_failed_event_per_cause_blackbox() {
     );
 }
 
-/// BC-1.18.013 v1.10 EC-039 / BC-3.08.001 v1.35 Event 13: exactly ONE
-/// `migration.admission_advisory` per anomaly, `reason` from the closed 9-token set;
-/// the dispatch outcome (admit) is unchanged. (The drain-GC timestamp tokens are
-/// emitted by the coordinator process, not the dispatcher, and are covered by the
-/// in-process capture test; `branch_c_finalize_unwired` needs the S-25.06 finalize
-/// leg.)
+/// BC-1.18.013 v1.10 EC-039 / ADR-052 v1.21 item 33(c)/(d)/(g); BC-3.08.001 v1.35
+/// Event 13: exactly ONE `migration.admission_advisory` per dispatcher-leg anomaly,
+/// `reason` from the CLOSED five-token set, S-25.08 NEVER emits `branch_c_finalized`,
+/// optional fields only from {migration_id, txn_id, check, detail, tool_use_id_len},
+/// no raw tool_use_id, no `plugin_name`; the dispatch outcome (admit) is unchanged.
+/// (The five reservation-timestamp tokens are coordinator STDERR diagnostics, not
+/// event reasons -- see the stderr test below.)
 #[test]
 fn test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox() {
-    const TOKENS: [&str; 9] = [
-        "created_at_unparseable",
-        "created_at_pre_epoch",
-        "created_at_future",
-        "mtime_future",
-        "age_unknown",
+    const TOKENS: [&str; 5] = [
         "reservation_release_failed",
         "branch_a_gate_reopened",
         "branch_b_txn_aborted",
         "branch_c_finalize_unwired",
+        "branch_c_finalized",
+    ];
+    const ENVELOPE: [&str; 7] = [
+        "type",
+        "trace_id",
+        "session_id",
+        "ts",
+        "ts_epoch",
+        "schema_version",
+        "reason",
+    ];
+    const OPTIONAL: [&str; 5] = [
+        "migration_id",
+        "txn_id",
+        "check",
+        "detail",
+        "tool_use_id_len",
     ];
     let mut failures: Vec<String> = Vec::new();
+
+    let check_closed = |label: &str, all: &[(serde_json::Value, String)]| -> Vec<String> {
+        let mut failures: Vec<String> = Vec::new();
+        for (v, line) in migration_events(all, "migration.admission_advisory") {
+            let reason = v["reason"].as_str().unwrap_or("");
+            if !TOKENS.contains(&reason) {
+                failures.push(format!(
+                    "[{label}] `reason` outside the closed five-token set: {line}"
+                ));
+            }
+            if reason == "branch_c_finalized" {
+                failures.push(format!(
+                    "[{label}] S-25.08 must NEVER emit branch_c_finalized: {line}"
+                ));
+            }
+            if let Some(obj) = v.as_object() {
+                for k in obj.keys() {
+                    if !ENVELOPE.contains(&k.as_str()) && !OPTIONAL.contains(&k.as_str()) {
+                        failures.push(format!("[{label}] forbidden advisory field `{k}`: {line}"));
+                    }
+                }
+            }
+            if v.get("plugin_name").is_some() || line.contains(SECRET_ID) {
+                failures.push(format!(
+                    "[{label}] plugin_name / raw tool_use_id leaked: {line}"
+                ));
+            }
+        }
+        failures
+    };
 
     // Branch A (gate re-open) and Branch B (null-generation discard): admitted + one advisory.
     for (label, reason, setup) in [
@@ -4852,16 +4973,7 @@ fn test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox() {
                     .collect::<Vec<_>>()
             ));
         }
-        for (v, line) in adv {
-            if !TOKENS.iter().any(|t| v["reason"] == *t)
-                || v.get("plugin_name").is_some()
-                || line.contains(SECRET_ID)
-            {
-                failures.push(format!(
-                    "[{label}] advisory outside the closed set / plugin_name / raw id: {line}"
-                ));
-            }
-        }
+        failures.extend(check_closed(label, &all));
     }
 
     // reservation_release_failed: a non-ENOENT release error on PostToolUse.
@@ -4887,10 +4999,200 @@ fn test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox() {
                 adv.iter().map(|(v, _)| v["reason"].clone()).collect::<Vec<_>>()
             ));
         }
+        failures.extend(check_closed("reservation_release_failed", &all));
     }
 
     assert_no_failures(
         "test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.21 item 33(g) / BC-1.18.013 v1.10 EC-039 + EC-037 vector: COMMITTING +
+/// the live txn's own terminal record, with S-25.08's undelivered finalize effect =>
+/// exit 2 with ONE `migration.admission_blocked`
+/// `{branch=completion_record_mismatch, reconciliation=completion_record_mismatch,
+/// check=finalize_unwired}` PLUS ONE `migration.admission_advisory
+/// {reason=branch_c_finalize_unwired}`.
+///
+/// FIXTURE LIMIT (reported to the coordinator): the merged Branch C verification seam
+/// reports every check UNVERIFIED (hardwired false), so `decide_terminal_record_reconciliation`
+/// can never return `FinalizeThenOpenGate` from the real dispatcher -- a black-box
+/// "verifying record" cannot be constructed (it would also need canonical files whose
+/// SHA-256 equals the txn/intent-log `expected_post_hash`). This test uses the closest
+/// reachable fixture (a fully field-matching record, COMMITTING) and asserts the SPEC
+/// outcome; it is therefore red until the seam reports a verifying record as
+/// `FinalizeThenOpenGate`-reaching (or the spec/seam question is routed).
+#[test]
+fn test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    for (mig, record, rel) in [
+        ("migrate-bc-index", "completed.json", BC_PATH),
+        (
+            "backfill-append-logs",
+            "completed-backfill-append-logs.json",
+            CYCLES_PATH,
+        ),
+    ] {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), "COMMITTING", Some("gen-1"), Some(mig));
+        write_terminal_record(&p.ms(), record, "act-s2508", "gen-1");
+        let target = p.abs(rel);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        let blocked = migration_events(&all, "migration.admission_blocked");
+        let adv = migration_events(&all, "migration.admission_advisory");
+        let err = stderr_of(&out);
+        let want_msg = format!("{}{MISMATCH_SUFFIX}", plain_msg(scope_of(rel)));
+        if out.status.code() != Some(2) || !err.contains(&want_msg) {
+            failures.push(format!(
+                "[{mig}] expected exit 2 with the mismatch-suffixed message; got {:?}: {err}",
+                out.status.code()
+            ));
+        }
+        if blocked.len() != 1 {
+            failures.push(format!(
+                "[{mig}] exactly ONE _blocked expected, found {}",
+                blocked.len()
+            ));
+        } else {
+            let v = &blocked[0].0;
+            if v["branch"] != "completion_record_mismatch"
+                || v["reconciliation"] != "completion_record_mismatch"
+                || v["check"] != "finalize_unwired"
+            {
+                failures.push(format!(
+                    "[{mig}] _blocked must be {{branch=completion_record_mismatch, \
+                     reconciliation=completion_record_mismatch, check=finalize_unwired}}; got {v}"
+                ));
+            }
+        }
+        if adv.len() != 1 || adv[0].0["reason"] != "branch_c_finalize_unwired" {
+            failures.push(format!(
+                "[{mig}] exactly ONE _advisory reason=branch_c_finalize_unwired expected; got {:?}",
+                adv.iter()
+                    .map(|(v, _)| v["reason"].clone())
+                    .collect::<Vec<_>>()
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.21 item 33(c)/(v) / BC-1.18.013 v1.10 EC-025 + EC-039: the five
+/// reservation-timestamp fallback tokens are COORDINATOR STDERR diagnostics, NOT
+/// dispatcher events: the drain GC over a reservation with an unusable timestamp
+/// writes `drain_bc_index_writers: reservation timestamp fallback (<token>): <path>`
+/// on stderr and NO `migration.admission_*` line anywhere. (The in-process tracing
+/// capture test in s2508_diagnostics_test.rs is a secondary check; THIS is the
+/// normative assertion.)
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC025_timestamp_fallback_tokens_are_coordinator_stderr_not_events_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let old = filetime::FileTime::from_system_time(
+        std::time::SystemTime::now() - Duration::from_secs(4000),
+    );
+    let future = filetime::FileTime::from_system_time(
+        std::time::SystemTime::now() + Duration::from_secs(5000),
+    );
+    let pre_epoch = filetime::FileTime::from_unix_time(-1000, 0);
+    let rfc = |d: i64| {
+        (chrono::Utc::now() + chrono::Duration::seconds(d))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    // (token, created_at JSON text, mtime, reservation is reclaimed by the GC?)
+    let vectors: Vec<(&str, String, filetime::FileTime, bool)> = vec![
+        ("created_at_unparseable", "\"yesterday\"".into(), old, true),
+        (
+            "created_at_pre_epoch",
+            "\"1969-12-31T23:59:59Z\"".into(),
+            old,
+            true,
+        ),
+        ("created_at_future", format!("\"{}\"", rfc(330)), old, true),
+        ("mtime_future", "\"nope\"".into(), future, false),
+        ("age_unknown", "\"nope\"".into(), pre_epoch, false),
+    ];
+    for (token, created, mtime, reclaimed) in vectors {
+        let p = Project::new();
+        let res = p.reservation("T1");
+        std::fs::write(
+            &res,
+            format!(r#"{{"created_at":{created},"tool_use_id":"T1"}}"#),
+        )
+        .unwrap();
+        filetime::set_file_mtime(&res, mtime).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let mut cmd = Command::new(binary_path());
+        cmd.arg("migrate-bc-index")
+            .current_dir(other.path())
+            .env("CLAUDE_PROJECT_DIR", p.root())
+            .env("VSDD_LOG_DIR", p.root().join("logs"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 512];
+            while let Ok(n) = stderr.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                let _ = tx.send(String::from_utf8_lossy(&buf).to_string());
+            }
+        });
+        // wait (<= 10 s) for the token line; a retained reservation keeps the drain
+        // polling, so kill the child once the line is seen.
+        let want_prefix =
+            format!("drain_bc_index_writers: reservation timestamp fallback ({token}): ");
+        let mut seen = String::new();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            if let Ok(s) = rx.recv_timeout(Duration::from_millis(50)) {
+                seen = s;
+            }
+            if seen.contains(&want_prefix) || (reclaimed && child.try_wait().unwrap().is_some()) {
+                break;
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        while let Ok(s) = rx.try_recv() {
+            seen = s;
+        }
+        let line = seen.lines().find(|l| l.contains(&want_prefix));
+        match line {
+            None => failures.push(format!(
+                "[{token}] coordinator stderr must carry `{want_prefix}<path>`; stderr was: {seen:?}"
+            )),
+            Some(l) => {
+                if !l.trim_start().starts_with(&want_prefix) || !l.contains("T1.reservation") {
+                    failures.push(format!("[{token}] malformed stderr line: {l:?}"));
+                }
+            }
+        }
+        let all = read_internal_events(&p);
+        if any_migration_event(&all) {
+            failures.push(format!(
+                "[{token}] NO migration.admission_* event may be written for a timestamp fallback"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC025_timestamp_fallback_tokens_are_coordinator_stderr_not_events_blackbox",
         failures,
     );
 }
