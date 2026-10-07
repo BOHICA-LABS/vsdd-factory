@@ -445,8 +445,9 @@ pub struct MigrationAdmission {
 ///   `Bash` leg is the separately tracked [D-1232-OBL-4] §5c classifier, and
 ///   leaving `Bash` alone means the coordinator's own closed-grammar invocation
 ///   can never self-deadlock through this gate (EC-014);
-/// * `.factory/migration-state/` present (no migration ever activated => zero
-///   cost no-op);
+/// * NO `.factory/migration-state/` existence guard: the namespace is created
+///   idempotently by the core (BC-1.18.013 EC-020), so a pre-directory writer is
+///   tracked and visible to a coordinator's first drain;
 /// * target path inside the protected union
 ///   (`.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/`); anything
 ///   else (e.g. `.factory/STATE.md`) is never gated.
@@ -471,10 +472,13 @@ pub fn bc_index_migration_admission(
     if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
         return out_of_scope();
     }
+    // NO `.factory/migration-state/` existence guard on the admit path
+    // (BC-1.18.013 EC-020): a protected write admitted before the namespace
+    // exists must still be visible to a coordinator's first drain, so the
+    // shared core creates `reservations/` idempotently (absent gate = OPEN,
+    // absent txn set = no live txn). A namespace/reservation create failure
+    // fails the PreToolUse closed rather than admitting untracked.
     let migration_state_dir = cwd.join(".factory/migration-state");
-    if !migration_state_dir.exists() {
-        return out_of_scope();
-    }
     let Some(family) = payload
         .tool_input
         .get("file_path")
