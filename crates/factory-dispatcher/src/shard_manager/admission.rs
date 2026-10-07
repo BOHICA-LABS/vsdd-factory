@@ -336,6 +336,17 @@ impl FactoryRoot {
     }
 }
 
+/// S-25.08 Red-Gate STUB (BC-1.18.013 v1.9 Pre 6(b)(i) spelling (ii)): the
+/// lexical alias `<CLAUDE_PROJECT_DIR as given>/.factory`, or `None` when the raw
+/// value is EMPTY or NOT an absolute path. Lexical normalization only (collapse
+/// `//`, `.`, `..`); no filesystem access. `executor.rs` must derive its alias
+/// through this function (it currently inlines a filter that only rejects the
+/// empty value).
+#[must_use]
+pub fn as_given_factory_root_spelling(_raw: &std::ffi::OsStr) -> Option<PathBuf> {
+    todo!("S-25.08 F-S2508-L2-010: as-given CLAUDE_PROJECT_DIR spelling (empty / relative => None)")
+}
+
 /// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`.
 /// `None` when that does not exist as a directory — the gate is then OUT OF SCOPE
 /// for the dispatch (no migration can be in flight without it) and NEVER creates

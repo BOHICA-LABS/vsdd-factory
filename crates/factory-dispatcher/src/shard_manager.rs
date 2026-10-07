@@ -144,9 +144,9 @@ mod admission;
 pub use admission::{
     ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
     MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
-    classify_tool_use_id, e_maintenance_block_message, is_valid_tool_use_id,
-    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
-    resolve_target_path,
+    as_given_factory_root_spelling, classify_tool_use_id, e_maintenance_block_message,
+    is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
+    resolve_factory_root, resolve_target_path,
 };
 
 // ---------------------------------------------------------------------------
