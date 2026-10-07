@@ -448,7 +448,7 @@ impl ProjectRootSource {
 
 /// Which source [`resolve_session_project_root`] used for this env value.
 #[must_use]
-pub fn project_root_source(claude_project_dir: Option<&std::ffi::OsStr>) -> ProjectRootSource {
+fn project_root_source(claude_project_dir: Option<&std::ffi::OsStr>) -> ProjectRootSource {
     match claude_project_dir {
         Some(v) if !v.is_empty() => ProjectRootSource::ClaudeProjectDir,
         _ => ProjectRootSource::ProcessCwd,
@@ -799,40 +799,75 @@ impl AdmissionDiagnostic {
     }
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 item 33(b); BC-1.18.013 v1.10 EC-037
-/// reconciliation->branch table): the pure `branch` derivation of a blocked
-/// verdict from the effectful reconciliation outcome and whether a live txn
-/// remains. `verify_admission` currently derives it INLINE; the implementer makes
-/// it call this function.
+/// Pure `branch` derivation of a blocked verdict (BC-3.08.001 Event 11; ADR-052
+/// §5a "Admission diagnostics channel"): `live_coordinator`,
+/// `foreign_migration_refused` -> `foreign_migration` and
+/// `completion_record_mismatch` map 1:1 from the effectful reconciliation outcome;
+/// otherwise `gate_only` when no live txn remains after reconciliation, else
+/// `live_txn`.
 #[must_use]
 pub fn derive_block_branch(
-    _reconciliation: StaleGateReconciliation,
-    _live_txn_remains: bool,
+    reconciliation: StaleGateReconciliation,
+    live_txn_remains: bool,
 ) -> BlockBranch {
-    todo!("S-25.08 item 33(b): derive_block_branch (pure reconciliation -> branch table)")
+    match reconciliation {
+        StaleGateReconciliation::LiveCoordinator => BlockBranch::LiveCoordinator,
+        StaleGateReconciliation::ForeignMigrationRefused => BlockBranch::ForeignMigration,
+        StaleGateReconciliation::CompletionRecordMismatch => BlockBranch::CompletionRecordMismatch,
+        StaleGateReconciliation::NothingToReconcile
+        | StaleGateReconciliation::GateReopened
+        | StaleGateReconciliation::NullGenerationTxnAborted => {
+            if live_txn_remains {
+                BlockBranch::LiveTxn
+            } else {
+                BlockBranch::GateOnly
+            }
+        }
+    }
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 item 33(g); BC-1.18.013 v1.10 Post 10(c)):
-/// the pure decision -> diagnostics mapping for the S-25.08 SEAM case, where
-/// `decide_terminal_record_reconciliation` returned `FinalizeThenOpenGate` but the
-/// finalize effect is undelivered (real verification is S-25.06's, so the real
-/// dispatcher can never reach this black-box). Returns the diagnostics (in
-/// emission order) -- exactly one `Blocked { branch = completion_record_mismatch,
-/// reconciliation = completion_record_mismatch, check = "finalize_unwired" }` and
-/// exactly one `Advisory { reason = branch_c_finalize_unwired }` -- and the
-/// E-MAINTENANCE-001 verdict message WITH the mismatch suffix. `reconcile_collecting`
-/// / `verify_admission` must produce their `FinalizeThenOpenGate` arm THROUGH this
-/// function (the merged code builds it inline and names the check
-/// `finalize_effect_not_delivered`).
+/// The pure decision -> diagnostics mapping for the S-25.08 SEAM case, where
+/// `decide_terminal_record_reconciliation` returned `FinalizeThenOpenGate` but
+/// the finalize effect is undelivered (real verification is S-25.06's). Returns
+/// the diagnostics in emission order — exactly one `Advisory
+/// { branch_c_finalize_unwired }` (the anomalous seam-reached condition) and
+/// exactly one `Blocked { branch = completion_record_mismatch, reconciliation =
+/// completion_record_mismatch, check = "finalize_unwired" }` (the verdict) — and
+/// the `E-MAINTENANCE-001` message WITH the mismatch suffix. Ids are sanitized.
 #[must_use]
 pub fn diagnostics_for_undelivered_finalize(
-    _family: ProtectedPathFamily,
-    _gate_state: BcIndexAdmissionGateState,
-    _migration_id: &str,
-    _txn_id: &str,
+    family: ProtectedPathFamily,
+    gate_state: BcIndexAdmissionGateState,
+    migration_id: &str,
+    txn_id: &str,
 ) -> (Vec<AdmissionDiagnostic>, String) {
-    todo!("S-25.08 item 33(g): diagnostics_for_undelivered_finalize")
+    let migration_id = sanitize_diagnostic_id(migration_id);
+    let txn_id = sanitize_diagnostic_id(txn_id);
+    let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchCFinalizeUnwired);
+    advisory.migration_id = Some(migration_id.clone());
+    advisory.txn_id = Some(txn_id.clone());
+    advisory.check = Some(FINALIZE_UNWIRED_CHECK.to_string());
+    let blocked = BlockedDiagnostic {
+        scope: family.scope(),
+        family: family.family_token(),
+        branch: BlockBranch::CompletionRecordMismatch,
+        gate_state,
+        migration_id: Some(migration_id),
+        txn_id: Some(txn_id),
+        check: Some(FINALIZE_UNWIRED_CHECK.to_string()),
+        reconciliation: StaleGateReconciliation::CompletionRecordMismatch,
+    };
+    (
+        vec![
+            AdmissionDiagnostic::Advisory(advisory),
+            AdmissionDiagnostic::Blocked(blocked),
+        ],
+        e_maintenance_block_message(family, true),
+    )
 }
+
+/// The Branch C failing-check token of the undelivered-finalize seam.
+const FINALIZE_UNWIRED_CHECK: &str = "finalize_unwired";
 
 fn gate_state_token(g: BcIndexAdmissionGateState) -> &'static str {
     match g {
@@ -864,6 +899,10 @@ impl StaleGateReconciliation {
 struct ReconcileFacts {
     advisories: Vec<AdmissionDiagnostic>,
     check: Option<String>,
+    /// `(migration_id, txn_id)` when the pure core decided `FinalizeThenOpenGate`
+    /// but the finalize effect is undelivered: the verdict and its diagnostics
+    /// are then built by [`diagnostics_for_undelivered_finalize`].
+    undelivered_finalize: Option<(String, String)>,
 }
 
 /// What the §5a step-3.5 reconciliation found / did.
@@ -963,23 +1002,15 @@ fn verify_admission(
     }
 
     let live = second.live_txn()?;
-    // `branch` derivation: live_coordinator / foreign_migration /
-    // completion_record_mismatch map 1:1 from the reconciliation outcome;
-    // otherwise gate_only when no live txn remains, else live_txn.
-    let branch = match reconciliation {
-        StaleGateReconciliation::LiveCoordinator => BlockBranch::LiveCoordinator,
-        StaleGateReconciliation::ForeignMigrationRefused => BlockBranch::ForeignMigration,
-        StaleGateReconciliation::CompletionRecordMismatch => BlockBranch::CompletionRecordMismatch,
-        StaleGateReconciliation::NothingToReconcile
-        | StaleGateReconciliation::GateReopened
-        | StaleGateReconciliation::NullGenerationTxnAborted => {
-            if live.is_some() {
-                BlockBranch::LiveTxn
-            } else {
-                BlockBranch::GateOnly
-            }
-        }
-    };
+    // The seam case (finalize decided but undelivered) builds its verdict and
+    // diagnostics THROUGH the pure mapping.
+    if let Some((migration_id, txn_id)) = &facts.undelivered_finalize {
+        let (mut finalize_diagnostics, message) =
+            diagnostics_for_undelivered_finalize(family, second.gate, migration_id, txn_id);
+        diagnostics.append(&mut finalize_diagnostics);
+        return Ok((Some(message), diagnostics));
+    }
+    let branch = derive_block_branch(reconciliation, live.is_some());
     // Developer breadcrumb only (BC 6(b)(iii)); the operator-visible record is
     // the `migration.admission_blocked` event written by `main.rs`.
     tracing::debug!(
@@ -1190,13 +1221,8 @@ fn reconcile_collecting(
             // is not delivered (S-25.06): fail closed (never finalize) and record
             // the anomalous seam-reached condition IN ADDITION to the verdict's
             // own `_blocked` event.
-            let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchCFinalizeUnwired);
-            advisory.migration_id = Some(sanitize_diagnostic_id(live.migration_id()));
-            advisory.txn_id = Some(sanitize_diagnostic_id(live.txn_id()));
-            facts
-                .advisories
-                .push(AdmissionDiagnostic::Advisory(advisory));
-            facts.check = Some("finalize_effect_not_delivered".to_string());
+            facts.undelivered_finalize =
+                Some((live.migration_id().to_string(), live.txn_id().to_string()));
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
         (
