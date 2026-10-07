@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5"
+version: "1.6"
 status: draft
 producer: product-owner
 timestamp: 2026-09-25T00:00:00Z
@@ -13,7 +13,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.011.md
-input-hash: "c94d624"
+input-hash: "13b706b"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -164,12 +164,48 @@ below specifies that closure. This BC directly discharges S-25.06's Spec-First G
      `.factory/stories/`), is NOT affected by this gate.
    - **Decision.** Admit iff `gate_state = OPEN` AND no txn record in state STAGING or
      COMMITTING exists (dual check, ADR-052 §Decision 5a step 4/5; PID liveness and flock
-     ownership are irrelevant to the decision). Otherwise block with `E-MAINTENANCE-001`
-     (`<scope>` = `.factory/cycles/` for a path under `.factory/cycles/`), exit 2 at the
-     PreToolUse hook-block surface. The step-0 reservation is created first; the ADR-052
+     ownership are irrelevant to the decision). Otherwise block with `E-MAINTENANCE-001`, exit 2
+     at the PreToolUse hook-block surface, with the message defined by the **`<scope>` keying
+     rule (v1.6)** immediately below. The step-0 reservation is created first; the ADR-052
      §Decision 5a step-3.5 reconciliation (plus Postcondition 5a(c) below) then runs and may
      flip the gate to OPEN, after which the decision is re-evaluated (reserve-then-verify,
      6(c)).
+   - **`E-MAINTENANCE-001` `<scope>` keying rule and exact message (v1.6; resolves the
+     path-vs-migration keying ambiguity; this BC, BC-1.18.011 Precondition 6(b)/(d) and
+     error-taxonomy v1.35 state the SAME rule).** `<scope>` is keyed on the WRITTEN PATH
+     FAMILY, never on the migration that owns the live txn. Rationale: the admission core is one
+     shared core over a shared protected-path union, and it also blocks when NO txn exists
+     (gate `DRAINING`/`LOCKED` only, e.g. the drain window before step 3a, or a live
+     coordinator mid-recovery), where no `migration_id` is available to key on; a path-keyed
+     scope is a total function of the dispatch, a migration-keyed scope is not. The live txn's
+     `migration_id` (when one exists) travels only in the structured `tracing::warn!`
+     diagnostic (field `migration_id`), never in the message. The scope token is exactly:
+     a target path under `.factory/specs/behavioral-contracts/` ⇒ `BC-INDEX`; a target path
+     under `.factory/cycles/` ⇒ `.factory/cycles/`. The block message is exactly the format
+     string
+     `<scope> write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts`
+     with `<scope>` substituted and nothing else substituted; the fixed parenthetical is
+     emitted verbatim even when the block is gate-only with no txn (it names the two txn states
+     that govern the window, not a claim that a txn file exists). All four combinations:
+
+     | Written path family | Live migration (txn `migration_id`) | Exact block message |
+     |---|---|---|
+     | `.factory/specs/behavioral-contracts/` | `migrate-bc-index` (or absent field) | `BC-INDEX write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts` |
+     | `.factory/specs/behavioral-contracts/` | `backfill-append-logs` | `BC-INDEX write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts` |
+     | `.factory/cycles/` | `backfill-append-logs` | `.factory/cycles/ write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts` |
+     | `.factory/cycles/` | `migrate-bc-index` (or absent field) | `.factory/cycles/ write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts` |
+
+     A write to `.factory/cycles/` while a B2 txn is live (or to `behavioral-contracts/` while a
+     mechanism-A txn is live) therefore produces exactly ONE message — the row above for its
+     path family — and never a second or merged message. **Mismatch suffix (v1.6):** when the
+     block is the PreToolUse Branch C verification-failure analogue (Postcondition 5a, EC-010;
+     STAGING + terminal record, or COMMITTING with a failed verification — for EITHER
+     migration, and for EITHER path family), the message is the format string above followed by
+     exactly one space and the suffix
+     `(completion-record mismatch — operator investigation required)` (em dash U+2014); the
+     `<scope>` token is still the path-family token from the table, and no other text is added.
+     A foreign-migration live txn (Postcondition 5a foreign-migration guard) and a live
+     coordinator (EWOULDBLOCK) produce the PLAIN message with no suffix.
    - **Exemption (no self-deadlock) — re-scoped in v1.4.** The migration binary's own
      closed-grammar invocation (`backfill-append-logs` / `backfill-append-logs --census`,
      Precondition 3, ADR-052 §Decision 5c Branches 1–4) is the coordinator, not a writer: it
@@ -262,7 +298,18 @@ below specifies that closure. This BC directly discharges S-25.06's Spec-First G
    - **Gate self-healing.** After any crash, a stuck `LOCKED`/`DRAINING` gate with no active
      txn (or a STAGING txn with `generation_id=null` and no live coordinator) is returned to
      `OPEN` by the next PreToolUse via the flock-gated reconciliation of ADR-052 §Decision 5a
-     step 3.5; `E-MAINTENANCE-001` never persists across a crashed abort.
+     step 3.5; `E-MAINTENANCE-001` never persists across a crashed abort. **Branch B on-disk
+     marker (v1.6; normative text in BC-1.18.011 Precondition 6(d)):** the Branch B discard
+     rewrites the txn record IN PLACE (same `txn-*.json` file, one atomic write-temp + fsync +
+     rename + dir-sync) to `"state": "ABORTED"` plus the top-level string field
+     `"abort_reason": "null_generation"`; `generation_id` and `source_sha256` stay `null`; the
+     file is RETAINED (never deleted, renamed or archived by the reconciler). Mechanism A's
+     Branch B behaves identically (the shared core is migration-agnostic for Branch B).
+     **Terminal-record reconciliation decision cell (v1.6; table in BC-1.18.011 Precondition
+     6(d)):** own migration + live txn + `exclusive.lock` acquired + this migration's terminal
+     record ABSENT ⇒ `NoOp` for BOTH STAGING and COMMITTING; the dispatch falls through to
+     Branch B (only if STAGING with `generation_id = null`) and otherwise to the ordinary
+     admission decision, which blocks because a txn is live (plain message, no suffix).
 
 ## Postconditions
 
@@ -373,8 +420,11 @@ below specifies that closure. This BC directly discharges S-25.06's Spec-First G
     analogue (v1.4):** when the same verification fails on the §Decision 5a step-3.5 Branch C
     path (no binary invocation), the PreToolUse outcome is an `E-MAINTENANCE-001` block with the
     mismatch reason logged (a structured `tracing::warn!` naming `migration_id`, `txn_id` and
-    the failing check; block message suffix `(completion-record mismatch — operator
-    investigation required)`) — NOT the binary exit code — and the same
+    the failing check; block message = the Precondition 6(b) `<scope>`-keyed format string
+    followed by one space and the suffix `(completion-record mismatch — operator
+    investigation required)`, identically for STAGING + terminal record and for a COMMITTING
+    verification failure, for either migration's live txn and either path family — see the v1.6
+    keying rule and message table) — NOT the binary exit code — and the same
     zero-write guarantee holds (no txn write, no gate write; a byte-for-byte snapshot of
     `.factory/migration-state/` is unchanged by the attempt). **Foreign-migration guard (v1.4):**
     this reconciliation concerns ONLY a live txn with `migration_id = "backfill-append-logs"`
@@ -547,7 +597,11 @@ below specifies that closure. This BC directly discharges S-25.06's Spec-First G
 | (v1.4, D4) `completed-backfill-append-logs.json` + `CURRENT-backfill-append-logs.json` present, NO `completed.json`; invoke `migrate-bc-index`; and run BC-INDEX `detect_migration_read_state` | `migrate-bc-index` not `ALREADY_MIGRATED`; reader state is NOT "complete" (EC-015b) | edge-case |
 | (v1.4, D4) Live txn `{migration_id: "migrate-bc-index", state: COMMITTING}` (or no `migration_id` field); invoke `backfill-append-logs` (and the reverse fixture for `migrate-bc-index`) | Exit 2, zero mutation, no `recover()`; foreign txn untouched (EC-016) | error |
 | (v1.4, D4) Live txn `{migration_id: "migrate-bc-index", state: COMMITTING}` with a VALID `completed-backfill-append-logs.json` present, PreToolUse Edit under `.factory/cycles/` | NOT finalized by Branch C on that record; Edit blocked `E-MAINTENANCE-001`; txn unchanged (EC-016, Postcondition 5a foreign-migration guard) | error |
-| (v1.4, D3 PreToolUse analogue) Branch C verification fails (e.g. `canonical_paths_count` = 3) on a PreToolUse Edit, no binary re-invocation | `E-MAINTENANCE-001` block; reason logged names `canonical_paths_count`; txn/gate/terminal record byte-identical (EC-010) | error |
+| (v1.4, D3 PreToolUse analogue) Branch C verification fails (e.g. `canonical_paths_count` = 3) on a PreToolUse Edit, no binary re-invocation | `E-MAINTENANCE-001` block whose message is the keyed format string plus ` (completion-record mismatch — operator investigation required)` (v1.6); reason logged names `canonical_paths_count`; txn/gate/terminal record byte-identical (EC-010) | error |
+| (v1.6, keying — four-cell matrix) Gate LOCKED, live txn COMMITTING with no terminal record (plain block); PreToolUse `Edit` for each of (a) `.factory/cycles/c1/burst-log.md` with txn `migration_id=backfill-append-logs`, (b) same path with `migration_id=migrate-bc-index`, (c) `.factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md` with `backfill-append-logs`, (d) same path with `migrate-bc-index` | Exit 2 `E-MAINTENANCE-001`; stderr contains exactly: (a)(b) `.factory/cycles/ write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts`; (c)(d) `BC-INDEX write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts`; no `completion-record mismatch` text; txn/gate byte-identical (EC-013, Precondition 6(b) keying rule) | error |
+| (v1.6, keying — gate-only) Gate DRAINING, NO txn file, `exclusive.lock` held by a live coordinator; PreToolUse `Edit` under `.factory/cycles/` and separately under `.factory/specs/behavioral-contracts/` | Exit 2; messages are exactly the `.factory/cycles/ …` / `BC-INDEX …` strings above (path-keyed; no migration identity needed); own reservation removed | error |
+| (v1.6, mismatch suffix — both migrations, both families) Gate LOCKED, txn STAGING (`generation_id` null and, separately, `gen-1`) of `backfill-append-logs` with `completed-backfill-append-logs.json` present, PreToolUse `Edit` under `.factory/cycles/`; and txn STAGING of `migrate-bc-index` with `completed.json` present, PreToolUse `Edit` under `.factory/specs/behavioral-contracts/` | Exit 2; stderr = the path-family format string followed by ` (completion-record mismatch — operator investigation required)` (e.g. `.factory/cycles/ write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts (completion-record mismatch — operator investigation required)`; `BC-INDEX write blocked: … aborts (completion-record mismatch — operator investigation required)`); migration-state byte-identical; Branch B NOT applied (EC-010) | error |
+| (v1.6, no terminal record — NoOp cell) Own-migration live txn (STAGING `generation_id=gen-1`, and separately COMMITTING), lock acquired, its terminal record ABSENT, PreToolUse `Edit` under the migration's own path family | Terminal-record reconciliation core returns `NoOp` in both cases (no txn write, no gate write); ordinary admission then blocks `E-MAINTENANCE-001` with the PLAIN keyed message (no mismatch suffix); migration-state byte-identical | error |
 | (v1.4) Reservation JSON with `created_at = now − 4000 s` but mtime = now; TTL 3,600 s (test seam) | Judged stale (removed at drain step 1); and reservation with no `created_at` field and mtime `now − 4000 s` ⇒ stale via fallback (EC-019) | edge-case |
 
 ## Verification Properties
@@ -700,6 +754,7 @@ Enrollment + Cap-Triggered Rotation
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.6 | 2026-10-06 | product-owner | Resolution of four spec ambiguities surfaced by the S-25.08 Red Gate (test-writer, commit 1b28017e). (1) Precondition 6(b): NEW normative `E-MAINTENANCE-001` `<scope>` keying rule — keyed on the WRITTEN PATH FAMILY (`.factory/specs/behavioral-contracts/` ⇒ `BC-INDEX`; `.factory/cycles/` ⇒ `.factory/cycles/`), never on the live txn's migration (a gate-only block has no txn); exact format string and four-cell (path family × live migration) message table; migration identity only in the `tracing::warn!` diagnostic. (2) Gate self-healing: Branch B on-disk marker specified — in-place rewrite to `state=ABORTED` + top-level `abort_reason: "null_generation"`, `generation_id`/`source_sha256` stay null, txn file retained. (3) Own-migration + live txn + lock acquired + terminal record ABSENT ⇒ `NoOp` for STAGING and COMMITTING alike (decision table in BC-1.18.011 Precondition 6(d)). (4) Postcondition 5a: PreToolUse Branch C mismatch block message = keyed format string + ` (completion-record mismatch — operator investigation required)`, identical for STAGING+terminal-record and COMMITTING-verification-failure, both migrations, both path families. Canonical Test Vectors: five rows added, one row amended. No clause renumbered/removed. **Stories affected by BC changes:** S-25.08 (Red Gate test alignment; no `bcs:` array change by PO) — story-writer/test-writer propagate. **VP citations changed in:** none. **ADR-052 delta owed (architect):** see hand-off (marker field name; scope keying text). |
 | 1.5 | 2026-10-06 | product-owner | ADR-052 v1.18 follow-up deltas 11 and 12 (architect review of v1.4; exact-text corrections, no behavior change). (11) STAGING wording: Postcondition 5a(b), the 5a failure paragraph and EC-010 now state "STAGING + terminal record is always fail-closed; no verification is attempted" (matches ADR §4e/Branch C; PO already implemented fail-closed). (12) Precondition 6(b) "Decision" bullet reordered: the step-0 reservation is created first; the §5a step-3.5 reconciliation then runs and may flip the gate to OPEN, after which the decision is re-evaluated (reserve-then-verify, 6(c)). **Stories affected by BC changes:** none (no `bcs:` array change; S-25.06 already anchors). **VP citations changed in:** none. inputs: dropped downstream error-taxonomy + S-25.06 to restore an acyclic input-hash graph (orchestrator, 2026-10-06); both remain prose cross-references. |
 | 1.4 | 2026-10-06 | product-owner | ADR-052 v1.18 formal-finding exception ratification/amendment of v1.3 (human-approved 2026-10-06; v1.3 was the baseline the architect adjudicated, so the delta is a distinct version rather than an in-place edit of v1.3). **Precondition 6(b):** Tools bullet reduced to `Edit`/`Write`/`MultiEdit` — `Bash` removed from S-25.06's tested surface ([D-1232-OBL-4] §5c classifier ships later; POL-3 + §7c step-5 fingerprint recheck are the stated backstops) and a regression requirement added that the Rust gate leaves `Bash` unprocessed (EC-014); "Where" bullet rewritten from "alongside, never in place of" to a single shared admission core evaluated exactly once per event ahead of `shard_cap_precheck`; Exemption re-scoped to the OBL-4 classifier (Branch 1–4). **Precondition 6(c):** "atomically under `LOCK_SH`" replaced by reserve-then-verify (ADR-052 §5a step 0, Dekker argument recorded); release-on-block incl. dispatcher-side release when a later stage blocks; staleness by `created_at` with mtime fallback; 30 s / 3,600 s / 1,800 s production floor (test seam injectable) / no PID liveness unchanged. **Postcondition 5a / EC-010:** PreToolUse analogue of the mismatch abort is an `E-MAINTENANCE-001` block with reason logged; foreign-migration guard. **Precondition 5:** `migration_id: "backfill-append-logs"` on the txn record (absent ⇒ `migrate-bc-index`), cross-migration recovery refusal, per-migration terminal record/pointer namespace, `canonical_paths_count` (draft `file_count` retired). **Renames throughout:** `completed.json`→`completed-backfill-append-logs.json`, `CURRENT.json`→`CURRENT-backfill-append-logs.json`, `gate-state`→`gate-state.json` (v1.3 changelog row left verbatim as history). **New edge cases (append-only):** EC-014 (Bash unprocessed), EC-015 (D4 per-migration terminal-record namespace), EC-016 (D4 cross-migration refusal), EC-017 (D5 reserve-then-verify race), EC-018 (release-on-block), EC-019 (`created_at`/mtime staleness) + 11 canonical test vector rows; EC-013 and EC-010 text amended. No clause number removed. **Stories affected by BC changes:** S-25.06 (AC/test additions for the v1.4 deltas) — story-writer must propagate under bc_array_changes_propagate_to_body_and_acs; no `bcs:` array change. **VP citations changed in:** none textually (VP-143 facet (b)/VP-146 a4 clause meanings affected by reserve-then-verify — architect already owns under ADR-052 v1.18). |
 | 1.3 | 2026-10-06 | product-owner | Semantic amendment closing three production defects found by S-25.06 formal verification (HEAD 9886cbc1). **D1 (gate never wired):** §Precondition 6(b) gained an explicit, testable WIRING OBLIGATION — `append_log_backfill_admission_precheck` MUST run on the production PreToolUse path in `main.rs` alongside `bc_index_migration_admission_precheck`/`shard_cap_precheck`; events PreToolUse (admit+reserve) / PostToolUse (release); tools Edit/Write/MultiEdit/write-effect Bash; protected path union `.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/`; decision = gate OPEN ∧ no STAGING/COMMITTING txn else `E-MAINTENANCE-001`; the coordinator's own closed-grammar invocation is exempt/creates no reservation (no self-deadlock). **D2 (no writer drain):** §Precondition 6(c) made normative — reservation creator/timing (PreToolUse admit, `<tool_use_id>.reservation`, PostToolUse release), mandatory drain ordering (TTL GC → flock → DRAINING → txn STAGING(null) → poll → snapshot → LOCKED), 30 s timeout → `DRAIN_TIMEOUT_ABORT` with abort gate-reset, TTL-only stale reclamation (no PID liveness; 3,600 s default, ≥1,800 s floor), self-heal; injectable timeout/TTL for tests. **D3 (permanent self-lock):** new §Postcondition 5a — terminal-record reconciliation (verify `completed.json` + four files against the COMMITTING txn, finalize txn → COMPLETED, THEN gate → OPEN) precedes `ALREADY_MIGRATED`, mirrored in the PreToolUse self-heal; fail-closed `COMPLETION_RECORD_MISMATCH_ABORT` (NEW error code, error-taxonomy v1.32) on mismatch; §Postcondition 5 and EC-004 text aligned (no longer claims "no lock / zero mutation" unconditionally); new §Invariant 6 (no permanent self-lock; gate live; coherent terminal state). New Edge Cases EC-009..EC-013 (append-only) and 8 Canonical Test Vector rows. No existing clause number changed or removed; VP-146 clause-mapping text in this BC left as-is pending architect (meaning changes listed in the hand-off: a1/a3/a4/a6 and VP-143 facet (b)). ADR-052 amendment owed by architect (§Decision 4e table row + §Decision 5c Branch 2 + §Decision 5a step 3.5 Branch C for COMMITTING+completed.json; coordinator-invocation reservation exemption). **Stories affected by BC changes:** S-25.06 (AC/test additions for D1/D2/D3) — story-writer must propagate under bc_array_changes_propagate_to_body_and_acs; no `bcs:` array change. **VP citations changed in:** none textually (VP-146 clause meanings affected — architect to review). |

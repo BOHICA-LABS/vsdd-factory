@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-10-07T03:12:24Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory && wc -l .factory/STATE.md; cargo test -q -p validate-state-structure --lib 2>&1 | tail -3"}
+{"status":"pass","timestamp":"2026-10-07T03:44:41Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.08 && cargo test --workspace --all-targets --no-fail-fast 2>&1 | grep -E \"test result\" | awk '{p+=$4; f+=$6} END {print \"passed\",p,\"failed\",f}'; cargo fmt --check --all && echo FMT_OK"}
