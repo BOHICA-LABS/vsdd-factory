@@ -51,10 +51,10 @@ setup() {
     return 1
   fi
 
-  # The new floor MUST be at 46.x.
-  if ! echo "$wasmtime_line" | grep -qE '"46\.'; then
-    echo "FAIL: wasmtime not pinned at 46.x: $wasmtime_line"
-    echo "Expected: wasmtime = \"46.0.2\""
+  # The new floor MUST be at 48.x (RUSTSEC-2026-0316 et al.; 46.x no longer passes cargo deny).
+  if ! echo "$wasmtime_line" | grep -qE '"48\.'; then
+    echo "FAIL: wasmtime not pinned at 48.x: $wasmtime_line"
+    echo "Expected: wasmtime = \"48.0.4\""
     return 1
   fi
 }
@@ -83,10 +83,10 @@ setup() {
     return 1
   fi
 
-  # The new floor MUST be at 46.x.
-  if ! echo "$wasi_line" | grep -qE '"46\.'; then
-    echo "FAIL: wasmtime-wasi not pinned at 46.x: $wasi_line"
-    echo "Expected: wasmtime-wasi = \"46.0.2\""
+  # The new floor MUST be at 48.x.
+  if ! echo "$wasi_line" | grep -qE '"48\.'; then
+    echo "FAIL: wasmtime-wasi not pinned at 48.x: $wasi_line"
+    echo "Expected: wasmtime-wasi = \"48.0.4\""
     return 1
   fi
 }

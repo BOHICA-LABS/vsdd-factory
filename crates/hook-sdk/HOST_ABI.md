@@ -526,7 +526,8 @@ Refs: BC-3.08.001 v1.8 (Event 3); BC-7.06.001 Invariants 1, 7; F-P14-001 Path B.
 
 All plugins receive WASI preopened directory access to the project root
 (`CLAUDE_PROJECT_DIR`) and the `FACTORY_STATE_FILE` parent directory with
-`DirPerms::all() | FilePerms::all()`. This means any plugin can read and write
+`FsPerms::ReadWrite` (wasmtime-wasi 48; formerly
+`DirPerms::all() | FilePerms::all()` — semantics unchanged). This means any plugin can read and write
 within these directories using native WASI filesystem calls (`std::fs::read`,
 `std::fs::write`, etc.) — no capability declaration required.
 

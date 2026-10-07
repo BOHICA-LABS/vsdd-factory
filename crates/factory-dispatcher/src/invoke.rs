@@ -28,7 +28,7 @@ use thiserror::Error;
 use wasmtime::{Engine, Module, Store, Trap};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::{DirPerms, FilePerms, I32Exit, WasiCtxBuilder};
+use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
 
 use crate::engine::timeout_ms_to_epochs;
 use crate::host::{HostContext, setup_linker};
@@ -351,7 +351,8 @@ pub fn invoke_plugin(
         // No project dir — build without filesystem preopen.
     } else if let Err(e) = wasi_builder.preopened_dir(
         // W-15 wave gate (SEC-001 / CRIT-W15-003): WASI preopens grant
-        // DirPerms::all() | FilePerms::all() to plugins. This is the sandbox
+        // FsPerms::ReadWrite (wasmtime-wasi 48 unified DirPerms::all() |
+        // FilePerms::all()) to plugins. This is the sandbox
         // boundary; capability-gated host functions (e.g., write_file) provide
         // ADDITIONAL bounded mechanisms but do not constrain native WASI calls.
         // See crates/hook-sdk/HOST_ABI.md "Filesystem Access Model". v1.1 will
@@ -359,8 +360,7 @@ pub fn invoke_plugin(
         // declarations.
         &host_ctx.cwd,
         ".",
-        DirPerms::all(),
-        FilePerms::all(),
+        FsPerms::ReadWrite,
     ) {
         // Non-fatal: log and continue without filesystem access.
         // Plugin may still function if it doesn't need std::fs.
