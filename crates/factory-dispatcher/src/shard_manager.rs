@@ -14060,13 +14060,47 @@ pub enum TerminalReconcileDecision {
     RefuseForeignMigration,
 }
 
-/// S-25.08 STUB: the ONE shared pure terminal-record reconciliation core
-/// (ADR-052 v1.18 §5a Branch C; BC-1.18.011 Postcondition 9; BC-1.18.013
-/// Postcondition 5a). Total over its input space.
+/// The ONE shared pure terminal-record reconciliation core (ADR-052 v1.18 §5a
+/// Branch C; BC-1.18.011 Precondition 6(d) decision table / Postcondition 9;
+/// BC-1.18.013 Postcondition 5a). Total over its input space; first match
+/// wins:
+///
+/// 1. lock NOT acquired (live coordinator) or no live txn -> `NoOp`;
+/// 2. live txn is not the evaluating migration's own -> `RefuseForeignMigration`
+///    (precedence over every record check);
+/// 3. own migration, record ABSENT -> `NoOp` (STAGING and COMMITTING alike);
+/// 4. record present, txn COMMITTING and every check passes ->
+///    `FinalizeThenOpenGate`;
+/// 5. record present otherwise (STAGING of any generation, or any failed
+///    check) -> `FailClosedMismatch`.
+///
+/// Pure: no I/O, no ambient time, no PID input.
 pub fn decide_terminal_record_reconciliation(
-    _inputs: &TerminalReconcileInputs,
+    inputs: &TerminalReconcileInputs,
 ) -> TerminalReconcileDecision {
-    todo!("S-25.08 AC-007/AC-010: pure terminal-record reconciliation decision core")
+    let live = matches!(
+        inputs.txn_state,
+        Some(BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing)
+    );
+    if !inputs.lock_acquired || !live {
+        return TerminalReconcileDecision::NoOp;
+    }
+    if !inputs.txn_is_own_migration {
+        return TerminalReconcileDecision::RefuseForeignMigration;
+    }
+    if !inputs.record_present {
+        return TerminalReconcileDecision::NoOp;
+    }
+    let all_checks_pass = inputs.record_parses
+        && inputs.txn_id_eq
+        && inputs.generation_id_eq
+        && inputs.count_eq_n
+        && inputs.hashes_eq.iter().all(|ok| *ok);
+    if inputs.txn_state == Some(BcIndexMigrationTxnState::Committing) && all_checks_pass {
+        TerminalReconcileDecision::FinalizeThenOpenGate
+    } else {
+        TerminalReconcileDecision::FailClosedMismatch
+    }
 }
 
 /// Poll the writer-reservations directory until it is empty (quiescence)
