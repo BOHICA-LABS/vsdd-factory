@@ -846,7 +846,7 @@ pub fn diagnostics_for_undelivered_finalize(
     let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchCFinalizeUnwired);
     advisory.migration_id = Some(migration_id.clone());
     advisory.txn_id = Some(txn_id.clone());
-    advisory.check = Some(FINALIZE_UNWIRED_CHECK.to_string());
+    advisory.check = Some(BranchCCheck::FinalizeUnwired.token().to_string());
     let blocked = BlockedDiagnostic {
         scope: family.scope(),
         family: family.family_token(),
@@ -854,7 +854,7 @@ pub fn diagnostics_for_undelivered_finalize(
         gate_state,
         migration_id: Some(migration_id),
         txn_id: Some(txn_id),
-        check: Some(FINALIZE_UNWIRED_CHECK.to_string()),
+        check: Some(BranchCCheck::FinalizeUnwired.token().to_string()),
         reconciliation: StaleGateReconciliation::CompletionRecordMismatch,
     };
     (
@@ -865,9 +865,6 @@ pub fn diagnostics_for_undelivered_finalize(
         e_maintenance_block_message(family, true),
     )
 }
-
-/// The Branch C failing-check token of the undelivered-finalize seam.
-const FINALIZE_UNWIRED_CHECK: &str = "finalize_unwired";
 
 fn gate_state_token(g: BcIndexAdmissionGateState) -> &'static str {
     match g {
@@ -893,12 +890,69 @@ impl StaleGateReconciliation {
     }
 }
 
+/// The CLOSED `check` value domain of the Branch C `completion_record_mismatch`
+/// verdict (BC-1.18.013 Postcondition 10(a)): nine tokens, each a compile-time
+/// constant — never derived from on-disk content. Variants 2-7 are emitted by
+/// S-25.06's verifier; they are pinned here so the domain is closed and exhaustive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchCCheck {
+    /// STAGING txn alongside a terminal record (always fail-closed).
+    StagingWithTerminalRecord,
+    /// The terminal record could not be parsed.
+    TerminalRecordUnparseable,
+    /// The terminal record's schema does not match.
+    TerminalRecordSchemaMismatch,
+    /// The terminal record's `txn_id` differs from the live txn's.
+    TxnIdMismatch,
+    /// The terminal record's `generation_id` differs from the live txn's.
+    GenerationIdMismatch,
+    /// The canonical-paths count differs.
+    CanonicalPathsCountMismatch,
+    /// A canonical-path hash differs.
+    CanonicalHashMismatch,
+    /// COMMITTING txn whose terminal record cannot be verified in this build.
+    TerminalRecordUnverified,
+    /// The finalize effect is undelivered (S-25.06 wires it).
+    FinalizeUnwired,
+}
+
+impl BranchCCheck {
+    /// All nine checks, in the BC's fixed order.
+    pub const ALL: [Self; 9] = [
+        Self::StagingWithTerminalRecord,
+        Self::TerminalRecordUnparseable,
+        Self::TerminalRecordSchemaMismatch,
+        Self::TxnIdMismatch,
+        Self::GenerationIdMismatch,
+        Self::CanonicalPathsCountMismatch,
+        Self::CanonicalHashMismatch,
+        Self::TerminalRecordUnverified,
+        Self::FinalizeUnwired,
+    ];
+
+    /// The wire token (snake_case, a compile-time constant).
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::StagingWithTerminalRecord => "staging_with_terminal_record",
+            Self::TerminalRecordUnparseable => "terminal_record_unparseable",
+            Self::TerminalRecordSchemaMismatch => "terminal_record_schema_mismatch",
+            Self::TxnIdMismatch => "txn_id_mismatch",
+            Self::GenerationIdMismatch => "generation_id_mismatch",
+            Self::CanonicalPathsCountMismatch => "canonical_paths_count_mismatch",
+            Self::CanonicalHashMismatch => "canonical_hash_mismatch",
+            Self::TerminalRecordUnverified => "terminal_record_unverified",
+            Self::FinalizeUnwired => "finalize_unwired",
+        }
+    }
+}
+
 /// What reconciliation did beyond its outcome (advisories + the Branch C
 /// failing check), collected as DATA.
 #[derive(Debug, Default)]
 struct ReconcileFacts {
     advisories: Vec<AdmissionDiagnostic>,
-    check: Option<String>,
+    check: Option<BranchCCheck>,
     /// `(migration_id, txn_id)` when the pure core decided `FinalizeThenOpenGate`
     /// but the finalize effect is undelivered: the verdict and its diagnostics
     /// are then built by [`diagnostics_for_undelivered_finalize`].
@@ -1026,7 +1080,7 @@ fn verify_admission(
         gate_state: second.gate,
         migration_id: live.map(|t| sanitize_diagnostic_id(t.migration_id())),
         txn_id: live.map(|t| sanitize_diagnostic_id(t.txn_id())),
-        check: facts.check.as_deref().map(sanitize_diagnostic_id),
+        check: facts.check.map(|c| c.token().to_string()),
         reconciliation,
     }));
     let mismatch = reconciliation == StaleGateReconciliation::CompletionRecordMismatch;
@@ -1206,14 +1260,11 @@ fn reconcile_collecting(
             // Branch C verification failure: no txn write, no gate write. The
             // failing check names why (STAGING + record is always fail-closed;
             // COMMITTING cannot be verified in this build).
-            facts.check = Some(
-                if live.state == BcIndexMigrationTxnState::Staging {
-                    "staging_with_terminal_record"
-                } else {
-                    "terminal_record_unverified"
-                }
-                .to_string(),
-            );
+            facts.check = Some(if live.state == BcIndexMigrationTxnState::Staging {
+                BranchCCheck::StagingWithTerminalRecord
+            } else {
+                BranchCCheck::TerminalRecordUnverified
+            });
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
         (StaleGateReconciliationPlan::FinalizeThenOpenGate, Some(live)) => {

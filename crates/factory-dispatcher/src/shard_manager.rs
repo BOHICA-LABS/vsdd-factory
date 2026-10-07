@@ -145,7 +145,7 @@ mod admission;
 mod ttl_seam_tests;
 pub use admission::{
     ABORT_REASON_NULL_GENERATION, AdmissionAdvisory, AdmissionDiagnostic, AdmissionOutcome,
-    AdvisoryReason, BlockBranch, BlockedDiagnostic, FactoryRoot, FailedDiagnostic,
+    AdvisoryReason, BlockBranch, BlockedDiagnostic, BranchCCheck, FactoryRoot, FailedDiagnostic,
     MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily,
     SessionProjectRoot, StaleGateReconciliation, admit_protected_write,
     as_given_factory_root_spelling, classify_tool_use_id, derive_block_branch,
