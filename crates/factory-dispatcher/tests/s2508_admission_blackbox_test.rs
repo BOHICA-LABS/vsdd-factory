@@ -513,7 +513,10 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
         );
         let err = stderr_of(&out);
         let want = plain_msg(scope_of(rel));
-        if out.status.code() != Some(2) || !err.contains(&want) {
+        if out.status.code() != Some(2)
+            || !err.contains(&want)
+            || err.contains("completion-record mismatch")
+        {
             failures.push(format!(
                 "gate-only (DRAINING, no txn, lock held) writing {rel} must block with exactly \
                  `{want}`; got exit {:?}, stderr: {err}",
@@ -3134,6 +3137,10 @@ enum Expect {
     /// plain `E-MAINTENANCE-001` block (prefix match: the path-family message),
     /// NEVER `E-MAINTENANCE-002`
     PlainBlock,
+    /// exit 2 `E-MAINTENANCE-001` keyed message followed by the EXACT
+    /// ` (completion-record mismatch -- operator investigation required)` suffix
+    /// (em dash U+2014); txn not finalized; tree byte-identical (v1.9 ruling)
+    MismatchBlock,
     /// exit 2 `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
     Cause(&'static str),
 }
@@ -3147,6 +3154,7 @@ struct Fixture {
 #[cfg(unix)]
 struct Row {
     label: &'static str,
+    rel: &'static str,
     needs_non_root: bool,
     expect: Expect,
     setup: Box<dyn Fn(&Project) -> Fixture>,
@@ -3164,6 +3172,7 @@ fn fx() -> Fixture {
 fn gate_row(label: &'static str, bytes: &'static [u8], expect: Expect) -> Row {
     Row {
         label,
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect,
         setup: Box::new(move |p| {
@@ -3185,7 +3194,7 @@ fn assert_row(row: &Row, failures: &mut Vec<String>) {
     let p = Project::new();
     let _fixture = (row.setup)(&p);
     let before = lenient_snapshot(&p);
-    let target = p.abs(CYCLES_PATH);
+    let target = p.abs(row.rel);
     let out = run(
         &p,
         &envelope("PreToolUse", "Write", Some("T32"), edit_input(&target)),
@@ -3200,7 +3209,18 @@ fn assert_row(row: &Row, failures: &mut Vec<String>) {
         Expect::Admit => out.status.code() == Some(0) && p.reservation("T32").exists(),
         Expect::PlainBlock => {
             out.status.code() == Some(2)
-                && err.contains(&plain_msg(".factory/cycles/"))
+                && err.contains(&plain_msg(scope_of(row.rel)))
+                && !err.contains("completion-record mismatch")
+                && !err.contains("E-MAINTENANCE-002")
+                && !p.reservation("T32").exists()
+                && lenient_snapshot(&p) == before
+        }
+        Expect::MismatchBlock => {
+            out.status.code() == Some(2)
+                && err.contains(&format!(
+                    "{}{MISMATCH_SUFFIX}",
+                    plain_msg(scope_of(row.rel))
+                ))
                 && !err.contains("E-MAINTENANCE-002")
                 && !p.reservation("T32").exists()
                 && lenient_snapshot(&p) == before
@@ -3241,6 +3261,7 @@ fn write_raw_txn(p: &Project, name: &str, bytes: &[u8]) {
 fn txn_row(label: &'static str, bytes: &'static [u8], expect: Expect) -> Row {
     Row {
         label,
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect,
         setup: Box::new(move |p| {
@@ -3266,6 +3287,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     ));
     rows.push(Row {
         label: "(b) gate-state \"LOCKED\" (live coordinator holds the lock)",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::PlainBlock,
         setup: Box::new(|p| {
@@ -3278,6 +3300,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "(c) gate-state ABSENT (ENOENT is not an error => OPEN)",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::Admit,
         setup: Box::new(|p| {
@@ -3287,6 +3310,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "(d) gate-state mode 000 (open fails EACCES)",
+        rel: CYCLES_PATH,
         needs_non_root: true,
         expect: Expect::Cause("io"),
         setup: Box::new(|p| {
@@ -3299,6 +3323,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "(e) gate-state is a DIRECTORY (read fails EISDIR)",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::Cause("io"),
         setup: Box::new(|p| {
@@ -3355,6 +3380,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     ));
     rows.push(Row {
         label: "(o) gate-state mode 000 whose bytes would ALSO be malformed => io (content never examined)",
+        rel: CYCLES_PATH,
         needs_non_root: true,
         expect: Expect::Cause("io"),
         setup: Box::new(|p| {
@@ -3370,6 +3396,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     // ---- txn-record rows (gate OPEN) ----
     rows.push(Row {
         label: "txn record unreadable (mode 000) => io",
+        rel: CYCLES_PATH,
         needs_non_root: true,
         expect: Expect::Cause("io"),
         setup: Box::new(|p| {
@@ -3403,6 +3430,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     ));
     rows.push(Row {
         label: "txn record `state` unknown value",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::Cause("state_integrity"),
         setup: Box::new(|p| {
@@ -3412,6 +3440,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "txn record non-string migration_id (EC-030) => state_integrity",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::Cause("state_integrity"),
         setup: Box::new(|p| {
@@ -3426,6 +3455,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "two live txn records => state_integrity",
+        rel: CYCLES_PATH,
         needs_non_root: false,
         expect: Expect::Cause("state_integrity"),
         setup: Box::new(|p| {
@@ -3439,6 +3469,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     // ---- first-failure-wins: gate-state is evaluated BEFORE the txn records ----
     rows.push(Row {
         label: "precedence: gate `7` (state_integrity) + txn unreadable (io) => state_integrity",
+        rel: CYCLES_PATH,
         needs_non_root: true,
         expect: Expect::Cause("state_integrity"),
         setup: Box::new(|p| {
@@ -3453,6 +3484,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
     rows.push(Row {
         label: "precedence: gate unreadable (io) + txn zero-length (state_integrity) => io",
+        rel: CYCLES_PATH,
         needs_non_root: true,
         expect: Expect::Cause("io"),
         setup: Box::new(|p| {
@@ -3465,44 +3497,116 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
         }),
     });
 
-    // ---- terminal record (Branch C; live COMMITTING B2 txn, lock FREE so the
-    // reconciler reaches the record) ----
-    rows.push(Row {
-        label: "terminal record unreadable (mode 000) => E-MAINTENANCE-002 (io)",
-        needs_non_root: true,
-        expect: Expect::Cause("io"),
-        setup: Box::new(|p| {
-            write_gate(&p.ms(), "LOCKED");
-            write_txn(
-                &p.ms(),
-                "COMMITTING",
-                Some("gen-1"),
-                Some("migrate-bc-index"),
-            );
-            write_terminal_record(&p.ms(), "completed.json", "act-s2508", "gen-1");
-            let path = p.ms().join("completed.json");
-            Fixture {
-                _modes: vec![chmod000(&path, 0o644)],
-                _lock: None,
+    // ---- terminal record (Branch C): live txn of its OWN migration, lock FREE so
+    // the reconciler reaches the record. BC-1.18.013 v1.9 EC-032 TV row (a)-(h),
+    // STAGING gen-1 and separately COMMITTING, both migrations / path families. ----
+    type RecordBytes = Box<dyn Fn() -> Vec<u8>>;
+    let mk = |txn_id: &'static str, gen_id: &'static str, count: u64| -> RecordBytes {
+        Box::new(move || {
+            serde_json::to_vec(&serde_json::json!({
+                "generation_id": gen_id,
+                "txn_id": txn_id,
+                "completed_at": "2026-10-06T00:00:00Z",
+                "canonical_paths_count": count,
+            }))
+            .unwrap()
+        })
+    };
+    let record_cases: Vec<(&'static str, RecordBytes)> = vec![
+        ("(a) non-UTF-8 bytes", Box::new(|| vec![0xFF, 0xFE, 0xFD])),
+        ("(b) zero-length", Box::new(Vec::new)),
+        (
+            "(c) truncated JSON",
+            Box::new(|| b"{\"generation_id\": \"gen-1\", \"tx".to_vec()),
+        ),
+        ("(d) wrong schema []", Box::new(|| b"[]".to_vec())),
+        (
+            "(d) wrong schema {\"foo\":1}",
+            Box::new(|| b"{\"foo\":1}".to_vec()),
+        ),
+        ("(e) canonical_paths_count = 3", mk("act-s2508", "gen-1", 3)),
+        ("(f) mismatching txn_id", mk("some-other-txn", "gen-1", 4)),
+        // (g) hash mismatch: every field matches, the canonical files do not
+        // carry `expected_post_hash` (no canonical files exist in the fixture).
+        (
+            "(g) all fields match, canonical hash mismatch",
+            mk("act-s2508", "gen-1", 4),
+        ),
+        ("not JSON text", Box::new(|| b"this is not json".to_vec())),
+    ];
+    let combos: [(&'static str, &'static str, &'static str, &'static str); 2] = [
+        ("migrate-bc-index", "completed.json", BC_PATH, "B2"),
+        (
+            "backfill-append-logs",
+            "completed-backfill-append-logs.json",
+            CYCLES_PATH,
+            "mechanism-A",
+        ),
+    ];
+    for (mig, record_file, rel, mig_label) in combos {
+        for state in ["STAGING", "COMMITTING"] {
+            for (case_label, bytes) in &record_cases {
+                let label: &'static str = Box::leak(
+                    format!(
+                        "[{mig_label} {state}] terminal record {case_label} => mismatch suffix"
+                    )
+                    .into_boxed_str(),
+                );
+                let content = bytes();
+                rows.push(Row {
+                    label,
+                    rel,
+                    needs_non_root: false,
+                    expect: Expect::MismatchBlock,
+                    setup: Box::new(move |p| {
+                        write_gate(&p.ms(), "LOCKED");
+                        write_txn(&p.ms(), state, Some("gen-1"), Some(mig));
+                        std::fs::write(p.ms().join(record_file), &content).unwrap();
+                        fx()
+                    }),
+                });
             }
-        }),
-    });
-    rows.push(Row {
-        label: "terminal record unparseable => plain E-MAINTENANCE-001 (NOT -002), not finalized",
-        needs_non_root: false,
-        expect: Expect::PlainBlock,
-        setup: Box::new(|p| {
-            write_gate(&p.ms(), "LOCKED");
-            write_txn(
-                &p.ms(),
-                "COMMITTING",
-                Some("gen-1"),
-                Some("migrate-bc-index"),
+            // (h) mode 000 => the read call fails => E-MAINTENANCE-002 (io)
+            let label: &'static str = Box::leak(
+                format!(
+                    "[{mig_label} {state}] terminal record (h) mode 000 => E-MAINTENANCE-002 (io)"
+                )
+                .into_boxed_str(),
             );
-            std::fs::write(p.ms().join("completed.json"), b"this is not json").unwrap();
-            fx()
-        }),
-    });
+            rows.push(Row {
+                label,
+                rel,
+                needs_non_root: true,
+                expect: Expect::Cause("io"),
+                setup: Box::new(move |p| {
+                    write_gate(&p.ms(), "LOCKED");
+                    write_txn(&p.ms(), state, Some("gen-1"), Some(mig));
+                    write_terminal_record(&p.ms(), record_file, "act-s2508", "gen-1");
+                    let path = p.ms().join(record_file);
+                    Fixture {
+                        _modes: vec![chmod000(&path, 0o644)],
+                        _lock: None,
+                    }
+                }),
+            });
+            // record ABSENT => PLAIN suffix-less block
+            let label: &'static str = Box::leak(
+                format!("[{mig_label} {state}] terminal record ABSENT => plain (no suffix)")
+                    .into_boxed_str(),
+            );
+            rows.push(Row {
+                label,
+                rel,
+                needs_non_root: false,
+                expect: Expect::PlainBlock,
+                setup: Box::new(move |p| {
+                    write_gate(&p.ms(), "LOCKED");
+                    write_txn(&p.ms(), state, Some("gen-1"), Some(mig));
+                    fx()
+                }),
+            });
+        }
+    }
 
     for row in &rows {
         assert_row(row, &mut failures);
