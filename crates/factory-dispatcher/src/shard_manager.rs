@@ -14008,9 +14008,18 @@ pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
 /// error. (The injectable test seam `drain_bc_index_writers` is NOT bound by
 /// the floor.)
 pub fn validate_production_reservation_ttl(
-    _ttl: std::time::Duration,
+    ttl: std::time::Duration,
 ) -> Result<std::time::Duration, BcIndexMigrationError> {
-    todo!("S-25.08 AC-008: reject TTL < MIN_PRODUCTION_RESERVATION_TTL (config error)")
+    if ttl < MIN_PRODUCTION_RESERVATION_TTL {
+        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "configuration error: reservation TTL {}s is below the {}s production floor                  (ADR-052 v1.18 §5a; BC-1.18.011 Precondition 6(c))",
+                ttl.as_secs(),
+                MIN_PRODUCTION_RESERVATION_TTL.as_secs()
+            ),
+        });
+    }
+    Ok(ttl)
 }
 
 /// S-25.08 AC-008 STUB: the single pure staleness predicate (no PID input, no
@@ -14018,12 +14027,13 @@ pub fn validate_production_reservation_ttl(
 /// wins; `mtime` is used ONLY when `created_at` is `None`. Stale iff
 /// `now - basis > ttl`.
 pub fn reservation_is_stale(
-    _created_at_epoch_secs: Option<u64>,
-    _mtime_epoch_secs: u64,
-    _now_epoch_secs: u64,
-    _ttl_secs: u64,
+    created_at_epoch_secs: Option<u64>,
+    mtime_epoch_secs: u64,
+    now_epoch_secs: u64,
+    ttl_secs: u64,
 ) -> bool {
-    todo!("S-25.08 AC-008: created_at-first staleness, mtime fallback only when absent")
+    let basis = created_at_epoch_secs.unwrap_or(mtime_epoch_secs);
+    now_epoch_secs.saturating_sub(basis) > ttl_secs
 }
 
 /// S-25.08 STUB (VP-146 v1.2 / VP-147 v1.1 canonical input record of the pure
