@@ -299,7 +299,7 @@ fn oracle(i: &TerminalReconcileInputs) -> TerminalReconcileDecision {
         return RefuseForeignMigration; // precedence over every record check
     }
     if !i.record_present {
-        return NoOp; // nothing to reconcile (only remaining output; see report ambiguity note)
+        return NoOp; // record ABSENT => nothing to reconcile (BC-1.18.011 v1.13 Pre 6(d) table row 3)
     }
     let all_ok = i.record_parses
         && i.txn_id_eq
@@ -464,4 +464,35 @@ fn test_BC_1_18_011_PC9_terminal_reconcile_finalize_only_on_full_verification() 
         TerminalReconcileDecision::NoOp,
         "lock not acquired (live coordinator) => NoOp"
     );
+}
+
+/// BC-1.18.011 v1.13 NoOp cell: own-migration live txn (STAGING and, separately,
+/// COMMITTING), lock acquired, terminal record ABSENT => `NoOp` (no txn write, no
+/// gate write).
+#[test]
+fn test_BC_1_18_011_PC9_terminal_reconcile_record_absent_is_noop_for_staging_and_committing() {
+    for state in [
+        BcIndexMigrationTxnState::Staging,
+        BcIndexMigrationTxnState::Committing,
+    ] {
+        // every other check input true AND false: record absence alone decides.
+        for others in [true, false] {
+            let i = TerminalReconcileInputs {
+                lock_acquired: true,
+                record_present: false,
+                txn_state: Some(state),
+                record_parses: others,
+                txn_id_eq: others,
+                generation_id_eq: others,
+                count_eq_n: others,
+                hashes_eq: [others; 4],
+                txn_is_own_migration: true,
+            };
+            assert_eq!(
+                decide_terminal_record_reconciliation(&i),
+                TerminalReconcileDecision::NoOp,
+                "own live txn {state:?} with NO terminal record must be NoOp ({i:?})"
+            );
+        }
+    }
 }

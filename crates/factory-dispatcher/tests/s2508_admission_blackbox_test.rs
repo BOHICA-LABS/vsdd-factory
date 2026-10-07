@@ -63,17 +63,16 @@
 //! * Txn fixtures carry the v1.11 `migration_id` field
 //!   (`"migrate-bc-index"` | `"backfill-append-logs"` | absent = B2).
 //!
-//! # Genuine ambiguities flagged (not guessed at)
+//! # Message format (BC-1.18.013 v1.6 Pre 6(b); error-taxonomy v1.35)
 //!
-//! * `<scope>` of `E-MAINTENANCE-001`: BC-1.18.013 6(b) keys it on the PATH
-//!   (`.factory/cycles/`), error-taxonomy v1.34 keys it on the MIGRATION
-//!   (`BC-INDEX` for B2, `.factory/cycles/` for mechanism A). The two agree for
-//!   (cycles path, backfill-append-logs txn); only THAT combination asserts the
-//!   scope literal here. Other combinations assert only the stable suffix
-//!   `write blocked: migration window active`.
-//! * The `null_generation` disposition marker (Branch B) has no specified
-//!   on-disk representation; the Branch B test asserts txn state=ABORTED, the
-//!   txn file RETAINED (not deleted/archived) and `generation_id` still null.
+//! `<scope> write blocked: migration window active (txn record in STAGING or
+//! COMMITTING state); retry after migration completes or aborts`, where
+//! `<scope>` is keyed on the WRITTEN PATH FAMILY (`BC-INDEX` under
+//! `.factory/specs/behavioral-contracts/`, `.factory/cycles/` under
+//! `.factory/cycles/`), never on the live migration. A STAGING + terminal-record
+//! block appends ` (completion-record mismatch -- operator investigation
+//! required)` (em dash U+2014); foreign-migration and EWOULDBLOCK blocks are the
+//! plain message.
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -84,7 +83,25 @@ use std::time::{Duration, Instant};
 use factory_dispatcher::shard_manager::{MigrationLockGuard, try_acquire_migration_lock};
 
 const SEAM_ENV: &str = "VSDD_TEST_ADMISSION_SEAM_DIR";
-const STABLE_BLOCK_SUFFIX: &str = "write blocked: migration window active";
+const MISMATCH_SUFFIX: &str =
+    " (completion-record mismatch \u{2014} operator investigation required)";
+
+/// Exact E-MAINTENANCE-001 message for a written-path family.
+fn plain_msg(scope: &str) -> String {
+    format!(
+        "{scope} write blocked: migration window active (txn record in STAGING or COMMITTING \
+         state); retry after migration completes or aborts"
+    )
+}
+
+/// `<scope>` keyed on the written path family.
+fn scope_of(rel: &str) -> &'static str {
+    if rel.starts_with(".factory/cycles/") {
+        ".factory/cycles/"
+    } else {
+        "BC-INDEX"
+    }
+}
 const CYCLES_PATH: &str = ".factory/cycles/c1/burst-log.md";
 const BC_PATH: &str = ".factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md";
 
@@ -389,11 +406,11 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
                     "{tool}/{state}: stderr lacks E-MAINTENANCE-001: {err}"
                 ));
             }
-            // Taxonomy v1.34 message form with <scope> = `.factory/cycles/`.
-            let want = format!(".factory/cycles/ {STABLE_BLOCK_SUFFIX}");
+            // Taxonomy v1.35 exact message, <scope> = `.factory/cycles/`.
+            let want = plain_msg(".factory/cycles/");
             if !err.contains(&want) {
                 failures.push(format!(
-                    "{tool}/{state}: block message lacks `{want}` (error-taxonomy v1.34 \
+                    "{tool}/{state}: block message lacks `{want}` (error-taxonomy v1.35 \
                      E-MAINTENANCE-001 format); stderr: {err}"
                 ));
             }
@@ -450,10 +467,11 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
         }
     }
 
-    // UNION: a live txn of EITHER migration blocks BOTH path families.
+    // UNION + keying: a live txn of EITHER migration blocks BOTH path families;
+    // the message is keyed on the WRITTEN PATH FAMILY (2 strings, 4 combinations).
     for (mig, label) in [
-        (None, "B2 (migration_id absent)"),
         (Some("migrate-bc-index"), "migrate-bc-index"),
+        (None, "B2 (migration_id absent)"),
         (Some("backfill-append-logs"), "backfill-append-logs"),
     ] {
         for rel in [BC_PATH, CYCLES_PATH] {
@@ -467,16 +485,40 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
                 &envelope("PreToolUse", "Edit", Some("TU"), edit_input(&target)),
             );
             let err = stderr_of(&out);
+            let want = plain_msg(scope_of(rel));
             if out.status.code() != Some(2)
                 || !err.contains("E-MAINTENANCE-001")
-                || !err.contains(STABLE_BLOCK_SUFFIX)
+                || !err.contains(&want)
+                || err.contains("completion-record mismatch")
             {
                 failures.push(format!(
-                    "union: live {label} txn must block {rel} with `E-MAINTENANCE-001 ... \
-                     {STABLE_BLOCK_SUFFIX}`; got exit {:?}, stderr: {err}",
+                    "keying: live {label} txn writing {rel} must block with exactly `{want}`; \
+                     got exit {:?}, stderr: {err}",
                     out.status.code()
                 ));
             }
+        }
+    }
+
+    // Gate-only block (DRAINING, no txn, live coordinator holds the lock): same
+    // path-family message.
+    for rel in [BC_PATH, CYCLES_PATH] {
+        let p = Project::new();
+        write_gate(&p.ms(), "DRAINING");
+        let _live = p.hold_lock();
+        let target = p.abs(rel);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TG"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        let want = plain_msg(scope_of(rel));
+        if out.status.code() != Some(2) || !err.contains(&want) {
+            failures.push(format!(
+                "gate-only (DRAINING, no txn, lock held) writing {rel} must block with exactly \
+                 `{want}`; got exit {:?}, stderr: {err}",
+                out.status.code()
+            ));
         }
     }
 
@@ -1158,17 +1200,38 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
                 &envelope("PreToolUse", "Edit", Some("TB"), edit_input(&target)),
             );
             let txn = p.txn_json();
+            let txn_path = p.ms().join("txn-act-s2508.json");
+            let bytes_after_first = std::fs::read(&txn_path).unwrap_or_default();
             if out.status.code() != Some(0)
                 || p.gate() != "OPEN"
                 || txn["state"] != "ABORTED"
+                || txn["abort_reason"] != "null_generation"
                 || !txn["generation_id"].is_null()
+                || !txn["source_sha256"].is_null()
+                || txn["activation_id"] != "act-s2508"
+                || bytes_after_first.is_empty()
             {
                 failures.push(format!(
                     "[{label}] Branch B (STAGING, generation_id=null): expected admit, gate OPEN, \
-                     txn ABORTED (retained, generation_id null); got exit {:?}, gate={}, txn={}",
+                     SAME txn file retained with state=ABORTED, abort_reason=null_generation, \
+                     generation_id/source_sha256 null; got exit {:?}, gate={}, txn={}",
                     out.status.code(),
                     p.gate(),
                     txn
+                ));
+            }
+            // A second PreToolUse leaves the txn file byte-identical.
+            let out2 = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("TB2"), edit_input(&target)),
+            );
+            if out2.status.code() != Some(0)
+                || std::fs::read(&txn_path).unwrap_or_default() != bytes_after_first
+            {
+                failures.push(format!(
+                    "[{label}] second PreToolUse after Branch B must admit and leave the txn \
+                     file byte-identical; exit {:?}",
+                    out2.status.code()
                 ));
             }
         }
@@ -1203,7 +1266,8 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
                 .map(|e| std::fs::read(e.path()).unwrap())
                 .collect::<Vec<_>>();
             if out.status.code() != Some(2)
-                || !stderr_of(&out).contains("E-MAINTENANCE-001")
+                || !stderr_of(&out).contains(&plain_msg(scope_of(rel)))
+                || stderr_of(&out).contains("completion-record mismatch")
                 || p.gate() != before_gate
                 || after_txn != before_txn
                 || p.reservation("TL").exists()
@@ -1249,21 +1313,24 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
             write_txn(&p.ms(), "STAGING", gen_id, mig);
             write_terminal_record(&p.ms(), terminal, "txn-s2508", "gen-1");
             let before = p.snapshot();
-            let target = p.abs(CYCLES_PATH);
+            // mechanism-A analogue writes under cycles/; B2 shapes under
+            // behavioral-contracts/ (path-family keyed message).
+            let rel = if mig == Some("backfill-append-logs") {
+                CYCLES_PATH
+            } else {
+                BC_PATH
+            };
+            let target = p.abs(rel);
             let out = run(
                 &p,
                 &envelope("PreToolUse", "Edit", Some("TC"), edit_input(&target)),
             );
             let err = stderr_of(&out);
-            if out.status.code() != Some(2)
-                || !err.contains("E-MAINTENANCE-001")
-                || !err.contains("completion-record mismatch")
-                || p.snapshot() != before
-            {
+            let want = format!("{}{MISMATCH_SUFFIX}", plain_msg(scope_of(rel)));
+            if out.status.code() != Some(2) || !err.contains(&want) || p.snapshot() != before {
                 failures.push(format!(
                     "[{label}, generation_id={gen_id:?}] Branch C: STAGING + terminal record is \
-                     ALWAYS fail-closed: expected exit 2, E-MAINTENANCE-001 with suffix \
-                     `(completion-record mismatch -- operator investigation required)`, and \
+                     ALWAYS fail-closed: expected exit 2, exactly `{want}`, and \
                      migration-state byte-identical (no txn write, no gate write, no leftover \
                      reservation); got exit {:?}, snapshot_unchanged={}, stderr={err}",
                     out.status.code(),
@@ -1323,7 +1390,7 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
         );
         let err = stderr_of(&out);
         if out.status.code() != Some(2)
-            || !err.contains("E-MAINTENANCE-001")
+            || !err.contains(&plain_msg(".factory/cycles/"))
             || err.contains("completion-record mismatch")
             || err.contains("COMPLETION_RECORD_MISMATCH_ABORT")
             || p.snapshot() != before
@@ -1331,6 +1398,40 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
             failures.push(format!(
                 "foreign live txn ({mig}) + {terminal}: must be a PLAIN E-MAINTENANCE-001 (no \
                  mismatch reason), never finalized, zero-write; got exit {:?}, \
+                 snapshot_unchanged={}, stderr={err}",
+                out.status.code(),
+                p.snapshot() == before
+            ));
+        }
+    }
+
+    // NoOp cell (BC-1.18.011 v1.13 vector): own live txn (STAGING gen-1, and
+    // COMMITTING), lock FREE (reconciler acquires it), terminal record ABSENT =>
+    // the core decides NoOp (no txn/gate write); ordinary admission blocks with the
+    // PLAIN path-family message, no mismatch suffix, migration-state byte-identical.
+    for (state, mig) in [
+        ("STAGING", Some("migrate-bc-index")),
+        ("COMMITTING", Some("migrate-bc-index")),
+        ("STAGING", None),
+    ] {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), state, Some("gen-1"), mig);
+        let before = p.snapshot();
+        let target = p.abs(BC_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TN"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains(&plain_msg("BC-INDEX"))
+            || err.contains("completion-record mismatch")
+            || p.snapshot() != before
+        {
+            failures.push(format!(
+                "record-absent NoOp ({state}, {mig:?}): expected the PLAIN `BC-INDEX write \
+                 blocked ...` block, no mismatch suffix, zero-write; got exit {:?}, \
                  snapshot_unchanged={}, stderr={err}",
                 out.status.code(),
                 p.snapshot() == before

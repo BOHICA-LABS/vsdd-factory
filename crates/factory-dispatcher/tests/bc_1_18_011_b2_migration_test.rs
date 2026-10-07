@@ -1671,7 +1671,9 @@ fn test_BC_1_18_011_PC6d_b2_entry_point_branch_b_aborts_null_generation_staging_
     )
     .unwrap();
     assert_eq!(txn["state"], "ABORTED");
+    assert_eq!(txn["abort_reason"], "null_generation");
     assert!(txn["generation_id"].is_null());
+    assert!(txn["source_sha256"].is_null());
 }
 
 /// AC-009 (BC-1.18.011 Precondition 6(c) reserve-then-verify + release-on-block,
