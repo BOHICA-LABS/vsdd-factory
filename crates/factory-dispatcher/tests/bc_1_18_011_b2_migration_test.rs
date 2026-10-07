@@ -28,12 +28,13 @@
 //!
 //! 1. **Native-gate precedence.** `bc_index_migration_admission_precheck`
 //!    must be evaluated BEFORE `shard_cap_precheck` for a BC-INDEX-path
-//!    dispatch, and `shard_cap_precheck` must be structurally SKIPPED (never
-//!    invoked at all) when migration-admission blocks. The gate-precedence
-//!    tests below enforce this via control flow (`shard_cap_precheck` is
-//!    only reachable in the `None` arm of a `match` on the migration
-//!    verdict) and assert the load-bearing filesystem side effect (no
-//!    roll/truncation), not merely the returned `HookResult`.
+//!    dispatch. That ORDERING is a property of `main::run`, so it is proven
+//!    ONLY by the real-binary test
+//!    `test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_blackbox`
+//!    (`s2508_admission_blackbox_test.rs`). The in-process tests below prove
+//!    the narrower, honest facts: the admission call itself returns
+//!    `HookResult::Block` for a live txn and performs no roll (no truncation,
+//!    no sealed shard) as a side effect of that call.
 //! 2. `bc_index_migration_admission_precheck`'s refusal path returns
 //!    `HookResult::Block` (E-MAINTENANCE-001) — NEVER `HookResult::Error`.
 //! 3. The `^Bash$` full-command pre-shell classifier (ADR-052 §5c) and the
@@ -76,7 +77,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use factory_dispatcher::executor::{bc_index_migration_admission_precheck, shard_cap_precheck};
+use factory_dispatcher::executor::bc_index_migration_admission_precheck;
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::shard_manager::migration_fs::{Fs, StdFs};
 use factory_dispatcher::shard_manager::{
@@ -1165,9 +1166,10 @@ fn test_BC_1_18_011_PC7_VP134_hooks_registry_has_no_bc_index_migration_dependenc
 }
 
 // ---------------------------------------------------------------------------
-// Gate-precedence Ruling-1/2/3 — the native OPEN/DRAINING writer-admission
-// gate takes precedence over the (destructive) shard-cap-gate roll, with
-// shard_cap_precheck structurally SKIPPED, never merely outcome-discarded.
+// Ruling-2 — the native writer-admission gate's refusal is a `HookResult::Block`
+// (E-MAINTENANCE-001), and the admission call itself never rolls. (The
+// admission-before-shard-cap ORDERING is pinned by the real-binary test in
+// `s2508_admission_blackbox_test.rs`, not here.)
 // ---------------------------------------------------------------------------
 
 const BC_INDEX_SHARD_CONFIG: &str = "\
@@ -1246,8 +1248,7 @@ fn bc_index_payload(
 }
 
 #[test]
-fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_precheck_never_runs_no_roll()
- {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_and_performs_no_roll() {
     let dir = tempfile::tempdir().unwrap();
     write_shard_config(dir.path(), BC_INDEX_SHARD_CONFIG);
     write_migration_txn(dir.path(), "STAGING");
@@ -1269,19 +1270,11 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    // Ruling 1: bc_index_migration_admission_precheck MUST be evaluated
-    // BEFORE shard_cap_precheck for a BC-INDEX-path dispatch, and
-    // shard_cap_precheck MUST be structurally SKIPPED (never invoked at
-    // all) when migration-admission blocks. shard_cap_precheck is only
-    // reachable in the `None` arm below — it is NEVER called when the
-    // migration-admission gate fires, which IS this test's central
-    // assertion.
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
-    let verdict = match migration_verdict {
-        Some(v) => v,
-        None => shard_cap_precheck(&payload, dir.path())
-            .expect("a genuinely over-cap dispatch with no migration in flight must fire"),
-    };
+    // The admission call alone: a live STAGING txn must refuse with a Block.
+    // (Whether shard_cap_precheck runs afterwards is decided by main::run and is
+    // pinned black-box elsewhere; this test makes no claim about that ordering.)
+    let verdict = bc_index_migration_admission_precheck(&payload, dir.path())
+        .expect("a live STAGING txn must refuse the protected write (Some(verdict))");
 
     assert!(
         matches!(verdict, HookResult::Block { .. }),
@@ -1297,12 +1290,9 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
         );
     }
 
-    // The load-bearing filesystem assertion: NO roll side effect occurred,
-    // even though the write was genuinely over-cap. execute_roll (reached
-    // only via shard_cap_gate_check, which shard_cap_precheck calls) would
-    // have truncated the canonical file to 0 bytes and published a sealed
-    // shard — neither may happen here because shard_cap_precheck was never
-    // reached.
+    // The admission call itself must not roll: execute_roll would have truncated
+    // the canonical file to 0 bytes and published a sealed shard, neither of which
+    // the admission precheck may ever do.
     assert_eq!(
         std::fs::read(&target).unwrap(),
         canonical_snapshot_before,
@@ -1318,8 +1308,7 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
 }
 
 #[test]
-fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_precheck_never_runs_no_roll()
- {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_and_performs_no_roll() {
     // Identical to the STAGING case above but for the COMMITTING state —
     // Precondition 6(b) names BOTH STAGING and COMMITTING as blocking
     // states.
@@ -1337,12 +1326,8 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_prec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
-    let verdict = match migration_verdict {
-        Some(v) => v,
-        None => shard_cap_precheck(&payload, dir.path())
-            .expect("a genuinely over-cap dispatch with no migration in flight must fire"),
-    };
+    let verdict = bc_index_migration_admission_precheck(&payload, dir.path())
+        .expect("a live COMMITTING txn must refuse the protected write (Some(verdict))");
 
     assert!(matches!(verdict, HookResult::Block { .. }));
     assert_eq!(

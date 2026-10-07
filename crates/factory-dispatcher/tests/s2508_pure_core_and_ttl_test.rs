@@ -942,6 +942,60 @@ fn test_BC_1_18_011_EC025_drain_gc_reservation_timestamp_vectors() {
     );
 }
 
+/// F-S2508-L3-003 ("never clamped"). BC-1.18.013 v1.11 EC-019/EC-025: a
+/// `created_at` that is pre-epoch (case (c)) or does not fit u64 is NOT a usable
+/// instant, so staleness falls back to the file mtime. With a FRESH mtime the
+/// reservation is therefore NOT stale and the drain RETAINS it
+/// (`DrainTimeoutAbort`, file still present). The sibling vectors (c)/(f) in
+/// `test_BC_1_18_011_EC025_drain_gc_reservation_timestamp_vectors` use an OLD
+/// mtime, where "clamp to epoch 0" and "fall back to mtime" BOTH reclaim, so they
+/// cannot detect a clamp; a fresh mtime separates the two.
+#[test]
+fn test_BC_1_18_011_EC025_never_clamped_unusable_created_at_with_fresh_mtime_is_retained() {
+    let vectors: [(&str, &str); 4] = [
+        (
+            "pre-1970 RFC 3339 (1969-12-31T23:59:59Z)",
+            "\"1969-12-31T23:59:59Z\"",
+        ),
+        (
+            "pre-1970 RFC 3339 with offset (1969-12-31T23:59:59+00:00)",
+            "\"1969-12-31T23:59:59+00:00\"",
+        ),
+        ("number outside u64", "99999999999999999999999"),
+        ("negative number", "-1"),
+    ];
+    let mut failures = Vec::new();
+    for (label, created) in vectors {
+        let body = format!(r#"{{"created_at":{created},"tool_use_id":"T1"}}"#);
+        let dir = tempfile::tempdir().unwrap();
+        let res_dir = dir.path().join("reservations");
+        write_reservation_raw(
+            &res_dir,
+            "T1",
+            &body,
+            filetime::FileTime::from_system_time(std::time::SystemTime::now()),
+        );
+        let r = drain_bc_index_writers(
+            &res_dir,
+            Duration::from_millis(120),
+            Duration::from_secs(3600),
+        );
+        let still_there = res_dir.join("T1.reservation").exists();
+        if !(matches!(r, Err(BcIndexMigrationError::DrainTimeoutAbort)) && still_there) {
+            failures.push(format!(
+                "[{label}] unusable created_at + FRESH mtime must be RETAINED (never clamped to \
+                 epoch 0); drain={r:?}, still_present={still_there}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "EC-025 never-clamped: {} failure(s):\n  - {}",
+        failures.len(),
+        failures.join("\n  - ")
+    );
+}
+
 /// F-009 part 1 / EC-031: below-floor TTL is `ReservationTtlBelowFloor`, NOT
 /// `BinaryIntegrityFailure`; 1,800 s and 3,600 s pass; the seam is not bound.
 #[test]

@@ -4189,3 +4189,289 @@ fn test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox() {
         failures,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Pass-3 F-S2508-L3-001 -- minimal-shape (interpretability) of a foreign txn
+// ---------------------------------------------------------------------------
+
+/// Row over a raw `txn-*.json` body with an explicit gate state and path family.
+#[cfg(unix)]
+fn raw_txn_row(
+    label: &'static str,
+    gate: &'static str,
+    rel: &'static str,
+    bytes: &'static [u8],
+    expect: Expect,
+) -> Row {
+    Row {
+        label,
+        rel,
+        needs_non_root: false,
+        expect,
+        setup: Box::new(move |p| {
+            write_gate(&p.ms(), gate);
+            write_raw_txn(p, "txn-act-s2508.json", bytes);
+            fx()
+        }),
+    }
+}
+
+/// F-S2508-L3-001. BC-1.18.013 v1.11 Precondition 6(c) rule 3: "a txn record must
+/// be a JSON object whose `state` is a known txn state and whose PRESENT
+/// `migration_id` is a JSON string"; Precondition 6 (foreign): "A live txn whose
+/// `migration_id` is a string NOT in K ... is FOREIGN: `RefuseForeignMigration`
+/// (plain `E-MAINTENANCE-001`, no suffix, precedence over every record check) ...
+/// a record this build cannot interpret is not this build's to discard" (EC-029).
+/// ADR-052 §7e "Definition of foreign": `migration_id ∉ K`. So a foreign record
+/// that carries ONLY `state` + `migration_id` (a newer build's schema) is a plain
+/// refusal, never `E-MAINTENANCE-002 (state_integrity)`; a NON-live foreign record
+/// is not live, so admission ignores it (dual check "gate OPEN AND no live txn").
+/// Both path families.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC029_minimal_shape_foreign_txn_is_foreign_not_state_integrity_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
+
+    for rel in [BC_PATH, CYCLES_PATH] {
+        // (a) live foreign, minimal shape => plain E-MAINTENANCE-001, byte-identical.
+        for (state_label, bytes) in [
+            (
+                "STAGING",
+                &br#"{"state":"STAGING","migration_id":"future-migration"}"#[..],
+            ),
+            (
+                "COMMITTING",
+                &br#"{"state":"COMMITTING","migration_id":"future-migration"}"#[..],
+            ),
+        ] {
+            for gate in ["LOCKED", "OPEN"] {
+                let label: &'static str = Box::leak(
+                    format!(
+                        "(a) [{rel}] gate {gate}: minimal live {state_label} foreign record => \
+                         plain E-MAINTENANCE-001 (not -002)"
+                    )
+                    .into_boxed_str(),
+                );
+                rows.push(raw_txn_row(label, gate, rel, bytes, Expect::PlainBlock));
+            }
+        }
+        // (b)/(c) minimal NON-live foreign records are not live => admitted (gate OPEN).
+        for (state_label, bytes) in [
+            (
+                "COMPLETED",
+                &br#"{"state":"COMPLETED","migration_id":"future-migration"}"#[..],
+            ),
+            (
+                "ABORTED",
+                &br#"{"state":"ABORTED","migration_id":"future-migration"}"#[..],
+            ),
+        ] {
+            let label: &'static str = Box::leak(
+                format!(
+                    "(b/c) [{rel}] gate OPEN: minimal NON-live {state_label} foreign record => \
+                     admitted (not live, not -002)"
+                )
+                .into_boxed_str(),
+            );
+            rows.push(raw_txn_row(label, "OPEN", rel, bytes, Expect::Admit));
+        }
+        // Controls (spec-backed shape violations stay state_integrity, with a foreign id):
+        // missing `state`, an UNKNOWN `state`, and a non-object body.
+        for (what, bytes) in [
+            (
+                "missing state",
+                &br#"{"migration_id":"future-migration"}"#[..],
+            ),
+            (
+                "unknown state",
+                &br#"{"state":"WEIRD","migration_id":"future-migration"}"#[..],
+            ),
+            ("non-object body (array)", &br#"["STAGING"]"#[..]),
+        ] {
+            let label: &'static str = Box::leak(
+                format!("(control) [{rel}] foreign-id record with {what} => state_integrity")
+                    .into_boxed_str(),
+            );
+            rows.push(raw_txn_row(
+                label,
+                "LOCKED",
+                rel,
+                bytes,
+                Expect::Cause("state_integrity"),
+            ));
+        }
+    }
+    for row in &rows {
+        assert_row(row, &mut failures);
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC029_minimal_shape_foreign_txn_is_foreign_not_state_integrity_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Pass-3 F-S2508-L3-002 -- non-string tool_name must still release
+// ---------------------------------------------------------------------------
+
+/// F-S2508-L3-002. BC-1.18.013 v1.11 EC-021: a `PostToolUseFailure` for an admitted
+/// `tool_use_id` REMOVES the reservation "keyed only on `tool_use_id`, no
+/// `tool_name` filter", "including ... (b) an envelope with NO `tool_name`, (c) an
+/// envelope with a differently-shaped `tool_name`"; ADR-052 §5a F-001. A `null`,
+/// numeric, boolean, array or object `tool_name` is differently shaped, so the
+/// envelope must still release (and exit 0).
+#[test]
+fn test_BC_1_18_013_EC021c_posttoolusefailure_non_string_tool_name_still_releases_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let shapes: [(&str, Option<serde_json::Value>); 6] = [
+        ("tool_name null", Some(serde_json::Value::Null)),
+        ("tool_name number", Some(serde_json::json!(7))),
+        ("tool_name bool", Some(serde_json::json!(true))),
+        ("tool_name array", Some(serde_json::json!(["Edit"]))),
+        ("tool_name object", Some(serde_json::json!({"n": "Edit"}))),
+        ("tool_name absent", None),
+    ];
+    for (label, tool_name) in shapes {
+        let p = Project::new();
+        let target = p.abs(CYCLES_PATH);
+        let pre = run(
+            &p,
+            &envelope("PreToolUse", "Write", Some("TN1"), edit_input(&target)),
+        );
+        if pre.status.code() != Some(0) || !p.reservation("TN1").exists() {
+            failures.push(format!(
+                "[{label}] precondition: PreToolUse Write must admit and reserve TN1 (exit {:?})",
+                pre.status.code()
+            ));
+            continue;
+        }
+        let mut v = serde_json::json!({
+            "hook_event_name": "PostToolUseFailure",
+            "session_id": "sess-s2508",
+            "tool_input": edit_input(&target),
+            "tool_use_id": "TN1",
+            "error": "boom",
+            "is_interrupt": false,
+        });
+        if let Some(t) = tool_name {
+            v["tool_name"] = t;
+        }
+        let out = run(&p, &v.to_string());
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "[{label}] PostToolUseFailure must exit 0, got {:?}",
+                out.status.code()
+            ));
+        }
+        if p.reservation("TN1").exists() {
+            failures.push(format!(
+                "[{label}] PostToolUseFailure must REMOVE reservations/TN1.reservation \
+                 (EC-021(c): keyed only on tool_use_id, no tool_name filter); it is still there. \
+                 stderr: {}",
+                stderr_of(&out)
+            ));
+        }
+    }
+
+    // PreToolUse with a non-string tool_name cannot be classified as Edit/Write/
+    // MultiEdit (ADR-052 §5a evaluation position O4: "an unparseable payload cannot
+    // be classified"): it must not be treated as a protected write -- exit 0, no
+    // reservation, no migration-state mutation.
+    for (label, tool_name) in [
+        ("PreToolUse tool_name null", serde_json::Value::Null),
+        ("PreToolUse tool_name object", serde_json::json!({"n": 1})),
+    ] {
+        let p = Project::new();
+        let target = p.abs(CYCLES_PATH);
+        let before = p.snapshot();
+        let v = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "session_id": "sess-s2508",
+            "tool_input": edit_input(&target),
+            "tool_use_id": "TN2",
+        });
+        let out = run(&p, &v.to_string());
+        if out.status.code() != Some(0) || p.reservation("TN2").exists() || p.snapshot() != before {
+            failures.push(format!(
+                "[{label}] must be an unclassifiable no-op (exit 0, no reservation, tree \
+                 unchanged); got exit {:?}",
+                out.status.code()
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC021c_posttoolusefailure_non_string_tool_name_still_releases_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Pass-3 F-S2508-L3-007 -- EISDIR (a directory at the path) is io, root-safe
+// ---------------------------------------------------------------------------
+
+/// F-S2508-L3-007. BC-1.18.013 v1.11 Precondition 6(c) rule 2 (`io`): a failed
+/// read CALL of a txn record or a terminal record is `E-MAINTENANCE-002 (io)`.
+/// A DIRECTORY at the file's path makes `read` fail with EISDIR for EVERY uid
+/// (unlike chmod 000, which root bypasses), so these rows run under root too.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC032_eisdir_directory_at_record_path_is_io_root_safe_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
+
+    for (mig, record_file, rel) in [
+        ("migrate-bc-index", "completed.json", BC_PATH),
+        (
+            "backfill-append-logs",
+            "completed-backfill-append-logs.json",
+            CYCLES_PATH,
+        ),
+    ] {
+        for state in ["STAGING", "COMMITTING"] {
+            let label: &'static str = Box::leak(
+                format!("[{mig} {state}] terminal record path is a DIRECTORY => -002 (io)")
+                    .into_boxed_str(),
+            );
+            rows.push(Row {
+                label,
+                rel,
+                needs_non_root: false,
+                expect: Expect::Cause("io"),
+                setup: Box::new(move |p| {
+                    write_gate(&p.ms(), "LOCKED");
+                    write_txn(&p.ms(), state, Some("gen-1"), Some(mig));
+                    std::fs::create_dir(p.ms().join(record_file)).unwrap();
+                    fx()
+                }),
+            });
+        }
+    }
+    for rel in [BC_PATH, CYCLES_PATH] {
+        for gate in ["OPEN", "LOCKED"] {
+            let label: &'static str = Box::leak(
+                format!("[{rel}] gate {gate}: a txn-*.json path that is a DIRECTORY => -002 (io)")
+                    .into_boxed_str(),
+            );
+            rows.push(Row {
+                label,
+                rel,
+                needs_non_root: false,
+                expect: Expect::Cause("io"),
+                setup: Box::new(move |p| {
+                    write_gate(&p.ms(), gate);
+                    std::fs::create_dir(p.ms().join("txn-dir.json")).unwrap();
+                    fx()
+                }),
+            });
+        }
+    }
+    for row in &rows {
+        assert_row(row, &mut failures);
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC032_eisdir_directory_at_record_path_is_io_root_safe_blackbox",
+        failures,
+    );
+}
