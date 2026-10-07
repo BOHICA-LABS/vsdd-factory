@@ -137,6 +137,17 @@ use migration_fs::{Fs, StdFs};
 #[cfg(kani)]
 mod obl1_kani_proofs;
 
+/// S-25.08: the ONE shared native admission core (reserve-then-verify,
+/// protected-path union, step-3.5 reconciliation Branches A/B/C, release) both
+/// governed migrations and the dispatcher's production PreToolUse path share.
+mod admission;
+pub use admission::{
+    ABORT_REASON_NULL_GENERATION, AdmissionOutcome, MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2,
+    ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
+    e_maintenance_block_message, is_valid_tool_use_id, reconcile_stale_admission_gate,
+    release_reservation_file,
+};
+
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
 // Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
@@ -13820,64 +13831,42 @@ fn write_admission_gate_state(
     })
 }
 
+/// B2 in-process admission entry point: delegates to the ONE shared admission
+/// core ([`admit_protected_write`]) — reserve-then-verify, the step-3.5
+/// reconciliation, and release of the admitter's own reservation on failed
+/// verification. There is no second reserve/verify implementation (S-25.08
+/// B2-4: the pre-fix check-then-reserve ordering is gone).
+///
+/// Constructs no `Fs` and takes no `&impl Fs` parameter, so the public
+/// signature stays unchanged. The protected-path family is the B2 BC-INDEX
+/// family (`BC-INDEX` scope).
 pub fn admit_or_block_bc_index_writer(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    // Production entry point (called from `executor.rs`'s PreToolUse
-    // admission precheck) — constructs its own `StdFs` rather than taking
-    // an `&impl Fs` parameter, so this function's public signature (and its
-    // `executor.rs`/test call sites) stays unchanged while its internal
-    // `read_active_txn_record` call is still routed through the OBL-1 seam.
-    let fs = StdFs;
-    let gate_state = read_admission_gate_state(_migration_state_dir)?;
-    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
-    if !is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
-        let detail = match &active_txn {
-            Some(txn) => format!(
-                "a BC-INDEX governed migration is currently in flight (txn {} state={:?}); \
-                 writers must retry after the migration completes",
-                txn.txn_id, txn.state
-            ),
-            None => format!(
-                "the BC-INDEX writer-admission gate is not OPEN (state={gate_state:?}); \
-                 writers must retry once the gate self-heals or the current maintenance \
-                 window completes"
-            ),
-        };
-        return Err(BcIndexMigrationError::WriterAdmissionRefused { reason: detail });
+    match admit_protected_write(
+        _migration_state_dir,
+        Some(_tool_use_id),
+        ProtectedPathFamily::BcIndex,
+    )? {
+        AdmissionOutcome::Admitted { .. } => Ok(()),
+        AdmissionOutcome::Blocked { message } => {
+            Err(BcIndexMigrationError::WriterAdmissionRefused { reason: message })
+        }
     }
-
-    let reservations_dir = _migration_state_dir.join("reservations");
-    std::fs::create_dir_all(&reservations_dir).map_err(|source| BcIndexMigrationError::Io {
-        path: reservations_dir.clone(),
-        source,
-    })?;
-    let reservation = WriterReservation {
-        created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        tool_use_id: _tool_use_id.to_string(),
-    };
-    let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize writer reservation: {e}"),
-        }
-    })?;
-    let reservation_path = reservations_dir.join(format!("{_tool_use_id}.reservation"));
-    last_amended_migrate::atomic_write::write_atomic(&reservation_path, &json).map_err(|e| {
-        BcIndexMigrationError::Io {
-            path: reservation_path.clone(),
-            source: migrate_err_to_io(e),
-        }
-    })
 }
 
 /// PostToolUse counterpart: remove the reservation file this tool
 /// invocation's PreToolUse created. A missing file (writer crashed between
-/// Pre and Post) is a no-op, not an error.
+/// Pre and Post) is a no-op, not an error; an id that could not have produced
+/// a reservation file name (see [`is_valid_tool_use_id`]) is likewise a no-op.
 pub fn release_bc_index_writer_reservation(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
+    if !is_valid_tool_use_id(_tool_use_id) {
+        return Ok(());
+    }
     let path = _migration_state_dir
         .join("reservations")
         .join(format!("{_tool_use_id}.reservation"));
@@ -13886,96 +13875,6 @@ pub fn release_bc_index_writer_reservation(
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(BcIndexMigrationError::Io { path, source }),
     }
-}
-
-/// Flock-gated stale-gate reconciliation (ADR-052 §Decision 5a step 3.5,
-/// Branch A / Branch B). A recovery process (or the next ordinary
-/// PreToolUse admission check) that finds `gate_state ∈ {LOCKED,
-/// DRAINING}` with no live coordinator holding `exclusive.lock` self-heals
-/// the gate back to `OPEN` — this is the mechanism that makes
-/// `E-MAINTENANCE-001` always self-heal by the next PreToolUse dispatch,
-/// never requiring operator intervention for a routine stuck-gate case.
-pub fn reconcile_stale_admission_gate(
-    _migration_state_dir: &Path,
-) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
-    // No production or test caller exists today (see this function's own
-    // "never called from anywhere in the real dispatch path" doc note in
-    // `executor.rs::bc_index_migration_admission_precheck`) — constructs
-    // its own `StdFs` rather than taking an `&impl Fs` parameter, matching
-    // `admit_or_block_bc_index_writer`'s pattern, so a future wiring burst
-    // can call this with its existing 1-arg signature unchanged.
-    let fs = StdFs;
-    let lock_path = _migration_state_dir.join("exclusive.lock");
-    if !lock_path.exists() {
-        std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
-            path: lock_path.clone(),
-            source,
-        })?;
-    }
-    let current_state = read_admission_gate_state(_migration_state_dir)?;
-
-    let Some(_guard) = try_acquire_migration_lock(&lock_path)? else {
-        // A live coordinator holds the lock -- return the gate's CURRENT
-        // (unreconciled) state; reconciliation is that coordinator's own
-        // responsibility, not this caller's.
-        return Ok(current_state);
-    };
-
-    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
-    let reconciled = match &active_txn {
-        // Branch A: no active txn record at all -- the gate can only be
-        // stuck due to a crash between "flip DRAINING/LOCKED" and
-        // "create/commit the txn record"; safe to flip OPEN.
-        None => BcIndexAdmissionGateState::Open,
-        // Branch B: a STAGING txn with no generation_id yet assigned means
-        // the coordinator crashed before `stage_new_generation` ever ran
-        // (ADR-052 §Decision 7c step 1) -- nothing durable was ever
-        // published, so this txn is safely abandoned.
-        Some(txn)
-            if txn.state == BcIndexMigrationTxnState::Staging && txn.generation_id.is_none() =>
-        {
-            let mut aborted = txn.clone();
-            aborted.state = BcIndexMigrationTxnState::Aborted;
-            aborted.updated_at =
-                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            write_txn_record(&fs, _migration_state_dir, &aborted)?;
-            BcIndexAdmissionGateState::Open
-        }
-        // Branch C (F-C5-P2-003 follow-on): a STAGING txn WITH a
-        // generation_id assigned might still be a crash-truncated partial
-        // staging pass (EC-002) or a complete-but-corrupted one (EC-060) --
-        // since this function only reaches here after itself acquiring the
-        // exclusive migration lock (no live coordinator currently holds
-        // it), re-run the SAME mandatory resume-time census/PC1 check
-        // `run_bc_index_migration`'s own STAGING-resume branch consults
-        // ([`resume_from_staging`] is a pure read-and-verify, no
-        // canonical-path mutation) and reclaim via
-        // [`discard_incomplete_staging`] exactly like that branch does on
-        // failure. A genuinely still-valid staged generation
-        // (`resume_from_staging` succeeds) is left untouched -- it may yet
-        // be resumed to completion by a future migration invocation.
-        Some(txn) if txn.state == BcIndexMigrationTxnState::Staging => {
-            match resume_from_staging(txn, _migration_state_dir) {
-                Ok(()) => current_state,
-                Err(_) => {
-                    let mut txn = txn.clone();
-                    discard_incomplete_staging(&fs, _migration_state_dir, &mut txn)?;
-                    BcIndexAdmissionGateState::Open
-                }
-            }
-        }
-        // Every other active-txn shape (COMMITTING) represents genuine
-        // in-flight migration work: executing the real canonical-path
-        // renames is a materially heavier, more consequential action than
-        // this lighter-touch probe should trigger incidentally from an
-        // ordinary PreToolUse dispatch -- that recovery belongs to the
-        // explicit `migrate-bc-index` CLI entry point
-        // ([`run_bc_index_migration`]'s own COMMITTING-resume branch), not
-        // here. Leave the gate's current state untouched.
-        Some(_) => current_state,
-    };
-    write_admission_gate_state(_migration_state_dir, reconciled)?;
-    Ok(reconciled)
 }
 
 /// ADR-052 §Decision 5a drain procedure's own documented default drain
