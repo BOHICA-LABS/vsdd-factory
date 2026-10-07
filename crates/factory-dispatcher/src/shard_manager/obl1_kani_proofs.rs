@@ -1041,8 +1041,9 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      created_at within the skew ages as 0 (never stale). Leaked
 //      reservations in the initial state carry arbitrary, possibly future,
 //      possibly absent stamps. RFC 3339 parsing / pre-epoch / u64-overflow
-//      classification (all mapping to `None`) and the `tracing::warn!`
-//      reasons are string/IO concerns outside Kani (VP-133 facet 7(c)).
+//      classification (all mapping to `None`) and the coordinator-drain
+//      stderr advisory tokens (BC-1.18.011 v1.18 Precondition 6(c) rule (5))
+//      are string/IO concerns outside Kani (VP-133 facet 7(c)).
 //   S9 (VP-147 v1.2) the reservation namespace exists from the first
 //      protected write: the initial state may be the never-migrated project
 //      (no `.factory/migration-state/`); the admitter creates the namespace
