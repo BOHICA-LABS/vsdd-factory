@@ -80,14 +80,25 @@ pub enum RegistryError {
     },
 }
 
-/// S-25.08 Red-Gate STUB (BC-7.06.001 v1.13 §Fail-Closed Symmetry; BC-1.08.001
-/// v1.4 Invariants 1/2): the dispatcher exit code for a registry load error.
-/// `SchemaVersion`, `AsyncBlockConflict` and `DuplicateEntry` fail CLOSED (2);
-/// `NotFound`, `Io`, `Toml` and `ToolRegex` fail OPEN (0) as an EXPLICIT variant
-/// list -- NO wildcard arm, so a future variant must be classified here at
-/// compile time (the merged `main.rs::run` ends its inline match in `_ => 0`).
-pub fn registry_error_exit_code(_error: &RegistryError) -> i32 {
-    todo!("S-25.08: registry_error_exit_code (explicit variant mapping, no wildcard)")
+/// The dispatcher exit code for a registry load error (BC-7.06.001 v1.13
+/// §Fail-Closed Symmetry; BC-1.08.001 v1.4 Invariants 1/2).
+///
+/// `SchemaVersion`, `AsyncBlockConflict` and `DuplicateEntry` fail CLOSED
+/// (exit 2, ADR-019 Decision 2); `NotFound`, `Io`, `Toml` and `ToolRegex` fail
+/// OPEN (exit 0, BC-1.08.001). The match is an EXPLICIT variant list with NO
+/// wildcard arm, so a future `RegistryError` variant must be classified here at
+/// compile time instead of silently failing open.
+#[must_use]
+pub fn registry_error_exit_code(error: &RegistryError) -> i32 {
+    match error {
+        RegistryError::SchemaVersion { .. }
+        | RegistryError::AsyncBlockConflict { .. }
+        | RegistryError::DuplicateEntry { .. } => 2,
+        RegistryError::NotFound(_)
+        | RegistryError::Io(_)
+        | RegistryError::Toml(_)
+        | RegistryError::ToolRegex { .. } => 0,
+    }
 }
 
 /// Outcome for a plugin that returns `Error` or crashes. `Continue` is

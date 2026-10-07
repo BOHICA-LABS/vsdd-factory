@@ -238,7 +238,12 @@ async fn run(
                 // Other registry errors (file not found, parse error) remain fail-open (exit 0)
                 // per BC-1.08.001 (only schema-version mismatch and invariant violation are
                 // the named fail-closed exceptions per ADR-019 §Decision 2 and BC-1.14.001 EC-006/EC-008).
-                let exit_code = match &e {
+                // The exit code is decided by the ONE pure, wildcard-free mapping
+                // `registry_error_exit_code` (BC-7.06.001 v1.13 Fail-Closed
+                // Symmetry); this match performs only each variant's own
+                // diagnostics, and its fail-open arm is an explicit variant list.
+                let exit_code = factory_dispatcher::registry::registry_error_exit_code(&e);
+                match &e {
                     RegistryError::SchemaVersion { got, expected } => {
                         // BC-1.14.001 EC-006 + BC-3.08.001 Event 2.
                         // Emit dispatcher.schema_mismatch with found_version/expected_version/error_code.
@@ -246,7 +251,6 @@ async fn run(
                         eprintln!(
                             "factory-dispatcher: E-REG-001 schema_version={got} expected={expected}; exiting 2 (fail-closed per ADR-019 §Decision 2)"
                         );
-                        2
                     }
                     RegistryError::AsyncBlockConflict { name, on_error } => {
                         // BC-1.14.001 EC-008 + BC-3.08.001 Event 3.
@@ -258,7 +262,6 @@ async fn run(
                         eprintln!(
                             "factory-dispatcher: E-REG-002 on_error={on_error} AND async=true for '{name}'; exiting 2 (fail-closed per ADR-019 §Decision 2)"
                         );
-                        2
                     }
                     RegistryError::DuplicateEntry { name, event, tool } => {
                         // BC-7.06.001 Invariant 7 + BC-3.08.001 Event 3 (E-REG-003).
@@ -278,13 +281,15 @@ async fn run(
                             event.as_str(), // offending_event — required for E-REG-003
                             tool.as_deref(), // offending_tool — None means wildcard/"all tools"
                         );
-                        2
                     }
                     // Other errors: file not found, parse failures, regex errors.
                     // These are operational errors (misconfiguration / missing file), not
                     // semantic invariant violations. Fail-open per BC-1.08.001.
-                    _ => 0,
-                };
+                    RegistryError::NotFound(_)
+                    | RegistryError::Io(_)
+                    | RegistryError::Toml(_)
+                    | RegistryError::ToolRegex { .. } => {}
+                }
                 // Flush structured events to VSDD_SINK_FILE (debug and release builds).
                 // VP-079 S2/S3 verify these events appear in the sink.
                 // SEC-003 path sanitization (no ".." traversal) is applied inside flush_sink_file.
