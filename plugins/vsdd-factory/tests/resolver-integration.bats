@@ -46,27 +46,8 @@
 # ---------------------------------------------------------------------------
 
 setup_file() {
-    # Record which factory-dispatcher binary this suite exercises.
-    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
-    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
-    emit_dispatcher_provenance
-}
-
-# ---------------------------------------------------------------------------
-# Setup / teardown helpers
-# ---------------------------------------------------------------------------
-
-setup() {
-    # Create a temporary working directory for each test.
-    # BATS_TMPDIR is provided by the bats runtime.
-    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-integration-XXXXXX")"
-
-    # Determine the repo root and dispatcher binary path.
-    # CARGO_MANIFEST_DIR is not set in bats; resolve from __file__.
-    # Path: plugins/vsdd-factory/tests/<file> → 3 levels up = worktree root.
+    # Resolve the dispatcher ONCE; provenance and every test use this exact path.
     REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
-    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
-
     # MED-004: binary-missing is FATAL (not a skip). Pre-build the dispatcher if needed.
     # We prefer the debug build for fast iteration; fall back to release if available.
     DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
@@ -85,6 +66,29 @@ setup() {
             exit 1
         fi
     fi
+    export DISPATCHER
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance "${DISPATCHER}"
+}
+
+# ---------------------------------------------------------------------------
+# Setup / teardown helpers
+# ---------------------------------------------------------------------------
+
+setup() {
+    # Create a temporary working directory for each test.
+    # BATS_TMPDIR is provided by the bats runtime.
+    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-integration-XXXXXX")"
+
+    # Determine the repo root and dispatcher binary path.
+    # CARGO_MANIFEST_DIR is not set in bats; resolve from __file__.
+    # Path: plugins/vsdd-factory/tests/<file> → 3 levels up = worktree root.
+    REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
+    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
+
+    # DISPATCHER is resolved once in setup_file (provenance names this binary).
 
     export REPO_ROOT PLUGIN_ROOT DISPATCHER FACTORY_TMP
 }
@@ -569,7 +573,8 @@ RESOLVER_TOML
 
     local sink_file log_dir
     sink_file="${FACTORY_TMP}/sink.jsonl"
-    log_dir="$(mktemp -d "${BATS_TMPDIR}/timeout-log-XXXXXX")"
+    log_dir="${FACTORY_TMP}/timeout-log"
+    mkdir -p "${log_dir}"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-timeout","dispatcher_trace_id":"bats-timeout-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
 

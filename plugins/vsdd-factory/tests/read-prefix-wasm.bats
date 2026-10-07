@@ -56,7 +56,8 @@ setup() {
 }
 
 teardown() {
-  rm -rf "${TEST_TMP}"
+  [ -n "${TEST_TMP:-}" ] && rm -rf "${TEST_TMP}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -314,7 +315,6 @@ teardown() {
       | sed 's://.*::' \
       | grep -oE 'OUTPUT_TOO_LARGE' || true
   )
-  rm -f "$mut_file"
 
   if [ -z "$mutant_output" ]; then
     echo "FAIL: mutation-liveness check — gate did NOT fire on mutant containing"
@@ -465,7 +465,6 @@ teardown() {
     "$CI_YML" > "$mut_ci_del"
   local mut_del_excl_count
   mut_del_excl_count=$(grep -c '\-\-exclude read-prefix-fixture' "$mut_ci_del" || true)
-  rm -f "$mut_ci_del"
   if [ "$mut_del_excl_count" -eq "$ci_workspace_count" ]; then
     echo "FAIL: mutation-liveness (deletion) — deleting one '--exclude read-prefix-fixture' line"
     echo "  still gives excl count ($mut_del_excl_count) == workspace count ($ci_workspace_count)."
@@ -493,7 +492,6 @@ teardown() {
   ' "$mut_ci_add")
   local mut_add_excl_count
   mut_add_excl_count=$(grep -c '\-\-exclude read-prefix-fixture' "$mut_ci_add" || true)
-  rm -f "$mut_ci_add"
   if [ "$mut_add_excl_count" -eq "$mut_add_workspace_count" ]; then
     echo "FAIL: mutation-liveness (new-build-without-exclusion) — appending a workspace build"
     echo "  without '--exclude read-prefix-fixture' still gives excl ($mut_add_excl_count) == workspace ($mut_add_workspace_count)."

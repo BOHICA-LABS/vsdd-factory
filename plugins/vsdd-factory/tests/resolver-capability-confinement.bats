@@ -29,22 +29,8 @@
 # ---------------------------------------------------------------------------
 
 setup_file() {
-    # Record which factory-dispatcher binary this suite exercises.
-    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
-    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
-    emit_dispatcher_provenance
-}
-
-# ---------------------------------------------------------------------------
-# Setup / teardown helpers
-# ---------------------------------------------------------------------------
-
-setup() {
-    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-cap-confinement-XXXXXX")"
-
+    # Resolve the dispatcher ONCE; provenance and every test use this exact path.
     REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
-    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
-
     # Build dispatcher if needed (same pattern as resolver-integration.bats).
     DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
     if [[ ! -x "${DISPATCHER}" ]]; then
@@ -61,6 +47,24 @@ setup() {
             exit 1
         fi
     fi
+    export DISPATCHER
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance "${DISPATCHER}"
+}
+
+# ---------------------------------------------------------------------------
+# Setup / teardown helpers
+# ---------------------------------------------------------------------------
+
+setup() {
+    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-cap-confinement-XXXXXX")"
+
+    REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
+    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
+
+    # DISPATCHER is resolved once in setup_file (provenance names this binary).
 
     # naughty_resolver.wasm lives in the dispatcher test fixtures (tracked by git).
     # hook-plugins/ is gitignored (build artifacts); we symlink at test runtime.

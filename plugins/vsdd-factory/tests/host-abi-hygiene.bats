@@ -52,7 +52,8 @@ setup() {
 }
 
 teardown() {
-  rm -rf "${TEST_TMP}"
+  [ -n "${TEST_TMP:-}" ] && rm -rf "${TEST_TMP}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -212,11 +213,9 @@ teardown() {
   mut_file="${TEST_TMP}/mutant.rs"
   printf 'pub const INTERNAL_FILE_NOT_FOUND: &str = "internal.file_not_found";\n' > "$mut_file"
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+INTERNAL_FILE_NOT_FOUND' "$mut_file"; then
-    rm -f "$mut_file"
     echo "FAIL: mutation-liveness — grep pattern did not match injected INTERNAL_FILE_NOT_FOUND declaration."
     false
   fi
-  rm -f "$mut_file"
   echo "PASS mutation-liveness: pattern correctly identifies INTERNAL_FILE_NOT_FOUND declaration."
 
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+INTERNAL_FILE_NOT_FOUND' "$INTERNAL_LOG_RS"; then
@@ -252,11 +251,9 @@ teardown() {
   mut_file="${TEST_TMP}/mutant.rs"
   printf 'pub const PLUGIN_ABANDONED: &str = "plugin.abandoned";\n' > "$mut_file"
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+PLUGIN_ABANDONED' "$mut_file"; then
-    rm -f "$mut_file"
     echo "FAIL: mutation-liveness — grep pattern did not match injected PLUGIN_ABANDONED declaration."
     false
   fi
-  rm -f "$mut_file"
   echo "PASS mutation-liveness: pattern correctly identifies PLUGIN_ABANDONED declaration."
 
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+PLUGIN_ABANDONED' "$INTERNAL_LOG_RS"; then
@@ -366,7 +363,6 @@ _scan_bare_literals() {
 
   local mutant_output
   mutant_output=$(_scan_bare_literals "$mut_file")
-  rm -f "$mut_file"
 
   if [ -z "$mutant_output" ]; then
     echo "FAIL: mutation-liveness (a) — gate did NOT fire on a temp copy of read_file.rs"
@@ -391,7 +387,6 @@ _scan_bare_literals() {
 
   local mutant_output2
   mutant_output2=$(_scan_bare_literals "$mut_file2")
-  rm -f "$mut_file2"
 
   if [ -z "$mutant_output2" ]; then
     echo "FAIL: mutation-liveness (b) — gate did NOT fire on a temp copy of read_file.rs"
@@ -417,7 +412,6 @@ _scan_bare_literals() {
 
   local mutant_output3
   mutant_output3=$(_scan_bare_literals "$mut_file3")
-  rm -f "$mut_file3"
 
   if [ -z "$mutant_output3" ]; then
     echo "FAIL: mutation-liveness (c) — gate did NOT fire on a temp copy of executor.rs"

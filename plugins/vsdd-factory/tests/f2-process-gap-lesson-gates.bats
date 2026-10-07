@@ -94,7 +94,8 @@ setup() {
 }
 
 teardown() {
-  rm -rf "${TEST_TMP}"
+  [ -n "${TEST_TMP:-}" ] && rm -rf "${TEST_TMP}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -132,7 +133,6 @@ STABLE_ASSERTIONS=\$(grep -rE '"code":"?DelegationRecommended"?' \\
 SCRIPT
   chmod +x "$tmpscript"
   run bash "$tmpscript"
-  rm -f "$tmpscript"
   assert_success
   refute_output --partial "FAIL"
   refute_output --partial "WARN"

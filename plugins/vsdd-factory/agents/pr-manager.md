@@ -203,12 +203,16 @@ b. After pr-reviewer returns, YOU must read its verdict. Do NOT treat the sub-ag
 
 c. Spawn github-ops to post triage summary as PR comment:
 ```
-Agent(subagent_type="vsdd-factory:github-ops", prompt="cd <project-path> && TMPFILE=$(mktemp \"${TMPDIR:-/tmp}/pr-comment-XXXXXX\") && cat > \"$TMPFILE\" << 'BODY'\n## Review Cycle N Triage\n\n| Finding | Severity | Routed To | Status |\n...\nBODY\ngh pr comment <PR_NUMBER> --body-file \"$TMPFILE\" && rm -f \"$TMPFILE\"")
+Agent(subagent_type="vsdd-factory:github-ops", prompt="cd <project-path> && TMPFILE=$(mktemp \"${TMPDIR:-/tmp}/pr-comment-XXXXXX\") && trap 'rm -f \"$TMPFILE\"' EXIT && cat > \"$TMPFILE\" << '__VSDD_PR_BODY_EOF__'\n## Review Cycle N Triage\n\n| Finding | Severity | Routed To | Status |\n...\n__VSDD_PR_BODY_EOF__\ngh pr comment <PR_NUMBER> --body-file \"$TMPFILE\"")
 ```
-Note: `--body-file <tempfile>` is used instead of `--body '...'` to avoid shell
-injection when finding text contains single quotes or other special characters
-(CWE-116). This mirrors the repo's heredoc-to-file convention established in
-CLAUDE.md and the PR description workflow (`gh pr create --body-file`).
+Note: `--body-file <tempfile>` is used instead of `--body '...'`, and the heredoc
+delimiter is quoted (`<< '__VSDD_PR_BODY_EOF__'`), so finding text containing single
+quotes, `$`, or backticks is written verbatim and never shell-expanded (CWE-116). The
+delimiter is deliberately unusual so it cannot collide with finding text; if finding
+text could ever contain that exact line, the body would be truncated, so do not
+include it. The `trap ... EXIT` removes the tempfile unconditionally, including when
+`gh pr comment` fails. This mirrors the repo's heredoc-to-file convention (`gh pr
+create --body-file`).
 
 d. Spawn fix agents (implementer, test-writer, demo-recorder) as needed.
 

@@ -66,9 +66,15 @@ FIXTURE_BASE="$(cd "$(dirname "$BATS_TEST_FILENAME")/fixtures/validate-cross-sit
 
 setup_file() {
   load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
-  # Auto-resolve: debug preferred over release; emits to >&3 (TAP comments).
+  # Resolve ONCE (debug preferred over release) and pass explicitly so provenance
+  # always names the binary the tests use. Emits to >&3 (TAP comments).
   # Under CI_REQUIRE_ARTIFACTS=1, returns non-zero if binary not found.
-  emit_dispatcher_provenance
+  local _root
+  _root="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
+  DISPATCHER="${_root}/target/debug/factory-dispatcher"
+  [[ -x "${DISPATCHER}" ]] || DISPATCHER="${_root}/target/release/factory-dispatcher"
+  export DISPATCHER
+  emit_dispatcher_provenance "${DISPATCHER}"
 }
 
 # ---------------------------------------------------------------------------
@@ -83,10 +89,7 @@ setup() {
   # F-P6-017 / D-693: the operator-cache binary is only updated on release —
   # silently falling back to it would validate the wrong binary under development.
   # An absent local build produces a loud FATAL rather than a silent stale result.
-  DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
-  if [[ ! -x "${DISPATCHER}" ]]; then
-    DISPATCHER="${REPO_ROOT}/target/release/factory-dispatcher"
-  fi
+  # DISPATCHER is resolved once in setup_file (provenance names this binary).
   if [[ ! -x "${DISPATCHER}" ]]; then
     echo "FATAL: factory-dispatcher not found (tried debug + release builds)." >&2
     echo "  Run: cargo build -p factory-dispatcher" >&2

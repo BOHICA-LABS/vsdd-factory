@@ -77,8 +77,14 @@ setup_file() {
     fi
     # Dispatcher provenance: record which binary T-001 and similar tests will use.
     # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    # Resolve the dispatcher ONCE (debug preferred, then release); tests reuse it.
+    DISPATCHER="${repo_root}/target/debug/factory-dispatcher"
+    if [[ ! -x "${DISPATCHER}" ]]; then
+        DISPATCHER="${repo_root}/target/release/factory-dispatcher"
+    fi
+    export DISPATCHER
     load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
-    emit_dispatcher_provenance
+    emit_dispatcher_provenance "${DISPATCHER}"
     # Darwin-leg /bin/bash 3.2 preflight — macOS only.
     if [[ "$(uname)" != "Darwin" ]]; then
         return 0
@@ -101,10 +107,7 @@ setup() {
 
     # Locate factory-dispatcher binary (needed for T-001 WASM hook test)
     REPO_ROOT="$(cd "${PLUGIN_ROOT}/../.." && pwd)"
-    DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
-    if [[ ! -x "${DISPATCHER}" ]]; then
-        DISPATCHER="${REPO_ROOT}/target/release/factory-dispatcher"
-    fi
+    # DISPATCHER is resolved once in setup_file (provenance names this binary).
     export PLUGIN_ROOT BIN_DIR FIXTURES_DIR MOCK_BIN SCRATCH_DIR REPO_ROOT DISPATCHER
 }
 
