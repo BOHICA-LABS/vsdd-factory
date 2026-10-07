@@ -124,13 +124,25 @@ setup() {
   local pkg resolved_version major minor patch
   local versions=""
   for pkg in wasmtime wasmtime-wasi; do
-    resolved_version=$(echo "$metadata_json" | jq -r --arg n "$pkg" '.packages[] | select(.name == $n) | .version' | head -1)
+    # Assert EXACTLY ONE resolved entry per package (mirrors the Rust
+    # check_wasmtime_lockstep_floor duplicate rejection): a duplicate
+    # wasmtime / wasmtime-wasi entry in Cargo.lock must not be masked by
+    # inspecting only the first match.
+    local entry_count
+    entry_count=$(echo "$metadata_json" | jq -r --arg n "$pkg" '[.packages[] | select(.name == $n)] | length')
 
-    [ -n "$resolved_version" ] || {
+    [ "$entry_count" -ge 1 ] || {
       echo "FAIL: $pkg not found in 'cargo metadata --locked' output"
       echo "(cargo metadata succeeded but produced no $pkg package entry — check Cargo.toml/Cargo.lock)"
       return 1
     }
+    [ "$entry_count" -eq 1 ] || {
+      echo "FAIL: $pkg has $entry_count entries in 'cargo metadata --locked' output, expected exactly 1"
+      echo "(duplicate $pkg versions in Cargo.lock: $(echo "$metadata_json" | jq -r --arg n "$pkg" '[.packages[] | select(.name == $n) | .version] | join(", ")'))"
+      return 1
+    }
+
+    resolved_version=$(echo "$metadata_json" | jq -r --arg n "$pkg" '.packages[] | select(.name == $n) | .version')
 
     major=$(echo "$resolved_version" | cut -d. -f1)
     minor=$(echo "$resolved_version" | cut -d. -f2)
@@ -158,13 +170,15 @@ setup() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-004 + AC-009: cargo deny check advisories exits 0 and all five RUSTSEC
+# AC-004 + AC-009: cargo deny check advisories exits 0 and all twelve RUSTSEC
 # advisory IDs (RUSTSEC-2026-0188, RUSTSEC-2026-0222, RUSTSEC-2026-0204,
-# RUSTSEC-2026-0190, RUSTSEC-2025-0052) are absent from the output.
+# RUSTSEC-2026-0190, RUSTSEC-2025-0052, RUSTSEC-2026-0316, RUSTSEC-2026-0314,
+# RUSTSEC-2026-0321, RUSTSEC-2026-0322, RUSTSEC-2026-0323, RUSTSEC-2026-0324,
+# RUSTSEC-2026-0327) are absent from the output.
 #
 # Traces to: deny.toml [advisories] deny-all posture
 # RED-before: advisories present → exit non-zero → test FAILS
-# GREEN-after: all five patched/removed, deny.toml ignore = [] → exit 0 → test PASSES
+# GREEN-after: all twelve patched/removed, deny.toml ignore = [] → exit 0 → test PASSES
 #
 # AC-009 note: RUSTSEC-2026-0204 (crossbeam-epoch pointer dereference) is
 # cleared by the crossbeam-epoch >= 0.9.20 transitive bump. Without that bump
@@ -172,7 +186,7 @@ setup() {
 # RUSTSEC-2026-0190 (anyhow unsoundness) is cleared by anyhow >= 1.0.104.
 # RUSTSEC-2025-0052 (async-std via httpmock 0.7) is cleared by httpmock >= 0.8.
 # ---------------------------------------------------------------------------
-@test "AC-004/AC-009: cargo deny check advisories exits 0 and RUSTSEC-2026-0188/0222/0204/0190/0052 absent" {
+@test "AC-004/AC-009: cargo deny check advisories exits 0 and RUSTSEC-2026-0188/0222/0204/0190/0052/0316/0314/0321/0322/0323/0324/0327 absent" {
   # cargo-deny must be installed; skip if absent so the bats suite does not
   # error-out in environments where cargo-deny is not yet installed.
   cargo deny --version >/dev/null 2>&1 || skip "cargo-deny not installed (cargo deny --version failed)"
@@ -192,7 +206,8 @@ setup() {
   fi
 
   local failed=0
-  for advisory in RUSTSEC-2026-0188 RUSTSEC-2026-0222 RUSTSEC-2026-0204 RUSTSEC-2026-0190 RUSTSEC-2025-0052; do
+  for advisory in RUSTSEC-2026-0188 RUSTSEC-2026-0222 RUSTSEC-2026-0204 RUSTSEC-2026-0190 RUSTSEC-2025-0052 \
+    RUSTSEC-2026-0316 RUSTSEC-2026-0314 RUSTSEC-2026-0321 RUSTSEC-2026-0322 RUSTSEC-2026-0323 RUSTSEC-2026-0324 RUSTSEC-2026-0327; do
     if echo "$output" | grep -qF "$advisory"; then
       echo "FAIL: $advisory still present in cargo deny output"
       failed=1
