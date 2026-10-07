@@ -13821,8 +13821,13 @@ pub(crate) fn read_admission_gate_state(
     migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
     let path = migration_state_dir.join("gate-state.json");
-    match std::fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).map_err(|e| {
+    // Read RAW BYTES, then decode: an OS read failure (anything but ENOENT) is
+    // `Io` (E-MAINTENANCE-002 `io`), while a decode/parse failure — invalid
+    // UTF-8, empty, truncated, wrong schema/casing — is a malformed record
+    // (`state_integrity`). `read_to_string` would conflate invalid UTF-8 into
+    // an `io::Error` (BC-1.18.013 v1.9 EC-032).
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::BinaryIntegrityFailure {
                 message: format!("malformed gate-state at {}: {e}", path.display()),
             }

@@ -583,19 +583,25 @@ pub fn reconcile_stale_admission_gate(
     let terminal_record_name = live.and_then(|t| terminal_record_file_name(t.migration_id()));
     let inputs = TerminalReconcileInputs {
         lock_acquired: true,
+        // The terminal record is actually READ (own migration's record, selected
+        // by `migration_id`): ENOENT => ABSENT; any other read failure => `Io`
+        // (E-MAINTENANCE-002 `io`, fail closed — never mistaken for ABSENT, which
+        // would let Branch B discard a txn whose record merely could not be
+        // read). A record that reads is PRESENT; whether it VERIFIES is the
+        // fail-closed seam below (S-25.06 delivers the real verification).
         record_present: match terminal_record_name {
-            // `try_exists`, not `exists`: an unreadable record must surface as an
-            // error (fail closed), never be mistaken for ABSENT (which would let
-            // Branch B discard a txn whose terminal record merely could not be
-            // stat'ed).
             Some(name) => {
                 let record_path = migration_state_dir.join(name);
-                record_path
-                    .try_exists()
-                    .map_err(|source| BcIndexMigrationError::Io {
-                        path: record_path,
-                        source,
-                    })?
+                match std::fs::read(&record_path) {
+                    Ok(_bytes) => true,
+                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(source) => {
+                        return Err(BcIndexMigrationError::Io {
+                            path: record_path,
+                            source,
+                        });
+                    }
+                }
             }
             None => false,
         },
@@ -817,12 +823,13 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
 
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
-        let content =
-            std::fs::read_to_string(&path).map_err(|source| BcIndexMigrationError::Io {
-                path: path.clone(),
-                source,
-            })?;
-        let raw: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        // Raw bytes, then decode: an OS read failure is `Io`; invalid UTF-8 or
+        // malformed JSON is `state_integrity` (BC-1.18.013 v1.9 EC-032).
+        let bytes = std::fs::read(&path).map_err(|source| BcIndexMigrationError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::BinaryIntegrityFailure {
                 message: format!("malformed txn record at {}: {e}", path.display()),
             }
