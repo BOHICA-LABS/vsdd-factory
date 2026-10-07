@@ -3620,3 +3620,420 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
         failures.join("\n  - ")
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR-052 v1.20 §Downstream item 21 -- lexical root spellings
+// (BC-1.18.013 v1.9 EC-023(g), EC-024(k)/(l); BC-1.18.011 v1.17 EC-018(g), EC-019)
+// ---------------------------------------------------------------------------
+
+/// Run the real binary with `CLAUDE_PROJECT_DIR` set to `proj_dir` EXACTLY AS GIVEN
+/// (possibly a symlink spelling of the real project directory).
+fn run_as_given(p: &Project, proj_dir: &Path, payload: &str) -> Output {
+    let mut cmd = Command::new(binary_path());
+    cmd.env("CLAUDE_PLUGIN_ROOT", p.plugin_root.path())
+        .env("CLAUDE_PROJECT_DIR", proj_dir)
+        .env("VSDD_LOG_DIR", p.root().join("logs"))
+        .env_remove(SEAM_ENV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn factory-dispatcher");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    stdin.write_all(payload.as_bytes()).expect("write payload");
+    drop(stdin);
+    finish(child, Duration::from_secs(30))
+}
+
+/// `scratch/alias -> <project real dir>`; returns `(scratch, alias_path)`.
+#[cfg(unix)]
+fn alias_project(p: &Project) -> (tempfile::TempDir, PathBuf) {
+    let scratch = tempfile::tempdir().unwrap();
+    let scratch_real = scratch.path().canonicalize().unwrap();
+    let alias = scratch_real.join("alias");
+    std::os::unix::fs::symlink(p.root().canonicalize().unwrap(), &alias).unwrap();
+    (scratch, alias)
+}
+
+#[cfg(unix)]
+struct ModeGuard(PathBuf, u32);
+#[cfg(unix)]
+impl Drop for ModeGuard {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(self.1));
+    }
+}
+
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    let uid = Command::new("id")
+        .arg("-u")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&uid.stdout).trim() == "0"
+}
+
+/// EC-023(g) / BC-1.18.011 EC-018(g): the project directory is reached through a
+/// SYMLINK spelling, `CLAUDE_PROJECT_DIR` is the non-canonical spelling and the
+/// target `file_path` is spelled through it, with `T_real` UNAVAILABLE (an
+/// unresolvable ancestor, EACCES). In scope via the as-given lexical spelling:
+/// blocked under a live txn; with the gate OPEN, admitted with the reservation in
+/// the CANONICAL `<factory_root_real>/migration-state/reservations/`.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC023g_as_given_spelling_in_scope_when_t_real_unavailable_blackbox() {
+    use std::os::unix::fs::PermissionsExt;
+    if running_as_root() {
+        eprintln!("SKIP: running as root; chmod 000 does not make T_real unavailable");
+        return;
+    }
+    let mut failures: Vec<String> = Vec::new();
+
+    for (family_rel, scope, label) in [
+        (".factory/cycles", ".factory/cycles/", "cycles"),
+        (
+            ".factory/specs/behavioral-contracts",
+            "BC-INDEX",
+            "behavioral-contracts",
+        ),
+    ] {
+        // --- live txn => blocked ---
+        {
+            let p = Project::new();
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+            let _live = p.hold_lock();
+            let (_scratch, alias) = alias_project(&p);
+            let locked = p.root().join(family_rel).join("locked");
+            std::fs::create_dir_all(locked.join("inner")).unwrap();
+            let _g = ModeGuard(locked.clone(), 0o755);
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let fp = alias.join(family_rel).join("locked/inner/y.md");
+            let out = run_as_given(
+                &p,
+                &alias,
+                &envelope("PreToolUse", "Edit", Some("Tg1"), edit_input(&fp)),
+            );
+            let err = stderr_of(&out);
+            if out.status.code() != Some(2)
+                || !err.contains(&plain_msg(scope))
+                || err.contains("completion-record mismatch")
+            {
+                failures.push(format!(
+                    "[{label}] as-given symlink spelling with T_real unavailable must be IN SCOPE \
+                     and blocked with the plain `{scope}` message; got exit {:?}, stderr: {err}",
+                    out.status.code()
+                ));
+            }
+        }
+        // --- gate OPEN => admitted, reservation in the CANONICAL migration-state ---
+        {
+            let p = Project::new();
+            let (_scratch, alias) = alias_project(&p);
+            let locked = p.root().join(family_rel).join("locked");
+            std::fs::create_dir_all(locked.join("inner")).unwrap();
+            let _g = ModeGuard(locked.clone(), 0o755);
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let fp = alias.join(family_rel).join("locked/inner/y.md");
+            let out = run_as_given(
+                &p,
+                &alias,
+                &envelope("PreToolUse", "Edit", Some("Tg2"), edit_input(&fp)),
+            );
+            let canonical = p
+                .root()
+                .canonicalize()
+                .unwrap()
+                .join(".factory/migration-state/reservations/Tg2.reservation");
+            if out.status.code() != Some(0) || !canonical.exists() {
+                failures.push(format!(
+                    "[{label}] gate OPEN: must be admitted with the reservation in the CANONICAL \
+                     {}; got exit {:?}, present={}",
+                    canonical.display(),
+                    out.status.code(),
+                    canonical.exists()
+                ));
+            }
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC023g_as_given_spelling_in_scope_when_t_real_unavailable_blackbox",
+        failures,
+    );
+}
+
+/// EC-024(k) / BC-1.18.011 EC-019 vector 1: the SAME protected target spelled via
+/// the canonical root form and via the as-given `CLAUDE_PROJECT_DIR/.factory` form
+/// is classified IDENTICALLY (same verdict, scope token, block-or-reserve outcome,
+/// same canonical migration-state).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC024k_canonical_and_as_given_spellings_classified_identically_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    for (rel, scope) in [
+        (".factory/cycles/c1/x.md", ".factory/cycles/"),
+        (".factory/specs/behavioral-contracts/ss-01/x.md", "BC-INDEX"),
+    ] {
+        // live txn => both spellings blocked with the SAME message
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(
+            &p.ms(),
+            "COMMITTING",
+            Some("gen-1"),
+            Some("backfill-append-logs"),
+        );
+        let _live = p.hold_lock();
+        let (_scratch, alias) = alias_project(&p);
+        let canonical_root = p.root().canonicalize().unwrap();
+        let mut stderrs = Vec::new();
+        for (spelling, base) in [
+            ("as-given", alias.clone()),
+            ("canonical", canonical_root.clone()),
+        ] {
+            let fp = base.join(rel);
+            std::fs::create_dir_all(fp.parent().unwrap()).unwrap();
+            let out = run_as_given(
+                &p,
+                &alias,
+                &envelope("PreToolUse", "Edit", Some("Tk1"), edit_input(&fp)),
+            );
+            let err = stderr_of(&out);
+            if out.status.code() != Some(2)
+                || !err.contains(&plain_msg(scope))
+                || err.contains("completion-record mismatch")
+            {
+                failures.push(format!(
+                    "{rel} [{spelling}] live txn must block with the plain `{scope}` message; \
+                     got exit {:?}, stderr: {err}",
+                    out.status.code()
+                ));
+            }
+            stderrs.push(
+                err.split("block_reason=\"")
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_string(),
+            );
+        }
+        if stderrs[0] != stderrs[1] {
+            failures.push(format!(
+                "{rel}: block reason differs between spellings: {:?} vs {:?}",
+                stderrs[0], stderrs[1]
+            ));
+        }
+
+        // gate OPEN => both spellings reserve in the SAME canonical migration-state
+        let p = Project::new();
+        let (_scratch, alias) = alias_project(&p);
+        let canonical_root = p.root().canonicalize().unwrap();
+        for (spelling, base, id) in [
+            ("as-given", alias.clone(), "Tk2"),
+            ("canonical", canonical_root.clone(), "Tk3"),
+        ] {
+            let fp = base.join(rel);
+            std::fs::create_dir_all(fp.parent().unwrap()).unwrap();
+            let out = run_as_given(
+                &p,
+                &alias,
+                &envelope("PreToolUse", "Edit", Some(id), edit_input(&fp)),
+            );
+            let landed = canonical_root
+                .join(".factory/migration-state/reservations")
+                .join(format!("{id}.reservation"));
+            if out.status.code() != Some(0) || !landed.exists() {
+                failures.push(format!(
+                    "{rel} [{spelling}] gate OPEN: must reserve in the canonical migration-state; \
+                     exit {:?}, present={}",
+                    out.status.code(),
+                    landed.exists()
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC024k_canonical_and_as_given_spellings_classified_identically_blackbox",
+        failures,
+    );
+}
+
+/// EC-024(l) / BC-1.18.011 EC-019 vector 2: a look-alike / other-project path that
+/// shares a symlink-ancestor spelling with NEITHER alias of the session's own root
+/// is OUT OF SCOPE (no over-match): admitted, NO reservation, NO directory, NO
+/// migration-state read -- with a live txn in the session's own tree, and with
+/// `T_real` both available and unavailable.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC024l_lookalike_and_sibling_paths_out_of_scope_no_over_match_blackbox() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut failures: Vec<String> = Vec::new();
+    let p = Project::new();
+    write_gate(&p.ms(), "LOCKED");
+    write_txn(
+        &p.ms(),
+        "STAGING",
+        Some("gen-1"),
+        Some("backfill-append-logs"),
+    );
+    let _live = p.hold_lock();
+    let (scratch, alias) = alias_project(&p);
+    let scratch_real = scratch.path().canonicalize().unwrap();
+
+    // `<as-given-parent>/other/.factory/cycles/...` (sibling project through the
+    // same symlinked parent), `<as-given-root>-old/...`, `<alias>/.factory-old/...`,
+    // `<alias>/x.factory/...`.
+    let siblings: Vec<(&str, PathBuf)> = vec![
+        (
+            "sibling project via the same parent",
+            scratch_real.join("other/.factory/cycles/c/x.md"),
+        ),
+        (
+            "<as-given-root>-old",
+            scratch_real.join("alias-old/.factory/cycles/c/x.md"),
+        ),
+        (
+            "<alias>/.factory-old",
+            alias.join(".factory-old/cycles/c/x.md"),
+        ),
+        ("<alias>/x.factory", alias.join("x.factory/cycles/c/x.md")),
+    ];
+    let unresolvable_root = running_as_root();
+    for (label, target) in &siblings {
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        for unresolvable in [false, true] {
+            if unresolvable && unresolvable_root {
+                continue;
+            }
+            // make T_real unavailable by locking the deepest existing ancestor's parent
+            let guard = if unresolvable {
+                let lock_dir = target.parent().unwrap().parent().unwrap().to_path_buf();
+                std::fs::set_permissions(&lock_dir, std::fs::Permissions::from_mode(0o000))
+                    .unwrap();
+                Some(ModeGuard(lock_dir, 0o755))
+            } else {
+                None
+            };
+            let before = p.snapshot();
+            let out = run_as_given(
+                &p,
+                &alias,
+                &envelope("PreToolUse", "Edit", Some("Tl1"), edit_input(target)),
+            );
+            drop(guard);
+            if out.status.code() != Some(0)
+                || p.snapshot() != before
+                || p.reservation("Tl1").exists()
+            {
+                failures.push(format!(
+                    "{label} (T_real unavailable={unresolvable}): must be OUT of scope (admitted, \
+                     no reservation, zero-mutation) even with a live txn; got exit {:?}: {}",
+                    out.status.code(),
+                    stderr_of(&out)
+                ));
+            }
+            let stray = migration_state_dirs_under(&scratch_real);
+            // the only migration-state under scratch is the session's own via the alias symlink,
+            // which the walk does not follow
+            if !stray.is_empty() {
+                failures.push(format!("{label}: spurious namespace created: {stray:?}"));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC024l_lookalike_and_sibling_paths_out_of_scope_no_over_match_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-052 v1.20 §Downstream item 22 -- replacement for the deleted
+// `resolve_shard_gate_precedence` tests: real-binary structural early return
+// ---------------------------------------------------------------------------
+
+const BC_INDEX_ROLL_SHARD_CONFIG: &str = "\
+[[shard]]
+artifact_stem = \"BC-INDEX\"
+artifact_path = \".factory/specs/behavioral-contracts/BC-INDEX.md\"
+practical_fuel_ceiling = 8000000
+worst_case_fuel_per_byte = 106.36
+max_single_record_bytes = 16384
+safety_margin = 8192
+shard_cap_bytes = 100
+shape = \"flat\"
+";
+
+/// BC-1.18.011 Architect Ruling 1 re-anchored (ADR-052 v1.20 item 22; BC-1.18.013
+/// Precondition 6(b) O3): with a live txn, a protected `Write` to a path that
+/// `shard_cap_precheck` WOULD roll (over-cap canonical + matching `[[shard]]`)
+/// exits 2 `E-MAINTENANCE-001`, leaves the canonical byte-identical and publishes no
+/// sealed shard (no seal/truncate). Covers both path families and both txn states.
+#[test]
+fn test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let cases: [(&str, &str, &str); 2] = [
+        (CYCLES_PATH, CYCLES_SHARD_CONFIG, ".factory/cycles/"),
+        (
+            ".factory/specs/behavioral-contracts/BC-INDEX.md",
+            BC_INDEX_ROLL_SHARD_CONFIG,
+            "BC-INDEX",
+        ),
+    ];
+    for (rel, config, scope) in cases {
+        for state in ["STAGING", "COMMITTING"] {
+            let p = Project::new();
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(&p.ms(), state, Some("gen-1"), Some("migrate-bc-index"));
+            let _live = p.hold_lock();
+            std::fs::write(p.root().join(".factory/shard-config.toml"), config).unwrap();
+            let target = p.abs(rel);
+            std::fs::write(&target, "y".repeat(50)).unwrap();
+            let before = std::fs::read(&target).unwrap();
+            let dir_before: Vec<String> = std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            let payload = envelope(
+                "PreToolUse",
+                "Write",
+                Some("Tr1"),
+                serde_json::json!({
+                    "file_path": target.to_string_lossy(),
+                    "content": "x".repeat(5_000),
+                }),
+            );
+            let out = run(&p, &payload);
+            let err = stderr_of(&out);
+            let mut dir_after: Vec<String> = std::fs::read_dir(target.parent().unwrap())
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            let mut dir_before_sorted = dir_before.clone();
+            dir_before_sorted.sort();
+            dir_after.sort();
+            if out.status.code() != Some(2)
+                || !err.contains(&format!("E-MAINTENANCE-001: {}", plain_msg(scope)))
+                || std::fs::read(&target).unwrap() != before
+                || dir_after != dir_before_sorted
+                || p.reservation("Tr1").exists()
+            {
+                failures.push(format!(
+                    "[{rel}, {state}] live txn must block the over-cap protected write with \
+                     `E-MAINTENANCE-001: {}` BEFORE shard_cap_precheck: canonical byte-identical, \
+                     no sealed shard, no reservation; got exit {:?}, canonical_unchanged={}, \
+                     dir {dir_before_sorted:?} -> {dir_after:?}, stderr: {err}",
+                    plain_msg(scope),
+                    out.status.code(),
+                    std::fs::read(&target).unwrap() == before
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_blackbox",
+        failures,
+    );
+}
