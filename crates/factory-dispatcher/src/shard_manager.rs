@@ -13927,21 +13927,34 @@ pub fn validate_production_reservation_ttl(
     Ok(ttl)
 }
 
-/// The single pure staleness predicate (S-25.08 AC-008) (no PID input, no
-/// ambient time). `created_at` (epoch seconds, `None` when absent/unparseable)
-/// wins; `mtime` is used ONLY when `created_at` is `None`. Stale iff
-/// `now - basis > ttl`.
+/// The single pure staleness predicate (S-25.08 AC-008; ADR-052 v1.20 §5a
+/// "Reservation timestamp rules", F-008). No PID input, no ambient time.
+///
+/// Rules, in order:
+/// 1. a `created_at` beyond `now + RESERVATION_CLOCK_SKEW_TOLERANCE_SECS` (a
+///    FUTURE stamp) is untrusted and treated as `None`; a stamp inside the
+///    tolerance is accepted and simply ages as 0;
+/// 2. `basis = created_at.or(mtime)`; with neither available the age is UNKNOWN
+///    and the reservation is NOT stale (never reclaimable on missing data);
+/// 3. `age = now.saturating_sub(basis)` (a future `mtime` ages as 0); stale iff
+///    `age > ttl` (strict).
+///
+/// Every ambiguity resolves toward RETENTION: wrongfully reclaiming a live
+/// writer's reservation lets the coordinator snapshot mid-write, while
+/// wrongfully retaining one yields only a bounded, visible
+/// `DRAIN_TIMEOUT_ABORT` stall.
 pub fn reservation_is_stale(
     created_at_epoch_secs: Option<u64>,
     mtime_epoch_secs: Option<u64>,
     now_epoch_secs: u64,
     ttl_secs: u64,
 ) -> bool {
-    // S-25.08 Red-Gate STUB (BC-1.18.011 v1.16 EC-025): the v1.20 timestamp
-    // table (skew tolerance, untrusted/future/pre-epoch created_at, future
-    // mtime, both-unusable => NOT stale) is NOT implemented yet.
-    let basis = created_at_epoch_secs.or(mtime_epoch_secs).unwrap_or(0);
-    now_epoch_secs.saturating_sub(basis) > ttl_secs
+    let trusted_created_at = created_at_epoch_secs
+        .filter(|c| *c <= now_epoch_secs.saturating_add(RESERVATION_CLOCK_SKEW_TOLERANCE_SECS));
+    match trusted_created_at.or(mtime_epoch_secs) {
+        Some(basis) => now_epoch_secs.saturating_sub(basis) > ttl_secs,
+        None => false,
+    }
 }
 
 /// Accepted clock skew (seconds) between a reservation's `created_at` and the
@@ -14113,24 +14126,87 @@ pub fn plan_stale_gate_reconciliation(
     }
 }
 
-/// Seconds since the Unix epoch of `t` (0 for a pre-epoch instant — such a
-/// timestamp is treated as maximally old, i.e. reclaimable).
-fn epoch_secs(t: std::time::SystemTime) -> u64 {
+/// Seconds since the Unix epoch of `t`; `None` for a pre-epoch instant (the
+/// age is then UNKNOWN — never clamped to 0, which would make the reservation
+/// maximally old and reclaimable; ADR-052 v1.20 F-008).
+fn epoch_secs_checked(t: std::time::SystemTime) -> Option<u64> {
     t.duration_since(std::time::UNIX_EPOCH)
+        .ok()
         .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
-/// Parse a reservation file's `created_at` field into epoch seconds. `None`
-/// when the file is unreadable, not JSON, the field is absent, or it does not
-/// parse as RFC 3339 — the caller then falls back to the file mtime
-/// ([`reservation_is_stale`]).
-fn reservation_created_at_epoch_secs(path: &Path) -> Option<u64> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let reservation: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let created_at = reservation.get("created_at")?.as_str()?;
-    let parsed = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
-    u64::try_from(parsed.timestamp()).ok()
+/// Why a reservation's `created_at` was not usable (the `reason` field of the
+/// F-008 diagnostics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreatedAtParse {
+    Usable(u64),
+    /// Unreadable file, not JSON, field absent / not a string / not RFC 3339.
+    Unparseable,
+    /// A valid RFC 3339 instant before 1970-01-01T00:00:00Z.
+    PreEpoch,
+}
+
+/// Parse a reservation file's `created_at` field as RFC 3339 (any UTC offset,
+/// normalised to UTC epoch seconds, sub-second truncated). Never clamps.
+fn parse_reservation_created_at(path: &Path) -> CreatedAtParse {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Ok(reservation) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Some(created_at) = reservation.get("created_at").and_then(|v| v.as_str()) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(created_at) else {
+        return CreatedAtParse::Unparseable;
+    };
+    match u64::try_from(parsed.timestamp()) {
+        Ok(secs) => CreatedAtParse::Usable(secs),
+        Err(_) => CreatedAtParse::PreEpoch,
+    }
+}
+
+/// Emit the F-008 `tracing::warn!` for every fallback / unknown-age outcome of
+/// [`reservation_is_stale`]'s inputs (target `bc_1_18_011_migration`, field
+/// `reason` ∈ {`created_at_unparseable`, `created_at_pre_epoch`,
+/// `created_at_future`, `mtime_future`, `age_unknown`}). Kept out of the pure
+/// predicate so it stays I/O- and logging-free for the Kani models.
+fn log_reservation_timestamp_fallback(
+    path: &Path,
+    created_at: CreatedAtParse,
+    mtime: Option<u64>,
+    now: u64,
+) {
+    let mut reasons: Vec<&'static str> = Vec::new();
+    let mut created_usable = false;
+    match created_at {
+        CreatedAtParse::Unparseable => reasons.push("created_at_unparseable"),
+        CreatedAtParse::PreEpoch => reasons.push("created_at_pre_epoch"),
+        CreatedAtParse::Usable(c) => {
+            if c > now.saturating_add(RESERVATION_CLOCK_SKEW_TOLERANCE_SECS) {
+                reasons.push("created_at_future");
+            } else {
+                created_usable = true;
+            }
+        }
+    }
+    if !created_usable {
+        match mtime {
+            Some(m) if m > now => reasons.push("mtime_future"),
+            Some(_) => {}
+            None => reasons.push("age_unknown"),
+        }
+    }
+    for reason in reasons {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            path = %path.display(),
+            reason,
+            "reservation timestamp fallback (ADR-052 v1.20 F-008): ambiguous timestamps resolve \
+             toward retention"
+        );
+    }
 }
 
 /// Poll the writer-reservations directory until it is empty (quiescence)
@@ -14151,22 +14227,27 @@ pub fn drain_bc_index_writers(
     // reservation's `created_at` field, falling back to file mtime ONLY when
     // the field is absent or unparseable (v1.18 B2-3).
     if let Ok(entries) = std::fs::read_dir(_reservations_dir) {
-        let now_secs = epoch_secs(std::time::SystemTime::now());
+        let now_secs = epoch_secs_checked(std::time::SystemTime::now()).unwrap_or(0);
         for entry in entries.flatten() {
             let path = entry.path();
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            let Ok(modified) = meta.modified() else {
-                continue;
-            };
-            let created_at = reservation_created_at_epoch_secs(&path);
-            if reservation_is_stale(
-                created_at,
-                Some(epoch_secs(modified)),
+            let created_at = parse_reservation_created_at(&path);
+            let mtime = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(epoch_secs_checked);
+            let ttl_secs = _max_reservation_ttl.as_secs();
+            let stale = reservation_is_stale(
+                match created_at {
+                    CreatedAtParse::Usable(c) => Some(c),
+                    CreatedAtParse::Unparseable | CreatedAtParse::PreEpoch => None,
+                },
+                mtime,
                 now_secs,
-                _max_reservation_ttl.as_secs(),
-            ) {
+                ttl_secs,
+            );
+            log_reservation_timestamp_fallback(&path, created_at, mtime, now_secs);
+            if stale {
                 let _ = std::fs::remove_file(&path);
             }
         }
