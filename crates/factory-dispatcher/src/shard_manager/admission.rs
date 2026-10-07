@@ -344,7 +344,7 @@ pub fn reconcile_stale_admission_gate(
         generation_id_eq: false,
         count_eq_n: false,
         hashes_eq: [false; 4],
-        txn_is_own_migration: terminal_record_name.is_some(),
+        txn_migration_known: terminal_record_name.is_some(),
     };
 
     let live_generation_id_is_null = live.is_some_and(|t| t.record.generation_id.is_none());

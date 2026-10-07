@@ -1875,3 +1875,1183 @@ fn test_BC_1_18_013_EC020_unwritable_namespace_fails_closed_no_reservation_black
         "no migration-state/ can exist, hence no reservation left behind"
     );
 }
+
+// ===========================================================================
+// ADR-052 v1.20 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
+// red tests (F-001 .. F-009), real spawned binary
+// ===========================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RootEnv {
+    Set,
+    Unset,
+    Empty,
+}
+
+/// Generic hook envelope: any event, optional `tool_name`, arbitrary
+/// `tool_use_id` JSON value (None = field ABSENT), extra top-level fields.
+fn json_env(
+    event: &str,
+    tool_name: Option<&str>,
+    tool_input: serde_json::Value,
+    tool_use_id: Option<serde_json::Value>,
+    extra: serde_json::Value,
+) -> String {
+    let mut v = serde_json::json!({
+        "hook_event_name": event,
+        "session_id": "sess-s2508",
+        "tool_input": tool_input,
+    });
+    if let Some(t) = tool_name {
+        v["tool_name"] = serde_json::Value::String(t.to_string());
+    }
+    if let Some(id) = tool_use_id {
+        v["tool_use_id"] = id;
+    }
+    if let Some(m) = extra.as_object() {
+        for (k, val) in m {
+            v[k] = val.clone();
+        }
+    }
+    v.to_string()
+}
+
+fn spawn_env(project: &Project, payload: &str, seam: Option<&Path>, root: RootEnv) -> Child {
+    let mut cmd = Command::new(binary_path());
+    cmd.env("CLAUDE_PROJECT_DIR", project.root())
+        .env("VSDD_LOG_DIR", project.root().join("logs"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    match root {
+        RootEnv::Set => {
+            cmd.env("CLAUDE_PLUGIN_ROOT", project.plugin_root.path());
+        }
+        RootEnv::Unset => {
+            cmd.env_remove("CLAUDE_PLUGIN_ROOT");
+        }
+        RootEnv::Empty => {
+            cmd.env("CLAUDE_PLUGIN_ROOT", "");
+        }
+    }
+    match seam {
+        Some(d) => {
+            cmd.env(SEAM_ENV, d);
+        }
+        None => {
+            cmd.env_remove(SEAM_ENV);
+        }
+    }
+    let mut child = cmd.spawn().expect("spawn factory-dispatcher");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    stdin.write_all(payload.as_bytes()).expect("write payload");
+    drop(stdin);
+    child
+}
+
+fn run_env(project: &Project, payload: &str, seam: Option<&Path>, root: RootEnv) -> Output {
+    finish(
+        spawn_env(project, payload, seam, root),
+        Duration::from_secs(30),
+    )
+}
+
+fn migration_state_dirs_under(root: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let is_link = p
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            let n = e.file_name().to_string_lossy().to_string();
+            if n == "migration-state" || n == "reservations" {
+                out.push(p.clone());
+            }
+            if p.is_dir() && !is_link {
+                walk(&p, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
+}
+
+fn count_w1(seam: &Path) -> usize {
+    events(seam)
+        .iter()
+        .filter(|e| e.starts_with("W1_RESERVE:"))
+        .count()
+}
+
+// ---------------------------------------------------------------------------
+// F-001 / EC-021 -- PostToolUseFailure releases the reservation
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.013 v1.8 EC-021 / ADR-052 v1.20 §5a F-001: a `PostToolUseFailure`
+/// envelope `{tool_name, tool_input, tool_use_id, error, is_interrupt}` for an id
+/// whose PreToolUse was admitted releases exactly that reservation, regardless of
+/// `is_interrupt` and of `tool_name` (absent / differently shaped). An
+/// unknown/invalid id is a silent zero-mutation no-op. This is the in-repo
+/// PostToolUseFailure fixture the ADR requires (real shape, with `tool_use_id`).
+#[test]
+fn test_BC_1_18_013_EC021_posttoolusefailure_releases_reservation_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+
+    let variants: [(Option<&str>, bool, &str); 5] = [
+        (Some("Edit"), false, "tool failed"),
+        (Some("Edit"), true, "interrupted"),
+        (None, false, "no tool_name"),
+        (None, true, "no tool_name + interrupt"),
+        (Some("SomeOtherTool"), false, "differently-shaped tool_name"),
+    ];
+    for (tool, interrupt, label) in variants {
+        let p = Project::new();
+        let target = p.abs(CYCLES_PATH);
+        let pre = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TF1"), edit_input(&target)),
+        );
+        if pre.status.code() != Some(0) || !p.reservation("TF1").exists() {
+            failures.push(format!(
+                "[{label}] precondition: PreToolUse must admit and reserve TF1 (exit {:?})",
+                pre.status.code()
+            ));
+            continue;
+        }
+        let payload = json_env(
+            "PostToolUseFailure",
+            tool,
+            edit_input(&target),
+            Some(serde_json::json!("TF1")),
+            serde_json::json!({ "error": "boom", "is_interrupt": interrupt }),
+        );
+        let out = run(&p, &payload);
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "[{label}] PostToolUseFailure must exit 0, got {:?}",
+                out.status.code()
+            ));
+        }
+        if p.reservation("TF1").exists() || p.reservation_count() != 0 {
+            failures.push(format!(
+                "[{label}] PostToolUseFailure must remove reservations/TF1.reservation (directory \
+                 empty after the pair); {} file(s) remain",
+                p.reservation_count()
+            ));
+        }
+    }
+
+    // Unknown / invalid id => silent zero-mutation no-op; a planted sibling file
+    // outside reservations/ (what `../x` would address) must survive.
+    for id in ["NEVER-RESERVED", "../x", ".hidden", ""] {
+        let p = Project::new();
+        std::fs::write(
+            p.reservation("OTHER"),
+            r#"{"created_at":"2026-10-06T00:00:00Z","tool_use_id":"OTHER"}"#,
+        )
+        .unwrap();
+        std::fs::write(p.ms().join("x.reservation"), b"outside").unwrap();
+        let before = p.snapshot();
+        let target = p.abs(CYCLES_PATH);
+        let payload = json_env(
+            "PostToolUseFailure",
+            Some("Edit"),
+            edit_input(&target),
+            Some(serde_json::json!(id)),
+            serde_json::json!({ "error": "boom", "is_interrupt": false }),
+        );
+        let out = run(&p, &payload);
+        if out.status.code() != Some(0) || p.snapshot() != before {
+            failures.push(format!(
+                "PostToolUseFailure for unknown/invalid id {id:?} must be a zero-mutation exit-0 \
+                 no-op; exit {:?}, tree_unchanged={}",
+                out.status.code(),
+                p.snapshot() == before
+            ));
+        }
+    }
+
+    // migration-state/ absent => zero-mutation no-op.
+    {
+        let p = Project::new_bare();
+        let target = p.abs(CYCLES_PATH);
+        let payload = json_env(
+            "PostToolUseFailure",
+            Some("Edit"),
+            edit_input(&target),
+            Some(serde_json::json!("TZ")),
+            serde_json::json!({ "error": "boom", "is_interrupt": false }),
+        );
+        let out = run(&p, &payload);
+        if out.status.code() != Some(0) || p.ms().exists() {
+            failures.push(format!(
+                "PostToolUseFailure with migration-state/ absent must be a no-op (exit {:?}, \
+                 migration-state created={})",
+                out.status.code(),
+                p.ms().exists()
+            ));
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC021_posttoolusefailure_releases_reservation_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-004 / EC-022 -- the gate is registry-independent (O1..O4)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Registry {
+    Normal,
+    Missing,
+    Unparseable,
+    SchemaMismatch,
+}
+
+fn set_registry(p: &Project, r: Registry) {
+    let path = p.plugin_root.path().join("hooks-registry.toml");
+    match r {
+        Registry::Normal => std::fs::write(&path, "schema_version = 2\n").unwrap(),
+        Registry::Missing => {
+            let _ = std::fs::remove_file(&path);
+        }
+        Registry::Unparseable => std::fs::write(&path, "this is [[[ not toml\n").unwrap(),
+        Registry::SchemaMismatch => std::fs::write(&path, "schema_version = 99\n").unwrap(),
+    }
+}
+
+/// BC-1.18.013 v1.8 EC-022 / ADR-052 v1.20 §5a "Evaluation position" O1-O4. Gate
+/// BEHAVIOR only (registry exit-code wording is being reconciled separately).
+#[test]
+fn test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let modes: [(&str, RootEnv, Registry); 6] = [
+        ("CLAUDE_PLUGIN_ROOT unset", RootEnv::Unset, Registry::Normal),
+        ("CLAUDE_PLUGIN_ROOT empty", RootEnv::Empty, Registry::Normal),
+        ("registry missing", RootEnv::Set, Registry::Missing),
+        ("registry unparseable", RootEnv::Set, Registry::Unparseable),
+        (
+            "registry empty/no matching plugin",
+            RootEnv::Set,
+            Registry::Normal,
+        ),
+        (
+            "registry schema mismatch",
+            RootEnv::Set,
+            Registry::SchemaMismatch,
+        ),
+    ];
+
+    for (label, root, reg) in modes {
+        // (A) live txn => blocked E-MAINTENANCE-001 exit 2 WITHOUT loading the
+        // registry; core runs exactly once.
+        {
+            let p = Project::new();
+            set_registry(&p, reg);
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(
+                &p.ms(),
+                "STAGING",
+                Some("gen-1"),
+                Some("backfill-append-logs"),
+            );
+            let _live = p.hold_lock();
+            let seam = tempfile::tempdir().unwrap();
+            let target = p.abs(CYCLES_PATH);
+            let out = run_env(
+                &p,
+                &envelope("PreToolUse", "Write", Some("TR"), edit_input(&target)),
+                Some(seam.path()),
+                root,
+            );
+            let err = stderr_of(&out);
+            if out.status.code() != Some(2)
+                || !err.contains(&plain_msg(".factory/cycles/"))
+                || err.contains("E-REG")
+            {
+                failures.push(format!(
+                    "[{label}] live txn must block E-MAINTENANCE-001 (exit 2) without loading the \
+                     registry; got exit {:?}, stderr: {err}",
+                    out.status.code()
+                ));
+            }
+            if count_w1(seam.path()) != 1 {
+                failures.push(format!(
+                    "[{label}] core must run EXACTLY ONCE (one W1_RESERVE), events: {:?}",
+                    events(seam.path())
+                ));
+            }
+        }
+
+        // (B) gate OPEN => admitted with the reservation standing (a registry that
+        // fails CLOSED after the admitted verdict removes it: release-on-block).
+        {
+            let p = Project::new();
+            set_registry(&p, reg);
+            let seam = tempfile::tempdir().unwrap();
+            let target = p.abs(CYCLES_PATH);
+            let out = run_env(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("TR2"), edit_input(&target)),
+                Some(seam.path()),
+                root,
+            );
+            let fail_closed_registry = reg == Registry::SchemaMismatch;
+            let ok = if fail_closed_registry {
+                out.status.code() == Some(2) && !p.reservation("TR2").exists()
+            } else {
+                out.status.code() == Some(0) && p.reservation("TR2").exists()
+            };
+            if !ok || count_w1(seam.path()) != 1 {
+                failures.push(format!(
+                    "[{label}] gate OPEN: expected {} ; got exit {:?}, reservation_present={}, \
+                     W1 count={}",
+                    if fail_closed_registry {
+                        "registry fail-closed exit 2 with NO reservation left (release-on-block)"
+                    } else {
+                        "admit (exit 0) with the reservation standing"
+                    },
+                    out.status.code(),
+                    p.reservation("TR2").exists(),
+                    count_w1(seam.path())
+                ));
+            }
+        }
+
+        // (C) the matching Post / PostToolUseFailure releases under the same broken
+        // registry (registry-independent release).
+        if reg != Registry::SchemaMismatch {
+            for post_event in ["PostToolUse", "PostToolUseFailure"] {
+                let p = Project::new();
+                let target = p.abs(CYCLES_PATH);
+                let _ = run(
+                    &p,
+                    &envelope("PreToolUse", "Edit", Some("TR3"), edit_input(&target)),
+                );
+                set_registry(&p, reg);
+                let payload = json_env(
+                    post_event,
+                    Some("Edit"),
+                    edit_input(&target),
+                    Some(serde_json::json!("TR3")),
+                    serde_json::json!({}),
+                );
+                let out = run_env(&p, &payload, None, root);
+                if out.status.code() != Some(0) || p.reservation("TR3").exists() {
+                    failures.push(format!(
+                        "[{label}] {post_event} must release TR3 under the same registry; exit \
+                         {:?}, reservation_present={}",
+                        out.status.code(),
+                        p.reservation("TR3").exists()
+                    ));
+                }
+            }
+        }
+    }
+
+    // (g) unparseable stdin: existing parse-error exit unchanged; nothing
+    // reservable, no classification, no mutation.
+    {
+        let p = Project::new();
+        let before = p.snapshot();
+        let seam = tempfile::tempdir().unwrap();
+        let _ = run_with_seam(&p, "this is { not json", seam.path());
+        if p.snapshot() != before || !events(seam.path()).is_empty() {
+            failures.push(
+                "unparseable stdin must create no reservation and run no classification".into(),
+            );
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-002 / EC-023 -- admission scope anchored to the session's factory_root
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.013 v1.8 EC-023 / ADR-052 v1.20 "Admission scope anchoring".
+#[test]
+fn test_BC_1_18_013_EC023_out_of_root_factory_paths_are_out_of_scope_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+
+    // (a)-(d): protected-LOOKING paths outside the session's factory_root, with a
+    // live txn in the session's OWN tree.
+    let other = tempfile::tempdir().unwrap();
+    let p = Project::new();
+    write_gate(&p.ms(), "LOCKED");
+    write_txn(
+        &p.ms(),
+        "STAGING",
+        Some("gen-1"),
+        Some("backfill-append-logs"),
+    );
+    let _live = p.hold_lock();
+    let cases: Vec<(String, PathBuf)> = vec![
+        (
+            "(a) another project's .factory/cycles".into(),
+            other.path().join(".factory/cycles/c1/x.md"),
+        ),
+        (
+            "(a) another project's .factory/specs/behavioral-contracts".into(),
+            other
+                .path()
+                .join(".factory/specs/behavioral-contracts/x.md"),
+        ),
+        (
+            "(b) nested project_root/sub/.factory/cycles".into(),
+            p.root().join("sub/.factory/cycles/c1/x.md"),
+        ),
+        (
+            "(d) look-alike x.factory/cycles".into(),
+            p.root().join("x.factory/cycles/y.md"),
+        ),
+        (
+            "(d) look-alike .factory-old/cycles".into(),
+            p.root().join(".factory-old/cycles/z.md"),
+        ),
+    ];
+    for (label, target) in cases {
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let before = p.snapshot();
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TO"), edit_input(&target)),
+        );
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "{label}: out-of-root path must be ADMITTED even with a live txn in the session \
+                 root; got exit {:?}: {}",
+                out.status.code(),
+                stderr_of(&out)
+            ));
+        }
+        if p.snapshot() != before || p.reservation("TO").exists() {
+            failures.push(format!(
+                "{label}: must create NO reservation / state in the session root"
+            ));
+        }
+        let stray: Vec<PathBuf> = migration_state_dirs_under(other.path())
+            .into_iter()
+            .chain(migration_state_dirs_under(&p.root().join("sub")))
+            .chain(migration_state_dirs_under(&p.root().join("x.factory")))
+            .chain(migration_state_dirs_under(&p.root().join(".factory-old")))
+            .collect();
+        if !stray.is_empty() {
+            failures.push(format!("{label}: spurious namespace created: {stray:?}"));
+        }
+    }
+
+    // (e) `.factory` is a SYMLINK to a real directory: both spellings are gated
+    // in ONE namespace (the real directory's).
+    #[cfg(unix)]
+    {
+        let real = tempfile::tempdir().unwrap();
+        let p = Project::new_bare();
+        std::fs::create_dir_all(real.path().join("migration-state/reservations")).unwrap();
+        std::fs::remove_dir_all(p.root().join(".factory")).unwrap();
+        std::os::unix::fs::symlink(real.path(), p.root().join(".factory")).unwrap();
+        let real_c = real.path().canonicalize().unwrap();
+        let via_link = p.root().join(".factory/cycles/c1/x.md");
+        let via_real = real_c.join("cycles/c1/x.md");
+        for (spelling, target, id) in [
+            ("via symlink", &via_link, "S1"),
+            ("via real path", &via_real, "S2"),
+        ] {
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some(id), edit_input(target)),
+            );
+            let landed = real_c
+                .join("migration-state/reservations")
+                .join(format!("{id}.reservation"));
+            if out.status.code() != Some(0) || !landed.exists() {
+                failures.push(format!(
+                    "(e) {spelling}: must be reserved in the REAL factory_root's migration-state; \
+                     exit {:?}, reservation_present={}",
+                    out.status.code(),
+                    landed.exists()
+                ));
+            }
+        }
+        // and gated when a txn is live in the real directory
+        write_gate(&real_c.join("migration-state"), "LOCKED");
+        write_txn(
+            &real_c.join("migration-state"),
+            "COMMITTING",
+            Some("gen-1"),
+            Some("migrate-bc-index"),
+        );
+        std::fs::write(real_c.join("migration-state/exclusive.lock"), b"").unwrap();
+        let _live = try_acquire_migration_lock(&real_c.join("migration-state/exclusive.lock"))
+            .unwrap()
+            .unwrap();
+        for (spelling, target) in [("via symlink", &via_link), ("via real path", &via_real)] {
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("S3"), edit_input(target)),
+            );
+            if out.status.code() != Some(2)
+                || !stderr_of(&out).contains(&plain_msg(".factory/cycles/"))
+            {
+                failures.push(format!(
+                    "(e) {spelling}: live txn in the real root must block (exit 2); got {:?}",
+                    out.status.code()
+                ));
+            }
+        }
+    }
+
+    // (f) the project has NO `.factory` directory: out of scope, nothing created.
+    {
+        let p = Project::new_bare();
+        std::fs::remove_dir_all(p.root().join(".factory")).unwrap();
+        let target = p.root().join(".factory/cycles/c1/x.md");
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TN"), edit_input(&target)),
+        );
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "(f) no .factory: must be admitted, got exit {:?}",
+                out.status.code()
+            ));
+        }
+        if p.root().join(".factory").exists() {
+            failures
+                .push("(f) the gate must NEVER create `.factory` (nor anything under it)".into());
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC023_out_of_root_factory_paths_are_out_of_scope_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-003 / EC-024 -- target-path aliasing (black-box classification)
+// ---------------------------------------------------------------------------
+
+struct AliasCase {
+    label: &'static str,
+    file_path: Box<dyn Fn(&Project) -> String>,
+    cwd_field: bool,
+    expect: Option<&'static str>, // Some(scope) = blocked; None = admitted
+}
+
+/// BC-1.18.013 v1.8 EC-024 / ADR-052 v1.20 "Target path resolution": in-scope
+/// aliases are BLOCKED with the path-family message while a txn is live;
+/// out-of-scope inputs are admitted.
+#[test]
+fn test_BC_1_18_013_EC024_target_path_aliases_classified_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let scratch_real = scratch.path().canonicalize().unwrap();
+    let sr1 = scratch_real.clone();
+    let sr2 = scratch_real.clone();
+
+    let cases: Vec<AliasCase> = vec![
+        AliasCase {
+            label: "(a) specs/./behavioral-contracts",
+            file_path: Box::new(|p| {
+                format!(
+                    "{}/.factory/specs/./behavioral-contracts/x.md",
+                    p.root().display()
+                )
+            }),
+            cwd_field: false,
+            expect: Some("BC-INDEX"),
+        },
+        AliasCase {
+            label: "(b) specs/../specs/behavioral-contracts",
+            file_path: Box::new(|p| {
+                format!(
+                    "{}/.factory/specs/../specs/behavioral-contracts/x.md",
+                    p.root().display()
+                )
+            }),
+            cwd_field: false,
+            expect: Some("BC-INDEX"),
+        },
+        AliasCase {
+            label: "(c) doubled slashes",
+            file_path: Box::new(|p| format!("{}/.factory//cycles//c1//log.md", p.root().display())),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "(f) nonexistent tail",
+            file_path: Box::new(|p| {
+                format!("{}/.factory/cycles/newcycle/new.md", p.root().display())
+            }),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "(g) .FACTORY/Cycles",
+            file_path: Box::new(|p| format!("{}/.FACTORY/Cycles/x", p.root().display())),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "(g) Specs/Behavioral-Contracts",
+            file_path: Box::new(|p| {
+                format!(
+                    "{}/.factory/Specs/Behavioral-Contracts/x.md",
+                    p.root().display()
+                )
+            }),
+            cwd_field: false,
+            expect: Some("BC-INDEX"),
+        },
+        AliasCase {
+            label: "(h) relative path joined to payload cwd",
+            file_path: Box::new(|_| ".factory/cycles/c1/log.md".to_string()),
+            cwd_field: true,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "~ is never expanded",
+            file_path: Box::new(|_| "~/.factory/cycles/x".to_string()),
+            cwd_field: true,
+            expect: None,
+        },
+        AliasCase {
+            label: "out of scope: STATE.md",
+            file_path: Box::new(|p| format!("{}/.factory/STATE.md", p.root().display())),
+            cwd_field: false,
+            expect: None,
+        },
+        AliasCase {
+            label: "out of scope: stories/x",
+            file_path: Box::new(|p| format!("{}/.factory/stories/x", p.root().display())),
+            cwd_field: false,
+            expect: None,
+        },
+        AliasCase {
+            label: "(d) symlink alias to .factory/cycles",
+            file_path: Box::new(move |_| format!("{}/alias/x", sr1.display())),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "(e) link/../ resolves link FIRST (real form in scope)",
+            file_path: Box::new(move |_| format!("{}/link/../x", sr2.display())),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+        AliasCase {
+            label: "(e) union: lexical form in scope, real form outside",
+            file_path: Box::new(|p| format!("{}/.factory/cycles/sub/../x", p.root().display())),
+            cwd_field: false,
+            expect: Some(".factory/cycles/"),
+        },
+    ];
+
+    for c in cases {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+        let _live = p.hold_lock();
+        std::fs::create_dir_all(p.root().join(".factory/cycles/c1")).unwrap();
+        std::fs::create_dir_all(p.root().join(".factory/specs/behavioral-contracts")).unwrap();
+        #[cfg(unix)]
+        {
+            // alias -> <factory_root>/cycles ; link -> <factory_root>/cycles/c1 ;
+            // cycles/sub -> a directory elsewhere
+            let _ = std::fs::remove_file(scratch_real.join("alias"));
+            let _ = std::fs::remove_file(scratch_real.join("link"));
+            let real_root = p.root().canonicalize().unwrap();
+            std::os::unix::fs::symlink(
+                real_root.join(".factory/cycles"),
+                scratch_real.join("alias"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(
+                real_root.join(".factory/cycles/c1"),
+                scratch_real.join("link"),
+            )
+            .unwrap();
+            let elsewhere = scratch_real.join(format!("elsewhere-{}", std::process::id()));
+            std::fs::create_dir_all(elsewhere.join("deep")).unwrap();
+            let sub = p.root().join(".factory/cycles/sub");
+            let _ = std::fs::remove_file(&sub);
+            std::os::unix::fs::symlink(elsewhere.join("deep"), &sub).unwrap();
+        }
+        let fp = (c.file_path)(&p);
+        let extra = if c.cwd_field {
+            serde_json::json!({ "cwd": p.root().to_string_lossy() })
+        } else {
+            serde_json::json!({})
+        };
+        let payload = json_env(
+            "PreToolUse",
+            Some("Edit"),
+            serde_json::json!({ "file_path": fp, "old_string": "a", "new_string": "b" }),
+            Some(serde_json::json!("TA1")),
+            extra,
+        );
+        let out = run(&p, &payload);
+        let err = stderr_of(&out);
+        match c.expect {
+            Some(scope) => {
+                if out.status.code() != Some(2) || !err.contains(&plain_msg(scope)) {
+                    failures.push(format!(
+                        "{}: file_path `{fp}` must be classified in scope and BLOCKED with `{}`; \
+                         got exit {:?}, stderr: {err}",
+                        c.label,
+                        plain_msg(scope),
+                        out.status.code()
+                    ));
+                }
+            }
+            None => {
+                if out.status.code() != Some(0) {
+                    failures.push(format!(
+                        "{}: file_path `{fp}` is OUT of scope and must be admitted; got exit {:?}: {err}",
+                        c.label,
+                        out.status.code()
+                    ));
+                }
+            }
+        }
+    }
+
+    // (i) on Unix `\` is an ordinary name byte (no separator rewrite): a file
+    // literally named `.factory\cycles\x` is NOT under `<factory_root>/cycles`.
+    #[cfg(unix)]
+    {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+        let _live = p.hold_lock();
+        let fp = format!("{}/.factory\\cycles\\c1\\x.md", p.root().display());
+        let out = run(
+            &p,
+            &envelope(
+                "PreToolUse",
+                "Edit",
+                Some("TB1"),
+                edit_input(Path::new(&fp)),
+            ),
+        );
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "(i) backslash name on Unix must be out of scope (admitted); got exit {:?}",
+                out.status.code()
+            ));
+        }
+    }
+
+    // missing / non-string / empty / NUL file_path => out of scope, not an error.
+    for (label, tool_input) in [
+        (
+            "missing file_path",
+            serde_json::json!({ "old_string": "a" }),
+        ),
+        (
+            "non-string file_path",
+            serde_json::json!({ "file_path": 7 }),
+        ),
+        ("empty file_path", serde_json::json!({ "file_path": "" })),
+        (
+            "NUL in file_path",
+            serde_json::json!({ "file_path": ".factory/cycles/x\u{0}y" }),
+        ),
+    ] {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+        let _live = p.hold_lock();
+        let before = p.snapshot();
+        let out = run(
+            &p,
+            &json_env(
+                "PreToolUse",
+                Some("Edit"),
+                tool_input,
+                Some(serde_json::json!("TM")),
+                serde_json::json!({}),
+            ),
+        );
+        if out.status.code() != Some(0) || p.snapshot() != before {
+            failures.push(format!(
+                "{label}: must be out of scope (admitted, zero-mutation); got exit {:?}",
+                out.status.code()
+            ));
+        }
+    }
+
+    // (j) unresolvable component (EACCES): classified on the lexical form alone,
+    // still protected (fail-closed).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let uid = Command::new("id")
+            .arg("-u")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        if String::from_utf8_lossy(&uid.stdout).trim() != "0" {
+            struct Restore(PathBuf);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    let _ =
+                        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+                }
+            }
+            let p = Project::new();
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+            let _live = p.hold_lock();
+            let locked = p.root().join(".factory/cycles/locked");
+            std::fs::create_dir_all(locked.join("inner")).unwrap();
+            let _r = Restore(locked.clone());
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let fp = locked.join("inner/y.md");
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("TJ"), edit_input(&fp)),
+            );
+            if out.status.code() != Some(2)
+                || !stderr_of(&out).contains(&plain_msg(".factory/cycles/"))
+            {
+                failures.push(format!(
+                    "(j) unresolvable (EACCES) ancestor must fall back to the lexical form and stay \
+                     protected; got exit {:?}",
+                    out.status.code()
+                ));
+            }
+        } else {
+            eprintln!("SKIP (j): running as root; chmod 000 does not restrict lstat");
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC024_target_path_aliases_classified_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-006 / EC-027..EC-030 -- migration_id knownness, dispatcher path
+// ---------------------------------------------------------------------------
+
+fn write_txn_with_raw_migration_id(
+    ms: &Path,
+    state: &str,
+    generation_id: Option<&str>,
+    migration_id: serde_json::Value,
+) {
+    write_txn(ms, state, generation_id, None);
+    let path = ms.join("txn-act-s2508.json");
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    v["migration_id"] = migration_id;
+    std::fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+}
+
+/// BC-1.18.013 v1.8 EC-027 / EC-029 / EC-030; BC-1.18.011 v1.16 (F-006).
+/// (EC-028's finalize-on-verifying-record path needs the S-25.06 effectful
+/// verification seam to be fixturable; its pure decision is pinned in
+/// `s2508_pure_core_and_ttl_test.rs`.)
+#[test]
+fn test_BC_1_18_013_EC027_029_030_migration_id_knownness_dispatcher_path_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+
+    // EC-027: a live txn of the OTHER KNOWN migration with ITS OWN record absent
+    // (only the mechanism-A record present): NoOp -> plain block, byte-identical.
+    for state in ["STAGING", "COMMITTING"] {
+        for rel in [BC_PATH, CYCLES_PATH] {
+            let p = Project::new();
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(&p.ms(), state, Some("gen-1"), Some("migrate-bc-index"));
+            write_terminal_record(
+                &p.ms(),
+                "completed-backfill-append-logs.json",
+                "act-s2508",
+                "gen-1",
+            );
+            let before = p.snapshot();
+            let target = p.abs(rel);
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("T27"), edit_input(&target)),
+            );
+            let err = stderr_of(&out);
+            if out.status.code() != Some(2)
+                || !err.contains(&plain_msg(scope_of(rel)))
+                || err.contains("completion-record mismatch")
+                || p.snapshot() != before
+            {
+                failures.push(format!(
+                    "EC-027 [{state}, {rel}]: B2 txn + only the mechanism-A record must be a PLAIN \
+                     block (own record absent => NoOp), byte-identical; got exit {:?}",
+                    out.status.code()
+                ));
+            }
+        }
+    }
+    // EC-027 Branch B: other known migration, null-generation STAGING, own record
+    // absent (B2's record present) => Branch B applies (txn ABORTED), admitted.
+    {
+        let p = Project::new();
+        write_gate(&p.ms(), "DRAINING");
+        write_txn(&p.ms(), "STAGING", None, Some("backfill-append-logs"));
+        write_terminal_record(&p.ms(), "completed.json", "act-s2508", "gen-1");
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("T27b"), edit_input(&target)),
+        );
+        let txn = p.txn_json();
+        if out.status.code() != Some(0)
+            || txn["state"] != "ABORTED"
+            || txn["abort_reason"] != "null_generation"
+        {
+            failures.push(format!(
+                "EC-027 Branch B: mechanism-A null-generation STAGING with only B2's record must be \
+                 aborted (own record absent); got exit {:?}, txn={txn}",
+                out.status.code()
+            ));
+        }
+    }
+
+    // EC-029: unknown string migration_id => FOREIGN: plain block, never
+    // aborted/finalized, byte-identical.
+    let long_id = "x".repeat(1000);
+    let ctl_id = "bad\u{1}id\nline\u{7}".to_string();
+    for mig in ["future-migration", long_id.as_str(), ctl_id.as_str()] {
+        for (state, gen_id) in [
+            ("STAGING", None),
+            ("STAGING", Some("gen-1")),
+            ("COMMITTING", Some("gen-1")),
+        ] {
+            for with_record in [false, true] {
+                let p = Project::new();
+                write_gate(&p.ms(), "LOCKED");
+                write_txn(&p.ms(), state, gen_id, Some(mig));
+                if with_record {
+                    write_terminal_record(&p.ms(), "completed.json", "act-s2508", "gen-1");
+                }
+                let before = p.snapshot();
+                let target = p.abs(BC_PATH);
+                let out = run(
+                    &p,
+                    &envelope("PreToolUse", "Edit", Some("T29"), edit_input(&target)),
+                );
+                let err = stderr_of(&out);
+                if out.status.code() != Some(2)
+                    || !err.contains(&plain_msg("BC-INDEX"))
+                    || err.contains("completion-record mismatch")
+                    || p.snapshot() != before
+                {
+                    failures.push(format!(
+                        "EC-029 [migration_id len {}, {state}, gen={gen_id:?}, record={with_record}]: \
+                         unknown id => plain block, NEVER aborted/finalized, byte-identical; got \
+                         exit {:?}, tree_unchanged={}",
+                        mig.len(),
+                        out.status.code(),
+                        p.snapshot() == before
+                    ));
+                }
+            }
+        }
+    }
+
+    // EC-030: a PRESENT non-string migration_id => E-MAINTENANCE-002
+    // (state_integrity), fail-closed, no reservation, no txn/gate write.
+    for raw in [
+        serde_json::json!(42),
+        serde_json::Value::Null,
+        serde_json::json!([1]),
+        serde_json::json!({"a": 1}),
+        serde_json::json!(true),
+    ] {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn_with_raw_migration_id(&p.ms(), "STAGING", Some("gen-1"), raw.clone());
+        let before = p.snapshot();
+        let target = p.abs(BC_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("T30"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains("E-MAINTENANCE-002: writer-admission check failed (state_integrity)")
+            || p.snapshot() != before
+        {
+            failures.push(format!(
+                "EC-030 [migration_id={raw}]: non-string id must fail closed with \
+                 `E-MAINTENANCE-002: writer-admission check failed (state_integrity)`, zero-write; \
+                 got exit {:?}, tree_unchanged={}, stderr={err}",
+                out.status.code(),
+                p.snapshot() == before
+            ));
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC027_029_030_migration_id_knownness_dispatcher_path_blackbox",
+        failures,
+    );
+}
+
+/// REGRESSION PIN (green at Red Gate; implemented at 332c14e0 without a red
+/// test): a terminal-record STAT ERROR must fail closed and must never be read
+/// as "record ABSENT" (which would let Branch B discard a null-generation STAGING
+/// txn whose record merely could not be stat'ed). A self-referential symlink
+/// `completed.json` makes `try_exists` return `Err(ELOOP)`.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_011_PC6d_terminal_record_stat_error_fails_closed_never_branch_b_regression_pin() {
+    let p = Project::new();
+    write_gate(&p.ms(), "DRAINING");
+    write_txn(&p.ms(), "STAGING", None, Some("migrate-bc-index"));
+    std::os::unix::fs::symlink("completed.json", p.ms().join("completed.json")).unwrap();
+    let txn_before = std::fs::read(p.ms().join("txn-act-s2508.json")).unwrap();
+    let target = p.abs(BC_PATH);
+    let out = run(
+        &p,
+        &envelope("PreToolUse", "Edit", Some("TS"), edit_input(&target)),
+    );
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "a stat error on the terminal record must fail closed (never admit)"
+    );
+    assert_eq!(
+        std::fs::read(p.ms().join("txn-act-s2508.json")).unwrap(),
+        txn_before,
+        "the null-generation STAGING txn must NOT be discarded when the terminal record cannot be stat'ed"
+    );
+    assert!(!p.reservation("TS").exists(), "no reservation left behind");
+}
+
+// ---------------------------------------------------------------------------
+// F-009 / EC-026 -- tool_use_id validity
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.013 v1.8 EC-026 / ADR-052 v1.20 "tool_use_id validity".
+#[test]
+fn test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let long129 = "a".repeat(129);
+    let invalid: Vec<(&str, serde_json::Value, Option<String>)> = vec![
+        ("number", serde_json::json!(7), None),
+        ("empty string", serde_json::json!(""), None),
+        ("../x", serde_json::json!("../x"), Some("../x".to_string())),
+        (
+            "129 chars",
+            serde_json::json!(long129),
+            Some(long129.clone()),
+        ),
+        (
+            ".hidden",
+            serde_json::json!(".hidden"),
+            Some(".hidden".to_string()),
+        ),
+        ("boolean", serde_json::json!(true), None),
+        ("array", serde_json::json!(["a"]), None),
+        ("object", serde_json::json!({"a": 1}), None),
+    ];
+    for (label, id, raw) in invalid {
+        let p = Project::new_bare();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &json_env(
+                "PreToolUse",
+                Some("Edit"),
+                edit_input(&target),
+                Some(id),
+                serde_json::json!({}),
+            ),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err
+                .contains("E-MAINTENANCE-002: writer-admission check failed (invalid_tool_use_id)")
+        {
+            failures.push(format!(
+                "[{label}] must FAIL CLOSED with `E-MAINTENANCE-002: writer-admission check failed \
+                 (invalid_tool_use_id)` (exit 2); got exit {:?}, stderr: {err}",
+                out.status.code()
+            ));
+        }
+        if p.ms().exists() {
+            failures.push(format!("[{label}] must create NO directory / reservation"));
+        }
+        if let Some(raw) = raw
+            && err.contains(&raw)
+        {
+            failures.push(format!(
+                "[{label}] the raw id must never appear in the output (byte length only)"
+            ));
+        }
+    }
+
+    // absent / null => check-only admission: no directory, no reservation.
+    for (label, id) in [("absent", None), ("null", Some(serde_json::Value::Null))] {
+        let p = Project::new_bare();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &json_env(
+                "PreToolUse",
+                Some("Edit"),
+                edit_input(&target),
+                id,
+                serde_json::json!({}),
+            ),
+        );
+        if out.status.code() != Some(0) || p.ms().exists() {
+            failures.push(format!(
+                "[{label}] tool_use_id must degrade to CHECK-ONLY admission (exit 0, no directory); \
+                 got exit {:?}, migration-state created={}",
+                out.status.code(),
+                p.ms().exists()
+            ));
+        }
+    }
+
+    // valid ids: exactly 128 chars, and `-` `_` `.` after the first char.
+    let ok128 = format!("toolu_{}", "A1".repeat(61));
+    assert_eq!(ok128.len(), 128);
+    for (label, id) in [
+        ("128 chars", ok128),
+        ("dash/underscore/dot", "toolu_a-b.c_d".to_string()),
+    ] {
+        let p = Project::new_bare();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(&id), edit_input(&target)),
+        );
+        if out.status.code() != Some(0) || !p.reservation(&id).exists() {
+            failures.push(format!(
+                "[valid {label}] must be accepted and reserved; got exit {:?}, reservation_present={}",
+                out.status.code(),
+                p.reservation(&id).exists()
+            ));
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox",
+        failures,
+    );
+}

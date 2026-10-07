@@ -12915,6 +12915,16 @@ pub enum BcIndexMigrationError {
     )]
     FingerprintMismatchAbort,
 
+    /// S-25.08 Red-Gate STUB variant (BC-1.18.011 v1.16 EC-031).
+    #[error(
+        "BC-INDEX migration: configured reservation TTL {configured_secs}s is below the \
+         {floor_secs}s production floor (RESERVATION_TTL_BELOW_FLOOR, exit 2)"
+    )]
+    ReservationTtlBelowFloor {
+        configured_secs: u64,
+        floor_secs: u64,
+    },
+
     #[error(
         "BC-INDEX migration: writer-reservation quiescence not reached within the drain \
          timeout (DRAIN_TIMEOUT_ABORT, exit 2); gate returned to OPEN"
@@ -13923,12 +13933,27 @@ pub fn validate_production_reservation_ttl(
 /// `now - basis > ttl`.
 pub fn reservation_is_stale(
     created_at_epoch_secs: Option<u64>,
-    mtime_epoch_secs: u64,
+    mtime_epoch_secs: Option<u64>,
     now_epoch_secs: u64,
     ttl_secs: u64,
 ) -> bool {
-    let basis = created_at_epoch_secs.unwrap_or(mtime_epoch_secs);
+    // S-25.08 Red-Gate STUB (BC-1.18.011 v1.16 EC-025): the v1.20 timestamp
+    // table (skew tolerance, untrusted/future/pre-epoch created_at, future
+    // mtime, both-unusable => NOT stale) is NOT implemented yet.
+    let basis = created_at_epoch_secs.or(mtime_epoch_secs).unwrap_or(0);
     now_epoch_secs.saturating_sub(basis) > ttl_secs
+}
+
+/// Accepted clock skew (seconds) between a reservation's `created_at` and the
+/// coordinator's `now` before `created_at` is treated as untrusted
+/// (BC-1.18.011 v1.16 EC-025).
+pub const RESERVATION_CLOCK_SKEW_TOLERANCE_SECS: u64 = 300;
+
+/// S-25.08 Red-Gate STUB (ADR-052 v1.20 "Target path resolution"; F-003):
+/// returns `(T_real, T_lex)` for one absolute target path. `T_real` is `None`
+/// when a component could not be resolved (non-`NotFound` error / hop limit).
+pub fn resolve_target_path(_path: &Path) -> (Option<PathBuf>, PathBuf) {
+    todo!("S-25.08 F-003: resolve_target_path (T_real, T_lex)")
 }
 
 /// Canonical input record of the pure terminal-record reconciliation core
@@ -13943,7 +13968,7 @@ pub struct TerminalReconcileInputs {
     pub generation_id_eq: bool,
     pub count_eq_n: bool,
     pub hashes_eq: [bool; 4],
-    pub txn_is_own_migration: bool,
+    pub txn_migration_known: bool,
 }
 
 /// Decision of the pure terminal-record reconciliation core (VP-146 v1.2 /
@@ -13981,7 +14006,7 @@ pub fn decide_terminal_record_reconciliation(
     if !inputs.lock_acquired || !live {
         return TerminalReconcileDecision::NoOp;
     }
-    if !inputs.txn_is_own_migration {
+    if !inputs.txn_migration_known {
         return TerminalReconcileDecision::RefuseForeignMigration;
     }
     if !inputs.record_present {
@@ -14138,7 +14163,7 @@ pub fn drain_bc_index_writers(
             let created_at = reservation_created_at_epoch_secs(&path);
             if reservation_is_stale(
                 created_at,
-                epoch_secs(modified),
+                Some(epoch_secs(modified)),
                 now_secs,
                 _max_reservation_ttl.as_secs(),
             ) {
