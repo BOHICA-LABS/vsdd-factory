@@ -4532,3 +4532,1031 @@ fn test_BC_1_18_013_EC021c_posttooluse_non_string_tool_name_still_releases_black
         failures,
     );
 }
+
+// ===========================================================================
+// ADR-052 v1.23 -- adversary pass-3 rulings, real spawned binary
+//
+//  * F-S2508-L3-009: section 5a "Factory-root lookup mapping" (the `.factory`
+//    stat is classified Found / Absent / Unstatable; admission leg + release leg).
+//    The coordinator `Io` mapping is S-25.09 and is NOT exercised here.
+//  * F-S2508-L3-001: section "Error Code Semantics" -> "Txn-record
+//    interpretation -- tiers" (Tier 0 shape at read; Tier 1 fields read lazily
+//    by the consuming branch only).
+//
+// The BC mirror (BC-1.18.013 v1.12) is being written in parallel; the ADR is
+// authoritative, so these tests cite ADR sections. Only BC ECs that already
+// exist (EC-029, EC-035) are cited.
+// ===========================================================================
+
+#[cfg(unix)]
+fn bare_project() -> Project {
+    let dir = tempfile::tempdir().expect("project tempdir");
+    let plugin_root = tempfile::tempdir().expect("plugin_root tempdir");
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .expect("write empty registry");
+    Project { dir, plugin_root }
+}
+
+/// Run the real binary with an explicit `CLAUDE_PROJECT_DIR` AND a log directory
+/// OUTSIDE the project (so a chmod-000 project root never blocks the log and the
+/// project tree is exactly what the dispatcher left).
+#[cfg(unix)]
+fn run_at(p: &Project, proj_dir: &Path, log_dir: &Path, payload: &str) -> Output {
+    let mut cmd = Command::new(binary_path());
+    cmd.env("CLAUDE_PLUGIN_ROOT", p.plugin_root.path())
+        .env("CLAUDE_PROJECT_DIR", proj_dir)
+        .env("VSDD_LOG_DIR", log_dir)
+        .env_remove(SEAM_ENV)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn factory-dispatcher");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    stdin.write_all(payload.as_bytes()).expect("write payload");
+    drop(stdin);
+    finish(child, Duration::from_secs(30))
+}
+
+/// lstat-based snapshot of a whole tree (symlinks are recorded, never followed).
+#[cfg(unix)]
+fn raw_tree(root: &Path) -> BTreeMap<String, String> {
+    fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let rel = p.strip_prefix(base).unwrap().to_string_lossy().to_string();
+            let md = std::fs::symlink_metadata(&p).unwrap();
+            if md.file_type().is_symlink() {
+                out.insert(
+                    rel,
+                    format!("symlink->{}", std::fs::read_link(&p).unwrap().display()),
+                );
+            } else if md.is_dir() {
+                out.insert(format!("{rel}/"), "dir".to_string());
+                walk(base, &p, out);
+            } else {
+                out.insert(
+                    rel,
+                    format!(
+                        "file:{}",
+                        String::from_utf8_lossy(&std::fs::read(&p).unwrap_or_default())
+                    ),
+                );
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+#[cfg(unix)]
+fn factory_target(proj: &Path) -> PathBuf {
+    proj.join(".factory/cycles/c1/burst-log.md")
+}
+
+/// Block reason text of the stderr summary line (what the operator sees).
+#[cfg(unix)]
+fn reason_of(err: &str) -> String {
+    err.split("block_reason=\"")
+        .nth(1)
+        .unwrap_or(err)
+        .to_string()
+}
+
+/// F-S2508-L3-009, ADR-052 v1.23 section 5a "Factory-root lookup mapping" (b)
+/// (BC-1.18.013 EC-035 for the regular-file row). `<project_root>/.factory` ABSENT
+/// is the CLOSED set {stat succeeds on a non-directory (regular file); ENOENT
+/// (dangling symlink); ENOTDIR (a path-prefix component, incl. the project root
+/// itself, is a regular file)}. On the PreToolUse admission leg the gate is OUT
+/// OF SCOPE: admitted (exit 0), no reservation, NOTHING created. The completion
+/// legs are a silent no-op. Root-safe (no chmod).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_absent_factory_root_closed_set_is_out_of_scope_admitted_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    type Setup = fn(&Path) -> PathBuf;
+    let rows: [(&str, Setup); 4] = [
+        ("`.factory` is a REGULAR FILE (EC-035)", |root| {
+            std::fs::write(root.join(".factory"), b"not a directory").unwrap();
+            root.to_path_buf()
+        }),
+        ("`.factory` is a DANGLING symlink (ENOENT)", |root| {
+            std::os::unix::fs::symlink(root.join("no-such-target"), root.join(".factory")).unwrap();
+            root.to_path_buf()
+        }),
+        (
+            "a path-prefix component of the project root is a regular file (ENOTDIR)",
+            |root| {
+                std::fs::write(root.join("afile"), b"x").unwrap();
+                root.join("afile").join("proj")
+            },
+        ),
+        (
+            "the project root itself is a regular file (ENOTDIR)",
+            |root| {
+                std::fs::write(root.join("afile"), b"x").unwrap();
+                root.join("afile")
+            },
+        ),
+    ];
+    for (label, setup) in rows {
+        for tool in ["Edit", "Write", "MultiEdit"] {
+            let p = bare_project();
+            let logs = tempfile::tempdir().unwrap();
+            let proj = setup(p.root());
+            let before = raw_tree(p.root());
+            let target = factory_target(&proj);
+            let pre = run_at(
+                &p,
+                &proj,
+                logs.path(),
+                &envelope("PreToolUse", tool, Some("TA1"), edit_input(&target)),
+            );
+            let err = stderr_of(&pre);
+            if pre.status.code() != Some(0) || err.contains("E-MAINTENANCE") {
+                failures.push(format!(
+                    "[{label}] {tool}: Absent must be admitted (exit 0, no E-MAINTENANCE-*); got \
+                     exit {:?}, stderr: {err}",
+                    pre.status.code()
+                ));
+            }
+            if !migration_state_dirs_under(p.root()).is_empty() {
+                failures.push(format!(
+                    "[{label}] {tool}: Absent must create NOTHING; found {:?}",
+                    migration_state_dirs_under(p.root())
+                ));
+            }
+            // Completion legs: silent no-op, exit 0, nothing created.
+            for ev in ["PostToolUse", "PostToolUseFailure"] {
+                let post = run_at(
+                    &p,
+                    &proj,
+                    logs.path(),
+                    &envelope(ev, tool, Some("TA1"), edit_input(&target)),
+                );
+                if post.status.code() != Some(0) || stderr_of(&post).contains("E-MAINTENANCE") {
+                    failures.push(format!(
+                        "[{label}] {tool}/{ev}: Absent release must be a silent no-op (exit 0); \
+                         got {:?}: {}",
+                        post.status.code(),
+                        stderr_of(&post)
+                    ));
+                }
+            }
+            if raw_tree(p.root()) != before {
+                failures.push(format!(
+                    "[{label}] {tool}: the project tree changed (Absent must create/mutate nothing)"
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_absent_factory_root_closed_set_is_out_of_scope_admitted_blackbox",
+        failures,
+    );
+}
+
+/// Shared assertions for an UNSTATABLE `.factory` on the admission leg.
+#[cfg(unix)]
+fn assert_unstatable_admission_fails_closed(
+    label: &str,
+    tool: &str,
+    out: &Output,
+    failures: &mut Vec<String>,
+) {
+    let err = stderr_of(out);
+    let reason = reason_of(&err);
+    let want = "E-MAINTENANCE-002: writer-admission check failed (io)";
+    if out.status.code() != Some(2) || !err.contains(want) {
+        failures.push(format!(
+            "[{label}] {tool}: expected exit 2 + `{want}`; got exit {:?}, stderr: {err}",
+            out.status.code()
+        ));
+    }
+    // Not the absent verdicts, not a block, and the message carries ONLY the
+    // cause token (no path / errno text).
+    for bad in [
+        "FACTORY_ROOT_NOT_FOUND",
+        "E-MAINTENANCE-001",
+        "os error",
+        "Permission denied",
+        "Too many levels",
+        ".factory",
+    ] {
+        if reason.contains(bad) {
+            failures.push(format!(
+                "[{label}] {tool}: block reason must not contain `{bad}`: {reason}"
+            ));
+        }
+    }
+}
+
+/// F-S2508-L3-009, ADR-052 v1.23 section 5a "Factory-root lookup mapping" (c) +
+/// section "Error Code Semantics" "Factory-root stat failure". A self-referential
+/// symlink `.factory` makes the one `stat` fail with ELOOP (for EVERY uid, so this
+/// row runs under root): existence is UNKNOWN => the admission leg FAILS CLOSED,
+/// `E-MAINTENANCE-002 (io)`, exit 2, no reservation, tree unchanged. NOT admitted
+/// (the pre-v1.23 `is_ok_and(is_dir)` collapse admitted it).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_unstatable_factory_eloop_fails_closed_io_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    for tool in ["Edit", "Write", "MultiEdit"] {
+        let p = bare_project();
+        let logs = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(".factory", p.root().join(".factory")).unwrap();
+        let before = raw_tree(p.root());
+        let target = factory_target(p.root());
+        let out = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope("PreToolUse", tool, Some("TL1"), edit_input(&target)),
+        );
+        assert_unstatable_admission_fails_closed("ELOOP", tool, &out, &mut failures);
+        if raw_tree(p.root()) != before {
+            failures.push(format!("[ELOOP] {tool}: the project tree changed"));
+        }
+        if !migration_state_dirs_under(p.root()).is_empty() {
+            failures.push(format!(
+                "[ELOOP] {tool}: a migration-state/reservations dir was created"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_unstatable_factory_eloop_fails_closed_io_blackbox",
+        failures,
+    );
+}
+
+/// F-S2508-L3-009, same ruling, EACCES instance: the PROJECT ROOT (parent of
+/// `.factory`) is `chmod 000`, so `stat(<root>/.factory)` fails EACCES. Skipped as
+/// root (root bypasses the permission check).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_unstatable_factory_eacces_fails_closed_io_blackbox() {
+    if is_root() {
+        eprintln!("SKIP: running as root; chmod 000 does not make the stat fail");
+        return;
+    }
+    let mut failures: Vec<String> = Vec::new();
+    for tool in ["Edit", "Write", "MultiEdit"] {
+        let p = Project::new(); // a REAL `.factory/migration-state` exists under the root
+        let logs = tempfile::tempdir().unwrap();
+        let target = factory_target(p.root());
+        let before = raw_tree(p.root());
+        let out;
+        {
+            let _restore = chmod000(p.root(), 0o755);
+            out = run_at(
+                &p,
+                p.root(),
+                logs.path(),
+                &envelope("PreToolUse", tool, Some("TE1"), edit_input(&target)),
+            );
+        }
+        assert_unstatable_admission_fails_closed("EACCES", tool, &out, &mut failures);
+        if p.reservation("TE1").exists() {
+            failures.push(format!("[EACCES] {tool}: a reservation was left"));
+        }
+        if raw_tree(p.root()) != before {
+            failures.push(format!(
+                "[EACCES] {tool}: the project tree changed (fail-closed must write nothing)"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_unstatable_factory_eacces_fails_closed_io_blackbox",
+        failures,
+    );
+}
+
+/// F-S2508-L3-009, ADR-052 v1.23 section 5a: the `.factory` stat is evaluated
+/// "after the input guards" and only for Edit/Write/MultiEdit with a valid
+/// `file_path`. With an UNSTATABLE `.factory`, a Bash dispatch, a Read, and an
+/// Edit with an absent / empty / non-string `file_path` are NOT gated (exit 0):
+/// the blast radius is exactly the gated tools ("`Bash` is not gated by this leg,
+/// so the operator can repair the mount/permission").
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_unstatable_factory_input_guards_precede_stat_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let p = bare_project();
+    let logs = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(".factory", p.root().join(".factory")).unwrap();
+    let before = raw_tree(p.root());
+    let target = factory_target(p.root());
+    let cases: [(&str, String); 5] = [
+        (
+            "Bash",
+            envelope(
+                "PreToolUse",
+                "Bash",
+                Some("TG1"),
+                serde_json::json!({"command": "true"}),
+            ),
+        ),
+        (
+            "Read",
+            envelope(
+                "PreToolUse",
+                "Read",
+                Some("TG2"),
+                serde_json::json!({"file_path": target.to_string_lossy()}),
+            ),
+        ),
+        (
+            "Edit with NO file_path",
+            envelope("PreToolUse", "Edit", Some("TG3"), serde_json::json!({})),
+        ),
+        (
+            "Edit with EMPTY file_path",
+            envelope(
+                "PreToolUse",
+                "Edit",
+                Some("TG4"),
+                serde_json::json!({"file_path": ""}),
+            ),
+        ),
+        (
+            "Edit with non-string file_path",
+            envelope(
+                "PreToolUse",
+                "Edit",
+                Some("TG5"),
+                serde_json::json!({"file_path": 7}),
+            ),
+        ),
+    ];
+    for (label, payload) in cases {
+        let out = run_at(&p, p.root(), logs.path(), &payload);
+        let err = stderr_of(&out);
+        if out.status.code() != Some(0) || err.contains("E-MAINTENANCE") {
+            failures.push(format!(
+                "[{label}] must not be gated by the `.factory` stat; got exit {:?}: {err}",
+                out.status.code()
+            ));
+        }
+    }
+    if raw_tree(p.root()) != before {
+        failures.push("the project tree changed".to_string());
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_unstatable_factory_input_guards_precede_stat_blackbox",
+        failures,
+    );
+}
+
+/// F-S2508-L3-009, ADR-052 v1.23 section 5a mapping table, release row: with an
+/// UNSTATABLE `.factory` a PostToolUse / PostToolUseFailure yields NO verdict
+/// (exit 0, no E-MAINTENANCE-*; "release is never a verdict"), creates and
+/// deletes nothing; the reservation admitted BEFORE the fault was injected is
+/// left in place for the drain-start TTL GC. Two fault kinds (ELOOP root-safe via
+/// `.factory` -> self-link with the real directory renamed aside; EACCES via
+/// chmod 000 root, skipped as root). A no-fault control proves the release leg
+/// otherwise removes the reservation.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_unstatable_factory_release_leg_no_verdict_reservation_left_blackbox()
+ {
+    let mut failures: Vec<String> = Vec::new();
+
+    // Control: no fault => PostToolUse removes the reservation.
+    {
+        let p = Project::new();
+        let logs = tempfile::tempdir().unwrap();
+        let target = p.abs(CYCLES_PATH);
+        let pre = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope("PreToolUse", "Write", Some("TR0"), edit_input(&target)),
+        );
+        if pre.status.code() != Some(0) || !p.reservation("TR0").exists() {
+            failures.push("control: PreToolUse must admit and reserve TR0".to_string());
+        }
+        let post = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope("PostToolUse", "Write", Some("TR0"), edit_input(&target)),
+        );
+        if post.status.code() != Some(0) || p.reservation("TR0").exists() {
+            failures
+                .push("control: PostToolUse (no fault) must remove the reservation".to_string());
+        }
+    }
+
+    for kind in ["ELOOP", "EACCES"] {
+        if kind == "EACCES" && is_root() {
+            eprintln!("SKIP [EACCES]: running as root");
+            continue;
+        }
+        for ev in ["PostToolUse", "PostToolUseFailure"] {
+            let p = Project::new();
+            let logs = tempfile::tempdir().unwrap();
+            let target = p.abs(CYCLES_PATH);
+            let pre = run_at(
+                &p,
+                p.root(),
+                logs.path(),
+                &envelope("PreToolUse", "Write", Some("TR1"), edit_input(&target)),
+            );
+            if pre.status.code() != Some(0) || !p.reservation("TR1").exists() {
+                failures.push(format!("[{kind}/{ev}] precondition: admit + reserve TR1"));
+                continue;
+            }
+            let res_path = if kind == "ELOOP" {
+                p.root()
+                    .join(".factory-real/migration-state/reservations/TR1.reservation")
+            } else {
+                p.reservation("TR1")
+            };
+            let res_bytes_before;
+            let out;
+            let before;
+            if kind == "ELOOP" {
+                // Inject the fault AFTER the reservation exists.
+                std::fs::rename(p.root().join(".factory"), p.root().join(".factory-real")).unwrap();
+                std::os::unix::fs::symlink(".factory", p.root().join(".factory")).unwrap();
+                res_bytes_before = std::fs::read(&res_path).unwrap();
+                before = raw_tree(p.root());
+                out = run_at(
+                    &p,
+                    p.root(),
+                    logs.path(),
+                    &envelope(ev, "Write", Some("TR1"), edit_input(&target)),
+                );
+            } else {
+                res_bytes_before = std::fs::read(&res_path).unwrap();
+                before = raw_tree(p.root());
+                let _restore = chmod000(p.root(), 0o755);
+                out = run_at(
+                    &p,
+                    p.root(),
+                    logs.path(),
+                    &envelope(ev, "Write", Some("TR1"), edit_input(&target)),
+                );
+            }
+            let err = stderr_of(&out);
+            if out.status.code() != Some(0) || err.contains("E-MAINTENANCE") {
+                failures.push(format!(
+                    "[{kind}/{ev}] release with an unstatable `.factory` must yield NO verdict \
+                     (exit 0, no E-MAINTENANCE-*); got {:?}: {err}",
+                    out.status.code()
+                ));
+            }
+            match std::fs::read(&res_path) {
+                Ok(b) if b == res_bytes_before => {}
+                other => failures.push(format!(
+                    "[{kind}/{ev}] the reservation must be LEFT UNCHANGED for the TTL GC; got {other:?}"
+                )),
+            }
+            if raw_tree(p.root()) != before {
+                failures.push(format!(
+                    "[{kind}/{ev}] nothing may be created or deleted by the release no-op"
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_unstatable_factory_release_leg_no_verdict_reservation_left_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-S2508-L3-001 -- ADR-052 v1.23 "Txn-record interpretation -- tiers"
+// ---------------------------------------------------------------------------
+
+/// (migration_id as written, protected path family, own terminal-record name).
+/// `None` = the pre-v1.11 B2 record (migration_id ABSENT).
+#[cfg(unix)]
+const TIER_FAMILIES: [(Option<&str>, &str, &str); 3] = [
+    (Some("migrate-bc-index"), BC_PATH, "completed.json"),
+    (
+        Some("backfill-append-logs"),
+        CYCLES_PATH,
+        "completed-backfill-append-logs.json",
+    ),
+    (None, BC_PATH, "completed.json"),
+];
+
+#[cfg(unix)]
+const TIER_GATES: [&str; 3] = ["DRAINING", "LOCKED", "OPEN"];
+
+/// A MINIMAL (Tier 0 only) record: `state` plus, optionally, `migration_id`, plus
+/// the given extra keys. NO other Decision-7a field.
+#[cfg(unix)]
+fn minimal_txn(state: &str, mig: Option<&str>, extra: &[(&str, serde_json::Value)]) -> Vec<u8> {
+    let mut v = serde_json::json!({ "state": state });
+    if let Some(m) = mig {
+        v["migration_id"] = serde_json::Value::String(m.to_string());
+    }
+    for (k, val) in extra {
+        v[*k] = val.clone();
+    }
+    serde_json::to_vec(&v).unwrap()
+}
+
+/// A FULL Decision-7a record whose `generation_id` is the given value, or whose
+/// `generation_id` KEY IS REMOVED when `gen_id` is `None` (serde's `Option`
+/// default would read a removed key as `None`, i.e. as the null generation).
+#[cfg(unix)]
+fn full_txn(state: &str, mig: Option<&str>, gen_id: Option<serde_json::Value>) -> Vec<u8> {
+    let mut v = serde_json::json!({
+        "txn_id": "txn-s2508",
+        "activation_id": "act-s2508",
+        "fencing_generation": 1,
+        "state": state,
+        "source_sha256": null,
+        "source_body_row_sha256": null,
+        "intent_log_path": null,
+        "pending_canonical_moves": [],
+        "created_at": "2026-10-06T00:00:00Z",
+        "updated_at": "2026-10-06T00:00:00Z",
+    });
+    if let Some(g) = gen_id {
+        v["generation_id"] = g;
+    }
+    if let Some(m) = mig {
+        v["migration_id"] = serde_json::Value::String(m.to_string());
+    }
+    serde_json::to_vec(&v).unwrap()
+}
+
+/// Gate + the given raw txn files (+ the family's terminal record when
+/// `terminal`); the coordinator lock is NOT held (acquirable).
+#[cfg(unix)]
+fn tier_row(
+    label: String,
+    gate: &'static str,
+    rel: &'static str,
+    files: Vec<(&'static str, Vec<u8>)>,
+    terminal: Option<&'static str>,
+    expect: Expect,
+) -> Row {
+    Row {
+        label: Box::leak(label.into_boxed_str()),
+        rel,
+        needs_non_root: false,
+        expect,
+        setup: Box::new(move |p| {
+            write_gate(&p.ms(), gate);
+            for (name, bytes) in &files {
+                write_raw_txn(p, name, bytes);
+            }
+            if let Some(t) = terminal {
+                write_terminal_record(&p.ms(), t, "txn-s2508", "gen-1");
+            }
+            fx()
+        }),
+    }
+}
+
+#[cfg(unix)]
+fn run_rows(test: &str, rows: &[Row]) {
+    let mut failures: Vec<String> = Vec::new();
+    for row in rows {
+        assert_row(row, &mut failures);
+    }
+    assert_no_failures(test, failures);
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch B row: STAGING, lock
+/// acquirable, own terminal record ABSENT => `generation_id` is read; an ABSENT
+/// key is NOT null and any non-null/non-string type is unusable => `E-MAINTENANCE-002
+/// (state_integrity)` with NO txn or gate write (tree byte-identical). Covers the
+/// minimal record (Tier 0 shape only) AND a full Decision-7a record with the key
+/// removed (serde's `Option` default would read it as null and DISCARD).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_branch_b_absent_or_ill_typed_generation_id_is_state_integrity()
+ {
+    let mut rows: Vec<Row> = Vec::new();
+    for (mig, rel, _t) in TIER_FAMILIES {
+        for gate in TIER_GATES {
+            let mut cases: Vec<(String, Vec<u8>)> = vec![
+                (
+                    "minimal STAGING, generation_id ABSENT".to_string(),
+                    minimal_txn("STAGING", mig, &[]),
+                ),
+                (
+                    "FULL STAGING with the generation_id KEY REMOVED".to_string(),
+                    full_txn("STAGING", mig, None),
+                ),
+            ];
+            for (what, val) in [
+                ("number 7", serde_json::json!(7)),
+                ("boolean true", serde_json::json!(true)),
+                ("array", serde_json::json!(["gen-1"])),
+                ("object", serde_json::json!({"id": "gen-1"})),
+            ] {
+                cases.push((
+                    format!("minimal STAGING, generation_id ill-typed ({what})"),
+                    minimal_txn("STAGING", mig, &[("generation_id", val.clone())]),
+                ));
+                cases.push((
+                    format!("FULL STAGING, generation_id ill-typed ({what})"),
+                    full_txn("STAGING", mig, Some(val)),
+                ));
+            }
+            for (what, bytes) in cases {
+                rows.push(tier_row(
+                    format!(
+                        "[{mig:?} {rel} gate {gate}] {what} => state_integrity, tree unchanged"
+                    ),
+                    gate,
+                    rel,
+                    vec![("txn-act-s2508.json", bytes)],
+                    None,
+                    Expect::Cause("state_integrity"),
+                ));
+            }
+        }
+    }
+    run_rows(
+        "test_BC_1_18_013_ADR052_v123_tier1_branch_b_absent_or_ill_typed_generation_id_is_state_integrity",
+        &rows,
+    );
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch B row: key PRESENT with JSON
+/// `null` => the null generation => DISCARD. The discard "rewrites the raw object
+/// and needs no other field": a MINIMAL record (state + migration_id + null
+/// generation_id) is discarded to `state=ABORTED` + `abort_reason=null_generation`
+/// with every other key preserved and NONE added; gate OPEN; admitted; non-live
+/// sibling records are neither modified nor deleted. (The full-record discard is
+/// pinned by `test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_blackbox`
+/// and `test_BC_1_18_011_PC6d_branch_b_applies_with_absent_or_open_gate_blackbox`.)
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_branch_b_null_generation_minimal_record_discards_raw_object()
+{
+    let mut failures: Vec<String> = Vec::new();
+    for (mig, rel, _t) in TIER_FAMILIES {
+        for gate in TIER_GATES {
+            for noise in [false, true] {
+                let label = format!("[{mig:?} {rel} gate {gate} noise={noise}]");
+                let p = Project::new();
+                write_gate(&p.ms(), gate);
+                let orig = minimal_txn(
+                    "STAGING",
+                    mig,
+                    &[("generation_id", serde_json::Value::Null)],
+                );
+                write_raw_txn(&p, "txn-b-live.json", &orig);
+                let noise_files: Vec<(&str, Vec<u8>)> = if noise {
+                    vec![
+                        (
+                            "txn-a-done.json",
+                            minimal_txn("COMPLETED", Some("future-migration"), &[]),
+                        ),
+                        ("txn-c-abort.json", minimal_txn("ABORTED", None, &[])),
+                    ]
+                } else {
+                    vec![]
+                };
+                for (n, b) in &noise_files {
+                    write_raw_txn(&p, n, b);
+                }
+                let target = p.abs(rel);
+                let out = run(
+                    &p,
+                    &envelope("PreToolUse", "Write", Some("TD1"), edit_input(&target)),
+                );
+                if out.status.code() != Some(0) || !p.reservation("TD1").exists() {
+                    failures.push(format!(
+                        "{label}: Branch B must admit with a reservation; got exit {:?}: {}",
+                        out.status.code(),
+                        stderr_of(&out)
+                    ));
+                }
+                if p.gate() != "OPEN" {
+                    failures.push(format!("{label}: gate must be OPEN, got {}", p.gate()));
+                }
+                let after: serde_json::Value = match std::fs::read(p.ms().join("txn-b-live.json")) {
+                    Ok(b) => serde_json::from_slice(&b).unwrap_or(serde_json::Value::Null),
+                    Err(e) => {
+                        failures.push(format!("{label}: the txn file must be retained: {e}"));
+                        continue;
+                    }
+                };
+                let mut want: serde_json::Value = serde_json::from_slice(&orig).unwrap();
+                want["state"] = serde_json::json!("ABORTED");
+                want["abort_reason"] = serde_json::json!("null_generation");
+                if after != want {
+                    failures.push(format!(
+                        "{label}: discarded record must equal the raw record + state=ABORTED + \
+                         abort_reason (no key added or lost); want {want}, got {after}"
+                    ));
+                }
+                for (n, b) in &noise_files {
+                    if std::fs::read(p.ms().join(n)).ok().as_deref() != Some(b.as_slice()) {
+                        failures.push(format!("{label}: non-live record {n} was modified/deleted"));
+                    }
+                }
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v123_tier1_branch_b_null_generation_minimal_record_discards_raw_object",
+        failures,
+    );
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, "Live block" row + Branch B row
+/// ("PRESENT string => not Branch B => live block"): a shape-valid live known
+/// record that no consuming branch decides on blocks with PLAIN
+/// `E-MAINTENANCE-001`. Rows: STAGING with a string `generation_id`; COMMITTING
+/// WITHOUT a terminal record whatever `generation_id` is (absent / null / string /
+/// ill-typed: the live block reads no field). Tree byte-identical, no reservation.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_live_block_is_plain_and_reads_no_field() {
+    let mut rows: Vec<Row> = Vec::new();
+    for (mig, rel, _t) in TIER_FAMILIES {
+        for gate in TIER_GATES {
+            rows.push(tier_row(
+                format!(
+                    "[{mig:?} {rel} gate {gate}] minimal STAGING, generation_id string => plain block"
+                ),
+                gate,
+                rel,
+                vec![(
+                    "txn-act-s2508.json",
+                    minimal_txn(
+                        "STAGING",
+                        mig,
+                        &[("generation_id", serde_json::json!("gen-1"))],
+                    ),
+                )],
+                None,
+                Expect::PlainBlock,
+            ));
+            let committing: [(&str, Vec<(&str, serde_json::Value)>); 4] = [
+                ("generation_id ABSENT", vec![]),
+                (
+                    "generation_id null",
+                    vec![("generation_id", serde_json::Value::Null)],
+                ),
+                (
+                    "generation_id string",
+                    vec![("generation_id", serde_json::json!("gen-1"))],
+                ),
+                (
+                    "generation_id ill-typed (7)",
+                    vec![("generation_id", serde_json::json!(7))],
+                ),
+            ];
+            for (what, extra) in committing {
+                rows.push(tier_row(
+                    format!(
+                        "[{mig:?} {rel} gate {gate}] minimal COMMITTING, no terminal record, \
+                         {what} => plain block (never -002)"
+                    ),
+                    gate,
+                    rel,
+                    vec![("txn-act-s2508.json", minimal_txn("COMMITTING", mig, &extra))],
+                    None,
+                    Expect::PlainBlock,
+                ));
+            }
+        }
+    }
+    run_rows(
+        "test_BC_1_18_013_ADR052_v123_tier1_live_block_is_plain_and_reads_no_field",
+        &rows,
+    );
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch C row (S-25.08 build: "none
+/// ... every check reports unverified => `FailClosedMismatch`"; "`staging_with_
+/// terminal_record` reads none"): a live known record WITH its own terminal record
+/// is the keyed block + the exact completion-record-mismatch suffix, whatever its
+/// Tier 1 fields are (a minimal STAGING with generation_id absent/null/ill-typed
+/// must NOT reach Branch B, which needs the record ABSENT, and must NOT be
+/// -002 because nothing is read). Tree byte-identical.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_branch_c_seam_reads_no_field_mismatch_block() {
+    let mut rows: Vec<Row> = Vec::new();
+    for (mig, rel, term) in TIER_FAMILIES {
+        for gate in ["LOCKED", "DRAINING"] {
+            for state in ["STAGING", "COMMITTING"] {
+                let gens: [(&str, Vec<(&str, serde_json::Value)>); 4] = [
+                    ("generation_id ABSENT", vec![]),
+                    (
+                        "generation_id null",
+                        vec![("generation_id", serde_json::Value::Null)],
+                    ),
+                    (
+                        "generation_id string",
+                        vec![("generation_id", serde_json::json!("gen-1"))],
+                    ),
+                    (
+                        "generation_id ill-typed (7)",
+                        vec![("generation_id", serde_json::json!(7))],
+                    ),
+                ];
+                for (what, extra) in gens {
+                    rows.push(tier_row(
+                        format!(
+                            "[{mig:?} {rel} gate {gate}] minimal {state} + own terminal record, \
+                             {what} => mismatch block (no field read)"
+                        ),
+                        gate,
+                        rel,
+                        vec![("txn-act-s2508.json", minimal_txn(state, mig, &extra))],
+                        Some(term),
+                        Expect::MismatchBlock,
+                    ));
+                }
+            }
+        }
+    }
+    run_rows(
+        "test_BC_1_18_013_ADR052_v123_tier1_branch_c_seam_reads_no_field_mismatch_block",
+        &rows,
+    );
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, "Foreign refusal" row: a live
+/// record whose `migration_id` is not known is refused PLAIN with no field beyond
+/// Tier 0 read, "precedence over every other record check" -- even with poisoned
+/// Tier 1 fields and even when a B2 terminal record exists.
+/// (Extends the minimal-shape pins of
+/// `test_BC_1_18_013_EC029_minimal_shape_foreign_txn_is_foreign_not_state_integrity_blackbox`.)
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_foreign_live_with_poisoned_fields_is_plain_refusal() {
+    let mut rows: Vec<Row> = Vec::new();
+    for rel in [BC_PATH, CYCLES_PATH] {
+        for gate in TIER_GATES {
+            for state in ["STAGING", "COMMITTING"] {
+                let poisons: [(&str, Vec<(&str, serde_json::Value)>); 5] = [
+                    ("generation_id ABSENT", vec![]),
+                    (
+                        "generation_id null",
+                        vec![("generation_id", serde_json::Value::Null)],
+                    ),
+                    (
+                        "generation_id 7",
+                        vec![("generation_id", serde_json::json!(7))],
+                    ),
+                    (
+                        "generation_id array",
+                        vec![("generation_id", serde_json::json!([1]))],
+                    ),
+                    (
+                        "pending_canonical_moves = 'x'",
+                        vec![("pending_canonical_moves", serde_json::json!("x"))],
+                    ),
+                ];
+                for (what, extra) in poisons {
+                    for with_b2_terminal in [false, true] {
+                        rows.push(tier_row(
+                            format!(
+                                "[{rel} gate {gate}] FOREIGN live {state}, {what}, b2_terminal=\
+                                 {with_b2_terminal} => plain refusal"
+                            ),
+                            gate,
+                            rel,
+                            vec![(
+                                "txn-act-s2508.json",
+                                minimal_txn(state, Some("future-migration"), &extra),
+                            )],
+                            with_b2_terminal.then_some("completed.json"),
+                            Expect::PlainBlock,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    run_rows(
+        "test_BC_1_18_013_ADR052_v123_tier1_foreign_live_with_poisoned_fields_is_plain_refusal",
+        &rows,
+    );
+}
+
+/// F-S2508-L3-001, ADR-052 v1.23: "Non-live records with a valid Tier 0 shape are
+/// admitted in all cases ... the 'more than one live txn' `state_integrity` counts
+/// live records only, foreign included." One live + N non-live (COMPLETED /
+/// ABORTED, minimal, known / foreign / B2, any filename order) is ONE live txn:
+/// the live record's own verdict (plain block / mismatch block), never "more than
+/// one live txn". Plus the control: two live records (one foreign) ARE
+/// `state_integrity` (full records, so only the live-count rule can fail them).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v123_tier1_one_live_plus_non_live_counts_as_one_live() {
+    let mut rows: Vec<Row> = Vec::new();
+    for (mig, rel, term) in TIER_FAMILIES {
+        for gate in ["LOCKED", "DRAINING"] {
+            // the live record sorts FIRST, MIDDLE, LAST among the filenames
+            let orders: [(&str, [&'static str; 4]); 3] = [
+                (
+                    "live first",
+                    ["txn-a-live.json", "txn-b.json", "txn-c.json", "txn-d.json"],
+                ),
+                (
+                    "live middle",
+                    ["txn-b.json", "txn-c-live.json", "txn-d.json", "txn-e.json"],
+                ),
+                (
+                    "live last",
+                    ["txn-b.json", "txn-c.json", "txn-d.json", "txn-z-live.json"],
+                ),
+            ];
+            for (pos, names) in orders {
+                let live_idx = names.iter().position(|n| n.contains("live")).unwrap();
+                let others: Vec<&'static str> = names
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != live_idx)
+                    .map(|(_, n)| *n)
+                    .collect();
+                for (what, live_bytes, terminal, expect) in [
+                    (
+                        "STAGING gen string, no terminal record",
+                        minimal_txn(
+                            "STAGING",
+                            mig,
+                            &[("generation_id", serde_json::json!("gen-1"))],
+                        ),
+                        None,
+                        Expect::PlainBlock,
+                    ),
+                    (
+                        "COMMITTING, no terminal record",
+                        minimal_txn("COMMITTING", mig, &[]),
+                        None,
+                        Expect::PlainBlock,
+                    ),
+                    (
+                        "COMMITTING + own terminal record",
+                        minimal_txn("COMMITTING", mig, &[]),
+                        Some(term),
+                        Expect::MismatchBlock,
+                    ),
+                ] {
+                    let mut files: Vec<(&'static str, Vec<u8>)> = vec![
+                        (
+                            others[0],
+                            minimal_txn("COMPLETED", Some("future-migration"), &[]),
+                        ),
+                        (others[1], minimal_txn("ABORTED", None, &[])),
+                        (
+                            others[2],
+                            minimal_txn("COMPLETED", Some("migrate-bc-index"), &[]),
+                        ),
+                    ];
+                    files.push((names[live_idx], live_bytes));
+                    rows.push(tier_row(
+                        format!(
+                            "[{mig:?} {rel} gate {gate}] {pos}: ONE live ({what}) + 3 non-live => \
+                             that live record's verdict (not 'more than one live txn')"
+                        ),
+                        gate,
+                        rel,
+                        files,
+                        terminal,
+                        expect,
+                    ));
+                }
+            }
+        }
+        // Control: >1 live (full records; one foreign) => state_integrity.
+        rows.push(tier_row(
+            format!("[{mig:?} {rel}] control: two LIVE records (one foreign) => state_integrity"),
+            "LOCKED",
+            rel,
+            vec![
+                (
+                    "txn-a.json",
+                    full_txn("STAGING", mig, Some(serde_json::json!("gen-1"))),
+                ),
+                (
+                    "txn-b.json",
+                    full_txn(
+                        "COMMITTING",
+                        Some("future-migration"),
+                        Some(serde_json::json!("gen-2")),
+                    ),
+                ),
+            ],
+            None,
+            Expect::Cause("state_integrity"),
+        ));
+    }
+    run_rows(
+        "test_BC_1_18_013_ADR052_v123_tier1_one_live_plus_non_live_counts_as_one_live",
+        &rows,
+    );
+}
