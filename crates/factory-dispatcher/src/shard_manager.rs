@@ -137,16 +137,19 @@ use migration_fs::{Fs, StdFs};
 #[cfg(kani)]
 mod obl1_kani_proofs;
 
+mod admission;
 /// S-25.08: the ONE shared native admission core (reserve-then-verify,
 /// protected-path union, step-3.5 reconciliation Branches A/B/C, release) both
 /// governed migrations and the dispatcher's production PreToolUse path share.
-mod admission;
+#[cfg(test)]
+mod ttl_seam_tests;
 pub use admission::{
     ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
     MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
     as_given_factory_root_spelling, classify_tool_use_id, e_maintenance_block_message,
     is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
-    resolve_factory_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
+    resolve_factory_root, resolve_session_project_root, resolve_target_path, sanitize_diagnostic,
+    sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
@@ -12935,6 +12938,28 @@ pub enum BcIndexMigrationError {
     #[error("writer admission: invalid tool_use_id ({len} bytes)")]
     InvalidToolUseId { len: usize },
 
+    /// S-25.08 Red-Gate STUB variant (ADR-052 v1.21 "Admission state-integrity
+    /// variant", F-012): the admission-side integrity failure. Display is
+    /// `migration admission: state integrity failure (<kind-token>): <detail>`
+    /// and MUST NOT contain `BINARY_INTEGRITY_FAILURE`. The five admission-side
+    /// raise sites still raise `BinaryIntegrityFailure` (the implementer converts
+    /// them).
+    #[error("migration admission: state integrity failure ({}): {detail}", .kind.token())]
+    AdmissionStateIntegrity {
+        kind: AdmissionStateIntegrityKind,
+        detail: String,
+    },
+
+    /// S-25.08 Red-Gate STUB variant (ADR-052 v1.21 "Single anchoring rule" (b),
+    /// error-taxonomy `FACTORY_ROOT_NOT_FOUND`, exit 2): the resolved session
+    /// project root has no `.factory` directory. Nothing is created or mutated.
+    #[error(
+        "BC-INDEX migration: no .factory directory under project root {} \
+         (FACTORY_ROOT_NOT_FOUND, exit 2)",
+        .project_root.display()
+    )]
+    FactoryRootNotFound { project_root: PathBuf },
+
     #[error(
         "BC-INDEX migration: ARCH-INDEX three-way parity check failed \
          (ARCH_INDEX_PARITY_ABORT, exit 2): {source}"
@@ -12982,7 +13007,7 @@ pub enum BcIndexMigrationError {
     /// in STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-
     /// binary process-exit-code path — this variant is constructed only by
     /// `admit_or_block_bc_index_writer`, whose caller (`executor.rs`'s
-    /// `bc_index_migration_admission_precheck`) translates it into
+    /// `migration_writer_admission_precheck`) translates it into
     /// `HookResult::Block` (E-MAINTENANCE-001), never `HookResult::Error`
     /// (BC-1.18.011 Architect Ruling 2).
     #[error("BC-INDEX writer admission refused: {reason}")]
@@ -13003,6 +13028,50 @@ pub enum BcIndexMigrationError {
     ShardCapConfigUnavailable { detail: String },
 }
 
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 F-012): closed classification of an
+/// admission-side state-integrity failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionStateIntegrityKind {
+    GateRecordMalformed,
+    TxnRecordMalformed,
+    TxnMigrationIdNotString,
+    MultipleLiveTxns,
+    ReservationSerialization,
+}
+
+impl AdmissionStateIntegrityKind {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::GateRecordMalformed => "gate_record_malformed",
+            Self::TxnRecordMalformed => "txn_record_malformed",
+            Self::TxnMigrationIdNotString => "txn_migration_id_not_string",
+            Self::MultipleLiveTxns => "multiple_live_txns",
+            Self::ReservationSerialization => "reservation_serialization",
+        }
+    }
+}
+
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 F-012): closed `E-MAINTENANCE-002`
+/// `<cause>` classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionFailureCause {
+    InvalidToolUseId,
+    Io,
+    StateIntegrity,
+}
+
+impl AdmissionFailureCause {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::InvalidToolUseId => "invalid_tool_use_id",
+            Self::Io => "io",
+            Self::StateIntegrity => "state_integrity",
+        }
+    }
+}
+
 impl BcIndexMigrationError {
     /// The `<cause>` token of the `E-MAINTENANCE-002` single-line message
     /// `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
@@ -13012,11 +13081,16 @@ impl BcIndexMigrationError {
     /// more than one live txn, any other integrity failure). The underlying
     /// detail goes to `tracing::warn!`, never into the message.
     #[must_use]
-    pub fn admission_failure_cause(&self) -> &'static str {
+    pub fn admission_failure_cause(&self) -> AdmissionFailureCause {
+        // S-25.08 Red-Gate NOTE: the closed return type is in place; the
+        // wildcard arm below still violates ADR-052 v1.21 F-012 (the match must
+        // be EXHAUSTIVE over `BcIndexMigrationError`, no `_`).
         match self {
-            BcIndexMigrationError::InvalidToolUseId { .. } => "invalid_tool_use_id",
-            BcIndexMigrationError::Io { .. } => "io",
-            _ => "state_integrity",
+            BcIndexMigrationError::InvalidToolUseId { .. } => {
+                AdmissionFailureCause::InvalidToolUseId
+            }
+            BcIndexMigrationError::Io { .. } => AdmissionFailureCause::Io,
+            _ => AdmissionFailureCause::StateIntegrity,
         }
     }
 
@@ -15867,6 +15941,19 @@ fn require_live_txn(
              internal invariant violated"
         ),
     })
+}
+
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 "EC-031 discharge", F-006): the
+/// crate-PRIVATE injectable-TTL seam. `run_bc_index_migration` must become a
+/// one-line delegation to this with `DEFAULT_MAX_RESERVATION_TTL`; this function
+/// calls `validate_production_reservation_ttl(max_reservation_ttl)?` as its FIRST
+/// statement (before any `create_dir_all`, `exclusive.lock`, gate write, GC).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_bc_index_migration_with_ttl(
+    _project_root: &Path,
+    _max_reservation_ttl: std::time::Duration,
+) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    todo!("S-25.08 F-006: run_bc_index_migration_with_ttl (validate TTL first)")
 }
 
 pub fn run_bc_index_migration(

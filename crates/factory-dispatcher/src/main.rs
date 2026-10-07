@@ -38,8 +38,8 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, bc_index_migration_admission,
-    bc_index_migration_reservation_release, execute_tiers, shard_cap_precheck, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, execute_tiers, migration_reservation_release,
+    migration_writer_admission, shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -181,10 +181,10 @@ async fn run(
     // that must never run for a blocked protected-path write) and every registry
     // plugin tier.
     let project_cwd = resolve_project_cwd();
-    let migration_admission = bc_index_migration_admission(&payload, &project_cwd);
+    let migration_admission = migration_writer_admission(&payload, &project_cwd);
     *admission_reservation = migration_admission.reservation;
     // The PostToolUse / PostToolUseFailure release is registry-independent too.
-    bc_index_migration_reservation_release(&payload, &project_cwd);
+    migration_reservation_release(&payload, &project_cwd);
     if migration_admission.verdict.is_some() {
         // A Block/Error verdict terminates the dispatch directly through the SAME
         // exit mapping the empty-tier short-circuit uses, without loading the

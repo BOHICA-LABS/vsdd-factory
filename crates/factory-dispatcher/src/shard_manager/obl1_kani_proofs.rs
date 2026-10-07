@@ -1050,7 +1050,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      inside an existing namespace, so a subsequent drain sees it.
 //      Claim boundary: this is a property of the MODELED admitter protocol.
 //      The scope guard that once short-circuited on an absent namespace sits
-//      in the effectful `executor::bc_index_migration_admission` (std::fs),
+//      in the effectful `executor::migration_writer_admission` (std::fs),
 //      outside Kani's domain; that call site, real `create_dir_all`
 //      idempotence, concurrent first-ever creation and EACCES/EROFS/ENOSPC
 //      fail-closed are carried by the black-box suite (VP-133 facet 7(d):

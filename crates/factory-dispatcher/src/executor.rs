@@ -414,7 +414,7 @@ pub fn shard_cap_precheck(
 }
 
 /// The result of evaluating the shared admission core once for a PreToolUse
-/// event ([`bc_index_migration_admission`]).
+/// event ([`migration_writer_admission`]).
 #[derive(Debug)]
 pub struct MigrationAdmission {
     /// The native gate's verdict: `None` = admitted / out of scope; `Some(Block)`
@@ -465,7 +465,7 @@ pub struct MigrationAdmission {
 /// `E-MAINTENANCE-002`): no reservation is created, so that write proceeds untracked by the drain
 /// procedure — a deliberate non-blocking degradation backstopped by §7c step-5's
 /// pre-commit fingerprint recheck, never a fabricated key.
-pub fn bc_index_migration_admission(
+pub fn migration_writer_admission(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
 ) -> MigrationAdmission {
@@ -572,7 +572,7 @@ pub fn bc_index_migration_admission(
 /// (path, `io::Error`, byte length — never a raw `tool_use_id` or record
 /// content) goes to `tracing::warn!`.
 fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> MigrationAdmission {
-    let cause = e.admission_failure_cause();
+    let cause = e.admission_failure_cause().token();
     tracing::warn!(
         target: "bc_1_18_011_migration",
         cause,
@@ -589,19 +589,19 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
     }
 }
 
-/// Verdict-only form of [`bc_index_migration_admission`] — the named
-/// `bc_index_migration_admission_precheck` entry point (BC-1.18.011 Precondition
+/// Verdict-only form of [`migration_writer_admission`] — the named
+/// `migration_writer_admission_precheck` entry point (BC-1.18.011 Precondition
 /// 6; BC-1.18.013 Precondition 6(b) "or their successor"). It delegates to the
 /// SAME shared core; it carries no reserve/verify logic of its own.
-pub fn bc_index_migration_admission_precheck(
+pub fn migration_writer_admission_precheck(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
 ) -> Option<vsdd_hook_sdk::HookResult> {
-    bc_index_migration_admission(payload, cwd).verdict
+    migration_writer_admission(payload, cwd).verdict
 }
 
 /// OBL-1 §5 (O-5 fold-in) — PostToolUse counterpart to
-/// [`bc_index_migration_admission_precheck`]: releases the writer
+/// [`migration_writer_admission_precheck`]: releases the writer
 /// reservation the SAME `tool_use_id`'s PreToolUse admission created (if
 /// any), so [`crate::shard_manager::drain_bc_index_writers`]'s quiescence
 /// poll sees this dispatch as complete.
@@ -613,10 +613,7 @@ pub fn bc_index_migration_admission_precheck(
 /// drain-procedure bookkeeping, not a correctness gate (mirrors
 /// [`crate::shard_manager::release_bc_index_writer_reservation`]'s own doc
 /// comment: "a missing file... is a no-op, not an error").
-pub fn bc_index_migration_reservation_release(
-    payload: &crate::payload::HookPayload,
-    cwd: &std::path::Path,
-) {
+pub fn migration_reservation_release(payload: &crate::payload::HookPayload, cwd: &std::path::Path) {
     // Release on BOTH `PostToolUse` and `PostToolUseFailure`, keyed ONLY on the
     // `tool_use_id` shared with the PreToolUse admission (no `tool_name` filter:
     // a `PostToolUseFailure` envelope may omit or reshape it, and an id that was
@@ -634,7 +631,7 @@ pub fn bc_index_migration_reservation_release(
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 error = %e,
-                "bc_index_migration_reservation_release: .factory is unstatable (non-fatal) -- \
+                "migration_reservation_release: .factory is unstatable (non-fatal) -- \
                  the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
                  own TTL GC pass instead"
             );
@@ -669,7 +666,7 @@ pub fn bc_index_migration_reservation_release(
         tracing::warn!(
             target: "bc_1_18_011_migration",
             error = %e,
-            "bc_index_migration_reservation_release: best-effort writer-reservation release \
+            "migration_reservation_release: best-effort writer-reservation release \
              failed (non-fatal) -- the reservation, if it still exists, will be reclaimed by \
              drain_bc_index_writers's own TTL GC pass instead"
         );
