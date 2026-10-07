@@ -812,6 +812,28 @@ pub fn derive_block_branch(
     todo!("S-25.08 item 33(b): derive_block_branch (pure reconciliation -> branch table)")
 }
 
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 item 33(g); BC-1.18.013 v1.10 Post 10(c)):
+/// the pure decision -> diagnostics mapping for the S-25.08 SEAM case, where
+/// `decide_terminal_record_reconciliation` returned `FinalizeThenOpenGate` but the
+/// finalize effect is undelivered (real verification is S-25.06's, so the real
+/// dispatcher can never reach this black-box). Returns the diagnostics (in
+/// emission order) -- exactly one `Blocked { branch = completion_record_mismatch,
+/// reconciliation = completion_record_mismatch, check = "finalize_unwired" }` and
+/// exactly one `Advisory { reason = branch_c_finalize_unwired }` -- and the
+/// E-MAINTENANCE-001 verdict message WITH the mismatch suffix. `reconcile_collecting`
+/// / `verify_admission` must produce their `FinalizeThenOpenGate` arm THROUGH this
+/// function (the merged code builds it inline and names the check
+/// `finalize_effect_not_delivered`).
+#[must_use]
+pub fn diagnostics_for_undelivered_finalize(
+    _family: ProtectedPathFamily,
+    _gate_state: BcIndexAdmissionGateState,
+    _migration_id: &str,
+    _txn_id: &str,
+) -> (Vec<AdmissionDiagnostic>, String) {
+    todo!("S-25.08 item 33(g): diagnostics_for_undelivered_finalize")
+}
+
 fn gate_state_token(g: BcIndexAdmissionGateState) -> &'static str {
     match g {
         BcIndexAdmissionGateState::Open => "OPEN",

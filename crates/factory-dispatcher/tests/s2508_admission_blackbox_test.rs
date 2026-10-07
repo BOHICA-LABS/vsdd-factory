@@ -6693,23 +6693,34 @@ fn test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox() {
     );
 }
 
-/// ADR-052 v1.21 item 33(g) / BC-1.18.013 v1.10 EC-039 + EC-037 vector: COMMITTING +
-/// the live txn's own terminal record, with S-25.08's undelivered finalize effect =>
-/// exit 2 with ONE `migration.admission_blocked`
+/// REACHABLE-fixture black-box for a Branch C record that is present but not proven
+/// to describe the finished activation (BC-1.18.013 v1.10 EC-037 / EC-039): COMMITTING
+/// + the live txn's own terminal record with every field matching, while S-25.08's
+/// verification seam reports every check UNVERIFIED (hardwired false; real
+/// verification is S-25.06's) => exit 2 with the E-MAINTENANCE-001 message plus the
+/// EXACT mismatch suffix, ONE `migration.admission_blocked`
 /// `{branch=completion_record_mismatch, reconciliation=completion_record_mismatch,
-/// check=finalize_unwired}` PLUS ONE `migration.admission_advisory
-/// {reason=branch_c_finalize_unwired}`.
+/// check=<failing check name>}` and NO `migration.admission_advisory` (item 33(a): a
+/// verification failure is ONE event).
 ///
-/// FIXTURE LIMIT (reported to the coordinator): the merged Branch C verification seam
-/// reports every check UNVERIFIED (hardwired false), so `decide_terminal_record_reconciliation`
-/// can never return `FinalizeThenOpenGate` from the real dispatcher -- a black-box
-/// "verifying record" cannot be constructed (it would also need canonical files whose
-/// SHA-256 equals the txn/intent-log `expected_post_hash`). This test uses the closest
-/// reachable fixture (a fully field-matching record, COMMITTING) and asserts the SPEC
-/// outcome; it is therefore red until the seam reports a verifying record as
-/// `FinalizeThenOpenGate`-reaching (or the spec/seam question is routed).
+/// NOTE (item 33(g) / S-25.06 obligation): the `finalize_unwired` case -- the pure
+/// decision returns `FinalizeThenOpenGate`, the finalize effect is undelivered => one
+/// `_blocked{check=finalize_unwired}` PLUS `_advisory{branch_c_finalize_unwired}` --
+/// is NOT black-box reachable in S-25.08 (it needs the S-25.06 verification seam to
+/// report a verifying record). It is pinned at the unit level by
+/// `test_BC_1_18_013_EC039_undelivered_finalize_diagnostics_mapping` in
+/// s2508_v121_units_test.rs. The black-box transition `finalize_unwired` ->
+/// `branch_c_finalized` (verified finalize: txn COMPLETED, gate OPEN, admitted, NO
+/// `_blocked`, `_advisory{branch_c_finalized}`) is S-25.06's obligation.
+///
+/// SPEC QUESTION: the value of `check` here (`terminal_record_unverified` for a
+/// COMMITTING txn, `staging_with_terminal_record` for STAGING) is NOT a member of any
+/// enumerated value list -- BC-3.08.001 v1.35 Event 11 and BC-1.18.013 Post 10 define
+/// the domain only as "the failing Branch C verification check name, or
+/// `finalize_unwired`". The test therefore asserts only: a non-null sanitized string
+/// (<= 64 chars, no control characters) that is NOT `finalize_unwired`.
 #[test]
-fn test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox() {
+fn test_BC_1_18_013_EC039_unverified_terminal_record_blocked_blackbox_no_advisory() {
     let mut failures: Vec<String> = Vec::new();
     for (mig, record, rel) in [
         ("migrate-bc-index", "completed.json", BC_PATH),
@@ -6732,10 +6743,13 @@ fn test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox() {
         let blocked = migration_events(&all, "migration.admission_blocked");
         let adv = migration_events(&all, "migration.admission_advisory");
         let err = stderr_of(&out);
-        let want_msg = format!("{}{MISMATCH_SUFFIX}", plain_msg(scope_of(rel)));
+        let want_msg = format!(
+            "E-MAINTENANCE-001: {}{MISMATCH_SUFFIX}",
+            plain_msg(scope_of(rel))
+        );
         if out.status.code() != Some(2) || !err.contains(&want_msg) {
             failures.push(format!(
-                "[{mig}] expected exit 2 with the mismatch-suffixed message; got {:?}: {err}",
+                "[{mig}] expected exit 2 with `{want_msg}`; got {:?}: {err}",
                 out.status.code()
             ));
         }
@@ -6746,27 +6760,31 @@ fn test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox() {
             ));
         } else {
             let v = &blocked[0].0;
+            let check_ok = v["check"].as_str().is_some_and(|c| {
+                !c.is_empty()
+                    && c != "finalize_unwired"
+                    && c.chars().count() <= 64
+                    && !c.chars().any(char::is_control)
+            });
             if v["branch"] != "completion_record_mismatch"
                 || v["reconciliation"] != "completion_record_mismatch"
-                || v["check"] != "finalize_unwired"
+                || !check_ok
             {
                 failures.push(format!(
                     "[{mig}] _blocked must be {{branch=completion_record_mismatch, \
-                     reconciliation=completion_record_mismatch, check=finalize_unwired}}; got {v}"
+                     reconciliation=completion_record_mismatch, check=<non-null sanitized name != finalize_unwired>}}; got {v}"
                 ));
             }
         }
-        if adv.len() != 1 || adv[0].0["reason"] != "branch_c_finalize_unwired" {
+        if !adv.is_empty() {
             failures.push(format!(
-                "[{mig}] exactly ONE _advisory reason=branch_c_finalize_unwired expected; got {:?}",
-                adv.iter()
-                    .map(|(v, _)| v["reason"].clone())
-                    .collect::<Vec<_>>()
+                "[{mig}] a Branch C verification failure is ONE event: NO _advisory expected; got {:?}",
+                adv.iter().map(|(v, _)| v["reason"].clone()).collect::<Vec<_>>()
             ));
         }
     }
     assert_no_failures(
-        "test_BC_1_18_013_EC039_finalize_unwired_blocked_plus_advisory_blackbox",
+        "test_BC_1_18_013_EC039_unverified_terminal_record_blocked_blackbox_no_advisory",
         failures,
     );
 }
