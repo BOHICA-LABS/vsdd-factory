@@ -472,24 +472,70 @@ pub fn bc_index_migration_admission(
     if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
         return out_of_scope();
     }
-    // NO `.factory/migration-state/` existence guard on the admit path
-    // (BC-1.18.013 EC-020): a protected write admitted before the namespace
-    // exists must still be visible to a coordinator's first drain, so the
-    // shared core creates `reservations/` idempotently (absent gate = OPEN,
-    // absent txn set = no live txn). A namespace/reservation create failure
-    // fails the PreToolUse closed rather than admitting untracked.
-    let migration_state_dir = cwd.join(".factory/migration-state");
-    let Some(family) = payload
+    // Input guards (ADR-052 v1.20 "Target path resolution" (a)): a missing,
+    // non-string, empty or NUL-containing `file_path` is out of scope (the tool
+    // itself cannot write it) — not an error.
+    let Some(file_path) = payload
         .tool_input
         .get("file_path")
         .and_then(|v| v.as_str())
-        .and_then(crate::shard_manager::ProtectedPathFamily::classify)
+        .filter(|p| !p.is_empty() && !p.contains('\0'))
     else {
         return out_of_scope();
     };
-    let tool_use_id = payload.extra.get("tool_use_id").and_then(|v| v.as_str());
+    // The gate guards exactly ONE factory root per dispatch — the session's own
+    // `<project_root>/.factory` (must exist as a directory; NEVER created here).
+    // There is NO `.factory/migration-state/` existence guard: the namespace is
+    // created idempotently by the core (BC-1.18.013 EC-020), so a pre-directory
+    // writer is tracked and visible to a coordinator's first drain.
+    let Some(mut factory_root) = crate::shard_manager::resolve_factory_root(cwd) else {
+        tracing::debug!(
+            target: "bc_1_18_011_migration",
+            "no .factory directory under the project root: admission gate out of scope"
+        );
+        return out_of_scope();
+    };
+    // The harness spells `file_path`s with the project directory exactly as it
+    // gave it to us; when that differs lexically from the canonical `cwd` (a
+    // symlinked path component) the as-given spelling is a lexical alias of the
+    // same root (part of the fail-closed union).
+    if let Some(raw) = std::env::var_os("CLAUDE_PROJECT_DIR").filter(|v| !v.is_empty()) {
+        factory_root.add_lexical_spelling(&std::path::PathBuf::from(raw).join(".factory"));
+    }
+    // A relative `file_path` (defensive; the harness sends absolute paths) is
+    // joined onto the payload's absolute `cwd`, else onto the project root; `~`
+    // is never expanded.
+    let base = payload
+        .extra
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| cwd.to_path_buf());
+    let target = base.join(file_path);
+    let (target_real, target_lex) = crate::shard_manager::resolve_target_path(&target);
+    let Some(family) = crate::shard_manager::ProtectedPathFamily::classify_target(
+        target_real.as_deref(),
+        &target_lex,
+        &factory_root,
+    ) else {
+        tracing::debug!(
+            target: "bc_1_18_011_migration",
+            "write target is outside the session's protected-path union: admitted, no state read"
+        );
+        return out_of_scope();
+    };
+    let tool_use_id =
+        match crate::shard_manager::classify_tool_use_id(payload.extra.get("tool_use_id")) {
+            Ok(id) => id,
+            Err(e) => return admission_error(&e),
+        };
 
-    match crate::shard_manager::admit_protected_write(&migration_state_dir, tool_use_id, family) {
+    match crate::shard_manager::admit_protected_write(
+        &factory_root.migration_state_dir(),
+        tool_use_id,
+        family,
+    ) {
         Ok(crate::shard_manager::AdmissionOutcome::Admitted { reservation }) => {
             admitted(reservation)
         }
@@ -499,12 +545,27 @@ pub fn bc_index_migration_admission(
             }),
             reservation: None,
         },
-        Err(e) => MigrationAdmission {
-            verdict: Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!("BC-1.18.011: writer-admission check failed: {e}"),
-            }),
-            reservation: None,
-        },
+        Err(e) => admission_error(&e),
+    }
+}
+
+/// The fail-closed `E-MAINTENANCE-002` verdict (error-taxonomy v1.37): the
+/// single-line message carries only the `<cause>` token; the underlying detail
+/// (path, `io::Error`, byte length — never a raw `tool_use_id` or record
+/// content) goes to `tracing::warn!`.
+fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> MigrationAdmission {
+    let cause = e.admission_failure_cause();
+    tracing::warn!(
+        target: "bc_1_18_011_migration",
+        cause,
+        detail = %e,
+        "E-MAINTENANCE-002: writer-admission check failed"
+    );
+    MigrationAdmission {
+        verdict: Some(vsdd_hook_sdk::HookResult::Error {
+            message: format!("E-MAINTENANCE-002: writer-admission check failed ({cause})"),
+        }),
+        reservation: None,
     }
 }
 
@@ -543,7 +604,11 @@ pub fn bc_index_migration_reservation_release(
     if !crate::invoke::is_tool_completion_event(&payload.event_name) {
         return;
     }
-    let migration_state_dir = cwd.join(".factory/migration-state");
+    // Anchored on the SAME session factory root as admission (never created).
+    let Some(factory_root) = crate::shard_manager::resolve_factory_root(cwd) else {
+        return;
+    };
+    let migration_state_dir = factory_root.migration_state_dir();
     if !migration_state_dir.exists() {
         return;
     }

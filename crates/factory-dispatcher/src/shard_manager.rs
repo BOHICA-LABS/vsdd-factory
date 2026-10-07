@@ -142,10 +142,11 @@ mod obl1_kani_proofs;
 /// governed migrations and the dispatcher's production PreToolUse path share.
 mod admission;
 pub use admission::{
-    ABORT_REASON_NULL_GENERATION, AdmissionOutcome, MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2,
-    ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
-    e_maintenance_block_message, is_valid_tool_use_id, reconcile_stale_admission_gate,
-    release_reservation_file,
+    ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
+    MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
+    classify_tool_use_id, e_maintenance_block_message, is_valid_tool_use_id,
+    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
+    resolve_target_path,
 };
 
 // ---------------------------------------------------------------------------
@@ -13995,13 +13996,6 @@ pub fn reservation_is_stale(
 /// coordinator's `now` before `created_at` is treated as untrusted
 /// (BC-1.18.011 v1.16 EC-025).
 pub const RESERVATION_CLOCK_SKEW_TOLERANCE_SECS: u64 = 300;
-
-/// S-25.08 Red-Gate STUB (ADR-052 v1.20 "Target path resolution"; F-003):
-/// returns `(T_real, T_lex)` for one absolute target path. `T_real` is `None`
-/// when a component could not be resolved (non-`NotFound` error / hop limit).
-pub fn resolve_target_path(_path: &Path) -> (Option<PathBuf>, PathBuf) {
-    todo!("S-25.08 F-003: resolve_target_path (T_real, T_lex)")
-}
 
 /// Canonical input record of the pure terminal-record reconciliation core
 /// ([`decide_terminal_record_reconciliation`]; VP-146 v1.2 / VP-147 v1.1).

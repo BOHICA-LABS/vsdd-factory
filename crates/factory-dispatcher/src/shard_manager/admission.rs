@@ -86,15 +86,54 @@ pub enum ProtectedPathFamily {
 }
 
 impl ProtectedPathFamily {
-    /// Classify a target path against the protected-path union. `None` for any
-    /// path outside it (e.g. `.factory/STATE.md`, `.factory/stories/`): such a
-    /// write is NOT subject to this gate.
+    /// Classify one write target against the protected-path union, anchored to
+    /// the session's own `factory_root` (ADR-052 v1.20 §5a "Admission scope
+    /// anchoring" / "Target path resolution").
+    ///
+    /// Classification is COMPONENT-WISE and CASE-INSENSITIVE: the target is
+    /// `BcIndex`-family iff it equals or descends from
+    /// `<factory_root>/specs/behavioral-contracts`, `Cycles`-family iff it equals
+    /// or descends from `<factory_root>/cycles`; never a substring test. A write
+    /// is in scope when EITHER the resolved comparison (`T_real` vs the real
+    /// `factory_root`) OR the lexical comparison (`T_lex` vs the lexical
+    /// `factory_root`) matches — the union is deliberately fail-closed. Any other
+    /// `.factory/…` path (another project's, a nested project's, a look-alike) is
+    /// OUT of scope (`None`).
     #[must_use]
-    pub fn classify(path: &str) -> Option<Self> {
-        let normalized = path.replace('\\', "/");
-        if normalized.contains(".factory/specs/behavioral-contracts/") {
+    pub fn classify_target(
+        target_real: Option<&Path>,
+        target_lex: &Path,
+        root: &FactoryRoot,
+    ) -> Option<Self> {
+        let by_real = match (target_real, root.real.as_deref()) {
+            (Some(t), Some(r)) => Self::classify_under(t, r),
+            _ => None,
+        };
+        by_real.or_else(|| {
+            std::iter::once(&root.lex)
+                .chain(root.lex_aliases.iter())
+                .find_map(|lex_root| Self::classify_under(target_lex, lex_root))
+        })
+    }
+
+    fn classify_under(target: &Path, factory_root: &Path) -> Option<Self> {
+        let target: Vec<_> = target.components().collect();
+        let root: Vec<_> = factory_root.components().collect();
+        if target.len() < root.len()
+            || !target
+                .iter()
+                .zip(root.iter())
+                .all(|(t, r)| components_fold_eq(t.as_os_str(), r.as_os_str()))
+        {
+            return None;
+        }
+        let rest = &target[root.len()..];
+        let name = |i: usize| rest.get(i).map(|c| c.as_os_str());
+        let eq =
+            |i: usize, want: &str| name(i).is_some_and(|n| components_fold_eq(n, want.as_ref()));
+        if eq(0, "specs") && eq(1, "behavioral-contracts") {
             Some(Self::BcIndex)
-        } else if normalized.contains(".factory/cycles/") {
+        } else if eq(0, "cycles") {
             Some(Self::Cycles)
         } else {
             None
@@ -108,6 +147,234 @@ impl ProtectedPathFamily {
             Self::BcIndex => "BC-INDEX",
             Self::Cycles => ".factory/cycles/",
         }
+    }
+}
+
+/// Case-insensitive path-component equality (ADR-052 v1.20 "Target path
+/// resolution" (e)): ASCII case-fold for ASCII, `str::to_lowercase` equality for
+/// other UTF-8, bytewise ASCII-fold for non-UTF-8. ALWAYS folds — no filesystem
+/// case-sensitivity probe (sensitivity is a per-volume property, a probe is
+/// racy, and probe-guided exact compare would let `.FACTORY/Cycles/x` bypass the
+/// gate on a case-insensitive volume).
+fn components_fold_eq(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
+    match (a.to_str(), b.to_str()) {
+        (Some(a), Some(b)) => a.to_lowercase() == b.to_lowercase(),
+        _ => a
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(b.as_encoded_bytes()),
+    }
+}
+
+/// Maximum symlink hops [`resolve_target_path`] follows before declaring the
+/// real form unavailable (POSIX `MAXSYMLINKS` is 40 on Linux, 32 on macOS).
+const MAX_SYMLINK_HOPS: usize = 40;
+
+/// ADR-052 v1.20 §5a "Target path resolution" (F-003): the shared function that
+/// returns `(T_real, T_lex)` for one path.
+///
+/// * `T_lex` — lexical form: collapse `//`, drop `.`, apply `..` lexically (never
+///   above the root); NO filesystem access. On Unix `\` is an ordinary name
+///   byte; on Windows `Path::components` treats it as a separator.
+/// * `T_real` — POSIX-correct resolved form: components are walked left to right
+///   keeping a symlink-free `resolved` prefix; `..` pops `resolved` (after any
+///   preceding symlink was resolved — `a/link/../b` resolves `link` FIRST); a
+///   symlink is read and its target spliced in front of the remaining components
+///   (an absolute target resets `resolved` to its root), bounded to
+///   [`MAX_SYMLINK_HOPS`]; on the first `NotFound` that component and ALL remaining
+///   ones are applied lexically (a nonexistent component cannot be a symlink —
+///   this realpaths the deepest existing ancestor and appends the unresolved
+///   tail). Any non-`NotFound` error (EACCES, ELOOP, ENOTDIR) or an exceeded hop
+///   limit makes `T_real` unavailable (`None`): the caller then classifies on
+///   `T_lex` alone, so a protected-looking path that cannot be resolved is
+///   treated as protected (fail-closed).
+#[must_use]
+pub fn resolve_target_path(path: &Path) -> (Option<PathBuf>, PathBuf) {
+    (resolve_real(path), lexical_normalize(path))
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    let mut anchored = false;
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => {
+                out.push(component.as_os_str());
+                anchored = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Pop a real name; never pop above the root / prefix; a relative
+                // leading `..` is preserved.
+                if out.file_name().is_some_and(|n| n != "..") {
+                    out.pop();
+                } else if !anchored {
+                    out.push("..");
+                }
+            }
+            Component::Normal(name) => out.push(name),
+        }
+    }
+    out
+}
+
+fn resolve_real(path: &Path) -> Option<PathBuf> {
+    use std::collections::VecDeque;
+    use std::ffi::OsString;
+    use std::path::Component;
+
+    enum Step {
+        Parent,
+        Name(OsString),
+    }
+    fn steps(path: &Path, queue: &mut VecDeque<Step>, front: bool) -> Option<PathBuf> {
+        // Returns the root/prefix of `path` when it is absolute.
+        let mut root = PathBuf::new();
+        let mut collected: Vec<Step> = Vec::new();
+        let mut has_root = false;
+        for component in path.components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => {
+                    root.push(component.as_os_str());
+                    has_root = true;
+                }
+                Component::CurDir => {}
+                Component::ParentDir => collected.push(Step::Parent),
+                Component::Normal(n) => collected.push(Step::Name(n.to_os_string())),
+            }
+        }
+        if front {
+            for step in collected.into_iter().rev() {
+                queue.push_front(step);
+            }
+        } else {
+            queue.extend(collected);
+        }
+        has_root.then_some(root)
+    }
+
+    let mut queue: VecDeque<Step> = VecDeque::new();
+    let mut resolved = steps(path, &mut queue, false).unwrap_or_default();
+    let mut floor = resolved.clone();
+    let mut hops = 0usize;
+    let mut in_tail = false;
+
+    while let Some(step) = queue.pop_front() {
+        match step {
+            Step::Parent => {
+                if resolved != floor {
+                    resolved.pop();
+                }
+            }
+            Step::Name(name) => {
+                let candidate = resolved.join(&name);
+                if in_tail {
+                    resolved = candidate;
+                    continue;
+                }
+                match std::fs::symlink_metadata(&candidate) {
+                    Ok(meta) if meta.file_type().is_symlink() => {
+                        hops += 1;
+                        if hops > MAX_SYMLINK_HOPS {
+                            return None;
+                        }
+                        let target = std::fs::read_link(&candidate).ok()?;
+                        if let Some(new_root) = steps(&target, &mut queue, true) {
+                            resolved = new_root.clone();
+                            floor = new_root;
+                        }
+                    }
+                    Ok(_) => resolved = candidate,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        in_tail = true;
+                        resolved = candidate;
+                    }
+                    Err(_) => return None,
+                }
+            }
+        }
+    }
+    Some(resolved)
+}
+
+/// The session's own factory root: where its governed-migration namespace
+/// (`<factory_root>/migration-state`) lives (ADR-052 v1.20 §5a "Admission scope
+/// anchoring"). `real` is the symlink-free form (`None` when it could not be
+/// resolved), `lex` the lexical form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactoryRoot {
+    pub real: Option<PathBuf>,
+    pub lex: PathBuf,
+    /// Additional LEXICAL spellings of the same root (e.g. the un-canonicalized
+    /// `CLAUDE_PROJECT_DIR` spelling the harness uses in its `file_path`s, which
+    /// differs from the canonical form wherever a path component is a symlink,
+    /// such as macOS `/var` -> `/private/var`). Part of the fail-closed union:
+    /// a target whose lexical form matches ANY spelling is in scope.
+    pub lex_aliases: Vec<PathBuf>,
+}
+
+impl FactoryRoot {
+    /// `<factory_root>/migration-state`, anchored on the REAL form when available
+    /// so a worktree whose `.factory` is a symlink to a shared checkout and the
+    /// main session share ONE namespace.
+    #[must_use]
+    pub fn migration_state_dir(&self) -> PathBuf {
+        self.real
+            .as_deref()
+            .unwrap_or(&self.lex)
+            .join("migration-state")
+    }
+}
+
+impl FactoryRoot {
+    /// Add another lexical spelling of the factory root (lexically normalised).
+    pub fn add_lexical_spelling(&mut self, factory_root_spelling: &Path) {
+        let lex = lexical_normalize(factory_root_spelling);
+        if lex != self.lex && !self.lex_aliases.contains(&lex) {
+            self.lex_aliases.push(lex);
+        }
+    }
+}
+
+/// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`.
+/// `None` when that does not exist as a directory — the gate is then OUT OF SCOPE
+/// for the dispatch (no migration can be in flight without it) and NEVER creates
+/// `.factory` itself.
+#[must_use]
+pub fn resolve_factory_root(project_root: &Path) -> Option<FactoryRoot> {
+    let dot_factory = project_root.join(".factory");
+    if !std::fs::metadata(&dot_factory).is_ok_and(|m| m.is_dir()) {
+        return None;
+    }
+    let (real, lex) = resolve_target_path(&dot_factory);
+    Some(FactoryRoot {
+        real,
+        lex,
+        lex_aliases: Vec::new(),
+    })
+}
+
+/// ADR-052 v1.20 §5a "`tool_use_id` presence and validity": an ABSENT key or JSON
+/// `null` degrades to check-only admission (`Ok(None)`); a PRESENT value that is
+/// not a string, is empty, or violates the grammar is
+/// [`BcIndexMigrationError::InvalidToolUseId`] (the admission FAILS CLOSED —
+/// never silently downgraded to check-only). The error carries the byte length
+/// only, never the raw value.
+///
+/// # Errors
+/// `InvalidToolUseId` for a present-but-invalid id.
+pub fn classify_tool_use_id(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<&str>, BcIndexMigrationError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(id)) if is_valid_tool_use_id(id) => Ok(Some(id.as_str())),
+        Some(serde_json::Value::String(id)) => {
+            Err(BcIndexMigrationError::InvalidToolUseId { len: id.len() })
+        }
+        Some(other) => Err(BcIndexMigrationError::InvalidToolUseId {
+            len: other.to_string().len(),
+        }),
     }
 }
 
@@ -566,6 +833,20 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
                     message: format!("malformed txn record at {}: {e}", path.display()),
                 }
             })?;
+        // A PRESENT non-string `migration_id` (including JSON `null`) is a MALFORMED
+        // record — `E-MAINTENANCE-002` `state_integrity` — never "foreign"
+        // (BC-1.18.013 v1.8 EC-030). An ABSENT key reads as B2 (serde default).
+        if raw
+            .get("migration_id")
+            .is_some_and(|v| !matches!(v, serde_json::Value::String(_)))
+        {
+            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
+                message: format!(
+                    "malformed txn record at {}: migration_id is not a JSON string",
+                    path.display()
+                ),
+            });
+        }
         files.push(TxnFile { path, raw, record });
     }
     Ok(files)
@@ -578,12 +859,8 @@ fn create_writer_reservation(
     tool_use_id: &str,
 ) -> Result<PathBuf, BcIndexMigrationError> {
     if !is_valid_tool_use_id(tool_use_id) {
-        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!(
-                "refusing to derive a reservation file name from an unsafe tool_use_id \
-                 ({} bytes)",
-                tool_use_id.len()
-            ),
+        return Err(BcIndexMigrationError::InvalidToolUseId {
+            len: tool_use_id.len(),
         });
     }
     let reservations_dir = migration_state_dir.join("reservations");
