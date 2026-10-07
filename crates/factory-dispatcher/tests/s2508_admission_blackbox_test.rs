@@ -1,5 +1,10 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::type_complexity
+)]
 //! S-25.08 (T-1) RED-GATE black-box suite for the SHARED ADMISSION CORE wired
 //! on the dispatcher's REAL PreToolUse/PostToolUse path.
 //!
@@ -4186,6 +4191,835 @@ fn test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox() {
     }
     assert_no_failures(
         "test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox",
+        failures,
+    );
+}
+
+// ===========================================================================
+// ADR-052 v1.21 -- D-2 single anchoring rule (coordinator), D-1 diagnostics
+// events (dispatcher-internal JSONL), F-013 admission verdict label
+// ===========================================================================
+
+fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let rel = p.strip_prefix(base).unwrap().to_string_lossy().to_string();
+            let is_link = p
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if is_link {
+                out.insert(format!("{rel}@link"), Vec::new());
+            } else if p.is_dir() {
+                out.insert(format!("{rel}/"), Vec::new());
+                walk(base, &p, out);
+            } else {
+                out.insert(rel, std::fs::read(&p).unwrap_or_default());
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// Spawn the real `migrate-bc-index` coordinator with `cwd` != `CLAUDE_PROJECT_DIR`.
+fn spawn_coordinator(project_dir: &Path, cwd: &Path) -> Child {
+    let mut cmd = Command::new(binary_path());
+    cmd.arg("migrate-bc-index")
+        .current_dir(cwd)
+        .env("CLAUDE_PROJECT_DIR", project_dir)
+        .env_remove(SEAM_ENV)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd.spawn().expect("spawn migrate-bc-index")
+}
+
+/// Poll until the coordinator has durably flipped `<state_dir>/gate-state.json`
+/// to DRAINING; Err (with the child's outcome) if it exits first or times out.
+fn wait_for_draining(child: &mut Child, state_dir: &Path) -> Result<(), String> {
+    let start = Instant::now();
+    loop {
+        let g = std::fs::read_to_string(state_dir.join("gate-state.json")).unwrap_or_default();
+        if g.contains("DRAINING") {
+            return Ok(());
+        }
+        if let Some(st) = child.try_wait().expect("try_wait") {
+            return Err(format!(
+                "coordinator exited ({st}) without ever flipping {} to DRAINING",
+                state_dir.display()
+            ));
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            return Err("timed out waiting for the coordinator to flip DRAINING".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// BC-1.18.013 v1.10 EC-033 / ADR-052 v1.21 D-2: the coordinator operates on --
+/// and creates `migration-state/` only under -- `<CLAUDE_PROJECT_DIR>/.factory`,
+/// even when its process cwd is elsewhere; a reservation created by admission under
+/// the same env is visible to its first drain (it WAITS on it), nothing is created
+/// under the cwd.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC033_coordinator_anchors_on_claude_project_dir_not_cwd_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let other = tempfile::tempdir().unwrap();
+
+    for variant in ["plain", "symlinked .factory (EC-036)"] {
+        let p = Project::new_bare();
+        let real_dir = tempfile::tempdir().unwrap();
+        let state_dir = if variant == "plain" {
+            p.ms()
+        } else {
+            std::fs::remove_dir_all(p.root().join(".factory")).unwrap();
+            let real_factory = real_dir.path().canonicalize().unwrap().join("real-factory");
+            std::fs::create_dir_all(real_factory.join("cycles/c1")).unwrap();
+            std::os::unix::fs::symlink(&real_factory, p.root().join(".factory")).unwrap();
+            real_factory.join("migration-state")
+        };
+        // admission (hook mode, env = P) creates the reservation
+        let target = p.root().join(".factory/cycles/c1/x.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let pre = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("T1"), edit_input(&target)),
+        );
+        let res = state_dir.join("reservations/T1.reservation");
+        if pre.status.code() != Some(0) || !res.exists() {
+            failures.push(format!(
+                "[{variant}] precondition: admission must reserve T1 in {} (exit {:?})",
+                res.display(),
+                pre.status.code()
+            ));
+            continue;
+        }
+
+        let mut child = spawn_coordinator(p.root(), other.path());
+        match wait_for_draining(&mut child, &state_dir) {
+            Err(e) => failures.push(format!("[{variant}] {e}")),
+            Ok(()) => {
+                std::thread::sleep(Duration::from_millis(300));
+                if child.try_wait().unwrap().is_some() {
+                    failures.push(format!(
+                        "[{variant}] the coordinator must WAIT on T1 (its first drain sees the \
+                         admission-created reservation) but it already exited"
+                    ));
+                }
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        if other.path().join(".factory").exists() || !tree_snapshot(other.path()).is_empty() {
+            failures.push(format!(
+                "[{variant}] NOTHING may be created under the process cwd; found {:?}",
+                tree_snapshot(other.path()).keys().collect::<Vec<_>>()
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC033_coordinator_anchors_on_claude_project_dir_not_cwd_blackbox",
+        failures,
+    );
+}
+
+/// BC-1.18.013 v1.10 EC-035: no `.factory` directory (absent, or a regular file)
+/// under the resolved project root => the coordinator exits 2
+/// `FACTORY_ROOT_NOT_FOUND`; nothing is created or mutated anywhere (project root
+/// AND process cwd trees byte-identical).
+#[test]
+fn test_BC_1_18_013_EC035_coordinator_factory_root_not_found_exit_2_nothing_created_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    for variant in ["no .factory", ".factory is a regular file"] {
+        let p = Project::new_bare();
+        std::fs::remove_dir_all(p.root().join(".factory")).unwrap();
+        if variant != "no .factory" {
+            std::fs::write(p.root().join(".factory"), b"i am a file").unwrap();
+        }
+        let other = tempfile::tempdir().unwrap();
+        let before = (tree_snapshot(p.root()), tree_snapshot(other.path()));
+        let child = spawn_coordinator(p.root(), other.path());
+        let out = finish(child, Duration::from_secs(30));
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2) || !err.contains("FACTORY_ROOT_NOT_FOUND") {
+            failures.push(format!(
+                "[{variant}] expected exit 2 with `FACTORY_ROOT_NOT_FOUND` on stderr; got exit \
+                 {:?}, stderr: {err}",
+                out.status.code()
+            ));
+        }
+        let after = (tree_snapshot(p.root()), tree_snapshot(other.path()));
+        if before != after {
+            failures.push(format!(
+                "[{variant}] nothing may be created or mutated (project root + cwd trees must be \
+                 byte-identical); project {:?} -> {:?}, cwd {:?} -> {:?}",
+                before.0.keys().collect::<Vec<_>>(),
+                after.0.keys().collect::<Vec<_>>(),
+                before.1.keys().collect::<Vec<_>>(),
+                after.1.keys().collect::<Vec<_>>()
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC035_coordinator_factory_root_not_found_exit_2_nothing_created_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// D-1 -- diagnostics events in dispatcher-internal-*.jsonl (never a tracing capture)
+// ---------------------------------------------------------------------------
+
+fn read_internal_events(p: &Project) -> Vec<(serde_json::Value, String)> {
+    fn find(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                find(&path, out);
+            } else if path
+                .file_name()
+                .map(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with("dispatcher-internal-") && n.ends_with(".jsonl")
+                })
+                .unwrap_or(false)
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    find(&p.root().join("logs"), &mut files);
+    files.sort();
+    let mut out = Vec::new();
+    for f in files {
+        for line in std::fs::read_to_string(f).unwrap_or_default().lines() {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                out.push((v, line.to_string()));
+            }
+        }
+    }
+    out
+}
+
+fn migration_events<'a>(
+    all: &'a [(serde_json::Value, String)],
+    ty: &str,
+) -> Vec<&'a (serde_json::Value, String)> {
+    all.iter().filter(|(v, _)| v["type"] == ty).collect()
+}
+
+fn any_migration_event(all: &[(serde_json::Value, String)]) -> bool {
+    all.iter().any(|(v, _)| {
+        v["type"]
+            .as_str()
+            .map(|t| t.starts_with("migration.admission_"))
+            .unwrap_or(false)
+    })
+}
+
+const SECRET_ID: &str = "toolu_SECRETID123";
+
+struct BlockedCase {
+    label: &'static str,
+    rel: &'static str,
+    /// acceptable `branch` values (the BC pins one; where the BC leaves two readings
+    /// open the set has two members -- see the report)
+    branches: &'static [&'static str],
+    setup: Box<dyn Fn(&Project) -> Option<MigrationLockGuard>>,
+}
+
+/// BC-1.18.013 v1.10 EC-037 / BC-3.08.001 v1.35 Event 11: exactly ONE
+/// `migration.admission_blocked` per `E-MAINTENANCE-001` verdict, all fields
+/// present (nullable as `null`), `branch` per cause, no raw `tool_use_id`, no
+/// `plugin_name`, sanitized ids; read from the JSONL file.
+#[test]
+fn test_BC_1_18_013_EC037_admission_blocked_event_per_branch_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let cases: Vec<BlockedCase> = vec![
+        BlockedCase {
+            label: "gate_only (gate LOCKED, no txn, coordinator holds the lock)",
+            rel: CYCLES_PATH,
+            branches: &["gate_only", "live_coordinator"],
+            setup: Box::new(|p| {
+                write_gate(&p.ms(), "LOCKED");
+                Some(p.hold_lock())
+            }),
+        },
+        BlockedCase {
+            label: "live_txn (STAGING gen-1, lock free, record absent)",
+            rel: BC_PATH,
+            branches: &["live_txn"],
+            setup: Box::new(|p| {
+                write_gate(&p.ms(), "LOCKED");
+                write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+                None
+            }),
+        },
+        BlockedCase {
+            label: "live_coordinator (live txn, EWOULDBLOCK)",
+            rel: CYCLES_PATH,
+            branches: &["live_coordinator"],
+            setup: Box::new(|p| {
+                write_gate(&p.ms(), "LOCKED");
+                write_txn(
+                    &p.ms(),
+                    "COMMITTING",
+                    Some("gen-1"),
+                    Some("backfill-append-logs"),
+                );
+                Some(p.hold_lock())
+            }),
+        },
+        BlockedCase {
+            label: "foreign_migration (migration_id not in K)",
+            rel: CYCLES_PATH,
+            branches: &["foreign_migration"],
+            setup: Box::new(|p| {
+                write_gate(&p.ms(), "LOCKED");
+                write_txn(
+                    &p.ms(),
+                    "COMMITTING",
+                    Some("gen-1"),
+                    Some("future-migration"),
+                );
+                None
+            }),
+        },
+        BlockedCase {
+            label: "completion_record_mismatch (STAGING + terminal record)",
+            rel: BC_PATH,
+            branches: &["completion_record_mismatch"],
+            setup: Box::new(|p| {
+                write_gate(&p.ms(), "LOCKED");
+                write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+                write_terminal_record(&p.ms(), "completed.json", "act-s2508", "gen-1");
+                None
+            }),
+        },
+    ];
+
+    for c in cases {
+        let p = Project::new();
+        let _guard = (c.setup)(&p);
+        let target = p.abs(c.rel);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        let blocked = migration_events(&all, "migration.admission_blocked");
+        if out.status.code() != Some(2) {
+            failures.push(format!(
+                "[{}] expected a block (exit 2), got {:?}",
+                c.label,
+                out.status.code()
+            ));
+        }
+        if blocked.len() != 1 {
+            failures.push(format!(
+                "[{}] exactly ONE migration.admission_blocked must be written before the early \
+                 return; found {} (all migration.* events: {})",
+                c.label,
+                blocked.len(),
+                all.iter()
+                    .filter_map(|(v, _)| v["type"].as_str())
+                    .filter(|t| t.starts_with("migration."))
+                    .count()
+            ));
+            continue;
+        }
+        let (v, line) = blocked[0];
+        let (scope, family) = if scope_of(c.rel) == "BC-INDEX" {
+            ("BC-INDEX", "bc_index")
+        } else {
+            (".factory/cycles/", "cycles")
+        };
+        for key in [
+            "type",
+            "trace_id",
+            "session_id",
+            "scope",
+            "family",
+            "branch",
+            "gate_state",
+            "migration_id",
+            "txn_id",
+            "check",
+            "reconciliation",
+            "ts",
+            "ts_epoch",
+            "schema_version",
+        ] {
+            if v.get(key).is_none() {
+                failures.push(format!("[{}] mandatory field `{key}` missing (nullable fields must be present as null)", c.label));
+            }
+        }
+        if v["scope"] != scope || v["family"] != family {
+            failures.push(format!(
+                "[{}] scope/family must be {scope}/{family}: {v}",
+                c.label
+            ));
+        }
+        if !c.branches.iter().any(|b| v["branch"] == *b) {
+            failures.push(format!(
+                "[{}] branch must be one of {:?}: {}",
+                c.label, c.branches, v["branch"]
+            ));
+        }
+        if v["schema_version"] != 1 || !v["ts_epoch"].is_number() || v["session_id"] != "sess-s2508"
+        {
+            failures.push(format!("[{}] envelope fields wrong: {v}", c.label));
+        }
+        let mismatch = v["branch"] == "completion_record_mismatch";
+        if mismatch != v["check"].is_string() {
+            failures.push(format!(
+                "[{}] `check` must be non-null ONLY for completion_record_mismatch: {v}",
+                c.label
+            ));
+        }
+        if v.get("plugin_name").is_some() {
+            failures.push(format!(
+                "[{}] `plugin_name` MUST NOT appear: {line}",
+                c.label
+            ));
+        }
+        if line.contains(SECRET_ID) {
+            failures.push(format!(
+                "[{}] a raw tool_use_id leaked into the event: {line}",
+                c.label
+            ));
+        }
+        if !migration_events(&all, "migration.admission_failed").is_empty() {
+            failures.push(format!(
+                "[{}] no migration.admission_failed for an E-MAINTENANCE-001",
+                c.label
+            ));
+        }
+    }
+
+    // sanitization of disk-derived ids (control chars escaped, <= 64 chars)
+    {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        let nasty = format!("evil\n\u{1b}[31m\0{}", "z".repeat(1000));
+        write_txn(&p.ms(), "COMMITTING", Some("gen-1"), Some(&nasty));
+        let target = p.abs(CYCLES_PATH);
+        let _ = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        match migration_events(&all, "migration.admission_blocked").first() {
+            None => failures.push("sanitization: no migration.admission_blocked written".into()),
+            Some((v, _)) => {
+                for k in ["migration_id", "txn_id", "check"] {
+                    if let Some(s) = v[k].as_str()
+                        && (s.chars().count() > 64 || s.chars().any(|c| c.is_control()))
+                    {
+                        failures.push(format!("sanitization: `{k}` must be <= 64 chars with control chars escaped, got {s:?}"));
+                    }
+                }
+            }
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC037_admission_blocked_event_per_branch_blackbox",
+        failures,
+    );
+}
+
+/// BC-1.18.013 v1.10 EC-038 / BC-3.08.001 v1.35 Event 12: exactly ONE
+/// `migration.admission_failed` per `E-MAINTENANCE-002`, `kind` null unless
+/// `state_integrity`, `detail` carries neither the raw `tool_use_id` nor record content.
+#[test]
+fn test_BC_1_18_013_EC038_admission_failed_event_per_cause_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    type Setup = Box<dyn Fn(&Project)>;
+    // (label, tool_use_id json, setup, cause, kind)
+    let cases: Vec<(&str, serde_json::Value, Setup, &str, Option<&str>)> = vec![
+        (
+            "invalid_tool_use_id (number)",
+            serde_json::json!(7),
+            Box::new(|_| {}),
+            "invalid_tool_use_id",
+            None,
+        ),
+        (
+            "invalid_tool_use_id (../x)",
+            serde_json::json!("../x_RAWSECRET"),
+            Box::new(|_| {}),
+            "invalid_tool_use_id",
+            None,
+        ),
+        (
+            "io (gate-state.json is a directory)",
+            serde_json::json!(SECRET_ID),
+            Box::new(|p| {
+                let g = p.ms().join("gate-state.json");
+                std::fs::remove_file(&g).unwrap();
+                std::fs::create_dir(&g).unwrap();
+            }),
+            "io",
+            None,
+        ),
+        (
+            "state_integrity / gate_record_malformed",
+            serde_json::json!(SECRET_ID),
+            Box::new(|p| {
+                std::fs::write(p.ms().join("gate-state.json"), b"\"SECRETVALUE_ZZZ\"").unwrap()
+            }),
+            "state_integrity",
+            Some("gate_record_malformed"),
+        ),
+        (
+            "state_integrity / txn_record_malformed",
+            serde_json::json!(SECRET_ID),
+            Box::new(|p| {
+                std::fs::write(
+                    p.ms().join("txn-act-s2508.json"),
+                    b"{\"secret\": \"SECRETVALUE_ZZZ\"",
+                )
+                .unwrap()
+            }),
+            "state_integrity",
+            Some("txn_record_malformed"),
+        ),
+        (
+            "state_integrity / txn_migration_id_not_string",
+            serde_json::json!(SECRET_ID),
+            Box::new(|p| {
+                write_txn_with_raw_migration_id(
+                    &p.ms(),
+                    "STAGING",
+                    Some("gen-1"),
+                    serde_json::json!(42),
+                )
+            }),
+            "state_integrity",
+            Some("txn_migration_id_not_string"),
+        ),
+        (
+            "state_integrity / multiple_live_txns",
+            serde_json::json!(SECRET_ID),
+            Box::new(|p| {
+                write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+                let one = std::fs::read(p.ms().join("txn-act-s2508.json")).unwrap();
+                std::fs::write(p.ms().join("txn-act-second.json"), one).unwrap();
+            }),
+            "state_integrity",
+            Some("multiple_live_txns"),
+        ),
+    ];
+    for (label, id, setup, cause, kind) in cases {
+        let p = Project::new();
+        setup(&p);
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &json_env(
+                "PreToolUse",
+                Some("Edit"),
+                edit_input(&target),
+                Some(id.clone()),
+                serde_json::json!({}),
+            ),
+        );
+        let all = read_internal_events(&p);
+        let failed = migration_events(&all, "migration.admission_failed");
+        if out.status.code() != Some(2) {
+            failures.push(format!(
+                "[{label}] expected exit 2, got {:?}",
+                out.status.code()
+            ));
+        }
+        if failed.len() != 1 {
+            failures.push(format!(
+                "[{label}] exactly ONE migration.admission_failed expected, found {}",
+                failed.len()
+            ));
+            continue;
+        }
+        let (v, line) = failed[0];
+        if v["cause"] != cause {
+            failures.push(format!("[{label}] cause must be {cause}: {v}"));
+        }
+        match kind {
+            Some(k) => {
+                if v["kind"] != k {
+                    failures.push(format!("[{label}] kind must be {k}: {v}"));
+                }
+            }
+            None => {
+                if !v.get("kind").is_some_and(serde_json::Value::is_null) {
+                    failures.push(format!("[{label}] kind must be PRESENT and null: {v}"));
+                }
+            }
+        }
+        if v["detail"].as_str().is_none_or(str::is_empty) {
+            failures.push(format!("[{label}] detail must be a non-empty string: {v}"));
+        }
+        for leak in [SECRET_ID, "RAWSECRET", "SECRETVALUE_ZZZ"] {
+            if line.contains(leak) {
+                failures.push(format!(
+                    "[{label}] `{leak}` (raw tool_use_id / record content) leaked: {line}"
+                ));
+            }
+        }
+        if v.get("plugin_name").is_some() {
+            failures.push(format!("[{label}] plugin_name MUST NOT appear"));
+        }
+        if !migration_events(&all, "migration.admission_blocked").is_empty() {
+            failures.push(format!(
+                "[{label}] no migration.admission_blocked for an E-MAINTENANCE-002"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC038_admission_failed_event_per_cause_blackbox",
+        failures,
+    );
+}
+
+/// BC-1.18.013 v1.10 EC-039 / BC-3.08.001 v1.35 Event 13: exactly ONE
+/// `migration.admission_advisory` per anomaly, `reason` from the closed 9-token set;
+/// the dispatch outcome (admit) is unchanged. (The drain-GC timestamp tokens are
+/// emitted by the coordinator process, not the dispatcher, and are covered by the
+/// in-process capture test; `branch_c_finalize_unwired` needs the S-25.06 finalize
+/// leg.)
+#[test]
+fn test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox() {
+    const TOKENS: [&str; 9] = [
+        "created_at_unparseable",
+        "created_at_pre_epoch",
+        "created_at_future",
+        "mtime_future",
+        "age_unknown",
+        "reservation_release_failed",
+        "branch_a_gate_reopened",
+        "branch_b_txn_aborted",
+        "branch_c_finalize_unwired",
+    ];
+    let mut failures: Vec<String> = Vec::new();
+
+    // Branch A (gate re-open) and Branch B (null-generation discard): admitted + one advisory.
+    for (label, reason, setup) in [
+        (
+            "Branch A",
+            "branch_a_gate_reopened",
+            Box::new(|p: &Project| write_gate(&p.ms(), "LOCKED")) as Box<dyn Fn(&Project)>,
+        ),
+        (
+            "Branch B",
+            "branch_b_txn_aborted",
+            Box::new(|p: &Project| {
+                write_gate(&p.ms(), "DRAINING");
+                write_txn(&p.ms(), "STAGING", None, Some("migrate-bc-index"));
+            }),
+        ),
+    ] {
+        let p = Project::new();
+        setup(&p);
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        let adv = migration_events(&all, "migration.admission_advisory");
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "[{label}] the outcome (admit) must be unchanged, got exit {:?}",
+                out.status.code()
+            ));
+        }
+        if adv.len() != 1 || adv[0].0["reason"] != reason {
+            failures.push(format!(
+                "[{label}] exactly ONE advisory with reason `{reason}` expected; got {:?}",
+                adv.iter()
+                    .map(|(v, _)| v["reason"].clone())
+                    .collect::<Vec<_>>()
+            ));
+        }
+        for (v, line) in adv {
+            if !TOKENS.iter().any(|t| v["reason"] == *t)
+                || v.get("plugin_name").is_some()
+                || line.contains(SECRET_ID)
+            {
+                failures.push(format!(
+                    "[{label}] advisory outside the closed set / plugin_name / raw id: {line}"
+                ));
+            }
+        }
+    }
+
+    // reservation_release_failed: a non-ENOENT release error on PostToolUse.
+    {
+        let p = Project::new();
+        let blocked_path = p.reservation("TREL");
+        std::fs::create_dir_all(&blocked_path).unwrap();
+        std::fs::write(blocked_path.join("keep"), b"x").unwrap();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &envelope("PostToolUse", "Edit", Some("TREL"), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        let adv = migration_events(&all, "migration.admission_advisory");
+        if out.status.code() != Some(0)
+            || adv.len() != 1
+            || adv[0].0["reason"] != "reservation_release_failed"
+        {
+            failures.push(format!(
+                "reservation_release_failed: exit 0 + exactly one advisory expected; got exit {:?}, advisories {:?}",
+                out.status.code(),
+                adv.iter().map(|(v, _)| v["reason"].clone()).collect::<Vec<_>>()
+            ));
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC039_admission_advisory_event_per_anomaly_blackbox",
+        failures,
+    );
+}
+
+/// BC-3.08.001 v1.35 Invariant 7 / EC-017..019: NO migration.* event for an admitted
+/// write with no anomaly, an out-of-root path, or a non-protected path.
+#[test]
+fn test_BC_3_08_001_EC017_no_migration_event_for_admitted_out_of_scope_or_nonprotected_writes_blackbox()
+ {
+    let mut failures: Vec<String> = Vec::new();
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join(".factory/cycles")).unwrap();
+    let cases: Vec<(&str, Box<dyn Fn(&Project) -> PathBuf>)> = vec![
+        (
+            "admitted (gate OPEN, no anomaly)",
+            Box::new(|p| p.abs(CYCLES_PATH)),
+        ),
+        (
+            "non-protected path (.factory/STATE.md)",
+            Box::new(|p| p.abs(".factory/STATE.md")),
+        ),
+        (
+            "out-of-root protected-looking path",
+            Box::new({
+                let o = other.path().to_path_buf();
+                move |_| o.join(".factory/cycles/x.md")
+            }),
+        ),
+    ];
+    for (label, mk) in cases {
+        let p = Project::new();
+        let target = mk(&p);
+        let _ = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_internal_events(&p);
+        if any_migration_event(&all) {
+            failures.push(format!(
+                "[{label}] no migration.admission_* event may be written"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_3_08_001_EC017_no_migration_event_for_admitted_out_of_scope_or_nonprotected_writes_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-013 -- admission verdict surface label
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.013 v1.10 EC-040 / ADR-052 v1.21 F-013: the migration-admission verdict
+/// prints `blocking_plugins=migration-admission`; a shard-cap block still prints
+/// `blocking_plugins=shard-cap-gate`; message and exit code unchanged.
+#[test]
+fn test_BC_1_18_013_EC040_admission_verdict_blocking_plugins_label_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    // E-MAINTENANCE-001 (live txn)
+    {
+        let p = Project::new();
+        write_gate(&p.ms(), "LOCKED");
+        write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+        let _live = p.hold_lock();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TL1"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains("blocking_plugins=migration-admission")
+            || err.contains("blocking_plugins=shard-cap-gate")
+            || !err.contains(&format!(
+                "E-MAINTENANCE-001: {}",
+                plain_msg(".factory/cycles/")
+            ))
+        {
+            failures.push(format!("E-MAINTENANCE-001 must carry blocking_plugins=migration-admission (message/exit unchanged); exit {:?}, stderr: {err}", out.status.code()));
+        }
+    }
+    // E-MAINTENANCE-002 (invalid tool_use_id)
+    {
+        let p = Project::new();
+        let target = p.abs(CYCLES_PATH);
+        let out = run(
+            &p,
+            &json_env(
+                "PreToolUse",
+                Some("Edit"),
+                edit_input(&target),
+                Some(serde_json::json!(7)),
+                serde_json::json!({}),
+            ),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains("blocking_plugins=migration-admission")
+            || !err
+                .contains("E-MAINTENANCE-002: writer-admission check failed (invalid_tool_use_id)")
+        {
+            failures.push(format!("E-MAINTENANCE-002 must carry blocking_plugins=migration-admission; exit {:?}, stderr: {err}", out.status.code()));
+        }
+    }
+    // shard-cap block keeps its own label
+    {
+        let p = Project::new();
+        std::fs::write(
+            p.root().join(".factory/shard-config.toml"),
+            CYCLES_MALFORMED_SHARD_CONFIG,
+        )
+        .unwrap();
+        let target = p.abs(CYCLES_PATH);
+        std::fs::write(&target, "x".repeat(100)).unwrap();
+        let out = run(
+            &p,
+            &envelope("PreToolUse", "Edit", Some("TL3"), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(2)
+            || !err.contains("blocking_plugins=shard-cap-gate")
+            || err.contains("migration-admission")
+        {
+            failures.push(format!("a shard-cap block must still carry blocking_plugins=shard-cap-gate; exit {:?}, stderr: {err}", out.status.code()));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC040_admission_verdict_blocking_plugins_label_blackbox",
         failures,
     );
 }

@@ -7,7 +7,7 @@
 //! directory and ONE `reservations/` directory, and the protected path set is
 //! the UNION `.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/`.
 //! Admission is therefore implemented ONCE, here. The dispatcher's
-//! PreToolUse path (`main.rs` → `executor::bc_index_migration_admission`)
+//! PreToolUse path (`main.rs` → `executor::migration_writer_admission`)
 //! evaluates it exactly once per event, structurally ahead of
 //! `shard_cap_precheck` and every registry plugin; the B2 in-process entry
 //! point (`admit_or_block_bc_index_writer`) delegates to it too — there is no
@@ -389,6 +389,20 @@ pub fn sanitize_diagnostic(input: &str, max_chars: usize) -> String {
 #[must_use]
 pub fn sanitize_diagnostic_id(input: &str) -> String {
     sanitize_diagnostic(input, DIAGNOSTIC_ID_MAX_CHARS)
+}
+
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 D-2 "Single anchoring rule" (a);
+/// BC-1.18.013 EC-034): the ONE session-project-root rule for admission and both
+/// coordinators. Pure (env is read by the caller). `claude_project_dir` that is
+/// present, non-empty and canonicalizes => the canonical path; present non-empty
+/// but not canonicalizable => the as-given path (NEVER the cwd); absent or empty =>
+/// `process_cwd` exactly. NO ancestor walk, NO `git rev-parse`.
+#[must_use]
+pub fn resolve_session_project_root(
+    _claude_project_dir: Option<&std::ffi::OsStr>,
+    _process_cwd: &Path,
+) -> PathBuf {
+    todo!("S-25.08 D-2: resolve_session_project_root")
 }
 
 /// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`.

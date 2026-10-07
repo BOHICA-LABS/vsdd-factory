@@ -26,7 +26,7 @@
 //!
 //! # Architect Rulings baked into this file (do not deviate)
 //!
-//! 1. **Native-gate precedence.** `bc_index_migration_admission_precheck`
+//! 1. **Native-gate precedence.** `migration_writer_admission_precheck`
 //!    must be evaluated BEFORE `shard_cap_precheck` for a BC-INDEX-path
 //!    dispatch, and `shard_cap_precheck` must be structurally SKIPPED (never
 //!    invoked at all) when migration-admission blocks. The gate-precedence
@@ -34,7 +34,7 @@
 //!    only reachable in the `None` arm of a `match` on the migration
 //!    verdict) and assert the load-bearing filesystem side effect (no
 //!    roll/truncation), not merely the returned `HookResult`.
-//! 2. `bc_index_migration_admission_precheck`'s refusal path returns
+//! 2. `migration_writer_admission_precheck`'s refusal path returns
 //!    `HookResult::Block` (E-MAINTENANCE-001) — NEVER `HookResult::Error`.
 //! 3. The `^Bash$` full-command pre-shell classifier (ADR-052 §5c) and the
 //!    4 dispatcher-guard amendments (§5b) are OUT OF SCOPE — this file
@@ -76,7 +76,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use factory_dispatcher::executor::{bc_index_migration_admission_precheck, shard_cap_precheck};
+use factory_dispatcher::executor::{migration_writer_admission_precheck, shard_cap_precheck};
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::shard_manager::migration_fs::{Fs, StdFs};
 use factory_dispatcher::shard_manager::{
@@ -1269,14 +1269,14 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    // Ruling 1: bc_index_migration_admission_precheck MUST be evaluated
+    // Ruling 1: migration_writer_admission_precheck MUST be evaluated
     // BEFORE shard_cap_precheck for a BC-INDEX-path dispatch, and
     // shard_cap_precheck MUST be structurally SKIPPED (never invoked at
     // all) when migration-admission blocks. shard_cap_precheck is only
     // reachable in the `None` arm below — it is NEVER called when the
     // migration-admission gate fires, which IS this test's central
     // assertion.
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    let migration_verdict = migration_writer_admission_precheck(&payload, dir.path());
     let verdict = match migration_verdict {
         Some(v) => v,
         None => shard_cap_precheck(&payload, dir.path())
@@ -1337,7 +1337,7 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_prec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    let migration_verdict = migration_writer_admission_precheck(&payload, dir.path());
     let verdict = match migration_verdict {
         Some(v) => v,
         None => shard_cap_precheck(&payload, dir.path())
@@ -1367,7 +1367,7 @@ fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migr
     payload
         .extra
         .insert("tool_use_id".to_string(), serde_json::json!("T1"));
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let result = migration_writer_admission_precheck(&payload, dir.path());
     assert!(
         result.is_none(),
         "no migration-state/ present: absent gate = OPEN, no live txn => admitted (None), got {result:?}"
@@ -1398,7 +1398,7 @@ fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migr
     std::fs::create_dir_all(target2.parent().unwrap()).unwrap();
     std::fs::write(&target2, "content").unwrap();
     let payload2 = bc_index_payload(dir2.path(), "Write", serde_json::json!({ "content": "x" }));
-    let result2 = bc_index_migration_admission_precheck(&payload2, dir2.path());
+    let result2 = migration_writer_admission_precheck(&payload2, dir2.path());
     assert!(result2.is_none(), "admitted check-only, got {result2:?}");
     assert!(
         !dir2.path().join(".factory/migration-state").exists(),
@@ -1419,7 +1419,7 @@ fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of
         "Bash",
         serde_json::json!({ "command": "echo hi" }),
     );
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let result = migration_writer_admission_precheck(&payload, dir.path());
     assert!(
         result.is_none(),
         "a Bash dispatch must be out of THIS function's scope regardless of migration state — \
@@ -1435,7 +1435,7 @@ fn test_BC_1_18_011_admission_precheck_returns_none_for_post_tool_use_event() {
     write_migration_txn(dir.path(), "STAGING");
     let mut payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
     payload.event_name = "PostToolUse".to_string();
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let result = migration_writer_admission_precheck(&payload, dir.path());
     assert!(
         result.is_none(),
         "this gate is PreToolUse-only, mirroring shard_cap_precheck"
@@ -1508,7 +1508,7 @@ fn test_BC_1_18_011_PC6d_b2_entry_point_branch_a_heals_stale_gate_then_admits() 
         let dir = tempfile::tempdir().unwrap();
         write_b2_state(dir.path(), gate, None);
         let payload = bc_index_payload_with_tool_use_id(dir.path(), "TA");
-        let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+        let verdict = migration_writer_admission_precheck(&payload, dir.path());
         assert!(
             verdict.is_none(),
             "gate {gate} + no txn + lock free: the shared core's Branch A must reconcile the gate \
@@ -1542,7 +1542,7 @@ fn test_BC_1_18_011_PC6d_b2_entry_point_branch_b_aborts_null_generation_staging_
         Some(("STAGING", serde_json::Value::Null)),
     );
     let payload = bc_index_payload_with_tool_use_id(dir.path(), "TB");
-    let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    let verdict = migration_writer_admission_precheck(&payload, dir.path());
     assert!(
         verdict.is_none(),
         "Branch B must abort the null-generation STAGING txn, open the gate, then admit; got \
@@ -1585,7 +1585,7 @@ fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created
     .unwrap();
 
     let payload = bc_index_payload_with_tool_use_id(dir.path(), "T5");
-    let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    let verdict = migration_writer_admission_precheck(&payload, dir.path());
     match verdict {
         Some(HookResult::Block { reason }) => assert!(
             reason.contains("E-MAINTENANCE-001"),
