@@ -146,7 +146,7 @@ pub use admission::{
     MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
     as_given_factory_root_spelling, classify_tool_use_id, e_maintenance_block_message,
     is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
-    resolve_factory_root, resolve_target_path,
+    resolve_factory_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
@@ -14224,7 +14224,7 @@ fn log_reservation_timestamp_fallback(
     for reason in reasons {
         tracing::warn!(
             target: "bc_1_18_011_migration",
-            path = %path.display(),
+            path = sanitize_diagnostic(&path.display().to_string(), 256),
             reason,
             "reservation timestamp fallback (ADR-052 v1.20 F-008): ambiguous timestamps resolve \
              toward retention"

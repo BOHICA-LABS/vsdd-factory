@@ -505,8 +505,10 @@ pub fn bc_index_migration_admission(
     // gave it to us; when that differs lexically from the canonical `cwd` (a
     // symlinked path component) the as-given spelling is a lexical alias of the
     // same root (part of the fail-closed union).
-    if let Some(raw) = std::env::var_os("CLAUDE_PROJECT_DIR").filter(|v| !v.is_empty()) {
-        factory_root.add_lexical_spelling(&std::path::PathBuf::from(raw).join(".factory"));
+    if let Some(spelling) = std::env::var_os("CLAUDE_PROJECT_DIR")
+        .and_then(|raw| crate::shard_manager::as_given_factory_root_spelling(&raw))
+    {
+        factory_root.add_lexical_spelling(&spelling);
     }
     // A relative `file_path` (defensive; the harness sends absolute paths) is
     // joined onto the payload's absolute `cwd`, else onto the project root; `~`
@@ -564,7 +566,9 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
     tracing::warn!(
         target: "bc_1_18_011_migration",
         cause,
-        detail = %e,
+        // The error text can embed untrusted record content (e.g. a serde
+        // variant name): escape control characters and cap its length.
+        detail = crate::shard_manager::sanitize_diagnostic(&e.to_string(), 256),
         "E-MAINTENANCE-002: writer-admission check failed"
     );
     MigrationAdmission {

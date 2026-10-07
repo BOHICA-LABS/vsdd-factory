@@ -336,15 +336,59 @@ impl FactoryRoot {
     }
 }
 
-/// S-25.08 Red-Gate STUB (BC-1.18.013 v1.9 Pre 6(b)(i) spelling (ii)): the
-/// lexical alias `<CLAUDE_PROJECT_DIR as given>/.factory`, or `None` when the raw
-/// value is EMPTY or NOT an absolute path. Lexical normalization only (collapse
-/// `//`, `.`, `..`); no filesystem access. `executor.rs` must derive its alias
-/// through this function (it currently inlines a filter that only rejects the
-/// empty value).
+/// The lexical alias `<CLAUDE_PROJECT_DIR as given>/.factory` (BC-1.18.013 v1.9
+/// Pre 6(b)(i) spelling (ii)), or `None` when the raw value is EMPTY or NOT an
+/// absolute path (a relative or `~`-style value names no fixed location, so it
+/// cannot be a stable lexical alias of the root). Lexical normalization only
+/// (collapse `//`, `.`, `..`); no filesystem access.
 #[must_use]
-pub fn as_given_factory_root_spelling(_raw: &std::ffi::OsStr) -> Option<PathBuf> {
-    todo!("S-25.08 F-S2508-L2-010: as-given CLAUDE_PROJECT_DIR spelling (empty / relative => None)")
+pub fn as_given_factory_root_spelling(raw: &std::ffi::OsStr) -> Option<PathBuf> {
+    if raw.is_empty() {
+        return None;
+    }
+    let project_dir = Path::new(raw);
+    if !project_dir.is_absolute() {
+        return None;
+    }
+    Some(lexical_normalize(&project_dir.join(".factory")))
+}
+
+/// Maximum characters of an untrusted identifier echoed into a diagnostic.
+pub const DIAGNOSTIC_ID_MAX_CHARS: usize = 64;
+
+/// Make an UNTRUSTED string (a txn's `migration_id` / `txn_id`, a file name, an
+/// error text derived from record content) safe to emit as a `tracing` field:
+/// control characters are ESCAPED (`\n`, `\u{1b}`, ...), never emitted raw, and
+/// the ESCAPED form is truncated so the result (including a trailing `…`
+/// truncation marker) is at most `max_chars` characters — so a hostile record can neither inject log lines /
+/// terminal escapes nor flood the log (BC-1.18.013 EC-029).
+#[must_use]
+pub fn sanitize_diagnostic(input: &str, max_chars: usize) -> String {
+    // Escape first (a control char may expand to several characters), then cap
+    // the ESCAPED form; the total INCLUDING the truncation marker is <= max_chars.
+    let escaped: Vec<char> = input
+        .chars()
+        .flat_map(|c| -> Vec<char> {
+            if c.is_control() {
+                c.escape_default().collect()
+            } else {
+                vec![c]
+            }
+        })
+        .collect();
+    if escaped.len() <= max_chars {
+        return escaped.into_iter().collect();
+    }
+    let keep = max_chars.saturating_sub(1);
+    let mut out: String = escaped.into_iter().take(keep).collect();
+    out.push('…');
+    out
+}
+
+/// [`sanitize_diagnostic`] at the identifier cap ([`DIAGNOSTIC_ID_MAX_CHARS`]).
+#[must_use]
+pub fn sanitize_diagnostic_id(input: &str) -> String {
+    sanitize_diagnostic(input, DIAGNOSTIC_ID_MAX_CHARS)
 }
 
 /// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`.
@@ -528,8 +572,8 @@ fn verify_admission(
     let live = second.live_txn()?;
     tracing::warn!(
         target: "bc_1_18_011_migration",
-        migration_id = live.map(|t| t.migration_id()).unwrap_or("none"),
-        txn_id = live.map(|t| t.record.txn_id.as_str()).unwrap_or("none"),
+        migration_id = sanitize_diagnostic_id(live.map(|t| t.migration_id()).unwrap_or("none")),
+        txn_id = sanitize_diagnostic_id(live.map(|t| t.record.txn_id.as_str()).unwrap_or("none")),
         gate_state = ?second.gate,
         reconciliation = ?reconciliation,
         scope = family.scope(),
@@ -666,8 +710,8 @@ pub fn reconcile_stale_admission_gate(
         (StaleGateReconciliationPlan::FailClosedMismatch, Some(live)) => {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
-                migration_id = live.migration_id(),
-                txn_id = %live.record.txn_id,
+                migration_id = sanitize_diagnostic_id(live.migration_id()),
+                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
                 txn_state = ?live.record.state,
                 failing_check = "terminal record present; verification is fail-closed in this \
                                  build (STAGING + record always; COMMITTING unverified)",
@@ -681,8 +725,8 @@ pub fn reconcile_stale_admission_gate(
             // future change makes it reachable before the effect is delivered.
             tracing::error!(
                 target: "bc_1_18_011_migration",
-                migration_id = live.migration_id(),
-                txn_id = %live.record.txn_id,
+                migration_id = sanitize_diagnostic_id(live.migration_id()),
+                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
                 "Branch C: FinalizeThenOpenGate decided but the finalize effect is not wired; \
                  failing closed"
             );
