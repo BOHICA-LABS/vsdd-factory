@@ -536,10 +536,11 @@ pub fn bc_index_migration_reservation_release(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
 ) {
-    if EventType::from_event_str(&payload.event_name) != EventType::PostToolUse {
-        return;
-    }
-    if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
+    // Release on BOTH `PostToolUse` and `PostToolUseFailure`, keyed ONLY on the
+    // `tool_use_id` shared with the PreToolUse admission (no `tool_name` filter:
+    // a `PostToolUseFailure` envelope may omit or reshape it, and an id that was
+    // never reserved is a no-op anyway — ADR-052 v1.20 §5a F-001).
+    if !crate::invoke::is_tool_completion_event(&payload.event_name) {
         return;
     }
     let migration_state_dir = cwd.join(".factory/migration-state");
