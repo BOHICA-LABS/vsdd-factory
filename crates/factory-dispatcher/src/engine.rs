@@ -109,6 +109,25 @@ mod tests {
         drop(engine);
     }
 
+    /// ADR-003: preview-2 / the component model is out of scope. The engine
+    /// must not compile component binaries (defence in depth: no component
+    /// parsing attack surface reachable from untrusted plugin bytes).
+    #[test]
+    fn engine_rejects_component_binaries() {
+        let engine = build_engine().expect("engine should build");
+        let bytes = wat::parse_str("(component)").expect("minimal component wat");
+        let err = match wasmtime::component::Component::new(&engine, &bytes) {
+            Ok(_) => panic!("component must NOT compile: component model must be disabled"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}").to_lowercase();
+        assert!(
+            msg.contains("component")
+                && (msg.contains("support") || msg.contains("enabled") || msg.contains("disabled")),
+            "expected a component-model-disabled error, got: {msg}"
+        );
+    }
+
     #[test]
     fn timeout_ms_to_epochs_rounds_up() {
         assert_eq!(timeout_ms_to_epochs(0), 0);

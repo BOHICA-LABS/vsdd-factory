@@ -71,6 +71,32 @@ fn parse_cargo_lock_version(lock_content: &str, pkg_name: &str) -> Option<String
     None
 }
 
+/// Return the `version` of EVERY `[[package]]` entry named `pkg_name`, in file
+/// order (empty if absent).
+fn parse_all_cargo_lock_versions(lock_content: &str, pkg_name: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut current_name: Option<&str> = None;
+    for line in lock_content.lines() {
+        let line = line.trim();
+        if line == "[[package]]" {
+            current_name = None;
+        } else if let Some(name) = line
+            .strip_prefix("name = \"")
+            .and_then(|r| r.strip_suffix('"'))
+        {
+            current_name = Some(name);
+        } else if let Some(ver) = line
+            .strip_prefix("version = \"")
+            .and_then(|r| r.strip_suffix('"'))
+        {
+            if current_name == Some(pkg_name) {
+                found.push(ver.to_string());
+            }
+        }
+    }
+    found
+}
+
 /// Return true iff `version` (a "major.minor.patch" string) is >= the tuple
 /// `(min_major, min_minor, min_patch)`.
 fn semver_ge(version: &str, min: (u64, u64, u64)) -> bool {
@@ -96,10 +122,22 @@ fn semver_lt(version: &str, max_exclusive: (u64, u64, u64)) -> bool {
 /// lockstep (identical version), >= 48.0.4 and < 49.0.0. Pure function over
 /// Cargo.lock content so the guard itself can be exercised against fixtures.
 fn check_wasmtime_lockstep_floor(lock_content: &str) -> Result<String, String> {
-    let wasmtime = parse_cargo_lock_version(lock_content, "wasmtime")
-        .ok_or_else(|| "wasmtime package entry not found in Cargo.lock".to_string())?;
-    let wasi = parse_cargo_lock_version(lock_content, "wasmtime-wasi")
-        .ok_or_else(|| "wasmtime-wasi package entry not found in Cargo.lock".to_string())?;
+    // Require EXACTLY ONE entry per package: a first-match parse over a lock
+    // with duplicate entries could hide an older, vulnerable version.
+    let single = |name: &str| -> Result<String, String> {
+        let versions = parse_all_cargo_lock_versions(lock_content, name);
+        match versions.as_slice() {
+            [only] => Ok(only.clone()),
+            [] => Err(format!("{name} package entry not found in Cargo.lock")),
+            many => Err(format!(
+                "{name} must resolve to exactly one version in Cargo.lock, found {}: [{}]",
+                many.len(),
+                many.join(", ")
+            )),
+        }
+    };
+    let wasmtime = single("wasmtime")?;
+    let wasi = single("wasmtime-wasi")?;
     for (name, v) in [("wasmtime", &wasmtime), ("wasmtime-wasi", &wasi)] {
         if !semver_ge(v, (48, 0, 4)) || !semver_lt(v, (49, 0, 0)) {
             return Err(format!(
@@ -200,6 +238,58 @@ fn test_wasmtime_lockstep_guard_rejects_vulnerable_fixtures() {
         check_wasmtime_lockstep_floor(&lock("48.1.0", "48.1.0")),
         Ok("48.1.0".to_string())
     );
+}
+
+/// LOW-1: a lock with more than one `wasmtime` / `wasmtime-wasi` entry must be
+/// rejected outright (a first-match parse could hide an older, vulnerable
+/// version). The error must name the package and list every version found.
+#[test]
+fn test_wasmtime_lockstep_guard_rejects_duplicate_entries() {
+    let pkg =
+        |name: &str, v: &str| format!("[[package]]\nname = \"{name}\"\nversion = \"{v}\"\n\n");
+    let wasi = pkg("wasmtime-wasi", "48.0.5");
+    let wt_wasi = pkg("wasmtime", "48.0.5");
+
+    // wasmtime duplicated, healthy entry first.
+    let lock = format!("{wt_wasi}{}{wasi}", pkg("wasmtime", "46.0.3"));
+    let err =
+        check_wasmtime_lockstep_floor(&lock).expect_err("duplicate wasmtime must be rejected");
+    assert!(err.contains("exactly one"), "unclear message: {err}");
+    assert!(
+        err.contains("48.0.5") && err.contains("46.0.3"),
+        "must list all versions: {err}"
+    );
+
+    // wasmtime duplicated, vulnerable entry first.
+    let lock = format!("{}{wt_wasi}{wasi}", pkg("wasmtime", "46.0.3"));
+    let err =
+        check_wasmtime_lockstep_floor(&lock).expect_err("duplicate wasmtime must be rejected");
+    assert!(err.contains("exactly one"), "unclear message: {err}");
+    assert!(
+        err.contains("48.0.5") && err.contains("46.0.3"),
+        "must list all versions: {err}"
+    );
+
+    // wasmtime-wasi duplicated, both orders.
+    for (a, b) in [("48.0.5", "46.0.3"), ("46.0.3", "48.0.5")] {
+        let lock = format!(
+            "{wt_wasi}{}{}",
+            pkg("wasmtime-wasi", a),
+            pkg("wasmtime-wasi", b)
+        );
+        let err = check_wasmtime_lockstep_floor(&lock)
+            .expect_err("duplicate wasmtime-wasi must be rejected");
+        assert!(err.contains("exactly one"), "unclear message: {err}");
+        assert!(err.contains("wasmtime-wasi"), "must name package: {err}");
+        assert!(
+            err.contains("48.0.5") && err.contains("46.0.3"),
+            "must list all versions: {err}"
+        );
+    }
+
+    // Two identical entries are still not "exactly one".
+    let lock = format!("{wt_wasi}{wt_wasi}{wasi}");
+    assert!(check_wasmtime_lockstep_floor(&lock).is_err());
 }
 
 // ---------------------------------------------------------------------------
