@@ -13987,7 +13987,14 @@ pub const DEFAULT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// exited by the time any drain step runs — TTL-only GC, never
 /// PID-liveness, per [`drain_bc_index_writers`]'s own doc comment / v1.9
 /// H1 correction).
-pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+///
+/// 3,600 s (ADR-052 v1.18 §5a; BC-1.18.011 / BC-1.18.013 Precondition 6(c)):
+/// longer than the worst-case legitimate tool-call duration (a human
+/// permission-prompt delay or a long `MultiEdit`), so the drain's step-1 GC
+/// can never reclaim a LIVE writer's reservation. The production entry point
+/// additionally enforces the [`MIN_PRODUCTION_RESERVATION_TTL`] floor via
+/// [`validate_production_reservation_ttl`].
+pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
 
 // ---------------------------------------------------------------------------
 // S-25.08 Red-Gate STUB SURFACE (BC-5.38.001 stub discipline) -- compilable
@@ -14103,6 +14110,26 @@ pub fn decide_terminal_record_reconciliation(
     }
 }
 
+/// Seconds since the Unix epoch of `t` (0 for a pre-epoch instant — such a
+/// timestamp is treated as maximally old, i.e. reclaimable).
+fn epoch_secs(t: std::time::SystemTime) -> u64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Parse a reservation file's `created_at` field into epoch seconds. `None`
+/// when the file is unreadable, not JSON, the field is absent, or it does not
+/// parse as RFC 3339 — the caller then falls back to the file mtime
+/// ([`reservation_is_stale`]).
+fn reservation_created_at_epoch_secs(path: &Path) -> Option<u64> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let reservation: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let created_at = reservation.get("created_at")?.as_str()?;
+    let parsed = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
+    u64::try_from(parsed.timestamp()).ok()
+}
+
 /// Poll the writer-reservations directory until it is empty (quiescence)
 /// or the drain timeout elapses (ADR-052 §Decision 5a drain procedure step
 /// 4; default timeout 30s). Also performs the stale-reservation TTL GC
@@ -14116,22 +14143,28 @@ pub fn drain_bc_index_writers(
 ) -> Result<(), BcIndexMigrationError> {
     // Step 1: TTL-only stale-reservation GC (v1.9 H1 — NOT PID-liveness;
     // the creating PreToolUse binary is a per-event process that has
-    // already exited by the time any drain step runs).
+    // already exited by the time any drain step runs). Staleness is the
+    // single pure predicate [`reservation_is_stale`]: judged by the
+    // reservation's `created_at` field, falling back to file mtime ONLY when
+    // the field is absent or unparseable (v1.18 B2-3).
     if let Ok(entries) = std::fs::read_dir(_reservations_dir) {
-        let now = std::time::SystemTime::now();
+        let now_secs = epoch_secs(std::time::SystemTime::now());
         for entry in entries.flatten() {
+            let path = entry.path();
             let Ok(meta) = entry.metadata() else {
                 continue;
             };
             let Ok(modified) = meta.modified() else {
                 continue;
             };
-            if now
-                .duration_since(modified)
-                .unwrap_or(std::time::Duration::ZERO)
-                > _max_reservation_ttl
-            {
-                let _ = std::fs::remove_file(entry.path());
+            let created_at = reservation_created_at_epoch_secs(&path);
+            if reservation_is_stale(
+                created_at,
+                epoch_secs(modified),
+                now_secs,
+                _max_reservation_ttl.as_secs(),
+            ) {
+                let _ = std::fs::remove_file(&path);
             }
         }
     }
@@ -16201,12 +16234,15 @@ pub fn run_bc_index_migration(
         path: reservations_dir.clone(),
         source,
     })?;
+    // Production entry point: the TTL is validated against the 1,800 s floor
+    // BEFORE any gate flip (a configuration error must not leave a stuck
+    // DRAINING gate behind). The drain function itself keeps the TTL and the
+    // timeout injectable for tests.
+    let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;
     write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Draining)?;
-    if let Err(e) = drain_bc_index_writers(
-        &reservations_dir,
-        DEFAULT_DRAIN_TIMEOUT,
-        DEFAULT_MAX_RESERVATION_TTL,
-    ) {
+    if let Err(e) =
+        drain_bc_index_writers(&reservations_dir, DEFAULT_DRAIN_TIMEOUT, reservation_ttl)
+    {
         let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
