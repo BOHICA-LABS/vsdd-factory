@@ -25,7 +25,15 @@ pub struct HookPayload {
 
     /// Tool being invoked, when the event is tool-scoped. Empty string
     /// for session / lifecycle events that don't carry a tool.
-    #[serde(default)]
+    ///
+    /// Deserialization is deliberately lenient (BC-1.18.013 EC-021(c),
+    /// ADR-052 section 5a F-001): a `tool_name` that is absent, `null`, or
+    /// any non-string JSON type maps to the empty string, which matches no
+    /// protected writer and no registry tool filter, rather than failing the
+    /// whole envelope parse. Completion events (PostToolUse /
+    /// PostToolUseFailure) are keyed on the event and `tool_use_id`, so they
+    /// must still reach reservation release.
+    #[serde(default, deserialize_with = "lenient_tool_name")]
     pub tool_name: String,
 
     /// Claude Code session id; stable across every hook in a session.
@@ -51,6 +59,17 @@ pub struct HookPayload {
     /// ensures unknown fields survive the parse→serialize round-trip.
     #[serde(flatten)]
     pub extra: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// Map any non-string JSON `tool_name` to the empty (unclassifiable) name.
+fn lenient_tool_name<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(s) => Ok(s),
+        _ => Ok(String::new()),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -135,6 +154,17 @@ mod tests {
         let p = HookPayload::from_bytes(json).unwrap();
         assert_eq!(p.event_name, "PostToolUse");
         assert!(p.tool_response.is_some());
+    }
+
+    #[test]
+    fn non_string_tool_name_maps_to_empty() {
+        for tn in ["null", "7", "true", "[\"Edit\"]", "{\"n\":1}"] {
+            let json = format!(
+                r#"{{"event_name":"PostToolUseFailure","tool_name":{tn},"session_id":"s"}}"#
+            );
+            let p = HookPayload::from_bytes(json.as_bytes()).unwrap();
+            assert_eq!(p.tool_name, "", "tool_name {tn}");
+        }
     }
 
     #[test]
