@@ -4037,3 +4037,155 @@ fn test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_b
         failures,
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-S2508-L2-003 -- positive control: with the gate OPEN and no txn, the SAME
+// fixtures DO roll (seal + truncate), so the blocked-case byte-identity above is
+// meaningful (it is not a fixture that never rolls).
+// ---------------------------------------------------------------------------
+
+/// Same fixtures as `..._live_txn_blocks_protected_write_before_shard_cap_roll_blackbox`
+/// and AC-002 part 2 (cap 100, 50-byte canonical, 5,000-byte Write), gate OPEN, no
+/// txn: `shard_cap_precheck` MUST roll -- the canonical is truncated away from its
+/// original bytes and a sealed shard file is published next to it.
+#[test]
+fn test_BC_1_18_011_PC6b_positive_control_gate_open_same_fixture_rolls_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let cases: [(&str, &str); 2] = [
+        (CYCLES_PATH, CYCLES_SHARD_CONFIG),
+        (
+            ".factory/specs/behavioral-contracts/BC-INDEX.md",
+            BC_INDEX_ROLL_SHARD_CONFIG,
+        ),
+    ];
+    for (rel, config) in cases {
+        let p = Project::new(); // gate OPEN, no txn
+        std::fs::write(p.root().join(".factory/shard-config.toml"), config).unwrap();
+        let target = p.abs(rel);
+        std::fs::write(&target, "y".repeat(50)).unwrap();
+        let before = std::fs::read(&target).unwrap();
+        let mut dir_before: Vec<String> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        dir_before.sort();
+        let payload = envelope(
+            "PreToolUse",
+            "Write",
+            Some("Tp1"),
+            serde_json::json!({
+                "file_path": target.to_string_lossy(),
+                "content": "x".repeat(5_000),
+            }),
+        );
+        let out = run(&p, &payload);
+        let after = std::fs::read(&target).unwrap_or_default();
+        let mut dir_after: Vec<String> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        dir_after.sort();
+        let truncated = after != before;
+        let new_shard = dir_after.len() > dir_before.len();
+        if !truncated || !new_shard {
+            failures.push(format!(
+                "[{rel}] POSITIVE CONTROL: with the gate OPEN the over-cap Write must make \
+                 shard_cap_precheck roll (canonical changed AND a sealed shard published); got \
+                 exit {:?}, canonical_changed={truncated}, new_shard_file={new_shard}, \
+                 dir {dir_before:?} -> {dir_after:?}, stderr: {}",
+                out.status.code(),
+                stderr_of(&out)
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_PC6b_positive_control_gate_open_same_fixture_rolls_blackbox",
+        failures,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F-S2508-L2-010 black-box spot-check -- relative CLAUDE_PROJECT_DIR
+// ---------------------------------------------------------------------------
+
+/// BC-1.18.013 Pre 6(b)(i) spelling (ii): a RELATIVE `CLAUDE_PROJECT_DIR` must not
+/// break or widen the gate. The child runs with its cwd = the project's parent and
+/// `CLAUDE_PROJECT_DIR=proj`: a protected write inside `proj` is still gated (live
+/// txn => blocked) and a protected-looking path in a SIBLING project is out of scope.
+/// (The "no relative alias is added" rule itself is unit-tested through
+/// `as_given_factory_root_spelling`.)
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let parent = tempfile::tempdir().unwrap();
+    let parent_real = parent.path().canonicalize().unwrap();
+    let proj = parent_real.join("proj");
+    let sibling = parent_real.join("sibling");
+    for d in [&proj, &sibling] {
+        std::fs::create_dir_all(d.join(".factory/cycles/c1")).unwrap();
+    }
+    let plugin_root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .unwrap();
+    let ms = proj.join(".factory/migration-state");
+    std::fs::create_dir_all(ms.join("reservations")).unwrap();
+    std::fs::write(ms.join("exclusive.lock"), b"").unwrap();
+    write_gate(&ms, "LOCKED");
+    write_txn(&ms, "STAGING", Some("gen-1"), Some("backfill-append-logs"));
+    let _live = try_acquire_migration_lock(&ms.join("exclusive.lock"))
+        .unwrap()
+        .unwrap();
+
+    let run_rel = |target: &Path, id: &str| -> Output {
+        let mut cmd = Command::new(binary_path());
+        cmd.current_dir(&parent_real)
+            .env("CLAUDE_PLUGIN_ROOT", plugin_root.path())
+            .env("CLAUDE_PROJECT_DIR", "proj")
+            .env("VSDD_LOG_DIR", parent_real.join("logs"))
+            .env_remove(SEAM_ENV)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().expect("spawn");
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(envelope("PreToolUse", "Edit", Some(id), edit_input(target)).as_bytes())
+            .unwrap();
+        drop(stdin);
+        finish(child, Duration::from_secs(30))
+    };
+
+    let inside = run_rel(&proj.join(".factory/cycles/c1/x.md"), "Tr1");
+    if inside.status.code() != Some(2)
+        || !stderr_of(&inside).contains(&plain_msg(".factory/cycles/"))
+    {
+        failures.push(format!(
+            "relative CLAUDE_PROJECT_DIR: a protected write inside the project must stay gated; \
+             got exit {:?}",
+            inside.status.code()
+        ));
+    }
+    let outside = run_rel(&sibling.join(".factory/cycles/c1/x.md"), "Tr2");
+    if outside.status.code() != Some(0) {
+        failures.push(format!(
+            "relative CLAUDE_PROJECT_DIR: a sibling project's protected-looking path must be out \
+             of scope (admitted); got exit {:?}",
+            outside.status.code()
+        ));
+    }
+    if !migration_state_dirs_under(&sibling).is_empty() {
+        failures.push(
+            "relative CLAUDE_PROJECT_DIR: a namespace was created in the sibling project".into(),
+        );
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox",
+        failures,
+    );
+}
