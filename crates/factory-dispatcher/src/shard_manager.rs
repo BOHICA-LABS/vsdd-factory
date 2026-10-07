@@ -150,9 +150,8 @@ pub use admission::{
     SessionProjectRoot, StaleGateReconciliation, admit_protected_write,
     as_given_factory_root_spelling, classify_tool_use_id, derive_block_branch,
     diagnostics_for_undelivered_finalize, e_maintenance_block_message, is_valid_tool_use_id,
-    project_root_source, reconcile_stale_admission_gate, release_reservation_file,
-    resolve_factory_root, resolve_session_project_root, resolve_target_path, sanitize_diagnostic,
-    sanitize_diagnostic_id,
+    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
+    resolve_session_project_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
@@ -12958,14 +12957,16 @@ pub enum BcIndexMigrationError {
     /// no `.factory` directory. Nothing is created or mutated. Display is
     /// exactly the text after `<subcommand>: ` of the normative operator line.
     #[error(
-        "FACTORY_ROOT_NOT_FOUND: no .factory directory under project root {} \
-         (resolved from {})",
+        "FACTORY_ROOT_NOT_FOUND: no .factory directory under project root {}{}",
         sanitize_diagnostic(&.project_root.display().to_string(), 512),
-        .root_source.label()
+        factory_root_source_suffix(.root_source)
     )]
     FactoryRootNotFound {
         project_root: PathBuf,
-        root_source: ProjectRootSource,
+        /// Where the project root came from. `None` only for a programmatic
+        /// caller that passed a bare path; the CLI always supplies it (threaded
+        /// from [`resolve_session_project_root`], never re-read from the env).
+        root_source: Option<ProjectRootSource>,
     },
 
     #[error(
@@ -15978,14 +15979,30 @@ fn require_live_txn(
     })
 }
 
-/// The B2 coordinator's public entry point: `project_root` is the resolved
-/// session PROJECT ROOT ([`resolve_session_project_root`]), never a process cwd.
-/// A one-line delegation to the crate-private TTL seam with the production
-/// default (ADR-052 v1.21 "EC-031 discharge").
+/// ` (resolved from <source>)` suffix of the `FACTORY_ROOT_NOT_FOUND` text.
+fn factory_root_source_suffix(source: &Option<ProjectRootSource>) -> String {
+    source
+        .map(|s| format!(" (resolved from {})", s.label()))
+        .unwrap_or_default()
+}
+
+/// The B2 coordinator's path-based entry point: `project_root` is the resolved
+/// session PROJECT ROOT, never a process cwd. A one-line delegation to the
+/// crate-private TTL seam with the production default (ADR-052 v1.21 "EC-031
+/// discharge"). The CLI uses [`run_bc_index_migration_for_session`] so a
+/// `FACTORY_ROOT_NOT_FOUND` can name the root's source.
 pub fn run_bc_index_migration(
     project_root: &Path,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     run_bc_index_migration_with_ttl(project_root, DEFAULT_MAX_RESERVATION_TTL)
+}
+
+/// The coordinator entry point that receives the whole [`SessionProjectRoot`]
+/// (path AND source), as the one anchoring rule resolved it.
+pub fn run_bc_index_migration_for_session(
+    root: &SessionProjectRoot,
+) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    run_bc_index_migration_core(&root.path, Some(root.source), DEFAULT_MAX_RESERVATION_TTL)
 }
 
 /// Crate-PRIVATE injectable-TTL seam (never public / env / argv: an
@@ -15995,6 +16012,14 @@ pub fn run_bc_index_migration(
 /// (BC-1.18.013 EC-031).
 pub(crate) fn run_bc_index_migration_with_ttl(
     project_root: &Path,
+    max_reservation_ttl: std::time::Duration,
+) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    run_bc_index_migration_core(project_root, None, max_reservation_ttl)
+}
+
+fn run_bc_index_migration_core(
+    project_root: &Path,
+    root_source: Option<ProjectRootSource>,
     max_reservation_ttl: std::time::Duration,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     // OBL-1 Fs seam: constructed once here and threaded through every
@@ -16015,7 +16040,7 @@ pub(crate) fn run_bc_index_migration_with_ttl(
     let factory_root = resolve_factory_root(project_root)?.ok_or_else(|| {
         BcIndexMigrationError::FactoryRootNotFound {
             project_root: project_root.to_path_buf(),
-            root_source: project_root_source(std::env::var_os("CLAUDE_PROJECT_DIR").as_deref()),
+            root_source,
         }
     })?;
     let bc_dir = factory_root.bc_dir();
@@ -16889,8 +16914,8 @@ pub fn migration_process_exit_code(
 /// invoked by the Bash-tool allowlist guard, not this function's own
 /// internal logic; it belongs to the allowlist/guard cluster, out of this
 /// story's T-10/T-11 task scope.
-pub fn run_migrate_bc_index_cli(project_root: &Path) -> i32 {
-    let outcome = run_bc_index_migration(project_root);
+pub fn run_migrate_bc_index_cli(root: &SessionProjectRoot) -> i32 {
+    let outcome = run_bc_index_migration_for_session(root);
     if let Err(e) = &outcome {
         // The coordinator is a CLI process with no `tracing` subscriber: its
         // stderr IS the operator surface (ADR-052 §5a "Admission diagnostics
