@@ -14001,6 +14001,94 @@ pub fn decide_terminal_record_reconciliation(
     }
 }
 
+/// The pure ADR-052 §5a step-3.5 reconciliation PLAN (Branches A/B/C) that the
+/// effectful [`reconcile_stale_admission_gate`] executes. Factored out of the
+/// shell (behavior-identical) so VP-147's `obl1_kani_proofs` model the REAL
+/// branch selection rather than a harness-local copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleGateReconciliationPlan {
+    /// `exclusive.lock` NOT acquired (EWOULDBLOCK): a live coordinator. No
+    /// action of any kind.
+    LiveCoordinator,
+    /// Nothing for the reconciler to repair: gate OPEN with no live txn, or a
+    /// live own-migration txn with no terminal record that is not a
+    /// null-generation STAGING (a legitimately running / binary-resumable
+    /// activation).
+    NothingToReconcile,
+    /// Branch A: gate ∈ {LOCKED, DRAINING} and no live txn -> gate OPEN.
+    ReopenGate,
+    /// Branch B: live own STAGING txn with `generation_id = null`, its
+    /// terminal record absent, gate not OPEN -> txn ABORTED (marker), THEN
+    /// gate OPEN.
+    AbortNullGenerationThenReopenGate,
+    /// Branch C: the live txn is not the evaluating build's own migration ->
+    /// never finalized, never aborted; plain block.
+    RefuseForeignMigration,
+    /// Branch C: own live txn + its terminal record, not provably finished
+    /// (STAGING + record always; COMMITTING with any failed check) -> no txn
+    /// write, no gate write; mismatch block.
+    FailClosedMismatch,
+    /// Branch C: own live COMMITTING txn + its terminal record with every
+    /// verification check passing -> txn COMPLETED, THEN gate OPEN.
+    FinalizeThenOpenGate,
+}
+
+/// Plan the step-3.5 reconciliation from the state re-read under the lock.
+///
+/// `terminal` carries the lock outcome, the live txn's state (`None` when no
+/// STAGING/COMMITTING txn exists) and the Branch C facts;
+/// `live_txn_generation_id_is_null` is consulted only for a live txn. First
+/// match wins:
+///
+/// 1. lock not acquired -> [`StaleGateReconciliationPlan::LiveCoordinator`];
+/// 2. no live txn -> Branch A when the gate is not OPEN, else nothing;
+/// 3. otherwise the Branch C core [`decide_terminal_record_reconciliation`]
+///    decides; its `NoOp` falls through to Branch B (STAGING, null
+///    generation, gate not OPEN) or else nothing.
+///
+/// Pure: no I/O, no ambient time, no PID input.
+pub fn plan_stale_gate_reconciliation(
+    gate: BcIndexAdmissionGateState,
+    terminal: &TerminalReconcileInputs,
+    live_txn_generation_id_is_null: bool,
+) -> StaleGateReconciliationPlan {
+    if !terminal.lock_acquired {
+        return StaleGateReconciliationPlan::LiveCoordinator;
+    }
+    let live = matches!(
+        terminal.txn_state,
+        Some(BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing)
+    );
+    if !live {
+        return if gate == BcIndexAdmissionGateState::Open {
+            StaleGateReconciliationPlan::NothingToReconcile
+        } else {
+            StaleGateReconciliationPlan::ReopenGate
+        };
+    }
+    match decide_terminal_record_reconciliation(terminal) {
+        TerminalReconcileDecision::RefuseForeignMigration => {
+            StaleGateReconciliationPlan::RefuseForeignMigration
+        }
+        TerminalReconcileDecision::FailClosedMismatch => {
+            StaleGateReconciliationPlan::FailClosedMismatch
+        }
+        TerminalReconcileDecision::FinalizeThenOpenGate => {
+            StaleGateReconciliationPlan::FinalizeThenOpenGate
+        }
+        TerminalReconcileDecision::NoOp => {
+            if terminal.txn_state == Some(BcIndexMigrationTxnState::Staging)
+                && live_txn_generation_id_is_null
+                && gate != BcIndexAdmissionGateState::Open
+            {
+                StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate
+            } else {
+                StaleGateReconciliationPlan::NothingToReconcile
+            }
+        }
+    }
+}
+
 /// Seconds since the Unix epoch of `t` (0 for a pre-epoch instant — such a
 /// timestamp is treated as maximally old, i.e. reclaimable).
 fn epoch_secs(t: std::time::SystemTime) -> u64 {

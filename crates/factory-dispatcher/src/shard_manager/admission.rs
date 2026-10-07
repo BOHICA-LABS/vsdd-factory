@@ -38,7 +38,8 @@
 //!
 //! The admit/block/branch DECISIONS are the pure functions in the parent
 //! module ([`super::is_bc_index_admission_open`],
-//! [`super::decide_terminal_record_reconciliation`],
+//! [`super::plan_stale_gate_reconciliation`] (Branch A/B/C selection, built on
+//! [`super::decide_terminal_record_reconciliation`]),
 //! [`super::reservation_is_stale`]); this module is the effectful shell around
 //! them (reservation files, gate/txn reads, flock-gated reconciliation).
 //!
@@ -54,9 +55,9 @@ use std::path::{Path, PathBuf};
 
 use super::{
     BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnRecord,
-    BcIndexMigrationTxnState, TerminalReconcileDecision, TerminalReconcileInputs,
-    WriterReservation, decide_terminal_record_reconciliation, is_bc_index_admission_open,
-    migrate_err_to_io, read_admission_gate_state, try_acquire_migration_lock,
+    BcIndexMigrationTxnState, StaleGateReconciliationPlan, TerminalReconcileInputs,
+    WriterReservation, is_bc_index_admission_open, migrate_err_to_io,
+    plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
     write_admission_gate_state,
 };
 
@@ -266,7 +267,8 @@ fn verify_admission(
 ///
 /// Runs under `flock(exclusive.lock, LOCK_EX|LOCK_NB)`; EWOULDBLOCK means a
 /// live coordinator holds it: no action. Gate / txn state is RE-READ under the
-/// lock and acted on as re-read.
+/// lock and acted on as re-read. Which branch fires is decided by the pure
+/// [`plan_stale_gate_reconciliation`]; this function performs its effects.
 ///
 /// * **Branch A** — gate ∈ {LOCKED, DRAINING}, no active txn (absent,
 ///   COMPLETED, ABORTED) -> gate OPEN.
@@ -307,21 +309,16 @@ pub fn reconcile_stale_admission_gate(
     };
 
     let snapshot = AdmissionSnapshot::read(migration_state_dir)?;
-    let Some(live) = snapshot.live_txn()? else {
-        // Branch A.
-        if snapshot.gate != BcIndexAdmissionGateState::Open {
-            write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)?;
-            return Ok(StaleGateReconciliation::GateReopened);
-        }
-        return Ok(StaleGateReconciliation::NothingToReconcile);
-    };
+    let live = snapshot.live_txn()?;
 
-    let terminal_record_name = terminal_record_file_name(live.migration_id());
+    // `None` for no live txn AND for a live txn whose `migration_id` this
+    // build does not know (foreign).
+    let terminal_record_name = live.and_then(|t| terminal_record_file_name(t.migration_id()));
     let inputs = TerminalReconcileInputs {
         lock_acquired: true,
         record_present: terminal_record_name
             .is_some_and(|name| migration_state_dir.join(name).exists()),
-        txn_state: Some(live.record.state),
+        txn_state: live.map(|t| t.record.state),
         // The effectful verification (parse the record; txn_id / generation_id
         // / canonical_paths_count equality; every canonical sha256) is
         // S-25.06's deliverable (AC-021/022/023/031). Until it lands the seam
@@ -336,11 +333,39 @@ pub fn reconcile_stale_admission_gate(
         txn_is_own_migration: terminal_record_name.is_some(),
     };
 
-    match decide_terminal_record_reconciliation(&inputs) {
-        TerminalReconcileDecision::RefuseForeignMigration => {
+    let live_generation_id_is_null = live.is_some_and(|t| t.record.generation_id.is_none());
+
+    // The branch selection is the pure planner (VP-147); this shell only
+    // performs the effects it names. `plan` names a txn-bearing branch
+    // (B / C) only when `inputs.txn_state` is live, i.e. only when `live` is
+    // `Some` (proven by `proof_obl1_h6_terminal_reconcile_idempotence`); the
+    // `None` arms below are unreachable and fail closed.
+    match (
+        plan_stale_gate_reconciliation(snapshot.gate, &inputs, live_generation_id_is_null),
+        live,
+    ) {
+        (StaleGateReconciliationPlan::LiveCoordinator, _) => {
+            Ok(StaleGateReconciliation::LiveCoordinator)
+        }
+        (StaleGateReconciliationPlan::NothingToReconcile, _)
+        | (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, None) => {
+            Ok(StaleGateReconciliation::NothingToReconcile)
+        }
+        (StaleGateReconciliationPlan::ReopenGate, _) => {
+            // Branch A.
+            write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)?;
+            Ok(StaleGateReconciliation::GateReopened)
+        }
+        (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, Some(live)) => {
+            // Branch B (terminal record ABSENT; STAGING with generation_id =
+            // null, gate stuck).
+            abort_null_generation_txn(migration_state_dir, live)?;
+            Ok(StaleGateReconciliation::NullGenerationTxnAborted)
+        }
+        (StaleGateReconciliationPlan::RefuseForeignMigration, _) => {
             Ok(StaleGateReconciliation::ForeignMigrationRefused)
         }
-        TerminalReconcileDecision::FailClosedMismatch => {
+        (StaleGateReconciliationPlan::FailClosedMismatch, Some(live)) => {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 migration_id = live.migration_id(),
@@ -352,7 +377,7 @@ pub fn reconcile_stale_admission_gate(
             );
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
-        TerminalReconcileDecision::FinalizeThenOpenGate => {
+        (StaleGateReconciliationPlan::FinalizeThenOpenGate, Some(live)) => {
             // Unreachable while the verification seam reports every check
             // unverified; fail closed (never finalize) rather than panic if a
             // future change makes it reachable before the effect is delivered.
@@ -365,19 +390,11 @@ pub fn reconcile_stale_admission_gate(
             );
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
-        TerminalReconcileDecision::NoOp => {
-            // Terminal record ABSENT (or no live txn): fall through to Branch B
-            // (STAGING with generation_id = null, gate stuck), else the
-            // ordinary admission decision (which blocks: a txn is live).
-            if live.record.state == BcIndexMigrationTxnState::Staging
-                && live.record.generation_id.is_none()
-                && snapshot.gate != BcIndexAdmissionGateState::Open
-            {
-                abort_null_generation_txn(migration_state_dir, live)?;
-                return Ok(StaleGateReconciliation::NullGenerationTxnAborted);
-            }
-            Ok(StaleGateReconciliation::NothingToReconcile)
-        }
+        (
+            StaleGateReconciliationPlan::FailClosedMismatch
+            | StaleGateReconciliationPlan::FinalizeThenOpenGate,
+            None,
+        ) => Ok(StaleGateReconciliation::CompletionRecordMismatch),
     }
 }
 

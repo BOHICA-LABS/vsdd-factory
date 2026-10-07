@@ -26,12 +26,13 @@ jobs:
   kani:
     name: kani (OBL-1 crash-recovery proofs)
     runs-on: ubuntu-latest
-    # All seven OBL-1 harnesses solve in well under a minute each (the
-    # recover-based ones mem::forget their String-heavy records to skip
-    # CBMC's drop-glue modeling — see obl1_kani_proofs.rs's "Solve-time
-    # note"). This budget is a generous margin over the ~2 min of solving
-    # plus Kani install + crate compile.
-    timeout-minutes: 20
+    # The ten OBL-1 harnesses (VP-147 v1.18 re-baseline, S-25.08 AC-010).
+    # Solve times are recorded in the S-25.08 T-5 report; the recover-based
+    # ones mem::forget their String-heavy records to skip CBMC's drop-glue
+    # modeling (see obl1_kani_proofs.rs's "Solve-time note"). This budget is
+    # a margin over the ~15 min local solve total (h4b alone ~10 min, ~3 GB
+    # RSS) plus Kani install + crate compile on a slower hosted runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -63,29 +64,62 @@ jobs:
         with:
           key: kani
 
-      # Run every OBL-1 crash-recovery harness (substring match on the shared
-      # `proof_obl1` prefix). Each `#[kani::proof]` must report VERIFICATION:-
-      # SUCCESSFUL; a counterexample (VERIFICATION:- FAILED) is a real
-      # crash-recovery defect and fails the job. Do NOT weaken a harness to make
-      # it pass — a failure is a finding to route to the implementer.
+      # Run EXACTLY the ten OBL-1 harnesses (VP-147), pinned by fully-
+      # qualified name with `--exact`. This replaces the former
+      # `--harness proof_obl1` SUBSTRING filter (adversary finding
+      # F-C5-P3-001): a renamed/split/moved harness now makes its pinned name
+      # match nothing and the per-name check below fails, instead of the
+      # survivors silently going green. Each `#[kani::proof]` must report
+      # VERIFICATION:- SUCCESSFUL; a counterexample is a real crash-recovery
+      # or admission defect and fails the job. Do NOT weaken a harness to make
+      # it pass -- route the failure to the implementer.
       #
-      # `--harness proof_obl1` is a SUBSTRING filter, not an exact-name pin
-      # (adversary finding F-C5-P3-001). If a future refactor renames, splits,
-      # or moves an OBL-1 harness so it no longer contains the `proof_obl1`
-      # prefix, Kani silently verifies only the survivors, prints
-      # "N successfully verified, 0 failures", and exits 0 GREEN — a
-      # false-green on a real partial-regression. (A *zero*-match filter does
-      # make Kani error; a *partial*-match filter does not.) Guard against
-      # this by asserting the full expected proof count ran and succeeded,
-      # independent of Kani's own exit code.
+      # Vacuity gate: every `kani::cover!` must be SATISFIED, and no check in
+      # obl1_kani_proofs.rs may be UNREACHABLE -- either means an assumption
+      # or a model change made a property trivially true (VP-147: INV-GATE-TXN
+      # UNSAT-for-violation AND non-vacuity re-confirmed).
       - name: Run OBL-1 Kani proofs
         run: |
           set -euo pipefail
 
-          EXPECTED_PROOFS=7
+          PROOF_FILE=crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs
+          HARNESSES=(
+            shard_manager::obl1_kani_proofs::proof_obl1_h1_recover_totality
+            shard_manager::obl1_kani_proofs::proof_obl1_h1_terminal_reconcile_totality
+            shard_manager::obl1_kani_proofs::proof_obl1_h2_recovery_safety_predicate
+            shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_inductive_step
+            shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_bounded_sequence
+            shard_manager::obl1_kani_proofs::proof_obl1_h4_admission_gate_invariant
+            shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal
+            shard_manager::obl1_kani_proofs::proof_obl1_h5_pointer_swap_crash_atomicity
+            shard_manager::obl1_kani_proofs::proof_obl1_h6_recovery_idempotence
+            shard_manager::obl1_kani_proofs::proof_obl1_h6_terminal_reconcile_idempotence
+          )
+          # SIX logical obligations (h1..h6), TEN harnesses: h3 is split into
+          # an inductive-step and a bounded-sequence proof, and the v1.18
+          # re-baseline adds h1/h4/h6 harnesses over the shared admission and
+          # terminal-reconciliation pure cores.
+          EXPECTED_PROOFS=10
+          if [ "${#HARNESSES[@]}" -ne "${EXPECTED_PROOFS}" ]; then
+            echo "FAIL: ${#HARNESSES[@]} harnesses pinned but EXPECTED_PROOFS=${EXPECTED_PROOFS}."
+            exit 1
+          fi
+
+          # A harness added to the proof file but not pinned above would be
+          # silently skipped -- refuse that drift.
+          DECLARED=$(grep -c '^#\[kani::proof\]' "${PROOF_FILE}" || true)
+          if [ "${DECLARED}" -ne "${EXPECTED_PROOFS}" ]; then
+            echo "FAIL: ${PROOF_FILE} declares ${DECLARED} #[kani::proof] harnesses but ${EXPECTED_PROOFS} are pinned in this job. Update HARNESSES and EXPECTED_PROOFS to match."
+            exit 1
+          fi
+
+          HARNESS_ARGS=()
+          for h in "${HARNESSES[@]}"; do
+            HARNESS_ARGS+=(--harness "$h")
+          done
 
           set +e
-          cargo kani -p factory-dispatcher --harness proof_obl1 2>&1 | tee kani-output.log
+          cargo kani -p factory-dispatcher --exact "${HARNESS_ARGS[@]}" 2>&1 | tee kani-output.log
           KANI_EXIT="${PIPESTATUS[0]}"
           set -e
 
@@ -105,8 +139,31 @@ jobs:
             exit 1
           fi
           if [ "${SUCCESS_COUNT}" -ne "${EXPECTED_PROOFS}" ]; then
-            echo "FAIL: expected ${EXPECTED_PROOFS} successful OBL-1 proofs but only ${SUCCESS_COUNT} ran. This means the --harness proof_obl1 substring filter no longer matches the full harness set (a harness was renamed, split, or moved out of the crate) -- a silent partial-verification false-green. If the harness count intentionally changed, update EXPECTED_PROOFS here to match."
+            echo "FAIL: expected ${EXPECTED_PROOFS} successful OBL-1 proofs but ${SUCCESS_COUNT} succeeded."
+            exit 1
+          fi
+          for h in "${HARNESSES[@]}"; do
+            if ! grep -qF "Checking harness ${h}..." kani-output.log; then
+              echo "FAIL: pinned harness ${h} did not run (renamed or moved?)."
+              exit 1
+            fi
+          done
+
+          # Vacuity gate 1: every cover property satisfied, in every harness.
+          UNSAT_COVERS=$(awk '/cover properties satisfied/ { if ($2 != $4) bad++ } END { print bad + 0 }' kani-output.log)
+          COVER_SUMMARIES=$(grep -c 'cover properties satisfied' kani-output.log || true)
+          if [ "${UNSAT_COVERS}" -ne 0 ] || [ "${COVER_SUMMARIES}" -ne "${EXPECTED_PROOFS}" ]; then
+            echo "FAIL: ${UNSAT_COVERS} harness(es) have an unsatisfied kani::cover! (or a harness lost its covers: ${COVER_SUMMARIES} cover summaries for ${EXPECTED_PROOFS} harnesses) -- a vacuous proof."
+            exit 1
+          fi
+          # Vacuity gate 2: no UNREACHABLE check located in the proof file.
+          UNREACHABLE_IN_PROOFS=$(awk -v f="${PROOF_FILE}" '
+            /Status: UNREACHABLE/ { pending = 1; next }
+            pending && /Location:/ { if (index($0, f) > 0) bad++; pending = 0 }
+            END { print bad + 0 }' kani-output.log)
+          if [ "${UNREACHABLE_IN_PROOFS}" -ne 0 ]; then
+            echo "FAIL: ${UNREACHABLE_IN_PROOFS} check(s) in ${PROOF_FILE} are UNREACHABLE -- a vacuous assertion."
             exit 1
           fi
 
-          echo "PASS: all ${EXPECTED_PROOFS} OBL-1 harnesses verified successfully."
+          echo "PASS: all ${EXPECTED_PROOFS} OBL-1 harnesses verified successfully, all covers satisfied."
