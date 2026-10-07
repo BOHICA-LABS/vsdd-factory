@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "e51cc48"
+input-hash: "f88d5fd"
 traces_to: STATE.md
 ---
 
@@ -2364,3 +2364,61 @@ D-1252, v10.85→v10.86. Single-commit TD-VSDD-053 session-wrap burst (state-man
 **Closes:** Blocking item [D-1163] (develop branch protection applied); Drift Item [D-1251-PG-001] -> S-12.17.
 
 Summary: Session wrap. Persisted S-25.08 LOCAL adversary pass-2; registered ADR-052 v1.21 and specialist spec/story work; recorded human decisions D-1252(a)-(f); STORY-INDEX v4.486, BC-INDEX v5.107; archived the v10.85 checkpoint; paused the pipeline.
+
+## Burst: S2508-S2509-SPLIT-EXECUTED-ADR052-V122-REGISTRATION (2026-10-07)
+
+D-1253, v10.86→v10.87. Single-commit TD-VSDD-053 registration burst (state-manager). Pipeline RESUMED (`pipeline: in_progress`; human: "proceed with the in-flight work").
+
+**Parent-commit:** `7f482d9c` (factory-artifacts HEAD immediately prior, v10.86 / D-1252). Code parents (local-only, not pushed): `feature/S-25.08` reset `--keep` to `5091f88f`; NEW `feature/S-25.09` @ `39e89c59` (merge-base `5091f88f`, 11 commits).
+
+**Adversary verdict:** none this burst (no adversary pass run). LOCAL streaks: S-25.08 0/3 after pass 2 (pass 3 not started); S-25.09 0/3 (pass 1 not started). Prior verdict (pass 2 NOT CLEAN, 14+2) is unchanged and persisted at `code-delivery/S-25.08/adv-local-pass-2.md`.
+
+**Files touched (Dim-1):** 30 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, BC-INDEX.md, STORY-INDEX.md hash-parity cites only; the remainder specialist-authored or hook-written telemetry, committed as-is with hash currency verified):
+- STATE.md (v10.86→v10.87)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1253)
+- cycles/v1.0-brownfield-backfill/lessons.md (L-BB-D1253 x2; L-BB-D1245 near-miss)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.86 checkpoint archived)
+- regression-state.json (hook-written telemetry)
+- sidecar-learning.md (hook-written telemetry)
+- specs/architecture/ARCH-INDEX.md (v4.52)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.22)
+- specs/architecture/verification-architecture.md (v1.44)
+- specs/architecture/verification-coverage-matrix.md (v1.42)
+- specs/behavioral-contracts/BC-INDEX.md (v5.107→v5.108)
+- specs/behavioral-contracts/ss-01/BC-1.08.001.md (v1.5)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.19)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.11)
+- specs/behavioral-contracts/ss-03/BC-3.08.001.md (v1.36)
+- specs/behavioral-contracts/ss-07/BC-7.06.001.md (v1.14)
+- specs/verification-properties/VP-079.md (v1.25)
+- specs/verification-properties/VP-133.md (v1.7)
+- specs/verification-properties/VP-143.md (v1.6)
+- specs/verification-properties/VP-INDEX.md (v3.31)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (v1.1)
+- stories/S-25.02-artifact-sharding-layer2.md (v5.3)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.11)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.5)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (NEW, v1.0)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (v1.1)
+- stories/S-6.03-input-hash-drift-backlog-owner-review-then-recompute.md (v1.1)
+- stories/STORY-INDEX.md (v4.487)
+- stories/epics/E-25-validation-integrity.md (v1.6)
+
+**Codifications:** D-1253 (split executed, AC-027 stays in S-25.08; ADR-052 v1.22; pipeline resumed; OPEN [D-1253-BC118011-STATUS]; L-BB-D1253 replace_all-on-history -> S-12.16 AC-011 [D-1253-PG-001]; L-BB-D1253 verify-before-dispatch; L-BB-D1245 near-miss, recurrence stays x5).
+
+**Dim-2 (hash currency / gates; literal shell, captured stdout):**
+- `compute-input-hash <changed .md> --update` run in cascade rounds until a `--check` loop over every changed file printed no DRIFT line. Round 1 updated: session-checkpoints.md, VP-079.md (5551e22→ec8c5ba), S-25.02 (35d0420→a4612b6), S-25.06 (29c6fc6→3124958), STORY-INDEX.md, E-25 epic (7ec102c→3e335f9); round 2 updated none. STORY-INDEX catalog rows + POLICY 18 blockquote parity re-synced to S-25.02=a4612b6, S-25.06=3124958, E-25 epic=3e335f9 (S-25.08=d907028, S-25.09=09b17e0 unchanged); session-checkpoints.md hash re-updated last, after STATE.md finalization.
+- `printf '{"tool_name":"Edit","tool_input":{"file_path":".../VP-INDEX.md"}}' | bash plugins/vsdd-factory/hooks/validate-vp-consistency.sh` -> `vp-consistency exit=0`.
+- `cargo run -q -p last-amended-migrate -- migrate --check` -> all 5 governed files `eligibility=CurrentEntryOnly changelog=AlreadyPresent|SkippedStateFile escape_fixed=false entries_relocated=0 entries_discarded=0 mutated=false`; `migrate-check exit=0`.
+- `wc -l .factory/STATE.md` -> 217 (banner updated to match: margin 500 - 217 = 283); `git -C .factory status --porcelain` after commit: empty (reported in the commit report).
+
+**Dim-5:** Count-propagation: total_bcs 2007, total_vps 147 UNCHANGED. STORY-INDEX Status Summary (story-writer): in-progress 2→3, Total (active) 229→230; registered 250→251 (S-25.09 NEW); STATE.md Identifier Conventions updated to 251 registered = 208 story files + 43 index-only stubs. BC-INDEX: 5 Stories-cell edits (BC-1.18.011 += S-25.08, S-25.09; BC-1.18.013 += S-25.08, S-25.09; BC-3.08.001 += S-25.09; BC-1.08.001, BC-7.06.001 += S-25.08); BC-1.08.001/BC-7.06.001 rows are 5-column and carry no version cell.
+
+**Dim-6:** No new adversary findings; no tech-debt-register entries (process-gaps routed to S-12.16 / lessons).
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` mutations (compute-input-hash is the sanctioned hash tool).
+
+**Closes:** Drift Item [D-1252-OWED] partially (split, S-12.16 reverse edge, `root_source`/`check` domain, ADR-052 nine-token + read-failure ruling); STATE.md `pipeline: PAUSED` -> `in_progress`. **Opens:** [D-1253-BC118011-STATUS] (human), [D-1253-PG-001] (-> S-12.16).
+
+Summary: Registered the executed S-25.08/S-25.09 split (AC-027 stays in S-25.08), ADR-052 v1.22 and BC/VP/story propagation; BC-INDEX v5.108, VP-INDEX v3.31, ARCH-INDEX v4.52, STORY-INDEX v4.487; resumed the pipeline; archived the v10.86 checkpoint.

@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.21"
+version: "1.22"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -868,11 +868,13 @@ activation manifest) is derived from the SAME resolved real factory root; the si
 public entry `run_migrate_bc_index_cli`/`run_bc_index_migration` take the resolved PROJECT ROOT (the
 parameter is renamed from `_cwd` — it was never a cwd); `main.rs` computes it with (a) from
 `std::env::var_os("CLAUDE_PROJECT_DIR")` and `std::env::current_dir()` for BOTH subcommand routes.
-(d) *Where it lands.* S-25.08 (production-grade default: this is B2 conformance — the merged B2
+(d) *Where it lands.* S-25.09 (v1.22: the v1.21 scope was split out of S-25.08 by the human-approved
+S-25.08/S-25.09 split, D-1252(f); the story is a sibling of S-25.08 in the same crate and depends on it).
+Production-grade default: this is B2 conformance — the merged B2
 coordinator is the non-conformant party, the files are the same `main.rs`/`shard_manager.rs`, and the
-shared admission core's correctness argument depends on it). S-25.06's `backfill-append-logs` CLI does
-not exist in code yet and MUST be built on (a)–(c) from its first line; S-25.06 gains the AC, S-25.08
-delivers the function, the B2 re-anchoring and the tests.
+shared admission core's correctness argument depends on it. S-25.06's `backfill-append-logs` CLI does
+not exist in code yet and MUST be built on (a)–(c) from its first line; S-25.06 gains the AC, S-25.09
+delivers the function, the B2 re-anchoring and the tests (S-25.09 AC-001).
 (e) *Verification.* Real-binary tests (cwd ≠ `CLAUDE_PROJECT_DIR`): the coordinator operates on —
 and creates `migration-state/` only under — `<CLAUDE_PROJECT_DIR>/.factory`, a reservation created by
 admission under the same env is visible to the coordinator's first drain; `CLAUDE_PROJECT_DIR` unset
@@ -910,7 +912,8 @@ in BC-3.08.001 as Events 11–13 (constants `MIGRATION_ADMISSION_BLOCKED`,
 (`BC-INDEX` | `.factory/cycles/`), `family` (`bc_index` | `cycles`), `branch` ∈ {`gate_only`,
 `live_txn`, `foreign_migration`, `live_coordinator`, `completion_record_mismatch`}, `gate_state`,
 `migration_id`/`txn_id` (sanitized, length-capped, control characters escaped; `null` when no live txn),
-`check` (Branch C failing check, else `null`), `reconciliation` (CLOSED domain — the snake_case
+`check` (non-null iff `branch = completion_record_mismatch`, then exactly one token of the CLOSED nine-token
+domain stated under "Closed `check` domain (v1.22)" below; else `null`), `reconciliation` (CLOSED domain — the snake_case
 token of the effectful `StaleGateReconciliation` OUTCOME the verdict followed, not the pure plan:
 `live_coordinator` | `nothing_to_reconcile` | `gate_reopened` | `null_generation_txn_aborted` |
 `foreign_migration_refused` | `completion_record_mismatch`; reconciliation always runs before a block, so
@@ -930,7 +933,8 @@ for `_blocked`), and `tool_use_id_len` (u64 byte length) — any other field is 
 performs that repair (the dispatch then continues to its verdict; a later block still writes its own
 `_blocked`); (ii) `branch_c_finalize_unwired` — written when the pure
 `decide_terminal_record_reconciliation` returns `FinalizeThenOpenGate` (COMMITTING + a terminal record
-whose checks verify) but the finalize effect is not delivered: S-25.08's fail-closed seam. The verdict is
+whose checks verify) but the finalize effect is not delivered: S-25.08's fail-closed seam (the seam's code is
+S-25.08's; its diagnostics mapping is S-25.09 AC-002(e)). The verdict is
 the E-MAINTENANCE-001 block with the mismatch suffix, so ONE `_blocked` (`branch=completion_record_mismatch`) is
 ALSO written, with `reconciliation=completion_record_mismatch` (the effectful outcome the code returns
 for the unwired seam — NO seventh token), `branch=completion_record_mismatch` (never `live_txn`: the
@@ -938,7 +942,7 @@ verdict carries the mismatch suffix) and `check=finalize_unwired` — the adviso
 seam-reached condition, the `_blocked` records the verdict. This reason is RETIRED when S-25.06 delivers the finalize (the seam no longer exists);
 (iii) `branch_c_finalized` — written by S-25.06's verify-then-finalize on SUCCESS (txn→COMPLETED then
 gate→OPEN; the write is then admitted, so NO `_blocked` follows) with `migration_id`/`txn_id`; it is
-catalogued now so the closed `reason` domain is stable, but S-25.08 never emits it; (iv)
+catalogued now so the closed `reason` domain is stable, but neither S-25.08 nor S-25.09 emits it; (iv)
 `reservation_release_failed` — a non-ENOENT release error (never a verdict); (v) the five reservation-timestamp
 fallback outcomes (`created_at_unparseable`, `created_at_pre_epoch`, `created_at_future`,
 `mtime_future`, `age_unknown`) are NOT event reasons: admission never reads reservation files — only the
@@ -949,13 +953,32 @@ cause token only); the diagnostics are the queryable detail. (5) The two coordin
 CLI processes whose stderr IS the operator surface: each failure/advisory they previously sent only to
 `tracing` (`run_migrate_bc_index_cli`'s `migrate-bc-index: migration failed`, the drain's
 reservation-staleness advisories) is written to stderr as one `E-…`/`<VARIANT>`-prefixed line;
-`tracing::error!` there is retained only as an additional developer trace. (6) Owner/scope: S-25.08
+`tracing::error!` there is retained only as an additional developer trace. (6) Owner/scope: S-25.09
+(v1.22: split out of S-25.08, D-1252(f); S-25.09 AC-002)
 delivers (2)–(3) for admission/release (small: three constants, a data type, ~6 call-site
 conversions, the `main.rs` drain of diagnostics) and the coordinator stderr line for
 `migrate-bc-index`; S-25.06 inherits (5) for `backfill-append-logs`. No deferral: the channel exists
 (`InternalLog`) and the change is mechanical. The PRE-EXISTING dispatcher-wide discard of other
-`tracing` call sites (≈60, none admission-mandated) is out of this ADR's scope and is not a
-S-25.08 obligation.
+`tracing` call sites (≈60, none admission-mandated) is out of this ADR's scope and is not an
+S-25.08 or S-25.09 obligation.
+
+**Closed `check` domain (v1.22 — restates the v1.21 `_blocked` `check` field verbatim with BC-1.18.013
+v1.10-rev2 Postcondition 10(a); ADR/BC consistency).** `check` is `null` unless `branch =
+completion_record_mismatch`, in which case it is EXACTLY one token of the CLOSED NINE-TOKEN domain,
+each a compile-time constant of an exhaustive `enum` with `fn token(self) -> &'static str` (never derived
+from on-disk content): *verification checks*, evaluated in this fixed order, first failure wins, over the
+live txn's OWN migration's terminal record — (1) `staging_with_terminal_record` (txn STAGING and its own
+terminal record present; always fail-closed, no verification attempted), (2) `terminal_record_unparseable`,
+(3) `terminal_record_schema_mismatch`, (4) `txn_id_mismatch`, (5) `generation_id_mismatch`, (6)
+`canonical_paths_count_mismatch`, (7) `canonical_hash_mismatch` (first canonical path, in canonical order,
+whose `sha256` ≠ its recorded `expected_post_hash` OR which is ENOENT); *seam tokens*, emitted only while
+the verify-then-finalize effect is undelivered and retired when S-25.06 delivers the verifier — (8)
+`terminal_record_unverified` (COMMITTING, own record present, the build cannot verify it), (9)
+`finalize_unwired` (the pure core decided `FinalizeThenOpenGate` but finalize is undelivered; also yields
+the `branch_c_finalize_unwired` advisory). The domain is exactly these nine tokens. Tokens (2)–(7) are
+emitted by S-25.06 once it delivers the verifier; this build (S-25.08/S-25.09) emits only (1), (8) and
+(9). A read CALL that fails with a non-ENOENT OS error is NOT a `check` token — see "Read-failure
+mapping" under §Error Code Semantics (`E-MAINTENANCE-002 (io)`, no `_blocked`).
 
 **Admission verdict surface label (v1.21 — closes F-013).** `shard_gate_block_outcome` /
 `shard_gate_error_outcome` hard-code `plugin_name = "shard-cap-gate"`, so a migration-window
@@ -970,7 +993,7 @@ parameter (a `NativeGate { ShardCap, MigrationAdmission }` enum with `fn plugin_
 (ADR-048 §Decision 1 / BC-1.18.002 PC5 concern the `block_if_marker` crash-block reason; the
 `blocking_plugins`/`block_reason` stderr line itself is a dispatcher-internal summary format, only
 described in ADR-042/ADR-053 prose as "TD #71"); the E-MAINTENANCE message text and the exit code are
-unchanged. S-25.08 gains the AC (black-box: a blocked protected write's stderr line carries
+unchanged. S-25.09 gains the AC (S-25.09 AC-005; black-box: a blocked protected write's stderr line carries
 `blocking_plugins=migration-admission`; a shard-cap block still carries `shard-cap-gate`).
 
 **Admission state-integrity variant (v1.21 — closes F-012).** v1.20 let admission reuse
@@ -2683,7 +2706,7 @@ reuse `BinaryIntegrityFailure`, whose Display is the digest/TOCTOU code `BINARY_
 | Error / variant | Layer | Trigger | Severity | Exit / surface |
 |---|---|---|---|---|
 | `RESERVATION_TTL_BELOW_FLOOR` — `BcIndexMigrationError::ReservationTtlBelowFloor { configured_secs: u64, floor_secs: u64 }` | migration binary (production drain entry point) | the production entry point is configured with a `MAX_RESERVATION_TTL` below the 1,800 s floor (§5a "Reservation timing parameters"); a configuration error, raised by `validate_production_reservation_ttl` BEFORE any gate or drain action (the injectable test seam `drain_bc_index_writers` is not bound) | BLOCKED — nothing mutated | exit 2 |
-| `E-MAINTENANCE-002` — `BcIndexMigrationError::InvalidToolUseId { len: usize }` and the other admission-check failures | guard layer (native admission gate) | the admission check could not be completed and FAILS CLOSED: `invalid_tool_use_id` (present but non-string/empty/grammar-violating id, §5a "`tool_use_id` presence and validity"), `io` (an OS-level filesystem call made by the check failed with anything other than `ENOENT` on the file itself — directory/reservation create, or open/read/readdir/stat of `migration-state/`, `gate-state.json`, a `txn-*.json` or the terminal record), `state_integrity` (bytes were read but are unusable: invalid UTF-8, empty/truncated/unparseable JSON, wrong JSON type or shape, a present non-string `migration_id`, more than one live txn). Total decision rule below. No reservation is left behind. | BROKEN — write not admitted | `HookResult::Error`; exit 2 at the PreToolUse hook surface |
+| `E-MAINTENANCE-002` — `BcIndexMigrationError::InvalidToolUseId { len: usize }` and the other admission-check failures | guard layer (native admission gate) | the admission check could not be completed and FAILS CLOSED: `invalid_tool_use_id` (present but non-string/empty/grammar-violating id, §5a "`tool_use_id` presence and validity"), `io` (an OS-level filesystem call made by the check failed with anything other than `ENOENT` on the file itself — directory/reservation create, or open/read/readdir/stat of `migration-state/`, `gate-state.json`, a `txn-*.json`, the terminal record or — on the Branch C verification path — a canonical file; v1.22 "Read-failure mapping" below), `state_integrity` (bytes were read but are unusable: invalid UTF-8, empty/truncated/unparseable JSON, wrong JSON type or shape, a present non-string `migration_id`, more than one live txn). Total decision rule below. No reservation is left behind. | BROKEN — write not admitted | `HookResult::Error`; exit 2 at the PreToolUse hook surface |
 
 **`E-MAINTENANCE-002` `<cause>` — total decision rule (aligned verbatim in substance with
 BC-1.18.013 v1.8 Precondition 6(c) and EC-032).** Every way the check can fail to complete maps
@@ -2714,6 +2737,32 @@ NO suffix and arises in exactly four cases — gate-only block (no live txn), te
 verification failure carries the suffix. Both
 `io` and `state_integrity` are fail-closed: no reservation left behind, no txn/gate write, no Branch
 A/B/C repair; the message carries only the cause token, details go to the `migration.admission_failed` InternalLog event (v1.21; §5a "Admission diagnostics channel").
+
+**Read-failure mapping (v1.22 ruling — a canonical-file or terminal-record read CALL that fails during
+admission).** A read CALL (`open`/`read`/`stat`) of the live txn's terminal record, or of any canonical
+file read during Branch C verification, that fails with anything other than `ENOENT` on the file itself
+(EACCES, EPERM, EISDIR — e.g. the path is a directory —, ELOOP, EIO, EMFILE, a short or interrupted
+read, …) maps to **`E-MAINTENANCE-002 (io)`**, NOT to a Branch C `check` token and NOT to
+`E-MAINTENANCE-001`. Exactly: one `migration.admission_failed` (`cause=io`), NO `migration.admission_blocked`,
+no `_advisory`, no reservation left behind, no txn/gate write, txn not finalized, not discarded. `ENOENT`
+keeps its absent semantics: ENOENT of the terminal record is "absent" (plain `NoOp` / Branch B path);
+ENOENT of a canonical file during verification is the `canonical_hash_mismatch` check (domain item (7)).
+*Rationale, from the existing rules:* (1) the total `<cause>` rule above says every way the check can
+fail to complete maps to exactly one cause and a failed OS call is `io` ("once a call has failed the
+content is NOT examined"; the enumerated file list is illustrative — "…" — and the rule's trigger is the
+failed call on the file itself, so the terminal record and the canonical files it names are covered by
+(2), not by (3)); (2) BC-1.18.013 EC-032 already decides the terminal-record leg: "terminal record: read
+failure ⇒ `io`, unverifiable content … ⇒ NOT `E-MAINTENANCE-002`" — "read failure wins when both would
+apply"; extending the same split to the canonical files is the only reading under which one rule holds for
+every file the check reads; (3) the item-33 rulings make `check` a CLOSED NINE-token domain of
+verification OUTCOMES, each a compile-time constant that is never derived from on-disk content: a read
+that failed produced no outcome about the record (the content was never examined), so a tenth
+`terminal_record_unreadable` token would both break the closed domain and report an infrastructure fault
+as evidence that a corrupt or mismatching completion record exists; (4) fail-closed safety: classifying an
+unreadable record as ABSENT would let Branch B discard a txn whose record merely could not be read; and
+(5) the exactly-once invariants stay clean — one verdict (`E-MAINTENANCE-002`) ⇒ one `_failed`, with
+`_blocked` reserved for `E-MAINTENANCE-001`. Conformance vector: BC-1.18.013 EC-037 Canonical Test Vector
+row (10) (record path a directory / `chmod 000` ⇒ `E-MAINTENANCE-002 (io)`, no `_blocked`).
 
 **v1.21 additions (closes F-012 / D-2; dedicated variants — see §5a "Admission state-integrity
 variant" and "Single anchoring rule"):**
@@ -3734,7 +3783,7 @@ unless a delta names one. Numbering continues the v1.20 list.
     when `decide_terminal_record_reconciliation` returns `FinalizeThenOpenGate` and the finalize effect is
     undelivered (S-25.08 seam) — written IN ADDITION to the one `_blocked`; retired when S-25.06
     delivers the finalize. `branch_c_finalized` is written by S-25.06's successful verify-then-finalize
-    (admitted ⇒ no `_blocked`); S-25.08 never emits it.
+    (admitted ⇒ no `_blocked`); neither S-25.08 nor S-25.09 emits it (v1.22).
     (d) *Optional `_advisory` context fields:* closed set `migration_id`, `txn_id`, `check`, `detail`,
     `tool_use_id_len`; any other field forbidden (replace "e.g." wording in Event 13).
     (e) *`FACTORY_ROOT_NOT_FOUND` text:* normative single stderr line `<subcommand>:
@@ -3764,7 +3813,8 @@ unless a delta names one. Numbering continues the v1.20 list.
 
 **story-writer** (no BC authoring)
 
-31. **S-25.08:** NEW ACs, each with the black-box/unit evidence named: AC-021 (D-2; §5a "Single
+31. **S-25.08 (as authored at v1.21; since v1.22 these ACs live in S-25.09 as AC-001..AC-006 — see
+    "v1.22 split mapping" below):** NEW ACs, each with the black-box/unit evidence named: AC-021 (D-2; §5a "Single
     anchoring rule": `resolve_session_project_root` pure fn unit table; real-binary cwd ≠
     `CLAUDE_PROJECT_DIR`; unset/empty; no-`.factory` exit 2; symlink; `grep 'join(".factory'` sweep gate;
     both `migrate-bc-index` routes in `main.rs`); AC-022 (D-1; three InternalLog event types +
@@ -3788,13 +3838,40 @@ unless a delta names one. Numbering continues the v1.20 list.
 32. **S-25.06:** re-point every `append_log_backfill_admission_precheck` /
     `append_log_backfill_reservation_release` mention (catalog/§Architecture rows, the file-list row,
     the two executor-scope paragraphs) to the neutral names; NEW AC: the `backfill-append-logs`
-    CLI resolves its factory root with the single anchoring rule (reusing S-25.08's function,
-    exit 2 `FACTORY_ROOT_NOT_FOUND`), its production entry delegates to a crate-private
+    CLI resolves its factory root with the single anchoring rule (reusing S-25.09's function since v1.22,
+    formerly S-25.08's; exit 2 `FACTORY_ROOT_NOT_FOUND`), its production entry delegates to a crate-private
     `…_with_ttl` seam (EC-031 shape), and its failures/advisories go to stderr; S-25.06 depends on
-    S-25.08's function (already in `depends_on`). STORY-INDEX row/version bump per normal propagation
+    S-25.09's function (S-25.09 must be in `depends_on`, transitively S-25.08). STORY-INDEX row/version bump per normal propagation
     (no `bcs:` change ⇒ POLICY 8 atomicity not triggered).
 
-**implementer (S-25.08; for the story-writer to carry as tasks)** — beyond the AC list: remove the
+### v1.22 split mapping (S-25.08 → S-25.08 + NEW S-25.09; human decision D-1252(f), amended: AC-027 stays in S-25.08)
+
+Story-ownership change only: **no design, state-machine, BC, taxonomy or VP-count change.** The split cut is
+`feature/S-25.08` commit `5091f88f` (S-25.08 = `ce2421be..5091f88f`; S-25.09 = the 11 commits
+`5091f88f..39e89c59`). Story-writer already carries the stories (S-25.08 v1.5, S-25.09 v1.0); this table is the
+ADR-side anchor so every story citation in this ADR resolves.
+
+| ADR-052 item | Rulings | Story | AC (S-25.09 numbering; formerly S-25.08) |
+|---|---|---|---|
+| v1.18–v1.20: shared admission core, reserve-then-verify, Branches A/B/C, release on `PostToolUse`/`PostToolUseFailure`, `factory_root` gate anchoring, `resolve_target_path`, registry-independent position, TTL/timestamp rules, named variants; B2 conformance; VP-147 re-baseline (items 14–22) | F-001..F-009, B2-1..B2-4 | **S-25.08** | AC-001..AC-020 |
+| Registry fail-closed exit mapping (BC-7.06.001 / BC-1.08.001) | — | **S-25.08** (stays; code `0cc54c94`, tests before the cut) | AC-027 |
+| v1.21 D-2 single anchoring rule (§5a "Single anchoring rule"; items 23, 31) | D-2 | **S-25.09** | AC-001 (formerly AC-021) |
+| v1.21 D-1 admission diagnostics as InternalLog events + `check` domain (§5a "Admission diagnostics channel", "Closed `check` domain"; items 24, 25, 33(a)–(g)) | D-1 | **S-25.09** | AC-002 (formerly AC-022) |
+| v1.21 F-006 EC-031 crate-private TTL seam (item 26) | F-006 | **S-25.09** | AC-003 (formerly AC-023) |
+| v1.21 F-012 `AdmissionStateIntegrity` + exhaustive cause match (item 27) | F-012 | **S-25.09** | AC-004 (formerly AC-024) |
+| v1.21 F-013 `NativeGate` / `blocking_plugins=migration-admission` (item 28) | F-013 | **S-25.09** | AC-005 (formerly AC-025) |
+| v1.21 F-014 neutral entry-point names (item 29) | F-014 | **S-25.09** | AC-006 (formerly AC-026) |
+| v1.22 read-failure mapping (§Error Code Semantics) | — | conformance vector under S-25.09 AC-002 (BC-1.18.013 EC-037 row (10)); implementation already conformant at `39e89c59` | AC-002 |
+
+Dependency/sequencing consequences (story-writer/STORY-INDEX already carry them; stated so the ADR is
+self-consistent): S-25.09 `depends_on` S-25.08; S-12.16, S-25.06, S-26.06 and S-6.03 depend on S-25.09; the
+S-25.06 `backfill-append-logs` coordinator AC (item 32) consumes S-25.09's `resolve_session_project_root` /
+`FactoryRootNotFound { root_source }`; the "S-25.08 seam" wording in items 33(c)/(g) names the fail-closed
+finalize seam whose CODE is S-25.08's and whose `finalize_unwired` diagnostics are S-25.09's; the verification
+property anchors follow the same split (VP-133 v1.7 facet 7(e), VP-143 v1.6 v1.5-D1 vectors, VP-079 v1.25 →
+S-25.09; VP-147 and VP-146 stay with S-25.08/S-25.06).
+
+**implementer (S-25.09 since v1.22, formerly S-25.08; for the story-writer to carry as tasks)** — beyond the AC list: remove the
 `_cwd` underscore names in the coordinator signatures (they are used); `FactoryRoot::migration_state_dir()`
 is already `pub`; the executor outcome synthesizers gain the `NativeGate` parameter; no change to
 the E-MAINTENANCE message strings or exit codes.
@@ -3834,7 +3911,7 @@ the E-MAINTENANCE message strings or exit codes.
 | `.claude/settings.json` | No change — Option B requires no settings.json mutation | — |
 | `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/shard_manager.rs` (v1.18, S-25.06 scope) | Shared admission core evaluated once per PreToolUse before `shard_cap_precheck` (D1); reserve-then-verify order + release-on-block (D5/D2); (v1.19) `executor.rs` admit path: REMOVE the early return that skips admission/reservation when `.factory/migration-state/` is absent (and its PostToolUse-release counterpart's directory-exists precondition becomes a best-effort no-op only) — replaced by an idempotent `create_dir_all(migration-state/reservations)` immediately before reservation W1; wire §5a step-3.5 Branches A/B/C into the production admission path for BOTH migrations (merged `reconcile_stale_admission_gate` is uncalled dead code) + verified `completed*.json`+COMMITTING finalize replacing the merged unverified B2 short-circuit (D3); `migration_id` txn field + cross-migration refusal + per-migration terminal-record/pointer names for `backfill-append-logs` + `file_count`→`canonical_paths_count` (D4); `DEFAULT_MAX_RESERVATION_TTL` 120 s→3,600 s with `created_at`-based staleness; mechanism-A coordinator drain (steps 1–7) writing `gate-state.json`. B2 test fixtures that model STAGING without holding `exclusive.lock` must be updated by test-writer. | implementer / test-writer (S-25.06) |
 | `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/invoke.rs`, `src/shard_manager.rs`, `src/shard_manager/admission.rs` (v1.20, S-25.08 scope) | (F-004) move the admission call and the release call in `main.rs::run` to immediately after payload parse + `resolve_project_cwd()`, BEFORE the `CLAUDE_PLUGIN_ROOT` tiering / `resolve_registry_path()` / `Registry::load`; a Block/Error verdict exits via the existing `shard_gate_verdict_outcomes` mapping without loading the registry; (F-001) `executor.rs` release gated by new pure `is_tool_completion_event` (`"PostToolUse"` \| `"PostToolUseFailure"`), keyed on `tool_use_id` only (drop the `Edit/Write/MultiEdit` tool filter), NO new `EventType` variant; (F-002/F-003) `ProtectedPathFamily::classify` replaced by component-wise classification against `factory_root` using new shared `resolve_target_path` → `(T_real, T_lex)`; admission/release derive `migration_state_dir` from `factory_root` (must exist; never create `.factory`); out-of-root paths out of scope; (F-006) rename `TerminalReconcileInputs.txn_is_own_migration` → `txn_migration_known` and set it from `migration_id ∈ {migrate-bc-index, backfill-append-logs}`; (F-008) `reservation_is_stale(Option<u64>, Option<u64>, u64, u64)`, `RESERVATION_CLOCK_SKEW_TOLERANCE_SECS = 300`, pre-epoch/unavailable mtime ⇒ NOT stale (replaces `epoch_secs ⇒ 0`); (F-009) add `BcIndexMigrationError::ReservationTtlBelowFloor` and `InvalidToolUseId`, map admission errors to `E-MAINTENANCE-002 (<cause>)`, `validate_production_reservation_ttl` stops returning `BinaryIntegrityFailure`; key-present-but-invalid `tool_use_id` fails closed. Tests: the §5a "v1.20 test mandate". | implementer / test-writer (S-25.08) |
-| `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/internal_log.rs`, `src/shard_manager.rs`, `src/shard_manager/admission.rs` (v1.21, S-25.08 scope) | (D-2) pure `resolve_session_project_root`; `main.rs::resolve_project_cwd` delegates; both subcommand routes pass the resolved project root; `run_bc_index_migration` derives every `.factory/…` path from `resolve_factory_root` (six `_cwd.join(".factory/…")` literals removed); `FactoryRootNotFound`; (D-1) `AdmissionDiagnostic` data returned by the core/`MigrationAdmission`, `main.rs` writes `migration.admission_*` InternalLog events before the early return, three constants in `internal_log.rs`, `migrate-bc-index` failure line on stderr; (F-006) `run_bc_index_migration_with_ttl` crate-private seam; (F-012) `AdmissionStateIntegrity`/`AdmissionStateIntegrityKind`/`AdmissionFailureCause`, exhaustive cause match; (F-013) `NativeGate` enum + `migration-admission` label; (F-014) rename `bc_index_migration_admission{,_precheck}` / `bc_index_migration_reservation_release` → `migration_writer_admission{,_precheck}` / `migration_reservation_release` | implementer (S-25.08) |
+| `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/internal_log.rs`, `src/shard_manager.rs`, `src/shard_manager/admission.rs` (v1.21 scope; owned by S-25.09 since v1.22, formerly S-25.08) | (D-2) pure `resolve_session_project_root`; `main.rs::resolve_project_cwd` delegates; both subcommand routes pass the resolved project root; `run_bc_index_migration` derives every `.factory/…` path from `resolve_factory_root` (six `_cwd.join(".factory/…")` literals removed); `FactoryRootNotFound`; (D-1) `AdmissionDiagnostic` data returned by the core/`MigrationAdmission`, `main.rs` writes `migration.admission_*` InternalLog events before the early return, three constants in `internal_log.rs`, `migrate-bc-index` failure line on stderr; (F-006) `run_bc_index_migration_with_ttl` crate-private seam; (F-012) `AdmissionStateIntegrity`/`AdmissionStateIntegrityKind`/`AdmissionFailureCause`, exhaustive cause match; (F-013) `NativeGate` enum + `migration-admission` label; (F-014) rename `bc_index_migration_admission{,_precheck}` / `bc_index_migration_reservation_release` → `migration_writer_admission{,_precheck}` / `migration_reservation_release` | implementer (S-25.08) |
 | `.factory/specs/behavioral-contracts/ss-01/BC-1.18.011.md` | Apply §Downstream Amendments 1–9 (v1.3 versions) | product-owner |
 | `.factory/specs/behavioral-contracts/ss-01/BC-1.18.010.md` | Apply §Downstream Invariant 2 amendment + §Reader Integration v1.3 replacement | product-owner |
 | `.factory/specs/prd-supplements/error-taxonomy.md` | Apply §Downstream error-taxonomy v1.3 correction | product-owner or technical-writer |
@@ -3856,6 +3933,7 @@ the E-MAINTENANCE message strings or exit codes.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.22 | 2026-10-07 | architect | Story-mapping and consistency amendment after the human-approved split of S-25.08 into S-25.08 + NEW S-25.09 (D-1252(f); AC-027 stays in S-25.08); NO design, state-machine, BC, taxonomy or VP-count change. (1) §Downstream "v1.22 split mapping": the v1.21 rulings (D-2, D-1, F-006, F-012, F-013, F-014; items 23–33) are now owned by S-25.09 AC-001..AC-006 (formerly S-25.08 AC-021..AC-026); v1.18–v1.20 scope and AC-027 stay with S-25.08; in-line ownership statements in §5a (anchoring "Where it lands", diagnostics (6), label AC), items 31/32 and the Files-to-Change v1.21 row re-pointed. (2) §5a "Closed `check` domain (v1.22)": states the closed NINE-token `check` domain (staging_with_terminal_record, terminal_record_unparseable, terminal_record_schema_mismatch, txn_id_mismatch, generation_id_mismatch, canonical_paths_count_mismatch, canonical_hash_mismatch, terminal_record_unverified, finalize_unwired) consistently with BC-1.18.013 v1.10-rev2 Postcondition 10(a) (v1.21 text said only "Branch C failing check"); no disagreement with the BC (BC not edited). (3) §Error Code Semantics "Read-failure mapping (v1.22)": RULING — a canonical-file or terminal-record read CALL failing with non-ENOENT during admission is `E-MAINTENANCE-002 (io)` (one `_failed`, no `_blocked`, no tenth `check` token), derived from the total `<cause>` rule, EC-032 and the item-33 closed-domain rulings; code at `39e89c59` already conforms. Refs: S-25.08 v1.5, S-25.09 v1.0, VP-INDEX v3.31, ARCH-INDEX v4.52. |
 | 1.21 | 2026-10-07 | architect | S-25.08 local adversary pass 2 (code `.worktrees/S-25.08` @ 25e5464e reviewed read-only) — normative rulings on six gaps. **D-2** one anchoring rule for admission AND both coordinator binaries (`resolve_session_project_root` → `resolve_factory_root`; coordinator derives every `.factory/…` path from the resolved real root, never creates `.factory`, new fail-closed `FactoryRootNotFound` exit 2; lands in S-25.08 as B2 conformance, `backfill-append-logs` built on it in S-25.06). **D-1** the dispatcher installs no `tracing` subscriber (all `tracing::*!` is discarded in production; no spec/story owns one), so admission diagnostics MUST use the spec-owned dispatcher-internal `InternalLog` channel: three `migration.admission_{blocked,failed,advisory}` events returned as data by the pure core and written by `main.rs`; coordinator diagnostics to stderr; installing a global subscriber explicitly NOT the fix; the seven `tracing::warn!` mandates in this ADR re-pointed. **F-006** const assertion alone does not discharge EC-031; crate-private `run_bc_index_migration_with_ttl` seam (first-statement validation) keeps the byte-identical-snapshot vector assertable; no public/env/argv TTL input. **F-012** dedicated `AdmissionStateIntegrity { kind }` variant (five kinds), exhaustive `admission_failure_cause` (closed `AdmissionFailureCause`, no wildcard), taxonomy rows `MIGRATION_STATE_INTEGRITY_FAILURE` / `FACTORY_ROOT_NOT_FOUND`. **F-013** admission verdict label `migration-admission` via a closed `NativeGate` enum; no spec names `shard-cap-gate`, TD #71 stderr format unchanged. **F-014** shared entry points renamed migration-neutral (`migration_writer_admission` / `_precheck` / `migration_reservation_release`), per-migration delegates NOT created (supersedes the v1.20 "thin delegates" sentence). VP-143 v1.5 / VP-146 v1.4 amended (VP-INDEX v3.30; no count change). **Same-version completion (product-owner gaps):** undelivered-finalize case ruled — `_blocked{branch=completion_record_mismatch, reconciliation=completion_record_mismatch, check=finalize_unwired}` (no seventh token; item 33(g)); Branch C verification failure writes ONE `_blocked` (`branch=completion_record_mismatch`) and NO `_advisory` (stale §5a prose fixed); `reconciliation` domain ratified/corrected to the six effectful-outcome tokens (no `none`) with a `branch` derivation table; `_advisory` reason domain closed to five dispatcher-leg tokens (+ `branch_c_finalize_unwired` fires when the S-25.08 fail-closed seam is reached, retired by S-25.06; `branch_c_finalized` reserved for S-25.06), the five timestamp tokens moved to coordinator stderr; optional advisory fields closed; `FACTORY_ROOT_NOT_FOUND` stderr line made normative (resolver returns `SessionProjectRoot { path, source }`); VP-079 v1.24 extended for Events 11–13, VP-028 v1.1 scope note, VP-133 v1.6 facet 7(e) (VP-INDEX v3.30 amended; no count change). §Downstream deltas 23-33 (product-owner: BC-1.18.011 v1.18, BC-1.18.013 v1.10, BC-3.08.001 v1.35, error-taxonomy v1.39; story-writer: S-25.08, S-25.06). |
 | 1.20 | 2026-10-07 | architect | S-25.08 local adversary pass 1 — normative rulings on seven spec-level gaps in the shared admission core (HEAD 292ffed5 reviewed read-only). **F-001** release on BOTH `PostToolUse` and `PostToolUseFailure` for the same `tool_use_id` (Claude Code delivers a failed tool call only as `PostToolUseFailure`; registered in `hooks.json.template`; payload carries `tool_use_id`, captured by `HookPayload.extra`); gate by a named pure predicate, no new `EventType` variant, no `tool_name` filter; neither event ⇒ TTL backstop; fixture gap recorded. **F-002** anchoring: the gate guards the session's own `factory_root` = resolved `<CLAUDE_PROJECT_DIR>/.factory` (must exist; never created); migration-state always `<factory_root>/migration-state`; component-wise classification replaces `contains(…)`; out-of-root `.factory` paths are out of scope (admitted, no reservation, no directory); worktree/symlink behaviour specified; residual + backstop stated. **F-003** shared `resolve_target_path`: lexical + POSIX-correct symlink resolution of the deepest existing ancestor, union of resolved/lexical match, unresolvable ⇒ lexical (fail-closed), `\` separator only on Windows, ALWAYS case-insensitive component compare (no FS probe; rationale); §5c Bash leg bound to the same function/anchor. **F-004** admission and release are registry-independent: evaluated before `Registry::load`/`resolve_registry_path`; obligations O1–O4; supersedes the "position … already holds" wording. **F-006** "foreign" in the shared core = `migration_id ∉ K` (K = the two known ids); a live txn of either known migration is decided against its own record selected by `migration_id`; `txn_is_own_migration` → `txn_migration_known`; five-row table restated; binary cross-migration refusal unchanged. **F-008** timestamp rules: skew tolerance 300 s, future-beyond-tolerance and pre-epoch/out-of-range `created_at` ⇒ unparseable ⇒ mtime, unknown age ⇒ NOT stale, never clamp; retention-over-reclamation rationale. **F-009** variants `ReservationTtlBelowFloor`, `InvalidToolUseId` (fail-closed when key present but invalid), new codes `E-MAINTENANCE-002` and `RESERVATION_TTL_BELOW_FLOOR`; `tool_use_id` grammar stated. Added §5a v1.20 test mandate, §Downstream deltas 14-20 (BC-1.18.011 v1.16 / BC-1.18.013 v1.8 / error-taxonomy v1.36 / stories), §Files to Change row. No state-machine, Dekker, or §Decision 1–4/7a–d/8–12 change. VP-133/VP-143/VP-147 anchors amended same burst. **Same-v1.20 consistency correction (product-owner conflict report):** the registry-error behaviour cited in §5a "Evaluation position", the F-004 test mandate and Downstream item 20 is restated from `main.rs::run` (HEAD 292ffed5): schema-version mismatch (`E-REG-001`), async+block conflict (`E-REG-002`) and duplicate entry (`E-REG-003`) exit 2 (fail-closed); not-found/parse/regex errors, `resolve_registry_path` Err and Tier-1 degraded are fail-open (exit 0); release-on-block keys on `code == 2`. **Same-v1.20 implementation rulings (S-25.08 HEAD 83f0f549):** (a) `FactoryRoot.lex_aliases` RATIFIED — the lexical side of the scope union compares against exactly two spellings of the session's own root (canonical, and as-given `CLAUDE_PROJECT_DIR/.factory`), both from the same env value, so no cross-project over-match; migration-state stays on the real root (§5a "Lexical root spellings"; Downstream item 21). (b) `executor::resolve_shard_gate_precedence` REMOVED with its tests as superseded by the structural early return (Downstream item 22; one real-binary test replaces them). **Same-v1.20 alignment with product-owner ruling (BC-1.18.013 v1.9 / BC-1.18.011 v1.17 / error-taxonomy v1.38):** a Branch C terminal record that reads but does not verify (unparseable, non-UTF-8, empty/truncated, wrong schema, count ≠ N, id/hash mismatch) yields `E-MAINTENANCE-001` WITH the completion-record-mismatch suffix (not plain); a failed read call is `E-MAINTENANCE-002` (`io`); "plain" = no suffix, only for gate-only block, terminal record absent (`NoOp`), foreign refusal, live coordinator. §Error Code Semantics E-MAINTENANCE-002 rule corrected; every other "plain" usage in this ADR audited and already matches. The earlier text calling the whole registry-load path "fail-open" was imprecise. **Same-v1.20 wording fix (E-MAINTENANCE-002 causes):** the Error Code Semantics row's `io` ("cannot … read gate/txn") and `state_integrity` ("unreadable …") overlapped; replaced by the total decision rule aligned with BC-1.18.013 v1.8 Precondition 6(c)/EC-032 — `io` = OS call failed (non-ENOENT), `state_integrity` = bytes read but unusable, ENOENT = absent semantics, fixed evaluation order, reservation files never read by admission, a terminal record that reads but does not verify = plain E-MAINTENANCE-001. The code's E-REG numbering disagrees with error-taxonomy rows E-REG-001..003 (which list other meanings, exit 0) — flagged to product-owner; no registry policy change. |
 | 1.19 | 2026-10-07 | architect | S-25.08 implementation finding — first-activation reservation race (ratifies product-owner BC-1.18.013 v1.7 Precondition 6(c) / BC-1.18.011 v1.15; same decision, option (a)). (1) §5a step 0 appended: admitter first ensures `.factory/migration-state/reservations/` by idempotent recursive create (already-exists is success; no existence pre-check, no lock); admission/reservation/release never conditioned on pre-existence of `migration-state/`; absent `gate-state.json` = OPEN, absent txn set = no live txn; Dekker argument holds from the first protected write ever; creation failure fails PreToolUse closed. (2) Cost note added: cost applies to every protected Edit/Write/MultiEdit (not only during migrations), still ≤ low-single-digit ms, accepted. (3) §7e "Why (D4)" parenthetical corrected: "(`.factory/migration-state/` does not exist)" → "(no txn record, terminal record or pointer exists; the empty `migration-state/reservations/` namespace may exist from admission)". (4) §Files-to-Change `executor.rs` row: removal of the directory-exists early return on the admit path. Verification: VP-133 reserve-then-verify facet, VP-146 a4, VP-147 h4 gain the obligation "reservation namespace exists from the first protected write" (see those VPs for Kani-provable vs black-box split). Versioned v1.19 (not an in-place edit of v1.18) because v1.18 was already committed. |

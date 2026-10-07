@@ -3,13 +3,13 @@ document_type: epic
 level: L3
 traces_to: .factory/stories/STORY-INDEX.md
 epic_id: "E-25"
-version: "v1.5"
+version: "v1.6"
 status: draft
 title: "Validation Integrity and Large-Artifact Resilience"
 prd_capabilities: [CAP-041]
 subsystems_affected: [SS-01, SS-03, SS-04, SS-07]
 target_release: "v1.0.0-rc.25"
-story_count: 8
+story_count: 9
 producer: story-writer
 timestamp: "2026-08-30T00:00:00Z"
 phase: 3
@@ -28,14 +28,16 @@ inputs:
   - .factory/stories/S-25.03-bounded-validator-windows-layer3.md
   - .factory/stories/S-25.06-append-log-backfill-split-executor.md
   - .factory/stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md
-input-hash: "7ec102c"
-last_amended: "2026-10-06 (v1.5) — Frontmatter `modified[]` re-sequenced monotonically (v1.3 entry had followed v1.4; POLICY 14 leg 3; all entries preserved) and S-25.08 status text READY -> IN-PROGRESS in the Description narrative, Sequencing-rationale bullet and Dependency Graph mermaid label (story-writer). --- (v1.4 detail retained:) 2026-10-06 (v1.4) — S-25.08 registered via the human-decided SPLIT of S-25.06 (2026-10-06, option (A); story-writer): S-25.06 v1.5 (21 pts, over the 13-pt index rule) is split — NEW S-25.08 (8 pts, wave W3a, `depends_on: []`, `blocks: [S-25.06]`; BC-1.18.011 + BC-1.18.013; VP-133/VP-143/VP-147) carries the shared admission core wired in main.rs (D1/D5/release-on-block), B2-1/B2-3/B2-4, B2 fixture updates and the VP-147 B2 obl1 Kani re-baseline; S-25.06 v1.6 (13 pts, `depends_on: [S-25.08]`, `blocks: [S-25.02]` unchanged) keeps baseline AC-001..AC-014, D2/D3/D4, B2-2 and the ten VP-146 harnesses. (1) story_count 7 -> 8; Stories table: S-25.08 row added, S-25.06 row corrected (points 8 -> 13, status ready -> in-progress, BCs += BC-1.18.011 per its own v1.5 anchor and the table's stale 2026-09-25 values), S-25.02 BCs cell unchanged. (2) Total points ~101 -> ~114 (12 + 45 + ~12 + 8 + 8 + 13 + 8 + 8). (3) Dependency Graph mermaid + topological order: S-25.08 -> S-25.06 -> S-25.02 (cluster 7 Cohort-B flip); acyclic. (4) Sequencing rationale: S-25.06 bullet updated, S-25.08 bullet added; Description narrative 7 -> 8 stories. input-hash recomputed via compute-input-hash --update. --- (v1.3 detail retained:) 2026-09-25 (v1.3) — E-25 file-drift reconciliation (story-writer, same burst as S-25.06 Spec-First Gate closure). (1) S-25.03 Stories-table status corrected `backlog` -> `draft` to align with STORY-INDEX.md (the catalog authority per CLAUDE.md Architectural Authority #9) — STORY-INDEX.md already carries S-25.03 as `draft`; this epic file's own table had drifted. (2) Dependency Graph mermaid rebuilt: previously showed only the S-25.01->S-25.02->S-25.03 linear chain and omitted S-25.04/S-25.05/S-25.06/S-25.07 entirely; now shows all 7 stories with their real edges, including the S-25.06->S-25.02 prerequisite (S-25.06 `blocks: [S-25.02]` — S-25.02's cluster-7 Cohort-B fail-closed flip must not dispatch until S-25.06's backfill completes), S-25.02->S-25.03, S-25.02->S-25.05, and S-25.04/S-25.07 as independent (no epic-internal dependency edge). (3) Description narrative corrected: the \"HOLDING EPIC ... collects one active story ... and two registered-backlog stories\" framing was stale from v1.0 (3-story epic) and never updated across the v1.1/v1.2 story-count growth to 7; now reflects the actual 7-story composition. (4) S-25.06 Stories-table row status updated `draft` -> `ready` to match its Spec-First Gate S-7.01 closure (BC-1.18.013 v1.1 authored, VP-143/144/145 allocated) in this same burst."
+  - .factory/stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md
+input-hash: "3e335f9"
+last_amended: "2026-10-07 (v1.6) — S-25.09 registered via the S-25.08 split (D-1252(f)); story_count 8 -> 9; Stories table, Total (~119 pts), Dependency Graph (S-25.08 -> S-25.09 -> S-25.06) and Changelog updated (story-writer). | (v1.5) — Frontmatter `modified[]` re-sequenced monotonically (v1.3 entry had followed v1.4; POLICY 14 leg 3; all entries preserved) and S-25.08 status text READY -> IN-PROGRESS in the Description narrative, Sequencing-rationale bullet and Dependency Graph mermaid label (story-writer). --- (v1.4 detail retained:) 2026-10-06 (v1.4) — S-25.08 registered via the human-decided SPLIT of S-25.06 (2026-10-06, option (A); story-writer): S-25.06 v1.5 (21 pts, over the 13-pt index rule) is split — NEW S-25.08 (8 pts, wave W3a, `depends_on: []`, `blocks: [S-25.06]`; BC-1.18.011 + BC-1.18.013; VP-133/VP-143/VP-147) carries the shared admission core wired in main.rs (D1/D5/release-on-block), B2-1/B2-3/B2-4, B2 fixture updates and the VP-147 B2 obl1 Kani re-baseline; S-25.06 v1.6 (13 pts, `depends_on: [S-25.08]`, `blocks: [S-25.02]` unchanged) keeps baseline AC-001..AC-014, D2/D3/D4, B2-2 and the ten VP-146 harnesses. (1) story_count 7 -> 8; Stories table: S-25.08 row added, S-25.06 row corrected (points 8 -> 13, status ready -> in-progress, BCs += BC-1.18.011 per its own v1.5 anchor and the table's stale 2026-09-25 values), S-25.02 BCs cell unchanged. (2) Total points ~101 -> ~114 (12 + 45 + ~12 + 8 + 8 + 13 + 8 + 8). (3) Dependency Graph mermaid + topological order: S-25.08 -> S-25.06 -> S-25.02 (cluster 7 Cohort-B flip); acyclic. (4) Sequencing rationale: S-25.06 bullet updated, S-25.08 bullet added; Description narrative 7 -> 8 stories. input-hash recomputed via compute-input-hash --update. --- (v1.3 detail retained:) 2026-09-25 (v1.3) — E-25 file-drift reconciliation (story-writer, same burst as S-25.06 Spec-First Gate closure). (1) S-25.03 Stories-table status corrected `backlog` -> `draft` to align with STORY-INDEX.md (the catalog authority per CLAUDE.md Architectural Authority #9) — STORY-INDEX.md already carries S-25.03 as `draft`; this epic file's own table had drifted. (2) Dependency Graph mermaid rebuilt: previously showed only the S-25.01->S-25.02->S-25.03 linear chain and omitted S-25.04/S-25.05/S-25.06/S-25.07 entirely; now shows all 7 stories with their real edges, including the S-25.06->S-25.02 prerequisite (S-25.06 `blocks: [S-25.02]` — S-25.02's cluster-7 Cohort-B fail-closed flip must not dispatch until S-25.06's backfill completes), S-25.02->S-25.03, S-25.02->S-25.05, and S-25.04/S-25.07 as independent (no epic-internal dependency edge). (3) Description narrative corrected: the \"HOLDING EPIC ... collects one active story ... and two registered-backlog stories\" framing was stale from v1.0 (3-story epic) and never updated across the v1.1/v1.2 story-count growth to 7; now reflects the actual 7-story composition. (4) S-25.06 Stories-table row status updated `draft` -> `ready` to match its Spec-First Gate S-7.01 closure (BC-1.18.013 v1.1 authored, VP-143/144/145 allocated) in this same burst."
 modified:
   - "v1.0 2026-08-30: Initial authoring"
   - "v1.1 2026-09-11: S-25.04 + S-25.05 registered; story_count 3→5 (state-manager, D-1209)"
   - "v1.2 2026-09-25: S-25.07 registered; S-25.06 backfilled into Stories table (never propagated at its 2026-09-12 registration); story_count 5→7 (state-manager, D-1240)"
   - "v1.3 2026-09-25: S-25.03 status backlog->draft (STORY-INDEX parity); Dependency Graph mermaid rebuilt for all 7 stories + real edges (S-25.06->S-25.02 prerequisite added); Description narrative updated from stale 3-story framing to 7-story composition; S-25.06 row status draft->ready (story-writer)"
   - "v1.4 2026-10-06: S-25.08 registered (split of S-25.06 per human decision 2026-10-06, option (A)); story_count 7->8; S-25.06 row corrected (13 pts, in-progress); dependency graph + sequencing updated: S-25.08 -> S-25.06 -> S-25.02 cluster 7 (story-writer)"
+  - "v1.6 2026-10-07: S-25.09 registered via the human-decided split of S-25.08 (D-1252(f)); story_count 8->9; S-25.09 row, Total ~119 pts, mermaid S-25.08 -> S-25.09 -> S-25.06 (story-writer)"
   - "v1.5 2026-10-06: modified[] re-sequenced monotonically (v1.3 had been listed after v1.4; POLICY 14 leg 3; no entry lost); S-25.08 status READY -> IN-PROGRESS in Description narrative + Dependency Graph mermaid label (matches Stories table + STORY-INDEX) (story-writer)"
 ---
 
@@ -155,11 +157,14 @@ Next-Advance Gate** (SS-01 primary; SS-03, SS-04, SS-07 secondary):
 | S-25.05 | Rotate Changelog Crash Atomicity — Proper Cross-File Crash-Atomicity for B1 Archive Boundary | Layer 2 add-on | TBD (after S-25.02 merges) | backlog | 8 | BC-1.18.009 (pending v1.8), BC-10.13.001 (pending v1.6) |
 | S-25.06 | Append-Log Artifact Class — Sanctioned Backfill-Split Executor + ShardRegistry Enrollment + Cap-Triggered Rotation | Layer 2 add-on | W3 (after S-25.08) | in-progress | 13 | BC-1.18.013, BC-1.18.011 |
 | S-25.07 | Revisit BC-1.18.002 INV2/EC-030 Marker-Read I/O-Error Fail-Open Posture | E-25 add-on | — | draft | 8 | BC-1.18.002 (v1.8, existing) |
-| S-25.08 | Shared Admission Core Wired on the Production Path + B2 Conformance (B2-1/B2-3/B2-4) + VP-147 Re-baseline | Layer 2 add-on | W3 (before S-25.06) | in-progress | 8 | BC-1.18.011, BC-1.18.013 |
+| S-25.08 | Shared Admission Core Wired on the Production Path + B2 Conformance (B2-1/B2-3/B2-4) + VP-147 Re-baseline | Layer 2 add-on | W3 (before S-25.09) | in-progress | 8 | BC-1.18.011, BC-1.18.013, BC-7.06.001, BC-1.08.001 |
+| S-25.09 | Admission Diagnostics as InternalLog Events + Single Session-Root Anchoring + Closed Verdict Label + Neutral Entry-Point Names (ADR-052 v1.21) | Layer 2 add-on | W3 (after S-25.08, before S-12.16 / S-25.06) | in-progress | 5 | BC-1.18.011, BC-1.18.013, BC-3.08.001 |
 
-**Total (current):** 8 stories, ~114 story points (12 + 45 + ~12 est. + 8 + 8 + 13 + 8 + 8).
+**Total (current):** 9 stories, ~119 story points (12 + 45 + ~12 est. + 8 + 8 + 13 + 8 + 8 + 5).
 S-25.06 was 8 pts at its 2026-09-25 registration, re-estimated 21 pts at its v1.5 (2026-10-06), and split by
-human decision (2026-10-06, option (A)) into S-25.06 (13) + S-25.08 (8).
+human decision (2026-10-06, option (A)) into S-25.06 (13) + S-25.08 (8). S-25.08 (8 pts, unchanged through two adversary
+passes) was split by human decision D-1252(f) (2026-10-07; AC-027 stays in S-25.08) into S-25.08 (8) + S-25.09 (5): the +5 is
+the pass-2 ADR-052 v1.21 scope growth made visible.
 
 S-25.02 and S-25.03 point estimates are preliminary; they will be refined when stories are
 elaborated (BCs authored, architecture sections evolved) at activation time.
@@ -211,10 +216,12 @@ graph LR
   S25_06[S-25.06 Layer 2 add-on in-progress 13 pts]
   S25_07[S-25.07 add-on draft]
   S25_08[S-25.08 shared admission core in-progress 8 pts]
+  S25_09[S-25.09 admission v1.21 layer in-progress 5 pts]
 
   S21_10 --> S25_01
   S25_01 --> S25_02
-  S25_08 -->|blocks: shared core, B2 conformance, VP-147| S25_06
+  S25_08 -->|blocks: shared core, B2 conformance, VP-147| S25_09
+  S25_09 -->|blocks: anchoring, InternalLog events, neutral entry points| S25_06
   S25_06 -->|blocks: cluster-7 Cohort-B flip| S25_02
   S25_02 --> S25_03
   S25_02 --> S25_05
@@ -272,6 +279,7 @@ has no unmet prerequisite (the merged B2 code and the mechanism-A algorithm are 
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| v1.6 | 2026-10-07 | story-writer | S-25.09 registered via the human-decided split of S-25.08 (D-1252(f), 2026-10-07; AC-027 stays in S-25.08): story_count 8 -> 9. Stories table: S-25.09 row added (5 pts, in-progress, W3 after S-25.08, BC-1.18.011 + BC-1.18.013 + BC-3.08.001); S-25.08 row BC cell corrected (+BC-7.06.001, +BC-1.08.001; BC-3.08.001 moved to S-25.09) and wave note updated. Total ~114 -> ~119 pts. Dependency Graph mermaid: S25_09 node, S25_08 -> S25_09 -> S25_06. Sequencing: S-25.08 -> S-25.09 -> S-12.16 -> S-25.06 -> S-25.02 cluster 7. `inputs:` += S-25.09. |
 | v1.5 | 2026-10-06 | story-writer | Frontmatter `modified[]` re-sequenced monotonically (v1.3 entry had followed v1.4; POLICY 14 leg 3; all entries preserved). S-25.08 status text READY -> IN-PROGRESS in the Description narrative and Dependency Graph mermaid label (Stories table + STORY-INDEX already carried in-progress). Also corrected the S-25.08 Sequencing-rationale bullet label (READY -> IN-PROGRESS). input-hash recomputed. |
 | v1.4 | 2026-10-06 | story-writer | S-25.08 registered via the human-decided split of S-25.06 (2026-10-06, option (A); the v1.5 proposal's S-25.07 ID was already taken). story_count 7 -> 8. Stories table: S-25.08 row added (8 pts, ready, W3 first sub-wave, BC-1.18.011 + BC-1.18.013); S-25.06 row corrected (8 -> 13 pts, ready -> in-progress, BCs += BC-1.18.011). Total ~101 -> ~114 pts. Dependency Graph mermaid + topological order: S-25.08 -> S-25.06 -> S-25.02 (cluster 7); acyclic. Sequencing rationale: S-25.06 bullet updated (`depends_on: [S-25.08]`), S-25.08 bullet added; Description narrative 7 -> 8 stories. |
 | v1.3 | 2026-09-25 | story-writer | E-25 file-drift reconciliation (same burst as S-25.06 Spec-First Gate closure). S-25.03 Stories-table status corrected `backlog` -> `draft` (STORY-INDEX.md parity — the catalog authority). Dependency Graph mermaid rebuilt: was S-25.01->S-25.02->S-25.03 only, omitting S-25.04/S-25.05/S-25.06/S-25.07; now shows all 7 stories with real edges, including the S-25.06->S-25.02 `blocks` prerequisite (S-25.02's cluster-7 Cohort-B fail-closed flip gated on S-25.06's live backfill completing), S-25.02->S-25.03, S-25.02->S-25.05, and S-25.04/S-25.07 shown independent. Description narrative corrected from the stale v1.0 "3-story holding epic" framing (never updated across the v1.1/v1.2 story-count growth) to the actual 7-story composition; Layer 1/2 status labels in the Three-Layer Architecture subsection corrected (S-25.01 active->MERGED, S-25.02 backlog->READY). S-25.06 Stories-table row status updated `draft` -> `ready` and BCs cell `(pending PO authorship)` -> `BC-1.18.013`, matching its Spec-First Gate S-7.01 closure (BC-1.18.013 v1.1 authored by product-owner; VP-143/144/145 allocated by architect) in this same burst. |

@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "e51cc48"
+input-hash: "f88d5fd"
 traces_to: STATE.md
 ---
 
@@ -2395,4 +2395,10 @@ Full verbatim text recoverable via `git -C .factory show ee19219d:STATE.md` (sec
 
 Full verbatim text recoverable via `git -C .factory show f3537cd6:STATE.md` (section "Session Resume Checkpoint"). Position at the time: develop `ce2421be`, main `51023185`, merged_count 123; S-25.08 TDD in progress on local `feature/S-25.08` (`.worktrees/S-25.08`, HEAD `c5c72585`) with LOCAL adversary pass 1 NOT CLEAN (9 findings, streak 0/3) and the implementer green batch in progress; S-25.06 blocked on S-25.08; ADR-052 v1.20, BC-1.18.013 v1.9, BC-1.18.011 v1.17, error-taxonomy v1.38, BC-INDEX v5.106, VP-INDEX v3.29, ARCH-INDEX v4.50, STORY-INDEX v4.485; NEXT was the implementer green batch then adversary pass 2.
 
-**See STATE.md v10.86 for the current checkpoint.**
+**Superseded by STATE.md v10.87 (D-1253); see the section below.**
+
+## Session Resume Checkpoint (2026-10-07 — SESSION-WRAP-PAUSE-2026-10-07 v10.85→v10.86), superseded by v10.87 (D-1253)
+
+Full verbatim text recoverable via `git -C .factory show 7f482d9c:STATE.md` (section "Session Resume Checkpoint"). Position at the time: PIPELINE PAUSED; develop `ce2421be`, main `51023185`, merged_count 123; S-25.08 implementation + verification complete through ADR-052 v1.21 scope on local `feature/S-25.08` @ `39e89c59` (all gates green at `f8726c34`); LOCAL adversary pass 2 NOT CLEAN (14+2, streak 0/3); S-25.08 -> S-25.08 + S-25.09 split decided (D-1252(f)), NOT yet executed; BC-INDEX v5.107, VP-INDEX v3.30, ARCH-INDEX v4.51, STORY-INDEX v4.486; NEXT was /vsdd-factory:rehydrate-wave then execute the split.
+
+**See STATE.md v10.87 for the current checkpoint.**

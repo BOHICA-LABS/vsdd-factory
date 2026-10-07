@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.13"
+version: "1.14"
 status: draft
 producer: product-owner
 timestamp: 2026-05-07T00:00:00Z
@@ -132,7 +132,7 @@ Any future `RegistryError` variant added to `registry.rs` MUST receive an explic
 
 ## Story Anchor
 
-TBD — single story per ADR-019 §6 (no phased rollout, user decision 2026-05-07)
+TBD — single story per ADR-019 §6 (no phased rollout, user decision 2026-05-07); S-25.08 AC-027 delivers the Invariant 7 / §Fail-Closed Symmetry registry fail-closed exit-code mapping (E-REG-001/002/003 exit 2; operational variants exit 0). S-25.09 does NOT anchor this BC.
 
 ## VP Anchors
 
@@ -212,7 +212,7 @@ Canonical error codes for all registry-validation failures in `registry.rs::vali
 | L2 Domain Invariants | DI-014 — Schema version mismatch is a hard load error (the fail-closed schema_version=2 enforcement here is the BC-7 enforcement arm of DI-014, complementing the BC-1 arm in BC-1.14.001; DI-014 enforcement-owner now extends to BC-7) |
 | Architecture Module | SS-01 (primary — runtime enforcement via `crates/factory-dispatcher/src/registry.rs::validate()`) + SS-07 (registry file shape — `plugins/vsdd-factory/hooks-registry.toml`). Frontmatter `subsystem` is SS-01 per F-P1-006 resolution: the runtime enforcement is the failure-loud mechanism and is housed in SS-01. |
 | ADR | ADR-019 — Async Semantics at Registry Layer, Not Envelope Layer |
-| Stories | S-15.01 (single story per ADR-019 §6) |
+| Stories | S-15.01 (single story per ADR-019 §6); S-25.08 (AC-027 delivers the Invariant 7 / §Fail-Closed Symmetry registry fail-closed exit-code mapping; stays in S-25.08 at the S-25.08/S-25.09 split, D-1252(f)) |
 | Cycle | v1.0-feature-plugin-async-semantics-pass-1 (F2) |
 | VP-077 Harness 1 Amendment Obligation | VP-077 Harness 1 `kani::assume` precondition for entry uniqueness must be updated from `(name, event)` to `(name, event, tool)` tuple uniqueness to remain consistent with Invariant 7 v1.4. **Architect handles VP-077 v1.8** — this row is a PO sync note for handoff. If VP-077 v1.8 has not already addressed this, architect must amend the `kani::assume` precondition in the Harness 1 fixture to reflect `(name, event, tool)` tuple uniqueness. |
 
@@ -233,6 +233,10 @@ Canonical error codes for all registry-validation failures in `registry.rs::vali
 | **Deterministic** | YES — given same registry content, always produces same validation result. |
 | **Thread safety** | YES — `validate()` is a pure check on an immutable parsed struct. |
 | **Overall classification** | Deterministic with filesystem I/O at load time only; `validate()` is a pure fn. |
+
+## Amendment 2026-10-07 (v1.13 → v1.14 — story-anchor: S-25.08 AC-027 named; S-25.08/S-25.09 split)
+
+Documentary only; no Precondition/Postcondition/Invariant/EC change. After the human-approved split of S-25.08 into S-25.08 + NEW S-25.09 (D-1252(f), amended so AC-027 stays in S-25.08), the Story Anchor and Traceability `Stories` row now name S-25.08 as the story whose AC-027 delivers Invariant 7 / §Fail-Closed Symmetry. S-25.09 does not anchor this BC. No delivery-gated promotion change (this BC's POL-14 status is unaffected by S-25.09).
 
 ## Amendment 2026-10-07 (v1.12 → v1.13 — catch-all scope vs BC-1.08.001 Invariant 1 reconciled)
 

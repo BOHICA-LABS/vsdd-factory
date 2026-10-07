@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: draft
 producer: codebase-analyzer
 timestamp: 2026-04-25T00:00:00
@@ -74,7 +74,7 @@ For any startup-side error (registry, payload, or engine), the dispatcher emits 
 | Capability Anchor Justification | CAP-002 ("Hook Claude Code tool calls with sandboxed WASM plugins") per capabilities.md §CAP-002 — this BC contracts the dispatcher's fail-safe non-blocking behavior on startup errors, which is a core invariant for the WASM dispatcher to never block Claude Code on its own internal failures |
 | L2 Domain Invariants | TBD |
 | Architecture Module | SS-01 — `crates/factory-dispatcher/src/main.rs` |
-| Stories | S-2.07 (Wave 9 SS-01 straggler re-anchor); S-15.01 (single story per ADR-019 §6) |
+| Stories | S-2.07 (Wave 9 SS-01 straggler re-anchor); S-15.01 (single story per ADR-019 §6); S-25.08 (AC-027 delivers Invariants 1/2 — registry fail-closed exit-code mapping; stays in S-25.08 at the S-25.08/S-25.09 split, D-1252(f)) |
 
 ### Source Evidence
 
@@ -102,6 +102,10 @@ For any startup-side error (registry, payload, or engine), the dispatcher emits 
 #### Refactoring Notes
 
 (TBD — to be assessed in Phase 1.6b verification properties pass)
+
+## Amendment 2026-10-07 (v1.4 → v1.5 — story-anchor: S-25.08 AC-027 named; S-25.08/S-25.09 split)
+
+Documentary only; no Precondition/Postcondition/Invariant/EC change. After the human-approved split of S-25.08 into S-25.08 + NEW S-25.09 (D-1252(f), amended so AC-027 stays in S-25.08), the Traceability `Stories` row now names S-25.08 as the story whose AC-027 delivers Invariants 1/2 (registry fail-closed exit-code mapping). S-25.09 does not anchor this BC.
 
 ## Amendment 2026-10-07 (v1.3 → v1.4 — Invariant 2 exception set reconciled)
 
