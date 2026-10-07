@@ -12915,7 +12915,11 @@ pub enum BcIndexMigrationError {
     )]
     FingerprintMismatchAbort,
 
-    /// S-25.08 Red-Gate STUB variant (BC-1.18.011 v1.16 EC-031).
+    /// BC-1.18.011 v1.16 EC-031 / error-taxonomy `RESERVATION_TTL_BELOW_FLOOR`:
+    /// the PRODUCTION drain entry point is configured with a
+    /// `MAX_RESERVATION_TTL` below the 1,800 s floor. Raised BEFORE any gate or
+    /// drain action (nothing mutated). Deliberately NOT
+    /// [`BcIndexMigrationError::BinaryIntegrityFailure`] (digest/TOCTOU).
     #[error(
         "BC-INDEX migration: configured reservation TTL {configured_secs}s is below the \
          {floor_secs}s production floor (RESERVATION_TTL_BELOW_FLOOR, exit 2)"
@@ -12930,6 +12934,15 @@ pub enum BcIndexMigrationError {
          timeout (DRAIN_TIMEOUT_ABORT, exit 2); gate returned to OPEN"
     )]
     DrainTimeoutAbort,
+
+    /// ADR-052 v1.20 §5a "`tool_use_id` presence and validity" (F-009): the
+    /// PreToolUse payload carries a `tool_use_id` key that is PRESENT but is not
+    /// a string, is empty, or violates the grammar `[A-Za-z0-9_.-]{1,128}` (no
+    /// leading `.`). The admission FAILS CLOSED (`E-MAINTENANCE-002`
+    /// `invalid_tool_use_id`). `len` is the byte length only — never the raw
+    /// value (log-injection / path-traversal hygiene).
+    #[error("writer admission: invalid tool_use_id ({len} bytes)")]
+    InvalidToolUseId { len: usize },
 
     #[error(
         "BC-INDEX migration: ARCH-INDEX three-way parity check failed \
@@ -13000,6 +13013,22 @@ pub enum BcIndexMigrationError {
 }
 
 impl BcIndexMigrationError {
+    /// The `<cause>` token of the `E-MAINTENANCE-002` single-line message
+    /// `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
+    /// (error-taxonomy v1.37): `invalid_tool_use_id`, `io` (cannot create
+    /// `reservations/` / the reservation, or cannot read gate/txn state), or
+    /// `state_integrity` (malformed gate/txn record, non-string `migration_id`,
+    /// more than one live txn, any other integrity failure). The underlying
+    /// detail goes to `tracing::warn!`, never into the message.
+    #[must_use]
+    pub fn admission_failure_cause(&self) -> &'static str {
+        match self {
+            BcIndexMigrationError::InvalidToolUseId { .. } => "invalid_tool_use_id",
+            BcIndexMigrationError::Io { .. } => "io",
+            _ => "state_integrity",
+        }
+    }
+
     /// Map this error to the migration-binary process exit code ADR-052
     /// §Error Code Semantics assigns it. `ExpiryAbort` alone is exit 1
     /// ("no harm done, but re-activation required"); every other error
@@ -13907,6 +13936,15 @@ pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration
 pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
     std::time::Duration::from_secs(1800);
 
+// The production default can never silently drift below the production floor:
+// a compile-time guard (no runtime seam), so `validate_production_reservation_ttl`
+// at the production entry point is a belt-and-braces check for any future
+// configurable source, not the only line of defence.
+const _: () = assert!(
+    DEFAULT_MAX_RESERVATION_TTL.as_secs() >= MIN_PRODUCTION_RESERVATION_TTL.as_secs(),
+    "DEFAULT_MAX_RESERVATION_TTL must be >= MIN_PRODUCTION_RESERVATION_TTL (ADR-052 v1.18 §5a)"
+);
+
 /// Production-entry-point TTL validation (S-25.08 AC-008). Returns the TTL
 /// unchanged when `>= MIN_PRODUCTION_RESERVATION_TTL`, else a configuration
 /// error. (The injectable test seam `drain_bc_index_writers` is NOT bound by
@@ -13915,13 +13953,9 @@ pub fn validate_production_reservation_ttl(
     ttl: std::time::Duration,
 ) -> Result<std::time::Duration, BcIndexMigrationError> {
     if ttl < MIN_PRODUCTION_RESERVATION_TTL {
-        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!(
-                "configuration error: reservation TTL {}s is below the {}s production floor \
-                 (ADR-052 v1.18 §5a; BC-1.18.011 Precondition 6(c))",
-                ttl.as_secs(),
-                MIN_PRODUCTION_RESERVATION_TTL.as_secs()
-            ),
+        return Err(BcIndexMigrationError::ReservationTtlBelowFloor {
+            configured_secs: ttl.as_secs(),
+            floor_secs: MIN_PRODUCTION_RESERVATION_TTL.as_secs(),
         });
     }
     Ok(ttl)
@@ -15856,6 +15890,11 @@ pub fn run_bc_index_migration(
     // injected at the top of this call graph rather than threaded through
     // the public API, matching the OBL-1 design's own "production call
     // sites pass &StdFs" framing.
+    // BC-1.18.011 v1.16 EC-031: validate the production reservation TTL BEFORE
+    // any gate or drain action — nothing is mutated on a configuration error (no
+    // `exclusive.lock`, no `create_dir_all`, no gate write, no GC).
+    let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;
+
     let fs = StdFs;
     let migration_state_dir = _cwd.join(".factory/migration-state");
 
@@ -16331,11 +16370,7 @@ pub fn run_bc_index_migration(
         path: reservations_dir.clone(),
         source,
     })?;
-    // Production entry point: the TTL is validated against the 1,800 s floor
-    // BEFORE any gate flip (a configuration error must not leave a stuck
-    // DRAINING gate behind). The drain function itself keeps the TTL and the
-    // timeout injectable for tests.
-    let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;
+    // `reservation_ttl` was validated at the top of this function (EC-031).
     write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Draining)?;
     if let Err(e) =
         drain_bc_index_writers(&reservations_dir, DEFAULT_DRAIN_TIMEOUT, reservation_ttl)
