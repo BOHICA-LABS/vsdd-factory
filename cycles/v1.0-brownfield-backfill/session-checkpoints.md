@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "e2f61e1"
+input-hash: "51919eb"
 traces_to: STATE.md
 ---
 
@@ -2374,3 +2374,11 @@ BC-4.17.001 v1.29 active. BC-6.28.001 v1.3 active. BC-5.45.001 v1.3 active. BC-1
 Condensed archive (full verbatim text recoverable via `git -C .factory show ff43c0da:STATE.md`, section "Session Resume Checkpoint"). Position at the time: develop `ddd99212` (PR #842 merged), main `51023185`, merged_count 123; S-25.06 Spec-First Gate S-7.01 CLOSED (draft→ready), NEW BC-1.18.013, VP-143/144/145, [CV-DIR-F2-OPEN] RESOLVED per ADR-052 §Decision 9; BC-INDEX v5.100, STORY-INDEX v4.478, VP-INDEX v3.24, ARCH-INDEX v4.47, E-25 v1.3. NEXT at the time: cluster-6 F1 delta analysis OR S-25.06 TDD. Activation-boundary obligations [D-1232-OBL-2]/[D-1232-OBL-3]/[D-1232-OBL-4] OPEN, unchanged.
 
 **See STATE.md v10.77 for the current checkpoint.**
+
+---
+
+## Session Resume Checkpoint (2026-10-06 — STATE-MD-COMPACTION-2026-10-06 v10.78→v10.79), superseded by v10.80 (D-1244/D-1245)
+
+Full verbatim text recoverable via `git -C .factory show 4043e128:STATE.md` (section "Session Resume Checkpoint"); the v10.78 (D-1243) checkpoint that preceded it is verbatim in `state-md-archive-through-v10.78.md`. Position at the time: develop `117dafdf` (PR #843 merged), main `51023185`, merged_count 123; S-25.06 TDD IN PROGRESS on local `feature/S-25.06` (commits `31890c0d`, `a00fabf3`, `36424701`, `f9db5857`, `08211795` + uncommitted Kani work); STATE.md compacted 489→190 lines (bookkeeping-only, no D-NNN). BC-INDEX v5.101 (2,007 BCs), VP-INDEX v3.25 (146 VPs), STORY-INDEX v4.479, ARCH-INDEX v4.47 (52 ADRs), error-taxonomy v1.31, E-25 v1.3. NEXT at the time: formal-verifier T-8a Kani run, implementer T-9/T-11, test-writer VP-143 tag, full gate; T-10 timing awaited human decision (resolved D-1244: after PR merge). Uncommitted specialist-authored S-25.06/S-25.08 spec + split work awaited its registration burst (this v10.80 burst). Activation-boundary obligations [D-1232-OBL-2]/[D-1232-OBL-3]/[D-1232-OBL-4] OPEN, unchanged.
+
+**See STATE.md v10.80 for the current checkpoint.**

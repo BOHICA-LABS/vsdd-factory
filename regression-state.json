@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-09-28T01:33:34Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.06 && timeout 300 cargo test -p factory-dispatcher --test s2506_append_log_backfill_test --features failpoints -- --test-threads=1 --nocapture 2>&1 | tail -60; echo \"EXIT_CODE=$?\""}
+{"status":"pass","timestamp":"2026-10-07T03:12:24Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory && wc -l .factory/STATE.md; cargo test -q -p validate-state-structure --lib 2>&1 | tail -3"}

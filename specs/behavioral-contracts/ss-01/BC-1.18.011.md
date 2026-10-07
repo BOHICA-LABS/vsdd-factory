@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.10"
+version: "1.12"
 status: active
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
   - .factory/specs/behavioral-contracts/BC-INDEX.md
-input-hash: "15bedba"
+input-hash: "4694036"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -107,7 +107,73 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        both deliveries are activated.
    (c) OPEN/DRAINING gate with writer reservations spanning PreToolUse→tool-completion ensures
        the migration coordinator waits for all in-flight admitted writers to complete before
-       snapshotting source files (ADR-052 §Decision 5a).
+       snapshotting source files (ADR-052 §Decision 5a). **(v1.11 — reserve-then-verify, release-
+       on-block, TTL; ADR-052 v1.18 D5/D2; the merged B2 code deviates and is brought into
+       alignment — the SPEC wins.)**
+       - **Reserve-then-verify admission order (§Decision 5a step 0).** For every protected-path
+         `Edit`/`Write`/`MultiEdit` the dispatcher's PreToolUse admission MUST create
+         `.factory/migration-state/reservations/<tool_use_id>.reservation` (atomic temp+rename;
+         `{"created_at": "<ISO-8601>", "tool_use_id": "<id>"}`) FIRST, and only THEN read
+         `gate-state.json` and scan `txn-*.json` (and run the Precondition 6(d) reconciliation).
+         On failed verification (gate ≠ OPEN or a live txn) it removes its own reservation before
+         returning the `E-MAINTENANCE-001` block. The admitter takes NO lock; the earlier
+         `LOCK_SH`-on-gate-file ordering is superseded (the coordinator's gate flip replaces the
+         file by `rename`, so a lock on the replaced inode does not serialize against an admitter
+         holding the old inode). Race-freedom is the Dekker ordering W1 (create reservation) <
+         W2 (read gate) versus C1 (durable DRAINING flip) < C2 (read `reservations/`): never both
+         miss.
+       - **Release-on-block.** If the dispatch's final aggregated outcome for the PreToolUse event
+         is a block (exit 2) or error — including a block by a LATER stage in the same dispatcher
+         process (`shard_cap_precheck`, any registry plugin) — the dispatcher removes the
+         reservation its own admission created for that `tool_use_id` before exiting
+         (harness-level denials the dispatcher cannot observe leak until PostToolUse/TTL).
+       - **TTL.** `MAX_RESERVATION_TTL` default 3,600 s; PRODUCTION floor 1,800 s (a lower value in
+         the production entry point is a configuration error; the TTL and the 30 s drain timeout
+         remain injectable for tests — the floor binds the production entry point, not the test
+         seam). The merged constant `DEFAULT_MAX_RESERVATION_TTL` = 120 s violates the floor and
+         MUST be raised to 3,600 s. Staleness is judged by the reservation's `created_at` field,
+         falling back to file mtime only when the field is absent/unparseable; reclamation is
+         TTL-only — NO PID liveness.
+   (d) **PreToolUse stale-gate reconciliation is part of this contract and MUST be wired on the
+       production admission path (v1.11; ADR-052 §Decision 5a step 3.5 Branches A/B/C; merged B2
+       code defect: `reconcile_stale_admission_gate` is never called).** The single shared
+       admission core (evaluated exactly once per PreToolUse event, ahead of `shard_cap_precheck`;
+       see BC-1.18.013 Precondition 6(b) "Where") runs, under the §5a flock-gated discipline
+       (`flock(exclusive.lock, LOCK_EX|LOCK_NB)`; EWOULDBLOCK ⇒ live coordinator ⇒ no action,
+       block): **Branch A** — gate ∈ {LOCKED, DRAINING} with no active txn (absent, COMPLETED,
+       ABORTED) ⇒ gate → OPEN; **Branch B** — txn STAGING with `generation_id = null` (pre-
+       generation crash) ⇒ txn → ABORTED (`null_generation` disposition marker, retained) and
+       gate → OPEN, EXCEPT when the migration's terminal record is present (Branch C governs,
+       Branch B does not apply — an unexplained terminal record beside a live STAGING txn is an
+       integrity anomaly, never a discardable pre-generation crash); **Branch C** — a live txn
+       (COMMITTING, or STAGING of any generation) with the live txn's own migration's terminal
+       record, selected by `migration_id` (`completed.json` for `migrate-bc-index`/absent field;
+       `completed-backfill-append-logs.json` for `backfill-append-logs`, BC-1.18.013
+       Postcondition 5a) — the shared core dispatches on `migration_id` (ADR-052 §7e) — present
+       ⇒ verify-then-finalize or fail-closed per Postcondition 9 (STAGING + terminal record is
+       always fail-closed; no verification is attempted). The
+       PreToolUse reconciler NEVER performs COMMITTING forward recovery (renames) — that remains
+       exclusively the binary's job. A
+       reconciler that exists but is not reachable from the production admission path does NOT
+       satisfy this precondition (black-box test through the real dispatcher entry required).
+   (e) **Migration discriminator and ownership (v1.11; ADR-052 §Decision 7e).** The txn record
+       carries `migration_id`; a record that lacks it (written by pre-v1.11 code) is read as
+       `"migrate-bc-index"` (serde default). `migrate-bc-index` OWNS and is the only writer of
+       `.factory/migration-state/completed.json` and `.factory/migration-state/CURRENT.json`
+       (consumed unchanged by BC-1.18.010 §Reader Integration and `detect_migration_read_state`);
+       `backfill-append-logs` (BC-1.18.013) never writes them — it uses
+       `completed-backfill-append-logs.json` / `CURRENT-backfill-append-logs.json`. The terminal-
+       record schema is `{generation_id, txn_id, completed_at, canonical_paths_count}`
+       (`canonical_paths_count` = N for the migration; for B2 the number of canonical paths in
+       its txn record/intent log). **Cross-migration recovery refusal:** the `migrate-bc-index`
+       binary recovers, resumes, finalizes or aborts ONLY a live txn whose `migration_id` is
+       `"migrate-bc-index"`; a live txn of `backfill-append-logs` ⇒ exit 2 (`LockContention`-
+       class), NO mutation, `recover()` NOT run over the foreign record. The admission gate is
+       migration-agnostic (a live txn of either migration blocks the union
+       `.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/`). One `exclusive.lock`, one
+       `gate-state.json` (the physical name of the logical "gate-state" file), one
+       `reservations/` directory and one `txn-*.json` directory are shared; at most ONE live txn
+       exists across both migrations.
 
 ## Postconditions
 
@@ -248,6 +314,47 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    existing primitive retroactively, once" relationship BC-1.18.008 has to BC-1.18.006, mirrored
    here for B2's own end-state BC.
 
+9. **Verified `completed.json` + COMMITTING finalize; `COMPLETION_RECORD_MISMATCH_ABORT` replaces
+   the unverified short-circuit (v1.11; ADR-052 §Decision 4e v1.18 D3 rows, §5a Branch C, §5c
+   Branch 2 step 0.5; closes the B2 permanent self-lock and the cross-migration finalize hazard).**
+   When the live txn's own migration's terminal record, selected by `migration_id`
+   (`completed.json` for `migrate-bc-index`/absent field; `completed-backfill-append-logs.json`
+   for `backfill-append-logs`, BC-1.18.013 Postcondition 5a), is present — the shared core
+   dispatches on `migration_id` (ADR-052 §7e) — neither the `migrate-bc-index` binary nor the
+   PreToolUse Branch C may treat its presence alone as authority to finalize a txn
+   (the merged B2 code's unverified `completed.json` short-circuit — which would rewrite ANY
+   live txn, including a `backfill-append-logs` txn, to COMPLETED and open the gate
+   mid-migration — is REMOVED). The B2-specific clauses below (schema, N, verification) apply
+   to `migrate-bc-index` txns; `backfill-append-logs` txns are verified per BC-1.18.013
+   Postcondition 5a. Instead, under `flock(exclusive.lock, LOCK_EX|LOCK_NB)`
+   (EWOULDBLOCK ⇒ live coordinator ⇒ no action, binary exits 0 with the §4e warning /
+   PreToolUse blocks):
+   (a) the live txn must have `migration_id = "migrate-bc-index"` (absent field counts as that);
+       a foreign live txn is NEVER finalized on the strength of B2's `completed.json`
+       (cross-migration refusal, Precondition 6(e): binary exit 2 `LockContention`-class, NOT
+       `COMPLETION_RECORD_MISMATCH_ABORT`; PreToolUse: plain `E-MAINTENANCE-001`, no mismatch
+       reason);
+   (b) **VERIFY:** `completed.json` parses; `txn_id == activation_id`; `generation_id` equal to
+       the txn's; `canonical_paths_count` equals B2's N for this txn; and for EVERY canonical
+       path `sha256(path) == expected_post_hash` per the txn record/intent log; the txn must be
+       COMMITTING;
+   (c) on success: atomically rewrite the txn to COMPLETED (write-temp + fsync + rename +
+       dir-sync, §7d), THEN (under gate `LOCK_EX`) flip `gate-state.json` → OPEN (order
+       mandatory: `gate=OPEN ⇒ no live txn`); the binary then exits 0 `ALREADY_MIGRATED`; the
+       PreToolUse Branch C performs the same action with no binary invocation and then admits
+       (idempotent; a crash between the two writes leaves txn=COMPLETED + gate≠OPEN, repaired by
+       Branch A);
+   (d) on ANY verification failure (unparseable; id/generation mismatch; `canonical_paths_count` ≠
+       N; any hash ≠ `expected_post_hash`; txn STAGING (STAGING + terminal record is always
+       fail-closed; no verification is attempted); COMMITTING with a different
+       `activation_id`): NO txn write, NO gate write, gate stays blocking; the binary exits 2
+       `COMPLETION_RECORD_MISMATCH_ABORT`; the PreToolUse analogue is an `E-MAINTENANCE-001`
+       block with the reason logged (`tracing::warn!` naming `migration_id`, `txn_id`, failing
+       check; message suffix `(completion-record mismatch — operator investigation required)`).
+       A byte-for-byte snapshot of `.factory/migration-state/` is unchanged by the attempt.
+   `--census` stays read-only and never reconciles. Idempotent: a second run is a zero-mutation
+   no-op.
+
 ## Invariants
 
 1. **This BC's per-file write logic invokes BC-1.18.006's `write_atomic` primitive
@@ -306,6 +413,14 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | EC-004 | SS-05's second-level sub-split (Postcondition 6) produces sub-shards `.a`/`.b`/`.c` whose combined row count does not match an independent pre-split count of `BC-5.*` rows | Migration ABORTS for the entire operation (not just SS-05) per Postcondition 4 — a sub-shard-level census failure is treated with the same severity as a top-level census failure, since a partial-success outcome (nine subsystems split correctly, SS-05 corrupted) would still violate Invariant 3's all-or-nothing guarantee |
 | EC-005 | An implementer mistakenly makes this migration a precondition for BC-7.08.001's Cohort B flip | Scope violation of Postcondition 7/Invariant 4 — the F2 architecture-delta doc's migration-impact map already confirms zero dependency; this BC introduces none |
 | EC-006 | The migration is re-run after already completing successfully (no partial state, fully migrated) | Idempotent no-op: the migration detects `BC-INDEX.md`'s body is already in the split end-state (zero per-BC rows remain in the body, per BC-1.18.010 Invariant 3) and exits without re-splitting or re-writing any shard file |
+| EC-007 | (v1.11, reserve-then-verify, ADR-052 D5) Admitter (W1 create reservation, W2 read gate) versus coordinator (C1 durable DRAINING flip, C2 read `reservations/`) at every ordering of {W1, C1, C2, W2} | Either C2 lists the reservation (coordinator waits; `source_sha256`/`source_body_row_sha256` not computed while it exists) or W2 reads DRAINING (admission blocked `E-MAINTENANCE-001`, own reservation removed) — never both miss; an admitter that read `OPEN` from the pre-`rename` gate-file inode is still observed by the coordinator (Precondition 6(c)) |
+| EC-008 | (v1.11, release-on-block) Admission has created `reservations/<tool_use_id>.reservation` and a later stage of the same dispatch (`shard_cap_precheck` or a registry plugin) blocks/errors, or the admitter's own verification fails | The dispatcher removes that reservation before exit; no reservation file remains for a blocked/errored event |
+| EC-009 | (v1.11, TTL) (a) A reservation with `created_at` older than 3,600 s (test seam: injected smaller) is GC'd at drain step 1; (b) younger ⇒ never removed by the coordinator; (c) `created_at` absent/unparseable ⇒ file mtime is used; (d) the production entry point is configured below 1,800 s | (a) removed, drain proceeds; (b) drain waits then `DRAIN_TIMEOUT_ABORT` at 30 s; (c) mtime fallback judged by the same TTL; (d) configuration error (rejected); the production default constant is 3,600 s, NOT the merged 120 s; no PID-liveness anywhere |
+| EC-010 | (v1.11, wiring) Gate LOCKED/DRAINING with no active txn (Branch A), or STAGING with `generation_id = null` (Branch B), and a PreToolUse `Edit`/`Write` under `.factory/specs/behavioral-contracts/` or `.factory/cycles/` arrives through the REAL dispatcher entry with `exclusive.lock` acquirable | The production admission path runs the §5a step-3.5 reconciliation (A: gate → OPEN; B: txn → ABORTED + gate → OPEN) and then admits; with `exclusive.lock` held by a live coordinator (EWOULDBLOCK) no action and `E-MAINTENANCE-001` block. A reconciler unit-tested but not called on the production path FAILS this EC |
+| EC-011 | (v1.11, D3) `completed.json` present and valid, txn COMMITTING (matching `activation_id`/`generation_id`, `migration_id` = `migrate-bc-index` or absent), gate LOCKED, all canonical hashes at `expected_post_hash` (crash between `completed.json` fsync and the txn→COMPLETED rewrite) | (a) next PreToolUse (no binary re-invocation) runs Branch C: txn → COMPLETED THEN gate → OPEN, admitted; (b) a binary re-invocation instead finalizes identically and exits 0 `ALREADY_MIGRATED`; (c) a second run is zero-mutation; (d) crash between txn rewrite and gate flip ⇒ txn COMPLETED + gate≠OPEN ⇒ Branch A repairs next dispatch; (e) lock held by live coordinator ⇒ no action, blocked (Postcondition 9) |
+| EC-012 | (v1.11, D3 mismatch) Same fixture but `completed.json.txn_id` ≠ `activation_id`, or `generation_id` ≠, or `canonical_paths_count` ≠ N, or any canonical hash ≠ `expected_post_hash`, or txn STAGING (always fail-closed; no verification is attempted), or COMMITTING with a different `activation_id` | NO txn write, NO gate write; PreToolUse blocks `E-MAINTENANCE-001` (reason logged); binary exits 2 `COMPLETION_RECORD_MISMATCH_ABORT`; `.factory/migration-state/` byte-for-byte unchanged. (A live `backfill-append-logs` txn is NOT this EC — it is the cross-migration refusal, EC-013; B2's `completed.json` NEVER finalizes it, Postcondition 9(a).) |
+| EC-013 | (v1.11, D4) The single live txn has `migration_id = "backfill-append-logs"` when `migrate-bc-index` is invoked; or a txn record lacks `migration_id` | Foreign live txn ⇒ cross-migration refusal: exit 2 (`LockContention`-class), no mutation, `recover()` not run, txn untouched. Absent `migration_id` ⇒ treated as `"migrate-bc-index"` (legacy record stays valid and recoverable by this binary) |
+| EC-014 | (v1.11, D4) `completed-backfill-append-logs.json`/`CURRENT-backfill-append-logs.json` exist (mechanism-A finished) while `completed.json`/`CURRENT.json` do not | `migrate-bc-index` is NOT `ALREADY_MIGRATED`; `detect_migration_read_state` does NOT report the BC-INDEX migration complete (readers keep legacy paths); B2 writes only `completed.json`/`CURRENT.json` and `backfill-append-logs` never does (Precondition 6(e)) |
 
 ## Canonical Test Vectors
 
@@ -317,6 +432,15 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | Independent census finds a `BC-3.14.002` row present in BOTH `shards/BC-INDEX-SS-03.md` and (erroneously) `shards/BC-INDEX-SS-04.md` | Migration ABORTS per Postcondition 4/EC-001; fail-loud CENSUS_MISMATCH_ABORT (process exit code) naming the duplicated ID | error |
 | Migration crashes mid-staging, restarted from scratch | Original `BC-INDEX.md` byte-identical to pre-crash state; restart produces the same split result as an uninterrupted run | error |
 | Migration re-run after a prior successful completion | No-op: zero shard files rewritten, `BC-INDEX.md` body unchanged (EC-006) | edge-case |
+| (v1.11, D5) Scripted admitter/coordinator at each of the 4 orderings of {W1, C1, C2, W2} (W1<W2, C1<C2) | Never "both miss": C2 sees the reservation, or W2 sees DRAINING and the admitter's reservation is removed (EC-007) | error |
+| (v1.11) Admission creates `reservations/T7.reservation`, then `shard_cap_precheck`/a registry plugin blocks the same event | Dispatcher exit 2; `reservations/T7.reservation` absent (EC-008) | error |
+| (v1.11) Reservation `created_at = now − 4000 s`, TTL 3,600 s (seam); another with no `created_at` and mtime `now − 4000 s`; another `created_at = now` | First two reclaimed at drain step 1; third blocks quiescence until PostToolUse or 30 s `DRAIN_TIMEOUT_ABORT`; production default constant asserted 3,600 s (not 120 s), floor 1,800 s (EC-009) | edge-case |
+| (v1.11, wiring) Real spawned dispatcher, PreToolUse `Edit` under `.factory/specs/behavioral-contracts/`, gate `LOCKED`, no txn, lock acquirable; and gate `DRAINING`, txn STAGING `generation_id=null` | First: gate → OPEN then admitted; second: txn → ABORTED (`null_generation`), gate → OPEN, admitted (EC-010) | error |
+| (v1.11, D3) `completed.json` valid, txn COMMITTING matching, gate LOCKED, canonical files at `expected_post_hash`; then (a) PreToolUse Edit with no binary run, (b) separately `migrate-bc-index` re-run | (a) txn COMPLETED then gate OPEN then admitted; (b) exit 0 `ALREADY_MIGRATED`, same end state; second run zero-mutation (EC-011) | error |
+| (v1.11, D3 mismatch) Same fixture but `completed.json.txn_id` ≠ `activation_id` (separate fixtures: one canonical hash differs; txn STAGING + terminal record (always fail-closed, no verification attempted); `canonical_paths_count` ≠ N) | Binary exit 2 `COMPLETION_RECORD_MISMATCH_ABORT`; PreToolUse `E-MAINTENANCE-001` with reason logged; txn still COMMITTING/STAGING, gate still non-OPEN; migration-state byte-identical (EC-012) | error |
+| (v1.11, D4) `completed.json` valid, live txn `{migration_id: "backfill-append-logs", COMMITTING}`, `migrate-bc-index` invoked / PreToolUse Edit | refusal exit 2 (LockContention-class) / plain `E-MAINTENANCE-001` block; txn NOT finalized, gate NOT opened (EC-013) | error |
+| (v1.11, D4) Txn record JSON without `migration_id`, state COMMITTING; `migrate-bc-index` invoked | Treated as `migrate-bc-index`; recovered normally (EC-013) | edge-case |
+| (v1.11, D4) Only `completed-backfill-append-logs.json` + `CURRENT-backfill-append-logs.json` present; `migrate-bc-index` invoked and `detect_migration_read_state` called | Not `ALREADY_MIGRATED`; reader state not "complete" (EC-014) | edge-case |
 
 ## Verification Properties
 
@@ -325,8 +449,12 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | VP-132 | Content-preservation invariant — BC-X.YY.NNN table rows extracted from all staged shard files and sorted in canonical BC-ID order produce a SHA-256 matching `source_body_row_sha256` from the txn record (the SHA-256 of the per-BC-row content from the original pre-split BC-INDEX.md body in canonical BC-ID sort order, excluding §Summary, §Subsystem Shard Manifest, cross-cutting invariants, and non-row separator lines); `source_sha256` (whole-file fingerprint) is used ONLY by step 5 fingerprint recheck, not by PC1 | proptest / golden-file round-trip against the live (or a synthetic fixture) `BC-INDEX.md` body |
 | VP-133 | Independent-census integrity invariant — every `BC-X.YY.NNN` ID in the pre-split census appears in EXACTLY ONE post-split shard (or sub-shard) file; the union of all shard row counts equals the pre-split census count; `BC-INDEX.md`'s post-split body contains zero per-BC rows | integration test (full-corpus census comparison against synthetic fixtures with known BC-ID sets, including a duplicated-row negative-control fixture) |
 | VP-133 | Atomicity-under-interruption invariant — a simulated crash at any staging step leaves `BC-INDEX.md`'s body either fully original or fully split, never a partial/corrupt intermediate state | fault-injection / integration test (simulated crash at each of N staging steps; assert post-recovery state is one of the two valid states) |
-| VP-133 | Idempotency invariant — running the migration twice against an already-split `BC-INDEX.md`, or resuming from a verified-complete staged state, does not re-split, re-duplicate, or corrupt any shard | integration test (double-invocation + resume-from-staged-checkpoint fixtures) |
+| VP-133 | Idempotency invariant — running the migration twice against an already-split `BC-INDEX.md`, or resuming from a verified-complete staged state, does not re-split, re-duplicate, or corrupt any shard; `completed.json` beside a live txn is the verified own-migration finalize (Postcondition 9), not an unverified no-op | integration test (double-invocation + resume-from-staged-checkpoint fixtures) |
 | VP-133 | SS-05/SS-06 second-level sub-split coverage invariant — the same content-preservation/census/atomicity/rollback obligations hold at the sub-shard level for SS-05 and SS-06 specifically, verified against an independent `BC-5.*`/`BC-6.*`-scoped count | integration test (sub-shard-scoped census comparison for SS-05/SS-06 fixtures) |
+| VP-133 | Production-path reconciliation wiring — a real dispatcher PreToolUse with the gate LOCKED/DRAINING reconciles Branch A/B and admits; a live coordinator ⇒ no action + `E-MAINTENANCE-001` block (Precondition 6(d), EC-010; defect B2-1) | integration test (real spawned dispatcher, black-box through the production PreToolUse entry) |
+| VP-133 | Reserve-then-verify / release-on-block / TTL — never both-miss at every W1/W2/C1/C2 ordering; no reservation survives a blocked event; production TTL 3,600 s / floor 1,800 s by `created_at` (Precondition 6(c), EC-007/EC-008/EC-009; defects B2-3, B2-4) | integration test (scripted admitter/coordinator orderings; blocked-event reservation-absence; TTL seam + production-constant assertion) |
+| VP-133 | Verified finalize, mismatch fail-closed, migration discriminator, per-migration namespace — `completed.json` + COMMITTING finalizes only after verification; any mismatch ⇒ `COMPLETION_RECORD_MISMATCH_ABORT` with zero mutation; `migration_id` + cross-migration refusal; per-migration terminal-record namespace (Postcondition 9, Precondition 6(e), EC-011..EC-014; defect B2-2) | integration test (finalize/mismatch/foreign-txn/legacy-record fixtures; migration-state byte-snapshot comparison) |
+| VP-147 | B2 crash-recovery / admission-gate decision core (Kani h1..h6, the `obl1_kani_proofs` suite): recovery totality, recovery safety (old-or-new, never torn), txn state-machine inductive invariant, INV-GATE-TXN admission quiescence, pointer-swap crash atomicity, recovery idempotence | kani-proof (CI job `kani`, `--harness proof_obl1`, EXPECTED_PROOFS=7; 7/7 PROVED pre-v1.18; v1.18 extension — reserve-then-verify, TTL, Branches A/B/C, verified finalize, `migration_id` — owed). Anchors: Precondition 5, 6(b), 6(c), 6(d), 6(e); Postconditions 3, 4, 5, 9; Invariant 3; EC-002, EC-003, EC-006, EC-007..EC-014 |
 | VP-134 | No-new-Cohort-B-dependency invariant — this BC's migration completion is never referenced as a precondition in `hooks-registry.toml`'s `failure_policy` deployment sequencing for `regression-gate`/`convergence-tracker` | static-check (config/PR-template audit confirming BC-7.08.001's gating conditions cite only BC-1.18.005/006/008, never this BC) |
 | VP-142 | Chunk-boundary determinism and correctness (ADR-051 §Decision 18, hosted here as Postcondition 6's concrete algorithm) — for a fixed row set, preamble, and `shard_cap_bytes`, `chunk_subsystem_rows_into_sub_shards` always produces identical chunk boundaries on any invocation, any machine, any retry; every row appears in exactly one chunk; no chunk's preamble+rows exceeds `shard_cap_bytes` except the documented lone-row-overflow edge case; consecutive chunks' BC-ID ranges are non-overlapping and jointly cover the full sorted sequence. Cross-referenced from BC-1.18.010 Postcondition 4, since the property holds identically for this one-time migration and the future steady-state rebuild path | proptest (property: chunking twice over the same input yields identical output; every row in exactly one chunk; no chunk exceeds cap except the lone-row case; consecutive ranges non-overlapping and gap-free) |
 
@@ -344,6 +472,15 @@ ADR-051 §Decision 18's authoring instruction (architect design-proposal, human-
 hosted on THIS BC's Postcondition 6 since Postcondition 6 is where the `chunk_subsystem_rows_into_sub_shards`
 function contract is named as a migration-behavior obligation; cross-referenced (not re-hosted) from
 BC-1.18.010 Postcondition 4.
+
+**VP-133 v1.1 facets and VP-147 (v1.12).** VP-133 (integration) additionally carries three v1.11-clause
+facets: production-path reconciliation wiring (Precondition 6(d), EC-010; B2-1), reserve-then-verify /
+release-on-block / TTL (Precondition 6(c), EC-007/EC-008/EC-009; B2-3, B2-4), and verified finalize /
+mismatch fail-closed / migration discriminator / per-migration namespace (Postcondition 9,
+Precondition 6(e), EC-011..EC-014; B2-2); its Idempotency row is re-based so that `completed.json`
+beside a live txn is the verified own-migration finalize, not an unverified no-op. **VP-147**
+(kani-proof; B2 crash-recovery / admission-gate decision core, the `obl1_kani_proofs` suite) was
+allocated by the architect under ADR-052 v1.18 (VP-INDEX v3.26); its v1.18 extension is owed.
 
 ## Related BCs
 
@@ -416,6 +553,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 ## VP Anchors
 
 - VP-132, VP-133, VP-134 — allocated by formal-verifier (S-25.02 F2 verification-property fix-burst; VP-INDEX v3.03), analogous to VP-123/VP-124 (content-preservation + record-integrity; atomicity-under-interruption + idempotency) but keyed to BC-INDEX's ID-census model instead of decision-log's byte-count model, per the F2 architecture-delta doc §4a authorship input for this BC. VP-132 (proptest; content-preservation structured-row-equivalence), VP-133 (integration; independent-census integrity + crash-atomicity + fail-loud rollback CENSUS_MISMATCH_ABORT (process exit code) + idempotency + SS-05/SS-06 second-level sub-split census — four same-method obligations consolidated per the single-method-per-VP convention), VP-134 (static-check; no-new-Cohort-B-dependency). The six candidate properties enumerated in `## Verification Properties` above map to these three VPs: candidate 1 → VP-132; candidates 2/3/4/5 → VP-133; candidate 6 → VP-134.
+- VP-147 — allocated by the architect under ADR-052 v1.18 (VP-INDEX v3.26) (kani-proof; B2 crash-recovery / admission-gate decision core, the `obl1_kani_proofs` suite). Anchors: Precondition 5, 6(b), 6(c), 6(d), 6(e); Postconditions 3, 4, 5, 9; Invariant 3; EC-002, EC-003, EC-006, EC-007..EC-014. VP-133 v1.1 additionally anchors the v1.11 facets (Precondition 6(d)/EC-010; Precondition 6(c)/EC-007/EC-008/EC-009; Postcondition 9/Precondition 6(e)/EC-011..EC-014).
 - VP-142 — allocated by formal-verifier per ADR-051 §Decision 18's authoring instruction (S-25.02-b2-sharding cluster-5 spec-closure chain; human-approved 2026-09-22 design proposal). Hosted on THIS BC's Postcondition 6 (proptest; chunk-boundary determinism and correctness for `chunk_subsystem_rows_into_sub_shards`), cross-referenced from BC-1.18.010 Postcondition 4 since the property holds identically for the one-time migration and the steady-state rebuild path.
 
 ## Traceability
@@ -427,7 +565,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 | L2 Domain Invariants | none (dispatcher runtime architectural invariant, not an L2 domain-spec DI-NNN — consistent with the sibling BC-1.18.005–010 precedent for this class of dispatcher-mechanics contract) |
 | Architecture Module | SS-01 (Hook Dispatcher Core — `shard_manager.rs` one-time B2 migration logic) |
 | ADR | ADR-051 §Decision 10 (governed one-time migration for the B2 BC-INDEX body split, fix-burst addition F-S2502-F2-002); ADR-051 §Decision 7 (B2 end-state design this migration produces); ADR-051 §Decision 8 (shard-manifest schema this migration publishes); ADR-052 §Decision 4 (armed-activation manifest governing pre-mutation authorization); ADR-052 §Decision 5a (native admission gate: OPEN/DRAINING gate with writer reservations; txn state check blocks ordinary writers regardless of PID liveness); ADR-052 §Decision 7a (advisory flock on stable never-unlinked inode; durable txn record separate from lock file); ADR-052 §Decision 7b (framed checksummed intent log + WAL boundary + matching-destination-hash recovery decision table); ADR-052 §Decision 7c (single atomic CURRENT.json pointer swap + completed.json permanent terminal record + generation-first/canonical-fallback reader protocol); ADR-052 §Decision 8 (POLICY 22 exception declaration with enumerated allowed write targets) |
-| Stories | S-25.02 |
+| Stories | S-25.02, S-25.06 (S-25.06 delivers B2-1..B2-4 conformance behavior under this BC; human-approved 2026-10-06) |
 | Cycle | v1.0-brownfield-backfill (F2 — product-owner spec-evolution fix-burst) |
 | Feature | E-25 — Validation Integrity and Large-Artifact Resilience |
 
@@ -435,6 +573,8 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.12 | 2026-10-06 | product-owner | ADR-052 v1.18 follow-up deltas 9, 10, 11, 13 (architect review of v1.11; exact-text corrections). (9) EC-012 + its D3-mismatch vector: removed the live-`backfill-append-logs`-txn clause and the "(also …)" fixtures (foreign txn is covered by EC-013 only); Postcondition 9(a): foreign-txn refusal is binary exit 2 `LockContention`-class, NOT `COMPLETION_RECORD_MISMATCH_ABORT`, PreToolUse plain `E-MAINTENANCE-001` with no mismatch reason; foreign-txn D4 vector expected column corrected and EC-012 dropped from its anchors. (10) Precondition 6(d) Branch C and Postcondition 9 lead-in: terminal record is the live txn's own migration's, selected by `migration_id` (`completed.json` / `completed-backfill-append-logs.json`); shared core dispatches on `migration_id` (ADR-052 §7e); B2-specific clauses stay for `migrate-bc-index` txns. (11) STAGING wording in Precondition 6(d) and Postcondition 9(d): STAGING + terminal record is always fail-closed, no verification attempted (no behavior change). (13) Verification Properties: VP-133 rows added (production-path reconciliation wiring; reserve-then-verify/release-on-block/TTL; verified finalize/mismatch/discriminator/namespace), VP-133 Idempotency row re-based, VP-147 row added (kani-proof), VP Anchors paragraph updated. Traceability Stories row: S-25.06 added (human-approved 2026-10-06). No clause renumbered/removed. **Stories affected by BC changes:** S-25.02, S-25.06 — story-writer must propagate under bc_array_changes_propagate_to_body_and_acs (Stories row only; no `bcs:` array change by PO). **VP citations changed in:** VP-133 (facets/anchors), VP-147 (new) — architect/story-writer propagate to VP-INDEX, S-25.02/S-25.06. |
+| 1.11 | 2026-10-06 | product-owner | ADR-052 v1.18 formal-finding exception — shared-core sibling sweep (human-approved 2026-10-06; keeps B2 conformance fixes B2-1..B2-4 in S-25.06 scope; ADR-052 is the spec, merged B2 code deviates). **Precondition 6(c)** rewritten: reserve-then-verify admission order (reservation FIRST, then read gate/txn; own reservation removed on failed verification; no admitter lock; Dekker argument) + release-on-block (dispatcher removes its reservation when a later stage blocks/errors) + TTL (`MAX_RESERVATION_TTL` default 3,600 s, production floor 1,800 s, test seam injectable, `created_at` staleness with mtime fallback, no PID liveness; merged 120 s corrected). **NEW Precondition 6(d):** PreToolUse stale-gate reconciliation Branches A/B/C is part of the contract and MUST be wired on the production admission path (merged `reconcile_stale_admission_gate` is uncalled dead code). **NEW Precondition 6(e):** `migration_id` txn field (absent ⇒ `migrate-bc-index`), cross-migration recovery refusal, B2 owns `completed.json`/`CURRENT.json` and `backfill-append-logs` never writes them (ADR-052 §7e), shared lock/gate/reservations/txn dir, `gate-state.json` physical name. **NEW Postcondition 9:** verified `completed.json`+COMMITTING finalize (txn→COMPLETED then gate→OPEN) replaces the unverified short-circuit; `COMPLETION_RECORD_MISMATCH_ABORT` (binary exit 2) / `E-MAINTENANCE-001` block with reason logged (PreToolUse); must never finalize another migration's txn. **New edge cases (append-only):** EC-007..EC-014 + 10 canonical test vector rows. No existing clause renumbered/removed. **Stories affected by BC changes:** S-25.02 (anchor; B2 amendment note — merged cluster code deviates), S-25.06 (B2-1..B2-4 conformance fixes in scope) — story-writer must propagate under bc_array_changes_propagate_to_body_and_acs; no `bcs:` array change. **VP citations changed in:** none textually (VP-133 atomicity/idempotency facets and VP-124-class gate obligations are affected by reserve-then-verify — architect owns under ADR-052 v1.18). |
 | 1.10 | 2026-09-23 | product-owner | Documentary cross-reference closing adversary finding F-C5-P1-004. Precondition 6(b) amended: added a "Delivery cross-reference (per D-1236 Ruling 3)" clause clarifying that the native admission gate's Edit/Write/MultiEdit legs ship with cluster-5 F4 TDD in `executor.rs`, while the Bash leg (full-command classification) is delivered separately by the ADR-052 §Decision 5c full-command classifier as part of [D-1232-OBL-4] (devops-engineer's dispatcher-guard amendments), deployed at the cluster-5 F4 activation boundary — not by cluster-5 TDD. This documents WHERE/WHEN each leg of the "ALL mutation tool calls (Edit/Write/MultiEdit/Bash)" admission-gate scope is actually enforced, resolving the apparent scope gap a fresh-context adversary flags when it cannot see D-1236. No change to any Postcondition, Invariant, Edge Case, Test Vector, or VP; the "ALL ... Bash" intent is preserved, only its phased delivery is now documented in-BC. input-hash recompute owed to state-manager. |
 | 1.9 | 2026-09-22 | product-owner | ADR-051 §Decision 18 addendum encoding (spec-closure chain step 2 of 2: architect → product-owner; human-approved 2026-09-22 design proposal). Postcondition 6 amended: named the concrete `chunk_subsystem_rows_into_sub_shards(sorted_rows, preamble, shard_cap_bytes) -> Vec<SubShardChunk>` function contract (ADR-051 §Decision 18 item 4) the migration invokes for SS-05/SS-06's second-level sub-split, and added explicit migration-behavior edge-case rulings per §Decision 18's edge-case table: lone-oversized-row (emitted as an over-cap lone sub-shard with a non-blocking `tracing::warn!`, never fail-loud, bounded by BC-1.18.005's `MAX_SINGLE_RECORD_BYTES` margin), exactly-at-cap (`<=` inclusive, matching BC-1.18.005 Postcondition 3's convention), sub-shard letter exhaustion (base-26 `.aa`/`.ab`... naming beyond 26 chunks, never fail-loud), and each-row-in-exactly-one-sub-shard (already covered by this BC's own Postcondition 2 independent census — zero new verification code). Added **VP-142** (proptest; chunk-boundary determinism and correctness) to this BC's own Verification Properties table and VP Anchors as the hosting BC, cross-referenced from BC-1.18.010 Postcondition 4. No change to Postconditions 1-5, 7-8 or to this BC's existing content-preservation/census/atomicity/rollback machinery — this amendment supplies the previously-unspecified chunk-boundary mechanism Postcondition 6 assumed but did not name. input-hash recompute owed to state-manager. |
 | 1.8 | 2026-09-13 | product-owner | ADR-052 v1.11 pass-8 reader-protocol mirror (MED-1). Invariant 3 COMMITTING-window accessibility description: replaced "generation-first/canonical-fallback protocol (ADR-052 §Decision 7c C-1 fix)" with the OPEN-based with ENOENT fallback form per the canonical reader protocol (ADR-052 §Decision 7c): for each required file, open `gen-<uuid>/<file>`; on ENOENT, open the canonical path. Replaced "a file absent from `gen-<uuid>/` has already been renamed to canonical" with "ENOENT on `gen-<uuid>/<file>` means the file has already been renamed to canonical — open the canonical path instead." Replaced "`rename(2)` atomicity ensures ENOENT is not possible for any new-generation file" with "`rename(2)` atomicity makes this protocol race-free and ENOENT-safe: a required file is never absent from both `gen-<uuid>/` and canonical during the COMMITTING window." Preserves the "never partially applied / There is no turning back" guarantee; grounds the COMMITTING-window accessibility claim in open-with-fallback, not exists-then-read. input-hash recompute owed to state-manager. |
