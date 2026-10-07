@@ -18,7 +18,7 @@ inputs:
   - .factory/phase-0-ingestion/pass-4-nfr-catalog.md
   - .factory/phase-0-ingestion/pass-8-final-synthesis.md
   - .factory/legacy-design-docs/2026-04-24-v1.0-factory-plugin-kit-design.md
-input-hash: "e75f6e1"
+input-hash: "bf11310"
 traces_to: .factory/specs/domain-spec/L2-INDEX.md
 supplements: []
 # Supplements deferred — PRD body contains summary versions:
@@ -1175,7 +1175,7 @@ See `.factory/specs/prd-supplements/nfr-catalog.md` for the complete 76-NFR cata
 
 | Category | Prefix | Severity | Exit Code | Examples |
 |----------|--------|----------|-----------|---------|
-| Registry errors | E-REG-NNN | broken → exit 0 | 0 | E-REG-001: schema_version mismatch; E-REG-002: invalid tool regex; E-REG-003: unknown fields |
+| Registry errors | E-REG-NNN | broken → exit 2 (fail-closed; uncoded load failures exit 0) | 2 | E-REG-001: schema_version mismatch; E-REG-002: async + block conflict; E-REG-003: duplicate hook entry |
 | Payload errors | E-PAY-NNN | broken → exit 0 | 0 | E-PAY-001: missing event_name; E-PAY-002: invalid JSON |
 | Capability denial | E-CAP-NNN | blocked → exit 2 | 2 | E-CAP-001: exec_subprocess denied; E-CAP-002: shell-bypass not acknowledged; E-CAP-003: setuid refused |
 | Plugin execution | E-PLG-NNN | degraded → exit 0 | 0 | E-PLG-001: timeout (epoch); E-PLG-002: timeout (fuel); E-PLG-003: crash (trap) |

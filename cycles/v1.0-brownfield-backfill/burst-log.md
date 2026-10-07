@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "971223d"
+input-hash: "ef88a4f"
 traces_to: STATE.md
 ---
 
@@ -2264,3 +2264,42 @@ Refs: D-1184, D-1183, S-25.02, BC-1.18.006 v1.11, F-C2-P10-001, F-C2-P10-002, F-
 | SESSION-WRAP-PAUSE-2026-09-12 (v10.47→v10.48) | state-manager | COMPLETE | 2nd cross-vendor Codex ADR-052 v1.1 closure-review PERSISTED (adv-cv-adr052-v11-closure-2026-09-12.md; RATIFY-WITH-CHANGES, not ratifiable; 8 findings, F4/F6 CLOSED, F5 OPEN). D-1216: ADR-052 v1.1 NOT POLICY-22-ratifiable; architect v1.2 redesign abandoned mid-read at wrap (wrote nothing). `pipeline:` PAUSED. BC-5.39.001 3/3 UNCHANGED. →0→1→1→1 LENGTH=4. v10.47→v10.48. |
 
 **Also this burst (D-1232-POLICY22-RATIFIED-CLUSTER5-UNBLOCKED, 2026-09-20):** POLICY 22 ratification burst committed (state-manager, single-commit TD-VSDD-053; D-1232). Human interactive 5-item sign-off walk (AskUserQuestion) dispositioned all outstanding POLICY 22 sign-off items — see `cycles/v1.0-brownfield-backfill/decision-log.md` D-1232 for the full Disposition Table (5 items) and the 4 Binding Obligations Registered section. Summary: (i) macOS exec-TOCTOU ACKNOWLEDGED; (ii) APFS dir-fsync durability SATISFIED VIA HYBRID (mandated F_FULLFSYNC(temp)→rename→F_FULLFSYNC(dir) code sequence + differential VM-kill test PENDING as a cluster-5 deliverable + explicit residual-risk acknowledgment); (iii) CLAUDE.md ADR-052 EXCEPTION amendment APPROVED exact text, APPLY at cluster-5 F4 activation; (iv) 4 dispatcher-guard amendments APPROVED, DEPLOY at cluster-5 activation; (v) concurrency core RATIFIED ON MECHANICAL PROOF — human REJECTED accept-at-floor and required more convergence before ratifying, D-1231's Kani model-checking pass-1 (DEF-1 HIGH found and fixed via ADR-052 v1.14 Option B structural drain reorder; re-verified 7/7 VP proofs PROVED, INV-GATE-TXN UNSAT, non-vacuity CONFIRMED, 5/5 regression + 7/7 fault-injection PASS) supplied the mechanical proof basis, superseding the D-1230 accept-at-floor basis, WITH a BINDING NON-DEFERRABLE CONDITION that implementation-phase Kani harnesses on `executor.rs` + `shard_manager.rs` are MANDATORY when cluster-5 is built. 4 binding obligations registered in STATE.md `## Blocking Issues`, anchored to cluster-5/S-25.02: (a) impl-phase Kani on executor.rs+shard_manager.rs — mandatory, non-deferrable; (b) APFS hybrid fsync sequence + differential VM-kill test + residual-risk ack; (c) apply CLAUDE.md ADR-052 EXCEPTION amendment at F4 activation; (d) deploy 4 dispatcher-guard amendments at activation. Cluster-5 TDD UNBLOCKED. `pipeline:` PAUSED→in_progress. This entry also separately persists D-1231 (ADR-052 v1.14 DEF-1 Kani fix-burst, committed 2026-09-20 in the prior commit `9e4570f2` — that commit touched `decision-log.md` + `ARCH-INDEX.md` + the ADR-052 file directly but not `burst-log.md`/STATE.md; this note closes that STATE-sync gap). Refs: D-1232, D-1231, D-1230, S-25.02, ADR-052 v1.14, `9e4570f2`. v10.62→v10.63.
+
+**Archived from STATE.md Current Phase Steps (evicted by the S2508-LOCAL-ADV-PASS1-ADR052-V120-REGISTRATION keep-last-5 window, 2026-10-07):**
+
+| Step | Agent | Status | Output |
+|------|-------|--------|--------|
+| STATE-MD-COMPACTION-2026-10-06 (v10.78→v10.79) | state-manager | COMPLETE | STATE.md compaction; pre-compaction file archived verbatim; no content lost. |
+
+## Burst: S2508-LOCAL-ADV-PASS1-ADR052-V120-REGISTRATION (2026-10-07)
+
+D-1251, v10.84→v10.85. Single-commit TD-VSDD-053 registration burst (state-manager).
+
+**Parent-commit:** `9021579b` (factory-artifacts HEAD immediately prior, v10.84 / D-1250). Code parent: `feature/S-25.08` @ `83f0f549` (unchanged by this burst).
+
+**Adversary verdict:** LOCAL S-25.08 adversary pass-1 = **NOT CLEAN**: 0 CRITICAL, 2 HIGH (F-S2508-L1-001, F-S2508-L1-002), 4 MEDIUM (F-S2508-L1-003/004/005/006), 3 LOW (F-S2508-L1-007/008/009); novelty HIGH; streak 0/3. Full Part A persisted at `code-delivery/S-25.08/adv-local-pass-1.md`.
+
+**Files touched (Dim-1):** 8 unique files (state-manager-authored this burst; specialist-authored files ADR-052, ARCH-INDEX, VP-133/143/147, verification-architecture, verification-coverage-matrix, BC-1.18.011/013, BC-1.08.001, BC-7.06.001, error-taxonomy, prd.md, S-25.08/S-25.06/S-25.02, E-25 epic, sidecar-learning.md, regression-state.json were registered unchanged):
+- STATE.md (v10.84→v10.85)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1251)
+- cycles/v1.0-brownfield-backfill/lessons.md (L-BB-D1245 x4)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- code-delivery/S-25.08/adv-local-pass-1.md (NEW)
+- specs/behavioral-contracts/BC-INDEX.md (v5.105→v5.106)
+- stories/STORY-INDEX.md (v4.484→v4.485)
+- specs/verification-properties/VP-INDEX.md (sanctioned migrate recovery)
+
+
+**Codifications:** D-1251 (decision-log, incl. late rulings (g) two-spelling lexical root rule / suffix ruling and (h) sequencing process-gap); L-BB-D1245 recurrence x4 and NEW L-BB-D1251-concurrent-spec-writers-during-state-burst (lessons.md; Drift Item [D-1251-PG-001]); no new policy.
+
+**Dim-2 Attestation:** `compute-input-hash <file> --check` run on every dirty specialist file before staging (exit 0); `cargo run -q -p last-amended-migrate -- migrate --check` clean on all 5 governed files after recovery (literal output in the commit report).
+
+**Dim-5:** Count-propagation: total_bcs 2007, total_vps 147 UNCHANGED (no add/remove); no count sweep required.
+
+**Dim-6:** No new findings in this registration burst; the adversary pass-1 findings are in the persisted review file; no new tech-debt-register entries.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution.
+
+**Closes:** none (registration only; pass-1 findings remain open until pass-2/3-CLEAN).
+
+Summary: Persisted the S-25.08 LOCAL adversary pass-1 review (`code-delivery/S-25.08/adv-local-pass-1.md`; NOT CLEAN, 9 findings 2H/4M/3L, streak 0/3). Registered specialist work: ADR-052 v1.20, ARCH-INDEX v4.50, VP-133 v1.5, VP-143 v1.4, VP-147 v1.4, VP-INDEX v3.29, verification-architecture v1.42, verification-coverage-matrix v1.40, BC-1.18.013 v1.9, BC-1.18.011 v1.17, BC-1.08.001 v1.4, BC-7.06.001 v1.13, error-taxonomy v1.38, prd.md, BC-INDEX v5.106, S-25.08 v1.3, S-25.06 v1.9, S-25.02 v5.1, E-25 epic hash 213dad1, STORY-INDEX v4.485. Applied sanctioned `last-amended-migrate migrate --path` recovery to VP-INDEX.md (PriorChainSplit, entries_relocated=1); `migrate --check` clean on all 5 governed files. L-BB-D1245 recurrence x4 appended (product-owner `sed -i` on BC-1.18.013); S-12.16 row recurrence 4. Decision: D-1251.

@@ -1,15 +1,21 @@
 ---
 document_type: vp-index
 level: L4
-version: "3.28"
+version: "3.29"
 status: draft
 producer: architect
 timestamp: 2026-09-05T00:00:00Z
-last_amended: "2026-10-07 (v3.28) — verification-status propagation (architect; S-25.08 evidence, NO count change, total_vps stays 147): VP-147 v1.2→v1.3 status draft→in-development (v1.18 re-baseline implemented; 10/10 harnesses SUCCESSFUL locally; CI pending, unmerged; not locked); VP-133 v1.3→v1.4 and VP-143 v1.2→v1.3 (facets 6/7 and D1/D5 implemented, passing locally; CI pending; status stays draft). [Prior: 2026-10-07 (v3.27) — POLICY 9 propagation (architect; ADR-052 v1.19 first-activation race — BC-1.18.011 v1.15 / BC-1.18.013 v1.7; NO count change, total_vps stays 147): VP-133 v1.3 (facet 7(d), black-box), VP-146 v1.3 (a4 S9), VP-147 v1.2 (h4 S9) — obligation \"reservation namespace exists from the first protected write\"; Kani-provable over the abstract model only (VP-146/VP-147), real-FS behavior black-box (VP-133).]"
+last_amended: "2026-10-07 (v3.29) — ADR-052 v1.20 anchor amendments (architect; NO count/ID/module/tool change, total_vps stays 147): VP-133 v1.4→v1.5, VP-143 v1.3→v1.4, VP-147 v1.3→v1.4 (facet/anchor text only; see changelog v3.29). Prior: (v3.28) — verification-status propagation (architect; S-25.08 evidence, NO count change, total_vps stays 147): VP-147 v1.2→v1.3 status draft→in-development (v1.18 re-baseline implemented; 10/10 harnesses SUCCESSFUL locally; CI pending, unmerged; not locked); VP-133 v1.3→v1.4 and VP-143 v1.2→v1.3 (facets 6/7 and D1/D5 implemented, passing locally; CI pending; status stays draft)."
 phase: F5
 traces_to: ARCH-INDEX.md
 total_vps: 147
 changelog:
+  - date: "2026-10-07"
+    version: "v3.27"
+    change: "POLICY 9 propagation (architect; ADR-052 v1.19 first-activation race — BC-1.18.011 v1.15 / BC-1.18.013 v1.7; NO count change, total_vps stays 147): VP-133 v1.3 (facet 7(d), black-box), VP-146 v1.3 (a4 S9), VP-147 v1.2 (h4 S9) — obligation \"reservation namespace exists from the first protected write\"; Kani-provable over the abstract model only (VP-146/VP-147), real-FS behavior black-box (VP-133)."
+  - date: "2026-10-07"
+    version: "v3.29"
+    change: "ADR-052 v1.20 anchor amendments (architect; S-25.08 local adversary pass 1 rulings F-001/F-002/F-003/F-004/F-006/F-008/F-009; NO count change, total_vps stays 147; no VP added/retired, no module/tool/phase change; per-tool counts and verification-architecture / verification-coverage-matrix unchanged, POLICY 9): VP-133 v1.4→v1.5 (facet 7 gains release-on-PostToolUseFailure, registry-independent evaluation and reservation-timestamp vectors; facets 6/8 gain the shared-core 'foreign' definition); VP-143 v1.3→v1.4 (D1 black-box facet gains F-001/F-002/F-003/F-004/F-009 vectors; the 13/13 local evidence is not re-claimed for them); VP-147 v1.3→v1.4 (core input txn_is_own_migration→txn_migration_known; S7 re-worded; h4 gains S10 staleness-retention property; the 10/10 local evidence is not re-claimed). VP-146 unchanged."
   - date: "2026-10-07"
     version: "v3.28"
     change: "Verification-status propagation (architect; S-25.08 evidence on local branch `feature/S-25.08`, HEAD 292ffed5, rebased on develop ce2421be, wasmtime 48.0.5; NO count change, total_vps stays 147): VP-147 v1.2→v1.3 — status draft→in-development; v1.18 re-baseline implemented, 10/10 `proof_obl1_*` harnesses SUCCESSFUL via the exact CI step script, covers satisfied, no UNREACHABLE; mutants M1/M2/M3/M4-model KILLED; M4-production killed by black-box tests (VP-133 7(d)); CI `kani` job pins EXPECTED_PROOFS=10; CI PENDING, unmerged; verification_lock stays false. VP-133 v1.3→v1.4 — facets 6/7 implemented, `s2508_admission_blackbox_test.rs` 13/13 and `bc_1_18_011_b2_migration_test` 60/60 passing locally (status stays draft; facet 8 = S-25.06). VP-143 v1.2→v1.3 — D1/D5 facets implemented (13/13 black-box), status stays draft (facet (b)/D2/D3/D4 = S-25.06). VP-146 unchanged (S-25.06). Propagated same burst to verification-architecture.md and verification-coverage-matrix.md."

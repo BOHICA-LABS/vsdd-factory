@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: codebase-analyzer
 timestamp: 2026-04-25T00:00:00
@@ -15,8 +15,8 @@ subsystem: "SS-01"
 capability: "CAP-002"
 lifecycle_status: active
 introduced: v1.0.0-beta.4
-modified: [v1.3-fix-burst-35-2026-05-09]
-last_amended: "2026-05-09 (v1.3 — F5 fix-burst-35: F-P36-001 Traceability Stories TBD→S-15.01; S-2.07 retained)"
+modified: [v1.3-fix-burst-35-2026-05-09, v1.4-ereg-fail-closed-set-2026-10-07]
+last_amended: "2026-10-07 (v1.4 — Invariant 2 exception set widened to E-REG-001/002/003 to match BC-1.14.001 / BC-7.06.001)"
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -44,7 +44,7 @@ For any startup-side error (registry, payload, or engine), the dispatcher emits 
 
 1. Dispatcher errors are non-blocking; the harness flow continues.
 
-2. **Exception — schema-version mismatch is fail-closed (exit 2)**: A `hooks-registry.toml` with `schema_version != 2` (e.g., a v1 registry loaded into a v2 dispatcher) is the one startup error that is NOT fail-open. The dispatcher exits with code 2 (blocking) and emits an explicit stderr diagnostic. This exception was introduced by ADR-019 (F2 cycle) because fail-open on a schema mismatch reproduces the silent-failure root cause the entire cycle was created to eliminate. **All other** registry, payload, and engine errors retain fail-open (exit 0) semantics per Invariant 1. Enforced by BC-1.14.001 Error Paths and BC-7.06.001 Postcondition 1.
+2. **Exception — registry invariant violations are fail-closed (exit 2)**: Three registry-load errors are NOT fail-open; the dispatcher exits with code 2 (blocking), emits a structured `dispatcher.*` event, and writes an explicit stderr diagnostic: (a) `E-REG-001` — `hooks-registry.toml` `schema_version != 2` (`RegistryError::SchemaVersion`; BC-1.14.001 EC-006); (b) `E-REG-002` — an entry with a blocking `on_error` AND `async = true` (`RegistryError::AsyncBlockConflict`; BC-1.14.001 EC-008, BC-7.06.001 Invariant 1); (c) `E-REG-003` — duplicate `(name, event, tool)` hook entry (`RegistryError::DuplicateEntry`; BC-7.06.001 Invariant 7). Fail-open on these reproduces the silent-failure root cause ADR-019 §Decision 2 was created to eliminate. **All other** registry, payload, and engine errors (registry file not found, I/O failure, TOML parse failure, invalid tool regex, payload, engine) retain fail-open (exit 0) semantics per Invariant 1. Enforced by BC-1.14.001 Error Paths and BC-7.06.001 Postcondition 1 / §Fail-Closed Symmetry. (v1.4: the exception set was previously stated as schema-version mismatch only, which contradicted BC-1.14.001 EC-008 and BC-7.06.001 Invariant 7.)
 
 ## Edge Cases
 
@@ -102,6 +102,10 @@ For any startup-side error (registry, payload, or engine), the dispatcher emits 
 #### Refactoring Notes
 
 (TBD — to be assessed in Phase 1.6b verification properties pass)
+
+## Amendment 2026-10-07 (v1.3 → v1.4 — Invariant 2 exception set reconciled)
+
+Invariant 2 named schema-version mismatch (E-REG-001) as the one fail-closed startup error. BC-1.14.001 EC-008 (E-REG-002, async+block) and BC-7.06.001 Invariant 7 / §Fail-Closed Symmetry (E-REG-003, duplicate entry) are also fail-closed (exit 2), and the dispatcher (`main.rs::run`) implements all three. Invariant 2 widened to the three-code set; Invariant 1 (all other errors fail-open) unchanged. No postcondition change.
 
 ## Amendment 2026-05-09 (v1.2 → v1.3 — F5 fix-burst-35 F-P36-001: Traceability Stories TBD→S-15.01)
 

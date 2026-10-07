@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.19"
+version: "1.20"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -24,9 +24,11 @@ inputs:
   - CLAUDE.md
   - .claude/settings.json
   - crates/factory-dispatcher/src/main.rs
+  - crates/factory-dispatcher/src/payload.rs
+  - plugins/vsdd-factory/hooks/hooks.json.template
   - plugins/vsdd-factory/hooks-registry.toml
   - .factory/cycles/v1.0-brownfield-backfill/adv-local-adr052-pass3.md
-input-hash: "f67e2a5"
+input-hash: "75c1595"
 # input-hash: run compute-input-hash --update at state-manager registration burst
 ---
 
@@ -79,6 +81,18 @@ black-box tests) before S-25.06 may merge (post-split ownership: the shared admi
 VP-146 harnesses and the VP-143 D2/D3/D4 facets by S-25.06). The POLICY 22 ratification of the v1.15 status flip is
 not reopened (no §Decision 1/2/3 mechanism change), but the orchestrator MUST surface this
 exception to the human for acknowledgement per the v1.14 precedent.
+**v1.20 rulings (S-25.08 local adversary pass 1 — spec-level gaps F-001/F-002/F-003/F-004/F-006/
+F-008/F-009 in the shared admission core):** normative architectural rulings only; no §Decision
+1/2/3/4 mechanism change and no change to the OPEN/DRAINING/LOCKED state machine, the Dekker
+reserve-then-verify argument, or any ratified Kani-proved transition. They add: release on
+`PostToolUseFailure` (§5a "Release events"), the admission scope anchor and Edit/Write/MultiEdit
+path resolution (§5a "Admission scope anchoring" / "Target path resolution"), the
+registry-independent evaluation position (§5a "Evaluation position"), reservation timestamp
+rules (§5a "Reservation timing parameters"), the shared-core definition of "foreign" (§7e), and
+named error variants (§Error Code Semantics). The §Verification Strategy re-verification
+obligation is extended only for the pure-core input rename and the new black-box facets listed in
+the §5a "v1.20 test mandate"; the human-acknowledgement requirement of the v1.18 exception is
+unchanged.
 
 ## Context
 
@@ -681,10 +695,13 @@ families, and at most ONE live txn may exist across both migrations at a time. A
 implemented ONCE in a shared core in `shard_manager.rs` that both
 `executor::bc_index_migration_admission_precheck` and
 `executor::append_log_backfill_admission_precheck` delegate to; `main.rs` evaluates that core
-exactly ONCE per PreToolUse event, at the position and fire-before-any-registry-plugin ordering
-`bc_index_migration_admission_precheck` already holds (structurally BEFORE `shard_cap_precheck`,
-whose fired branch performs a destructive seal-and-truncate and must never run for a blocked
-protected-path write). It MUST NOT be evaluated twice (a second evaluation would re-create the
+exactly ONCE per PreToolUse event, at the REGISTRY-INDEPENDENT position specified in "Evaluation
+position (v1.20)" below — before `Registry::load`, hence structurally before `shard_cap_precheck`
+(whose fired branch performs a destructive seal-and-truncate and must never run for a blocked
+protected-path write) and before every registry plugin tier. (v1.20 supersedes the v1.18 wording
+"at the position and fire-before-any-registry-plugin ordering `bc_index_migration_admission_precheck`
+already holds": that position is AFTER `Registry::load` in the merged code and so inherits its
+fail-open arms.) It MUST NOT be evaluated twice (a second evaluation would re-create the
 reservation and re-run reconciliation). Which of the two named entry points `main.rs` invokes is
 an implementation detail ("or its successor", BC-1.18.013 Precondition 6(b)); the observable
 obligation is the black-box test through the real dispatcher PreToolUse entry. The tool set of
@@ -722,6 +739,145 @@ exiting. (Harness-level denials the dispatcher cannot observe — a user denying
 prompt, or a block by a hook process other than this dispatcher — still leak until PostToolUse
 or the TTL; that residual is exactly what the TTL and the operator remediation below cover.)
 
+**Evaluation position (v1.20 — closes F-004; replaces the v1.18 "position
+`bc_index_migration_admission_precheck` already holds" wording).** The native admission (PreToolUse)
+and the reservation release (PostToolUse / PostToolUseFailure) are REGISTRY-INDEPENDENT. In
+`main.rs::run` they execute immediately after the stdin payload parse and `resolve_project_cwd()`
+and BEFORE the `CLAUDE_PLUGIN_ROOT` tiering, `resolve_registry_path()` and `Registry::load`. Why:
+the registry-load outcomes are, per `main.rs::run` as read at HEAD 292ffed5 (this is the
+authoritative current behaviour, not a ruling): `CLAUDE_PLUGIN_ROOT` unset/empty ⇒ Tier-1 degraded
+empty registry, dispatch continues (final exit 0); `Registry::load` `RegistryError::SchemaVersion`
+⇒ stderr `E-REG-001`, **exit 2 (fail-closed)**; `AsyncBlockConflict` ⇒ `E-REG-002`, **exit 2
+(fail-closed)**; `DuplicateEntry` ⇒ `E-REG-003`, **exit 2 (fail-closed)**; every other load error
+(file not found, TOML parse failure, regex error) ⇒ `return Ok(0)` **fail-open** per BC-1.08.001;
+`resolve_registry_path()?` Err ⇒ `main` maps the `Err` to exit 0 (fail-open). (The `E-REG-NNN`
+numbering above is the CODE's; `error-taxonomy.md` rows E-REG-001..003 currently list different
+meanings and exit 0 — a taxonomy/code mismatch outside this ADR, flagged to product-owner; this
+ADR does not change registry fail-open/closed policy.) `main.rs`'s own "Corrected scope"
+note already accepts that every registry-ordered native leg is disabled by a broken
+`hooks-registry.toml`. That acceptance is correct for a janitor (`reconcile_replace_all_overcap…`,
+`shard_cap_precheck`) and WRONG for this gate: the admission gate is the writer-exclusion interlock
+of a governed migration, so a missing or unparseable registry on a degraded install would silently
+let protected writers run unreserved while a coordinator drains and snapshots (mid-write snapshot;
+safety then rests only on the §7c step-5 abort). Ordering obligations (all testable black-box):
+**O1** the core is evaluated exactly once per PreToolUse event; **O2** before `Registry::load` /
+`resolve_registry_path()` / the Tier-1 degraded-registry branch, so it runs identically with
+`CLAUDE_PLUGIN_ROOT` unset or empty, with a missing, unparseable or schema-mismatched registry, and
+with an empty matched-plugin set; **O3** before `shard_cap_precheck` and every registry plugin tier;
+**O4** an unparseable stdin payload cannot be classified (existing parse-error exit, unchanged — no
+protected path is known, so nothing is reservable). Verdict handling at this position: a
+`Block`/`Error` verdict terminates the dispatch directly through the SAME exit mapping the
+empty-tier short-circuit already uses (`shard_gate_verdict_outcomes` → exit 2 + reason), without
+loading the registry; an `Admitted` outcome stores the reservation handle in `admission_reservation`
+and the dispatch continues into the registry stages unchanged. The release-on-block funnel then
+covers EVERY later exit-2 outcome (the funnel keys on `code == 2`), including the registry
+fail-CLOSED exits (schema-version mismatch `E-REG-001`, async+block conflict `E-REG-002`,
+duplicate entry `E-REG-003` — all exit 2 in the code), shard-cap blocks and plugin blocks; a registry
+fail-OPEN exit 0 (not found / parse / regex error, `resolve_registry_path` Err, Tier-1 degraded)
+leaves the reservation for the matching Post event, which is itself registry-independent.
+The two named entry points `bc_index_migration_admission_precheck` /
+`append_log_backfill_admission_precheck` remain thin verdict-only delegates to the shared core
+(BC-1.18.013 Precondition 6(b) "or its successor"); `main.rs` calls the reservation-returning form.
+
+**Admission scope anchoring (v1.20 — closes F-002).** The v1.18–v1.19 classification
+`contains(".factory/specs/behavioral-contracts/")` / `contains(".factory/cycles/")` matched ANY
+`.factory/…` path anywhere on disk while the migration-state namespace was read from
+`CLAUDE_PROJECT_DIR`; a protected-looking path in another project, a nested project, a scratch
+directory or a look-alike (`x.factory/cycles/…`) therefore created a spurious
+`<project>/.factory/migration-state/reservations/` and was gated against a migration it does not
+belong to. Ruling — the gate guards exactly ONE factory root per dispatch, the session's own:
+(1) `project_root` = `resolve_project_cwd()` (canonicalized `CLAUDE_PROJECT_DIR`, else the process
+cwd). (2) `factory_root` = `resolve_target_path(project_root/.factory)` (below). If `factory_root`
+does not exist as a directory the gate is OUT OF SCOPE for the dispatch (no migration can be in
+flight without it) and the gate NEVER creates `.factory` itself; `create_dir_all` is applied only to
+`<factory_root>/migration-state/reservations` after that check. (3) The migration-state directory is
+ALWAYS `<factory_root>/migration-state` — the same anchor the coordinator binary uses — never
+derived from the written path. (4) Classification is COMPONENT-WISE against that root: a target is
+`BcIndex`-family iff it equals or descends from `<factory_root>/specs/behavioral-contracts`, and
+`Cycles`-family iff it equals or descends from `<factory_root>/cycles`; never a substring test.
+(5) A `.factory/…` path that is not under the session's `factory_root` — another project's
+`.factory`, a nested project's `project_root/sub/.factory`, a scratch tree, a look-alike — is OUT OF
+SCOPE: admitted unconditionally, NO reservation, NO directory creation, NO read of any
+migration-state, `tracing::debug!` only. Rationale: the interlock serializes a session against ITS
+OWN project's governed migration (the coordinator operates on `<project>/.factory/migration-state`);
+holding state for a foreign tree would mean writing outside the session's project, creating
+`migration-state/` in trees that have no governed migration, and gating by a migration that tree's
+sessions — not this one — are bound to; a foreign project's migration is guarded by sessions rooted
+there. Residual (accepted, documented): a session in project A writing into project B's protected
+paths is not serialized by B's gate; B's §7c step-5 pre-commit fingerprint recheck
+(`FINGERPRINT_MISMATCH_ABORT`) is the backstop. (6) Worktrees need no special case: each session
+anchors on its own `project_root`. If a worktree's `.factory` is a symlink (or bind mount) to the
+shared factory-artifacts checkout, `resolve_target_path` follows it, so the worktree session and the
+main session resolve to the SAME real `factory_root` and share ONE migration-state (correct: one
+namespace per real directory). If a worktree has its own separate `.factory` checkout it is a
+separate directory with its own namespace: a migration of the main checkout does not govern it and
+vice versa, and an absolute-path write from such a session into the other checkout's `.factory` is
+out of scope under (5). (7) A write whose target matches under EITHER the resolved comparison
+(`T_real` vs `factory_root_real`) OR the lexical comparison (`T_lex` vs `factory_root_lex`, see
+"Target path resolution") is in scope: the union is deliberately fail-closed (its only cost is a
+spurious reservation, or a spurious block while a window is active, for a path that merely looks
+protected through a symlink pointing out of the tree).
+
+**Target path resolution (v1.20 — closes F-003; applies to `Edit`/`Write`/`MultiEdit` `file_path`;
+the §5c Bash write-effect classifier (OBL-4) MUST use the same function for every extracted
+write-target, mirroring §5c's `realpath()` discipline for the executable).** One shared function
+`resolve_target_path` in `shard_manager.rs` returns the pair `(T_real, T_lex)`:
+(a) *Input guards.* A missing, non-string, empty or NUL-containing `file_path` is out of scope (the
+tool itself cannot write it); this is not an error. A relative `file_path` (defensive — the harness
+sends absolute paths) is joined onto the payload's `cwd` when that is an absolute path, else onto
+`project_root`; `~` is never expanded. (b) *Separators.* On Windows targets `\` is a separator and
+`Path::components` handles drive/UNC prefixes; on Unix `\` is an ordinary name byte (the v1.19
+unconditional `replace('\\','/')` over-matched and is removed). (c) *Lexical form `T_lex`.* Collapse
+`//`, drop `.`, apply `..` lexically; no filesystem access. (d) *Real form `T_real`
+(POSIX-correct; plain lexical normalization BEFORE resolution is WRONG because `a/link/../b`
+resolves `link` first).* Walk the components left to right keeping `resolved` (always
+symlink-free): `.` and empty components are skipped; `..` pops `resolved` (never above the root);
+a normal component is `lstat`ed — a symlink is read and its target spliced in front of the
+remaining components (an absolute target resets `resolved` to the root), bounded to 40 hops; an
+existing non-symlink is pushed; on the first `NotFound` that component and ALL remaining
+components are applied lexically without further `lstat` (a nonexistent component cannot be a
+symlink; this realpaths "the deepest existing ancestor" and appends the unresolved tail). Any
+non-`NotFound` error (EACCES, ELOOP, ENOTDIR, hop limit exceeded) makes `T_real` unavailable and
+classification proceeds on `T_lex` alone — a protected-looking path that cannot be resolved is
+treated as protected (fail-closed). (e) *Case.* All path-component comparisons — the
+`factory_root` prefix AND the `specs`/`behavioral-contracts`/`cycles` family names — are ALWAYS
+case-insensitive: ASCII case-fold for ASCII, `str::to_lowercase` equality for other UTF-8
+components, ASCII-fold bytewise for non-UTF-8. Decision: no filesystem case-sensitivity probe —
+sensitivity is a per-volume property (APFS default is insensitive; ext4 sensitive; a project can
+mix mounts), a probe is racy and per-directory, and on a case-insensitive volume a probe-guided
+exact compare would let `.FACTORY/Cycles/x` bypass the gate. Always-fold only over-matches on a
+case-sensitive volume (a distinct-case sibling directory nobody uses), costing at worst a spurious
+reservation (released at the Post event) or a spurious block during an active window. Unicode
+NFC/NFD folding is NOT applied: the family names are ASCII and the `factory_root` prefix is
+compared realpath-form to realpath-form, both kernel-produced. (f) *Residuals (accepted; same
+consistency-interlock trust model as Branch C safety point (v) — same-user local, not an
+authorization boundary):* hard links into a protected file from outside the tree, bind mounts not
+visible to `lstat`, and a symlink swapped between admission and the tool's actual write (TOCTOU);
+backstopped by the §7c step-5 fingerprint recheck.
+
+**Lexical root spellings — `FactoryRoot.lex_aliases` RATIFIED (v1.20, S-25.08 implementation
+ruling; refines "Admission scope anchoring" (7) and "Target path resolution" (c)).** The harness
+may spell a target `file_path` through a non-canonical form of the project directory (macOS
+`/var/...` for canonical `/private/var/...`; a symlinked checkout), so a lexical comparison against
+ONLY the canonicalized root fails whenever `T_real` is unavailable. The lexical side of the union
+therefore compares `T_lex` against the SET of lexical spellings of the session's own
+`<project>/.factory`, exactly these two and no others: (i) the lexical normalization of the
+canonical `factory_root` (`FactoryRoot.lex`), and (ii) the lexical normalization of
+`<CLAUDE_PROJECT_DIR as given>/.factory` (the raw environment value before `canonicalize`; ignored
+when the raw value is empty or not an absolute path; no filesystem access, no symlink resolution,
+`.`/`..`/`//` collapsed lexically; deduplicated against (i)). Both spellings derive from the SAME
+`CLAUDE_PROJECT_DIR` value, so each names the session's own project by construction; no
+`file_path`-derived, payload-`cwd`-derived or `$HOME`/ancestor-derived spelling is ever added.
+**Why it cannot over-match into another project:** classification stays component-wise (descendant
+of `<spelling>/specs/behavioral-contracts` or `<spelling>/cycles`, case-insensitive per (e)); a path
+under another project's `.factory` shares no prefix with either spelling unless that other project
+IS the one `CLAUDE_PROJECT_DIR` names (then it is the session's own), a nested project's
+`<project>/sub/.factory` is not a descendant of `<spelling>/specs|cycles`, and a look-alike
+(`x.factory`, `.factory-old`) fails the whole-component match. The migration-state directory is NOT
+affected: it remains `<factory_root_real>/migration-state` (real form when available, else
+`lex`), never derived from an alias, so aliasing can only widen WHICH writes are gated, never WHERE
+state lives. Cost: at most one extra lexical compare per protected-candidate write (no I/O).
+
 **Reservation timing parameters (v1.18; confirms the v1.9 H1 / v1.10 MED-2 values and corrects
 merged B2 code).** Drain quiescence timeout: 30 s (`DEFAULT_DRAIN_TIMEOUT`), poll interval ≤ 100
 ms. `MAX_RESERVATION_TTL`: default 3,600 s; production floor 1,800 s (the production entry
@@ -735,10 +891,93 @@ production entry point, not the test seam). Staleness is judged from the reserva
 (the merged B2 code uses mtime alone). Stale reclamation is TTL-only: NO PID liveness, ever
 (unchanged, v1.9 H1).
 
-- **PostToolUse:** after tool completion (success or failure): remove the reservation file
-  `reservations/<tool_use_id>.reservation` created by this invocation's PreToolUse hook, using
-  the same `tool_use_id` the harness provides to both hook events for the same tool invocation.
-  If the reservation file does not exist (writer crashed between Pre and Post): no-op (normal).
+**Reservation timestamp rules (v1.20 — closes F-008).** The staleness basis is computed by the ONE
+pure predicate `reservation_is_stale(created_at: Option<u64>, mtime: Option<u64>, now: u64,
+ttl: u64) -> bool` (epoch seconds; `mtime` is `Option` because it can be unavailable). Constant
+`RESERVATION_CLOCK_SKEW_TOLERANCE_SECS = 300` (5 min — covers NTP step and VM-resume skew, an order
+of magnitude below the 1,800 s floor). Rules, in order: (1) `created_at` is parsed as RFC 3339 (any
+UTC offset, normalised to UTC epoch seconds, sub-second truncated); a parse failure, a value before
+1970-01-01T00:00:00Z (negative epoch) or a value outside `u64` is UNPARSEABLE ⇒ `None` — never
+clamped (clamping a pre-epoch stamp to 0 would make a live writer's reservation maximally old and
+reclaimable). (2) `created_at > now + 300` (a FUTURE stamp beyond the skew tolerance) is treated as
+UNTRUSTED ⇒ `None`; a stamp in `(now, now + 300]` is accepted as ordinary skew and ages as 0.
+(3) `basis = created_at.or(mtime)`; if both are `None` (mtime unavailable, including a pre-epoch
+mtime) the age is UNKNOWN and the reservation is NOT stale — the merged B2 behaviour
+`epoch_secs(pre-epoch) = 0 ⇒ reclaimable` is REMOVED. (4) `age = now.saturating_sub(basis)`; stale
+iff `age > ttl`; a future `mtime` therefore also ages as 0. (5) Every fallback or unknown-age
+outcome emits a `tracing::warn!` (target `bc_1_18_011_migration`, field `reason` ∈
+{`created_at_unparseable`, `created_at_pre_epoch`, `created_at_future`, `mtime_future`,
+`age_unknown`}). **Direction rationale:** the two possible errors are asymmetric. Wrongfully
+RECLAIMING a live writer's reservation lets the coordinator observe quiescence and snapshot
+mid-write (an integrity hazard). Wrongfully RETAINING one yields a bounded, visible stall —
+`DRAIN_TIMEOUT_ABORT` with gate returned to OPEN — and the sanctioned manual-deletion remediation
+above. Every ambiguous timestamp therefore resolves toward retention; clamping a future stamp to
+`now` per evaluation (age 0 forever) and clamping a pre-epoch stamp to 0 (reclaimable) are both
+rejected. A forged far-future `created_at` falls back to the file mtime, which the host filesystem
+sets at creation and which the forger would also have to control; forging both requires write
+access to `migration-state/`, which already implies the ability to delete the txn record or rewrite
+`gate-state.json` (Branch C safety point (v)).
+
+**`tool_use_id` presence and validity (v1.20 — closes F-009 part 2).** Grammar:
+`[A-Za-z0-9_.-]{1,128}`, not starting with `.` (the harness form is `toolu_<alphanumerics>`).
+Absent key or JSON `null` ⇒ check-only admission (unchanged v1.19 degradation: no directory, no
+reservation). A key that is PRESENT but is not a string, is empty, or violates the grammar ⇒
+`BcIndexMigrationError::InvalidToolUseId { len }` — the admission FAILS CLOSED (error verdict
+`E-MAINTENANCE-002`, no reservation created, nothing admitted). It is not silently downgraded to
+check-only: a harness that sends an id this core cannot key would otherwise turn every protected
+write into an untracked admit with no signal. The error carries the byte length only, never the raw
+value (log-injection / path-traversal hygiene). Contract drift in the harness id alphabet thus
+surfaces loudly on the first protected write and is fixed by amending the grammar; the black-box
+suite pins the grammar against the documented id form. The release leg treats an invalid id as a
+silent no-op (it cannot have created a reservation).
+
+- **PostToolUse AND PostToolUseFailure — release events (v1.20 — closes F-001):** after tool
+  completion, remove the reservation file `reservations/<tool_use_id>.reservation` created by
+  this tool call's PreToolUse admission, using the same `tool_use_id` the harness provides to
+  both events of the pair. If the reservation file does not exist (writer crashed between Pre
+  and Post, was never created, or was already released): no-op (normal).
+  **Ruling.** Reservation release happens on BOTH hook events for the same `tool_use_id`:
+  `PostToolUse` (the tool call succeeded) and `PostToolUseFailure` (the tool call failed, was
+  interrupted, or was cancelled mid-execution). Claude Code delivers a failed tool call as
+  `PostToolUseFailure` and does NOT fire `PostToolUse` for it; the v1.4–v1.19 text "after tool
+  completion (success or failure)" therefore described an event the harness never sends for the
+  failure leg and leaked the reservation of every failed protected write until the TTL.
+  **Event payload shape (confirmed).** `PostToolUseFailure` is registered for the dispatcher in
+  `plugins/vsdd-factory/hooks/hooks.json.template` (and the generated per-platform
+  `hooks.json.*`), so the dispatcher is invoked for it. Its stdin envelope carries the common
+  fields plus top-level `tool_name`, `tool_input`, `tool_use_id`, `error`, `is_interrupt` (Claude
+  Code hook schema; the same `tool_use_id` value as the paired PreToolUse; repo corroboration:
+  BC-4.08.001 Related-BCs names `tool_use_id` as the `PostToolUseFailure` join key, BC-4.08.006).
+  The dispatcher's `HookPayload` has no named `tool_use_id` field; `#[serde(flatten)] extra`
+  captures it on EVERY event (so `payload.extra["tool_use_id"]` is populated for
+  `PostToolUseFailure` exactly as for `PostToolUse`), and `hook_event_name` is accepted via
+  `serde(alias)`. **Gap to close in the test suite:** no in-repo fixture currently contains a
+  `PostToolUseFailure` envelope with `tool_use_id` (the tool-failure-hooks fixtures read
+  `tool_name`/`error_message` from `tool_input` only); S-25.08 MUST add one (real-binary
+  black-box, shape above) — if a captured real payload ever lacks the id, the TTL backstop below
+  is the only recovery and this ruling must be re-opened with the captured payload.
+  **Dispatch-side obligation.** `invoke.rs::EventType::from_event_str("PostToolUseFailure")`
+  returns `EventType::Other`; the release MUST NOT be conditioned on `EventType::PostToolUse`
+  alone. Ruling: NO new `EventType` variant is added (BC-1.15.001 INV1's closed enum has
+  sibling-sweep cost far beyond this fix and the variant would change routing semantics for
+  every `Other` consumer); instead a single named pure predicate
+  `is_tool_completion_event(event_name: &str) -> bool` (true iff `"PostToolUse"` or
+  `"PostToolUseFailure"`, exact match on the already-aliased `payload.event_name`) gates the
+  release. The release is keyed ONLY on `tool_use_id` — it applies NO `tool_name` filter (a
+  failure envelope whose `tool_name` were absent or differently shaped must still release; the
+  `tool_use_id` is globally unique, the unlink is idempotent, and a non-protected tool's id has no
+  reservation file, so the cost is one `unlink` returning ENOENT; this also pre-wires the future
+  Bash leg). A `tool_use_id` that fails the §Error-Code-Semantics grammar can never have created
+  a reservation and is a silent no-op on release; release errors other than ENOENT are
+  `tracing::warn!` non-fatal (never a verdict). Release runs at the registry-independent
+  position (§5a "Evaluation position").
+  **If neither Post event arrives** (harness crash, session killed, hook timeout, a user denial
+  of the permission prompt, a block by a hook process other than this dispatcher — the tool
+  never ran or its completion event was lost): the reservation leaks until
+  `MAX_RESERVATION_TTL` (3,600 s default, 1,800 s production floor) elapses, at which point drain
+  step 1 GC reclaims it by `created_at` (TTL-only, no PID liveness); before that, the sanctioned
+  operator remediation (manual deletion of a confirmed-stale `*.reservation`) applies. That is
+  the designed residual and the sole one for this leg.
 
 **Bash admission and reservation (v1.5 — closes M-6):** Every admitted Bash command whose
 write effect targets `.factory/specs/behavioral-contracts/` or `.factory/cycles/` creates a
@@ -1054,6 +1293,50 @@ migrations through the shared core):**
   migration's binary (foreign live txn ⇒ refusal), and one migration's terminal record never
   satisfies the other's `ALREADY_MIGRATED`/reader checks.
 
+**v1.20 test mandate (S-25.08 share; real spawned `factory-dispatcher` unless stated):**
+- (F-001) `PostToolUseFailure` envelope `{hook_event_name:"PostToolUseFailure", tool_name:"Edit",
+  tool_input:{…}, tool_use_id:<id>, error:"…", is_interrupt:false|true}` following an admitted
+  protected PreToolUse of the same id removes `reservations/<id>.reservation` (directory empty
+  after the pair); `is_interrupt:true` likewise; a failure event whose `tool_name` is absent still
+  releases; a failure event for an unknown/never-reserved id, an invalid id, or with
+  `migration-state/` absent is a zero-mutation no-op exit 0; `PostToolUse` release is unchanged.
+- (F-004) with a live STAGING txn, a protected `Write` is blocked E-MAINTENANCE-001 (exit 2) under
+  each of: `CLAUDE_PLUGIN_ROOT` unset; registry file unparseable; registry empty/no matching plugin;
+  and with the gate OPEN the reservation is created under each. Under a schema-mismatched registry
+  (`RegistryError::SchemaVersion`, code `E-REG-001`, fail-closed exit 2 in `main.rs`) the dispatch
+  exits 2 and NO reservation remains (release-on-block); the same for an async+block-conflict and a
+  duplicate-entry registry (exit 2); a not-found / TOML-parse-error registry is fail-open (exit 0)
+  and the admission verdict is unaffected.
+  PostToolUse/PostToolUseFailure release works under an unparseable registry.
+- (F-002) a protected-looking path outside the session's `factory_root` (sibling temp dir
+  `…/other/.factory/cycles/x`, `project/sub/.factory/cycles/x`, `x.factory/cycles/y`) is admitted
+  with NO `reservations/` or `migration-state/` created anywhere and a live txn in the session's own
+  state does not block it; a session whose `project_root` has no `.factory` directory creates none;
+  `.factory` as a symlink to a real checkout resolves to the real `factory_root` (one shared
+  namespace, reservation lands in the real directory).
+- (F-003) in-scope under a live txn (blocked) and, with gate OPEN, reserved: `…/./cycles//a/../x`,
+  an alias symlink `/tmp/alias → <factory_root>/cycles` target `/tmp/alias/x`, `link/../` ordering
+  (`<factory_root>/cycles/sub/../x` where `sub` is a symlink elsewhere resolves the symlink first),
+  a nonexistent tail `<factory_root>/cycles/new-cycle/new.md`, `.FACTORY/CYCLES/x` and
+  `.Factory/Specs/Behavioral-Contracts/BC-INDEX.md` (always-fold), a relative `file_path` joined to
+  the payload `cwd`; out of scope: `<factory_root>/STATE.md`, `<factory_root>/stories/x`, a
+  backslash-named file on Unix. An unresolvable (EACCES) ancestor falls back to lexical and is still
+  protected.
+- (F-006) pure core: `txn_migration_known=false` ⇒ `RefuseForeignMigration` for every input
+  vector (precedence over record checks); dispatcher: a live `backfill-append-logs` txn with NO
+  `completed-backfill-append-logs.json` and a present B2 `completed.json` ⇒ plain E-MAINTENANCE-001
+  block, txn not finalized, gate not opened; a live `backfill-append-logs` COMMITTING txn WITH its
+  own verifying record ⇒ Branch C finalize + admit (dispatch on `migration_id`); an unknown
+  `migration_id` string ⇒ plain block, never aborted/finalized, diagnostic only.
+- (F-008) `reservation_is_stale` table: `created_at` = now+299 ⇒ age 0; now+301 ⇒ falls back to
+  mtime; pre-1970 / non-RFC3339 / year-9999 ⇒ falls back to mtime; mtime future ⇒ not stale;
+  mtime unavailable and `created_at` unusable ⇒ not stale (warn `age_unknown`); `created_at` 4,000
+  s ago with fresh mtime ⇒ stale at TTL 3,600 (basis is `created_at`).
+- (F-009) `validate_production_reservation_ttl(1_799 s)` ⇒ `ReservationTtlBelowFloor{1799,1800}`
+  (not `BinaryIntegrityFailure`); `tool_use_id` present as a number / `""` / `"../x"` / 129 chars ⇒
+  `InvalidToolUseId`, verdict `E-MAINTENANCE-002`, no reservation, no directory; absent/`null` ⇒
+  check-only admit.
+
 **Fingerprint recheck:** Retained at §Decision 7c step 5 as defense-in-depth after quiescence.
 Not the drain mechanism.
 
@@ -1162,6 +1445,12 @@ commands are fail-closed: if the guard cannot determine write effect is absent, 
 guard evaluation time. A relative path, a symlink pointing outside the project tree, or a
 PATH-resolved name (no path separator) is rejected at Branch 3/4 regardless of final resolution.
 The canonical project root is resolved via `git rev-parse --show-toplevel` at guard load time.
+**(v1.20, F-002/F-003)** That git-toplevel root is used for validating the executable path only. The
+write-effect TARGET classification of this classifier (OBL-4) MUST use the same anchor and the same
+`resolve_target_path` (lexical + POSIX-correct symlink resolution of the deepest existing ancestor +
+always-case-insensitive family compare) as the Rust Edit/Write/MultiEdit gate (§5a "Admission scope
+anchoring" / "Target path resolution"): the session's own `factory_root`, component-wise, so the
+two legs can never disagree about whether a path is protected.
 
 **Negative tests (v1.16 CORRECTED — cluster-5 F4 ACTIVATION deliverable, devops-engineer,
 per §Status block [D-1232-OBL-4] and the §Files-to-Change `validate-factory-path-staging` /
@@ -1665,6 +1954,46 @@ and the PreToolUse path blocks with the ordinary `E-MAINTENANCE-001` (live txn),
 mismatch reason and no mismatch-suffix. Shared reconciliation (§5a Branches A/B/C, §5c Branch 2) dispatches on
 `migration_id` to select the terminal-record path, the canonical-path set and N.
 
+**Definition of "foreign" in the shared admission core (v1.20 — closes F-006).** The shared core
+(§5a step 3.5 Branches A/B/C on the dispatcher's PreToolUse path, and the §5c Branch-2 hook-side
+reconciliation) serves BOTH migrations and has NO "evaluating migration"; the v1.18 phrase "the
+live txn is not the evaluating migration's own" is meaningful only in a migration BINARY. Rulings:
+(1) Let `K = {"migrate-bc-index", "backfill-append-logs"}` be the `migration_id` values THIS build
+recognises (absent field ⇒ `"migrate-bc-index"`). (2) In the shared core, a live txn is **foreign
+iff its `migration_id ∉ K`** (an id written by a newer or alien build). A foreign txn is NEVER
+finalized, NEVER aborted — including Branch B's null-generation discard, because a record this
+build cannot interpret is not this build's to discard — and no Branch A/B/C repair runs; the gate
+keeps blocking the union with the ordinary `E-MAINTENANCE-001` (path-family `<scope>`, NO mismatch
+suffix); the raw id (truncated to 64 chars, control characters escaped) goes only to the
+`tracing::warn!` diagnostic. A `migration_id` that is not a JSON string is a malformed record
+(admission error, fail-closed `E-MAINTENANCE-002`), not "foreign". (3) A live txn whose
+`migration_id ∈ K` is, for the core, simply ITS OWN: the core selects the terminal-record path, the
+canonical-path set and N by that `migration_id` (this table) and applies the five-row decision
+table; the OTHER known migration's terminal record is never consulted. Hence a live
+`backfill-append-logs` txn beside a present B2 `completed.json` and NO
+`completed-backfill-append-logs.json` yields row 3 (`NoOp`) ⇒ Branch B only if STAGING with
+`generation_id=null`, otherwise the ordinary plain live-txn block; and a live `migrate-bc-index`
+txn symmetrically. Neither is `RefuseForeignMigration`, neither is a mismatch, and neither is
+finalized on the strength of the other's record (the pre-existing "never finalize a txn on the
+strength of the other migration's record" invariant is preserved by selection-by-`migration_id`,
+not by refusal). (4) The pure core input `TerminalReconcileInputs.txn_is_own_migration` is RENAMED
+`txn_migration_known: bool` (true iff `migration_id ∈ K`); decision row 2 reads "live txn's
+`migration_id ∉ K` ⇒ `RefuseForeignMigration` (plain `E-MAINTENANCE-001`, precedence over every
+record check)"; rows 1, 3, 4, 5 and the five-row shape are unchanged:
+| # | Condition (first match wins) | Decision |
+|---|---|---|
+| 1 | lock not acquired, or no live txn | `NoOp` |
+| 2 | `migration_id ∉ K` | `RefuseForeignMigration` |
+| 3 | known, own terminal record ABSENT (STAGING and COMMITTING alike) | `NoOp` |
+| 4 | record present, COMMITTING, every verification check passes | `FinalizeThenOpenGate` |
+| 5 | record present otherwise (STAGING any generation, or any failed check) | `FailClosedMismatch` |
+(5) The cross-migration refusal above ("each coordinator recovers … ONLY a live txn whose
+`migration_id` equals its own", `LockContention`-class exit 2) is a property of the migration
+BINARIES' recovery path, where "own" is the invoking subcommand; it is unchanged and is the only
+place "own vs other known migration" is a refusal. A formally-unreachable-for-two-known-ids
+`RefuseForeignMigration` in the core is retained (not removed) because the totality of the pure
+core over `txn_migration_known=false` is what makes forward-compatible ids fail closed.
+
 **Note on `gate-state.json`:** the physical file name is `gate-state.json` (merged B2 code);
 every "gate-state" reference in this ADR and in BC-1.18.011/013 denotes that file.
 
@@ -2142,6 +2471,52 @@ dispatcher hook path — this is a `HookResult` value, NOT a migration binary pr
 | Error Code | Trigger | Severity | Exit |
 |---|---|---|---|
 | `E-MAINTENANCE-001` | Mutation tool call (Edit/Write/MultiEdit/Bash) attempted while gate state is DRAINING or LOCKED, OR while txn record exists with state STAGING or COMMITTING. Emitted by the native admission gate in `executor.rs` (§Decision 5a), NOT by the migration binary. | BLOCKED — writer must retry after migration completes or after PreToolUse step-3.5 self-heals a stuck gate | HookResult (guard layer) |
+
+**v1.20 additions (closes F-009; dedicated `BcIndexMigrationError` variants — neither condition may
+reuse `BinaryIntegrityFailure`, whose Display is the digest/TOCTOU code `BINARY_INTEGRITY_FAILURE`):**
+
+| Error / variant | Layer | Trigger | Severity | Exit / surface |
+|---|---|---|---|---|
+| `RESERVATION_TTL_BELOW_FLOOR` — `BcIndexMigrationError::ReservationTtlBelowFloor { configured_secs: u64, floor_secs: u64 }` | migration binary (production drain entry point) | the production entry point is configured with a `MAX_RESERVATION_TTL` below the 1,800 s floor (§5a "Reservation timing parameters"); a configuration error, raised by `validate_production_reservation_ttl` BEFORE any gate or drain action (the injectable test seam `drain_bc_index_writers` is not bound) | BLOCKED — nothing mutated | exit 2 |
+| `E-MAINTENANCE-002` — `BcIndexMigrationError::InvalidToolUseId { len: usize }` and the other admission-check failures | guard layer (native admission gate) | the admission check could not be completed and FAILS CLOSED: `invalid_tool_use_id` (present but non-string/empty/grammar-violating id, §5a "`tool_use_id` presence and validity"), `io` (an OS-level filesystem call made by the check failed with anything other than `ENOENT` on the file itself — directory/reservation create, or open/read/readdir/stat of `migration-state/`, `gate-state.json`, a `txn-*.json` or the terminal record), `state_integrity` (bytes were read but are unusable: invalid UTF-8, empty/truncated/unparseable JSON, wrong JSON type or shape, a present non-string `migration_id`, more than one live txn). Total decision rule below. No reservation is left behind. | BROKEN — write not admitted | `HookResult::Error`; exit 2 at the PreToolUse hook surface |
+
+**`E-MAINTENANCE-002` `<cause>` — total decision rule (aligned verbatim in substance with
+BC-1.18.013 v1.8 Precondition 6(c) and EC-032).** Every way the check can fail to complete maps
+to EXACTLY ONE cause, evaluated in this order, stopping at the FIRST failure (no aggregation):
+`tool_use_id` check → `reservations/` creation and the reservation create (W1) → `gate-state.json`
+→ `txn-*.json` records in ascending filename order (W2) → the terminal record (only on the Branch C
+verification path). (1) `invalid_tool_use_id`: payload-only, decided before any filesystem access.
+(2) `io`: an OS call returned an error other than `ENOENT` on the file itself (EACCES, EPERM, EROFS,
+ENOSPC, EIO, EISDIR, ELOOP, EMFILE, short/interrupted read, …); once a call has failed the content is
+NOT examined — an unreadable file is `io` even if its bytes would also be malformed. `ENOENT` of
+`gate-state.json`, the txn set or a terminal record is NOT an error (absent semantics: OPEN / no live
+txn / no terminal record). (3) `state_integrity`: every byte was read but cannot be accepted — invalid
+UTF-8; empty, truncated or unparseable JSON; wrong JSON type/shape (`gate-state.json` must be exactly
+one JSON string `"OPEN"`/`"DRAINING"`/`"LOCKED"`; a txn record must be an object with a known `state`
+and, if PRESENT, a string `migration_id` — an ABSENT one defaults to `migrate-bc-index` and is not
+this cause); or more than one live txn. In this ADR's wording "unreadable" never means a failed read
+call: a failed read call is `io`; "unreadable record" means readable bytes not interpretable as the
+record. Scope boundaries: reservation files are only CREATED by the check (failure ⇒ `io`) and NEVER
+read by admission (reading/parsing them is the binary drain GC, a process-exit-code surface); a
+terminal record that READS but does not verify (unparseable, non-UTF-8, empty/truncated, wrong
+schema, `canonical_paths_count` ≠ N, id/hash mismatch) is NOT `E-MAINTENANCE-002` — it yields
+`E-MAINTENANCE-001` WITH the ` (completion-record mismatch — operator investigation required)`
+suffix (the Branch C `FailClosedMismatch` outcome), txn NOT finalized, because an unverifiable
+terminal record is an expected recovery input, not a failure of the check; a failed read CALL of the
+terminal record is `io`. Terminology: throughout this ADR a "plain" `E-MAINTENANCE-001` means
+NO suffix and arises in exactly four cases — gate-only block (no live txn), terminal record ABSENT
+(`NoOp`), foreign refusal (`migration_id ∉ K`), live coordinator (EWOULDBLOCK); every Branch C
+verification failure carries the suffix. Both
+`io` and `state_integrity` are fail-closed: no reservation left behind, no txn/gate write, no Branch
+A/B/C repair; the message carries only the cause token, details go to `tracing::warn!`.
+
+`E-MAINTENANCE-002` message format (single line):
+`E-MAINTENANCE-002: writer-admission check failed (<cause>)` with `<cause>` ∈
+{`invalid_tool_use_id`, `io`, `state_integrity`}; it replaces the unnamed
+`BC-1.18.011: writer-admission check failed: {e}` string. The variant's Display carries its
+code token; the underlying detail (path, `io::Error`, byte length — never a raw id or record
+content) goes to `tracing::warn!`. `error-taxonomy.md` therefore gains exactly two catalog rows
+(`E-MAINTENANCE-002`, `RESERVATION_TTL_BELOW_FLOOR`) — see §Downstream v1.20 deltas.
 
 **Note:** One catalog row per code was added to `error-taxonomy.md` (v1.25). The `exit 0`
 for `ALREADY_MIGRATED` is a deliberate sentinel — callers that re-invoke the migration binary
@@ -2925,6 +3300,129 @@ as BC-1.18.013 v1.4 / BC-1.18.011 v1.11 / error-taxonomy v1.33) PLUS items 8-13 
 Items 8-9 need error-taxonomy v1.34; items 9-11 and 13 need BC-1.18.011 v1.12; items 11-12 also
 BC-1.18.013 v1.5.
 
+### v1.20 (S-25.08 local adversary pass 1: F-001/F-002/F-003/F-004/F-006/F-008/F-009) — BC, taxonomy, VP and story deltas
+
+Target versions: BC-1.18.013 v1.7 → v1.8; BC-1.18.011 v1.15 → v1.16; error-taxonomy v1.35 → v1.36;
+VP-133, VP-143, VP-147 amended by the architect in the same burst (below; VP catalog unchanged ⇒
+VP-INDEX / verification-architecture / verification-coverage-matrix counts untouched, POLICY 9).
+Apply to BOTH BCs (shared-core sibling sweep) unless a delta names one.
+
+14. **Precondition 6(b) "Where" bullet (both BCs):** replace "at the position
+    `bc_index_migration_admission_precheck` already holds on the production PreToolUse dispatch
+    path — structurally AHEAD of `shard_cap_precheck` … and before any registry plugin" with the
+    §5a "Evaluation position (v1.20)" obligations O1–O4: exactly once; BEFORE `Registry::load` /
+    `resolve_registry_path()` / the Tier-1 degraded branch (so it runs with `CLAUDE_PLUGIN_ROOT`
+    unset, a missing/unparseable/schema-mismatched registry, and an empty matched-plugin set);
+    before `shard_cap_precheck` and every plugin tier; the release leg is registry-independent too.
+    Add the reason (the registry not-found/parse/regex arms and the Tier-1/`resolve_registry_path`
+    paths are fail-open; the interlock must not be; schema/async-block/duplicate arms exit 2 today
+    — see ADR §5a "Evaluation position" for the per-error table).
+15. **Precondition 6(b) "Which events / tools" bullet (both BCs):** hook events become
+    `PreToolUse` (admission + reservation creation) and `PostToolUse` **and `PostToolUseFailure`**
+    (reservation release; Precondition 6(c)). Tools unchanged (`Edit`/`Write`/`MultiEdit`; `Bash`
+    stays OBL-4). Replace "every target path outside the protected union (e.g. `.factory/STATE.md`,
+    `.factory/stories/`) is NOT affected" with the anchoring + resolution rules: NEW sub-bullets
+    (i) **Anchor** — the gate guards the session's own `factory_root` = resolved
+    `<CLAUDE_PROJECT_DIR>/.factory` (must exist as a directory; the gate never creates `.factory`);
+    migration-state is `<factory_root>/migration-state`; (ii) **Classification** — component-wise
+    descendant-or-equal of `<factory_root>/specs/behavioral-contracts` (`BC-INDEX` scope) or
+    `<factory_root>/cycles` (`.factory/cycles/` scope), never a substring; (iii) **Out-of-root
+    `.factory` paths** (other project, nested project, scratch tree, look-alike `x.factory/…`) are
+    out of scope: admitted, no reservation, no directory creation, no state read; state the
+    accepted residual + §7c step-5 backstop; (iv) **Target path resolution** — lexical
+    normalisation of `.`/`..`/`//`, POSIX-correct symlink resolution of the deepest existing
+    ancestor with the nonexistent tail appended lexically, in-scope iff EITHER the resolved OR the
+    lexical form matches, unresolvable ⇒ lexical (fail-closed), relative `file_path` joined to the
+    payload `cwd`, `\` a separator only on Windows, ALWAYS case-insensitive component compare (no
+    filesystem probe); (v) residuals (hard links, bind mounts, TOCTOU).
+16. **Precondition 6(c) (both BCs):** (a) the release is "on `PostToolUse` or `PostToolUseFailure`
+    for the same `tool_use_id`" (replace "(success or failure of the tool)", which named an event the
+    harness never sends for failure); keyed only on `tool_use_id`, no `tool_name` filter; neither
+    event arriving ⇒ TTL backstop; (b) NEW **timestamp rules** paragraph (ADR §5a v1.20 rules 1-5:
+    RFC 3339 parse, pre-epoch/out-of-range ⇒ unparseable ⇒ mtime, `created_at > now + 300 s` ⇒
+    untrusted ⇒ mtime, in-tolerance future ⇒ age 0, both unusable ⇒ NOT stale + warn, no clamping);
+    extend EC-019 (011: the equivalent EC) with these vectors; (c) NEW **`tool_use_id` presence and
+    validity** paragraph (absent/`null` ⇒ check-only; present-but-invalid ⇒ fail-closed
+    `E-MAINTENANCE-002` `invalid_tool_use_id`; grammar `[A-Za-z0-9_.-]{1,128}`, no leading `.`);
+    (d) "Failure semantics" sentence: the "writer-admission-check error result" is now named
+    `E-MAINTENANCE-002` (message `E-MAINTENANCE-002: writer-admission check failed (<cause>)`).
+17. **Precondition 6(d) decision table (BC-1.18.011) / "Terminal-record reconciliation decision
+    cell" (BC-1.18.013 Precondition 6(d)) and Precondition 5 / Postcondition 5a / Postcondition 9
+    wording:** replace "live txn is NOT the evaluating migration's own (`migration_id` differs)"
+    (row 2) with "live txn's `migration_id ∉ K`, K = {`migrate-bc-index`, `backfill-append-logs`}
+    (absent field ⇒ `migrate-bc-index`) ⇒ `RefuseForeignMigration`"; rename the core input
+    `txn_is_own_migration` → `txn_migration_known`; add: in the shared (dispatcher/§5c) core a live
+    txn of EITHER known migration is decided against ITS OWN migration's terminal record selected by
+    `migration_id` (the other migration's record is never consulted), so "foreign" never applies
+    between the two known ids on the dispatcher path; cross-migration refusal (binary exit 2
+    `LockContention`-class) is unchanged and binary-only. A non-string `migration_id` is a malformed
+    record ⇒ `E-MAINTENANCE-002` `state_integrity`.
+18. **Edge cases + test vectors (both BCs; IDs continue each BC's sequence):** NEW EC rows (a)
+    `PostToolUseFailure` releases the reservation (incl. `is_interrupt`, absent `tool_name`);
+    (b) broken/missing/schema-mismatched registry, `CLAUDE_PLUGIN_ROOT` unset ⇒ gate still
+    enforces and releases; (c) protected-looking path outside the session `factory_root` ⇒ admitted,
+    nothing created; `.factory` symlink ⇒ real root; no-`.factory` project ⇒ no directory created;
+    (d) path aliasing — `.`/`..`/`//`, symlink alias, `link/..` ordering, nonexistent tail,
+    mixed-case family names, relative `file_path`; (e) `created_at` future (+299 s / +301 s),
+    pre-epoch, non-RFC3339, year-9999, mtime future/unavailable; (f) invalid `tool_use_id`
+    (number / empty / `../x` / 129 chars) vs absent/`null`; (g) a live txn of the OTHER known
+    migration with no own record (plain block, not finalized) and with its own verifying record
+    (Branch C finalize); unknown `migration_id` (plain block, never aborted). BC-1.18.013 EC-016 and
+    BC-1.18.011 EC-013 keep their binary-refusal meaning; add "(binary recovery path only)".
+19. **error-taxonomy.md v1.36:** two new catalog rows — `E-MAINTENANCE-002` (category Migration
+    window guards; severity broken; `HookResult::Error`, exit 2 at the PreToolUse hook surface;
+    message `E-MAINTENANCE-002: writer-admission check failed (<cause>)`,
+    `<cause>` ∈ {`invalid_tool_use_id`, `io`, `state_integrity`}; "no reservation left behind";
+    ADR-052 §5a/§Error Code Semantics v1.20) and `RESERVATION_TTL_BELOW_FLOOR` (category Migration
+    binary exit codes; blocked; exit 2; production entry point configured below the 1,800 s floor;
+    nothing mutated); update the MAINTENANCE category prose ("`E-MAINTENANCE-NNN` … exit 2 blocks")
+    to mention the `-002` HookResult::Error member and that `E-MAINTENANCE-001`'s `PostToolUse`
+    wording becomes "PostToolUse / PostToolUseFailure"; `E-MAINTENANCE-001` text/format UNCHANGED.
+21. **Lexical root spellings (both BCs; ADR §5a "Lexical root spellings"):** BC-1.18.013 v1.8 →
+    v1.9 and BC-1.18.011 v1.16 → v1.17. Precondition 6(b) anchor/classification sub-bullets (i)/(ii)
+    and (iv): replace "the lexical comparison (`T_lex` vs the lexical `factory_root`)" with "`T_lex`
+    vs the lexical normalization of EITHER spelling of the session's own factory root: (a) the
+    canonical `factory_root`, (b) `<CLAUDE_PROJECT_DIR as given>/.factory` (raw env value, absolute
+    only, lexical normalization only); no other spelling (never from the target, payload `cwd` or an
+    ancestor)"; add "migration-state is anchored on the real root regardless of spelling". EC-023: add
+    vector (f) — project directory reached via a symlink spelling (macOS `/var` vs `/private/var`;
+    symlinked checkout): `file_path` spelled through the NON-canonical `CLAUDE_PROJECT_DIR` is in
+    scope (blocked under a live txn / reserved when OPEN) even when `T_real` is unavailable
+    (unresolvable ancestor seam), and the reservation lands in the canonical
+    `<factory_root_real>/migration-state/reservations/`. EC-024: add vector — the same protected target
+    spelled via the canonical form and via the as-given form are classified identically; and a
+    look-alike/other-project path that merely shares a symlink-ancestor spelling with neither
+    alias is out of scope (no over-match). Test vectors: one row per new vector.
+22. **`executor::resolve_shard_gate_precedence` REMOVED (S-25.08 implementation ruling).** With
+    admission evaluated before `Registry::load` and returning directly on a Block/Error verdict
+    (§5a "Evaluation position"), the "never invoke `shard_cap_precheck` when the migration gate
+    fires" guarantee of BC-1.18.011 Architect Ruling 1 is STRUCTURAL (control flow of `main.rs::run`:
+    an early return precedes the only `shard_cap_precheck` call) and is exercised by the real-binary
+    black-box test (O3). The helper has no remaining production role, and a `pub` function used only
+    by its own unit tests is dead production surface and a false-assurance seam (the tests prove the
+    helper, not `main`). Ruling: delete `resolve_shard_gate_precedence` and its four unit tests
+    (`test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_*` in
+    `bc_1_18_011_b2_migration_test.rs`) and the import; replace their coverage with ONE real-binary
+    test asserting that with a live txn a protected `Write` to a path that `shard_cap_precheck` would
+    roll (an over-cap `[[shard]]` canonical under `.factory/cycles/`/BC-INDEX) exits 2
+    `E-MAINTENANCE-001` AND leaves the canonical byte-identical (no seal/truncate) — the behaviour the
+    helper's tests existed to protect. No BC text names the helper (grep clean); BC-1.18.011's
+    Architect Ruling 1 prose stays valid, re-anchored to the structural early return — product-owner
+    to word one sentence in BC-1.18.011 v1.17 Precondition 6(b) ("structurally skipped: admission
+    returns before `shard_cap_precheck` is reachable").
+20. **Story deltas (story-writer; no BC authoring):** S-25.08 gains ACs/tasks for each of F-001
+    (release on `PostToolUseFailure` + fixture), F-004 (evaluation before `Registry::load`; O1–O3
+    black-box under broken/absent registry; release-on-block under a schema-mismatch/async-block/duplicate registry, exit 2), F-002 (anchor +
+    out-of-root no-op), F-003 (`resolve_target_path` shared fn + alias/case vectors), F-006
+    (`txn_migration_known` rename + dispatcher-path decision vectors), F-008 (`reservation_is_stale`
+    signature `(Option<u64>, Option<u64>, u64, u64)` + skew constant 300 + pre-epoch-mtime change),
+    F-009 (`ReservationTtlBelowFloor`, `InvalidToolUseId`, `E-MAINTENANCE-002` mapping); file list
+    gains `crates/factory-dispatcher/src/invoke.rs` (`is_tool_completion_event`) and
+    `shard_manager/admission.rs`; cite BC-1.18.011 v1.16 / BC-1.18.013 v1.8 and the VP amendments.
+    S-25.06 (mechanism-A) inherits the "foreign" wording and the rename only (no new ACs). STORY-INDEX
+    row/version bump per the story-writer's normal propagation (POLICY 8 bcs-array atomicity: only if
+    the `bcs:` frontmatter set changes — it does not).
+
 ---
 
 ## References
@@ -2959,6 +3457,7 @@ BC-1.18.013 v1.5.
 | `CLAUDE.md` | Apply §Decision 8 CLAUDE.md amendment text | **Human only** |
 | `.claude/settings.json` | No change — Option B requires no settings.json mutation | — |
 | `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/shard_manager.rs` (v1.18, S-25.06 scope) | Shared admission core evaluated once per PreToolUse before `shard_cap_precheck` (D1); reserve-then-verify order + release-on-block (D5/D2); (v1.19) `executor.rs` admit path: REMOVE the early return that skips admission/reservation when `.factory/migration-state/` is absent (and its PostToolUse-release counterpart's directory-exists precondition becomes a best-effort no-op only) — replaced by an idempotent `create_dir_all(migration-state/reservations)` immediately before reservation W1; wire §5a step-3.5 Branches A/B/C into the production admission path for BOTH migrations (merged `reconcile_stale_admission_gate` is uncalled dead code) + verified `completed*.json`+COMMITTING finalize replacing the merged unverified B2 short-circuit (D3); `migration_id` txn field + cross-migration refusal + per-migration terminal-record/pointer names for `backfill-append-logs` + `file_count`→`canonical_paths_count` (D4); `DEFAULT_MAX_RESERVATION_TTL` 120 s→3,600 s with `created_at`-based staleness; mechanism-A coordinator drain (steps 1–7) writing `gate-state.json`. B2 test fixtures that model STAGING without holding `exclusive.lock` must be updated by test-writer. | implementer / test-writer (S-25.06) |
+| `crates/factory-dispatcher/src/main.rs`, `src/executor.rs`, `src/invoke.rs`, `src/shard_manager.rs`, `src/shard_manager/admission.rs` (v1.20, S-25.08 scope) | (F-004) move the admission call and the release call in `main.rs::run` to immediately after payload parse + `resolve_project_cwd()`, BEFORE the `CLAUDE_PLUGIN_ROOT` tiering / `resolve_registry_path()` / `Registry::load`; a Block/Error verdict exits via the existing `shard_gate_verdict_outcomes` mapping without loading the registry; (F-001) `executor.rs` release gated by new pure `is_tool_completion_event` (`"PostToolUse"` \| `"PostToolUseFailure"`), keyed on `tool_use_id` only (drop the `Edit/Write/MultiEdit` tool filter), NO new `EventType` variant; (F-002/F-003) `ProtectedPathFamily::classify` replaced by component-wise classification against `factory_root` using new shared `resolve_target_path` → `(T_real, T_lex)`; admission/release derive `migration_state_dir` from `factory_root` (must exist; never create `.factory`); out-of-root paths out of scope; (F-006) rename `TerminalReconcileInputs.txn_is_own_migration` → `txn_migration_known` and set it from `migration_id ∈ {migrate-bc-index, backfill-append-logs}`; (F-008) `reservation_is_stale(Option<u64>, Option<u64>, u64, u64)`, `RESERVATION_CLOCK_SKEW_TOLERANCE_SECS = 300`, pre-epoch/unavailable mtime ⇒ NOT stale (replaces `epoch_secs ⇒ 0`); (F-009) add `BcIndexMigrationError::ReservationTtlBelowFloor` and `InvalidToolUseId`, map admission errors to `E-MAINTENANCE-002 (<cause>)`, `validate_production_reservation_ttl` stops returning `BinaryIntegrityFailure`; key-present-but-invalid `tool_use_id` fails closed. Tests: the §5a "v1.20 test mandate". | implementer / test-writer (S-25.08) |
 | `.factory/specs/behavioral-contracts/ss-01/BC-1.18.011.md` | Apply §Downstream Amendments 1–9 (v1.3 versions) | product-owner |
 | `.factory/specs/behavioral-contracts/ss-01/BC-1.18.010.md` | Apply §Downstream Invariant 2 amendment + §Reader Integration v1.3 replacement | product-owner |
 | `.factory/specs/prd-supplements/error-taxonomy.md` | Apply §Downstream error-taxonomy v1.3 correction | product-owner or technical-writer |
@@ -2980,6 +3479,7 @@ BC-1.18.013 v1.5.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.20 | 2026-10-07 | architect | S-25.08 local adversary pass 1 — normative rulings on seven spec-level gaps in the shared admission core (HEAD 292ffed5 reviewed read-only). **F-001** release on BOTH `PostToolUse` and `PostToolUseFailure` for the same `tool_use_id` (Claude Code delivers a failed tool call only as `PostToolUseFailure`; registered in `hooks.json.template`; payload carries `tool_use_id`, captured by `HookPayload.extra`); gate by a named pure predicate, no new `EventType` variant, no `tool_name` filter; neither event ⇒ TTL backstop; fixture gap recorded. **F-002** anchoring: the gate guards the session's own `factory_root` = resolved `<CLAUDE_PROJECT_DIR>/.factory` (must exist; never created); migration-state always `<factory_root>/migration-state`; component-wise classification replaces `contains(…)`; out-of-root `.factory` paths are out of scope (admitted, no reservation, no directory); worktree/symlink behaviour specified; residual + backstop stated. **F-003** shared `resolve_target_path`: lexical + POSIX-correct symlink resolution of the deepest existing ancestor, union of resolved/lexical match, unresolvable ⇒ lexical (fail-closed), `\` separator only on Windows, ALWAYS case-insensitive component compare (no FS probe; rationale); §5c Bash leg bound to the same function/anchor. **F-004** admission and release are registry-independent: evaluated before `Registry::load`/`resolve_registry_path`; obligations O1–O4; supersedes the "position … already holds" wording. **F-006** "foreign" in the shared core = `migration_id ∉ K` (K = the two known ids); a live txn of either known migration is decided against its own record selected by `migration_id`; `txn_is_own_migration` → `txn_migration_known`; five-row table restated; binary cross-migration refusal unchanged. **F-008** timestamp rules: skew tolerance 300 s, future-beyond-tolerance and pre-epoch/out-of-range `created_at` ⇒ unparseable ⇒ mtime, unknown age ⇒ NOT stale, never clamp; retention-over-reclamation rationale. **F-009** variants `ReservationTtlBelowFloor`, `InvalidToolUseId` (fail-closed when key present but invalid), new codes `E-MAINTENANCE-002` and `RESERVATION_TTL_BELOW_FLOOR`; `tool_use_id` grammar stated. Added §5a v1.20 test mandate, §Downstream deltas 14-20 (BC-1.18.011 v1.16 / BC-1.18.013 v1.8 / error-taxonomy v1.36 / stories), §Files to Change row. No state-machine, Dekker, or §Decision 1–4/7a–d/8–12 change. VP-133/VP-143/VP-147 anchors amended same burst. **Same-v1.20 consistency correction (product-owner conflict report):** the registry-error behaviour cited in §5a "Evaluation position", the F-004 test mandate and Downstream item 20 is restated from `main.rs::run` (HEAD 292ffed5): schema-version mismatch (`E-REG-001`), async+block conflict (`E-REG-002`) and duplicate entry (`E-REG-003`) exit 2 (fail-closed); not-found/parse/regex errors, `resolve_registry_path` Err and Tier-1 degraded are fail-open (exit 0); release-on-block keys on `code == 2`. **Same-v1.20 implementation rulings (S-25.08 HEAD 83f0f549):** (a) `FactoryRoot.lex_aliases` RATIFIED — the lexical side of the scope union compares against exactly two spellings of the session's own root (canonical, and as-given `CLAUDE_PROJECT_DIR/.factory`), both from the same env value, so no cross-project over-match; migration-state stays on the real root (§5a "Lexical root spellings"; Downstream item 21). (b) `executor::resolve_shard_gate_precedence` REMOVED with its tests as superseded by the structural early return (Downstream item 22; one real-binary test replaces them). **Same-v1.20 alignment with product-owner ruling (BC-1.18.013 v1.9 / BC-1.18.011 v1.17 / error-taxonomy v1.38):** a Branch C terminal record that reads but does not verify (unparseable, non-UTF-8, empty/truncated, wrong schema, count ≠ N, id/hash mismatch) yields `E-MAINTENANCE-001` WITH the completion-record-mismatch suffix (not plain); a failed read call is `E-MAINTENANCE-002` (`io`); "plain" = no suffix, only for gate-only block, terminal record absent (`NoOp`), foreign refusal, live coordinator. §Error Code Semantics E-MAINTENANCE-002 rule corrected; every other "plain" usage in this ADR audited and already matches. The earlier text calling the whole registry-load path "fail-open" was imprecise. **Same-v1.20 wording fix (E-MAINTENANCE-002 causes):** the Error Code Semantics row's `io` ("cannot … read gate/txn") and `state_integrity` ("unreadable …") overlapped; replaced by the total decision rule aligned with BC-1.18.013 v1.8 Precondition 6(c)/EC-032 — `io` = OS call failed (non-ENOENT), `state_integrity` = bytes read but unusable, ENOENT = absent semantics, fixed evaluation order, reservation files never read by admission, a terminal record that reads but does not verify = plain E-MAINTENANCE-001. The code's E-REG numbering disagrees with error-taxonomy rows E-REG-001..003 (which list other meanings, exit 0) — flagged to product-owner; no registry policy change. |
 | 1.19 | 2026-10-07 | architect | S-25.08 implementation finding — first-activation reservation race (ratifies product-owner BC-1.18.013 v1.7 Precondition 6(c) / BC-1.18.011 v1.15; same decision, option (a)). (1) §5a step 0 appended: admitter first ensures `.factory/migration-state/reservations/` by idempotent recursive create (already-exists is success; no existence pre-check, no lock); admission/reservation/release never conditioned on pre-existence of `migration-state/`; absent `gate-state.json` = OPEN, absent txn set = no live txn; Dekker argument holds from the first protected write ever; creation failure fails PreToolUse closed. (2) Cost note added: cost applies to every protected Edit/Write/MultiEdit (not only during migrations), still ≤ low-single-digit ms, accepted. (3) §7e "Why (D4)" parenthetical corrected: "(`.factory/migration-state/` does not exist)" → "(no txn record, terminal record or pointer exists; the empty `migration-state/reservations/` namespace may exist from admission)". (4) §Files-to-Change `executor.rs` row: removal of the directory-exists early return on the admit path. Verification: VP-133 reserve-then-verify facet, VP-146 a4, VP-147 h4 gain the obligation "reservation namespace exists from the first protected write" (see those VPs for Kani-provable vs black-box split). Versioned v1.19 (not an in-place edit of v1.18) because v1.18 was already committed. |
 | 1.18 | 2026-10-06 | architect | Formal-finding exception (v1.14/DEF-1 pattern) adjudicating S-25.06 formal-verification defects D1/D2/D3 (HEAD 9886cbc1) and BC-1.18.013 v1.3 / error-taxonomy v1.32; two further spec defects found while adjudicating against merged B2 code. **Ratified from PO v1.3:** PreToolUse Branch C verify-then-finalize (COMMITTING + verifying terminal record ⇒ txn→COMPLETED THEN gate→OPEN; mismatch ⇒ fail-closed; safety analysis recorded in §5a Branch C); coordinator exemption (keyed solely on §5c Branch 1–4 classification; implemented in the OBL-4 classifier, Rust gate leaves Bash unprocessed); shared protected-path union and shared gate/txn-dir/reservation-dir/`exclusive.lock` (this ADR already specified the union; merged B2 code already scopes to it, but deviates elsewhere); drain parameters 30 s / 3,600 s default / 1,800 s floor / no PID liveness CONFIRMED (merged B2 `DEFAULT_MAX_RESERVATION_TTL`=120 s corrected). **Amended/added:** §4e table — completed.json+COMMITTING verify-then-finalize row and mismatch row; §5c Branch 2 step 0.5 (the "no active txn"-only reconciliation gap); §5a step-3.5 Branch C + non-reconciliation note (1); §5a "Shared protected-path union and shared admission state" (single shared core evaluated once, before `shard_cap_precheck`; Bash leg stays OBL-4 with stated residual/backstops); "Coordinator exemption"; "Release-on-block" (dispatcher removes its own reservation when a later stage blocks); "Reservation timing parameters"; **D5** reserve-then-verify admission order replacing the unsound `LOCK_SH`-on-rename-replaced-gate-file ordering (Dekker argument recorded); **D4** new §Decision 7e — per-migration terminal record/pointer (`completed.json`/`CURRENT.json` stay B2's; `backfill-append-logs` uses `completed-backfill-append-logs.json`/`CURRENT-backfill-append-logs.json`), `migration_id` txn discriminator, cross-migration recovery refusal, physical gate file name `gate-state.json`; §Error Code Semantics (`COMPLETION_RECORD_MISMATCH_ABORT`; `ALREADY_MIGRATED` per-migration); v1.18 test mandate; §Verification Strategy re-verification obligation for the delta with the Kani-vs-fault-injection claim boundary; §Downstream BC/taxonomy deltas for product-owner; §Files to Change. Performance (point 5): per-protected-mutation reservation create+delete (no fsync, no admitter lock) measured against ADR-020 Class A (p95 ≤ 1,500 ms; observed 1,050–1,161 ms process-spawn-dominated) is a ≤ low-single-digit-ms increment confined to Edit/Write/MultiEdit on protected paths — accepted, no alternative required. §Decision 1/2/3/4a–d/7a–d/9–12 unchanged. **Same-amendment follow-up (human approved the formal-finding exception + B2-1..B2-4 in S-25.06, 2026-10-06):** (1) §4e mismatch row, §5a step-3.5 predicate and §5c step 0.5 reworded so STAGING + terminal record is unambiguously ALWAYS fail-closed (never finalizable, no verification attempted) and only COMMITTING is finalizable via Branch C — wording-only, matches PO's reading; (2) §7e label discipline: foreign-txn refusal is a `LockContention`-class refusal, not `COMPLETION_RECORD_MISMATCH_ABORT`; (3) §Downstream deltas 8-12 to product-owner; (4) §Verification Strategy / VP facet meanings re-baselined (VP-143/146/133/124-class, see VP-INDEX). Canonical B2 defect labels: B2-1 `reconcile_stale_admission_gate` dead code → wire Branches A/B/C; B2-2 unverified `completed.json` short-circuit → verified own-migration finalize; B2-3 120 s TTL + mtime staleness → 3,600 s / 1,800 s floor + `created_at`; B2-4 check-then-reserve race → reserve-then-verify. **Same-version alignment amendment (uncommitted v1.18; matches product-owner BC-1.18.011 v1.13 PC6(d) / BC-1.18.013 v1.6 PC6(b)):** (a) Branch B on-disk marker made exact in §4e F2 row, §5a step 3.5 Branch B and the test plan — txn record rewritten in place to `state: ABORTED` with top-level string field `abort_reason: "null_generation"`, optional on read, informational only, never consulted for admission or reconciliation decisions (replaces the underspecified "null_generation disposition marker"); (b) §5a now states the E-MAINTENANCE-001 `<scope>` keying rule (written path family: `BC-INDEX` / `.factory/cycles/`; live txn `migration_id` only in the `tracing::warn!` diagnostic) with the exact BC-1.18.013 PC6(b) format string; (c) §5a Branch C names the shared pure decision core `decide_terminal_record_reconciliation`. **inputs:** dropped downstream artifacts (S-25.06, BC-1.18.011, BC-1.18.013, error-taxonomy) to restore an acyclic input-hash graph; still cross-referenced in §Downstream. |
 | 1.17 | 2026-09-23 | architect | Adds §Decision 12 — OBL-1 verification architecture (documentary; discharges [D-1232-OBL-1], the implementation-phase Kani + fault-injection obligation this ADR's own §Verification Strategy subsection mandated). Documents the `Fs` trait seam (`crates/factory-dispatcher/src/shard_manager/migration_fs.rs`, 7 core ops + `append`) as the abstraction boundary enabling both Kani model-checking (in-memory two-namespace `live`/`durable` model) and real-filesystem fault-injection (feature-gated `fail`-instrumented crash points), with `StdFs` delegating to the existing §Decision 7d `F_FULLFSYNC`/`fsync` durable-write primitives — zero behavioral change to production I/O. Records the two-pronged verification split: 7/7 `#[kani::proof]` harnesses PROVED in `crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs` (recover() totality, recovery-safety predicate, transition inductive invariants, INV-GATE-TXN admission-gate quiescence re-verification, bounded pointer-swap crash-atomicity + WAL-ordering before/after regression, recovery idempotence), executed via the `kani` CI job (`.github/workflows/kani.yml`); 30/30 green fault-injection tests in `crates/factory-dispatcher/tests/bc_1_18_011_b2_migration_crash_injection_test.rs` (child-process `abort()`-based crash injection at real syscall boundaries, empirically confirming the `Fs` model's axioms against the real OS). Cross-references the §Decision 7b WAL-ordering conformance fix: the implementation had deviated from the always-ratified INTENT-before-pointer-swap ordering (constructing/appending INTENT records post-rename instead of pre-swap); the fix brings code into conformance with the unchanged §Decision 7b text (spec wins, per CLAUDE.md Standing Rule) — Kani harness 5 is the before/after regression proof. **Governance verdict: REFINES/IMPLEMENTS, not CHANGES-RATIFIED** — §Decision 4e/5a/7c's frozen state-machine text is unchanged by this entry; it documents an already-mandated verification harness architecture, not a new design decision, so it does not trigger the "formal-finding exception or superseding ADR" bar in §Status. Full governance analysis on file as `obl1-recover-refactor-design.md` (architect work product). No BC-1.18.011/BC-1.18.010/error-taxonomy amendment required — this entry changes how the ratified behavior is verified and how the already-ratified ordering is correctly implemented, not what any BC promises callers. ARCH-INDEX / VP-INDEX / BC-INDEX / STATE.md cross-document propagations are out of scope for this edit (state-manager owns those). |

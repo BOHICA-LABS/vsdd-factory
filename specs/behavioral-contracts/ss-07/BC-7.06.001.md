@@ -1,17 +1,17 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.12"
+version: "1.13"
 status: draft
 producer: product-owner
 timestamp: 2026-05-07T00:00:00Z
-last_amended: 2026-05-09
+last_amended: 2026-10-07
 phase: F2
 inputs:
   - .factory/cycles/v1.0-feature-plugin-async-semantics-pass-1/F1-delta-analysis.md
   - plugins/vsdd-factory/hooks-registry.toml
   - crates/factory-dispatcher/src/registry.rs
-input-hash: "50ba566"
+input-hash: "5226893"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -105,7 +105,7 @@ All three E-REG-NNN error codes share the same fail-closed semantic — load fai
 - `E-REG-002` (`RegistryError::AsyncBlockConflict`) — exits 2 via the `RegistryError::AsyncBlockConflict { name }` arm in `factory_dispatcher::main::run` (the arm carrying `eprintln! + 2` above the catch-all in `main.rs::run`); correct.
 - `E-REG-003` (`RegistryError::DuplicateEntry`) — fixed at F-P8-001 by adding the explicit `RegistryError::DuplicateEntry` arm in `factory_dispatcher::main::run` returning exit code 2 with `[E-REG-003]` stderr prefix and `dispatcher.registry_invalid` event emission. This arm precedes the catch-all `_ => 0` arm. Future `RegistryError` variants MUST receive an explicit non-zero exit branch and MUST NOT fall through to the catch-all (per TD-028 process-gap codification). (F-P13-002: migrated from stale line numbers 148–151/143–145 to stable symbol anchors per TD-VSDD-091.)
 
-Any future `RegistryError` variant added to `registry.rs` MUST receive an explicit exit-code branch in `main.rs` before the catch-all. The catch-all MAY only remain as a last-resort fallback for truly unexpected variants, and MUST map to a non-zero exit code (e.g., `_ => 1`), never 0.
+Any future `RegistryError` variant added to `registry.rs` MUST receive an explicit exit-code branch in `main.rs` before the catch-all. The catch-all applies ONLY to unknown/future variants (variants not enumerated in `main.rs::run`): it MUST map them to a non-zero exit code (e.g., `_ => 1`), never 0. The four existing operational variants — `RegistryError::NotFound`, `RegistryError::Io`, `RegistryError::Toml`, `RegistryError::ToolRegex` — are NOT subject to this rule: they carry no E-REG code and remain fail-open (exit 0) per BC-1.08.001 Invariant 1, and an implementation MUST route them through explicit exit-0 arms (not through the catch-all) so that the catch-all's non-zero mapping for unknown variants is not defeated.
 
 ## Error Paths
 
@@ -233,6 +233,10 @@ Canonical error codes for all registry-validation failures in `registry.rs::vali
 | **Deterministic** | YES — given same registry content, always produces same validation result. |
 | **Thread safety** | YES — `validate()` is a pure check on an immutable parsed struct. |
 | **Overall classification** | Deterministic with filesystem I/O at load time only; `validate()` is a pure fn. |
+
+## Amendment 2026-10-07 (v1.12 → v1.13 — catch-all scope vs BC-1.08.001 Invariant 1 reconciled)
+
+§Fail-Closed Symmetry said the `RegistryError` catch-all "MUST map to a non-zero exit code", which read as contradicting BC-1.08.001 Invariant 1 (registry file not found / I/O / TOML parse / invalid tool regex are fail-open, exit 0). Clarified: the non-zero rule applies to unknown/future variants only; the four enumerated fail-open variants exit 0 via explicit arms. No postcondition or invariant change. Conformance note: at develop ce2421be `main.rs::run` ends the `match &e` with a single `_ => 0` arm covering both the four fail-open variants and any future variant, so a future variant would silently exit 0 — a code/spec gap routed to implementer (add explicit `NotFound | Io | Toml | ToolRegex => 0` arm; make the catch-all non-zero).
 
 ## Amendment 2026-05-09 (v1.11 → v1.12 — F5 fix-burst-35 F-P36-001: Traceability Stories TBD→S-15.01)
 
