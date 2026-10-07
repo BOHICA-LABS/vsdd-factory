@@ -13087,15 +13087,34 @@ impl BcIndexMigrationError {
     /// detail goes to `tracing::warn!`, never into the message.
     #[must_use]
     pub fn admission_failure_cause(&self) -> AdmissionFailureCause {
-        // S-25.08 Red-Gate NOTE: the closed return type is in place; the
-        // wildcard arm below still violates ADR-052 v1.21 F-012 (the match must
-        // be EXHAUSTIVE over `BcIndexMigrationError`, no `_`).
+        // EXHAUSTIVE over `BcIndexMigrationError` (no `_` arm): adding a variant
+        // is a compile error until it is classified here.
         match self {
             BcIndexMigrationError::InvalidToolUseId { .. } => {
                 AdmissionFailureCause::InvalidToolUseId
             }
             BcIndexMigrationError::Io { .. } => AdmissionFailureCause::Io,
-            _ => AdmissionFailureCause::StateIntegrity,
+            BcIndexMigrationError::AdmissionStateIntegrity { .. } => {
+                AdmissionFailureCause::StateIntegrity
+            }
+            // Coordinator-only variants: unreachable from admission. If one is
+            // ever surfaced here the fail-closed classification is
+            // `state_integrity`.
+            BcIndexMigrationError::BinaryIntegrityFailure { .. }
+            | BcIndexMigrationError::RecoveryRequiresReauthorization
+            | BcIndexMigrationError::ExpiryAbort
+            | BcIndexMigrationError::FingerprintMismatchAbort
+            | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
+            | BcIndexMigrationError::DrainTimeoutAbort
+            | BcIndexMigrationError::FactoryRootNotFound { .. }
+            | BcIndexMigrationError::ArchIndexParityAbort { .. }
+            | BcIndexMigrationError::CompletionManifestRejection { .. }
+            | BcIndexMigrationError::CensusMismatchAbort { .. }
+            | BcIndexMigrationError::ContentPreservationAbort { .. }
+            | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
+                AdmissionFailureCause::StateIntegrity
+            }
         }
     }
 
@@ -13907,8 +13926,9 @@ pub(crate) fn read_admission_gate_state(
     // an `io::Error` (BC-1.18.013 v1.9 EC-032).
     match std::fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
-            BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!("malformed gate-state at {}: {e}", path.display()),
+            BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::GateRecordMalformed,
+                detail: admission::parse_failure_detail(&path, &e),
             }
         }),
         Err(source) if source.kind() == io::ErrorKind::NotFound => {

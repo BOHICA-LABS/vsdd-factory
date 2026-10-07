@@ -54,9 +54,9 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnRecord,
-    BcIndexMigrationTxnState, StaleGateReconciliationPlan, TerminalReconcileInputs,
-    WriterReservation, is_bc_index_admission_open, migrate_err_to_io,
+    AdmissionStateIntegrityKind, BcIndexAdmissionGateState, BcIndexMigrationError,
+    BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, StaleGateReconciliationPlan,
+    TerminalReconcileInputs, WriterReservation, is_bc_index_admission_open, migrate_err_to_io,
     plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
     write_admission_gate_state,
 };
@@ -365,6 +365,20 @@ pub fn as_given_factory_root_spelling(raw: &std::ffi::OsStr) -> Option<PathBuf> 
         return None;
     }
     Some(lexical_normalize(&project_dir.join(".factory")))
+}
+
+/// The `detail` of a malformed-record failure: path plus the parse error's
+/// CATEGORY and position — never the serde message, which can echo record
+/// content (an unknown variant name, a literal) into the diagnostic.
+#[must_use]
+pub(crate) fn parse_failure_detail(path: &Path, e: &serde_json::Error) -> String {
+    format!(
+        "{}: {:?} error at line {} column {}",
+        sanitize_diagnostic(&path.display().to_string(), 256),
+        e.classify(),
+        e.line(),
+        e.column()
+    )
 }
 
 /// Maximum characters of an untrusted identifier echoed into a diagnostic.
@@ -813,8 +827,12 @@ fn abort_null_generation_txn(
 ) -> Result<(), BcIndexMigrationError> {
     let mut raw = live.raw.clone();
     let Some(object) = raw.as_object_mut() else {
-        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("txn record {} is not a JSON object", live.path.display()),
+        return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
+                "{}: not a JSON object",
+                sanitize_diagnostic(&live.path.display().to_string(), 256)
+            ),
         });
     };
     object.insert("state".to_string(), serde_json::json!("ABORTED"));
@@ -823,8 +841,12 @@ fn abort_null_generation_txn(
         serde_json::json!(ABORT_REASON_NULL_GENERATION),
     );
     let json = serde_json::to_string_pretty(&raw).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize aborted txn record: {e}"),
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
+                "failed to serialize aborted txn record ({:?})",
+                e.classify()
+            ),
         }
     })?;
     // ONE atomic write-temp + fsync + rename + dir-sync (§7d): no observable
@@ -895,8 +917,9 @@ impl AdmissionSnapshot {
         let first = live.next();
         if live.next().is_some() {
             let count = self.txns.iter().filter(|t| t.is_live()).count();
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!(
+            return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
+                detail: format!(
                     "found {count} coexisting LIVE (STAGING/COMMITTING) txn records -- the \
                      writer-exclusion invariant requires at most one active migration in flight \
                      at a time across both governed migrations"
@@ -951,14 +974,16 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
             source,
         })?;
         let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
-            BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!("malformed txn record at {}: {e}", path.display()),
+            BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+                detail: parse_failure_detail(&path, &e),
             }
         })?;
         let record: BcIndexMigrationTxnRecord =
             serde_json::from_value(raw.clone()).map_err(|e| {
-                BcIndexMigrationError::BinaryIntegrityFailure {
-                    message: format!("malformed txn record at {}: {e}", path.display()),
+                BcIndexMigrationError::AdmissionStateIntegrity {
+                    kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+                    detail: parse_failure_detail(&path, &e),
                 }
             })?;
         // A PRESENT non-string `migration_id` (including JSON `null`) is a MALFORMED
@@ -968,10 +993,11 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
             .get("migration_id")
             .is_some_and(|v| !matches!(v, serde_json::Value::String(_)))
         {
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!(
-                    "malformed txn record at {}: migration_id is not a JSON string",
-                    path.display()
+            return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: AdmissionStateIntegrityKind::TxnMigrationIdNotString,
+                detail: format!(
+                    "{}: migration_id is not a JSON string",
+                    sanitize_diagnostic(&path.display().to_string(), 256)
                 ),
             });
         }
@@ -1001,8 +1027,12 @@ fn create_writer_reservation(
         tool_use_id: tool_use_id.to_string(),
     };
     let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize writer reservation: {e}"),
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::ReservationSerialization,
+            detail: format!(
+                "failed to serialize writer reservation ({:?})",
+                e.classify()
+            ),
         }
     })?;
     let path = reservations_dir.join(format!("{tool_use_id}.reservation"));
