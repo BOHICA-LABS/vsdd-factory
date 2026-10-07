@@ -326,6 +326,20 @@ impl FactoryRoot {
 }
 
 impl FactoryRoot {
+    /// The factory root directory itself, REAL form when available. Every
+    /// `.factory/…` path a coordinator reads or writes is derived from this
+    /// (never from a hand-built `project/.factory` literal).
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        self.real.as_deref().unwrap_or(&self.lex)
+    }
+
+    /// `<factory_root>/specs/behavioral-contracts`.
+    #[must_use]
+    pub fn bc_dir(&self) -> PathBuf {
+        self.path().join("specs/behavioral-contracts")
+    }
+
     /// Add another lexical spelling of the factory root (lexically normalised).
     pub fn add_lexical_spelling(&mut self, factory_root_spelling: &Path) {
         let lex = lexical_normalize(factory_root_spelling);
@@ -390,18 +404,54 @@ pub fn sanitize_diagnostic_id(input: &str) -> String {
     sanitize_diagnostic(input, DIAGNOSTIC_ID_MAX_CHARS)
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 D-2 "Single anchoring rule" (a);
-/// BC-1.18.013 EC-034): the ONE session-project-root rule for admission and both
-/// coordinators. Pure (env is read by the caller). `claude_project_dir` that is
-/// present, non-empty and canonicalizes => the canonical path; present non-empty
-/// but not canonicalizable => the as-given path (NEVER the cwd); absent or empty =>
-/// `process_cwd` exactly. NO ancestor walk, NO `git rev-parse`.
+/// Where the session project root came from (the `<source>` token of the
+/// `FACTORY_ROOT_NOT_FOUND` operator line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectRootSource {
+    ClaudeProjectDir,
+    ProcessCwd,
+}
+
+impl ProjectRootSource {
+    /// `CLAUDE_PROJECT_DIR` | `process cwd`.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ClaudeProjectDir => "CLAUDE_PROJECT_DIR",
+            Self::ProcessCwd => "process cwd",
+        }
+    }
+}
+
+/// Which source [`resolve_session_project_root`] used for this env value.
+#[must_use]
+pub fn project_root_source(claude_project_dir: Option<&std::ffi::OsStr>) -> ProjectRootSource {
+    match claude_project_dir {
+        Some(v) if !v.is_empty() => ProjectRootSource::ClaudeProjectDir,
+        _ => ProjectRootSource::ProcessCwd,
+    }
+}
+
+/// The ONE session-project-root rule shared by the dispatcher's admission /
+/// release legs and BOTH coordinator binaries (ADR-052 §5a "Single anchoring
+/// rule" (a); BC-1.18.013 EC-034). Pure: the env value is read by the caller.
+///
+/// A PRESENT, non-empty `claude_project_dir` wins, canonicalized (a canonicalize
+/// failure falls back to the AS-GIVEN path — NEVER to the cwd); an absent or
+/// empty value falls back to `process_cwd` exactly. NO ancestor walk for a
+/// `.factory`, NO `git rev-parse`.
 #[must_use]
 pub fn resolve_session_project_root(
-    _claude_project_dir: Option<&std::ffi::OsStr>,
-    _process_cwd: &Path,
+    claude_project_dir: Option<&std::ffi::OsStr>,
+    process_cwd: &Path,
 ) -> PathBuf {
-    todo!("S-25.08 D-2: resolve_session_project_root")
+    match claude_project_dir.filter(|v| !v.is_empty()) {
+        Some(dir) => {
+            let as_given = PathBuf::from(dir);
+            as_given.canonicalize().unwrap_or(as_given)
+        }
+        None => process_cwd.to_path_buf(),
+    }
 }
 
 /// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`

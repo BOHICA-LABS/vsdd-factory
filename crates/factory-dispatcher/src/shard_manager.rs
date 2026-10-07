@@ -145,11 +145,11 @@ mod admission;
 mod ttl_seam_tests;
 pub use admission::{
     ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
-    MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
-    as_given_factory_root_spelling, classify_tool_use_id, e_maintenance_block_message,
-    is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
-    resolve_factory_root, resolve_session_project_root, resolve_target_path, sanitize_diagnostic,
-    sanitize_diagnostic_id,
+    MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily, StaleGateReconciliation,
+    admit_protected_write, as_given_factory_root_spelling, classify_tool_use_id,
+    e_maintenance_block_message, is_valid_tool_use_id, project_root_source,
+    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
+    resolve_session_project_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
@@ -12950,15 +12950,20 @@ pub enum BcIndexMigrationError {
         detail: String,
     },
 
-    /// S-25.08 Red-Gate STUB variant (ADR-052 v1.21 "Single anchoring rule" (b),
-    /// error-taxonomy `FACTORY_ROOT_NOT_FOUND`, exit 2): the resolved session
-    /// project root has no `.factory` directory. Nothing is created or mutated.
+    /// ADR-052 v1.21 "Single anchoring rule" (b) / error-taxonomy
+    /// `FACTORY_ROOT_NOT_FOUND` (exit 2): the resolved session project root has
+    /// no `.factory` directory. Nothing is created or mutated. Display is
+    /// exactly the text after `<subcommand>: ` of the normative operator line.
     #[error(
-        "BC-INDEX migration: no .factory directory under project root {} \
-         (FACTORY_ROOT_NOT_FOUND, exit 2)",
-        .project_root.display()
+        "FACTORY_ROOT_NOT_FOUND: no .factory directory under project root {} \
+         (resolved from {})",
+        sanitize_diagnostic(&.project_root.display().to_string(), 512),
+        .root_source.label()
     )]
-    FactoryRootNotFound { project_root: PathBuf },
+    FactoryRootNotFound {
+        project_root: PathBuf,
+        root_source: ProjectRootSource,
+    },
 
     #[error(
         "BC-INDEX migration: ARCH-INDEX three-way parity check failed \
@@ -15392,14 +15397,14 @@ pub fn resume_from_staging(
 /// [`execute_canonical_path_moves`]) matches intent-log records against a
 /// move's `target_canonical` path, never by list position.
 fn recompute_pending_canonical_moves_from_staged_generation(
-    _cwd: &Path,
+    bc_dir: &Path,
     migration_state_dir: &Path,
     generation_id: &str,
 ) -> Result<Vec<PendingCanonicalMove>, BcIndexMigrationError> {
     let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
     let shards_dir = gen_dir.join("shards");
-    let shards_canonical_root = _cwd.join(".factory/specs/behavioral-contracts/shards");
-    let canonical_bc_index_path = _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+    let shards_canonical_root = bc_dir.join("shards");
+    let canonical_bc_index_path = bc_dir.join("BC-INDEX.md");
 
     let mut entries: Vec<PathBuf> = std::fs::read_dir(&shards_dir)
         .map_err(|source| BcIndexMigrationError::Io {
@@ -15943,39 +15948,50 @@ fn require_live_txn(
     })
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 "EC-031 discharge", F-006): the
-/// crate-PRIVATE injectable-TTL seam. `run_bc_index_migration` must become a
-/// one-line delegation to this with `DEFAULT_MAX_RESERVATION_TTL`; this function
-/// calls `validate_production_reservation_ttl(max_reservation_ttl)?` as its FIRST
-/// statement (before any `create_dir_all`, `exclusive.lock`, gate write, GC).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn run_bc_index_migration_with_ttl(
-    _project_root: &Path,
-    _max_reservation_ttl: std::time::Duration,
+/// The B2 coordinator's public entry point: `project_root` is the resolved
+/// session PROJECT ROOT ([`resolve_session_project_root`]), never a process cwd.
+/// A one-line delegation to the crate-private TTL seam with the production
+/// default (ADR-052 v1.21 "EC-031 discharge").
+pub fn run_bc_index_migration(
+    project_root: &Path,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
-    todo!("S-25.08 F-006: run_bc_index_migration_with_ttl (validate TTL first)")
+    run_bc_index_migration_with_ttl(project_root, DEFAULT_MAX_RESERVATION_TTL)
 }
 
-pub fn run_bc_index_migration(
-    _cwd: &Path,
+/// Crate-PRIVATE injectable-TTL seam (never public / env / argv: an
+/// operator-controlled TTL would defeat the production floor). Its FIRST
+/// statement validates the TTL against the 1,800 s floor, before the factory
+/// root is resolved or anything is created, locked, written or GC'd
+/// (BC-1.18.013 EC-031).
+pub(crate) fn run_bc_index_migration_with_ttl(
+    project_root: &Path,
+    max_reservation_ttl: std::time::Duration,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     // OBL-1 Fs seam: constructed once here and threaded through every
     // migration-state-mutating/reading call this function makes (and every
     // helper it calls) — production entry point, so the real
     // `migration_fs::*` failpoints are reachable end-to-end from this call.
-    // `run_bc_index_migration`'s own PUBLIC signature stays `(_cwd: &Path)`
+    // `run_bc_index_migration`'s own PUBLIC signature stays `(project_root: &Path)`
     // unchanged (no `Fs` parameter) — callers (the `migrate-bc-index` CLI
     // entry point, and every existing test) are unaffected; `StdFs` is
     // injected at the top of this call graph rather than threaded through
     // the public API, matching the OBL-1 design's own "production call
     // sites pass &StdFs" framing.
-    // BC-1.18.011 v1.16 EC-031: validate the production reservation TTL BEFORE
-    // any gate or drain action — nothing is mutated on a configuration error (no
-    // `exclusive.lock`, no `create_dir_all`, no gate write, no GC).
-    let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;
+    let reservation_ttl = validate_production_reservation_ttl(max_reservation_ttl)?;
+
+    // ADR-052 v1.21 "Single anchoring rule" (b)/(c): the factory root is obtained
+    // ONLY through `resolve_factory_root`; every `.factory/…` path below derives
+    // from it. No `.factory` => fail closed, nothing created or mutated.
+    let factory_root = resolve_factory_root(project_root).ok_or_else(|| {
+        BcIndexMigrationError::FactoryRootNotFound {
+            project_root: project_root.to_path_buf(),
+            root_source: project_root_source(std::env::var_os("CLAUDE_PROJECT_DIR").as_deref()),
+        }
+    })?;
+    let bc_dir = factory_root.bc_dir();
 
     let fs = StdFs;
-    let migration_state_dir = _cwd.join(".factory/migration-state");
+    let migration_state_dir = factory_root.migration_state_dir();
 
     // Branch 2 (EC-006/EC-061): completed.json is the permanent terminal
     // record — its mere presence is sufficient, no other file consulted.
@@ -16266,7 +16282,7 @@ pub fn run_bc_index_migration(
             // a permanent deadlock, not forward progress).
             let recomputed_pending_moves =
                 match recompute_pending_canonical_moves_from_staged_generation(
-                    _cwd,
+                    &bc_dir,
                     &migration_state_dir,
                     &generation_id,
                 ) {
@@ -16295,8 +16311,7 @@ pub fn run_bc_index_migration(
                 txn.fencing_generation,
                 &txn.pending_canonical_moves,
             )?;
-            let canonical_bc_index_path =
-                _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+            let canonical_bc_index_path = bc_dir.join("BC-INDEX.md");
             let pointer = CurrentGenerationPointer {
                 generation_id,
                 status: "committing".to_string(),
@@ -16461,7 +16476,7 @@ pub fn run_bc_index_migration(
 
     // Fresh run: quiescence snapshot of the source, then stage + verify +
     // commit + move + complete.
-    let canonical_bc_index_path = _cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md");
+    let canonical_bc_index_path = bc_dir.join("BC-INDEX.md");
     let original_content = std::fs::read_to_string(&canonical_bc_index_path).map_err(|source| {
         BcIndexMigrationError::Io {
             path: canonical_bc_index_path.clone(),
@@ -16515,12 +16530,12 @@ pub fn run_bc_index_migration(
     // SAME OBL-2(a) durable-write primitive and the SAME
     // `pending_canonical_moves`/txn/census/atomicity machinery as the
     // first-level split.
-    let shard_cap_bytes = resolve_bc_index_shard_cap_bytes(_cwd, &canonical_bc_index_path)?;
+    let shard_cap_bytes = resolve_bc_index_shard_cap_bytes(project_root, &canonical_bc_index_path)?;
     let sections = split_original_body_into_subsystems(&original_content);
     let mut staged_bodies: Vec<String> = Vec::new();
     let mut manifest_entries: Vec<SubsystemShardManifestEntry> = Vec::new();
     let mut pending_moves: Vec<PendingCanonicalMove> = Vec::new();
-    let shards_canonical_root = _cwd.join(".factory/specs/behavioral-contracts/shards");
+    let shards_canonical_root = bc_dir.join("shards");
 
     for (ss_id, section_body) in &sections {
         // O-2: fail loud on a genuine parse error rather than silently
@@ -16844,12 +16859,15 @@ pub fn migration_process_exit_code(
 /// invoked by the Bash-tool allowlist guard, not this function's own
 /// internal logic; it belongs to the allowlist/guard cluster, out of this
 /// story's T-10/T-11 task scope.
-pub fn run_migrate_bc_index_cli(_cwd: &Path) -> i32 {
-    let outcome = run_bc_index_migration(_cwd);
+pub fn run_migrate_bc_index_cli(project_root: &Path) -> i32 {
+    let outcome = run_bc_index_migration(project_root);
     if let Err(e) = &outcome {
+        // The coordinator is a CLI process with no `tracing` subscriber: its
+        // stderr IS the operator surface (ADR-052 §5a "Admission diagnostics
+        // channel" (5)). One single line, `<subcommand>: ` + the variant text.
+        eprintln!("migrate-bc-index: {e}");
         tracing::error!(
             target: "bc_1_18_011_migration",
-            error = %e,
             "migrate-bc-index: migration failed"
         );
     }
