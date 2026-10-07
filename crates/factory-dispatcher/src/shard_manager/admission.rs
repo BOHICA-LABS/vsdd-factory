@@ -746,7 +746,7 @@ pub fn reconcile_stale_admission_gate(
         (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, Some(live)) => {
             // Branch B (terminal record ABSENT; STAGING with generation_id =
             // null; any gate state).
-            abort_null_generation_txn(migration_state_dir, live)?;
+            abort_null_generation_txn(migration_state_dir, &live.path, &live.raw)?;
             Ok(StaleGateReconciliation::NullGenerationTxnAborted)
         }
         (StaleGateReconciliationPlan::RefuseForeignMigration, _) => {
@@ -803,14 +803,20 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
 }
 
 /// Branch B effect: txn ABORTED + `abort_reason`, THEN gate OPEN.
-fn abort_null_generation_txn(
+///
+/// The ONE shared raw-object null-generation discard (ADR-052 v1.23): takes the
+/// txn file path and its raw JSON object (no typed record), so both the
+/// admission Branch B and the migration coordinator discard the same record
+/// identically.
+pub(super) fn abort_null_generation_txn(
     migration_state_dir: &Path,
-    live: &TxnFile,
+    txn_path: &Path,
+    txn_raw: &serde_json::Value,
 ) -> Result<(), BcIndexMigrationError> {
-    let mut raw = live.raw.clone();
+    let mut raw = txn_raw.clone();
     let Some(object) = raw.as_object_mut() else {
         return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("txn record {} is not a JSON object", live.path.display()),
+            message: format!("txn record {} is not a JSON object", txn_path.display()),
         });
     };
     object.insert("state".to_string(), serde_json::json!("ABORTED"));
@@ -825,9 +831,9 @@ fn abort_null_generation_txn(
     })?;
     // ONE atomic write-temp + fsync + rename + dir-sync (§7d): no observable
     // "ABORTED without marker" / "marker without ABORTED" intermediate state.
-    last_amended_migrate::atomic_write::write_atomic_strict_durable(&live.path, &json).map_err(
+    last_amended_migrate::atomic_write::write_atomic_strict_durable(txn_path, &json).map_err(
         |e| BcIndexMigrationError::Io {
-            path: live.path.clone(),
+            path: txn_path.to_path_buf(),
             source: migrate_err_to_io(e),
         },
     )?;
