@@ -226,10 +226,23 @@ fn test_BC_1_18_011_EC009_reservation_is_stale_created_at_first_mtime_fallback()
         reservation_is_stale(Some(now - ttl - 1), Some(now), now, ttl),
         "age == ttl + 1 is stale"
     );
-    // a created_at in the future never underflows / is never stale.
+    // Spec change (BC-1.18.011 v1.16 EC-020 / BC-1.18.013 v1.8 EC-025 / ADR-052
+    // v1.20 timestamp rule (2)): a `created_at` beyond now + 300 s is UNUSABLE
+    // (clock-skew untrusted) and the mtime is the basis. The v1.18 expectation
+    // "any future created_at is never stale" is superseded. Intent kept: a
+    // future-but-within-skew created_at is retained (age 0, never underflows),
+    // and a far-future created_at with a RECENT mtime is retained too.
     assert!(
-        !reservation_is_stale(Some(now + 500), Some(0), now, ttl),
-        "future created_at must not be stale"
+        !reservation_is_stale(Some(now + 299), Some(0), now, ttl),
+        "within-skew future created_at is retained (age 0), even with an ancient mtime"
+    );
+    assert!(
+        !reservation_is_stale(Some(now + 500), Some(now), now, ttl),
+        "far-future created_at falls back to a recent mtime => retained"
+    );
+    assert!(
+        reservation_is_stale(Some(now + 500), Some(0), now, ttl),
+        "far-future created_at falls back to mtime 0 => stale (v1.20 EC-025)"
     );
     assert!(
         !reservation_is_stale(None, Some(now + 500), now, ttl),
