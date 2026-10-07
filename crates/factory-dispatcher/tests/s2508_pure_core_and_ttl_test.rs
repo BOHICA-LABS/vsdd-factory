@@ -20,8 +20,8 @@
 //!   may rename it IF the production entry point is kept a distinct, testable
 //!   function.
 //!
-//! The existing `DEFAULT_MAX_RESERVATION_TTL` is left at its merged 120 s
-//! value (that is defect B2-3).
+//! `DEFAULT_MAX_RESERVATION_TTL` is asserted to be 3,600 s (the merged 120 s
+//! value was defect B2-3, now corrected).
 //!
 //! # Traceability
 //!
