@@ -13989,6 +13989,76 @@ pub const DEFAULT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// H1 correction).
 pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
+// ---------------------------------------------------------------------------
+// S-25.08 Red-Gate STUB SURFACE (BC-5.38.001 stub discipline) -- compilable
+// `todo!()` skeletons so the S-25.08 failing tests compile. NOT behavior.
+// The implementer (T-3/T-4) replaces every `todo!()` below; names/signatures
+// are pinned by VP-146 v1.2 / VP-147 v1.1 (`TerminalReconcileInputs`,
+// `decide_terminal_record_reconciliation`, `reservation_is_stale`) and by
+// ADR-052 v1.18 §Decision 5a (TTL floor).
+// ---------------------------------------------------------------------------
+
+/// ADR-052 v1.18 §5a / BC-1.18.011 Precondition 6(c): the PRODUCTION entry
+/// point MUST reject any configured reservation TTL below this floor.
+pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
+    std::time::Duration::from_secs(1800);
+
+/// S-25.08 AC-008 STUB: production-entry-point TTL validation. Returns the TTL
+/// unchanged when `>= MIN_PRODUCTION_RESERVATION_TTL`, else a configuration
+/// error. (The injectable test seam `drain_bc_index_writers` is NOT bound by
+/// the floor.)
+pub fn validate_production_reservation_ttl(
+    _ttl: std::time::Duration,
+) -> Result<std::time::Duration, BcIndexMigrationError> {
+    todo!("S-25.08 AC-008: reject TTL < MIN_PRODUCTION_RESERVATION_TTL (config error)")
+}
+
+/// S-25.08 AC-008 STUB: the single pure staleness predicate (no PID input, no
+/// ambient time). `created_at` (epoch seconds, `None` when absent/unparseable)
+/// wins; `mtime` is used ONLY when `created_at` is `None`. Stale iff
+/// `now - basis > ttl`.
+pub fn reservation_is_stale(
+    _created_at_epoch_secs: Option<u64>,
+    _mtime_epoch_secs: u64,
+    _now_epoch_secs: u64,
+    _ttl_secs: u64,
+) -> bool {
+    todo!("S-25.08 AC-008: created_at-first staleness, mtime fallback only when absent")
+}
+
+/// S-25.08 STUB (VP-146 v1.2 / VP-147 v1.1 canonical input record of the pure
+/// terminal-record reconciliation core).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalReconcileInputs {
+    pub lock_acquired: bool,
+    pub record_present: bool,
+    pub txn_state: Option<BcIndexMigrationTxnState>,
+    pub record_parses: bool,
+    pub txn_id_eq: bool,
+    pub generation_id_eq: bool,
+    pub count_eq_n: bool,
+    pub hashes_eq: [bool; 4],
+    pub txn_is_own_migration: bool,
+}
+
+/// S-25.08 STUB (VP-146 v1.2 / VP-147 v1.1): decision of the pure core.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalReconcileDecision {
+    NoOp,
+    FinalizeThenOpenGate,
+    FailClosedMismatch,
+    RefuseForeignMigration,
+}
+
+/// S-25.08 STUB: the ONE shared pure terminal-record reconciliation core
+/// (ADR-052 v1.18 §5a Branch C; BC-1.18.011 Postcondition 9; BC-1.18.013
+/// Postcondition 5a). Total over its input space.
+pub fn decide_terminal_record_reconciliation(
+    _inputs: &TerminalReconcileInputs,
+) -> TerminalReconcileDecision {
+    todo!("S-25.08 AC-007/AC-010: pure terminal-record reconciliation decision core")
+}
+
 /// Poll the writer-reservations directory until it is empty (quiescence)
 /// or the drain timeout elapses (ADR-052 §Decision 5a drain procedure step
 /// 4; default timeout 30s). Also performs the stale-reservation TTL GC

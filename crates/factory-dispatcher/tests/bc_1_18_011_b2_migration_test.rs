@@ -1208,6 +1208,24 @@ fn write_migration_txn(cwd: &Path, state: &str) {
     .unwrap();
 }
 
+/// S-25.08 T-2 (AC-009; ADR-052 v1.18 §Files-to-Change): a fixture that models a
+/// STAGING txn must ALSO hold `exclusive.lock`, i.e. model a LIVE coordinator.
+/// Without it, the PreToolUse step-3.5 reconciliation (Branch B: STAGING with
+/// `generation_id = null`, no live coordinator) legitimately self-heals the
+/// fixture to ABORTED+OPEN, which would defeat a "still genuinely STAGING"
+/// scenario. Fixture-only change: no assertion is weakened. The returned guard
+/// must be kept alive for the whole scenario.
+fn hold_exclusive_lock(cwd: &Path) -> factory_dispatcher::shard_manager::MigrationLockGuard {
+    let lock_path = cwd.join(".factory/migration-state/exclusive.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    if !lock_path.exists() {
+        std::fs::write(&lock_path, b"").unwrap();
+    }
+    try_acquire_migration_lock(&lock_path)
+        .expect("exclusive.lock must be openable")
+        .expect("exclusive.lock must be free at fixture setup")
+}
+
 fn bc_index_target(cwd: &Path) -> PathBuf {
     cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md")
 }
@@ -1241,6 +1259,9 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
     let dir = tempfile::tempdir().unwrap();
     write_shard_config(dir.path(), BC_INDEX_SHARD_CONFIG);
     write_migration_txn(dir.path(), "STAGING");
+    // S-25.08 T-2: model a LIVE coordinator (holds exclusive.lock) so the
+    // wired step-3.5 reconciliation cannot self-heal this STAGING fixture.
+    let _live_coordinator = hold_exclusive_lock(dir.path());
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     // Genuinely over-cap: cap is 100 bytes; the canonical content already on
@@ -1554,6 +1575,148 @@ fn test_BC_1_18_011_PRECOND6_admit_or_block_bc_index_writer_creates_reservation_
             .join("reservations/tool-use-1.reservation")
             .exists(),
         "admission must create the writer reservation file for this tool_use_id"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-25.08 (T-2, AC-009) -- B2 entry point delegates to the SHARED admission
+// core: reserve-then-verify, step-3.5 reconciliation wired, release-on-block.
+// RED at the Red Gate (the merged B2 entry point is check-then-reserve and
+// never calls `reconcile_stale_admission_gate`). These are the IN-PROCESS B2
+// entry-point facets; the real-binary facets are in
+// `s2508_admission_blackbox_test.rs`.
+// ---------------------------------------------------------------------------
+
+fn bc_index_payload_with_tool_use_id(cwd: &Path, tool_use_id: &str) -> HookPayload {
+    let mut payload = bc_index_payload(
+        cwd,
+        "Edit",
+        serde_json::json!({ "old_string": "a", "new_string": "b" }),
+    );
+    payload
+        .extra
+        .insert("tool_use_id".to_string(), serde_json::json!(tool_use_id));
+    payload
+}
+
+fn write_b2_state(cwd: &Path, gate: &str, txn: Option<(&str, serde_json::Value)>) {
+    let ms = cwd.join(".factory/migration-state");
+    std::fs::create_dir_all(ms.join("reservations")).unwrap();
+    std::fs::write(ms.join("exclusive.lock"), b"").unwrap();
+    std::fs::write(ms.join("gate-state.json"), format!("\"{gate}\"")).unwrap();
+    if let Some((state, generation_id)) = txn {
+        std::fs::write(
+            ms.join("txn-act-b2.json"),
+            format!(
+                r#"{{"txn_id":"txn-b2","activation_id":"act-b2","fencing_generation":1,"state":"{state}","generation_id":{generation_id},"source_sha256":null,"source_body_row_sha256":null,"intent_log_path":null,"pending_canonical_moves":[],"created_at":"2026-10-06T00:00:00Z","updated_at":"2026-10-06T00:00:00Z","migration_id":"migrate-bc-index"}}"#
+            ),
+        )
+        .unwrap();
+    }
+}
+
+/// AC-009 / AC-007 (BC-1.18.011 Precondition 6(d) Branch A, EC-010): the B2 entry
+/// point runs the flock-gated stale-gate reconciliation (gate LOCKED/DRAINING, no
+/// active txn, lock acquirable => gate -> OPEN) and then ADMITS, creating the
+/// reservation.
+#[test]
+fn test_BC_1_18_011_PC6d_b2_entry_point_branch_a_heals_stale_gate_then_admits() {
+    for gate in ["LOCKED", "DRAINING"] {
+        let dir = tempfile::tempdir().unwrap();
+        write_b2_state(dir.path(), gate, None);
+        let payload = bc_index_payload_with_tool_use_id(dir.path(), "TA");
+        let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+        assert!(
+            verdict.is_none(),
+            "gate {gate} + no txn + lock free: the shared core's Branch A must reconcile the gate \
+             to OPEN and then admit (None), got {verdict:?}"
+        );
+        let gate_after =
+            std::fs::read_to_string(dir.path().join(".factory/migration-state/gate-state.json"))
+                .unwrap();
+        assert!(
+            gate_after.contains("OPEN"),
+            "Branch A must durably flip the gate to OPEN, found {gate_after}"
+        );
+        assert!(
+            dir.path()
+                .join(".factory/migration-state/reservations/TA.reservation")
+                .exists(),
+            "an admitted dispatch holds its reservation until PostToolUse"
+        );
+    }
+}
+
+/// AC-009 / AC-007 (BC-1.18.011 Precondition 6(d) Branch B, EC-010): STAGING with
+/// `generation_id = null` and no live coordinator => txn ABORTED (retained) + gate
+/// OPEN, then admit.
+#[test]
+fn test_BC_1_18_011_PC6d_b2_entry_point_branch_b_aborts_null_generation_staging_then_admits() {
+    let dir = tempfile::tempdir().unwrap();
+    write_b2_state(
+        dir.path(),
+        "DRAINING",
+        Some(("STAGING", serde_json::Value::Null)),
+    );
+    let payload = bc_index_payload_with_tool_use_id(dir.path(), "TB");
+    let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    assert!(
+        verdict.is_none(),
+        "Branch B must abort the null-generation STAGING txn, open the gate, then admit; got \
+         {verdict:?}"
+    );
+    let txn: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join(".factory/migration-state/txn-act-b2.json"))
+            .expect("the ABORTED txn record must be RETAINED (never deleted)"),
+    )
+    .unwrap();
+    assert_eq!(txn["state"], "ABORTED");
+    assert!(txn["generation_id"].is_null());
+}
+
+/// AC-009 (BC-1.18.011 Precondition 6(c) reserve-then-verify + release-on-block,
+/// EC-007, EC-008): on FAILED verification (live coordinator holds the lock, txn
+/// STAGING) the admitter has created ITS OWN reservation FIRST and then removes it
+/// before returning the `E-MAINTENANCE-001` Block. Discriminator vs the merged
+/// check-then-reserve ordering: a stale file already sitting at the SAME
+/// `tool_use_id` path is overwritten by the admitter's own reservation and then
+/// removed (merged code refuses BEFORE creating, so the planted file survives).
+/// An unrelated writer's reservation is never touched.
+#[test]
+fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created_first() {
+    let dir = tempfile::tempdir().unwrap();
+    write_b2_state(
+        dir.path(),
+        "LOCKED",
+        Some(("STAGING", serde_json::json!("gen-1"))),
+    );
+    let _live_coordinator = hold_exclusive_lock(dir.path());
+    let res_dir = dir.path().join(".factory/migration-state/reservations");
+    std::fs::write(res_dir.join("T5.reservation"), "stale-planted-content").unwrap();
+    std::fs::write(
+        res_dir.join("OTHER.reservation"),
+        r#"{"created_at":"2026-10-06T00:00:00Z","tool_use_id":"OTHER"}"#,
+    )
+    .unwrap();
+
+    let payload = bc_index_payload_with_tool_use_id(dir.path(), "T5");
+    let verdict = bc_index_migration_admission_precheck(&payload, dir.path());
+    match verdict {
+        Some(HookResult::Block { reason }) => assert!(
+            reason.contains("E-MAINTENANCE-001"),
+            "refusal must be the E-MAINTENANCE-001 Block, got {reason}"
+        ),
+        other => panic!("live STAGING txn must Block (never Error/None), got {other:?}"),
+    }
+    assert!(
+        !res_dir.join("T5.reservation").exists(),
+        "reserve-then-verify: the admitter's own reservation (T5) was created FIRST and must be \
+         removed on failed verification -- a surviving T5 file means the merged check-then-reserve \
+         ordering is still in force"
+    );
+    assert!(
+        res_dir.join("OTHER.reservation").exists(),
+        "another writer's reservation must never be removed by this admitter"
     );
 }
 
