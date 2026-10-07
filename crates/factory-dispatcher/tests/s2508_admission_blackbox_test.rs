@@ -5560,3 +5560,75 @@ fn test_BC_1_18_013_ADR052_v123_tier1_one_live_plus_non_live_counts_as_one_live(
         &rows,
     );
 }
+
+/// BC-1.18.013 v1.12 EC-045 CONTROL (S-25.08 v1.6 AC-029 gap), ADR-052 v1.23
+/// "Txn-record interpretation -- tiers", Branch B row: the `generation_id` rule
+/// applies ONLY when the migration is known, the txn is STAGING, the lock is
+/// ACQUIRED and the own terminal record is ABSENT. With `exclusive.lock` HELD by
+/// a live coordinator Branch B does not execute and NO field is read, so a
+/// minimal (or full-minus-key) known STAGING record with an ABSENT or ill-typed
+/// `generation_id` gives the PLAIN `E-MAINTENANCE-001` live-coordinator block --
+/// never `E-MAINTENANCE-002 (state_integrity)` -- with the txn, gate and the
+/// whole migration-state tree byte-identical and no reservation left. Covers both
+/// migration families, the absent-`migration_id` family, and every gate state.
+/// The free-lock twin is
+/// `test_BC_1_18_013_ADR052_v123_tier1_branch_b_absent_or_ill_typed_generation_id_is_state_integrity`.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC045_lock_held_minimal_staging_without_generation_id_is_plain_live_coordinator_block()
+ {
+    let mut rows: Vec<Row> = Vec::new();
+    for (mig, rel, _t) in TIER_FAMILIES {
+        for gate in TIER_GATES {
+            let mut cases: Vec<(String, Vec<u8>)> = vec![
+                (
+                    "minimal STAGING, generation_id ABSENT".to_string(),
+                    minimal_txn("STAGING", mig, &[]),
+                ),
+                (
+                    "FULL STAGING with the generation_id KEY REMOVED".to_string(),
+                    full_txn("STAGING", mig, None),
+                ),
+            ];
+            for (what, val) in [
+                ("number 7", serde_json::json!(7)),
+                ("boolean true", serde_json::json!(true)),
+                ("array", serde_json::json!(["x"])),
+                ("object", serde_json::json!({"id": "gen-1"})),
+            ] {
+                cases.push((
+                    format!("minimal STAGING, generation_id ill-typed ({what})"),
+                    minimal_txn("STAGING", mig, &[("generation_id", val.clone())]),
+                ));
+                cases.push((
+                    format!("FULL STAGING, generation_id ill-typed ({what})"),
+                    full_txn("STAGING", mig, Some(val)),
+                ));
+            }
+            for (what, bytes) in cases {
+                let label = format!(
+                    "[{mig:?} {rel} gate {gate}, exclusive.lock HELD] {what} => plain \
+                     E-MAINTENANCE-001 live-coordinator block, no field read, tree unchanged"
+                );
+                rows.push(Row {
+                    label: Box::leak(label.into_boxed_str()),
+                    rel,
+                    needs_non_root: false,
+                    expect: Expect::PlainBlock,
+                    setup: Box::new(move |p| {
+                        write_gate(&p.ms(), gate);
+                        write_raw_txn(p, "txn-act-s2508.json", &bytes);
+                        Fixture {
+                            _modes: Vec::new(),
+                            _lock: Some(p.hold_lock()),
+                        }
+                    }),
+                });
+            }
+        }
+    }
+    run_rows(
+        "test_BC_1_18_013_EC045_lock_held_minimal_staging_without_generation_id_is_plain_live_coordinator_block",
+        &rows,
+    );
+}
