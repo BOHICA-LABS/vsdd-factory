@@ -39,8 +39,7 @@ use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
     ExecutorInputs, PluginOutcome, bc_index_migration_admission,
-    bc_index_migration_reservation_release, execute_tiers, resolve_shard_gate_precedence,
-    shard_cap_precheck, spawn_async_plugin,
+    bc_index_migration_reservation_release, execute_tiers, shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -167,6 +166,34 @@ async fn run(
 ) -> anyhow::Result<i32> {
     let trace_id = new_trace_id();
     let payload = HookPayload::from_reader(std::io::stdin().lock())?;
+
+    // S-25.08 / ADR-052 v1.20 §5a "Evaluation position" (F-004): the native
+    // writer-admission gate and the reservation release are REGISTRY-INDEPENDENT.
+    // They run immediately after the stdin payload parse (O4: an unparseable
+    // payload cannot be classified — the `?` above is the unchanged parse-error
+    // exit) and `resolve_project_cwd()`, and BEFORE the `CLAUDE_PLUGIN_ROOT`
+    // tiering, `resolve_registry_path()` and `Registry::load` (O2): a missing,
+    // unparseable or schema-mismatched registry, or an unset/empty
+    // `CLAUDE_PLUGIN_ROOT`, must never let protected writers run unreserved
+    // while a coordinator drains and snapshots. O1: the shared core is evaluated
+    // EXACTLY ONCE per PreToolUse event; O3: structurally before
+    // `shard_cap_precheck` (whose fired branch is a destructive seal-and-truncate
+    // that must never run for a blocked protected-path write) and every registry
+    // plugin tier.
+    let project_cwd = resolve_project_cwd();
+    let migration_admission = bc_index_migration_admission(&payload, &project_cwd);
+    *admission_reservation = migration_admission.reservation;
+    // The PostToolUse / PostToolUseFailure release is registry-independent too.
+    bc_index_migration_reservation_release(&payload, &project_cwd);
+    if migration_admission.verdict.is_some() {
+        // A Block/Error verdict terminates the dispatch directly through the SAME
+        // exit mapping the empty-tier short-circuit uses, without loading the
+        // registry. (The admitter's own reservation is already removed.)
+        return Ok(exit_code_for_native_gate_verdict(
+            &payload,
+            migration_admission.verdict,
+        ));
+    }
 
     // ADR-024 Decision 2 — two-tier CLAUDE_PLUGIN_ROOT check.
     //
@@ -348,7 +375,7 @@ async fn run(
     // Resolved ONCE, here — see `resolve_project_cwd`'s own doc comment for
     // why this must happen before the early-return guard immediately below,
     // rather than at `base_host_ctx.cwd`'s own (later) assignment site.
-    let project_cwd = resolve_project_cwd();
+    // `project_cwd` was resolved at the top of `run` (registry-independent gate).
 
     // BC-1.18.006 Postcondition 7 catch point (i) / story AC-024 (ADR-051
     // §Decision 15 point 4 — LOAD-BEARING placement caveat; §Decision 17
@@ -477,35 +504,13 @@ async fn run(
     // "won" only in the RETURNED value, after `execute_roll`'s destructive
     // side effect had already landed on disk).
     //
-    // S-25.08 (D1/D5): this is the ONE evaluation of the shared admission core
-    // per PreToolUse event (reserve-then-verify, step-3.5 reconciliation,
-    // path-family-keyed `E-MAINTENANCE-001`); `main`'s exit funnel removes the
-    // reservation it created if the final outcome is a block.
-    let migration_admission = bc_index_migration_admission(&payload, &project_cwd);
-    *admission_reservation = migration_admission.reservation;
-    let migration_gate_precheck_result = migration_admission.verdict;
-
-    // OBL-1 §5 (O-5 fold-in): the PostToolUse release counterpart to the
-    // admission precheck above. No-ops internally for every dispatch that
-    // isn't a genuine PostToolUse Edit/Write/MultiEdit with migration state
-    // present (mirrors `bc_index_migration_admission_precheck`'s own
-    // real, non-stub existence/scope guards) — fire-and-forget, never
-    // produces a verdict, never affects `shard_gate_precheck_result` or
-    // any downstream exit-code aggregation below.
-    bc_index_migration_reservation_release(&payload, &project_cwd);
-
-    // `shard_cap_precheck` is reachable ONLY in the `None` arm below — this
-    // `match`'s control flow IS Ruling 1's "structurally skipped" guarantee.
-    // Non-BC-INDEX-path dispatches (decision-log/burst-log/lessons/session-
-    // checkpoints) and every dispatch while no migration is in flight are
-    // UNAFFECTED: `bc_index_migration_admission_precheck` returns `None`
-    // for them (its own real, non-stub existence/scope guards), so
-    // `shard_cap_precheck` continues to run normally on exactly the same
-    // inputs as before this restructure.
-    let shard_gate_precheck_result =
-        resolve_shard_gate_precedence(migration_gate_precheck_result, || {
-            shard_cap_precheck(&payload, &project_cwd)
-        });
+    // `shard_cap_precheck` runs only for a dispatch the shared admission core
+    // (evaluated above, registry-independently) did NOT block — so a blocked
+    // protected-path write never reaches its destructive seal-and-truncate
+    // (BC-1.18.011 Architect Ruling 1; ADR-052 §5a O3). Non-protected-path
+    // dispatches and every dispatch while no migration window is active are
+    // unaffected.
+    let shard_gate_precheck_result = shard_cap_precheck(&payload, &project_cwd);
 
     // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
     // a fired shard-cap-gate verdict (`Some(_)`) must still reach
@@ -538,44 +543,10 @@ async fn run(
             return Ok(0);
         }
 
-        let plugin_version = env!("CARGO_PKG_VERSION").to_string();
-        let (outcomes, block_intent) = factory_dispatcher::executor::shard_gate_verdict_outcomes(
+        return Ok(exit_code_for_native_gate_verdict(
+            &payload,
             shard_gate_precheck_result,
-            plugin_version,
-        );
-
-        // BC-1.15.001 PC2: PostCompact is advisory-only regardless of
-        // native-gate verdict — same suppression this function's normal
-        // (post-`execute_tiers`) path applies below.
-        let event_is_advisory_only =
-            factory_dispatcher::invoke::EventType::from_event_str(&payload.event_name)
-                .is_advisory_only();
-        let final_exit_code = if event_is_advisory_only {
-            0
-        } else if block_intent {
-            2
-        } else {
-            0
-        };
-
-        if final_exit_code == 2 {
-            let (blocking_names, block_reason) = extract_block_info(&outcomes);
-            eprintln!(
-                "  plugins_run={} total_ms=0 block_intent=true exit_code={} blocking_plugins={} block_reason=\"{}\"",
-                outcomes.len(),
-                final_exit_code,
-                blocking_names,
-                block_reason,
-            );
-        } else {
-            eprintln!(
-                "  plugins_run={} total_ms=0 block_intent=false exit_code={}",
-                outcomes.len(),
-                final_exit_code,
-            );
-        }
-
-        return Ok(final_exit_code);
+        ));
     }
 
     // Execution layer. Build a shared engine + epoch ticker + module
@@ -1054,6 +1025,50 @@ async fn run(
     }
 
     Ok(final_exit_code)
+}
+
+/// Translate a native-gate verdict (`Some(Block|Error)`) into the dispatcher's
+/// exit code, printing the same `plugins_run=… block_reason=…` summary line the
+/// registry-driven path prints. Shared by the registry-independent admission
+/// leg and the empty-tier `shard_cap_precheck` short-circuit.
+fn exit_code_for_native_gate_verdict(
+    payload: &HookPayload,
+    verdict: Option<vsdd_hook_sdk::HookResult>,
+) -> i32 {
+    let plugin_version = env!("CARGO_PKG_VERSION").to_string();
+    let (outcomes, block_intent) =
+        factory_dispatcher::executor::shard_gate_verdict_outcomes(verdict, plugin_version);
+
+    // BC-1.15.001 PC2: PostCompact is advisory-only regardless of native-gate
+    // verdict — same suppression the normal (post-`execute_tiers`) path applies.
+    let event_is_advisory_only =
+        factory_dispatcher::invoke::EventType::from_event_str(&payload.event_name)
+            .is_advisory_only();
+    let final_exit_code = if event_is_advisory_only {
+        0
+    } else if block_intent {
+        2
+    } else {
+        0
+    };
+
+    if final_exit_code == 2 {
+        let (blocking_names, block_reason) = extract_block_info(&outcomes);
+        eprintln!(
+            "  plugins_run={} total_ms=0 block_intent=true exit_code={} blocking_plugins={} block_reason=\"{}\"",
+            outcomes.len(),
+            final_exit_code,
+            blocking_names,
+            block_reason,
+        );
+    } else {
+        eprintln!(
+            "  plugins_run={} total_ms=0 block_intent=false exit_code={}",
+            outcomes.len(),
+            final_exit_code,
+        );
+    }
+    final_exit_code
 }
 
 /// Extract blocking plugin names and the first available block reason from
