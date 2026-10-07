@@ -13780,21 +13780,13 @@ pub fn is_bc_index_admission_open(
     }
 }
 
-/// PreToolUse admission-check entry point (ADR-052 §Decision 5a's atomic
-/// admission protocol steps 1-5, minus the flock-gated stale-gate
-/// reconciliation sub-procedure — see
-/// [`reconcile_stale_admission_gate`] for that). On admission, creates the
-/// writer reservation file; on refusal, returns the reason without
-/// creating one.
 /// Read the persisted OPEN/DRAINING/LOCKED admission-gate state from
 /// `.factory/migration-state/gate-state.json` — absent file defaults to
 /// `Open` (the OPEN default case: no gate-state file and no txn record
 /// present).
 ///
-/// `pub(crate)` (widened from private, OBL-1 §4 fail-open fix): consulted
-/// directly by `executor::bc_index_migration_admission_precheck`, which
-/// previously never checked gate state at all — see that function's own
-/// doc comment.
+/// `pub(crate)` (widened from private, OBL-1 §4 fail-open fix): consulted by
+/// the shared admission core ([`admit_protected_write`]) on every admission.
 pub(crate) fn read_admission_gate_state(
     migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
