@@ -186,8 +186,24 @@ async fn run(
     let project_cwd = resolve_project_cwd();
     let migration_admission = migration_writer_admission(&payload, &project_cwd);
     *admission_reservation = migration_admission.reservation;
+    // The admission/release diagnostics are DATA returned by the core; the shell
+    // writes them to the dispatcher-internal log (the spec-owned durable channel
+    // — the dispatcher installs no `tracing` subscriber) BEFORE the early return
+    // below, so a blocked/failed dispatch is logged too.
+    write_admission_diagnostics(
+        &internal_log,
+        &trace_id,
+        &payload.session_id,
+        &migration_admission.diagnostics,
+    );
     // The PostToolUse / PostToolUseFailure release is registry-independent too.
-    migration_reservation_release(&payload, &project_cwd);
+    let release_diagnostics = migration_reservation_release(&payload, &project_cwd);
+    write_admission_diagnostics(
+        &internal_log,
+        &trace_id,
+        &payload.session_id,
+        &release_diagnostics,
+    );
     if migration_admission.verdict.is_some() {
         // A Block/Error verdict terminates the dispatch directly through the SAME
         // exit mapping the empty-tier short-circuit uses, without loading the
@@ -1030,6 +1046,29 @@ async fn run(
     }
 
     Ok(final_exit_code)
+}
+
+/// Write the admission/release diagnostics (BC-3.08.001 Events 11–13) to the
+/// dispatcher-internal log via `InternalLog::write` DIRECTLY — no `HostContext`
+/// exists at the registry-independent admission position, so these events land
+/// only in `dispatcher-internal-{date}.jsonl` (never `ctx.events`) and carry no
+/// `plugin_name`. Exactly one event per diagnostic; the verdict, message and exit
+/// code are unaffected.
+fn write_admission_diagnostics(
+    internal_log: &InternalLog,
+    trace_id: &str,
+    session_id: &str,
+    diagnostics: &[factory_dispatcher::shard_manager::AdmissionDiagnostic],
+) {
+    for diagnostic in diagnostics {
+        let mut event = InternalEvent::now(diagnostic.event_type())
+            .with_trace_id(trace_id.to_string())
+            .with_session_id(session_id.to_string());
+        for (key, value) in diagnostic.fields() {
+            event = event.with_field(key, value);
+        }
+        internal_log.write(&event);
+    }
 }
 
 /// Translate a native-gate verdict (`Some(Block|Error)`) into the dispatcher's

@@ -54,11 +54,11 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    AdmissionStateIntegrityKind, BcIndexAdmissionGateState, BcIndexMigrationError,
-    BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, StaleGateReconciliationPlan,
-    TerminalReconcileInputs, WriterReservation, is_bc_index_admission_open, migrate_err_to_io,
-    plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
-    write_admission_gate_state,
+    AdmissionFailureCause, AdmissionStateIntegrityKind, BcIndexAdmissionGateState,
+    BcIndexMigrationError, BcIndexMigrationTxnRecord, BcIndexMigrationTxnState,
+    StaleGateReconciliationPlan, TerminalReconcileInputs, WriterReservation,
+    is_bc_index_admission_open, migrate_err_to_io, plan_stale_gate_reconciliation,
+    read_admission_gate_state, try_acquire_migration_lock, write_admission_gate_state,
 };
 
 /// The `migration_id` of the B2 BC-INDEX migration. A txn record that lacks the
@@ -137,6 +137,15 @@ impl ProtectedPathFamily {
             Some(Self::Cycles)
         } else {
             None
+        }
+    }
+
+    /// The `family` token of the `migration.admission_blocked` event.
+    #[must_use]
+    pub fn family_token(self) -> &'static str {
+        match self {
+            Self::BcIndex => "bc_index",
+            Self::Cycles => "cycles",
         }
     }
 
@@ -554,11 +563,227 @@ pub enum AdmissionOutcome {
     /// the matching PostToolUse, or until the dispatcher releases it because a
     /// LATER stage of the same dispatch blocked); `None` when the event carried
     /// no usable `tool_use_id` (check-only admission, nothing to track).
-    Admitted { reservation: Option<PathBuf> },
+    Admitted {
+        reservation: Option<PathBuf>,
+        /// Non-verdict anomalies of this evaluation (Branch A / B repairs) —
+        /// returned as DATA; `main.rs` writes them (never the core).
+        diagnostics: Vec<AdmissionDiagnostic>,
+    },
     /// Blocked with `E-MAINTENANCE-001`. The admitter's OWN reservation has
     /// already been removed (release-on-block). `message` is the exact
     /// path-family-keyed message.
-    Blocked { message: String },
+    Blocked {
+        message: String,
+        /// Advisories (if any) followed by exactly ONE `Blocked` diagnostic.
+        diagnostics: Vec<AdmissionDiagnostic>,
+    },
+}
+
+/// Which cause produced an `E-MAINTENANCE-001` block (Event 11 `branch`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockBranch {
+    GateOnly,
+    LiveTxn,
+    ForeignMigration,
+    LiveCoordinator,
+    CompletionRecordMismatch,
+}
+
+impl BlockBranch {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::GateOnly => "gate_only",
+            Self::LiveTxn => "live_txn",
+            Self::ForeignMigration => "foreign_migration",
+            Self::LiveCoordinator => "live_coordinator",
+            Self::CompletionRecordMismatch => "completion_record_mismatch",
+        }
+    }
+}
+
+/// Reason of a `migration.admission_advisory` (Event 13). CLOSED: the five
+/// reservation-timestamp tokens are coordinator stderr diagnostics, not
+/// dispatcher events, and `branch_c_finalized` is S-25.06's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvisoryReason {
+    ReservationReleaseFailed,
+    BranchAGateReopened,
+    BranchBTxnAborted,
+    BranchCFinalizeUnwired,
+}
+
+impl AdvisoryReason {
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::ReservationReleaseFailed => "reservation_release_failed",
+            Self::BranchAGateReopened => "branch_a_gate_reopened",
+            Self::BranchBTxnAborted => "branch_b_txn_aborted",
+            Self::BranchCFinalizeUnwired => "branch_c_finalize_unwired",
+        }
+    }
+}
+
+/// Event 11 data (`migration.admission_blocked`). Disk-derived strings are
+/// SANITIZED at construction ([`sanitize_diagnostic_id`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedDiagnostic {
+    pub scope: &'static str,
+    pub family: &'static str,
+    pub branch: BlockBranch,
+    pub gate_state: BcIndexAdmissionGateState,
+    pub migration_id: Option<String>,
+    pub txn_id: Option<String>,
+    pub check: Option<String>,
+    pub reconciliation: StaleGateReconciliation,
+}
+
+/// Event 12 data (`migration.admission_failed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailedDiagnostic {
+    pub cause: AdmissionFailureCause,
+    pub kind: Option<AdmissionStateIntegrityKind>,
+    pub detail: String,
+}
+
+/// Event 13 data (`migration.admission_advisory`). Optional context fields are
+/// the CLOSED set `migration_id`, `txn_id`, `check`, `detail`, `tool_use_id_len`
+/// (all sanitized; a `tool_use_id` is NEVER logged raw).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionAdvisory {
+    pub reason: AdvisoryReason,
+    pub migration_id: Option<String>,
+    pub txn_id: Option<String>,
+    pub check: Option<String>,
+    pub detail: Option<String>,
+    pub tool_use_id_len: Option<u64>,
+}
+
+impl AdmissionAdvisory {
+    #[must_use]
+    pub fn new(reason: AdvisoryReason) -> Self {
+        Self {
+            reason,
+            migration_id: None,
+            txn_id: None,
+            check: None,
+            detail: None,
+            tool_use_id_len: None,
+        }
+    }
+}
+
+/// A diagnostic RETURNED AS DATA by the shared core / executor entry points;
+/// `main.rs` (the effectful shell) writes each as an `InternalLog` event
+/// (ADR-052 §5a "Admission diagnostics channel"). The core stays free of the log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmissionDiagnostic {
+    Blocked(BlockedDiagnostic),
+    Failed(FailedDiagnostic),
+    Advisory(AdmissionAdvisory),
+}
+
+fn opt_string(v: &Option<String>) -> serde_json::Value {
+    v.as_ref()
+        .map_or(serde_json::Value::Null, |s| serde_json::json!(s))
+}
+
+impl AdmissionDiagnostic {
+    /// The `InternalEvent` type constant for this diagnostic.
+    #[must_use]
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            Self::Blocked(_) => crate::internal_log::MIGRATION_ADMISSION_BLOCKED,
+            Self::Failed(_) => crate::internal_log::MIGRATION_ADMISSION_FAILED,
+            Self::Advisory(_) => crate::internal_log::MIGRATION_ADMISSION_ADVISORY,
+        }
+    }
+
+    /// The event-specific fields (BC-3.08.001 Events 11–13). Nullable fields are
+    /// always present (as `null`); advisories carry `reason` plus only the
+    /// optional fields that are set.
+    #[must_use]
+    pub fn fields(&self) -> Vec<(&'static str, serde_json::Value)> {
+        match self {
+            Self::Blocked(b) => vec![
+                ("scope", serde_json::json!(b.scope)),
+                ("family", serde_json::json!(b.family)),
+                ("branch", serde_json::json!(b.branch.token())),
+                (
+                    "gate_state",
+                    serde_json::json!(gate_state_token(b.gate_state)),
+                ),
+                ("migration_id", opt_string(&b.migration_id)),
+                ("txn_id", opt_string(&b.txn_id)),
+                ("check", opt_string(&b.check)),
+                (
+                    "reconciliation",
+                    serde_json::json!(b.reconciliation.token()),
+                ),
+            ],
+            Self::Failed(f) => vec![
+                ("cause", serde_json::json!(f.cause.token())),
+                (
+                    "kind",
+                    f.kind
+                        .map_or(serde_json::Value::Null, |k| serde_json::json!(k.token())),
+                ),
+                ("detail", serde_json::json!(f.detail)),
+            ],
+            Self::Advisory(a) => {
+                let mut v = vec![("reason", serde_json::json!(a.reason.token()))];
+                if let Some(x) = &a.migration_id {
+                    v.push(("migration_id", serde_json::json!(x)));
+                }
+                if let Some(x) = &a.txn_id {
+                    v.push(("txn_id", serde_json::json!(x)));
+                }
+                if let Some(x) = &a.check {
+                    v.push(("check", serde_json::json!(x)));
+                }
+                if let Some(x) = &a.detail {
+                    v.push(("detail", serde_json::json!(x)));
+                }
+                if let Some(x) = a.tool_use_id_len {
+                    v.push(("tool_use_id_len", serde_json::json!(x)));
+                }
+                v
+            }
+        }
+    }
+}
+
+fn gate_state_token(g: BcIndexAdmissionGateState) -> &'static str {
+    match g {
+        BcIndexAdmissionGateState::Open => "OPEN",
+        BcIndexAdmissionGateState::Draining => "DRAINING",
+        BcIndexAdmissionGateState::Locked => "LOCKED",
+    }
+}
+
+impl StaleGateReconciliation {
+    /// Snake-case wire token of the effectful outcome (Event 11
+    /// `reconciliation`; closed domain, no plan tokens, no `none`).
+    #[must_use]
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::LiveCoordinator => "live_coordinator",
+            Self::NothingToReconcile => "nothing_to_reconcile",
+            Self::GateReopened => "gate_reopened",
+            Self::NullGenerationTxnAborted => "null_generation_txn_aborted",
+            Self::ForeignMigrationRefused => "foreign_migration_refused",
+            Self::CompletionRecordMismatch => "completion_record_mismatch",
+        }
+    }
+}
+
+/// What reconciliation did beyond its outcome (advisories + the Branch C
+/// failing check), collected as DATA.
+#[derive(Debug, Default)]
+struct ReconcileFacts {
+    advisories: Vec<AdmissionDiagnostic>,
+    check: Option<String>,
 }
 
 /// What the §5a step-3.5 reconciliation found / did.
@@ -619,10 +844,16 @@ pub fn admit_protected_write(
 
     // W2 and everything after — verify.
     match verify_admission(migration_state_dir, family) {
-        Ok(None) => Ok(AdmissionOutcome::Admitted { reservation }),
-        Ok(Some(message)) => {
+        Ok((None, diagnostics)) => Ok(AdmissionOutcome::Admitted {
+            reservation,
+            diagnostics,
+        }),
+        Ok((Some(message), diagnostics)) => {
             remove_own_reservation(reservation.as_deref());
-            Ok(AdmissionOutcome::Blocked { message })
+            Ok(AdmissionOutcome::Blocked {
+                message,
+                diagnostics,
+            })
         }
         Err(e) => {
             remove_own_reservation(reservation.as_deref());
@@ -636,31 +867,62 @@ pub fn admit_protected_write(
 fn verify_admission(
     migration_state_dir: &Path,
     family: ProtectedPathFamily,
-) -> Result<Option<String>, BcIndexMigrationError> {
+) -> Result<(Option<String>, Vec<AdmissionDiagnostic>), BcIndexMigrationError> {
     let first = AdmissionSnapshot::read(migration_state_dir)?;
     seam::record("W2_VERIFY");
     if first.is_admissible()? {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
 
-    let reconciliation = reconcile_stale_admission_gate(migration_state_dir)?;
+    let mut facts = ReconcileFacts::default();
+    let reconciliation = reconcile_collecting(migration_state_dir, &mut facts)?;
     let second = AdmissionSnapshot::read(migration_state_dir)?;
+    let mut diagnostics = facts.advisories;
     if second.is_admissible()? {
-        return Ok(None);
+        return Ok((None, diagnostics));
     }
 
     let live = second.live_txn()?;
-    tracing::warn!(
+    // `branch` derivation: live_coordinator / foreign_migration /
+    // completion_record_mismatch map 1:1 from the reconciliation outcome;
+    // otherwise gate_only when no live txn remains, else live_txn.
+    let branch = match reconciliation {
+        StaleGateReconciliation::LiveCoordinator => BlockBranch::LiveCoordinator,
+        StaleGateReconciliation::ForeignMigrationRefused => BlockBranch::ForeignMigration,
+        StaleGateReconciliation::CompletionRecordMismatch => BlockBranch::CompletionRecordMismatch,
+        StaleGateReconciliation::NothingToReconcile
+        | StaleGateReconciliation::GateReopened
+        | StaleGateReconciliation::NullGenerationTxnAborted => {
+            if live.is_some() {
+                BlockBranch::LiveTxn
+            } else {
+                BlockBranch::GateOnly
+            }
+        }
+    };
+    // Developer breadcrumb only (BC 6(b)(iii)); the operator-visible record is
+    // the `migration.admission_blocked` event written by `main.rs`.
+    tracing::debug!(
         target: "bc_1_18_011_migration",
+        branch = branch.token(),
         migration_id = sanitize_diagnostic_id(live.map(|t| t.migration_id()).unwrap_or("none")),
-        txn_id = sanitize_diagnostic_id(live.map(|t| t.record.txn_id.as_str()).unwrap_or("none")),
-        gate_state = ?second.gate,
-        reconciliation = ?reconciliation,
-        scope = family.scope(),
-        "E-MAINTENANCE-001: protected-path write blocked by the shared admission core"
+        "protected-path write blocked by the shared admission core"
     );
+    diagnostics.push(AdmissionDiagnostic::Blocked(BlockedDiagnostic {
+        scope: family.scope(),
+        family: family.family_token(),
+        branch,
+        gate_state: second.gate,
+        migration_id: live.map(|t| sanitize_diagnostic_id(t.migration_id())),
+        txn_id: live.map(|t| sanitize_diagnostic_id(&t.record.txn_id)),
+        check: facts.check.as_deref().map(sanitize_diagnostic_id),
+        reconciliation,
+    }));
     let mismatch = reconciliation == StaleGateReconciliation::CompletionRecordMismatch;
-    Ok(Some(e_maintenance_block_message(family, mismatch)))
+    Ok((
+        Some(e_maintenance_block_message(family, mismatch)),
+        diagnostics,
+    ))
 }
 
 /// ADR-052 §Decision 5a step 3.5 — flock-gated stale-gate reconciliation,
@@ -696,6 +958,15 @@ fn verify_admission(
 /// I/O failure performing a repair write.
 pub fn reconcile_stale_admission_gate(
     migration_state_dir: &Path,
+) -> Result<StaleGateReconciliation, BcIndexMigrationError> {
+    reconcile_collecting(migration_state_dir, &mut ReconcileFacts::default())
+}
+
+/// [`reconcile_stale_admission_gate`] that also collects the advisories / failing
+/// check as data (the admission core needs them; the public wrapper discards).
+fn reconcile_collecting(
+    migration_state_dir: &Path,
+    facts: &mut ReconcileFacts,
 ) -> Result<StaleGateReconciliation, BcIndexMigrationError> {
     seam::record("RECONCILE");
 
@@ -776,40 +1047,54 @@ pub fn reconcile_stale_admission_gate(
         (StaleGateReconciliationPlan::ReopenGate, _) => {
             // Branch A.
             write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)?;
+            facts
+                .advisories
+                .push(AdmissionDiagnostic::Advisory(AdmissionAdvisory::new(
+                    AdvisoryReason::BranchAGateReopened,
+                )));
             Ok(StaleGateReconciliation::GateReopened)
         }
         (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, Some(live)) => {
             // Branch B (terminal record ABSENT; STAGING with generation_id =
             // null; any gate state).
             abort_null_generation_txn(migration_state_dir, live)?;
+            let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchBTxnAborted);
+            advisory.migration_id = Some(sanitize_diagnostic_id(live.migration_id()));
+            advisory.txn_id = Some(sanitize_diagnostic_id(&live.record.txn_id));
+            facts
+                .advisories
+                .push(AdmissionDiagnostic::Advisory(advisory));
             Ok(StaleGateReconciliation::NullGenerationTxnAborted)
         }
         (StaleGateReconciliationPlan::RefuseForeignMigration, _) => {
             Ok(StaleGateReconciliation::ForeignMigrationRefused)
         }
         (StaleGateReconciliationPlan::FailClosedMismatch, Some(live)) => {
-            tracing::warn!(
-                target: "bc_1_18_011_migration",
-                migration_id = sanitize_diagnostic_id(live.migration_id()),
-                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
-                txn_state = ?live.record.state,
-                failing_check = "terminal record present; verification is fail-closed in this \
-                                 build (STAGING + record always; COMMITTING unverified)",
-                "Branch C: completion-record mismatch -- no txn write, no gate write"
+            // Branch C verification failure: no txn write, no gate write. The
+            // failing check names why (STAGING + record is always fail-closed;
+            // COMMITTING cannot be verified in this build).
+            facts.check = Some(
+                if live.record.state == BcIndexMigrationTxnState::Staging {
+                    "staging_with_terminal_record"
+                } else {
+                    "terminal_record_unverified"
+                }
+                .to_string(),
             );
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
         (StaleGateReconciliationPlan::FinalizeThenOpenGate, Some(live)) => {
-            // Unreachable while the verification seam reports every check
-            // unverified; fail closed (never finalize) rather than panic if a
-            // future change makes it reachable before the effect is delivered.
-            tracing::error!(
-                target: "bc_1_18_011_migration",
-                migration_id = sanitize_diagnostic_id(live.migration_id()),
-                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
-                "Branch C: FinalizeThenOpenGate decided but the finalize effect is not wired; \
-                 failing closed"
-            );
+            // The pure core decided FinalizeThenOpenGate but the finalize effect
+            // is not delivered (S-25.06): fail closed (never finalize) and record
+            // the anomalous seam-reached condition IN ADDITION to the verdict's
+            // own `_blocked` event.
+            let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchCFinalizeUnwired);
+            advisory.migration_id = Some(sanitize_diagnostic_id(live.migration_id()));
+            advisory.txn_id = Some(sanitize_diagnostic_id(&live.record.txn_id));
+            facts
+                .advisories
+                .push(AdmissionDiagnostic::Advisory(advisory));
+            facts.check = Some("finalize_effect_not_delivered".to_string());
             Ok(StaleGateReconciliation::CompletionRecordMismatch)
         }
         (
@@ -1038,7 +1323,9 @@ fn create_writer_reservation(
     let path = reservations_dir.join(format!("{tool_use_id}.reservation"));
     last_amended_migrate::atomic_write::write_atomic(&path, &json).map_err(|e| {
         BcIndexMigrationError::Io {
-            path: path.clone(),
+            // A placeholder file name: the real one embeds the raw `tool_use_id`,
+            // which must never reach a diagnostic.
+            path: reservations_dir.join("<tool_use_id>.reservation"),
             source: migrate_err_to_io(e),
         }
     })?;
