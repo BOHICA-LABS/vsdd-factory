@@ -113,9 +113,13 @@ async fn main() {
         // ADR-052 §5a "Single anchoring rule": the coordinator operates on the
         // SESSION project root (CLAUDE_PROJECT_DIR, else the process cwd) — the
         // same rule admission uses — never on the bare process cwd.
-        let project_root = resolve_project_cwd();
+        let process_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let session_root = factory_dispatcher::shard_manager::resolve_session_project_root(
+            std::env::var_os(ENV_PROJECT_DIR).as_deref(),
+            &process_cwd,
+        );
         std::process::exit(factory_dispatcher::shard_manager::run_migrate_bc_index_cli(
-            &project_root,
+            &session_root,
         ));
     }
 
