@@ -3055,3 +3055,464 @@ fn test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox() {
         failures,
     );
 }
+
+// ---------------------------------------------------------------------------
+// EC-032 -- `E-MAINTENANCE-002 <cause>` classification fixture matrix
+// (BC-1.18.013 v1.8 EC-032 + canonical test vector row; Precondition 6(c))
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+/// Restores a path's mode on drop (so tempdir cleanup always works).
+#[cfg(unix)]
+struct RestoreMode {
+    path: PathBuf,
+    mode: u32,
+}
+#[cfg(unix)]
+impl Drop for RestoreMode {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(self.mode));
+    }
+}
+
+#[cfg(unix)]
+fn chmod000(path: &Path, restore_to: u32) -> RestoreMode {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    RestoreMode {
+        path: path.to_path_buf(),
+        mode: restore_to,
+    }
+}
+
+#[cfg(unix)]
+fn is_root() -> bool {
+    let uid = Command::new("id")
+        .arg("-u")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&uid.stdout).trim() == "0"
+}
+
+/// Byte snapshot that tolerates unreadable (mode-000) entries.
+#[cfg(unix)]
+fn lenient_snapshot(p: &Project) -> BTreeMap<String, Vec<u8>> {
+    fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let path = e.path();
+            let rel = path
+                .strip_prefix(base)
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            if path.is_dir() {
+                out.insert(format!("{rel}/"), Vec::new());
+                walk(base, &path, out);
+            } else {
+                out.insert(
+                    rel,
+                    std::fs::read(&path).unwrap_or_else(|_| b"<unreadable>".to_vec()),
+                );
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(&p.ms(), &p.ms(), &mut out);
+    out
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+enum Expect {
+    /// admitted (exit 0) and a reservation stands
+    Admit,
+    /// plain `E-MAINTENANCE-001` block (prefix match: the path-family message),
+    /// NEVER `E-MAINTENANCE-002`
+    PlainBlock,
+    /// exit 2 `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
+    Cause(&'static str),
+}
+
+#[cfg(unix)]
+struct Fixture {
+    _modes: Vec<RestoreMode>,
+    _lock: Option<MigrationLockGuard>,
+}
+
+#[cfg(unix)]
+struct Row {
+    label: &'static str,
+    needs_non_root: bool,
+    expect: Expect,
+    setup: Box<dyn Fn(&Project) -> Fixture>,
+}
+
+#[cfg(unix)]
+fn fx() -> Fixture {
+    Fixture {
+        _modes: Vec::new(),
+        _lock: None,
+    }
+}
+
+#[cfg(unix)]
+fn gate_row(label: &'static str, bytes: &'static [u8], expect: Expect) -> Row {
+    Row {
+        label,
+        needs_non_root: false,
+        expect,
+        setup: Box::new(move |p| {
+            std::fs::write(p.ms().join("gate-state.json"), bytes).unwrap();
+            fx()
+        }),
+    }
+}
+
+#[cfg(unix)]
+fn assert_row(row: &Row, failures: &mut Vec<String>) {
+    if row.needs_non_root && is_root() {
+        eprintln!(
+            "SKIP [{}]: running as root; chmod 000 does not restrict reads",
+            row.label
+        );
+        return;
+    }
+    let p = Project::new();
+    let _fixture = (row.setup)(&p);
+    let before = lenient_snapshot(&p);
+    let target = p.abs(CYCLES_PATH);
+    let out = run(
+        &p,
+        &envelope("PreToolUse", "Write", Some("T32"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    let reason = err
+        .split("block_reason=\"")
+        .nth(1)
+        .unwrap_or(&err)
+        .to_string();
+    let ok = match row.expect {
+        Expect::Admit => out.status.code() == Some(0) && p.reservation("T32").exists(),
+        Expect::PlainBlock => {
+            out.status.code() == Some(2)
+                && err.contains(&plain_msg(".factory/cycles/"))
+                && !err.contains("E-MAINTENANCE-002")
+                && !p.reservation("T32").exists()
+                && lenient_snapshot(&p) == before
+        }
+        Expect::Cause(cause) => {
+            let want = format!("E-MAINTENANCE-002: writer-admission check failed ({cause})");
+            out.status.code() == Some(2)
+                && err.contains(&want)
+                // message carries ONLY the cause token (no path / errno / serde position)
+                && !reason.contains("gate-state")
+                && !reason.contains("txn-")
+                && !reason.contains("os error")
+                && !reason.contains("expected")
+                && !p.reservation("T32").exists()
+                && lenient_snapshot(&p) == before
+        }
+    };
+    if !ok {
+        failures.push(format!(
+            "[{}] expected {:?}; got exit {:?}, reservation_left={}, tree_unchanged={}, \
+             stderr: {err}",
+            row.label,
+            row.expect,
+            out.status.code(),
+            p.reservation("T32").exists(),
+            lenient_snapshot(&p) == before
+        ));
+    }
+}
+
+#[cfg(unix)]
+fn write_raw_txn(p: &Project, name: &str, bytes: &[u8]) {
+    std::fs::write(p.ms().join(name), bytes).unwrap();
+}
+
+/// Gate OPEN + a raw `txn-*.json` fixture.
+#[cfg(unix)]
+fn txn_row(label: &'static str, bytes: &'static [u8], expect: Expect) -> Row {
+    Row {
+        label,
+        needs_non_root: false,
+        expect,
+        setup: Box::new(move |p| {
+            write_raw_txn(p, "txn-act-s2508.json", bytes);
+            fx()
+        }),
+    }
+}
+
+/// BC-1.18.013 v1.8 EC-032 (canonical TV row): gate-state rows (a)-(o), the
+/// txn-record rows, first-failure-wins precedence, and the terminal-record rows.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
+
+    // ---- gate-state.json rows (a)-(o) ----
+    rows.push(gate_row(
+        "(a) gate-state \"OPEN\"",
+        b"\"OPEN\"",
+        Expect::Admit,
+    ));
+    rows.push(Row {
+        label: "(b) gate-state \"LOCKED\" (live coordinator holds the lock)",
+        needs_non_root: false,
+        expect: Expect::PlainBlock,
+        setup: Box::new(|p| {
+            std::fs::write(p.ms().join("gate-state.json"), b"\"LOCKED\"").unwrap();
+            Fixture {
+                _modes: Vec::new(),
+                _lock: Some(p.hold_lock()),
+            }
+        }),
+    });
+    rows.push(Row {
+        label: "(c) gate-state ABSENT (ENOENT is not an error => OPEN)",
+        needs_non_root: false,
+        expect: Expect::Admit,
+        setup: Box::new(|p| {
+            std::fs::remove_file(p.ms().join("gate-state.json")).unwrap();
+            fx()
+        }),
+    });
+    rows.push(Row {
+        label: "(d) gate-state mode 000 (open fails EACCES)",
+        needs_non_root: true,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            let path = p.ms().join("gate-state.json");
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+    rows.push(Row {
+        label: "(e) gate-state is a DIRECTORY (read fails EISDIR)",
+        needs_non_root: false,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            let path = p.ms().join("gate-state.json");
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            fx()
+        }),
+    });
+    rows.push(gate_row(
+        "(f) gate-state zero-length",
+        b"",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(g) gate-state truncated \"OPE",
+        b"\"OPE",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(h) gate-state invalid UTF-8 0xFF 0xFE",
+        &[0xFF, 0xFE],
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(i) gate-state unquoted OPEN",
+        b"OPEN",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(j) gate-state \"open\" (wrong casing)",
+        b"\"open\"",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(k) gate-state \"BOGUS\"",
+        b"\"BOGUS\"",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(l) gate-state {\"state\":\"OPEN\"}",
+        b"{\"state\":\"OPEN\"}",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(m) gate-state null",
+        b"null",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(gate_row(
+        "(n) gate-state 7",
+        b"7",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(Row {
+        label: "(o) gate-state mode 000 whose bytes would ALSO be malformed => io (content never examined)",
+        needs_non_root: true,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            let path = p.ms().join("gate-state.json");
+            std::fs::write(&path, [0xFF, 0xFE, b'x']).unwrap();
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+
+    // ---- txn-record rows (gate OPEN) ----
+    rows.push(Row {
+        label: "txn record unreadable (mode 000) => io",
+        needs_non_root: true,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+            let path = p.ms().join("txn-act-s2508.json");
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+    rows.push(txn_row(
+        "txn record zero-length",
+        b"",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(txn_row(
+        "txn record truncated JSON",
+        b"{\"txn_id\": \"x\", \"state\"",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(txn_row(
+        "txn record invalid UTF-8",
+        &[0xFF, 0xFE, 0xFD],
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(txn_row(
+        "txn record JSON array top level",
+        b"[1,2,3]",
+        Expect::Cause("state_integrity"),
+    ));
+    rows.push(Row {
+        label: "txn record `state` unknown value",
+        needs_non_root: false,
+        expect: Expect::Cause("state_integrity"),
+        setup: Box::new(|p| {
+            write_txn(&p.ms(), "BOGUS", Some("gen-1"), Some("migrate-bc-index"));
+            fx()
+        }),
+    });
+    rows.push(Row {
+        label: "txn record non-string migration_id (EC-030) => state_integrity",
+        needs_non_root: false,
+        expect: Expect::Cause("state_integrity"),
+        setup: Box::new(|p| {
+            write_txn_with_raw_migration_id(
+                &p.ms(),
+                "STAGING",
+                Some("gen-1"),
+                serde_json::json!(42),
+            );
+            fx()
+        }),
+    });
+    rows.push(Row {
+        label: "two live txn records => state_integrity",
+        needs_non_root: false,
+        expect: Expect::Cause("state_integrity"),
+        setup: Box::new(|p| {
+            write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+            let one = std::fs::read(p.ms().join("txn-act-s2508.json")).unwrap();
+            write_raw_txn(p, "txn-act-second.json", &one);
+            fx()
+        }),
+    });
+
+    // ---- first-failure-wins: gate-state is evaluated BEFORE the txn records ----
+    rows.push(Row {
+        label: "precedence: gate `7` (state_integrity) + txn unreadable (io) => state_integrity",
+        needs_non_root: true,
+        expect: Expect::Cause("state_integrity"),
+        setup: Box::new(|p| {
+            std::fs::write(p.ms().join("gate-state.json"), b"7").unwrap();
+            write_txn(&p.ms(), "STAGING", Some("gen-1"), Some("migrate-bc-index"));
+            let path = p.ms().join("txn-act-s2508.json");
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+    rows.push(Row {
+        label: "precedence: gate unreadable (io) + txn zero-length (state_integrity) => io",
+        needs_non_root: true,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            write_raw_txn(p, "txn-act-s2508.json", b"");
+            let path = p.ms().join("gate-state.json");
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+
+    // ---- terminal record (Branch C; live COMMITTING B2 txn, lock FREE so the
+    // reconciler reaches the record) ----
+    rows.push(Row {
+        label: "terminal record unreadable (mode 000) => E-MAINTENANCE-002 (io)",
+        needs_non_root: true,
+        expect: Expect::Cause("io"),
+        setup: Box::new(|p| {
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(
+                &p.ms(),
+                "COMMITTING",
+                Some("gen-1"),
+                Some("migrate-bc-index"),
+            );
+            write_terminal_record(&p.ms(), "completed.json", "act-s2508", "gen-1");
+            let path = p.ms().join("completed.json");
+            Fixture {
+                _modes: vec![chmod000(&path, 0o644)],
+                _lock: None,
+            }
+        }),
+    });
+    rows.push(Row {
+        label: "terminal record unparseable => plain E-MAINTENANCE-001 (NOT -002), not finalized",
+        needs_non_root: false,
+        expect: Expect::PlainBlock,
+        setup: Box::new(|p| {
+            write_gate(&p.ms(), "LOCKED");
+            write_txn(
+                &p.ms(),
+                "COMMITTING",
+                Some("gen-1"),
+                Some("migrate-bc-index"),
+            );
+            std::fs::write(p.ms().join("completed.json"), b"this is not json").unwrap();
+            fx()
+        }),
+    });
+
+    for row in &rows {
+        assert_row(row, &mut failures);
+    }
+
+    assert!(
+        failures.is_empty(),
+        "EC-032: {} of {} fixture row(s) failed:\n  - {}",
+        failures.len(),
+        rows.len(),
+        failures.join("\n  - ")
+    );
+}
