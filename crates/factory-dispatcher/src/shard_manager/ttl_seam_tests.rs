@@ -103,3 +103,47 @@ fn test_BC_1_18_013_EC031_drain_test_seam_is_not_bound_by_the_floor() {
     )
     .expect("the injectable drain seam accepts a sub-floor TTL");
 }
+
+/// BC-1.18.013 v1.11 EC-035 vector (B), crate-private half (S-25.09 T-14): the
+/// in-crate TTL seam is a path-only entry like `run_bc_index_migration`, so a
+/// project root without `.factory` yields `FactoryRootNotFound { root_source: None }`
+/// with the exact suffix-less Display, and nothing is created or mutated. The
+/// production default TTL passes the floor, so the failure is the missing root.
+#[test]
+fn test_BC_1_18_013_EC035_with_ttl_seam_root_source_none_suffixless_display() {
+    use super::DEFAULT_MAX_RESERVATION_TTL;
+    for variant_file in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        if variant_file {
+            std::fs::write(dir.path().join(".factory"), b"i am a file").unwrap();
+        }
+        let before = snapshot(dir.path());
+        match run_bc_index_migration_with_ttl(dir.path(), DEFAULT_MAX_RESERVATION_TTL) {
+            Err(
+                e @ BcIndexMigrationError::FactoryRootNotFound {
+                    project_root: _,
+                    root_source: _,
+                },
+            ) => {
+                let BcIndexMigrationError::FactoryRootNotFound {
+                    project_root,
+                    root_source,
+                } = &e
+                else {
+                    unreachable!()
+                };
+                assert_eq!(project_root, dir.path());
+                assert_eq!(*root_source, None);
+                assert_eq!(
+                    e.to_string(),
+                    format!(
+                        "FACTORY_ROOT_NOT_FOUND: no .factory directory under project root {}",
+                        dir.path().display()
+                    )
+                );
+            }
+            other => panic!("expected FactoryRootNotFound (file={variant_file}), got {other:?}"),
+        }
+        assert_eq!(snapshot(dir.path()), before, "tree byte-identical");
+    }
+}
