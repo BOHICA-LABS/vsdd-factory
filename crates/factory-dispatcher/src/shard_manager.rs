@@ -12194,18 +12194,10 @@ mod bc_1_18_006_roll_tests {
 
 // ===========================================================================
 // BC-1.18.010 — Mechanism B2 end-state addressing (S-25.02 cluster-5
-// "shard-b2", T-10) — STUB SURFACE, stub-architect this burst.
-//
-// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
-//
-// This section and the BC-1.18.011 section below it are COMPILABLE STUBS
-// only. Every non-trivial function body is `todo!()`, citing the AC/BC
-// postcondition/invariant it will implement. Trivial, zero-branching,
-// ≤3-line, no-I/O, no-helper-call bodies are marked GREEN-BY-DESIGN per
-// BC-5.38.002 and given real bodies (see the stub commit report). No
-// WIRING-EXEMPT bodies are used in this section — every `From<...> for
-// HookResult` impl below branches on the source error's variant and is
-// therefore `todo!()`, unlike a pure single-field delegation.
+// "shard-b2", T-10). Implemented: every function in this section has a real
+// body (the original BC-5.38.001 Red Gate `todo!()` stub surface has been fully
+// replaced); `From<...> for HookResult` impls branch on the source error's
+// variant.
 //
 // Scope: BC-1.18.010 (this section, T-10) specifies the END-STATE
 // addressing scheme only — first-level `BC-S Prefix` → `SS-NN` pure-
@@ -12740,10 +12732,8 @@ pub fn open_bc_index_path_during_migration(
 
 // ===========================================================================
 // BC-1.18.011 — Governed one-time migration for the B2 BC-INDEX body split
-// (S-25.02 cluster-5 "shard-b2", T-11) — STUB SURFACE, stub-architect this
-// burst.
-//
-// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
+// (S-25.02 cluster-5 "shard-b2", T-11). Implemented: the original BC-5.38.001
+// Red Gate `todo!()` stub surface has been fully replaced by real bodies.
 //
 // Implements the durable txn-record + framed checksummed intent-log
 // STAGING/COMMITTING/COMPLETED/ABORTED state machine (ADR-052 §Decision 7a/

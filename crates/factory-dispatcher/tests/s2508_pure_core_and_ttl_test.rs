@@ -10,8 +10,9 @@
 //! and shapes are pinned by VP-146 v1.2 / VP-147 v1.1 / ADR-052 v1.18 §5a):
 //!
 //! * `decide_terminal_record_reconciliation(&TerminalReconcileInputs) -> TerminalReconcileDecision`
-//! * `reservation_is_stale(created_at: Option<u64>, mtime: u64, now: u64, ttl: u64) -> bool`
-//!   (epoch seconds; `created_at = None` models absent/unparseable)
+//! * `reservation_is_stale(created_at: Option<u64>, mtime: Option<u64>, now: u64, ttl: u64) -> bool`
+//!   (epoch seconds; `created_at = None` models absent/unparseable/untrusted,
+//!   `mtime = None` models unavailable; ADR-052 v1.20 timestamp rules)
 //! * `validate_production_reservation_ttl(Duration) -> Result<Duration, BcIndexMigrationError>`
 //!   and `MIN_PRODUCTION_RESERVATION_TTL` (1,800 s) -- the PRODUCTION entry
 //!   point's TTL floor (the injectable test seam `drain_bc_index_writers` is

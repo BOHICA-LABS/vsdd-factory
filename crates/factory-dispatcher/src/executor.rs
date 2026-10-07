@@ -445,15 +445,21 @@ pub struct MigrationAdmission {
 ///   `Bash` leg is the separately tracked [D-1232-OBL-4] §5c classifier, and
 ///   leaving `Bash` alone means the coordinator's own closed-grammar invocation
 ///   can never self-deadlock through this gate (EC-014);
-/// * NO `.factory/migration-state/` existence guard: the namespace is created
+/// * a usable `file_path` (missing / non-string / empty / NUL-containing is out
+///   of scope, not an error);
+/// * the session's own `<project_root>/.factory` exists as a directory (never
+///   created) — the gate guards exactly ONE factory root per dispatch;
+/// * the target (lexical AND symlink-resolved forms, component-wise and
+///   case-insensitively) is inside `<factory_root>/specs/behavioral-contracts` ∪
+///   `<factory_root>/cycles`; any other path (another project's `.factory`, a
+///   look-alike, `.factory/STATE.md`) is never gated;
+/// * NO `migration-state/` existence guard: the namespace is created
 ///   idempotently by the core (BC-1.18.013 EC-020), so a pre-directory writer is
-///   tracked and visible to a coordinator's first drain;
-/// * target path inside the protected union
-///   (`.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/`); anything
-///   else (e.g. `.factory/STATE.md`) is never gated.
+///   tracked and visible to a coordinator's first drain.
 ///
-/// A payload with no `tool_use_id` degrades to a check-only admission: no
-/// reservation is created, so that write proceeds untracked by the drain
+/// A payload with no `tool_use_id` (absent or JSON `null`) degrades to a
+/// check-only admission (a PRESENT but invalid id fails closed with
+/// `E-MAINTENANCE-002`): no reservation is created, so that write proceeds untracked by the drain
 /// procedure — a deliberate non-blocking degradation backstopped by §7c step-5's
 /// pre-commit fingerprint recheck, never a fabricated key.
 pub fn bc_index_migration_admission(
