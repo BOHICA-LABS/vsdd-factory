@@ -4475,3 +4475,60 @@ fn test_BC_1_18_013_EC032_eisdir_directory_at_record_path_is_io_root_safe_blackb
         failures,
     );
 }
+
+/// BC-1.18.013 v1.11 EC-021 / ADR-052 §5a F-001: release is keyed only on
+/// `tool_use_id` for BOTH completion events (`is_tool_completion_event` is true for
+/// `PostToolUse` and `PostToolUseFailure`), so a `PostToolUse` whose `tool_name`
+/// is null / numeric / boolean / an array / an object must still release.
+#[test]
+fn test_BC_1_18_013_EC021c_posttooluse_non_string_tool_name_still_releases_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    let shapes: [(&str, serde_json::Value); 5] = [
+        ("tool_name null", serde_json::Value::Null),
+        ("tool_name number", serde_json::json!(7)),
+        ("tool_name bool", serde_json::json!(true)),
+        ("tool_name array", serde_json::json!(["Write"])),
+        ("tool_name object", serde_json::json!({"n": "Write"})),
+    ];
+    for (label, tool_name) in shapes {
+        let p = Project::new();
+        let target = p.abs(CYCLES_PATH);
+        let pre = run(
+            &p,
+            &envelope("PreToolUse", "Write", Some("TP1"), edit_input(&target)),
+        );
+        if pre.status.code() != Some(0) || !p.reservation("TP1").exists() {
+            failures.push(format!(
+                "[{label}] precondition: PreToolUse Write must admit and reserve TP1 (exit {:?})",
+                pre.status.code()
+            ));
+            continue;
+        }
+        let v = serde_json::json!({
+            "hook_event_name": "PostToolUse",
+            "tool_name": tool_name,
+            "session_id": "sess-s2508",
+            "tool_input": edit_input(&target),
+            "tool_response": {"ok": true},
+            "tool_use_id": "TP1",
+        });
+        let out = run(&p, &v.to_string());
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "[{label}] PostToolUse must exit 0, got {:?}",
+                out.status.code()
+            ));
+        }
+        if p.reservation("TP1").exists() {
+            failures.push(format!(
+                "[{label}] PostToolUse must REMOVE reservations/TP1.reservation (keyed only on \
+                 tool_use_id); it is still there. stderr: {}",
+                stderr_of(&out)
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC021c_posttooluse_non_string_tool_name_still_releases_blackbox",
+        failures,
+    );
+}
