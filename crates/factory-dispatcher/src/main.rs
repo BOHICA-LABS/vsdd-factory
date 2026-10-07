@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck,
+    ExecutorInputs, PluginOutcome, bc_index_migration_admission,
     bc_index_migration_reservation_release, execute_tiers, resolve_shard_gate_precedence,
     shard_cap_precheck, spawn_async_plugin,
 };
@@ -134,17 +134,37 @@ async fn main() {
         Arc::new(InternalLog::new(resolve_log_dir()).with_mount_gate(!explicit_override));
     internal_log.prune_old(DEFAULT_RETENTION_DAYS);
 
-    let code = match run(internal_log.clone()).await {
+    // The reservation the shared admission core created for THIS dispatch
+    // (admitted PreToolUse Edit/Write/MultiEdit with a `tool_use_id`), recorded
+    // by `run` the moment admission returns.
+    let mut admission_reservation: Option<PathBuf> = None;
+    let code = match run(internal_log.clone(), &mut admission_reservation).await {
         Ok(code) => code,
         Err(err) => {
             emit_dispatcher_error(&internal_log, None, None, &err.to_string());
             0
         }
     };
+    // Release-on-block (ADR-052 v1.18 §5a "Release-on-block"; BC-1.18.013
+    // Precondition 6(c); BC-1.18.011 Precondition 6(c)): admission created the
+    // reservation, but a LATER stage of this same dispatch (`shard_cap_precheck`
+    // or a registry plugin) may have blocked/errored, in which case the tool
+    // never runs and PostToolUse is not guaranteed to fire. Every exit path of
+    // `run` funnels through this one point, so the dispatch's FINAL aggregated
+    // outcome (exit 2) is what decides: a blocked/errored event leaves no
+    // reservation behind. An admitted event (exit 0) keeps it until PostToolUse.
+    if code == 2 {
+        factory_dispatcher::shard_manager::release_reservation_file(
+            admission_reservation.as_deref(),
+        );
+    }
     std::process::exit(code);
 }
 
-async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
+async fn run(
+    internal_log: Arc<InternalLog>,
+    admission_reservation: &mut Option<PathBuf>,
+) -> anyhow::Result<i32> {
     let trace_id = new_trace_id();
     let payload = HookPayload::from_reader(std::io::stdin().lock())?;
 
@@ -451,8 +471,14 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // check ever ran, so a fired migration-admission verdict would have
     // "won" only in the RETURNED value, after `execute_roll`'s destructive
     // side effect had already landed on disk).
-    let migration_gate_precheck_result =
-        bc_index_migration_admission_precheck(&payload, &project_cwd);
+    //
+    // S-25.08 (D1/D5): this is the ONE evaluation of the shared admission core
+    // per PreToolUse event (reserve-then-verify, step-3.5 reconciliation,
+    // path-family-keyed `E-MAINTENANCE-001`); `main`'s exit funnel removes the
+    // reservation it created if the final outcome is a block.
+    let migration_admission = bc_index_migration_admission(&payload, &project_cwd);
+    *admission_reservation = migration_admission.reservation;
+    let migration_gate_precheck_result = migration_admission.verdict;
 
     // OBL-1 §5 (O-5 fold-in): the PostToolUse release counterpart to the
     // admission precheck above. No-ops internally for every dispatch that
