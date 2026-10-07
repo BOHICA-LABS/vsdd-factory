@@ -316,8 +316,22 @@ pub fn reconcile_stale_admission_gate(
     let terminal_record_name = live.and_then(|t| terminal_record_file_name(t.migration_id()));
     let inputs = TerminalReconcileInputs {
         lock_acquired: true,
-        record_present: terminal_record_name
-            .is_some_and(|name| migration_state_dir.join(name).exists()),
+        record_present: match terminal_record_name {
+            // `try_exists`, not `exists`: an unreadable record must surface as an
+            // error (fail closed), never be mistaken for ABSENT (which would let
+            // Branch B discard a txn whose terminal record merely could not be
+            // stat'ed).
+            Some(name) => {
+                let record_path = migration_state_dir.join(name);
+                record_path
+                    .try_exists()
+                    .map_err(|source| BcIndexMigrationError::Io {
+                        path: record_path,
+                        source,
+                    })?
+            }
+            None => false,
+        },
         txn_state: live.map(|t| t.record.state),
         // The effectful verification (parse the record; txn_id / generation_id
         // / canonical_paths_count equality; every canonical sha256) is

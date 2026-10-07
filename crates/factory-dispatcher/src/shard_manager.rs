@@ -14152,9 +14152,22 @@ pub fn drain_bc_index_writers(
     // Step 4: poll until quiescence (empty reservations dir) or timeout.
     let start = std::time::Instant::now();
     loop {
-        let is_quiescent = std::fs::read_dir(_reservations_dir)
-            .map(|mut it| it.next().is_none())
-            .unwrap_or(true);
+        // Fail closed: ONLY a missing directory (no writer ever reserved) or an
+        // empty one is quiescence. Any other read error (permissions, I/O)
+        // leaves the in-flight writer set UNKNOWN, so it must never be reported
+        // as quiescent — the coordinator would proceed to LOCKED + snapshot
+        // while an admitted writer may still be mid-write. The drain itself
+        // never advances the gate.
+        let is_quiescent = match std::fs::read_dir(_reservations_dir) {
+            Ok(mut it) => it.next().is_none(),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => true,
+            Err(source) => {
+                return Err(BcIndexMigrationError::Io {
+                    path: _reservations_dir.to_path_buf(),
+                    source,
+                });
+            }
+        };
         if is_quiescent {
             return Ok(());
         }
