@@ -1,5 +1,6 @@
 //! Shared `wasmtime::Engine` with epoch-interruption + fuel consumption
-//! enabled.
+//! enabled and the component model explicitly disabled (ADR-003: WASI
+//! preview-1 core modules only).
 //!
 //! The engine is expensive to build (~100 ms) so we construct one per
 //! dispatcher process and hand out references. An `EpochTicker` thread
@@ -37,6 +38,10 @@ pub fn build_engine() -> Result<Engine, EngineError> {
     // WASI preview-1 needs imports registered per-instance; preview-2
     // is explicitly out of scope for v1.0 (ADR-003).
     config.wasm_reference_types(true);
+    // ADR-003: core modules only. Explicitly disable the component model
+    // (wasmtime 48 enables it by default) so component binaries are
+    // rejected at compile time rather than relying on the default.
+    config.wasm_component_model(false);
     Engine::new(&config).map_err(|e| EngineError::Config(e.to_string()))
 }
 
