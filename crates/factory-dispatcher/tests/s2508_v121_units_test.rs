@@ -188,6 +188,72 @@ fn test_BC_1_18_013_EC037_reconciliation_to_branch_derivation_table() {
 }
 
 // ---------------------------------------------------------------------------
+// item 33(g) -- undelivered finalize: decision -> diagnostics mapping (unit)
+// ---------------------------------------------------------------------------
+
+/// ADR-052 v1.21 item 33(g); BC-1.18.013 v1.10 EC-039/EC-037: under the S-25.08 seam
+/// (pure decision `FinalizeThenOpenGate`, finalize effect undelivered) the admission
+/// shell produces EXACTLY ONE `migration.admission_blocked`
+/// `{branch=completion_record_mismatch, reconciliation=completion_record_mismatch,
+/// check=finalize_unwired}`, EXACTLY ONE `migration.admission_advisory
+/// {reason=branch_c_finalize_unwired}` and the E-MAINTENANCE-001 verdict WITH the
+/// mismatch suffix. `diagnostics_for_undelivered_finalize` is a `todo!()` stub added by
+/// the test-writer as the injection seam: the real dispatcher cannot reach this case
+/// (its verification seam reports every check false; real verification is S-25.06's).
+/// The black-box `finalize_unwired` -> `branch_c_finalized` transition is S-25.06's
+/// obligation.
+#[test]
+fn test_BC_1_18_013_EC039_undelivered_finalize_diagnostics_mapping() {
+    use factory_dispatcher::shard_manager::{
+        AdmissionDiagnostic, BcIndexAdmissionGateState, diagnostics_for_undelivered_finalize,
+        e_maintenance_block_message,
+    };
+    for family in [ProtectedPathFamily::BcIndex, ProtectedPathFamily::Cycles] {
+        let (diags, message) = diagnostics_for_undelivered_finalize(
+            family,
+            BcIndexAdmissionGateState::Locked,
+            "backfill-append-logs",
+            "txn-x",
+        );
+        assert_eq!(
+            message,
+            e_maintenance_block_message(family, true),
+            "the verdict is the keyed E-MAINTENANCE-001 message WITH the mismatch suffix"
+        );
+        let blocked: Vec<_> = diags
+            .iter()
+            .filter(|d| matches!(d, AdmissionDiagnostic::Blocked(_)))
+            .collect();
+        let advisories: Vec<_> = diags
+            .iter()
+            .filter(|d| matches!(d, AdmissionDiagnostic::Advisory(_)))
+            .collect();
+        assert_eq!(blocked.len(), 1, "exactly ONE _blocked: {diags:?}");
+        assert_eq!(advisories.len(), 1, "exactly ONE _advisory: {diags:?}");
+        let f: std::collections::BTreeMap<_, _> = blocked[0].fields().into_iter().collect();
+        assert_eq!(f["branch"], "completion_record_mismatch");
+        assert_eq!(f["reconciliation"], "completion_record_mismatch");
+        assert_eq!(f["check"], "finalize_unwired");
+        assert_eq!(f["migration_id"], "backfill-append-logs");
+        assert_eq!(f["txn_id"], "txn-x");
+        let a: std::collections::BTreeMap<_, _> = advisories[0].fields().into_iter().collect();
+        assert_eq!(a["reason"], "branch_c_finalize_unwired");
+        assert!(
+            a.keys().all(|k| [
+                "reason",
+                "migration_id",
+                "txn_id",
+                "check",
+                "detail",
+                "tool_use_id_len"
+            ]
+            .contains(k)),
+            "advisory optional fields must stay inside the closed set: {a:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // D-2 -- sibling-sweep source gate (ADR-052 v1.21 "Single anchoring rule" (e))
 // ---------------------------------------------------------------------------
 

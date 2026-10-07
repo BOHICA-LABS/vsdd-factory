@@ -149,9 +149,10 @@ pub use admission::{
     MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily,
     SessionProjectRoot, StaleGateReconciliation, admit_protected_write,
     as_given_factory_root_spelling, classify_tool_use_id, derive_block_branch,
-    e_maintenance_block_message, is_valid_tool_use_id, project_root_source,
-    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
-    resolve_session_project_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
+    diagnostics_for_undelivered_finalize, e_maintenance_block_message, is_valid_tool_use_id,
+    project_root_source, reconcile_stale_admission_gate, release_reservation_file,
+    resolve_factory_root, resolve_session_project_root, resolve_target_path, sanitize_diagnostic,
+    sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
