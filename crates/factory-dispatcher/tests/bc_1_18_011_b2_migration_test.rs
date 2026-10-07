@@ -1505,21 +1505,56 @@ fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_none_inv
 }
 
 #[test]
-fn test_BC_1_18_011_PRECOND6_admission_precheck_returns_none_when_no_migration_state_dir() {
-    // Negative control — this guard is REAL (already-implemented) code per
-    // stub-architect's own Red-Gate safety note, so this test is expected
-    // to be GREEN today, locking in the exact zero-cost-bypass condition
-    // the positive gate-precedence tests above depend on.
+fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migration_state_dir() {
+    // BC-1.18.011 v1.15 Precondition 6(c) "Unconditional reservation namespace"
+    // / EC-015 (replaces the pre-v1.15 "no migration-state/ => zero-cost no-op
+    // with nothing created" expectation): a protected write admitted before
+    // `.factory/migration-state/` ever existed STILL reserves, so a coordinator
+    // that activates mid-flight sees it.
     let dir = tempfile::tempdir().unwrap();
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "content").unwrap();
-    let payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
+    let mut payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
+    payload
+        .extra
+        .insert("tool_use_id".to_string(), serde_json::json!("T1"));
     let result = bc_index_migration_admission_precheck(&payload, dir.path());
     assert!(
         result.is_none(),
-        "with no .factory/migration-state/ directory present at all, this gate must be a \
-         zero-cost no-op (None)"
+        "no migration-state/ present: absent gate = OPEN, no live txn => admitted (None), got {result:?}"
+    );
+    let ms = dir.path().join(".factory/migration-state");
+    let reservation = ms.join("reservations/T1.reservation");
+    let body = std::fs::read(&reservation).unwrap_or_else(|e| {
+        panic!("admitter must create reservations/T1.reservation even when migration-state/ never existed: {e}")
+    });
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("reservation parses as JSON");
+    assert_eq!(v["tool_use_id"], "T1");
+    assert!(v["created_at"].is_string());
+    assert!(
+        !ms.join("gate-state.json").exists(),
+        "the admitter writes no gate-state.json"
+    );
+    let txn_files = std::fs::read_dir(&ms)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("txn-"))
+        .count();
+    assert_eq!(txn_files, 0, "the admitter writes no txn record");
+
+    // No `tool_use_id` => check-only: NO directory and NO reservation (EC-015).
+    // EC-015: no `tool_use_id` => check-only: NO directory and NO reservation.
+    let dir2 = tempfile::tempdir().unwrap();
+    let target2 = bc_index_target(dir2.path());
+    std::fs::create_dir_all(target2.parent().unwrap()).unwrap();
+    std::fs::write(&target2, "content").unwrap();
+    let payload2 = bc_index_payload(dir2.path(), "Write", serde_json::json!({ "content": "x" }));
+    let result2 = bc_index_migration_admission_precheck(&payload2, dir2.path());
+    assert!(result2.is_none(), "admitted check-only, got {result2:?}");
+    assert!(
+        !dir2.path().join(".factory/migration-state").exists(),
+        "a payload without tool_use_id must create no migration-state directory"
     );
 }
 

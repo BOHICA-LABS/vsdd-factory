@@ -1662,3 +1662,216 @@ fn test_BC_1_18_011_PC6d_branch_b_applies_with_absent_or_open_gate_blackbox() {
         failures,
     );
 }
+
+// ---------------------------------------------------------------------------
+// BC-1.18.013 v1.7 EC-020 / BC-1.18.011 v1.15 EC-015 -- UNCONDITIONAL
+// reservation namespace (first-activation race), real binary
+// ---------------------------------------------------------------------------
+
+impl Project {
+    /// A repository where `.factory/` exists but `.factory/migration-state/`
+    /// has NEVER existed (no migration ever run).
+    fn new_bare() -> Self {
+        let dir = tempfile::tempdir().expect("project tempdir");
+        let plugin_root = tempfile::tempdir().expect("plugin_root tempdir");
+        std::fs::write(
+            plugin_root.path().join("hooks-registry.toml"),
+            "schema_version = 2\n",
+        )
+        .expect("write empty registry");
+        std::fs::create_dir_all(dir.path().join(".factory")).unwrap();
+        Project { dir, plugin_root }
+    }
+}
+
+/// Scripted coordinator over the on-disk namespace: create the directory (it
+/// did not exist), take the lock, flip DRAINING, write txn STAGING(null).
+fn coordinator_activate(p: &Project) -> MigrationLockGuard {
+    std::fs::create_dir_all(p.ms().join("reservations")).unwrap();
+    std::fs::write(p.ms().join("exclusive.lock"), b"").unwrap();
+    let guard = p.hold_lock();
+    write_gate(&p.ms(), "DRAINING");
+    write_txn(&p.ms(), "STAGING", None, Some("migrate-bc-index"));
+    guard
+}
+
+/// EC-020 / EC-015 (a): a writer admitted BEFORE migration-state/ existed is seen
+/// by the coordinator's drain: the drain WAITS (timeout variant =>
+/// DRAIN_TIMEOUT_ABORT; mid-poll PostToolUse release variant => drain proceeds).
+#[test]
+fn test_BC_1_18_013_EC020_pre_directory_writer_is_seen_by_coordinator_drain_blackbox() {
+    use factory_dispatcher::shard_manager::{BcIndexMigrationError, drain_bc_index_writers};
+    let mut failures: Vec<String> = Vec::new();
+
+    for rel in [CYCLES_PATH, BC_PATH] {
+        // --- variant (a): writer withheld PostToolUse => DRAIN_TIMEOUT_ABORT ---
+        {
+            let p = Project::new_bare();
+            let target = p.abs(rel);
+            let out = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("T1"), edit_input(&target)),
+            );
+            if out.status.code() != Some(0) {
+                failures.push(format!(
+                    "[{rel}] pre-directory admit expected exit 0, got {:?}: {}",
+                    out.status.code(),
+                    stderr_of(&out)
+                ));
+            }
+            if !p.reservation("T1").exists() {
+                failures.push(format!(
+                    "[{rel}] admitter must create migration-state/reservations/T1.reservation \
+                     even though migration-state/ never existed (unconditional namespace)"
+                ));
+            }
+            let _coord = coordinator_activate(&p);
+            let r = drain_bc_index_writers(
+                &p.ms().join("reservations"),
+                Duration::from_millis(150),
+                Duration::from_secs(3600),
+            );
+            if !matches!(r, Err(BcIndexMigrationError::DrainTimeoutAbort)) {
+                failures.push(format!(
+                    "[{rel}] coordinator drain must SEE the pre-directory writer and end in \
+                     DRAIN_TIMEOUT_ABORT, got {r:?}"
+                ));
+            }
+        }
+
+        // --- variant (b): PostToolUse release mid-poll => drain proceeds ---
+        {
+            let p = Project::new_bare();
+            let target = p.abs(rel);
+            let _ = run(
+                &p,
+                &envelope("PreToolUse", "Edit", Some("T1"), edit_input(&target)),
+            );
+            let _coord = coordinator_activate(&p);
+            let post = envelope("PostToolUse", "Edit", Some("T1"), edit_input(&target));
+            let reservations = p.ms().join("reservations");
+            let had_reservation = p.reservation("T1").exists();
+            let releaser = std::thread::scope(|sc| {
+                let h = sc.spawn(|| {
+                    std::thread::sleep(Duration::from_millis(100));
+                    run(&p, &post)
+                });
+                let r = drain_bc_index_writers(
+                    &reservations,
+                    Duration::from_secs(10),
+                    Duration::from_secs(3600),
+                );
+                (r, h.join().unwrap())
+            });
+            let (r, post_out) = releaser;
+            if !had_reservation {
+                failures.push(format!(
+                    "[{rel}] mid-poll variant: no reservation existed for the coordinator to wait on"
+                ));
+            }
+            if r.is_err() || post_out.status.code() != Some(0) {
+                failures.push(format!(
+                    "[{rel}] mid-poll PostToolUse release must let the drain reach quiescence; \
+                     drain={r:?}, post exit={:?}",
+                    post_out.status.code()
+                ));
+            }
+        }
+    }
+
+    assert_no_failures(
+        "test_BC_1_18_013_EC020_pre_directory_writer_is_seen_by_coordinator_drain_blackbox",
+        failures,
+    );
+}
+
+/// EC-020 / EC-015 (b): concurrent FIRST-EVER admissions racing on directory
+/// creation all succeed (idempotent create; no EEXIST error), each with its own
+/// reservation.
+#[test]
+fn test_BC_1_18_013_EC020_concurrent_first_ever_admissions_all_succeed_blackbox() {
+    let mut failures: Vec<String> = Vec::new();
+    for round in 0..3 {
+        let p = Project::new_bare();
+        let target = p.abs(CYCLES_PATH);
+        let ids = ["C1", "C2", "C3", "C4"];
+        let children: Vec<Child> = ids
+            .iter()
+            .map(|id| {
+                spawn(
+                    &p,
+                    &envelope("PreToolUse", "Edit", Some(id), edit_input(&target)),
+                    None,
+                )
+            })
+            .collect();
+        for (id, child) in ids.iter().zip(children) {
+            let out = finish(child, Duration::from_secs(30));
+            if out.status.code() != Some(0) {
+                failures.push(format!(
+                    "round {round}: concurrent first-ever admission {id} must succeed, got {:?}: {}",
+                    out.status.code(),
+                    stderr_of(&out)
+                ));
+            }
+            if !p.reservation(id).exists() {
+                failures.push(format!("round {round}: {id} has no reservation of its own"));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC020_concurrent_first_ever_admissions_all_succeed_blackbox",
+        failures,
+    );
+}
+
+/// EC-020 / EC-015 (c): directory/reservation creation failure (unwritable
+/// `.factory/`) fails the PreToolUse CLOSED (`HookResult::Error`, exit 2, the
+/// writer-admission-check error) with no reservation left behind -- never an
+/// untracked admit. Skipped (loudly) only when running as root, where chmod does
+/// not restrict writes.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC020_unwritable_namespace_fails_closed_no_reservation_blackbox() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let uid_out = Command::new("id").arg("-u").output().expect("id -u");
+    if String::from_utf8_lossy(&uid_out.stdout).trim() == "0" {
+        eprintln!(
+            "SKIP: running as root; chmod 0555 does not restrict writes, so the EACCES path is unobservable"
+        );
+        return;
+    }
+
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let p = Project::new_bare();
+    let target = p.abs(CYCLES_PATH);
+    let factory_dir = p.root().join(".factory");
+    // .factory/ read+exec only: migration-state/ cannot be created under it.
+    // (cycles/ was created by p.abs BEFORE the chmod, so it is not affected.)
+    std::fs::set_permissions(&factory_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let _restore = Restore(factory_dir.clone());
+
+    let out = run(
+        &p,
+        &envelope("PreToolUse", "Edit", Some("TX"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    if out.status.code() != Some(2) || !err.contains("writer-admission check failed") {
+        panic!(
+            "unwritable namespace must FAIL CLOSED with the writer-admission-check error \
+             (exit 2); got exit {:?}, stderr: {err}",
+            out.status.code()
+        );
+    }
+    assert!(
+        !factory_dir.join("migration-state").exists(),
+        "no migration-state/ can exist, hence no reservation left behind"
+    );
+}
