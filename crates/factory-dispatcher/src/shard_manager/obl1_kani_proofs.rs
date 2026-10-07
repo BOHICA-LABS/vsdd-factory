@@ -79,9 +79,10 @@ use super::migration_fs::Fs;
 use super::{
     BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnRecord,
     BcIndexMigrationTxnState, CompletedMigrationRecord, DEFAULT_MAX_RESERVATION_TTL,
-    ManifestStatus, QuarantineReason, RecoveryDecision, StaleGateReconciliationPlan,
-    TerminalReconcileDecision, TerminalReconcileInputs, decide_terminal_record_reconciliation,
-    is_bc_index_admission_open, plan_stale_gate_reconciliation, recover, reservation_is_stale,
+    ManifestStatus, QuarantineReason, RESERVATION_CLOCK_SKEW_TOLERANCE_SECS, RecoveryDecision,
+    StaleGateReconciliationPlan, TerminalReconcileDecision, TerminalReconcileInputs,
+    decide_terminal_record_reconciliation, is_bc_index_admission_open,
+    plan_stale_gate_reconciliation, recover, reservation_is_stale,
 };
 
 // ---------------------------------------------------------------------------
@@ -385,7 +386,14 @@ fn proof_obl1_h1_recover_totality() {
 // table, row by row (they are a specification, not a copy of the
 // implementation's control flow: each outcome is pinned to the exact input
 // region the BC assigns it), and the named row assertions restate the
-// v1.12/v1.13 normative cells verbatim.
+// normative cells verbatim. Row numbers are BC-1.18.011 v1.17 /
+// BC-1.18.013 v1.9 Precondition 6(d) numbering: 1 NoOp (lock not acquired /
+// no live txn), 2 RefuseForeignMigration (`migration_id ∉ K`), 3 NoOp (known
+// migration, its terminal record ABSENT), 4 FinalizeThenOpenGate, 5
+// FailClosedMismatch. K = {`migrate-bc-index`, `backfill-append-logs`} (an
+// absent `migration_id` reads `migrate-bc-index`); the core's input
+// `txn_migration_known` is `migration_id ∈ K` — the shared core serves BOTH
+// migrations and has no "evaluating migration".
 // ===========================================================================
 
 #[kani::proof]
@@ -400,22 +408,24 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
     let committing = i.txn_state == Some(BcIndexMigrationTxnState::Committing);
     let checks = all_terminal_checks_pass(&i);
 
-    // Row 1 (lock not acquired / no live txn) and row 2 (own migration,
-    // record ABSENT — STAGING and COMMITTING alike): NoOp, and ONLY there.
+    // Row 1 (lock not acquired / no live txn) and row 3 (known migration,
+    // its terminal record ABSENT — STAGING and COMMITTING alike): NoOp, and
+    // ONLY there.
     kani::assert(
         (d == TerminalReconcileDecision::NoOp)
             == (!i.lock_acquired || !live || (i.txn_migration_known && !i.record_present)),
-        "H1b: NoOp iff lock not acquired, no live txn, or own live txn with terminal record absent",
+        "H1b rows 1/3: NoOp iff lock not acquired, no live txn, or known-migration live txn with its terminal record absent",
     );
-    // Row 3 (Precondition 6(e)): a live txn of ANOTHER migration under the
-    // lock is refused — with precedence over every record check.
+    // Row 2 (Precondition 6(e)): a live txn whose `migration_id ∉ K` under
+    // the lock is refused — with precedence over every record check.
     kani::assert(
         (d == TerminalReconcileDecision::RefuseForeignMigration)
             == (i.lock_acquired && live && !i.txn_migration_known),
-        "H1b: RefuseForeignMigration iff lock acquired, live txn, foreign migration",
+        "H1b row 2: RefuseForeignMigration iff lock acquired, live txn, migration_id not in K",
     );
-    // Row 5 (Postcondition 9): FINALIZE only on full verification of the own
-    // migration's present record against a COMMITTING txn under the lock.
+    // Row 4 (Postcondition 9): FINALIZE only on full verification of the
+    // known migration's own present terminal record against a COMMITTING txn
+    // under the lock.
     kani::assert(
         (d == TerminalReconcileDecision::FinalizeThenOpenGate)
             == (i.lock_acquired
@@ -423,9 +433,9 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
                 && i.record_present
                 && committing
                 && checks),
-        "H1b: FinalizeThenOpenGate iff lock + own + record present + COMMITTING + every check passes",
+        "H1b row 4: FinalizeThenOpenGate iff lock + known migration + its record present + COMMITTING + every check passes",
     );
-    // Rows 4/5 failure arm: every other own-record-present live case fails
+    // Row 5: every other known-migration, record-present live case fails
     // closed.
     kani::assert(
         (d == TerminalReconcileDecision::FailClosedMismatch)
@@ -434,7 +444,7 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
                 && i.txn_migration_known
                 && i.record_present
                 && !(committing && checks)),
-        "H1b: FailClosedMismatch iff own live txn + record present and not (COMMITTING and fully verified)",
+        "H1b row 5: FailClosedMismatch iff known-migration live txn + its record present and not (COMMITTING and fully verified)",
     );
 
     // Named normative cells.
@@ -448,13 +458,13 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
         kani::assert(
             d != TerminalReconcileDecision::FinalizeThenOpenGate
                 && d != TerminalReconcileDecision::FailClosedMismatch,
-            "H1b/S7: a foreign-migration txn is never finalized and never a completion-record mismatch",
+            "H1b/S7: an unknown-migration_id txn is never finalized and never a completion-record mismatch",
         );
     }
     if i.lock_acquired && live && i.txn_migration_known && !i.record_present {
         kani::assert(
             d == TerminalReconcileDecision::NoOp,
-            "H1b: own live txn + lock + terminal record ABSENT => NoOp (STAGING and COMMITTING alike)",
+            "H1b row 3: known-migration live txn + lock + its terminal record ABSENT => NoOp (STAGING and COMMITTING alike)",
         );
     }
     if !i.lock_acquired {
@@ -471,7 +481,7 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
     );
     kani::cover!(
         d == TerminalReconcileDecision::RefuseForeignMigration && i.record_present && checks,
-        "H1b non-vacuity: foreign refusal wins over a present, fully verified record"
+        "H1b non-vacuity: row-2 refusal (migration_id not in K) wins over a present, fully verified record"
     );
     kani::cover!(
         d == TerminalReconcileDecision::FailClosedMismatch && staging && checks,
@@ -487,7 +497,7 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
             && committing
             && i.txn_migration_known
             && !i.record_present,
-        "H1b non-vacuity: own COMMITTING + lock + record ABSENT => NoOp"
+        "H1b non-vacuity: row 3 — known COMMITTING + lock + record ABSENT => NoOp"
     );
     kani::cover!(
         d == TerminalReconcileDecision::NoOp
@@ -495,7 +505,7 @@ fn proof_obl1_h1_terminal_reconcile_totality() {
             && staging
             && i.txn_migration_known
             && !i.record_present,
-        "H1b non-vacuity: own STAGING + lock + record ABSENT => NoOp"
+        "H1b non-vacuity: row 3 — known STAGING + lock + record ABSENT => NoOp"
     );
 }
 
@@ -694,9 +704,9 @@ fn txn_is_terminal(s: BcIndexMigrationTxnState) -> bool {
 
 /// The `FinalizeFromTerminalRecord` safety facts shared by both h3 harnesses:
 /// the event only ever moves COMMITTING -> COMPLETED (STAGING + terminal
-/// record is ALWAYS fail-closed), and only for the evaluating build's own
-/// migration with the lock acquired, the record present and every check
-/// passing. Returns the non-vacuity witness "this step finalized COMMITTING
+/// record is ALWAYS fail-closed), and only for a known migration
+/// (`migration_id ∈ K`) with the lock acquired, its own terminal record
+/// present and every check passing (BC Precondition 6(d) row 4). Returns the non-vacuity witness "this step finalized COMMITTING
 /// -> COMPLETED" for the caller's `kani::cover!`.
 fn assert_finalize_event_safety(
     s: BcIndexMigrationTxnState,
@@ -725,7 +735,7 @@ fn assert_finalize_event_safety(
                     && facts.generation_id_eq
                     && facts.count_eq_n
                     && facts.hashes_eq.iter().all(|ok| *ok),
-                "H3: FinalizeFromTerminalRecord fires only for own migration + lock + present, fully verified record",
+                "H3: FinalizeFromTerminalRecord fires only for a known migration + lock + its present, fully verified record",
             );
         }
         return s == BcIndexMigrationTxnState::Committing
@@ -769,7 +779,7 @@ fn proof_obl1_h3_transition_inductive_step() {
     kani::cover!(
         matches!(e, TxnEvent::FinalizeFromTerminalRecord(f) if f.lock_acquired && f.txn_migration_known && f.record_present)
             && s == BcIndexMigrationTxnState::Staging,
-        "H3 non-vacuity: FinalizeFromTerminalRecord evaluated against STAGING + own present record"
+        "H3 non-vacuity: FinalizeFromTerminalRecord evaluated against STAGING + known migration's present record"
     );
 }
 
@@ -948,10 +958,10 @@ fn proof_obl1_h4_admission_gate_invariant() {
 // (e), EC-007..EC-014)
 //
 // A finite nondeterministic scheduler over the product state
-//   gate x txn{state, generation null?, own/foreign migration} x terminal
+//   gate x txn{state, generation null?, migration_id in K / not in K} x terminal
 //   record x exclusive.lock (held by a live coordinator) x 2 writers x 2
-//   reservation slots {absent, present{created_at parsed | unparseable},
-//   mtime} x clock
+//   reservation slots {absent, present{created_at parsed (possibly future) |
+//   unusable, mtime available (possibly future) | unavailable}} x clock
 // with ops (each an atomic step; the scheduler interleaves them freely):
 //   writer:  W1 reserve | W2a read gate | W2b read txns + decide (REAL
 //            `is_bc_index_admission_open`) | step-3.5 reconcile (REAL
@@ -1014,12 +1024,25 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      the unchanged state yields the same mismatch.
 //   S6 bounded progress / no permanent self-lock: a reconcile that holds the
 //      lock never leaves the gate closed with no live txn, nor a
-//      null-generation own STAGING txn stuck without a terminal record.
-//   S7 a foreign-migration txn is never finalized, aborted or reopened over.
-//   S8 created_at-first staleness: with created_at parsed the mtime is
-//      ignored; with it absent the mtime is judged exactly as a created_at
-//      of that value; the drain GC never reclaims a live writer's
-//      reservation.
+//      null-generation known-migration STAGING txn stuck without its
+//      terminal record.
+//   S7 (VP-147 v1.4) a live txn whose `migration_id ∉ K` (unknown to this
+//      build; `txn_migration_known = false`) is never finalized, aborted or
+//      reconciled over.
+//   S8 created_at-first staleness: a TRUSTED created_at (<= now + 300 s)
+//      decides and the mtime is ignored; with created_at absent the mtime
+//      is judged exactly as a created_at of that value; the drain GC never
+//      reclaims a live writer's reservation.
+//   S10 (VP-147 v1.4; ADR-052 v1.20 "Reservation timestamp rules", the REAL
+//      `reservation_is_stale` with the shipped 300 s skew) staleness
+//      retention: a reservation of UNKNOWN age (no usable created_at and no
+//      mtime) is never reclaimed; a created_at beyond now + 300 s is
+//      untrusted and falls back to the mtime (never clamped); a future
+//      created_at within the skew ages as 0 (never stale). Leaked
+//      reservations in the initial state carry arbitrary, possibly future,
+//      possibly absent stamps. RFC 3339 parsing / pre-epoch / u64-overflow
+//      classification (all mapping to `None`) and the `tracing::warn!`
+//      reasons are string/IO concerns outside Kani (VP-133 facet 7(c)).
 //   S9 (VP-147 v1.2) the reservation namespace exists from the first
 //      protected write: the initial state may be the never-migrated project
 //      (no `.factory/migration-state/`); the admitter creates the namespace
@@ -1037,6 +1060,10 @@ fn proof_obl1_h4_admission_gate_invariant() {
 /// The SHIPPED reservation TTL (3,600 s) — the model checks the production
 /// constant, not a toy value.
 const H4X_TTL_SECS: u64 = DEFAULT_MAX_RESERVATION_TTL.as_secs();
+
+/// The SHIPPED clock-skew tolerance (300 s; ADR-052 v1.20 §5a "Reservation
+/// timestamp rules").
+const H4X_SKEW_SECS: u64 = RESERVATION_CLOCK_SKEW_TOLERANCE_SECS;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum H4xWriterPhase {
@@ -1062,18 +1089,22 @@ struct H4xWriter {
 #[derive(Clone, Copy)]
 struct H4xReservation {
     present: bool,
-    /// `None` = the `created_at` field is absent / unparseable.
+    /// `None` = the `created_at` field is absent / unparseable / pre-epoch
+    /// (the RFC 3339 parse is string I/O outside Kani; its `None` outcome is
+    /// what the predicate sees). A `Some` may lie in the FUTURE (skew).
     created_at: Option<u64>,
-    mtime: u64,
+    /// `None` = the file mtime is unavailable (incl. pre-epoch).
+    mtime: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
 struct H4xTxn {
     state: BcIndexMigrationTxnState,
     generation_id_is_null: bool,
-    /// The txn's `migration_id` is one this build knows (its own terminal
-    /// record can be selected); `false` = foreign migration.
-    own_migration: bool,
+    /// The txn's `migration_id ∈ K` (`txn_migration_known`: one of the two
+    /// ids the build recognises, so its own terminal record can be selected);
+    /// `false` = unknown `migration_id` (BC row 2).
+    migration_known: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1114,7 +1145,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
         Some(H4xTxn {
             state: any_txn_state(),
             generation_id_is_null: kani::any(),
-            own_migration: kani::any(),
+            migration_known: kani::any(),
         })
     } else {
         None
@@ -1138,20 +1169,28 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
         H4xReservation {
             present: kani::any(),
             created_at: if kani::any() {
-                Some(h4x_time_at_most(now))
+                Some(h4x_time_at_most(now + 2 * H4X_SKEW_SECS))
             } else {
                 None
             },
-            mtime: h4x_time_at_most(now),
+            mtime: if kani::any() {
+                Some(h4x_time_at_most(now + 2 * H4X_SKEW_SECS))
+            } else {
+                None
+            },
         },
         H4xReservation {
             present: kani::any(),
             created_at: if kani::any() {
-                Some(h4x_time_at_most(now))
+                Some(h4x_time_at_most(now + 2 * H4X_SKEW_SECS))
             } else {
                 None
             },
-            mtime: h4x_time_at_most(now),
+            mtime: if kani::any() {
+                Some(h4x_time_at_most(now + 2 * H4X_SKEW_SECS))
+            } else {
+                None
+            },
         },
     ];
     // S9 (VP-147 v1.2): `.factory/migration-state/` (and so `reservations/`)
@@ -1181,6 +1220,9 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
     let mut blocked_by_draining_observation = false;
     let mut stale_gc_by_created_at = false;
     let mut stale_gc_by_mtime_fallback = false;
+    let mut unknown_age_retained = false;
+    let mut future_created_at_fell_back_to_mtime = false;
+    let mut within_skew_future_retained = false;
     let mut plan_reopen = false;
     let mut plan_abort_null = false;
     let mut plan_finalize = false;
@@ -1208,7 +1250,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                     res[w] = H4xReservation {
                         present: true,
                         created_at: if kani::any() { Some(now) } else { None },
-                        mtime: now,
+                        mtime: Some(now),
                     };
                     writers[w] = H4xWriter {
                         phase: H4xWriterPhase::Reserved,
@@ -1272,17 +1314,17 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                 if writers[w].phase == H4xWriterPhase::Reconcile {
                     let lock_acquired = coord == H4xCoord::Absent;
                     let live = h4x_txn_live(txn);
-                    let own = live && txn.is_some_and(|t| t.own_migration);
+                    let known = live && txn.is_some_and(|t| t.migration_known);
                     let inputs = TerminalReconcileInputs {
                         lock_acquired,
-                        record_present: own && terminal_record,
+                        record_present: known && terminal_record,
                         txn_state: if live { txn.map(|t| t.state) } else { None },
                         record_parses: kani::any(),
                         txn_id_eq: kani::any(),
                         generation_id_eq: kani::any(),
                         count_eq_n: kani::any(),
                         hashes_eq: kani::any(),
-                        txn_migration_known: own,
+                        txn_migration_known: known,
                     };
                     let gen_null = live && txn.is_some_and(|t| t.generation_id_is_null);
                     let plan = plan_stale_gate_reconciliation(gate, &inputs, gen_null);
@@ -1323,10 +1365,10 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                         );
                     }
                     // S7.
-                    if live && !own {
+                    if live && !known {
                         kani::assert(
                             unchanged,
-                            "H4b/S7: a foreign-migration live txn is never finalized, aborted or reopened over",
+                            "H4b/S7: a live txn whose migration_id is not in K is never finalized, aborted or reconciled over",
                         );
                     }
                     // S5.
@@ -1350,12 +1392,12 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                         kani::assert(
                             !(h4x_txn_live(txn)
                                 && txn.is_some_and(|t| {
-                                    t.own_migration
+                                    t.migration_known
                                         && t.state == BcIndexMigrationTxnState::Staging
                                         && t.generation_id_is_null
                                 })
                                 && !terminal_record),
-                            "H4b/S6: an own null-generation STAGING txn without a terminal record never survives reconciliation",
+                            "H4b/S6: a known-migration null-generation STAGING txn without its terminal record never survives reconciliation",
                         );
                     }
                     writers[w].phase = H4xWriterPhase::Reserved;
@@ -1382,7 +1424,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                     if !h4x_txn_live(txn) {
                         coord = H4xCoord::LockHeld; // fresh run
                     } else if let Some(t) = txn
-                        && t.own_migration
+                        && t.migration_known
                         && !t.generation_id_is_null
                     {
                         coord = if t.state == BcIndexMigrationTxnState::Committing {
@@ -1436,7 +1478,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                     txn = Some(H4xTxn {
                         state: BcIndexMigrationTxnState::Staging,
                         generation_id_is_null: true,
-                        own_migration: true,
+                        migration_known: true,
                     });
                     coord = H4xCoord::StagingNullGeneration;
                 }
@@ -1474,46 +1516,73 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                         if !slot.present {
                             continue;
                         }
-                        let stale = reservation_is_stale(
-                            slot.created_at,
-                            Some(slot.mtime),
-                            now,
-                            H4X_TTL_SECS,
-                        );
-                        // S8.
-                        let alt_mtime: u64 = kani::any();
-                        match slot.created_at {
-                            Some(c) => {
-                                kani::assert(
-                                    stale
-                                        == reservation_is_stale(
-                                            Some(c),
-                                            Some(alt_mtime),
-                                            now,
-                                            H4X_TTL_SECS,
-                                        ),
-                                    "H4b/S8: a parsed created_at decides staleness; the mtime is ignored",
-                                );
+                        let stale =
+                            reservation_is_stale(slot.created_at, slot.mtime, now, H4X_TTL_SECS);
+                        // Spec regions (BC-1.18.011 v1.17 / BC-1.18.013 v1.9
+                        // Precondition 6(c) "Reservation timestamp rules").
+                        let skew_bound = now + H4X_SKEW_SECS;
+                        let created_at_trusted = slot.created_at.filter(|c| *c <= skew_bound);
+                        let created_at_beyond_skew =
+                            slot.created_at.is_some_and(|c| c > skew_bound);
+                        let alt_mtime: Option<u64> =
+                            if kani::any() { Some(kani::any()) } else { None };
+                        // S8: a TRUSTED created_at (<= now + skew) decides;
+                        // the mtime is ignored.
+                        if let Some(c) = created_at_trusted {
+                            kani::assert(
+                                stale
+                                    == reservation_is_stale(Some(c), alt_mtime, now, H4X_TTL_SECS),
+                                "H4b/S8: a trusted created_at decides staleness; the mtime is ignored",
+                            );
+                        }
+                        // S8: with created_at absent, a trusted-range mtime is
+                        // judged exactly as a created_at of that value.
+                        if slot.created_at.is_none()
+                            && let Some(m) = slot.mtime
+                            && m <= skew_bound
+                        {
+                            kani::assert(
+                                stale == reservation_is_stale(Some(m), None, now, H4X_TTL_SECS),
+                                "H4b/S8: with created_at absent the mtime is judged exactly as a created_at of that value",
+                            );
+                        }
+                        // S10(a): age UNKNOWN (no usable created_at, no
+                        // mtime) => never reclaimed (retention direction).
+                        if created_at_trusted.is_none() && slot.mtime.is_none() {
+                            kani::assert(
+                                !stale,
+                                "H4b/S10: a reservation of unknown age (no usable created_at, no mtime) is never reclaimed",
+                            );
+                            unknown_age_retained = true;
+                        }
+                        // S10(b): a created_at beyond now + 300 s is untrusted
+                        // and falls back to the mtime (no clamp).
+                        if created_at_beyond_skew {
+                            kani::assert(
+                                stale == reservation_is_stale(None, slot.mtime, now, H4X_TTL_SECS),
+                                "H4b/S10: a created_at beyond the skew tolerance falls back to the mtime",
+                            );
+                            if stale {
+                                future_created_at_fell_back_to_mtime = true;
                             }
-                            None => {
-                                kani::assert(
-                                    stale
-                                        == reservation_is_stale(
-                                            Some(slot.mtime),
-                                            Some(alt_mtime),
-                                            now,
-                                            H4X_TTL_SECS,
-                                        ),
-                                    "H4b/S8: with created_at absent the mtime is judged exactly as a created_at of that value",
-                                );
-                            }
+                        }
+                        // S10(c): a future created_at within the skew ages
+                        // as 0 => never stale.
+                        if let Some(c) = created_at_trusted
+                            && c > now
+                        {
+                            kani::assert(
+                                !stale,
+                                "H4b/S10: a future created_at within the skew tolerance ages as 0 (never stale)",
+                            );
+                            within_skew_future_retained = true;
                         }
                         if stale {
                             kani::assert(
                                 writers[i].phase == H4xWriterPhase::Idle,
                                 "H4b/S8: the drain's TTL GC never reclaims a live writer's reservation",
                             );
-                            if slot.created_at.is_some() {
+                            if created_at_trusted.is_some() {
                                 stale_gc_by_created_at = true;
                             } else {
                                 stale_gc_by_mtime_fallback = true;
@@ -1543,12 +1612,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                 for (i, slot) in res.iter().enumerate() {
                     if writers[i].phase != H4xWriterPhase::Idle
                         && slot.present
-                        && reservation_is_stale(
-                            slot.created_at,
-                            Some(slot.mtime),
-                            later,
-                            H4X_TTL_SECS,
-                        )
+                        && reservation_is_stale(slot.created_at, slot.mtime, later, H4X_TTL_SECS)
                     {
                         live_writers_stay_fresh = false;
                     }
@@ -1632,6 +1696,18 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
         "H4b non-vacuity: the drain GC reclaimed a reservation stale by the mtime fallback"
     );
     kani::cover!(
+        unknown_age_retained,
+        "H4b/S10 non-vacuity: the drain GC met a reservation of unknown age and retained it"
+    );
+    kani::cover!(
+        future_created_at_fell_back_to_mtime,
+        "H4b/S10 non-vacuity: a created_at beyond the skew fell back to a stale mtime and was reclaimed"
+    );
+    kani::cover!(
+        within_skew_future_retained,
+        "H4b/S10 non-vacuity: a future created_at within the skew aged as 0 and was retained"
+    );
+    kani::cover!(
         plan_reopen,
         "H4b non-vacuity: Branch A reopened a stuck gate"
     );
@@ -1649,7 +1725,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
     );
     kani::cover!(
         plan_foreign,
-        "H4b non-vacuity: Branch C refused a foreign-migration txn"
+        "H4b non-vacuity: Branch C refused a txn whose migration_id is not in K"
     );
     kani::cover!(
         plan_live_coordinator,
@@ -2097,10 +2173,11 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
             "H6b: a txn-bearing plan is produced only for a live txn under the lock (shell contract)",
         );
     }
-    // BC-1.18.011 v1.13 Precondition 6(d) row-3 caller contract: Branch B
-    // applies IF AND ONLY IF the lock is held and the live txn is the own
-    // migration's STAGING with `generation_id = null` and its terminal record
-    // absent — with NO gate condition (an absent gate file reads OPEN).
+    // BC-1.18.011 v1.17 Precondition 6(d) row-3 caller contract: Branch B
+    // applies IF AND ONLY IF the lock is held and the live txn is a known
+    // migration's (`migration_id ∈ K`) STAGING with `generation_id = null`
+    // and its own terminal record absent — with NO gate condition (an absent
+    // gate file reads OPEN).
     kani::assert(
         (p1 == StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate)
             == (i.lock_acquired
@@ -2108,7 +2185,7 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
                 && gen_null
                 && i.txn_migration_known
                 && !i.record_present),
-        "H6b: Branch B iff lock + own null-generation STAGING + own terminal record absent (no gate condition)",
+        "H6b: Branch B iff lock + known-migration null-generation STAGING + its terminal record absent (no gate condition)",
     );
     let (gate2, state2) = match p1 {
         StaleGateReconciliationPlan::ReopenGate => (BcIndexAdmissionGateState::Open, i.txn_state),
@@ -2173,7 +2250,7 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
     );
     kani::cover!(
         p1 == StaleGateReconciliationPlan::RefuseForeignMigration,
-        "H6b non-vacuity: stable foreign refusal"
+        "H6b non-vacuity: stable row-2 refusal (migration_id not in K)"
     );
     kani::cover!(
         p1 == StaleGateReconciliationPlan::LiveCoordinator,
