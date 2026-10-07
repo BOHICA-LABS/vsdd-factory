@@ -1352,6 +1352,7 @@ fn resolve_project_cwd() -> PathBuf {
         std::env::var_os(ENV_PROJECT_DIR).as_deref(),
         &process_cwd,
     )
+    .path
 }
 
 // flush_sink_file is now in factory_dispatcher::vsdd_sink (S-19.05 AC-004).

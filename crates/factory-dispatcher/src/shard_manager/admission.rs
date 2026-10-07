@@ -455,6 +455,14 @@ pub fn project_root_source(claude_project_dir: Option<&std::ffi::OsStr>) -> Proj
     }
 }
 
+/// The resolved session project root together with where it came from (ADR-052
+/// v1.21 item 33; `resolve_session_project_root` returns this, not a bare path).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionProjectRoot {
+    pub path: PathBuf,
+    pub source: ProjectRootSource,
+}
+
 /// The ONE session-project-root rule shared by the dispatcher's admission /
 /// release legs and BOTH coordinator binaries (ADR-052 §5a "Single anchoring
 /// rule" (a); BC-1.18.013 EC-034). Pure: the env value is read by the caller.
@@ -465,6 +473,15 @@ pub fn project_root_source(claude_project_dir: Option<&std::ffi::OsStr>) -> Proj
 /// `.factory`, NO `git rev-parse`.
 #[must_use]
 pub fn resolve_session_project_root(
+    claude_project_dir: Option<&std::ffi::OsStr>,
+    process_cwd: &Path,
+) -> SessionProjectRoot {
+    let source = project_root_source(claude_project_dir);
+    let path = resolve_session_project_root_path(claude_project_dir, process_cwd);
+    SessionProjectRoot { path, source }
+}
+
+fn resolve_session_project_root_path(
     claude_project_dir: Option<&std::ffi::OsStr>,
     process_cwd: &Path,
 ) -> PathBuf {
@@ -780,6 +797,19 @@ impl AdmissionDiagnostic {
             }
         }
     }
+}
+
+/// S-25.08 Red-Gate STUB (ADR-052 v1.21 item 33(b); BC-1.18.013 v1.10 EC-037
+/// reconciliation->branch table): the pure `branch` derivation of a blocked
+/// verdict from the effectful reconciliation outcome and whether a live txn
+/// remains. `verify_admission` currently derives it INLINE; the implementer makes
+/// it call this function.
+#[must_use]
+pub fn derive_block_branch(
+    _reconciliation: StaleGateReconciliation,
+    _live_txn_remains: bool,
+) -> BlockBranch {
+    todo!("S-25.08 item 33(b): derive_block_branch (pure reconciliation -> branch table)")
 }
 
 fn gate_state_token(g: BcIndexAdmissionGateState) -> &'static str {

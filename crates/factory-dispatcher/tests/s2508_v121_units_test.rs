@@ -9,7 +9,7 @@
 //! admission state-integrity variant, source-level sibling-sweep gate).
 //!
 //! # Stub surface added by the test-writer (BC-5.38.001)
-//! * `resolve_session_project_root(Option<&OsStr>, &Path) -> PathBuf`
+//! * `resolve_session_project_root(Option<&OsStr>, &Path) -> SessionProjectRoot`
 //!   (`shard_manager::admission`, `todo!()`);
 //! * `BcIndexMigrationError::{AdmissionStateIntegrity, FactoryRootNotFound}`,
 //!   `AdmissionStateIntegrityKind`, `AdmissionFailureCause` (declarative: variants,
@@ -33,6 +33,7 @@ use factory_dispatcher::shard_manager::{
 
 #[test]
 fn test_BC_1_18_013_EC034_resolve_session_project_root_table() {
+    use factory_dispatcher::shard_manager::{ProjectRootSource, SessionProjectRoot};
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let proc_cwd = root.join("proc/sub");
@@ -41,30 +42,35 @@ fn test_BC_1_18_013_EC034_resolve_session_project_root_table() {
     std::fs::create_dir_all(root.join("proc/.factory")).unwrap();
     let existing = root.join("existing");
     std::fs::create_dir_all(&existing).unwrap();
+    let want = |path: PathBuf, source: ProjectRootSource| SessionProjectRoot { path, source };
 
-    // (a) absolute existing dir => canonicalized path
+    // (a) absolute existing dir => canonicalized path, source ClaudeProjectDir
     assert_eq!(
         resolve_session_project_root(Some(existing.as_os_str()), &proc_cwd),
-        existing.canonicalize().unwrap(),
-        "(a) existing absolute dir => canonical path"
+        want(
+            existing.canonicalize().unwrap(),
+            ProjectRootSource::ClaudeProjectDir
+        ),
+        "(a) existing absolute dir => canonical path / ClaudeProjectDir"
     );
-    // (b) empty == absent; (c) None => process_cwd exactly
+    // (b) empty == absent; (c) None => process_cwd exactly, source ProcessCwd
     assert_eq!(
         resolve_session_project_root(Some(OsStr::new("")), &proc_cwd),
-        proc_cwd,
+        want(proc_cwd.clone(), ProjectRootSource::ProcessCwd),
         "(b)"
     );
     assert_eq!(
         resolve_session_project_root(None, &proc_cwd),
-        proc_cwd,
+        want(proc_cwd.clone(), ProjectRootSource::ProcessCwd),
         "(c)"
     );
-    // (d) absolute but nonexistent => the AS-GIVEN path, NEVER process_cwd
+    // (d) absolute but nonexistent => the AS-GIVEN path (source ClaudeProjectDir),
+    // NEVER process_cwd
     let ghost = root.join("does/not/exist");
     assert_eq!(
         resolve_session_project_root(Some(ghost.as_os_str()), &proc_cwd),
-        ghost,
-        "(d) nonexistent absolute path => as-given (never cwd)"
+        want(ghost.clone(), ProjectRootSource::ClaudeProjectDir),
+        "(d) nonexistent absolute path => as-given (never cwd) / ClaudeProjectDir"
     );
     // (e) symlink => symlink-resolved
     #[cfg(unix)]
@@ -73,16 +79,111 @@ fn test_BC_1_18_013_EC034_resolve_session_project_root_table() {
         std::os::unix::fs::symlink(&existing, &link).unwrap();
         assert_eq!(
             resolve_session_project_root(Some(link.as_os_str()), &proc_cwd),
-            existing.canonicalize().unwrap(),
-            "(e) symlink => resolved"
+            want(
+                existing.canonicalize().unwrap(),
+                ProjectRootSource::ClaudeProjectDir
+            ),
+            "(e) symlink => resolved / ClaudeProjectDir"
         );
     }
     // (f) NO ancestor walk: with CLAUDE_PROJECT_DIR absent the answer is process_cwd
     // exactly, even though `proc/.factory` exists one level up.
     assert_eq!(
         resolve_session_project_root(None, &proc_cwd),
-        proc_cwd,
+        want(proc_cwd, ProjectRootSource::ProcessCwd),
         "(f) no ancestor walk / git rev-parse"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// reconciliation -> branch derivation (BC-1.18.013 v1.10 EC-037 table; ADR-052
+// v1.21 item 33(b)) -- the pure builder
+// ---------------------------------------------------------------------------
+
+/// `derive_block_branch` is a `todo!()` stub added by the test-writer (the merged
+/// `verify_admission` derives the branch inline); the implementer must route the
+/// inline derivation through it. Rows are the PO's 9 vectors (token, live txn
+/// remains?) -> branch.
+#[test]
+fn test_BC_1_18_013_EC037_reconciliation_to_branch_derivation_table() {
+    use factory_dispatcher::shard_manager::{
+        BlockBranch, StaleGateReconciliation as R, derive_block_branch,
+    };
+    let rows: [(R, bool, BlockBranch, &str); 9] = [
+        (
+            R::LiveCoordinator,
+            true,
+            BlockBranch::LiveCoordinator,
+            "live_coordinator",
+        ),
+        (
+            R::NothingToReconcile,
+            true,
+            BlockBranch::LiveTxn,
+            "nothing_to_reconcile",
+        ),
+        (
+            R::NothingToReconcile,
+            false,
+            BlockBranch::GateOnly,
+            "nothing_to_reconcile",
+        ),
+        (
+            R::GateReopened,
+            false,
+            BlockBranch::GateOnly,
+            "gate_reopened",
+        ),
+        (R::GateReopened, true, BlockBranch::LiveTxn, "gate_reopened"),
+        (
+            R::NullGenerationTxnAborted,
+            false,
+            BlockBranch::GateOnly,
+            "null_generation_txn_aborted",
+        ),
+        (
+            R::NullGenerationTxnAborted,
+            true,
+            BlockBranch::LiveTxn,
+            "null_generation_txn_aborted",
+        ),
+        (
+            R::ForeignMigrationRefused,
+            true,
+            BlockBranch::ForeignMigration,
+            "foreign_migration_refused",
+        ),
+        (
+            R::CompletionRecordMismatch,
+            true,
+            BlockBranch::CompletionRecordMismatch,
+            "completion_record_mismatch",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (recon, live, want_branch, want_token) in rows {
+        if recon.token() != want_token {
+            failures.push(format!(
+                "{recon:?}: wire token {:?} != {want_token}",
+                recon.token()
+            ));
+        }
+        let got = std::panic::catch_unwind(|| derive_block_branch(recon, live));
+        match got {
+            Ok(b) if b == want_branch => {}
+            Ok(b) => failures.push(format!(
+                "({recon:?}, live={live}) => {b:?}, expected {want_branch:?}"
+            )),
+            Err(_) => failures.push(format!(
+                "({recon:?}, live={live}) => derive_block_branch panicked (unimplemented)"
+            )),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failure(s):\n  - {}",
+        failures.len(),
+        failures.join("\n  - ")
     );
 }
 
