@@ -14043,8 +14043,10 @@ pub enum StaleGateReconciliationPlan {
 /// 1. lock not acquired -> [`StaleGateReconciliationPlan::LiveCoordinator`];
 /// 2. no live txn -> Branch A when the gate is not OPEN, else nothing;
 /// 3. otherwise the Branch C core [`decide_terminal_record_reconciliation`]
-///    decides; its `NoOp` falls through to Branch B (STAGING, null
-///    generation, gate not OPEN) or else nothing.
+///    decides; its `NoOp` falls through to Branch B (own live txn STAGING with
+///    a null generation; NO gate condition — BC-1.18.011 v1.13 Precondition
+///    6(d) row-3 caller contract; safe because planning runs only under an
+///    acquired `exclusive.lock`) or else nothing.
 ///
 /// Pure: no I/O, no ambient time, no PID input.
 pub fn plan_stale_gate_reconciliation(
@@ -14079,7 +14081,6 @@ pub fn plan_stale_gate_reconciliation(
         TerminalReconcileDecision::NoOp => {
             if terminal.txn_state == Some(BcIndexMigrationTxnState::Staging)
                 && live_txn_generation_id_is_null
-                && gate != BcIndexAdmissionGateState::Open
             {
                 StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate
             } else {
