@@ -143,6 +143,15 @@ artifacts:
     description: Product requirements document
     enforcement_level: block
 
+  - artifact_type: prd-supplement
+    canonical_path_pattern: ".factory/specs/prd-supplements/{slug}.md"
+    description: >
+      PRD supplement extracted from the monolithic PRD per DF-021 (interface-definitions.md,
+      error-taxonomy.md, test-vectors.md, nfr-catalog.md). Producer: product-owner. Added
+      S-25.02 F2 fix-burst (F-S2502-F2-006) closing a pre-existing gap — prd.md §5.1/§5b/§4/§3
+      have referenced this directory since before this registry entry existed.
+    enforcement_level: block
+
   - artifact_type: state
     canonical_path_pattern: ".factory/STATE.md"
     description: Pipeline state document
@@ -200,6 +209,11 @@ artifacts:
   - artifact_type: reference-manifest
     canonical_path_pattern: ".factory/reference-manifest.yaml"
     description: Reference manifest for brownfield ingestion
+    enforcement_level: block
+
+  - artifact_type: shard-config
+    canonical_path_pattern: ".factory/shard-config.toml"
+    description: "[[shard]] registry consumed by shard_cap_precheck/shard_cap_gate_check (BC-1.18.005/006) — declares every shard-cap-gated artifact, its shape, and its shard_cap_bytes ceiling"
     enforcement_level: block
 
   # ── Holdout Evaluations ──────────────────────────────────────────────────
@@ -430,4 +444,34 @@ artifacts:
       - status
       - author
       - date
+    enforcement_level: block
+
+  - artifact_type: story-index-amendment-history
+    canonical_path_pattern: ".factory/stories/STORY-INDEX-amendment-history.md"
+    description: Frozen pre-migration D-1149 amendment-history sidecar for stories/STORY-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
+    enforcement_level: block
+
+  - artifact_type: bc-index-amendment-history
+    canonical_path_pattern: ".factory/specs/behavioral-contracts/BC-INDEX-amendment-history.md"
+    description: Frozen pre-migration D-1149 amendment-history sidecar for specs/behavioral-contracts/BC-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
+    enforcement_level: block
+
+  - artifact_type: bc-index-changelog-archive
+    canonical_path_pattern: ".factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md"
+    description: Evergreen changelog archive written by rotate_changelog_at (BC-1.18.009 PC5/PC2) — overflow changelog entries rotated out of BC-INDEX.md when the inline changelog exceeds the cap
+    enforcement_level: block
+
+  - artifact_type: arch-index-amendment-history
+    canonical_path_pattern: ".factory/specs/architecture/ARCH-INDEX-amendment-history.md"
+    description: Frozen pre-migration D-1149 amendment-history sidecar for specs/architecture/ARCH-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
+    enforcement_level: block
+
+  - artifact_type: vp-index-amendment-history
+    canonical_path_pattern: ".factory/specs/verification-properties/VP-INDEX-amendment-history.md"
+    description: Frozen pre-migration D-1149 amendment-history sidecar for specs/verification-properties/VP-INDEX.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
+    enforcement_level: block
+
+  - artifact_type: state-amendment-history
+    canonical_path_pattern: ".factory/STATE-amendment-history.md"
+    description: Frozen pre-migration D-1149 amendment-history sidecar for STATE.md (BC-10.13.001 PC6 — read-only; last-amended-migrate never mutates it)
     enforcement_level: block

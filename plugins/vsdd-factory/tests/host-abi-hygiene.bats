@@ -21,7 +21,9 @@
 #            "plugin.completed"/"plugin.timeout" literals in production
 #            code (before #[cfg(test)]) of read_file.rs, read_prefix.rs,
 #            emit_event.rs (extended to four classes per story v1.1/AC-008)
-#     T-012: cargo test -p factory-dispatcher exits 0 (bidirectional regression gate)
+#     T-012: cargo test -p factory-dispatcher --lib -- s19_09 exits 0 (bidirectional
+#            regression gate, scoped to the D19/D22 read_prefix + timestamp unit tests;
+#            narrowed from --all-targets per rc.24 flake fix — see T-012 comment below)
 #
 # RED gate status (pre-D20/D21 at develop 9787c056):
 #   T-004: FAILS — "enforced in S-1.5 via epoch interruption" present in read_file.rs
@@ -439,7 +441,36 @@ _scan_bare_literals() {
 # ---------------------------------------------------------------------------
 # T-012  AC-008/AC-009 bidirectional regression gate
 #
-# Gate: `cargo test -p factory-dispatcher --all-targets` exits 0.
+# Gate: `cargo test -p factory-dispatcher --lib -- s19_09` exits 0.
+#
+# T-012's actual intent (per the original RED/GREEN narrative below) is
+# narrower than "the entire factory-dispatcher test suite": it verifies that
+# the D19 (read_prefix wired into setup_host_on_store_data, the production
+# linker) and D22 (timestamp field on plugin.completed) unit tests pass, and
+# that the D21 literal→named-constant sweep did not change the event-type
+# string *values* those tests assert on. All six tests carrying that intent
+# live as `#[cfg(test)]` unit tests inside src/ (invoke.rs, emit_event.rs) and
+# share the "s19_09" name fragment:
+#   t001_s19_09_read_prefix_instantiates_without_link_error_via_production_linker
+#   t002_s19_09_read_prefix_round_trip_bytes_correct_and_out_ptr_nonzero_via_production_path
+#   t002b_s19_09_read_prefix_head_c_bound_clamps_out_len_to_max_bytes
+#   t003_s19_09_read_prefix_capability_absent_returns_capability_denied_via_production_path
+#   t015_s19_09_read_prefix_empty_file_returns_ok_with_zero_ptr_len_no_grow
+#   test_s19_09_t013_emit_plugin_completed_async_has_timestamp_field
+#
+# Narrowed from `cargo test -p factory-dispatcher --all-targets` (rc.24 flake
+# fix): `--all-targets` re-runs every integration-test binary in
+# crates/factory-dispatcher/tests/, including the BC-1.14.001 async e2e tests
+# in full_stack_plugin_invocation.rs. Those tests spawn real debug-build WASM
+# plugins and wait on wall-clock deadlines; ~2200 lines into this bats suite
+# the CI runner is under enough load that those deadlines occasionally blow
+# out (confirmed flake — the SAME tests pass under the `cargo-host` CI job's
+# `cargo test --workspace --all-targets`, which duplicates this gate's
+# coverage anyway). T-012 does not need that coverage to prove its own
+# intent, and re-paying debug-WASM cold-start here only adds risk with no
+# unique signal. `--lib` runs unit tests only (no tests/ integration
+# binaries, no WASM-plugin-file cold start) and `-- s19_09` scopes to the
+# tests the RED/GREEN narrative below actually documents.
 #
 # RED today: T-001/T-002/T-003 (invoke.rs production-linker) fail at runtime
 # because read_prefix is absent from setup_host_on_store_data (D19 unimplemented);
@@ -447,13 +478,13 @@ _scan_bare_literals() {
 # plugin.completed (D22 unimplemented).  T-009/T-010 are now compile-safe
 # bats grep-gates and no longer cause compile errors here.
 #
-# GREEN after D19+D20+D21+D22: T-001..T-003 pass (read_prefix wired), T-013
-# passes (timestamp field present), all existing tests still pass; exits 0.
+# GREEN after D19+D20+D21+D22: T-001..T-003 (+T-002b/T-015) pass (read_prefix
+# wired), T-013 passes (timestamp field present); exits 0.
 #
 # Bidirectional: RED pre-fix (runtime failures in T-001/T-002/T-003/T-013);
-# GREEN post-fix (entire factory-dispatcher test suite passes).
+# GREEN post-fix (the D19/D22 unit test set above passes).
 # ---------------------------------------------------------------------------
-@test "T-012 AC-008 regression: cargo test -p factory-dispatcher passes after D21 sweep" {
+@test "T-012 AC-008 regression: cargo test -p factory-dispatcher --lib -- s19_09 passes after D21 sweep" {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
 
   # Select platform-compatible timeout command.
@@ -468,15 +499,53 @@ _scan_bare_literals() {
   local exit_code=0
   cd "$REPO_ROOT"
   # shellcheck disable=SC2086
-  output=$(${timeout_cmd} cargo test -p factory-dispatcher --all-targets 2>&1) \
+  output=$(${timeout_cmd} cargo test -p factory-dispatcher --lib -- s19_09 2>&1) \
     || exit_code=$?
 
   if [ "$exit_code" -ne 0 ]; then
-    echo "FAIL: cargo test -p factory-dispatcher exited $exit_code"
+    echo "FAIL: cargo test -p factory-dispatcher --lib -- s19_09 exited $exit_code"
     echo "--- output (last 40 lines) ---"
     echo "$output" | tail -40
     echo "---"
     echo "T-012: existing test assertions on event type strings must pass after D21 sweep."
+    false
+  fi
+
+  # Sanity gate: the name filter must actually select the six documented
+  # tests (not zero tests via a silently-broken filter, and not fewer than
+  # expected via a partial name collision). "running N tests" is libtest's
+  # own summary line.
+  if ! echo "$output" | grep -qE "running 6 tests?"; then
+    echo "FAIL: expected the 's19_09' filter to select exactly 6 unit tests; got:"
+    echo "$output" | grep -E "running [0-9]+ tests?" || echo "(no 'running N tests' line found)"
+    echo "T-012: filter scope drifted — update either the filter or this count."
+    false
+  fi
+
+  # Identity gate: a count-only check ("running 6 tests") would still pass
+  # if a filter typo swapped in six DIFFERENT tests that happen to also
+  # match "s19_09" (e.g. a future rename collision). Assert each of the six
+  # documented test names individually appears in the output, not just the
+  # aggregate count.
+  local expected_tests=(
+    "t001_s19_09_read_prefix_instantiates_without_link_error_via_production_linker"
+    "t002_s19_09_read_prefix_round_trip_bytes_correct_and_out_ptr_nonzero_via_production_path"
+    "t002b_s19_09_read_prefix_head_c_bound_clamps_out_len_to_max_bytes"
+    "t003_s19_09_read_prefix_capability_absent_returns_capability_denied_via_production_path"
+    "t015_s19_09_read_prefix_empty_file_returns_ok_with_zero_ptr_len_no_grow"
+    "test_s19_09_t013_emit_plugin_completed_async_has_timestamp_field"
+  )
+  local missing_tests=()
+  for t in "${expected_tests[@]}"; do
+    echo "$output" | grep -qF "$t" || missing_tests+=("$t")
+  done
+  if [ "${#missing_tests[@]}" -gt 0 ]; then
+    echo "FAIL: the 's19_09' filter matched 6 tests by count, but by NAME the"
+    echo "following documented test(s) are missing from the output (a wrong-test"
+    echo "filter-typo scenario, not just a wrong-count scenario):"
+    printf '  missing: %s\n' "${missing_tests[@]}"
+    echo "--- actual test names in output ---"
+    echo "$output" | grep -E "^test .* \.\.\. (ok|FAILED)" || true
     false
   fi
 }

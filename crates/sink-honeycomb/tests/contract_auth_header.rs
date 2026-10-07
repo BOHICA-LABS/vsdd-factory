@@ -77,7 +77,7 @@ fn test_BC_3_06_005_auth_header_value_matches_configured_api_key() {
     sink.flush().expect("flush");
     sink.shutdown();
 
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 #[test]

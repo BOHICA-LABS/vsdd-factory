@@ -11,7 +11,7 @@
 //!
 //! Oracle:
 //! - Mock HTTP server receives exactly 1 POST request
-//! - `DD-API-KEY` header is present and non-empty (verified via httpmock 0.7 matcher)
+//! - `DD-API-KEY` header is present and non-empty (verified via httpmock 0.8 matcher)
 //! - Request body parses as JSON containing the submitted event
 //!
 //! Note: Datadog payload schema is uncontracted-by-BC in v1.0. AC-13 verifies
@@ -67,7 +67,7 @@ fn test_BC_v1_1_datadog_sink_posts_with_dd_api_key_header() {
 
     // Oracle: mock with DD-API-KEY matcher received exactly 1 hit.
     // If DatadogSink did NOT send the header, the mock would have 0 hits.
-    api_key_mock.assert_hits(1);
+    api_key_mock.assert_calls(1);
 }
 
 /// v1.1 BC candidate: datadog-sink-payload-format — multiple events in one batch.
@@ -110,9 +110,9 @@ fn test_BC_v1_1_datadog_sink_batches_multiple_events_with_auth_header() {
     // Oracle: at least 1 POST with DD-API-KEY header received.
     // (5 events may be batched into 1 or more requests depending on implementation.)
     assert!(
-        api_key_mock.hits() >= 1,
+        api_key_mock.calls() >= 1,
         "AC-13: DatadogSink must send at least 1 POST with DD-API-KEY header; got {} hits",
-        api_key_mock.hits()
+        api_key_mock.calls()
     );
 }
 
@@ -154,9 +154,9 @@ fn test_BC_v1_1_datadog_sink_posts_valid_json_body() {
 
     // Oracle: at least 1 POST was made to the endpoint.
     assert!(
-        any_post_mock.hits() >= 1,
+        any_post_mock.calls() >= 1,
         "AC-13: DatadogSink must POST at least once to the configured endpoint; got {} hits",
-        any_post_mock.hits()
+        any_post_mock.calls()
     );
 }
 
@@ -209,7 +209,7 @@ fn test_BC_v1_1_datadog_sink_reachable_through_router_submit() {
 
     // Oracle: mock with DD-API-KEY constraint got at least 1 hit.
     assert!(
-        api_key_mock.hits() >= 1,
+        api_key_mock.calls() >= 1,
         "AC-13 Router path: DatadogSink must POST with DD-API-KEY via Router::submit()"
     );
 }

@@ -10,25 +10,21 @@
     unused_imports,
     unused_variables
 )]
-//! Red Gate integration tests for precompact-flush (S-18.04a T-2).
+//! Integration tests for precompact-flush (S-18.04a T-2).
 //!
 //! All tests in this file correspond to rows in the Red Gate Test Table in
-//! `S-18.04a-precompact-flush-sh-core.md`. All must FAIL against stubs
-//! (todo!() bodies); they will pass only after the implementer completes T-5..T-9.
+//! `S-18.04a-precompact-flush-sh-core.md`. All tests pass against the
+//! implemented precompact-flush plugin (S-18.04a T-5..T-9 complete).
 //!
 //! # Test strategy
 //!
 //! Pure-logic functions in `precompact_flush` are tested directly (no WASM
 //! runtime needed). These tests import and call the pure functions exported
-//! from `precompact_flush::` (lib.rs); they fail because all pure functions
-//! contain `todo!()`.
+//! from `precompact_flush::` (lib.rs).
 //!
 //! Effectful `run_plugin` tests use `run_plugin_with_mock` — an injectable
-//! variant that the implementer must add to lib.rs (see MockHostContext below).
-//! These tests define the expected injectable API surface the implementer must
-//! create. All tests fail now because `run_plugin_with_mock` does not yet exist
-//! (compile error on missing symbol is the Red Gate) OR because `run_plugin`
-//! still contains `todo!()`.
+//! variant of `run_plugin` that accepts mock closures for host::read_file,
+//! host::write_file, and host::exec_subprocess (defined in lib.rs).
 //!
 //! # BC / ADR traces
 //!
@@ -739,9 +735,15 @@ fn make_state_md(cycle: &str, step: &str) -> String {
 }
 
 // Build a mock STATE.md with a held lock.
+//
+// expires_at is set to 2099 (far future) so the lock is NOT expired when
+// run under `renew_lock_if_holder` (S-17.07 / ADR-046 Decision 3). Prior
+// to S-17.07 the fixture used 2020 (expired), which happened to work with
+// the identity-blind predecessor but is incorrect under the identity-gated
+// gate that enforces the AlreadyExpired skip.
 fn make_state_md_with_lock(cycle: &str, step: &str) -> String {
     format!(
-        "---\ncurrent_cycle: {cycle}\ncurrent_step: {step}\nfactory_lock:\n  holder: agent@example.com\n  locked_at: 2026-06-01T10:00:00Z\n  expires_at: 2020-01-01T00:00:00Z\n---\n\n# STATE.md with lock\n"
+        "---\ncurrent_cycle: {cycle}\ncurrent_step: {step}\nfactory_lock:\n  holder: agent@example.com\n  locked_at: 2026-06-01T10:00:00Z\n  expires_at: 2099-01-01T00:00:00Z\n---\n\n# STATE.md with lock\n"
     )
 }
 
@@ -1285,7 +1287,7 @@ fn test_diff_cached_error_is_fail_open_not_spurious_commit() {
         payload,
         |path| {
             if path == ".factory/STATE.md" {
-                // NoOp lock state (no factory_lock block → renew_lock returns NoOp)
+                // NoOp lock state (no factory_lock block → renew_lock_if_holder returns NoOp)
                 Ok(make_state_md("v1.0-test-cycle", "stub-phase/S-18.04a"))
             } else {
                 Err("CAPABILITY_DENIED: file not found".to_string())
@@ -1439,6 +1441,13 @@ fn test_lock_held_renews_before_commit() {
                 if args.contains(&"-C") && args.contains(&"push") {
                     return Ok((0, String::new(), String::new()));
                 }
+                // S-17.07 / ADR-046 Decision 3: step4_renewal_gate calls
+                // `git config user.email` to resolve the committer identity
+                // for holder-check. Return the same email used in the fixture
+                // (make_state_md_with_lock sets holder: agent@example.com).
+                if args == ["config", "user.email"] {
+                    return Ok((0, "agent@example.com\n".to_string(), String::new()));
+                }
                 Ok((0, String::new(), String::new()))
             }
         },
@@ -1470,11 +1479,11 @@ fn test_lock_held_renews_before_commit() {
 ///
 /// Traces to: AC-013 / BC-7.07.001 PC3 (lock renewal failure = advisory; flush proceeds; NOT exit 2)
 ///
-/// When renew_lock() returns Err(Malformed), the plugin must write an advisory to stderr
-/// and proceed with flush commit — NOT exit 2.
+/// When renew_lock_if_holder() returns Err(Malformed), the plugin must write an advisory
+/// to the log_warn channel and proceed with flush commit — NOT exit 2.
 ///
 /// This test traverses the FULL flush path: discovery → guard pass → STATE.md read
-/// with malformed lock → renew_lock Err(Malformed) advisory → add → diff non-empty →
+/// with malformed lock → renew_lock_if_holder Err(Malformed) advisory → add → diff non-empty →
 /// commit → rev-parse → log write → push → exit 0.  Asserts both the final
 /// HookResult::Continue AND that git commit was actually invoked (proving the flush
 /// proceeded past the advisory rather than short-circuiting).
@@ -1550,7 +1559,7 @@ fn test_lock_renewal_failure_is_advisory_not_exit_2() {
     // proceeded past the Err(Malformed) advisory rather than exiting early.
     assert!(
         *commit_called.borrow(),
-        "AC-013: git commit must have been called when renew_lock() returns Err(Malformed); \
+        "AC-013: git commit must have been called when renew_lock_if_holder() returns Err(Malformed); \
         the advisory must not cause the flush to exit early — flush must proceed to commit"
     );
 
@@ -1566,13 +1575,13 @@ fn test_lock_renewal_failure_is_advisory_not_exit_2() {
 /// Red Gate: test_caller_downgrades_renew_err_to_advisory
 ///
 /// Traces to: AC-013 / ADR-028 §Decision 2 F-NW-004
-/// (hook caller downgrades renew_lock() Err to advisory warning; proceeds to commit; does NOT exit 2)
+/// (hook caller downgrades renew_lock_if_holder() Err to advisory warning; proceeds to commit; does NOT exit 2)
 ///
 /// This is a behavioral twin of test_lock_renewal_failure_is_advisory_not_exit_2
 /// focused on the "caller downgrade" language from the BC.
 ///
 /// This test traverses the FULL flush path: discovery → guard pass → STATE.md read
-/// with malformed lock → renew_lock Err(Malformed) downgraded to advisory → add →
+/// with malformed lock → renew_lock_if_holder Err(Malformed) downgraded to advisory → add →
 /// diff non-empty → commit → rev-parse → log write → push → exit 0.  Asserts both
 /// the final HookResult::Continue AND that git push was actually invoked (proving the
 /// flush proceeded end-to-end past the downgraded advisory).
@@ -1648,7 +1657,7 @@ fn test_caller_downgrades_renew_err_to_advisory() {
     // ran end-to-end past the Err(Malformed) downgrade (not just exiting at advisory).
     assert!(
         *push_called.borrow(),
-        "F-NW-004: git push must have been called when renew_lock() Err is downgraded to advisory; \
+        "F-NW-004: git push must have been called when renew_lock_if_holder() Err is downgraded to advisory; \
         the downgrade must not abort the flush — full flush path must execute through to push"
     );
 
@@ -1656,7 +1665,7 @@ fn test_caller_downgrades_renew_err_to_advisory() {
     assert_eq!(
         result,
         HookResult::Continue,
-        "F-NW-004: renew_lock() Err must be downgraded to advisory; \
+        "F-NW-004: renew_lock_if_holder() Err must be downgraded to advisory; \
         flush must proceed; expected Continue, got: {result:?}"
     );
 }

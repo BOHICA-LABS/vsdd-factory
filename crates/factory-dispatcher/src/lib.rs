@@ -22,6 +22,7 @@ pub mod aggregator;
 pub mod engine;
 pub mod executor;
 pub mod host;
+pub mod indeterminate_marker;
 pub mod internal_log;
 pub mod invoke;
 pub mod log_dir;
@@ -36,6 +37,7 @@ pub mod resolver_classify_trap;
 pub mod resolver_loader;
 pub use resolver_loader::{ResolverLoadError, ResolverLoader};
 pub mod routing;
+pub mod shard_manager;
 pub mod sinks;
 pub mod vsdd_sink;
 pub use vsdd_sink::flush_sink_file;
@@ -43,9 +45,13 @@ pub use vsdd_sink::flush_sink_file;
 pub use aggregator::{PluginResult as AggregatorPluginResult, aggregate_exit_code};
 pub use engine::{EPOCH_TICK_MS, EngineError, EpochTicker, build_engine};
 pub use executor::{
-    ExecutorInputs, PluginOutcome, TierExecutionSummary, execute_tiers, spawn_async_plugin,
+    DispatchOutcome, ExecutorInputs, IndeterminateCause, PluginOutcome, TierExecutionSummary,
+    classify_outcome, execute_tiers, spawn_async_plugin,
 };
 pub use host::{HostCallError, HostContext, setup_linker};
+pub use indeterminate_marker::{
+    MarkerFields, delete_marker_if_pass, should_write_marker, write_indeterminate_marker,
+};
 pub use internal_log::{
     DEFAULT_RETENTION_DAYS, DISPATCHER_SHUTTING_DOWN, DISPATCHER_STARTED,
     INTERNAL_CAPABILITY_DENIED, INTERNAL_DISPATCHER_ERROR, INTERNAL_EVENT_FILTERED,
@@ -55,17 +61,25 @@ pub use internal_log::{
     PLUGIN_LOADED, PLUGIN_TIMEOUT,
 };
 pub use invoke::{
-    EventType, InvokeError, InvokeLimits, PluginResult, StoreData, TimeoutCause,
+    DEFAULT_FUEL_CAP, EventType, InvokeError, InvokeLimits, PluginResult, StoreData, TimeoutCause,
     dispatch_postcompact, dispatch_precompact, invoke_plugin,
 };
 pub use partition::{PluginPartition, partition_plugins};
 pub use payload::{HookPayload, PayloadError};
 pub use plugin_loader::{PluginCache, PluginLoadError};
 pub use registry::{
-    Capabilities, ExecSubprocessCaps, OnError, ReadFileCaps, Registry, RegistryDefaults,
-    RegistryEntry, RegistryError,
+    Capabilities, ExecSubprocessCaps, FailurePolicy, OnError, ReadFileCaps, Registry,
+    RegistryDefaults, RegistryEntry, RegistryError,
 };
 pub use routing::{PluginResultStub, group_by_priority, match_plugins};
+pub use shard_manager::{
+    CapFormulaInputs, EditDelta, ShardConfigError, ShardEntry, ShardRegistry, ShardShape, ToolKind,
+    compute_shard_cap_bytes, current_shard_bytes_flat, effective_shard_cap_bytes,
+    find_matching_entry, item_count_trigger_fires, net_delta_bytes_for_edit,
+    net_delta_bytes_for_multi_edit, projected_size_edit, projected_size_write,
+    read_changelog_item_count, resolved_low_water_mark, shard_cap_gate_check, size_trigger_fires,
+    validate_entry, validate_low_water_mark,
+};
 
 /// ABI version the dispatcher speaks. Kept in lock-step with
 /// `vsdd_hook_sdk::HOST_ABI_VERSION`; diverging is a breaking change.

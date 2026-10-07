@@ -1,0 +1,47 @@
+$ CI_REQUIRE_ARTIFACTS=1 bats plugins/vsdd-factory/tests/validate-factory-path-staging.bats
+# Captured 2026-08-13T01:18:56Z on branch feature/S-21.09 @ 12d0fe98
+# Purpose: AC-002 positive claim -- with both required artifacts present
+# (target/release/factory-dispatcher + hook-plugins/validate-factory-path-staging.wasm)
+# and CI_REQUIRE_ARTIFACTS=1 set, zero tests skip on either
+# 'validate-factory-path-staging.wasm not present' or 'factory-dispatcher binary not built'.
+
+1..36
+ok 1 T-001 S-21.01 AC-001: guard blocks git add .factory/STATE.md on develop branch
+ok 2 T-001b S-21.01 AC-001: guard blocks git add .factory/<path> on main branch
+ok 3 T-001c S-21.01 AC-001: guard blocks git add -A (conservative) on develop branch
+ok 4 T-002 S-21.01 AC-002: guard passes git add .factory/STATE.md on factory-artifacts
+ok 5 T-003 S-21.01 AC-003: guard passes git commit on develop (non-git-add PC4)
+ok 6 T-003b S-21.01 AC-003: guard passes git merge on develop (Layer-1 scope narrow)
+ok 7 T-004 S-21.01 AC-004: guard passes git add src/main.rs on develop (non-factory PC2)
+ok 8 T-005 S-21.01 AC-005: guard fails open when run outside a git repo
+ok 9 T-006 S-21.01 AC-001: production registry has validate-factory-path-staging entry
+ok 10 T-006b S-21.01 AC-001: registry entry has tool=^Bash$ (anchored)
+ok 11 T-006c S-21.01 AC-001: registry entry has priority=140 and on_error=continue
+ok 12 T-006d S-21.01 AC-001: registry entry has exec_subprocess.binary_allow=[git]
+ok 13 T-007 S-21.01 AC-007: per-story-delivery.md has Main-Checkout Sync Protocol section
+ok 14 T-008 S-21.01 AC-007(a): per-story-delivery.md mandates git diff --name-only pre-check
+ok 15 T-009 S-21.01 AC-007(b): per-story-delivery.md specifies FactoryPathDeletionInMergeDiff halt
+ok 16 T-010 S-21.01 AC-007(d): per-story-delivery.md covers git pull or git merge
+ok 17 T-011 S-21.01 AC-008: per-story-delivery.md documents pass on clean diff (section-scoped)
+ok 18 T-012 S-21.01 AC-009: per-story-delivery.md documents fail-open with non-zero exit (section-scoped)
+ok 19 T-013 S-21.01 AC-009 behavioral: fail-open subsection documents warning AND proceed on non-zero exit
+ok 20 T-014 S-21.01 F-P1-001 AC-001: guard blocks git add .factory (bare, no slash) on develop
+ok 21 T-015 S-21.01 F-P1-001 AC-001: guard blocks git add .factory on main branch
+ok 22 T-016 S-21.01 F-P1-001 AC-001: guard blocks git add .factory on feature/* branch
+ok 23 T-017 S-21.01 F-P1-001 AC-001: guard blocks git add .factory on release/* branch
+ok 24 T-018 S-21.01 F-P1-001 AC-001: guard blocks git add .factory on maintenance/* branch
+ok 25 T-019 S-21.01 F-P1-001 AC-002: guard passes git add .factory on factory-artifacts (PC3)
+ok 26 T-020 S-21.01 F-P1-001 AC-001: guard blocks git add ./ (CWD-relative explicit slash) on develop
+ok 27 T-021 S-21.01 F-P1-001 AC-001: guard blocks git add :/ (pathspec-magic root) on develop
+ok 28 T-022 S-21.01 F-P1-001 AC-001: guard blocks git add ':/.factory' (pathspec-magic .factory) on develop
+ok 29 T-023 S-21.01 F-P1-002 AC-001: guard blocks git stage .factory/STATE.md on develop
+ok 30 T-024 S-21.01 F-P1-002 AC-001: guard blocks git stage .factory/STATE.md on main
+ok 31 T-025 S-21.01 F-P1-002 AC-001: guard blocks git stage on feature/* branch
+ok 32 T-026 S-21.01 F-P1-002 AC-001: guard blocks git stage on release/* branch
+ok 33 T-027 S-21.01 F-P1-002 AC-001: guard blocks git stage on maintenance/* branch
+ok 34 T-028 S-21.01 F-P2-001 AC-001: guard blocks chained '&&' git add .factory on develop
+ok 35 T-029 S-21.01 F-P2-002 AC-001: guard blocks git -C . add .factory on develop
+ok 36 T-030 S-21.01 F-P2-003 AC-001: guard blocks git add .Factory (capitalized) on develop
+
+# Skip-line grep (expect: no output below this line) ---------------------
+(zero skip lines found)

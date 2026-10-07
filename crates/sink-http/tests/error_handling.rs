@@ -53,7 +53,7 @@ async fn test_VP_012_5xx_retries_then_records_failure() {
     let _ = sink.flush();
 
     // Retry behavior: at least 2 attempts before giving up.
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert!(
         hits >= 2,
         "5xx must trigger at least 1 retry (>=2 total attempts), got {hits}"
@@ -95,7 +95,7 @@ async fn test_VP_012_4xx_drops_immediately_no_retry() {
     let _ = sink.flush();
 
     // Exactly 1 attempt — 4xx is a client error, no retry is correct behavior.
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert_eq!(
         hits, 1,
         "4xx must result in exactly 1 attempt (no retry), got {hits}"

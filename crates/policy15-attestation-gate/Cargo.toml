@@ -1,0 +1,28 @@
+[package]
+name = "policy15-attestation-gate"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "POLICY 15 ATTESTATION-LOCATION GATE — Rust implementation of the ADR-040 §Decisions 8+9 four-outcome gate (FAIL / PASS-N-activations / PASS-zero-activations / EMPTY-or-UNREACHABLE). Replaces the bash-in-markdown approach; controls are #[test] functions, making defect class 5 (four-outcome/two-exit-code confusion) structurally impossible."
+publish = false
+
+[[bin]]
+name = "policy15-attestation-gate"
+path = "src/main.rs"
+
+[lib]
+name = "policy15_attestation_gate"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror.workspace = true
+clap = { workspace = true, features = ["env"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -22,10 +22,13 @@
 //!     fail-open with DURABILITY DEGRADED if mismatch. Runs BEFORE any I/O.
 //! 3.  Read STATE.md via host `read_file`; exit 0 + warn if unreadable (AC-002).
 //!     The AC-002 fail-open occurs AFTER steps 1–2.
-//! 4.  Check `factory_lock:` block via `renew_lock(state_md_content)` (AC-003, AC-018):
-//!     - `Ok(NoOp)` → skip step 5 (no write_file call)
-//!     - `Ok(Renewed(content))` → proceed to step 5
-//!     - `Err(Malformed)` → advisory warn to stderr; skip step 5; proceed to step 6
+//! 4.  Identity-gated renewal via `step4_renewal_gate` / `renew_lock_if_holder` (AC-003, AC-018,
+//!     S-17.07 / ADR-046 Decision 3):
+//!     - `Renewed(content)` → write STATE.md (step 5) and proceed with new content
+//!     - `AlreadyExpired` / `NotHolder` / absent block → skip step 5; flush with original
+//!     - `IdentityResolutionFailed` → emit `factory.lock.renewal_indeterminate` event +
+//!       `host::log_warn`; flush with original content
+//!     - `Err(Malformed)` → MANDATORY `host::log_warn` (SHALL); skip step 5; proceed to step 6
 //! 5.  If `Renewed`: call `host::write_file(".factory/STATE.md", content)` (AC-018).
 //! 6.  `git -C <wt> add -A` — stage ALL changes including new untracked files (AC-004).
 //!     After staging, check `git -C <wt> diff --cached`: if NoOp AND diff empty →
@@ -44,7 +47,10 @@
 #![cfg_attr(not(kani), allow(unexpected_cfgs))]
 
 use chrono::Utc;
-use factory_lock::{LockError, RenewOutcome, renew_lock};
+use factory_lock::{
+    IdentityResolution, LockError, RenewOutcome, SkipReason, classify_identity_resolution,
+    renew_lock_if_holder,
+};
 use vsdd_hook_sdk::{HookPayload, HookResult};
 
 /// Precompact-flush log path (relative to `.factory/` host write_file root).
@@ -54,9 +60,6 @@ pub const LOG_PATH: &str = ".factory/hooks/precompact-flush-log";
 
 /// STATE.md path (relative to `.factory/` host write_file root).
 pub const STATE_MD_PATH: &str = ".factory/STATE.md";
-
-/// Lock renewal TTL in seconds (expires_at = now + 2700s per ADR-028 §Decision 9).
-pub const LOCK_RENEWAL_TTL_SECS: u64 = 2700;
 
 /// Commit message prefix. MUST begin with exactly `PreCompact flush ` (capital P,
 /// capital C, single space between words, trailing space) per BC-5.41.003 INV3 and
@@ -260,10 +263,152 @@ pub fn decide_append_failure_action(sha_b: &str, current_head: &str) -> AppendFa
 /// Returns `true` if the `git diff --cached` output is empty (no staged changes),
 /// `false` otherwise.
 ///
-/// When `true` AND `renew_lock()` returned `NoOp`, the plugin MUST exit 0 silently
-/// without creating an empty commit (BC-7.07.001 INV5).
+/// When `true` AND `step4_renewal_gate` returned the original un-renewed content, the
+/// plugin MUST exit 0 silently without creating an empty commit (BC-7.07.001 INV5).
 pub fn is_diff_empty(git_diff_cached_output: &str) -> bool {
     git_diff_cached_output.is_empty()
+}
+
+/// Step-4 identity-gate: resolve caller identity, call
+/// [`factory_lock::renew_lock_if_holder`], and map the result to the 6
+/// BC-7.07.001 outcomes, plus a defensive exhaustiveness wildcard
+/// (structurally unreachable per BC-5.40.001) — returning the STATE.md
+/// content to use for the flush.
+///
+/// Pure-core (callback-injectable) per S-17.07 Purity Classification. All
+/// effectful operations are injected via closures, enabling all 5 Rust unit
+/// tests (AC-001 through AC-005) to run without a WASM runtime or a real
+/// subprocess.
+///
+/// # Parameters
+///
+/// - `state_md_content` — full STATE.md content (pure content-in; no I/O).
+/// - `resolve_identity` — lazy identity resolver (`FnOnce`). Called AT MOST
+///   ONCE: only when the lock is present, valid, and not yet expired
+///   (AC-002 lazy-call invariant). In production: wraps
+///   `host::exec_subprocess("git", &["config", "user.email"])` through
+///   `factory_lock::classify_identity_resolution`. In tests: a mock closure
+///   with an invocation counter.
+/// - `write_state_md` — injectable write for `.factory/STATE.md`. Called ONLY
+///   on `Ok((RenewOutcome::Renewed(new_content), None))` to persist the
+///   updated `expires_at`. NOT called on any other outcome.
+/// - `log_warn_fn` — injectable `host::log_warn`. **MANDATORY** (SHALL, not
+///   advisory-optional) on `Err(LockError::Malformed(msg))` per BC-7.07.001
+///   PC3 case 1 / EC-004 / Invariant 3 step 3. Also called on
+///   `SkipReason::IdentityResolutionFailed`. In tests: a counter closure.
+/// - `emit_event_fn` — injectable `host::emit_event`. Called ONLY on
+///   `SkipReason::IdentityResolutionFailed` with event type
+///   `factory.lock.renewal_indeterminate` and exactly 5 payload fields:
+///   `plugin`, `holder`, `locked_at`, `expires_at`, `resolution_error`
+///   (ADR-046 Decision 4 / AC-004). In tests: a counter closure.
+/// - `now_fn` — injectable clock (`FnOnce() -> DateTime<Utc>`); passed
+///   through to `factory_lock::renew_lock_if_holder`. Use `|| Utc::now()`
+///   in production.
+///
+/// # Returns
+///
+/// The STATE.md content to flush:
+/// - `Ok((Renewed(new_content), None))` → write new_content, return
+///   new_content (`expires_at` advanced by `TTL_SECONDS`).
+/// - All other outcomes → return `state_md_content` unchanged (flush
+///   proceeds unblocked per BC-7.07.001 Invariant 3 /
+///   flush-proceeds-unblocked invariant).
+///
+/// # Self-check (BC-5.38.005 invariant 1)
+///
+/// "If I include this real implementation, will the test for this function
+/// pass trivially without any implementer work?" YES — the 6-branch decision
+/// tree with conditional I/O callbacks makes this non-trivial.
+pub fn step4_renewal_gate<RI, WS, LW, EE, NF>(
+    state_md_content: &str,
+    resolve_identity: RI,
+    write_state_md: WS,
+    mut log_warn_fn: LW,
+    mut emit_event_fn: EE,
+    now_fn: NF,
+) -> String
+where
+    RI: FnOnce() -> IdentityResolution,
+    WS: FnOnce(&str) -> Result<(), String>,
+    LW: FnMut(&str),
+    EE: FnMut(&str, &[(&str, &str)]),
+    NF: FnOnce() -> chrono::DateTime<Utc>,
+{
+    match renew_lock_if_holder(state_md_content, resolve_identity, now_fn) {
+        // Case 5 (Success): identity matched and lock unexpired → write renewed content.
+        Ok((RenewOutcome::Renewed(new_content), None)) => {
+            if let Err(e) = write_state_md(&new_content) {
+                // Write failure is advisory — flush proceeds with un-renewed content.
+                // Route through log_warn_fn (injectable advisory channel) so the failure
+                // is visible to the dispatcher telemetry pipeline. No eprintln! in
+                // production paths per CLAUDE.md conventions.
+                log_warn_fn(&format!(
+                    "precompact-flush: advisory: STATE.md renewal write failed: {}; \
+                    proceeding with flush commit using un-renewed content.",
+                    e
+                ));
+                state_md_content.to_string()
+            } else {
+                new_content
+            }
+        }
+
+        // Case 4 (IdentityResolutionFailed): emit event + MANDATORY log_warn;
+        // flush proceeds unblocked with original content (ADR-046 Decision 4 / AC-004 /
+        // BC-7.07.001 Invariant 3b).
+        Ok((
+            RenewOutcome::NoOp,
+            Some(SkipReason::IdentityResolutionFailed {
+                reason,
+                holder,
+                locked_at,
+                expires_at,
+            }),
+        )) => {
+            emit_event_fn(
+                "factory.lock.renewal_indeterminate",
+                &[
+                    ("plugin", "precompact-flush"),
+                    ("holder", &holder),
+                    ("locked_at", &locked_at),
+                    ("expires_at", &expires_at),
+                    ("resolution_error", &reason),
+                ],
+            );
+            log_warn_fn(&format!(
+                "precompact-flush: factory_lock renewal indeterminate: \
+                identity resolution failed ({}); holder={}; lock expires {}; \
+                flush proceeds with un-renewed content.",
+                reason, holder, expires_at
+            ));
+            state_md_content.to_string()
+        }
+
+        // Case 2 (AlreadyExpired): no renewal, flush proceeds.
+        Ok((RenewOutcome::NoOp, Some(SkipReason::AlreadyExpired))) => state_md_content.to_string(),
+
+        // Case 3 (NotHolder): no renewal, flush proceeds.
+        Ok((RenewOutcome::NoOp, Some(SkipReason::NotHolder))) => state_md_content.to_string(),
+
+        // Case 0 (absent/null block): no renewal, no event, flush proceeds.
+        Ok((RenewOutcome::NoOp, None)) => state_md_content.to_string(),
+
+        // Case 1 (Malformed): MANDATORY log_warn (SHALL) per BC-7.07.001 PC3 case 1 /
+        // EC-004 / Invariant 3 step 3. resolve_identity is NOT called. expires_at
+        // byte-identical. Flush proceeds unblocked.
+        Err(LockError::Malformed(msg)) => {
+            log_warn_fn(&format!(
+                "precompact-flush: advisory: factory_lock block malformed: {}; \
+                proceeding with flush commit.",
+                msg
+            ));
+            state_md_content.to_string()
+        }
+
+        // Structurally impossible: Renewed always pairs with None per BC-5.40.001.
+        // Defensive wildcard required for Rust exhaustiveness.
+        Ok((RenewOutcome::Renewed(_), Some(_))) => state_md_content.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +466,10 @@ pub fn run_plugin(payload: HookPayload) -> HookResult {
                 .map_err(|e| format!("exec_subprocess error: {e:?}"))
         },
         Some(cwd),
+        // Step-4 log_warn: use host::log_warn for structured dispatcher telemetry.
+        host::log_warn,
+        // Step-4 emit_event: use host::emit_event for factory.lock.renewal_indeterminate.
+        host::emit_event,
     )
 }
 
@@ -365,6 +514,10 @@ where
         write_file,
         exec_subprocess,
         Some(mock_cwd),
+        // Step-4 log_warn: eprintln in mock context (no WASM host available).
+        |msg| eprintln!("precompact-flush: log_warn: {msg}"),
+        // Step-4 emit_event: no-op in mock context.
+        |_event_type, _fields| {},
     )
 }
 
@@ -372,7 +525,11 @@ where
 ///
 /// `cwd` is the project directory (CLAUDE_PROJECT_DIR) used for the
 /// canonicalize assertion in AC-017. `None` skips the check.
-fn run_plugin_with_mock_and_cwd<RF, WF, ES>(
+///
+/// `log_warn_fn` and `emit_event_fn` are injectable I/O callbacks for the
+/// Step-4 identity-gate (S-17.07). In production: `host::log_warn` and
+/// `host::emit_event`. In mock context: eprintln-based / no-op defaults.
+fn run_plugin_with_mock_and_cwd<RF, WF, ES, LW, EE>(
     // PreCompact fires unconditionally on every compaction event — no payload dispatch
     // is needed because there is no tool_name or input_content to route on.
     _payload: HookPayload,
@@ -380,11 +537,15 @@ fn run_plugin_with_mock_and_cwd<RF, WF, ES>(
     write_file: WF,
     exec_subprocess: ES,
     cwd: Option<String>,
+    mut log_warn_fn: LW,
+    mut emit_event_fn: EE,
 ) -> HookResult
 where
     RF: Fn(&str) -> Result<String, String>,
     WF: Fn(&str, &str) -> Result<(), String>,
     ES: Fn(&str, &[&str]) -> Result<(i32, String, String), String>,
+    LW: FnMut(&str),
+    EE: FnMut(&str, &[(&str, &str)]),
 {
     // -------------------------------------------------------------------------
     // Step 1: Discover factory-artifacts worktree path via git worktree list --porcelain.
@@ -513,39 +674,31 @@ where
     };
 
     // -------------------------------------------------------------------------
-    // Step 4: Check factory_lock: block via renew_lock(). (AC-003, AC-018)
+    // Step 4: identity-gated renewal via step4_renewal_gate / renew_lock_if_holder
+    // (S-17.07 / AC-003, AC-018 / ADR-046 Decision 3).
+    //
+    // resolve_identity is lazy: called at most once, only when lock is present,
+    // valid, and not expired (AC-002 lazy-call invariant).
     // -------------------------------------------------------------------------
-    let renew_result = renew_lock(&state_md_content);
+    let resolve_identity = || {
+        classify_identity_resolution(
+            exec_subprocess("git", &["config", "user.email"])
+                .map(|(exit, stdout, _stderr)| (exit, stdout)),
+        )
+    };
+    let write_state_md_fn = |new_content: &str| write_file(STATE_MD_PATH, new_content);
+
+    let flush_content = step4_renewal_gate(
+        &state_md_content,
+        resolve_identity,
+        write_state_md_fn,
+        &mut log_warn_fn,
+        &mut emit_event_fn,
+        Utc::now,
+    );
 
     // Track whether renewal produced new content (for INV5 decision in step 6).
-    let mut renewed_content: Option<String> = None;
-
-    match renew_result {
-        Ok(RenewOutcome::NoOp) => {
-            // Lock absent or byte-identical — skip write_file for STATE.md.
-        }
-        Ok(RenewOutcome::Renewed(new_content)) => {
-            // Step 5: write renewed STATE.md. (AC-018)
-            if let Err(e) = write_file(STATE_MD_PATH, &new_content) {
-                // Write failure is advisory per EC-004 / AC-013 — continue anyway.
-                eprintln!(
-                    "precompact-flush: advisory: STATE.md renewal write failed: {}; \
-                    proceeding with flush commit using un-renewed content.",
-                    e
-                );
-            } else {
-                renewed_content = Some(new_content);
-            }
-        }
-        Err(LockError::Malformed(msg)) => {
-            // Step 4 error path: advisory warn, proceed. (AC-013 / EC-012)
-            eprintln!(
-                "precompact-flush: advisory: factory_lock block malformed: {}; \
-                proceeding with flush commit.",
-                msg
-            );
-        }
-    }
+    let was_renewed = flush_content != state_md_content;
 
     // -------------------------------------------------------------------------
     // Step 6a: git -C <wt> add -A — stage ALL changes including new untracked files.
@@ -602,7 +755,7 @@ where
         }
     };
 
-    if renewed_content.is_none() && is_diff_empty(&diff_output) {
+    if !was_renewed && is_diff_empty(&diff_output) {
         // INV5: no renewal + no staged changes → clean state → exit 0.
         return HookResult::Continue;
     }
@@ -790,5 +943,652 @@ where
             // Push succeeded → exit 0. (AC-009 / BC-7.07.001 PC5)
             HookResult::Continue
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S-17.07 unit tests — step4_renewal_gate (BC-7.07.001 PC3 / Invariants 3/3b)
+//
+// All 5 tests exercise the implemented step4_renewal_gate function (S-17.07
+// complete). Test naming follows the Red Gate Test Table in S-17.07 v1.2
+// (authoritative). Each test uses injected counter/capture closures — no WASM
+// runtime needed.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod step4_tests {
+    #![allow(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::type_complexity
+    )]
+
+    use super::step4_renewal_gate;
+    use chrono::{DateTime, Utc};
+    use factory_lock::IdentityResolution;
+    use std::sync::{Arc, Mutex};
+
+    // -----------------------------------------------------------------------
+    // Fixtures — portable STATE.md content strings (all \n; no platform-specific
+    // terminators, paths, or separators — PG-CI-2 cross-platform portability).
+    // -----------------------------------------------------------------------
+
+    /// STATE.md with expired factory_lock (expires_at 2020, now_2026 > 2020 → AlreadyExpired).
+    fn fixture_expired_lock() -> &'static str {
+        concat!(
+            "---\n",
+            "document_type: state\n",
+            "version: \"test\"\n",
+            "factory_lock:\n",
+            "  holder: \"holder@example.com\"\n",
+            "  locked_at: \"2020-01-01T10:00:00Z\"\n",
+            "  expires_at: \"2020-01-01T10:45:00Z\"\n",
+            "---\n\n# STATE\n",
+        )
+    }
+
+    /// STATE.md with valid unexpired factory_lock (expires_at 2099, now_2026 < 2099 → identity step).
+    /// holder = "holder@example.com"
+    fn fixture_valid_unexpired_lock() -> &'static str {
+        concat!(
+            "---\n",
+            "document_type: state\n",
+            "version: \"test\"\n",
+            "factory_lock:\n",
+            "  holder: \"holder@example.com\"\n",
+            "  locked_at: \"2026-01-01T10:00:00Z\"\n",
+            "  expires_at: \"2099-01-01T10:45:00Z\"\n",
+            "---\n\n# STATE\n",
+        )
+    }
+
+    /// STATE.md with malformed factory_lock (holder = "" → Err(LockError::Malformed)).
+    /// factory_lock: key IS present; block is structurally malformed.
+    fn fixture_malformed_lock() -> &'static str {
+        concat!(
+            "---\n",
+            "document_type: state\n",
+            "version: \"test\"\n",
+            "factory_lock:\n",
+            "  holder: \"\"\n",
+            "  locked_at: \"2026-01-01T10:00:00Z\"\n",
+            "  expires_at: \"2026-01-01T10:45:00Z\"\n",
+            "---\n\n# STATE\n",
+        )
+    }
+
+    /// STATE.md with NO factory_lock key (absent lock — 0th case, Ok((NoOp, None))).
+    fn fixture_no_lock() -> &'static str {
+        concat!(
+            "---\n",
+            "document_type: state\n",
+            "version: \"test\"\n",
+            "---\n\n# STATE\n",
+        )
+    }
+
+    /// Injectable clock returning 2026-08-27T12:00:00Z.
+    /// After expired fixture (2020) but before valid fixture (2099): discriminates cases.
+    /// now_2026() + 2700s = 2026-08-27T12:45:00Z (expected renewed expires_at for AC-002).
+    fn now_2026() -> DateTime<Utc> {
+        "2026-08-27T12:00:00Z"
+            .parse::<DateTime<Utc>>()
+            .expect("fixture timestamp must parse")
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-001: AlreadyExpired → NO resolve_identity call (count==0), flush returns
+    //         ORIGINAL content, no write_state_md call.
+    //
+    // Verifies: step4_renewal_gate returns original content and does NOT invoke
+    // resolve_identity or write_state_md on the AlreadyExpired path
+    // (BC-7.07.001 PC3 Case 2).
+    // -----------------------------------------------------------------------
+
+    /// test_BC_7_07_001_AC001 — AlreadyExpired path: no exec subprocess, original content returned.
+    #[test]
+    fn test_precompact_flush_step4_already_expired_no_exec_subprocess() {
+        let content = fixture_expired_lock();
+
+        let resolve_identity_calls = Arc::new(Mutex::new(0u32));
+        let ri_count = resolve_identity_calls.clone();
+
+        let write_state_md_calls = Arc::new(Mutex::new(0u32));
+        let ws_count = write_state_md_calls.clone();
+
+        let result = step4_renewal_gate(
+            content,
+            // resolve_identity: MUST NOT be called on AlreadyExpired path.
+            move || -> IdentityResolution {
+                *ri_count.lock().unwrap() += 1;
+                IdentityResolution::Resolved("holder@example.com".to_string())
+            },
+            // write_state_md: MUST NOT be called (no renewal on AlreadyExpired).
+            move |_new_content: &str| -> Result<(), String> {
+                *ws_count.lock().unwrap() += 1;
+                Ok(())
+            },
+            |_msg: &str| {},
+            |_event: &str, _fields: &[(&str, &str)]| {},
+            now_2026,
+        );
+
+        // AC-001: resolve_identity MUST NOT be called — no exec subprocess on AlreadyExpired.
+        assert_eq!(
+            *resolve_identity_calls.lock().unwrap(),
+            0,
+            "AC-001: resolve_identity must NOT be called for AlreadyExpired \
+            (no git config user.email exec subprocess)"
+        );
+        // AC-001: write_state_md MUST NOT be called (no renewal).
+        assert_eq!(
+            *write_state_md_calls.lock().unwrap(),
+            0,
+            "AC-001: write_state_md must NOT be called on AlreadyExpired path"
+        );
+        // AC-001: flush returns the original un-renewed content.
+        assert_eq!(
+            result, content,
+            "AC-001: flush content must be the original un-renewed STATE.md on AlreadyExpired"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-002: identity match → write_state_md called with RENEWED content,
+    //         expires_at advanced by TTL, flush returns renewed content.
+    //
+    // Verifies: step4_renewal_gate calls write_state_md once with expires_at
+    // advanced by TTL and returns the renewed content (BC-7.07.001 PC3 Case 5).
+    // -----------------------------------------------------------------------
+
+    /// test_BC_7_07_001_AC002 — identity match: write_state_md called, expires_at advanced.
+    #[test]
+    fn test_precompact_flush_step4_identity_match_renews_content() {
+        let content = fixture_valid_unexpired_lock();
+
+        let write_state_md_calls = Arc::new(Mutex::new(0u32));
+        let ws_count = write_state_md_calls.clone();
+        let written_content: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let wct = written_content.clone();
+
+        let result = step4_renewal_gate(
+            content,
+            // resolve_identity: identity matches holder → Renewed outcome.
+            || IdentityResolution::Resolved("holder@example.com".to_string()),
+            // write_state_md: MUST be called once with renewed content.
+            move |new_content: &str| -> Result<(), String> {
+                *ws_count.lock().unwrap() += 1;
+                *wct.lock().unwrap() = Some(new_content.to_string());
+                Ok(())
+            },
+            |_msg: &str| {},
+            |_event: &str, _fields: &[(&str, &str)]| {},
+            now_2026,
+        );
+
+        // AC-002: write_state_md MUST be called exactly once with renewed content.
+        assert_eq!(
+            *write_state_md_calls.lock().unwrap(),
+            1,
+            "AC-002: write_state_md must be called exactly once on identity match"
+        );
+        // AC-002: written content must contain expires_at advanced by TTL.
+        // now_2026() = 2026-08-27T12:00:00Z; + 2700s = 2026-08-27T12:45:00Z.
+        {
+            let guard = written_content.lock().unwrap();
+            let written_str = guard
+                .as_ref()
+                .expect("AC-002: write_state_md must have been called with renewed content");
+            assert!(
+                written_str.contains("2026-08-27T12:45:00Z"),
+                "AC-002: written content must contain expires_at advanced by TTL \
+                (2026-08-27T12:45:00Z), content: {}",
+                written_str
+            );
+            // AC-002: flush returns the same renewed content.
+            assert_eq!(
+                result, *written_str,
+                "AC-002: step4_renewal_gate must return the renewed content \
+                (same value as passed to write_state_md)"
+            );
+        }
+        // AC-002: original stale expires_at must not survive in renewed output.
+        assert!(
+            !result.contains("2099-01-01T10:45:00Z"),
+            "AC-002: renewed content must NOT still contain the stale fixture \
+            expires_at (2099-01-01T10:45:00Z)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-003: NotHolder → no renewal, expires_at byte-identical, flush returns
+    //         original content, no abort.
+    //
+    // Verifies: step4_renewal_gate returns original content with expires_at
+    // byte-identical and does NOT call write_state_md (BC-7.07.001 PC3 Case 3).
+    // -----------------------------------------------------------------------
+
+    /// test_BC_7_07_001_AC003 — not holder: expires_at unchanged, flush proceeds.
+    #[test]
+    fn test_precompact_flush_step4_not_holder_no_renewal() {
+        let content = fixture_valid_unexpired_lock();
+
+        let write_state_md_calls = Arc::new(Mutex::new(0u32));
+        let ws_count = write_state_md_calls.clone();
+
+        let result = step4_renewal_gate(
+            content,
+            // resolve_identity: resolves to a different identity — not the holder.
+            || IdentityResolution::Resolved("other@example.com".to_string()),
+            // write_state_md: MUST NOT be called (not holder → no renewal).
+            move |_new_content: &str| -> Result<(), String> {
+                *ws_count.lock().unwrap() += 1;
+                Ok(())
+            },
+            |_msg: &str| {},
+            |_event: &str, _fields: &[(&str, &str)]| {},
+            now_2026,
+        );
+
+        // AC-003: write_state_md MUST NOT be called on NotHolder path.
+        assert_eq!(
+            *write_state_md_calls.lock().unwrap(),
+            0,
+            "AC-003: write_state_md must NOT be called on NotHolder path"
+        );
+        // AC-003: flush returns original content — expires_at byte-identical.
+        assert_eq!(
+            result, content,
+            "AC-003: flush content must be the original un-renewed STATE.md on NotHolder"
+        );
+        // AC-003: expires_at must be byte-identical — original value still present.
+        assert!(
+            result.contains("2099-01-01T10:45:00Z"),
+            "AC-003: expires_at must be byte-identical (original 2099-01-01T10:45:00Z \
+            must still appear in the flushed content)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-004: IdentityResolutionFailed → emit_event_fn called with
+    //         factory.lock.renewal_indeterminate + 5-field payload,
+    //         log_warn_fn called, flush proceeds with original content.
+    //
+    // Verifies: step4_renewal_gate emits event + log_warn and returns original
+    // content without renewal on IdentityResolutionFailed
+    // (BC-7.07.001 PC3 Case 4 / ADR-046 Decision 4).
+    // -----------------------------------------------------------------------
+
+    /// test_BC_7_07_001_AC004 — IdentityResolutionFailed: event emitted, log_warn called.
+    #[test]
+    fn test_precompact_flush_step4_resolution_failed_emits_event_and_logs() {
+        let content = fixture_valid_unexpired_lock();
+
+        let emit_event_calls = Arc::new(Mutex::new(0u32));
+        let ec = emit_event_calls.clone();
+        let emitted_events: Arc<Mutex<Vec<(String, Vec<(String, String)>)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let ev = emitted_events.clone();
+
+        let log_warn_calls = Arc::new(Mutex::new(0u32));
+        let wc = log_warn_calls.clone();
+
+        let write_state_md_calls = Arc::new(Mutex::new(0u32));
+        let wrt = write_state_md_calls.clone();
+
+        let result = step4_renewal_gate(
+            content,
+            // resolve_identity: resolution fails → IdentityResolutionFailed outcome.
+            || IdentityResolution::Failed("git config user.email failed (exit 1)".to_string()),
+            // write_state_md: MUST NOT be called (no renewal on IdentityResolutionFailed).
+            move |_new_content: &str| -> Result<(), String> {
+                *wrt.lock().unwrap() += 1;
+                Ok(())
+            },
+            // log_warn_fn: MUST be called on IdentityResolutionFailed.
+            move |_msg: &str| {
+                *wc.lock().unwrap() += 1;
+            },
+            // emit_event_fn: MUST be called with factory.lock.renewal_indeterminate + 5 fields.
+            move |event_type: &str, fields: &[(&str, &str)]| {
+                *ec.lock().unwrap() += 1;
+                ev.lock().unwrap().push((
+                    event_type.to_string(),
+                    fields
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect(),
+                ));
+            },
+            now_2026,
+        );
+
+        // AC-004: emit_event_fn must be called exactly once.
+        assert_eq!(
+            *emit_event_calls.lock().unwrap(),
+            1,
+            "AC-004: emit_event_fn must be called exactly once on IdentityResolutionFailed"
+        );
+
+        // AC-004: verify event type and 5-field payload.
+        // (use a nested block so the MutexGuard is released before further lock calls)
+        {
+            let events = emitted_events.lock().unwrap();
+            let (event_type, fields) = events
+                .first()
+                .expect("AC-004: at least one event must have been emitted");
+            assert_eq!(
+                event_type, "factory.lock.renewal_indeterminate",
+                "AC-004: event type must be factory.lock.renewal_indeterminate, got: {:?}",
+                event_type
+            );
+            // AC-004: exactly 5 fields required (ADR-046 Decision 4 — fewer is a BC violation).
+            assert_eq!(
+                fields.len(),
+                5,
+                "AC-004: event payload must have exactly 5 fields (ADR-046 Decision 4), \
+                got {:?}: {:?}",
+                fields.len(),
+                fields
+            );
+            // AC-004: assert ORDER + VALUES — POLICY 12 makes field order and
+            // value-sourcing contractual (F-P3-001). The fixture is
+            // fixture_valid_unexpired_lock(); the injected reason string is
+            // "git config user.email failed (exit 1)".
+            assert_eq!(
+                fields[0],
+                ("plugin".to_string(), "precompact-flush".to_string()),
+                "AC-004: fields[0] must be (\"plugin\", \"precompact-flush\") — \
+                ORDER+VALUE contractual per POLICY 12 (F-P3-001); got: {:?}",
+                fields[0]
+            );
+            assert_eq!(
+                fields[1],
+                ("holder".to_string(), "holder@example.com".to_string()),
+                "AC-004: fields[1] must be (\"holder\", \"holder@example.com\") \
+                from fixture_valid_unexpired_lock (F-P3-001); got: {:?}",
+                fields[1]
+            );
+            assert_eq!(
+                fields[2],
+                ("locked_at".to_string(), "2026-01-01T10:00:00Z".to_string()),
+                "AC-004: fields[2] must be (\"locked_at\", \"2026-01-01T10:00:00Z\") \
+                from fixture_valid_unexpired_lock (F-P3-001); got: {:?}",
+                fields[2]
+            );
+            assert_eq!(
+                fields[3],
+                ("expires_at".to_string(), "2099-01-01T10:45:00Z".to_string()),
+                "AC-004: fields[3] must be (\"expires_at\", \"2099-01-01T10:45:00Z\") \
+                from fixture_valid_unexpired_lock (F-P3-001); got: {:?}",
+                fields[3]
+            );
+            assert_eq!(
+                fields[4],
+                (
+                    "resolution_error".to_string(),
+                    "git config user.email failed (exit 1)".to_string()
+                ),
+                "AC-004: fields[4] must be (\"resolution_error\", \
+                \"git config user.email failed (exit 1)\") — injected reason string \
+                (F-P3-001); got: {:?}",
+                fields[4]
+            );
+        } // MutexGuard on emitted_events released here
+
+        // AC-004: log_warn_fn must be called.
+        assert!(
+            *log_warn_calls.lock().unwrap() >= 1,
+            "AC-004: log_warn_fn must be called on IdentityResolutionFailed"
+        );
+        // AC-004: write_state_md must NOT be called (no renewal on IdentityResolutionFailed).
+        assert_eq!(
+            *write_state_md_calls.lock().unwrap(),
+            0,
+            "AC-004: write_state_md must NOT be called on IdentityResolutionFailed"
+        );
+        // AC-004: flush proceeds with original un-renewed content.
+        assert_eq!(
+            result, content,
+            "AC-004: flush content must be the original un-renewed STATE.md \
+            on IdentityResolutionFailed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // AC-005: PRIMARY — Err(LockError::Malformed(msg)):
+    //           log_warn_fn called exactly once (MANDATORY SHALL),
+    //           resolve_identity NOT called (count==0),
+    //           write_state_md NOT called (expires_at byte-identical),
+    //           flush proceeds.
+    //
+    //         SECONDARY — Ok((RenewOutcome::NoOp, None)) absent lock:
+    //           resolve_identity NOT called, no event emitted, flush proceeds.
+    //
+    // Verifies: step4_renewal_gate emits MANDATORY log_warn (and no event) on
+    // Malformed; and neither calls resolve_identity nor write_state_md on
+    // absent lock (BC-7.07.001 PC3 Case 1 / EC-004 / Case 0).
+    // -----------------------------------------------------------------------
+
+    /// test_BC_7_07_001_AC005 — Malformed + absent-lock: MANDATORY log_warn, no exec, no write.
+    #[test]
+    fn test_precompact_flush_step4_malformed_lock_emits_log_warn_no_exec() {
+        // ------------------------------------------------------------------
+        // PRIMARY sub-case: Err(LockError::Malformed(msg))
+        // factory_lock: key present, holder="" → parse_factory_lock returns
+        // Err(MalformedLockBlock) → renew_lock_if_holder returns Err(LockError::Malformed).
+        // ------------------------------------------------------------------
+        {
+            let content = fixture_malformed_lock();
+
+            let resolve_identity_calls = Arc::new(Mutex::new(0u32));
+            let ri_count = resolve_identity_calls.clone();
+
+            let log_warn_calls = Arc::new(Mutex::new(0u32));
+            let lw_count = log_warn_calls.clone();
+
+            let write_state_md_calls = Arc::new(Mutex::new(0u32));
+            let ws_count = write_state_md_calls.clone();
+
+            let emit_event_calls = Arc::new(Mutex::new(0u32));
+            let ec = emit_event_calls.clone();
+
+            let result = step4_renewal_gate(
+                content,
+                // resolve_identity: MUST NOT be called on Malformed path.
+                move || -> IdentityResolution {
+                    *ri_count.lock().unwrap() += 1;
+                    IdentityResolution::Resolved("holder@example.com".to_string())
+                },
+                // write_state_md: MUST NOT be called (expires_at byte-identical on Malformed).
+                move |_new_content: &str| -> Result<(), String> {
+                    *ws_count.lock().unwrap() += 1;
+                    Ok(())
+                },
+                // log_warn_fn: MANDATORY (SHALL) — must be called exactly once.
+                // BC-7.07.001 PC3 case 1 / EC-004 / Invariant 3 step 3.
+                move |_msg: &str| {
+                    *lw_count.lock().unwrap() += 1;
+                },
+                move |_event: &str, _fields: &[(&str, &str)]| {
+                    *ec.lock().unwrap() += 1;
+                },
+                now_2026,
+            );
+
+            // AC-005 PRIMARY: log_warn_fn MUST be called exactly once.
+            // This is MANDATORY (SHALL) per BC-7.07.001 PC3 case 1 / EC-004 / Invariant 3 step 3.
+            // Failing this assertion is the blocker that F2 identified as missing.
+            assert_eq!(
+                *log_warn_calls.lock().unwrap(),
+                1,
+                "AC-005 PRIMARY: log_warn_fn must be called exactly once on \
+                Err(LockError::Malformed) — this is MANDATORY (SHALL), not optional \
+                (BC-7.07.001 PC3 case 1 / EC-004 / Invariant 3 step 3)"
+            );
+            // AC-005 PRIMARY: resolve_identity MUST NOT be called.
+            assert_eq!(
+                *resolve_identity_calls.lock().unwrap(),
+                0,
+                "AC-005 PRIMARY: resolve_identity must NOT be called on Malformed path \
+                (no exec subprocess; AC-002 lazy-call invariant)"
+            );
+            // AC-005 PRIMARY: write_state_md MUST NOT be called (expires_at byte-identical).
+            assert_eq!(
+                *write_state_md_calls.lock().unwrap(),
+                0,
+                "AC-005 PRIMARY: write_state_md must NOT be called on Malformed path \
+                (expires_at must remain byte-identical)"
+            );
+            // AC-005 PRIMARY: flush proceeds with original content.
+            assert_eq!(
+                result, content,
+                "AC-005 PRIMARY: flush must proceed with original content on Malformed path \
+                (must not abort or exit 2)"
+            );
+            // AC-005 PRIMARY: NO factory.lock.renewal_indeterminate event must be emitted
+            // on Malformed arm (BC-7.07.001 Invariant 3b / PC3 case 1 mandate NO event
+            // on Malformed; event is ONLY for IdentityResolutionFailed — O-1).
+            assert_eq!(
+                *emit_event_calls.lock().unwrap(),
+                0,
+                "AC-005 PRIMARY: no factory.lock.renewal_indeterminate event must be emitted \
+                on Malformed arm (BC-7.07.001 Invariant 3b / PC3 case 1 — event is exclusive \
+                to IdentityResolutionFailed path; O-1)"
+            );
+        }
+
+        // ------------------------------------------------------------------
+        // SECONDARY sub-case: Ok((RenewOutcome::NoOp, None)) — absent lock.
+        // factory_lock: key absent → renew_lock_if_holder returns Ok((NoOp, None)).
+        // ------------------------------------------------------------------
+        {
+            let content = fixture_no_lock();
+
+            let resolve_identity_calls = Arc::new(Mutex::new(0u32));
+            let ri_count = resolve_identity_calls.clone();
+
+            let emit_event_calls = Arc::new(Mutex::new(0u32));
+            let ec = emit_event_calls.clone();
+
+            let write_state_md_calls = Arc::new(Mutex::new(0u32));
+            let ws_count = write_state_md_calls.clone();
+
+            let result = step4_renewal_gate(
+                content,
+                // resolve_identity: MUST NOT be called on absent lock (0th case).
+                move || -> IdentityResolution {
+                    *ri_count.lock().unwrap() += 1;
+                    IdentityResolution::Resolved("holder@example.com".to_string())
+                },
+                move |_new_content: &str| -> Result<(), String> {
+                    *ws_count.lock().unwrap() += 1;
+                    Ok(())
+                },
+                |_msg: &str| {},
+                // emit_event_fn: MUST NOT be called on absent lock.
+                move |_event: &str, _fields: &[(&str, &str)]| {
+                    *ec.lock().unwrap() += 1;
+                },
+                now_2026,
+            );
+
+            // AC-005 SECONDARY: resolve_identity MUST NOT be called on absent lock.
+            assert_eq!(
+                *resolve_identity_calls.lock().unwrap(),
+                0,
+                "AC-005 SECONDARY: resolve_identity must NOT be called on absent lock \
+                (0th case; BC-7.07.001 PC3 0th case / EC-009)"
+            );
+            // AC-005 SECONDARY: no event must be emitted.
+            assert_eq!(
+                *emit_event_calls.lock().unwrap(),
+                0,
+                "AC-005 SECONDARY: no event must be emitted on absent lock path"
+            );
+            // AC-005 SECONDARY: no write to expires_at.
+            assert_eq!(
+                *write_state_md_calls.lock().unwrap(),
+                0,
+                "AC-005 SECONDARY: write_state_md must NOT be called on absent lock path"
+            );
+            // AC-005 SECONDARY: flush proceeds with original content.
+            assert_eq!(
+                result, content,
+                "AC-005 SECONDARY: flush must proceed with original content on absent lock"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // O-2: Renewed arm write-failure routes through log_warn_fn (advisory channel)
+    //      and returns un-renewed content (fail-open semantics preserved).
+    //
+    // Traces to: step4_renewal_gate Renewed arm write-failure branch (O-2 finding).
+    // BC-7.07.001 does not mandate a specific behavior for renewal-write-failure —
+    // fail-open-with-advisory is the production-grade choice.
+    // -----------------------------------------------------------------------
+
+    /// test_step4_renewed_write_failure_routes_log_warn_and_returns_original
+    ///
+    /// When `write_state_md` returns `Err(...)` on the `Renewed` arm:
+    /// - `log_warn_fn` MUST be called (advisory emitted to dispatcher telemetry).
+    /// - The returned content MUST be the original un-renewed STATE.md.
+    /// - Flush proceeds (fail-open — this test exercises the branch;
+    ///   caller tests verify the flush continues to commit/push).
+    ///
+    /// This closes the untested branch identified in the O-2 finding.
+    #[test]
+    fn test_step4_renewed_write_failure_routes_log_warn_and_returns_original() {
+        let content = fixture_valid_unexpired_lock();
+
+        let log_warn_calls = Arc::new(Mutex::new(0u32));
+        let lw_count = log_warn_calls.clone();
+        let logged_messages: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lm = logged_messages.clone();
+
+        let result = step4_renewal_gate(
+            content,
+            // resolve_identity: identity matches holder → Renewed outcome attempted.
+            || IdentityResolution::Resolved("holder@example.com".to_string()),
+            // write_state_md: returns Err — simulates a filesystem write failure.
+            |_new_content: &str| -> Result<(), String> {
+                Err("write_file: CAPABILITY_DENIED: disk full".to_string())
+            },
+            // log_warn_fn: MUST be called when write_state_md fails on Renewed arm.
+            move |msg: &str| {
+                *lw_count.lock().unwrap() += 1;
+                lm.lock().unwrap().push(msg.to_string());
+            },
+            |_event: &str, _fields: &[(&str, &str)]| {},
+            now_2026,
+        );
+
+        // O-2: log_warn_fn MUST be called exactly once (advisory channel, not eprintln!).
+        assert_eq!(
+            *log_warn_calls.lock().unwrap(),
+            1,
+            "O-2: log_warn_fn must be called exactly once when write_state_md fails on \
+            Renewed arm (advisory channel — NOT eprintln! / raw stderr)"
+        );
+
+        // O-2: the advisory message must mention the failure.
+        {
+            let msgs = logged_messages.lock().unwrap();
+            let msg = msgs
+                .first()
+                .expect("O-2: log_warn_fn must have received a message");
+            assert!(
+                msg.contains("advisory") || msg.contains("write failed") || msg.contains("renewal"),
+                "O-2: advisory message must describe the write failure; got: {msg:?}"
+            );
+        }
+
+        // O-2: fail-open — return original (un-renewed) content, not the new content.
+        assert_eq!(
+            result, content,
+            "O-2: step4_renewal_gate must return original un-renewed content when \
+            write_state_md fails (fail-open semantics preserved)"
+        );
     }
 }

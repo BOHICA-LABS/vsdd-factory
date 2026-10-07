@@ -47,7 +47,7 @@ endpoint = "{}/api/v2/logs"
     sink.flush().expect("flush must succeed");
 
     // Assert exactly 1 POST with the correct DD-API-KEY header.
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 /// BC-3.06.005 — DD-API-KEY header value exactly matches the configured api_key.
@@ -93,7 +93,7 @@ endpoint = "{}/api/v2/logs"
     sink.flush().expect("flush must succeed");
 
     // Auth mock must get the hit (header was present with correct value).
-    auth_mock.assert_hits(1);
+    auth_mock.assert_calls(1);
     // No-auth fallback must get zero hits (header was present, so it matched the first mock).
-    no_auth_mock.assert_hits(0);
+    no_auth_mock.assert_calls(0);
 }

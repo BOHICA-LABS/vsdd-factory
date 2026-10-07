@@ -348,3 +348,157 @@ fn test_renew_noop_on_byte_identical_expires_at() {
         got: {result:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-S1705-P7-001: CRLF-preserving renew_lock_with_now
+// (EC-017 / BC-4.17.001 PC4/AC-010 Invariant 5)
+// ---------------------------------------------------------------------------
+
+/// test_renew_lock_with_now_crlf_preserves_all_terminators
+///
+/// Traces to: F-S1705-P7-001 / EC-017 / BC-4.17.001 PC4/AC-010 Invariant 5.
+///
+/// `renew_lock_with_now` on a fully-CRLF STATE.md MUST:
+///   (a) renew the `expires_at` VALUE to `now + 2700s` (returns `Renewed`);
+///   (b) preserve `\r\n` on the rewritten `expires_at` line;
+///   (c) leave every other line's `\r\n` terminator byte-for-byte unchanged
+///       (no bare `\n` introduced anywhere);
+///   (d) change exactly one line — the `expires_at` line — and nothing else.
+///
+/// MUTATION-KILL A (terminator preservation): revert `rewrite_expires_at` to emit
+/// bare `\n` instead of the detected `\r\n` → assertion (b) fails immediately.
+///
+/// MUTATION-KILL B (whole-file normalization): insert a `replace("\r\n", "\n")` pass
+/// before the line-by-line rewrite → body lines lose `\r` → assertion (c) fails.
+///
+/// The companion LF baseline is covered by `test_renew_lock_updates_expires_at_only`
+/// (above), which uses an LF-only `LOCK_HELD_TEMPLATE` and asserts the rewritten
+/// content retains LF terminators — no new LF test needed here.
+#[test]
+fn test_renew_lock_with_now_crlf_preserves_all_terminators() {
+    use chrono::{Duration, TimeZone, Utc};
+
+    let old_expires = "2020-01-01T00:00:00Z";
+    // TTL = 2700 s (factory_lock_parse::TTL_SECONDS canonical value; literal used in
+    // integration tests by convention — see test_renew_noop_on_byte_identical_expires_at).
+    let ttl_seconds: i64 = 2700;
+
+    let fixed_now = Utc.with_ymd_and_hms(2026, 8, 27, 12, 0, 0).unwrap();
+    let expected_expires = (fixed_now + Duration::seconds(ttl_seconds))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    // Sanity: fixed_now + 2700 s = 2026-08-27T12:45:00Z
+    assert_eq!(
+        expected_expires, "2026-08-27T12:45:00Z",
+        "test fixture sanity check failed"
+    );
+
+    // CRLF STATE.md — every line ends with \r\n, including fences and body.
+    // Written as a single format-string (no backslash continuation) so the
+    // two-space indent on the factory_lock sub-fields is preserved exactly.
+    let crlf_fixture = format!(
+        "---\r\ncurrent_cycle: test-cycle\r\ncurrent_step: stub-step\r\nfactory_lock:\r\n  holder: agent@example.com\r\n  locked_at: 2026-06-01T10:00:00Z\r\n  expires_at: {old_expires}\r\n---\r\n\r\n# STATE.md body content\r\n"
+    );
+
+    // Fixture sanity: every LF must be preceded by \r.
+    for (i, segment) in crlf_fixture.split_inclusive('\n').enumerate() {
+        if !segment.ends_with('\n') {
+            continue; // last chunk with no trailing LF is OK
+        }
+        assert!(
+            segment.ends_with("\r\n"),
+            "crlf_fixture line {} must end with \\r\\n; got: {:?}",
+            i,
+            segment
+        );
+    }
+
+    let result = renew_lock_with_now(&crlf_fixture, move || fixed_now);
+
+    let new_content = match result {
+        Ok(RenewOutcome::Renewed(c)) => c,
+        other => panic!(
+            "F-S1705-P7-001: CRLF fixture with stale expires_at must return Renewed, got: {:?}",
+            other
+        ),
+    };
+
+    // (a) The expires_at VALUE was renewed to now + 2700 s.
+    assert!(
+        new_content.contains(&format!("  expires_at: {expected_expires}")),
+        "F-S1705-P7-001 (a): expires_at must be renewed to {expected_expires}. \
+         Got:\n{new_content:?}"
+    );
+    assert!(
+        !new_content.contains(&format!("  expires_at: {old_expires}")),
+        "F-S1705-P7-001 (a): stale expires_at ({old_expires}) must be gone. \
+         Got:\n{new_content:?}"
+    );
+
+    // (b) The rewritten expires_at line ends with \r\n (CRLF terminator preserved).
+    // MUTATION-KILL A: reverting the terminator detection so \n is emitted instead
+    // of \r\n → this assertion fails.
+    let expires_line = new_content
+        .split_inclusive('\n')
+        .find(|seg| {
+            let trimmed = seg.trim_end_matches('\n').trim_end_matches('\r');
+            trimmed.starts_with("  expires_at:")
+        })
+        .expect("F-S1705-P7-001: expires_at line must exist in renewed content");
+    assert!(
+        expires_line.ends_with("\r\n"),
+        "F-S1705-P7-001 (b): rewritten expires_at line must end with \\r\\n (CRLF), \
+         not bare \\n. Got segment: {:?}",
+        expires_line
+    );
+
+    // (c) No bare \n introduced — every LF still preceded by \r.
+    // MUTATION-KILL B: whole-file \r\n→\n normalization before rewrite → body lines
+    // become bare-LF → this assertion fails on the first body segment.
+    for (i, segment) in new_content.split_inclusive('\n').enumerate() {
+        if !segment.ends_with('\n') {
+            continue;
+        }
+        assert!(
+            segment.ends_with("\r\n"),
+            "F-S1705-P7-001 (c): line {} must still end with \\r\\n after CRLF renewal; \
+             got bare \\n: {:?}",
+            i,
+            segment
+        );
+    }
+
+    // (d) Exactly one line differs between input and output — the expires_at line.
+    let in_segments: Vec<&str> = crlf_fixture.split_inclusive('\n').collect();
+    let out_segments: Vec<&str> = new_content.split_inclusive('\n').collect();
+    assert_eq!(
+        in_segments.len(),
+        out_segments.len(),
+        "F-S1705-P7-001 (d): CRLF renewal must not change the segment count (line count)"
+    );
+    let differing: Vec<usize> = in_segments
+        .iter()
+        .zip(out_segments.iter())
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        differing.len(),
+        1,
+        "F-S1705-P7-001 (d): exactly 1 line must change (the expires_at line); \
+         {} lines differed at indices {:?}",
+        differing.len(),
+        differing
+    );
+    let changed_segment = out_segments[differing[0]];
+    let changed_trimmed = changed_segment
+        .trim_end_matches('\n')
+        .trim_end_matches('\r');
+    assert!(
+        changed_trimmed.starts_with("  expires_at:"),
+        "F-S1705-P7-001 (d): the one changed line must be the expires_at line, \
+         got: {:?}",
+        changed_segment
+    );
+}

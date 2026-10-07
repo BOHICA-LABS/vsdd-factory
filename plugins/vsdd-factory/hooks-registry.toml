@@ -662,6 +662,81 @@ path_allow = [
   ".factory/HANDOFF.md",
 ]
 
+# ---------- validate-cross-site-correspondence (PostToolUse, Edit|Write|MultiEdit) ----------
+# BC-5.39.010 §Gate Spec: PostToolUse cross-site value-correspondence gate (current version per BC-INDEX).
+# Six active arms: Class A Arm1 (BC version vs BC-INDEX row), Class A Arm2 (story BC-table
+# citations vs BC frontmatter), Class B Arm1 (story input-hash three-way equality),
+# Class B Arm2 (STORY-INDEX internal catalog/blockquote parity), Class E1 (frontmatter
+# version/last_amended parity), Class E2 (modified[] monotonicity).
+# Class D (finding-ID namespace format advisory) is DEFERRED to S-21.08 (BC-5.39.010 v1.6 / D-953).
+# priority = 460: next available slot after validate-wave-handoff-completeness (450).
+# on_error = "continue": fuel exhaustion (debug build, oversized artifact) → silent
+#   non-finding, not spurious block (ADR-035 §Decision 5). NOTE: max_bytes caps are
+#   NOT calibrated against the fuel budget — BC-5.39.010 v1.15 RETRACTED that claim
+#   as false (measured fuel consumption ~99.21% of the 10M-instruction budget at
+#   typical artifact sizes, i.e. near-exhaustion, not comfortable headroom).
+# tool = "^(Edit|Write|MultiEdit)$": aligns with all 41 Edit/Write/MultiEdit hooks
+#   in the live registry. BC-5.39.010 v1.1 §Gate Spec had MultiEdit omitted — a
+#   POLICY 13 ESCAPE-SCOPE-PARITY gap. v1.2 corrects to include MultiEdit.
+# No fuel_cap field: the per-plugin fuel_cap registry field (ADR-035 §Decision 5,
+#   ADR-039 §Decision 2) is not yet implemented — ADR-039 Phase 1 (registry fuel_cap
+#   schema extension) has not shipped. The general prohibition on fuel_cap entries
+#   (BC-5.39.010 v1.15) was LIFTED by ADR-042 §Decision 2 (v1.16): once ADR-039
+#   Phase 1 ships, a per-plugin fuel_cap SHOULD be set for this hook, calibrated to
+#   p99×1.5 (minimum 50M for Phase 3 fail-closed annotation). Until then the only
+#   available lever is the global InvokeLimits::default() cap (BC-5.39.010
+#   §Gate Spec §Fuel-cap verification).
+# path_allow: covers .factory/specs/behavioral-contracts/, .factory/specs/
+#   verification-properties/, .factory/stories/ — three directory subtrees the
+#   hook reads from. .factory/cycles/ was removed with Class D deferral
+#   (BC-5.39.010 v1.6 / D-953): cycle artifact dispatch descoped; no reads needed.
+# S-21.07 deliverable — E-21 W4 cross-site correspondence validation.
+
+[[hooks]]
+name = "validate-cross-site-correspondence"
+event = "PostToolUse"
+tool = "^(Edit|Write|MultiEdit)$"
+plugin = "hook-plugins/validate-cross-site-correspondence.wasm"
+priority = 460
+timeout_ms = 8000
+on_error = "continue"
+async = false
+
+[hooks.capabilities.read_file]
+path_allow = [
+  ".factory/specs/behavioral-contracts/",
+  ".factory/specs/verification-properties/",
+  ".factory/stories/",
+]
+
+# ---------- stamp-state-timestamp (PostToolUse, Edit|Write|MultiEdit) ----------
+# S-17.05 / ADR-046 / BC-4.17.001: hook-authored STATE.md wall-clock stamping.
+# PC1 unconditional timestamp re-stamp; PC2 identity-gated factory_lock.expires_at
+# renewal (mid-burst TTL keep-alive per BC-5.40.001 PC4); PC3 fail-open; PC5 no
+# lock-lifecycle involvement. async=false required (ADR-019; ADR-046; BC-4.17.001).
+# Replaces verify-state-timestamp-refresh (PreToolUse guard, S-17.04) per ADR-046
+# Decision 3: PostToolUse hook-authored stamping supersedes PreToolUse verification.
+
+[[hooks]]
+name = "stamp-state-timestamp"
+event = "PostToolUse"
+tool = "^(Edit|Write|MultiEdit)$"
+plugin = "hook-plugins/stamp-state-timestamp.wasm"
+priority = 470
+timeout_ms = 5000
+on_error = "continue"
+async = false
+
+[hooks.capabilities.read_file]
+path_allow = [".factory/STATE.md"]
+
+[hooks.capabilities.write_file]
+path_allow = [".factory/STATE.md"]
+
+[hooks.capabilities.exec_subprocess]
+binary_allow = ["git"]
+env_allow = ["HOME", "GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME"]
+
 # ---------- PreToolUse ----------
 
 [[hooks]]
@@ -874,6 +949,8 @@ plugin = "hook-plugins/legacy-bash-adapter.wasm"
 priority = 120
 timeout_ms = 10000
 on_error = "block"
+# ACTIVATION CONDITIONAL on S-21.24 calibration per ADR-047 §D8a Cohort A-deferred
+failure_policy = "fail-closed"
 
 [hooks.config]
 script_path = "hooks/validate-pr-merge-prerequisites.sh"
@@ -894,6 +971,8 @@ plugin = "hook-plugins/legacy-bash-adapter.wasm"
 priority = 130
 timeout_ms = 10000
 on_error = "block"
+# ACTIVATION CONDITIONAL on S-21.24 calibration per ADR-047 §D8a Cohort A-deferred
+failure_policy = "fail-closed"
 
 [hooks.config]
 script_path = "hooks/validate-wave-gate-prerequisite.sh"
@@ -949,6 +1028,17 @@ priority = 140
 timeout_ms = 5000
 on_error = "continue"
 async = false
+# S-25.01 Cohort A-immediate (ASSIGNED-NOW — corrected from the overclaiming EFFECTIVE-NOW
+# label per BC-1.18.004 v1.2): validate-factory-path-staging is assigned failure_policy =
+# "fail-closed" unconditionally. PreToolUse ^Bash$; on_error = "continue"; bounded input
+# (file path from tool params); calibration confirmed; no S-21.24 dependency. Its
+# PreToolUse-only registration structurally cannot reach the PostToolUse-only marker-write
+# path, so the assignment produces ZERO observable enforcement effect at S-25.01 merge
+# (ADR-047 §D8a Cohort A-immediate; BC-1.18.004 v1.4 PC4; AC-016). S-25.04 adds a companion
+# PostToolUse detective mirror, validate-factory-path-staged (priority 161), which IS
+# structurally reachable (BC-4.16.002; BC-1.18.004 v1.4 PC4 companion statement) — see that
+# entry below for the non-Cohort-A fail-closed sanction (ADR-039 §Decision 2).
+failure_policy = "fail-closed"
 
 [hooks.capabilities.exec_subprocess]
 binary_allow = ["git"]
@@ -1341,6 +1431,44 @@ on_error = "block"
 [hooks.capabilities.read_file]
 path_allow = ["plugins/vsdd-factory/hooks-registry.toml"]
 
+# ---------- validate-factory-path-staged (PostToolUse, Bash) ----------
+# S-25.04: post-hoc detective mirror of validate-factory-path-staging (BC-4.16.001).
+# Fires on every completed PostToolUse Bash dispatch and, unconditionally — with no
+# command-text pre-filter (BROAD trigger scope, human-ratified 2026-09-04, FINAL) —
+# inspects the actual git index/branch state via two exec_subprocess calls: `git diff
+# --cached --name-only` then `git branch --show-current`. Detects .factory/ paths that
+# reached the index without being intercepted by validate-factory-path-staging's own
+# PreToolUse guard (git plumbing, alias, wrapper script, under-matched invocation text).
+# failure_policy = "fail-closed": this is the first Layer-1 validator whose fail-closed
+# assignment has a structurally-reachable PostToolUse trigger for write_indeterminate_marker
+# (S-25.01's marker/gate machinery, reused verbatim — no new marker file or gate mechanism;
+# BC-4.16.002 Invariant 5). on_error = "continue": a non-resource-exhaustion crash is
+# advisory-only (PC5) — a detective PostToolUse check's own failure cannot wedge the
+# session (BC-4.16.002 Invariant 8). Priority 161 — lowest free slot above the occupied
+# 150-160 band (BC-4.16.002 SDK Grounding Evidence Grep 2). Does NOT modify or replace
+# validate-factory-path-staging's own entry (AC-003) — additive companion only.
+# BC-4.16.002; ADR-039 §Decision 2 seventh-member roadmap entry (native-WASM,
+# fuel-axis-only calibration); ADR-047 §Decision 8a Known Gap closure.
+
+[[hooks]]
+name = "validate-factory-path-staged"
+event = "PostToolUse"
+tool = "^Bash$"
+plugin = "hook-plugins/validate-factory-path-staged.wasm"
+priority = 161
+timeout_ms = 5000
+on_error = "continue"
+async = false
+failure_policy = "fail-closed"
+
+[hooks.capabilities.exec_subprocess]
+binary_allow = ["git"]
+# PATH omitted: mirrors validate-factory-path-staging's own capability shape — the
+# dispatcher process inherits PATH from its parent Claude session; the child git
+# subprocess resolves the binary via that inherited PATH without needing PATH
+# re-injected into the plugin sandbox.
+env_allow = ["HOME", "GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME"]
+
 # ---------- verify-factory-lock (PreToolUse, Edit|Write|MultiEdit|Agent) ----------
 # S-17.02: factory-artifacts orphan-branch single-writer guard (BC-4.13.001).
 # Reads factory_lock block from STATE.md; blocks mutating tools when a foreign
@@ -1386,28 +1514,6 @@ path_allow = [".factory/STATE.md"]
 [hooks.capabilities.exec_subprocess]
 binary_allow = ["git"]
 env_allow = ["HOME", "GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME"]
-
-# ---------- verify-state-timestamp-refresh (PreToolUse, Edit|Write|MultiEdit) ----------
-# S-17.04: PreToolUse guard — blocks Edit/Write/MultiEdit to .factory/STATE.md when
-# proposed content (reconstructed for Edit/MultiEdit) does not advance timestamp:
-# frontmatter (every write) or factory_lock.expires_at (when lock held).
-# Decision 12 / BC-5.40.001 PC4.
-# Trigger (v1.6 env-free): normalised path == ".factory/STATE.md" OR ends with
-# "/.factory/STATE.md" — covers absolute paths from Claude Code production (AC-018).
-# async = false REQUIRED — see ADR-019 + ADR-025 Decision 12
-
-[[hooks]]
-name = "verify-state-timestamp-refresh"
-event = "PreToolUse"
-tool = "^(Edit|Write|MultiEdit)$"
-plugin = "hook-plugins/verify-state-timestamp-refresh.wasm"
-priority = 143
-timeout_ms = 5000
-on_error = "continue"
-async = false
-
-[hooks.capabilities.read_file]
-path_allow = [".factory/STATE.md"]
 
 # ---------- PreCompact (S-18.00) ----------
 # check-harness-version: verify Claude Code harness >= v2.1.105 before compaction.
@@ -1536,6 +1642,60 @@ patterns = [
 # No capabilities block: exec-free, no read_file, no exec_subprocess (BC-5.41.003 PC1).
 # Priority 159 = lowest free slot above 154 (validate-dispatch-advance).
 # (traces to ADR-032 AC-021 / BC-5.41.003 / BC-5.40.001 PC6)
+
+# ---------- validate-unvalidated-mutation-marker — S-25.01 Layer-1 Next-Advance Gate ----------
+# BC-1.18.002: TWO registry entries for the SAME WASM binary (BC-1.18.002 invariant 1; AC-019).
+# Both entries reference hook-plugins/validate-unvalidated-mutation-marker.wasm.
+#
+# Arm 1 (^Agent$): blocks Agent dispatches while .factory/unvalidated-mutation.marker exists.
+# Arm 2 (^Bash$):  blocks git commit/push Bash dispatches while the marker exists.
+#   The \bgit\b.*\b(commit|push)\b regex is ILLUSTRATIVE ONLY — authoritative Arm-2 filter is
+#   the Phase 1-4 tokenized algorithm is_git_commit_or_push (BC-1.18.002 §PC2). It is
+#   PLUGIN-INTERNAL logic (reads `command` parameter); it is NOT a registry field.
+#   Non-advancing Bash commands (git status, cargo test) pass through.
+#
+# BOTH entries MUST have failure_policy = "fail-open" (BC-1.18.002 invariant 2; AC-011).
+# failure_policy = "fail-open" governs marker-WRITING only: if the gate plugin itself
+# fuel-exhausts or crashes it does NOT write a NEW marker — preventing self-lock via new
+# quarantine. However, on gate crash/fuel/timeout the dispatcher's native
+# on_error = "block_if_marker" check applies: if a non-expired marker ALREADY EXISTS the
+# dispatch is BLOCKED (BC-1.18.002 PC5 / EC-031 ADR-048 §D1); if the marker is absent or
+# TTL-expired the dispatch is ALLOWED (BC-1.18.002 PC6 / EC-009 / EC-032 ADR-048 §D1).
+# Recovery: remove .factory/unvalidated-mutation.marker or wait for the 24-hour TTL.
+#
+# No priority assigned: gate runs in default priority tier. The marker-check is fast (single
+# file-presence check) and does not conflict with existing priority assignments.
+
+[[hooks]]
+name = "validate-unvalidated-mutation-marker"
+event = "PreToolUse"
+tool = "^Agent$"
+plugin = "hook-plugins/validate-unvalidated-mutation-marker.wasm"
+# ADR-048 §Decision 1: on_error="block_if_marker" — WASM crash/timeout triggers a NATIVE
+# filesystem check. If a non-expired .factory/unvalidated-mutation.marker exists the dispatch
+# is blocked (crash + quarantine-signal → Block). If the marker is absent or expired the
+# dispatch is allowed (crash + no quarantine → Allow). This closes the CWE-636 gap where
+# WASM crash + valid-quarantine-signal silently allowed the dispatch under "continue".
+# failure_policy = "fail-open" UNCHANGED (BC-1.18.002 INV2 self-lock prevention).
+on_error = "block_if_marker"
+async = false
+failure_policy = "fail-open"
+
+[[hooks]]
+# Arm 2: same WASM binary as Arm 1 (BC-1.18.002 invariant 1; AC-019).
+# The git commit/push filter (is_git_commit_or_push, BC-1.18.002 v1.3 tokenized subcommand match)
+# is implemented inside the WASM plugin by reading the `command` parameter from the Bash tool
+# event payload — NOT a registry field.
+name = "validate-unvalidated-mutation-marker-git"
+event = "PreToolUse"
+tool = "^Bash$"
+plugin = "hook-plugins/validate-unvalidated-mutation-marker.wasm"
+# ADR-048 §Decision 1: on_error="block_if_marker" — same crash-policy as Arm 1. Both arms
+# must have identical on_error semantics (BC-1.18.002 invariant 1: same binary, same gate
+# invariants). See Arm 1 comment above for rationale.
+on_error = "block_if_marker"
+async = false
+failure_policy = "fail-open"
 
 [[hooks]]
 name = "verify-state-timestamp-advisory"

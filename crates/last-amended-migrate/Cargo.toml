@@ -1,0 +1,44 @@
+[package]
+name = "last-amended-migrate"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Sanctioned Rust CLI for one-time last_amended/changelog: migration plus changelog rotation across the 5 ADR-049-governed index/state files (BC-10.13.001, POLICY 21-compliant; S-15.03 AC-006)"
+publish = false
+
+# Standalone native CLI binary — NOT a WASM hook plugin. Unlike the
+# crates/hook-plugins/* crates, this tool has no vsdd-hook-sdk dependency and
+# is not built for the wasm32-wasip1 target: it is invoked directly by an
+# operator or an orchestrator-dispatched agent (BC-10.13.001 Precondition 1),
+# not dispatched by the factory-dispatcher hook chain. [lib] carries testable
+# logic; [[bin]] is the invoked entry point.
+[lib]
+name = "last_amended_migrate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "last-amended-migrate"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+thiserror = { workspace = true }
+# Strict-YAML `safe_load` pre-write validity gate (S-15.03 SEC-001;
+# BC-10.13.001 Invariant 4 / PC3) — `src/yaml_guard.rs` parses every produced
+# frontmatter/changelog write under this independent, general-purpose YAML
+# parser before allowing the write to proceed. Deliberately NOT a dependency
+# of the production D-1144/SEC-001 escape logic itself, which remains a
+# hand-rolled bounded scan per `src/escape.rs`'s own doc comment (bounded-cost
+# hot-path read/write); this is an OUTPUT-side, bounded-size validity check
+# only, mirroring every other workspace crate's `serde_norway` usage.
+serde = { workspace = true }
+serde_norway = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -241,16 +241,16 @@ mod kani_proofs {
         let r2 = aggregate_exit_code(&sync_group);
 
         // Determinism: identical inputs → identical outputs.
-        kani::assert!(
+        kani::assert(
             r1 == r2,
             "VP-077 H5: aggregate_exit_code must be deterministic; \
-             same sync_group must always produce same exit code"
+             same sync_group must always produce same exit code",
         );
 
         // Independence: return value is only 0 or 2 (no other values possible).
-        kani::assert!(
+        kani::assert(
             r1 == 0 || r1 == 2,
-            "VP-077 H5: aggregate_exit_code must return 0 or 2 only"
+            "VP-077 H5: aggregate_exit_code must return 0 or 2 only",
         );
     }
 
@@ -293,14 +293,14 @@ mod kani_proofs {
         let exit_code = aggregate_exit_code(&sync_group);
 
         if any_blocking {
-            kani::assert!(
+            kani::assert(
                 exit_code == 2,
-                "VP-077 H6: any sync block (exit_code=2, on_error=Block) => dispatcher exit 2"
+                "VP-077 H6: any sync block (exit_code=2, on_error=Block) => dispatcher exit 2",
             );
         } else {
-            kani::assert!(
+            kani::assert(
                 exit_code == 0,
-                "VP-077 H6: no sync block => dispatcher exit 0"
+                "VP-077 H6: no sync block => dispatcher exit 0",
             );
         }
     }

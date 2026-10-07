@@ -1,0 +1,36 @@
+[package]
+name = "validate-cross-site-correspondence"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "WASM hook plugin: PostToolUse gate that validates cross-site value-correspondence for BC version citations, story input-hash three-way equality, frontmatter version/last_amended parity, and modified[] monotonicity (BC-5.39.010 Classes A/B/E; Class D deferred to S-21.08)"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+# rlib target is REQUIRED for `cargo test` to work — cdylib-only prevents
+# test compilation. All sibling hook crates use ["cdylib", "rlib"].
+
+[[bin]]
+name = "validate-cross-site-correspondence"
+path = "src/main.rs"
+
+[dependencies]
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# NOTE: serde_yaml is FORBIDDEN — archived/deprecated 2024; workspace migrated to
+# serde_norway via TD #72. serde_norway is permitted but YAML parsing is not
+# required for this hook (frontmatter parsed via line-scanning regex per sibling
+# pattern). Do NOT add serde_yaml under any circumstances.
+# NOTE: wasmtime is FORBIDDEN — hook plugins are WASM binaries; only the dispatcher
+# binary links wasmtime. Adding wasmtime creates a circular compile dependency.
+# NOTE: regex crate is NOT added — hand-rolled byte-walk scanning is mandated
+# for all WASM hook plugins to stay within the 10M-instruction fuel budget
+# (ADR-035 §Decision 5).
+
+[lints]
+workspace = true

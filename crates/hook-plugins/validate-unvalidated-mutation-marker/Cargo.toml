@@ -1,0 +1,51 @@
+[package]
+name = "validate-unvalidated-mutation-marker"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "WASM hook plugin: two-arm next-advance gate — blocks Agent dispatches and git commit/push while .factory/unvalidated-mutation.marker exists (BC-1.18.002; S-25.01 ADR-047 Layer 1)"
+publish = false
+
+# Hook plugins ship as WASI commands (_start entry point) built via
+# `cargo build --target wasm32-wasip1`. The [lib] target carries testable
+# logic; [[bin]] wraps the macro-generated entry point.
+#
+# BC-1.18.002 invariant 1: Arm 1 (^Agent$) and Arm 2 (^Bash$ git filter) are
+# registered as two separate hooks-registry.toml entries that BOTH reference
+# the IDENTICAL compiled binary (validate-unvalidated-mutation-marker.wasm).
+# The dispatch routing between arms is plugin-internal: the plugin reads the
+# tool event payload to determine which arm to execute.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "validate-unvalidated-mutation-marker"
+path = "src/main.rs"
+
+[dependencies]
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+# MEDIUM-2 fix (S-25.01): quote-aware POSIX tokenization for is_git_commit_or_push.
+# shell-words 1.1.x is pure-Rust, zero-dep, MIT-licensed, and compiles for wasm32-wasip1.
+# Version verified against crates.io (BC-1.18.002 v1.3 tokenized subcommand match; TD #74).
+shell-words = "1.1"
+# Observability: structured warn logging for fail-open paths (EC-030; CLAUDE.md no-println rule).
+# tracing macros are no-ops when no subscriber is configured, so this adds no overhead in
+# WASM sandbox contexts where no subscriber is registered.
+tracing = { workspace = true }
+# ADR-048 §Decision 2: 24-hour deadman TTL check in evaluate_gate.
+# chrono 0.4 compiles for wasm32-wasip1 — WASI provides clock_gettime.
+chrono = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+tempfile.workspace = true
+
+[lints]
+workspace = true

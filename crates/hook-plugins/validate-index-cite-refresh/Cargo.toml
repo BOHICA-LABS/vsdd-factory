@@ -25,8 +25,9 @@ vsdd-hook-sdk = { path = "../../hook-sdk" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # NOTE: No `regex` crate — hand-rolled scanning is used to stay within the
-# WASM 10M fuel budget. The regex crate's DFA compilation exhausts the fuel
-# cap on first call. See src/lib.rs extract_index_cites().
+# WASM fuel budget. The regex crate's DFA compilation exhausted the former 10M
+# fuel cap on first call; not re-measured at the current 20M cap.
+# See src/lib.rs extract_index_cites().
 
 [dev-dependencies]
 serde_json = { workspace = true }

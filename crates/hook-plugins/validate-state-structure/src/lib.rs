@@ -1336,7 +1336,7 @@ pub fn check_phase_progress_rows(content: &str) -> Option<Violation> {
 /// The heading prefix strings are pre-computed ONCE outside the per-line scan loop to avoid
 /// `format!()` allocations inside the hot-path closure. A naive implementation that called
 /// `format!("{heading_prefix} ")` and `format!("{heading_prefix}(")` inside the closure
-/// allocated two new Strings per line, exhausting the 10M fuel budget on the live 426-line
+/// allocated two new Strings per line, exhausting the former 10M fuel budget on the live 426-line
 /// STATE.md. Pre-computing strings once reduces allocations from O(n_lines) to O(1).
 ///
 /// # BC trace

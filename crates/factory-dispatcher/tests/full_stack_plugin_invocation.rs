@@ -111,6 +111,7 @@ fn sync_registry_entry(plugin_path: PathBuf, name: &str, event: &str) -> Registr
         config: toml::Value::Table(toml::Table::new()),
         async_flag: false,
         needs_context: vec![],
+        failure_policy: Default::default(),
     }
 }
 
@@ -130,6 +131,7 @@ fn async_registry_entry(plugin_path: PathBuf, name: &str, event: &str) -> Regist
         config: toml::Value::Table(toml::Table::new()),
         async_flag: true,
         needs_context: vec![],
+        failure_policy: Default::default(),
     }
 }
 
@@ -334,7 +336,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_blocks_unauthorized_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     // The real validate-artifact-path WASM must have run (not a stub)
     assert_eq!(
@@ -458,7 +460,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_continues_authorized_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     assert_eq!(summary.per_plugin_results.len(), 1);
     let outcome = &summary.per_plugin_results[0];
@@ -554,7 +556,7 @@ async fn test_e2e_BC_4_11_001_sync_hook_continues_non_factory_path() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
 
     // Plugin may not match (tool filter "Write|Edit") — that's fine, no block either way
     assert_eq!(
@@ -707,23 +709,29 @@ async fn test_e2e_BC_1_14_001_async_hook_output_reaches_sink_when_fast() {
     // crash-equivalent terminal events (plugin.crashed) are also acceptable per TC-5's
     // environment-tolerance requirement (factory-health binary may be absent in CI).
     //
-    // 15s bound covers debug WASM cold-start + WASM compile time in parallel test runs.
+    // 60s bound (widened from 15s per rc.24 flake fix) covers debug WASM cold-start +
+    // WASM compile time when the CI runner is under heavy parallel-test-run load.
+    // wait_for_log_event polls the log file, so this only lengthens how long a slow-but-
+    // correct completion is tolerated — it does not weaken the assertion: the test still
+    // fails if the event never arrives.
     let completed = wait_for_log_event(
         &log_dir,
         "plugin.completed",
         Some("session-start-telemetry"),
-        Duration::from_secs(15),
+        Duration::from_secs(60),
     )
     .await;
 
     // Also accept plugin.crashed as a terminal event (session-start-telemetry may crash
     // if exec_subprocess / factory-health is not on PATH; crash ≠ stub, real WASM ran).
+    // Fallback bound widened from 2s to 10s (rc.24 flake fix) for the same cold-start
+    // reason as the primary wait above.
     let crashed = if !completed {
         wait_for_log_event(
             &log_dir,
             "plugin.crashed",
             Some("session-start-telemetry"),
-            Duration::from_secs(2),
+            Duration::from_secs(10),
         )
         .await
     } else {
@@ -801,6 +809,7 @@ async fn test_e2e_BC_1_14_001_async_block_verdict_discarded() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: true, // ASYNC — verdict must NOT gate Claude Code
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry = registry_from(vec![async_entry.clone()]);
 
@@ -826,7 +835,11 @@ async fn test_e2e_BC_1_14_001_async_block_verdict_discarded() {
         Arc::new(ResolverRegistry::new()),
     );
 
-    let outcome = tokio::time::timeout(Duration::from_secs(15), handle)
+    // 60s bound (widened from 15s per rc.24 flake fix) covers debug WASM cold-start when
+    // the CI runner is under heavy parallel-test-run load. The JoinHandle either resolves
+    // (and the assertions below still run) or the timeout still fails the test — this only
+    // stops a slow-but-correct completion from being flagged as a failure.
+    let outcome = tokio::time::timeout(Duration::from_secs(60), handle)
         .await
         .expect("join did not panic")
         .expect("JoinHandle ok");
@@ -877,6 +890,7 @@ async fn test_e2e_BC_1_14_001_async_block_verdict_discarded() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: true,
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry2 = registry_from(vec![async_entry2]);
 
@@ -893,7 +907,7 @@ async fn test_e2e_BC_1_14_001_async_block_verdict_discarded() {
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
-    let sync_summary = execute_tiers(inputs, empty_tiers).await;
+    let sync_summary = execute_tiers(inputs, empty_tiers, None).await;
     assert_eq!(
         sync_summary.exit_code, 0,
         "TC-6 FAIL: sync_group exit_code must be 0 when sync_group is empty \
@@ -964,6 +978,7 @@ async fn test_e2e_BC_1_14_001_mixed_sync_async_partition_timing() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: false, // SYNC
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let async_entry = RegistryEntry {
         name: "async-telemetry".to_string(),
@@ -979,6 +994,7 @@ async fn test_e2e_BC_1_14_001_mixed_sync_async_partition_timing() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: true, // ASYNC
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry = registry_from(vec![sync_entry.clone(), async_entry.clone()]);
 
@@ -1027,7 +1043,7 @@ async fn test_e2e_BC_1_14_001_mixed_sync_async_partition_timing() {
         internal_log: internal_log.clone(),
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, None).await;
     let sync_elapsed = sync_start.elapsed();
 
     // Sync must complete and return 0 (authorized path)
@@ -1134,6 +1150,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_crash_fail_closed_on_error_block() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: false, // sync
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry = registry_from(vec![crash_entry.clone()]);
 
@@ -1155,7 +1172,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_crash_fail_closed_on_error_block() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),
@@ -1243,6 +1260,7 @@ async fn test_e2e_BC_1_14_001_async_timeout_emits_plugin_timeout_event() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: true,
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry = registry_from(vec![async_hang_entry.clone()]);
 
@@ -1474,7 +1492,7 @@ async fn test_e2e_BC_3_08_001_sync_hook_internal_log_events() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(summary.per_plugin_results.len(), 1);
 
@@ -1573,6 +1591,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_timeout_fail_closed_on_error_block() {
         config: toml::Value::Table(toml::Table::new()),
         async_flag: false, // SYNC — verdict propagates to gate
         needs_context: vec![],
+        failure_policy: Default::default(),
     };
     let registry = registry_from(vec![hang_entry.clone()]);
 
@@ -1594,7 +1613,7 @@ async fn test_e2e_BC_7_06_001_sync_hook_timeout_fail_closed_on_error_block() {
         resolver_registry: Arc::new(ResolverRegistry::new()),
     };
 
-    let summary = execute_tiers(inputs, tiers).await;
+    let summary = execute_tiers(inputs, tiers, None).await;
 
     assert_eq!(
         summary.per_plugin_results.len(),

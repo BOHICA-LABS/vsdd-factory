@@ -28,6 +28,33 @@
 #![cfg_attr(not(kani), allow(unexpected_cfgs))]
 
 // ---------------------------------------------------------------------------
+// Canonical shared constants (S-17.05 T-2 / ADR-046 F-006 / BC-4.17.001 Precondition 3)
+// ---------------------------------------------------------------------------
+
+/// Canonical TTL in seconds for `factory_lock.expires_at` renewal.
+///
+/// Cross-references `plugins/vsdd-factory/bin/factory-lock-write.sh` `TTL_SECONDS=2700`.
+/// Both must remain in sync (BC-4.17.001 Invariant 3 / ADR-046 F-006 single-canonical-TTL-source).
+/// Imported by `stamp-state-timestamp` for PC2 renewal (`expires_at = now + TTL_SECONDS`);
+/// also used to migrate `crates/factory-lock/renew_lock_with_now`'s bare `2700` literal (T-2).
+///
+/// BC-5.38.001: `test_ttl_seconds_constant_equals_2700` asserts `TTL_SECONDS == 2700`
+/// (S-17.05 T-2 / ADR-046 F-006).
+pub const TTL_SECONDS: u32 = 2700;
+
+/// Canonical STATE.md byte read-cap shared across the hook family.
+///
+/// Single canonical home per ADR-046 Decision 5 / F-P5-001.
+/// Imported by `stamp-state-timestamp` as the `max_bytes` argument to
+/// `host::read_file(".factory/STATE.md", STATE_MD_MAX_BYTES, timeout_ms)`.
+/// Parity with BC-5.40.001 / BC-4.13.001 cap-parity requirement (formerly a
+/// per-crate local constant `STATE_MD_MAX_BYTES = 262144` in `verify-state-timestamp-refresh`).
+///
+/// BC-5.38.001: `test_state_md_max_bytes_constant_equals_262144` asserts
+/// `STATE_MD_MAX_BYTES == 262144` (ADR-046 Decision 5 / F-P5-001).
+pub const STATE_MD_MAX_BYTES: u32 = 262_144;
+
+// ---------------------------------------------------------------------------
 // Error variants
 // ---------------------------------------------------------------------------
 
@@ -661,5 +688,48 @@ mod tests {
             }
             Ok(_) => panic!("Invalid timestamp must NOT parse successfully"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // S-17.05 T-2 Red Gate tests — TTL_SECONDS + STATE_MD_MAX_BYTES constants
+    // (BC-4.17.001 Precondition 3 / Invariant 3 / ADR-046 F-006 / F-P5-001)
+    //
+    // Both tests MUST FAIL against the stub values (0) until S-17.05 T-2 is
+    // implemented and sets them to the correct canonical values (2700 / 262144).
+    // -----------------------------------------------------------------------
+
+    /// S-17.05 T-2 / AC-012 / BC-4.17.001 Precondition 3 / Invariant 3:
+    /// TTL_SECONDS must equal 2700 (canonical factory_lock TTL in seconds).
+    ///
+    /// Cross-references `plugins/vsdd-factory/bin/factory-lock-write.sh` TTL_SECONDS=2700
+    /// (ADR-046 F-006 single-canonical-TTL-source). stamp-state-timestamp imports this
+    /// constant for PC2 renewal (expires_at = now + TTL_SECONDS).
+    ///
+    /// RED GATE: stub sets TTL_SECONDS = 0 → assert_eq fails until implementer sets 2700.
+    #[test]
+    fn test_ttl_seconds_constant_equals_2700() {
+        assert_eq!(
+            TTL_SECONDS, 2700u32,
+            "TTL_SECONDS must equal 2700 (canonical factory_lock TTL; \
+             AC-012 / BC-4.17.001 Precondition 3 / Invariant 3 / ADR-046 F-006). \
+             Stub has 0 — S-17.05 T-2 must set to 2700."
+        );
+    }
+
+    /// S-17.05 T-2 / AC-012 / ADR-046 Decision 5 / F-P5-001:
+    /// STATE_MD_MAX_BYTES must equal 262144 (canonical STATE.md byte read-cap).
+    ///
+    /// Single canonical home per ADR-046 Decision 5 — imported by stamp-state-timestamp
+    /// as the max_bytes argument to host::read_file (BC-5.40.001 / BC-4.13.001 cap-parity).
+    ///
+    /// RED GATE: stub sets STATE_MD_MAX_BYTES = 0 → assert_eq fails until implementer sets 262144.
+    #[test]
+    fn test_state_md_max_bytes_constant_equals_262144() {
+        assert_eq!(
+            STATE_MD_MAX_BYTES, 262_144u32,
+            "STATE_MD_MAX_BYTES must equal 262144 (canonical STATE.md read-cap; \
+             AC-012 / ADR-046 Decision 5 / F-P5-001). \
+             Stub has 0 — S-17.05 T-2 must set to 262144."
+        );
     }
 }

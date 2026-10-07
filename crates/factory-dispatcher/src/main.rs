@@ -34,9 +34,13 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(debug_assertions, feature = "test-support"))]
+use factory_dispatcher::engine::EngineError;
 use factory_dispatcher::engine::{EpochTicker, build_engine};
 use factory_dispatcher::executor::{
-    ExecutorInputs, PluginOutcome, execute_tiers, spawn_async_plugin,
+    ExecutorInputs, PluginOutcome, bc_index_migration_admission_precheck,
+    bc_index_migration_reservation_release, execute_tiers, resolve_shard_gate_precedence,
+    shard_cap_precheck, spawn_async_plugin,
 };
 use factory_dispatcher::host::HostContext;
 use factory_dispatcher::host::emit_event::{
@@ -44,11 +48,12 @@ use factory_dispatcher::host::emit_event::{
     emit_plugin_completed_async, emit_plugin_timeout_async, emit_registry_invalid_e_reg002,
     emit_registry_invalid_e_reg003,
 };
+use factory_dispatcher::indeterminate_marker::MarkerFields;
 use factory_dispatcher::internal_log::{
     DEFAULT_RETENTION_DAYS, DISPATCHER_STARTED, INTERNAL_DISPATCHER_ERROR, InternalEvent,
     InternalLog,
 };
-use factory_dispatcher::invoke::PluginResult;
+use factory_dispatcher::invoke::{PluginResult, TimeoutCause};
 use factory_dispatcher::partition::partition_plugins;
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::plugin_loader::PluginCache;
@@ -77,8 +82,41 @@ const ENV_SINK_FILE: &str = "VSDD_SINK_FILE";
 #[cfg(any(debug_assertions, feature = "test-support"))]
 const ENV_ASYNC_DRAIN_WINDOW_MS: &str = "VSDD_ASYNC_DRAIN_WINDOW_MS";
 
+// VSDD_FORCE_ENGINE_BUILD_FAILURE: test-only fault-injection seam for
+// MINOR-N1 (S-25.02 cluster-2 PR #824 pr-review cycle 4). `build_engine()`
+// (wasmtime `Engine::new` over a static `Config`) has no other reachable
+// failure mode in this environment — the MINOR-N1 finding itself notes it
+// "effectively never fails outside OOM" — so there is no way to drive a
+// genuine `build_engine()` failure from a test without this seam. Gated
+// identically to `VSDD_ASYNC_DRAIN_WINDOW_MS` above: active in debug builds
+// AND release builds compiled with feature=test-support (CI integration
+// tests only), compiled out of shipped release artifacts (release.yml: no
+// features) so the env var name never appears in a production binary.
+#[cfg(any(debug_assertions, feature = "test-support"))]
+const ENV_FORCE_ENGINE_BUILD_FAILURE: &str = "VSDD_FORCE_ENGINE_BUILD_FAILURE";
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    // BC-1.18.011 / ADR-052 §Decision 3 (S-25.02 cluster-5, T-11) —
+    // `migrate-bc-index` CLI subcommand scaffold. ADR-052 §Decision 3's
+    // closed argument grammar sanctions exactly this one-argument
+    // invocation form, absolute-path-pinned, via the Bash-tool allowlist
+    // guard (a SEPARATE guard, not implemented by this check): `{project-
+    // root}/target/release/factory-dispatcher migrate-bc-index`. This
+    // check MUST run BEFORE the ordinary hook-envelope stdin read below —
+    // the migration subcommand is a distinct invocation mode, never a hook
+    // dispatch, and must never attempt to parse a hook envelope from
+    // stdin. WIRING-EXEMPT (BC-5.38.003): pure argv-routing delegation to
+    // a single call, zero branching beyond the one dispatch condition —
+    // see the stub commit report WIRING-EXEMPT table. The real migration
+    // logic behind `run_migrate_bc_index_cli` is `todo!()`.
+    if std::env::args().nth(1).as_deref() == Some("migrate-bc-index") {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        std::process::exit(factory_dispatcher::shard_manager::run_migrate_bc_index_cli(
+            &cwd,
+        ));
+    }
+
     // ONLY an explicit VSDD_LOG_DIR (resolution level A) bypasses the #206
     // mount gate: the operator said exactly where to log, and suppressing
     // that would override the override (the bats harness points VSDD_LOG_DIR
@@ -190,13 +228,15 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
                         );
                         2
                     }
-                    RegistryError::AsyncBlockConflict { name } => {
+                    RegistryError::AsyncBlockConflict { name, on_error } => {
                         // BC-1.14.001 EC-008 + BC-3.08.001 Event 3.
                         // Emit dispatcher.registry_invalid with offending_plugin/violation/error_code.
                         // E-REG-002 is intra-entry; offending_event/tool absence is enforced by type system.
                         emit_registry_invalid_e_reg002(&err_ctx, name, "async_block_conflict");
+                        // LOW-1: name the actual offending on_error value ("block" or
+                        // "block_if_marker"), not a hardcoded "block" literal.
                         eprintln!(
-                            "factory-dispatcher: E-REG-002 on_error=block AND async=true for '{name}'; exiting 2 (fail-closed per ADR-019 §Decision 2)"
+                            "factory-dispatcher: E-REG-002 on_error={on_error} AND async=true for '{name}'; exiting 2 (fail-closed per ADR-019 §Decision 2)"
                         );
                         2
                     }
@@ -280,8 +320,231 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
         partition.async_group.len(),
     );
 
+    // Resolved ONCE, here — see `resolve_project_cwd`'s own doc comment for
+    // why this must happen before the early-return guard immediately below,
+    // rather than at `base_host_ctx.cwd`'s own (later) assignment site.
+    let project_cwd = resolve_project_cwd();
+
+    // BC-1.18.006 Postcondition 7 catch point (i) / story AC-024 (ADR-051
+    // §Decision 15 point 4 — LOAD-BEARING placement caveat; §Decision 17
+    // MAJOR-3, S-25.02 cluster-2 PR #824 pr-review cycle 3): an
+    // UNCONDITIONAL native call, independent of the registry's
+    // matched-plugin count, placed BEFORE the (now widened, see below)
+    // `sync_tiers.is_empty() && partition.async_group.is_empty()`
+    // early-return guard — mirroring Decision 1's own "before the
+    // registry-driven plugin loop" placement rule. If this call were placed
+    // AFTER that guard (e.g. as "one more thing the registry-driven loop
+    // does"), it would silently stop firing altogether on any configuration
+    // where the registered PostToolUse `Edit`/`Write`/`MultiEdit` plugin set
+    // becomes empty — the exact "silently stop firing if the plugin set
+    // changes" failure mode Decision 1's placement rule already exists to
+    // prevent for the PreToolUse leg. Precedent for a native call sitting
+    // unconditionally in this exact slot: `write_indeterminate_marker`'s
+    // `executor.rs` call sites and `inject_git_context_if_qualifying`
+    // (further below, ADR-029 §Decision 1-3) — both native, non-WASM,
+    // non-registry-gated dispatcher-internal calls reached from this same
+    // `run` function.
+    //
+    // **Corrected scope (MINOR-3, S-25.02 cluster-2 PR #824 pr-review cycle
+    // 3):** "independent of the registry's matched-plugin count" means
+    // exactly that — independent of WHICH/HOW MANY `[[hooks]]` entries
+    // matched — never "independent of the registry entirely". Two registry
+    // paths still return BEFORE this call ever runs: `resolve_registry_path()?`
+    // (Tier 2 path resolution failure) and the fail-open `return Ok(exit_code)`
+    // arm on `Registry::load` failure, both above. A broken or unparseable
+    // `hooks-registry.toml` therefore disables catch point (i) for that
+    // dispatch too — an over-cap canonical left unreconciled — same as it
+    // disables every other registry-driven check in this function; this is
+    // an accepted consequence of the SAME fail-open registry-load contract
+    // (BC-1.08.001) every other native/WASM check in `run` already lives
+    // under, not a gap specific to this call site, and the registry-load
+    // failure itself is already surfaced via `emit_dispatcher_error`/the
+    // internal log above — never silently swallowed.
+    //
+    // Silent filesystem side effect, no `HookResult` signaling (Decision 15
+    // point 2 — a janitor, not a gate): this call never influences
+    // `sync_tiers`/`partition.async_group` or this function's own return
+    // value. Real, cheap, structural qualification filtering happens inside
+    // `reconcile_replace_all_overcap_if_qualifying` itself (event/tool/
+    // `replace_all` — BC-1.18.006 Postcondition 7's own "zero added cost
+    // outside the narrow case" requirement); the `[[shard]]` config-match
+    // step itself is a real (bounded) TOML parse, not free — see that
+    // function's own corrected doc comment (NIT-4). The actual
+    // `stat()`-and-retroactive-roll behavior it delegates into
+    // (`shard_manager::reconcile_post_write_replace_all_overcap`) is fully
+    // implemented and unit-tested. **Corrected coverage claim (MINOR-4,
+    // cycle 3):** this call site's WIRING through `main::run` itself —
+    // placement before the tier loop, and `project_cwd` (canonicalized, not
+    // raw `$CLAUDE_PROJECT_DIR`) as the `cwd` argument — is NOT exercised by
+    // `bc_1_18_006_roll_test.rs`'s AC-024 test, which calls
+    // `reconcile_replace_all_overcap_if_qualifying` directly and never goes
+    // through `main::run`; that test covers ONLY the delegated
+    // stat()-and-retroactive-roll behavior. The real end-to-end wiring is
+    // covered by `bc_1_18_006_roll_test.rs`'s
+    // `test_MINOR4_catch_point_i_fires_via_real_binary_before_post_tool_use_tier_loop`,
+    // which spawns the compiled binary (mirroring MAJOR-3's own real-binary
+    // falsifier for the PreToolUse leg) and asserts the sealed shard and
+    // truncated canonical on disk after a real dispatch.
+    //
+    // **Ordering trade-off (MINOR-5, cycle 3):** because this call precedes
+    // the tier loop, a PostToolUse WASM plugin ALSO matched for this same
+    // `Edit`/`MultiEdit` dispatch runs AFTER the canonical has already been
+    // truncated to 0 bytes when this leg's reconciliation fires — such a
+    // plugin, if it re-reads the artifact it was invoked for (e.g. via
+    // `read_prefix`), observes the post-roll empty file, not the content the
+    // tool call just wrote. This is a plausible false-positive
+    // advisory/block source on precisely the dispatch where the roll fires.
+    // Risk assessed as ACCEPTED: no PostToolUse WASM plugin registered in
+    // this repository's own `hooks-registry.toml` reads the artifact its
+    // OWN dispatch just wrote (the class of plugin this would affect), and
+    // the alternative — running this leg AFTER the tier loop — reintroduces
+    // the strictly worse "silently stop firing if the plugin set changes"
+    // failure mode this placement exists to prevent (see above). Concretely
+    // demonstrated by `invoke.rs`'s
+    // `test_MINOR5_post_tool_use_validator_observes_truncated_canonical_after_catch_point_i`.
+    factory_dispatcher::invoke::reconcile_replace_all_overcap_if_qualifying(&payload, &project_cwd);
+
+    // BC-1.18.005 T-2 / MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle
+    // 3; ADR-051 §Decision 17): the PreToolUse shard-cap gate, computed ONCE
+    // here — at the same call site as the catch-point-(i) leg immediately
+    // above, and for the SAME reason (ADR-051 §Decision 1's placement rule:
+    // a native, non-registry-gated check must run BEFORE the
+    // `sync_tiers.is_empty() && partition.async_group.is_empty()` guard, not
+    // as something the registry-driven `execute_tiers` loop does on the
+    // side). Before MAJOR-3, `shard_cap_precheck` ran only INSIDE
+    // `execute_tiers`, which this function skips entirely whenever no
+    // plugin matched — silently defeating the PreToolUse gate for exactly
+    // that configuration (an empty matched-plugin set), the asymmetric twin
+    // of the failure mode this same Decision 1 placement rule already
+    // prevents on the PostToolUse leg above. The gate's own guards
+    // (event/tool/config-presence — see `shard_cap_precheck`'s doc comment)
+    // make this a zero-cost no-op (`None`) for every dispatch that isn't a
+    // genuine PreToolUse Edit/Write/MultiEdit candidate with a `[[shard]]`
+    // config present.
+    //
+    // Computed EXACTLY ONCE: consumed either by `execute_tiers` below (via
+    // `shard_gate_verdict_outcomes`, when at least one tier group is
+    // non-empty) OR, since MINOR-N1 (S-25.02 cluster-2 PR #824 pr-review
+    // cycle 4), by this function's own empty-tier-groups short-circuit
+    // calling that SAME `shard_gate_verdict_outcomes` helper directly —
+    // never both, and never recomputed. The gate's fired branch reaches
+    // `shard_manager::execute_roll` — a destructive seal-and-truncate-to-0
+    // operation — so evaluating this twice would corrupt on-disk state (the
+    // second evaluation would see the already-rolled canonical), not merely
+    // waste cycles. **On the empty-tier-groups path (MINOR-N1), a fired
+    // verdict short-circuits DIRECTLY to its exit code — it is NO LONGER
+    // gated behind `build_engine()`, which that path never reaches at all**;
+    // see the empty-tier-groups guard immediately below for the full
+    // rationale.
+    // BC-1.18.011 Precondition 6 / ADR-052 §Decision 5a (S-25.02 cluster-5,
+    // T-11) — the native OPEN/DRAINING writer-admission gate for the B2
+    // governed one-time migration. Computed FIRST, before
+    // `shard_cap_precheck`, per BC-1.18.011 Architect Ruling 1
+    // (D-1232-OBL, this burst): `shard_cap_precheck`'s fired branch reaches
+    // `shard_manager::execute_roll` — a DESTRUCTIVE seal-and-truncate-to-0
+    // operation — so it must be STRUCTURALLY SKIPPED (never invoked at
+    // all) when a BC-INDEX-path write is already blocked by a
+    // STAGING/COMMITTING migration txn, never merely evaluated and then
+    // outcome-discarded via `.or(...)` after both already ran (the prior
+    // revision's defect: it computed `shard_gate_precheck_result` via
+    // `shard_cap_precheck` UNCONDITIONALLY above, before the migration
+    // check ever ran, so a fired migration-admission verdict would have
+    // "won" only in the RETURNED value, after `execute_roll`'s destructive
+    // side effect had already landed on disk).
+    let migration_gate_precheck_result =
+        bc_index_migration_admission_precheck(&payload, &project_cwd);
+
+    // OBL-1 §5 (O-5 fold-in): the PostToolUse release counterpart to the
+    // admission precheck above. No-ops internally for every dispatch that
+    // isn't a genuine PostToolUse Edit/Write/MultiEdit with migration state
+    // present (mirrors `bc_index_migration_admission_precheck`'s own
+    // real, non-stub existence/scope guards) — fire-and-forget, never
+    // produces a verdict, never affects `shard_gate_precheck_result` or
+    // any downstream exit-code aggregation below.
+    bc_index_migration_reservation_release(&payload, &project_cwd);
+
+    // `shard_cap_precheck` is reachable ONLY in the `None` arm below — this
+    // `match`'s control flow IS Ruling 1's "structurally skipped" guarantee.
+    // Non-BC-INDEX-path dispatches (decision-log/burst-log/lessons/session-
+    // checkpoints) and every dispatch while no migration is in flight are
+    // UNAFFECTED: `bc_index_migration_admission_precheck` returns `None`
+    // for them (its own real, non-stub existence/scope guards), so
+    // `shard_cap_precheck` continues to run normally on exactly the same
+    // inputs as before this restructure.
+    let shard_gate_precheck_result =
+        resolve_shard_gate_precedence(migration_gate_precheck_result, || {
+            shard_cap_precheck(&payload, &project_cwd)
+        });
+
+    // Widened (MAJOR-3) from `sync_tiers.is_empty() && partition.async_group.is_empty()`:
+    // a fired shard-cap-gate verdict (`Some(_)`) must still reach
+    // `execute_tiers`'s verdict->`all_outcomes`/`block_intent` translation
+    // and this function's own `final_exit_code` aggregation even when BOTH
+    // the sync and async matched-plugin groups are empty — the exact
+    // configuration that previously made this gate unreachable. An empty
+    // `tiers` vec with a fired precheck verdict is already handled
+    // correctly by `execute_tiers` (empty `tiers` loop body, precheck
+    // consumed unconditionally before it).
+    //
+    // MINOR-N1 fix (S-25.02 cluster-2 PR #824 pr-review cycle 4): on this
+    // empty-tier-groups path, a FIRED verdict (`Some(_)`) short-circuits
+    // DIRECTLY to its exit code here — via [`factory_dispatcher::executor::
+    // shard_gate_verdict_outcomes`], the SAME verdict-translation
+    // `execute_tiers` runs on its own shard-gate arm, followed by this
+    // function's own `extract_block_info` — and returns BEFORE
+    // `build_engine()` is ever reached. `build_engine()` exists only to run
+    // the registry-driven tier loop below; that loop is EMPTY on this path
+    // (`tiers` would be `Vec::new()`), so building a WASM engine here is
+    // pure waste, and — the actual defect this closes — a `build_engine()`
+    // failure previously returned `Ok(0)` on this path, silently
+    // downgrading an already-fired verdict from exit 2 to exit 0 even
+    // though the fired branch's destructive `execute_roll` (seal +
+    // truncate-to-0) had ALREADY completed against on-disk state. A
+    // non-fired (`None`) verdict is unaffected: it still returns `Ok(0)`
+    // immediately below, exactly as before this fix.
     if sync_tiers.is_empty() && partition.async_group.is_empty() {
-        return Ok(0);
+        if shard_gate_precheck_result.is_none() {
+            return Ok(0);
+        }
+
+        let plugin_version = env!("CARGO_PKG_VERSION").to_string();
+        let (outcomes, block_intent) = factory_dispatcher::executor::shard_gate_verdict_outcomes(
+            shard_gate_precheck_result,
+            plugin_version,
+        );
+
+        // BC-1.15.001 PC2: PostCompact is advisory-only regardless of
+        // native-gate verdict — same suppression this function's normal
+        // (post-`execute_tiers`) path applies below.
+        let event_is_advisory_only =
+            factory_dispatcher::invoke::EventType::from_event_str(&payload.event_name)
+                .is_advisory_only();
+        let final_exit_code = if event_is_advisory_only {
+            0
+        } else if block_intent {
+            2
+        } else {
+            0
+        };
+
+        if final_exit_code == 2 {
+            let (blocking_names, block_reason) = extract_block_info(&outcomes);
+            eprintln!(
+                "  plugins_run={} total_ms=0 block_intent=true exit_code={} blocking_plugins={} block_reason=\"{}\"",
+                outcomes.len(),
+                final_exit_code,
+                blocking_names,
+                block_reason,
+            );
+        } else {
+            eprintln!(
+                "  plugins_run={} total_ms=0 block_intent=false exit_code={}",
+                outcomes.len(),
+                final_exit_code,
+            );
+        }
+
+        return Ok(final_exit_code);
     }
 
     // Execution layer. Build a shared engine + epoch ticker + module
@@ -289,7 +552,26 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // of cold-start cost but sidesteps any global state concerns for
     // the short-lived dispatcher process. S-1.5's `PluginCache` still
     // amortizes per-plugin compile cost within a single invocation.
-    let engine = match build_engine() {
+    // MINOR-N1 regression coverage (S-25.02 cluster-2 PR #824 pr-review
+    // cycle 4): `VSDD_FORCE_ENGINE_BUILD_FAILURE`, gated identically to
+    // `VSDD_ASYNC_DRAIN_WINDOW_MS` above, lets a test drive a genuine
+    // `build_engine()` failure — otherwise unreachable outside OOM — so
+    // `test_MINORN1_fired_shard_gate_verdict_on_empty_tiers_survives_build_engine_failure`
+    // can prove the empty-tier-groups short-circuit above never depends on
+    // `build_engine()` succeeding. Absent from shipped release builds.
+    #[cfg(any(debug_assertions, feature = "test-support"))]
+    let engine_build_result = if std::env::var(ENV_FORCE_ENGINE_BUILD_FAILURE).is_ok() {
+        Err(EngineError::Config(
+            "VSDD_FORCE_ENGINE_BUILD_FAILURE forced failure (test-support fault injection)"
+                .to_string(),
+        ))
+    } else {
+        build_engine()
+    };
+    #[cfg(not(any(debug_assertions, feature = "test-support")))]
+    let engine_build_result = build_engine();
+
+    let engine = match engine_build_result {
         Ok(e) => e,
         Err(e) => {
             emit_dispatcher_error(
@@ -317,27 +599,13 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
     // every hook that calls bin/emit-event) walk `.factory/logs/`
     // relative to cwd. Falling back to the dispatcher's cwd produces
     // log writes in surprising places.
-    base_host_ctx.cwd = std::env::var(ENV_PROJECT_DIR)
-        .map(PathBuf::from)
-        .ok()
-        .filter(|p| !p.as_os_str().is_empty())
-        // Canonicalize the project directory to resolve OS-level symlinks
-        // (e.g., macOS /var → /private/var). This ensures host::cwd() returns
-        // the same physical path that `git worktree list --porcelain` reports,
-        // preventing false-positive DURABILITY DEGRADED from Tier 2 path-mismatch
-        // checks in precompact-flush and similar plugins. Canonicalize failure is
-        // non-fatal: fall back to the raw path (better than no cwd at all).
-        //
-        // SEC-004 TOCTOU ACCEPTED: the canonicalize call here resolves symlinks at
-        // dispatcher startup, but the resolved path is used as a label (host::cwd()
-        // for path-comparison in plugins), not for filesystem access. Any TOCTOU
-        // window between canonicalize and plugin use is therefore inconsequential:
-        // the worst outcome is a false-positive DURABILITY DEGRADED advisory (fail-open).
-        // This is explicitly accepted under the same-user local trust model; the
-        // `unwrap_or(p)` fallback is fail-safe (raw path beats no path at all).
-        .map(|p| p.canonicalize().unwrap_or(p))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // S-25.02 BC-1.18.006 cluster-2: reuses the SAME `project_cwd` this
+    // function already resolved above (before the early-return guard, for
+    // Postcondition 7 catch point (i)'s sake) rather than re-deriving it —
+    // see `resolve_project_cwd`'s own doc comment. Behavior-preserving: this
+    // is the exact same env-var-read + canonicalize + fallback sequence that
+    // was previously inlined here, only moved earlier and named.
+    base_host_ctx.cwd = project_cwd;
     // ADR-024 Decision 2: CLAUDE_PLUGIN_ROOT already checked above (Tier-1 vs Tier-2).
     // plugin_root_val is set from ENV_PLUGIN_ROOT at the start of run(); use it here
     // directly so HostContext carries the same value as the registry resolution path.
@@ -472,7 +740,7 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
         resolver_registry: resolver_registry.clone(),
     };
 
-    let summary = execute_tiers(inputs, sync_tiers).await;
+    let summary = execute_tiers(inputs, sync_tiers, shard_gate_precheck_result).await;
 
     // S-15.01 F5-T-A: async_group dispatch via tokio::spawn per-plugin + tokio::select! drain.
     //
@@ -761,10 +1029,14 @@ async fn run(internal_log: Arc<InternalLog>) -> anyhow::Result<i32> {
 /// a slice of per-plugin outcomes. Used by the TD #71 stderr surfacing path.
 ///
 /// **blocking_names**: comma-joined names of plugins that contributed to
-/// the block decision. Three trigger categories:
+/// the block decision. Four trigger categories:
 ///   1. Advisory block: `stdout.contains(r#""outcome":"block""#)` (any `on_error`).
 ///   2. WASI-exit-code block: `exit_code == 2 && on_error == OnError::Block`.
 ///   3. Fail-closed: `Crashed | Timeout && on_error == OnError::Block`.
+///   4. BlockIfMarker: `Crashed | Timeout && on_error == OnError::BlockIfMarker
+///      && block_if_marker_fired == true` (ADR-048 §Decision 1 / BC-1.18.002 PC5).
+///      Only surfaces when the marker was confirmed present/non-expired at dispatch time;
+///      `block_if_marker_fired` is set by `execute_tiers` from `plugin_block_if_marker`.
 ///
 /// **block_reason**: the `reason` field from the first blocking plugin's
 /// `{"outcome":"block","reason":"..."}` stdout JSON, or a generic sentinel
@@ -787,8 +1059,11 @@ fn extract_block_info(outcomes: &[PluginOutcome]) -> (String, String) {
                 advisory || wasi_block
             }
             // Fail-closed: crash or timeout with on_error=Block.
+            // BlockIfMarker: crash or timeout with on_error=BlockIfMarker AND the
+            // block_if_marker check confirmed the marker was present/non-expired.
             PluginResult::Crashed { .. } | PluginResult::Timeout { .. } => {
                 outcome.on_error == OnError::Block
+                    || (outcome.on_error == OnError::BlockIfMarker && outcome.block_if_marker_fired)
             }
         };
 
@@ -797,7 +1072,19 @@ fn extract_block_info(outcomes: &[PluginOutcome]) -> (String, String) {
 
             // Extract block reason from the first blocking plugin's stdout.
             if first_reason.is_none() {
-                first_reason = extract_reason_from_outcome(&outcome.result);
+                // For BlockIfMarker crash-blocks, emit a recoverable sentinel that
+                // tells operators exactly how to recover — distinct from the generic
+                // "fail-closed: plugin crashed" message (ADR-048 §Decision 1 /
+                // BC-1.18.002 PC5 / TD #71).
+                first_reason = if outcome.on_error == OnError::BlockIfMarker
+                    && outcome.block_if_marker_fired
+                {
+                    Some(format_block_if_marker_crash_reason(
+                        outcome.block_if_marker_fields.as_deref(),
+                    ))
+                } else {
+                    extract_reason_from_outcome(&outcome.result)
+                };
             }
         }
     }
@@ -809,26 +1096,111 @@ fn extract_block_info(outcomes: &[PluginOutcome]) -> (String, String) {
     (names_str, reason_escaped)
 }
 
+/// Build the crash-path BLOCK message for an `on_error = "block_if_marker"`
+/// outcome whose `block_if_marker_fired` flag is `true` (BC-1.18.002 v1.6 PC5;
+/// ADR-048 §Decision 3 amended v1.1 Four-Tier Recovery Model).
+///
+/// F-P2-001 fix: the message previously omitted the marker's fields and
+/// instructed the blocked agent to `rm .factory/unvalidated-mutation.marker`
+/// directly — a CWE-636 self-de-quarantine that ADR-048 §Decision 3 / INV6-T4
+/// FORBIDS (agent-tool `rm` is de-sanctioned; only a human operator acting
+/// out-of-band in their own terminal, T3, may clear the marker that way).
+/// This function instead:
+///
+///   1. names the marker's `plugin_name`, `artifact_path`, `cause`, and
+///      `expires_at` fields (BC-1.18.002 v1.6 PC5 "the block message includes
+///      the marker's ... fields");
+///   2. orders recovery guidance T1 (agent re-validation via Edit/Write —
+///      inherently ungated, the agent's genuine primary recovery) first,
+///      T2 (24h TTL auto-clear) second, T3 (human out-of-band `rm`,
+///      break-glass) third and explicitly framed as a human/operator action;
+///   3. never instructs the agent itself to run `rm`.
+///
+/// `fields` is `None` when the marker could not be re-read at message-build
+/// time (e.g. a racing T1 re-validation cleared it between the crash-path
+/// block decision and this read) — degrades to `"<unknown>"` placeholders
+/// rather than fabricating values; the recovery guidance and tier ordering
+/// are unchanged either way.
+fn format_block_if_marker_crash_reason(fields: Option<&MarkerFields>) -> String {
+    const UNKNOWN: &str = "<unknown>";
+    let plugin_name = fields.map_or(UNKNOWN, |f| f.plugin_name.as_str());
+    let artifact_path = fields.map_or(UNKNOWN, |f| f.artifact_path.as_str());
+    let cause = fields.map_or(UNKNOWN, |f| f.cause.as_str());
+    let expires_at = fields.map_or(UNKNOWN, |f| f.expires_at.as_str());
+
+    format!(
+        "fail-closed-recoverable: non-expired .factory/unvalidated-mutation.marker \
+         present (ADR-048 \u{00a7}D1 block_if_marker on gate crash/timeout) — \
+         plugin_name=\"{plugin_name}\" artifact_path=\"{artifact_path}\" cause=\"{cause}\" \
+         expires_at=\"{expires_at}\". Recovery, in order of sanctioned preference: \
+         (T1 — primary agent recovery, do this) re-run the Edit or Write that produced \
+         artifact_path \"{artifact_path}\"; this dispatch type is permanently ungated by \
+         this gate and re-validates the artifact, clearing the marker on PASS; \
+         (T2 — passive) if immediate re-validation is not possible, the marker auto-clears \
+         once the 24h TTL elapses at \"{expires_at}\"; \
+         (T3 — human operator only, NOT an agent action) the human operator may run \
+         `rm .factory/unvalidated-mutation.marker` out-of-band in their own terminal as a \
+         break-glass escape — this agent MUST NOT perform that action."
+    )
+}
+
 /// Parse the `reason` field from a `{"outcome":"block","reason":"..."}` stdout
 /// JSON produced by a blocking plugin. Returns `None` for non-OK results or
 /// when the JSON does not contain a `reason` field.
 fn extract_reason_from_outcome(result: &PluginResult) -> Option<String> {
     match result {
         PluginResult::Ok { stdout, .. } => {
-            // Fast-path: only attempt JSON parsing when the block marker is present.
-            if !stdout.contains(r#""outcome":"block""#) {
+            if stdout.contains(r#""outcome":"block""#) {
+                // Advisory block: parse the `reason` field.
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
+            } else if stdout.contains(r#""outcome":"error""#) {
+                // Gate fail-loud (e.g. shard_gate_error_outcome / VP-131
+                // E-SHD-004): parse the `message` field so operator-facing
+                // block_reason carries the diagnostic text rather than being
+                // silently empty (WASI-exit-code block without `"reason"` key).
+                serde_json::from_str::<serde_json::Value>(stdout)
+                    .ok()
+                    .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+            } else {
                 // WASI-exit-code block without advisory stdout JSON:
                 // no reason available from plugin stdout.
-                return None;
+                None
             }
-            // Parse the reason field from the JSON payload.
-            serde_json::from_str::<serde_json::Value>(stdout)
-                .ok()
-                .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_owned))
         }
-        // Fail-closed crash/timeout: sentinel reason.
+        // Fail-closed crash/timeout: sentinel reasons distinguished by cause so
+        // operators can choose the right remedy without opening the internal log.
+        // Fuel exhaustion is a permanent resource-policy failure (raise cap or
+        // reduce payload); epoch/wall-clock is a transient compute failure
+        // (investigate slow script). Conflating them forces operators to grep
+        // the internal log for the trace UUID to determine cause — TD #71 pattern.
+        //
+        // All three arms use the "fail-closed:" family prefix, consistent with
+        // the rest of the fail-closed taxonomy. The fuel arm additionally embeds
+        // "FUEL_EXHAUSTED:" as a greppable sub-token so a future consumer can
+        // distinguish fuel from epoch without parsing the trailing prose. The
+        // epoch arm string "fail-closed: plugin timed out" is unchanged —
+        // existing operator runbooks match it.
+        //
+        // On Trap::OutOfFuel, wasmtime's remaining-fuel counter reaches zero, so
+        // fuel_consumed_from_store() == fuel_cap (cap.saturating_sub(0) = cap).
+        // The interpolated value therefore represents the configured cap, not a
+        // measured cost. The message is framed accordingly ("fuel cap of N units")
+        // rather than "N units consumed" which would imply a metered demand figure.
         PluginResult::Crashed { .. } => Some("fail-closed: plugin crashed".to_owned()),
-        PluginResult::Timeout { .. } => Some("fail-closed: plugin timed out".to_owned()),
+        PluginResult::Timeout {
+            cause: TimeoutCause::Fuel,
+            fuel_cap,
+            ..
+        } => Some(format!(
+            "fail-closed: FUEL_EXHAUSTED: fuel cap of {fuel_cap} units exhausted; \
+             raise fuel_cap or reduce payload size"
+        )),
+        PluginResult::Timeout {
+            cause: TimeoutCause::Epoch,
+            ..
+        } => Some("fail-closed: plugin timed out".to_owned()),
     }
 }
 
@@ -860,6 +1232,48 @@ fn resolve_log_dir() -> PathBuf {
     let project_dir = std::env::var(ENV_PROJECT_DIR).ok();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     factory_dispatcher::log_dir::resolve_log_dir_from(project_dir.as_deref(), &cwd)
+}
+
+/// Resolve the project working directory the dispatcher treats as `cwd` for
+/// path-scoped native checks. Extracted, BEHAVIOR-PRESERVING, from the
+/// `base_host_ctx.cwd` derivation `run()` previously computed inline at its
+/// (single, pre-extraction) call site — see this function's own inline
+/// comments for the full canonicalize/TOCTOU rationale (SEC-004 ACCEPTED),
+/// reproduced verbatim, not altered.
+///
+/// This extraction exists so `run()` can resolve `cwd` ONCE, BEFORE its own
+/// `sync_tiers.is_empty() && partition.async_group.is_empty()` early-return
+/// guard, and reuse the SAME value for both (a) BC-1.18.006 Postcondition 7
+/// catch point (i)'s unconditional native call (ADR-051 §Decision 15 point 4
+/// — the placement caveat requires this call to precede that guard, which
+/// in turn requires `cwd` to be available before `base_host_ctx` itself is
+/// constructed) and (b) `base_host_ctx.cwd`'s own later assignment — never
+/// two independent env-var reads that could, in principle, observe a
+/// changed `CLAUDE_PROJECT_DIR` between them (this process never mutates its
+/// own env after start, so this is a determinism/duplication cleanup, not a
+/// correctness fix for an observed bug).
+fn resolve_project_cwd() -> PathBuf {
+    std::env::var(ENV_PROJECT_DIR)
+        .map(PathBuf::from)
+        .ok()
+        .filter(|p| !p.as_os_str().is_empty())
+        // Canonicalize the project directory to resolve OS-level symlinks
+        // (e.g., macOS /var → /private/var). This ensures host::cwd() returns
+        // the same physical path that `git worktree list --porcelain` reports,
+        // preventing false-positive DURABILITY DEGRADED from Tier 2 path-mismatch
+        // checks in precompact-flush and similar plugins. Canonicalize failure is
+        // non-fatal: fall back to the raw path (better than no cwd at all).
+        //
+        // SEC-004 TOCTOU ACCEPTED: the canonicalize call here resolves symlinks at
+        // dispatcher startup, but the resolved path is used as a label (host::cwd()
+        // for path-comparison in plugins), not for filesystem access. Any TOCTOU
+        // window between canonicalize and plugin use is therefore inconsequential:
+        // the worst outcome is a false-positive DURABILITY DEGRADED advisory (fail-open).
+        // This is explicitly accepted under the same-user local trust model; the
+        // `unwrap_or(p)` fallback is fail-safe (raw path beats no path at all).
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 // flush_sink_file is now in factory_dispatcher::vsdd_sink (S-19.05 AC-004).
@@ -1003,15 +1417,12 @@ mod red_gate_s18_14_log_dir {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    /// Emit a `dispatcher.started` event exactly as `main.rs` currently does
-    /// (WITHOUT `log_dir` — the pre-fix state), then read back the JSONL and
-    /// assert that the `log_dir` key IS present and is_absolute.
-    ///
-    /// This test is RED before the fix because the current code does not include
-    /// `log_dir` in the `DISPATCHER_STARTED` event builder chain at all.
-    ///
-    /// After the fix (implementer adds `.with_field("log_dir", std::path::absolute(...)...)`
-    /// to the builder chain in `main.rs`), this test turns GREEN.
+    /// Emit a `dispatcher.started` event and assert that the `log_dir` key
+    /// IS present and is_absolute (S-18.14 fix: `.with_field("log_dir",
+    /// std::path::absolute(...))` added to the builder chain in `main.rs`).
+    /// Uses a relative `log_dir` path to discriminate — an absolute tempdir
+    /// path would pass `is_absolute()` trivially without exercising the fix.
+    /// This test passes against HEAD (GREEN).
     ///
     /// Covers AC-005, AC-006 (BC-1.13.001 PC-10).
     #[test]
@@ -1096,10 +1507,8 @@ mod red_gate_s18_14_log_dir {
         let event: serde_json::Value =
             serde_json::from_str(line).expect("JSONL line must be valid JSON");
 
-        // PRIMARY RED-GATE ASSERTION (AC-005):
-        // The `log_dir` key MUST be present in the `dispatcher.started` event payload.
-        // Before fix: this assertion FAILS because the current code does not include `log_dir`.
-        // After fix: this assertion PASSES because the implementer adds the field.
+        // AC-005 assertion: `log_dir` key MUST be present in the
+        // `dispatcher.started` event payload (S-18.14 fix applied; GREEN).
         let log_dir_value = event
             .get("log_dir")
             .expect(
@@ -1123,6 +1532,376 @@ mod red_gate_s18_14_log_dir {
             Path::new(log_dir_value).is_absolute(),
             "log_dir field value must be an absolute path (BC-1.13.001 PC-10 absolutize-on-emit); \
              got: {log_dir_value:?} (relative path means absolutize-on-emit fix is not applied)"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// extract_reason_from_outcome — fuel vs epoch distinction
+//
+// Fuel exhaustion and wall-clock (epoch) timeouts need opposite operator
+// responses: fuel is a permanent resource-policy failure requiring a cap
+// raise or payload reduction; epoch is a transient compute failure requiring
+// script investigation. Both previously returned "fail-closed: plugin timed
+// out", making them indistinguishable from the agent-visible block_reason.
+//
+// TDD: `fuel_timeout_reason_identifies_fuel_exhaustion` passes against HEAD
+// (fix applied: fuel returns "plugin timed out: fuel" distinct from epoch's
+// "plugin timed out").  The epoch and crash tests confirm those arms are
+// unaffected by the change.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests_extract_reason_cause_distinction {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use factory_dispatcher::invoke::{PluginResult, TimeoutCause};
+
+    // Fuel timeout must produce a fuel-specific reason, not "plugin timed out".
+    //
+    // The test input uses fuel_consumed == 20_000_000 to reflect the real invariant:
+    // on Trap::OutOfFuel, wasmtime's remaining-fuel counter is zero, so
+    // fuel_consumed_from_store() == fuel_cap (cap.saturating_sub(0) = cap).
+    // A value like 10_500_000 that differs from any plausible cap is unreachable
+    // in production and would make assertions on the interpolated value misleading.
+    #[test]
+    fn fuel_timeout_reason_identifies_fuel_exhaustion() {
+        use factory_dispatcher::invoke::DEFAULT_FUEL_CAP;
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Fuel,
+            stderr: String::new(),
+            elapsed_ms: 5,
+            // consumed == cap on fuel trap (see invariant comment above).
+            fuel_consumed: DEFAULT_FUEL_CAP,
+            // fuel_cap is the configured cap; message interpolates this field.
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let reason = super::extract_reason_from_outcome(&result);
+        let text = reason
+            .as_deref()
+            .expect("fuel timeout must produce Some reason");
+        // Family prefix + greppable sub-token. Both must be present in the
+        // emitted message so operators see the fail-closed taxonomy and can
+        // still grep FUEL_EXHAUSTED: without opening the internal log.
+        assert!(
+            text.starts_with("fail-closed: FUEL_EXHAUSTED:"),
+            "fuel timeout block_reason must start with 'fail-closed: FUEL_EXHAUSTED:', got: {text:?}"
+        );
+        assert!(
+            text.contains("exhausted"),
+            "fuel timeout block_reason must contain 'exhausted', got: {text:?}"
+        );
+        assert!(
+            !text.contains("timed out"),
+            "fuel timeout block_reason must NOT say 'timed out' — \
+             operators need distinct messages to choose the right remedy; got: {text:?}"
+        );
+        // The interpolated value is the cap (consumed == cap on fuel trap).
+        // Assert against the actual cap constant so this tracks deliberate changes.
+        assert!(
+            text.contains(&DEFAULT_FUEL_CAP.to_string()),
+            "fuel timeout block_reason should include the cap value ({DEFAULT_FUEL_CAP}) \
+             so operators know which cap to raise; got: {text:?}"
+        );
+    }
+
+    // Decoupling test: the message is a function of `fuel_cap` alone and must
+    // not read `fuel_consumed`.  With `fuel_consumed=0` and
+    // `fuel_cap=DEFAULT_FUEL_CAP`, the message must still cite the configured
+    // cap so operators know which budget to raise — regardless of whatever
+    // value `fuel_consumed` holds.
+    //
+    // Note: `fuel_consumed_from_store` has a dead `Err(_) => 0` arm (it can
+    // only err when fuel is disabled, but `build_engine` enables fuel
+    // unconditionally and `set_fuel` failing aborts in `InvokeError::Setup`
+    // before execution begins).  The `fuel_consumed: 0` input here is simply
+    // a synthetic boundary value, not a claim about the Err(_) path.
+    #[test]
+    fn fuel_timeout_with_zero_consumed_still_reports_cap() {
+        use factory_dispatcher::invoke::DEFAULT_FUEL_CAP;
+        // Synthetic: consumed=0 to verify the message ignores fuel_consumed.
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Fuel,
+            stderr: String::new(),
+            elapsed_ms: 0,
+            fuel_consumed: 0,
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let reason = super::extract_reason_from_outcome(&result);
+        let text = reason
+            .as_deref()
+            .expect("fuel timeout must produce Some reason");
+        assert!(
+            text.starts_with("fail-closed: FUEL_EXHAUSTED:"),
+            "message must carry fail-closed: FUEL_EXHAUSTED: prefix even when fuel_consumed=0; got: {text:?}"
+        );
+        assert!(
+            text.contains(&DEFAULT_FUEL_CAP.to_string()),
+            "message must report the configured cap ({DEFAULT_FUEL_CAP}), \
+             not fuel_consumed (0); got: {text:?}"
+        );
+        // Fails against the pre-fix form "fuel cap of 0 units exhausted":
+        //   pre-fix:  "…fail-closed: FUEL_EXHAUSTED: fuel cap of 0 units exhausted…"  → contains → assertion FAILS  ✓
+        //   post-fix: "…fail-closed: FUEL_EXHAUSTED: fuel cap of 20000000 units …"    → absent   → assertion PASSES ✓
+        assert!(
+            !text.contains("of 0 units"),
+            "message must NOT interpolate fuel_consumed=0 as the cap; \
+             pre-fix form contained 'of 0 units'; got: {text:?}"
+        );
+    }
+
+    // Epoch timeout must still produce the original "plugin timed out" sentinel —
+    // changing this arm would break existing operator runbooks for slow scripts.
+    #[test]
+    fn epoch_timeout_reason_is_unaffected() {
+        use factory_dispatcher::invoke::DEFAULT_FUEL_CAP;
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Epoch,
+            stderr: String::new(),
+            elapsed_ms: 5_001,
+            fuel_consumed: 2_000_000,
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let reason = super::extract_reason_from_outcome(&result);
+        assert_eq!(
+            reason.as_deref(),
+            Some("fail-closed: plugin timed out"),
+            "epoch timeout block_reason must remain 'fail-closed: plugin timed out'"
+        );
+    }
+
+    // Crash arm must be untouched — regression guard.
+    #[test]
+    fn crash_reason_is_unaffected() {
+        let result = PluginResult::Crashed {
+            trap_string: "unreachable".to_owned(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 50_000,
+        };
+        let reason = super::extract_reason_from_outcome(&result);
+        assert_eq!(
+            reason.as_deref(),
+            Some("fail-closed: plugin crashed"),
+            "crash block_reason must remain 'fail-closed: plugin crashed'"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// extract_block_info — BlockIfMarker crash-block surfacing (TD #71 / ADR-048)
+//
+// Closes the M-1 coverage gap: extract_block_info was previously blind to
+// on_error=BlockIfMarker outcomes (only checked on_error==Block in the
+// Crashed|Timeout arm). These tests assert that the recoverable sentinel reason
+// is surfaced when block_if_marker_fired=true, and NOT surfaced when the marker
+// was absent (block_if_marker_fired=false).
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests_extract_block_info_block_if_marker {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+    use factory_dispatcher::executor::PluginOutcome;
+    use factory_dispatcher::indeterminate_marker::MarkerFields;
+    use factory_dispatcher::invoke::PluginResult;
+    use factory_dispatcher::registry::OnError;
+
+    /// BC-1.18.002 PC5 / TD #71 (M-1):
+    /// Crash + on_error=BlockIfMarker + block_if_marker_fired=true →
+    /// extract_block_info MUST return non-empty blocking_plugins AND a
+    /// block_reason containing the recoverable sentinel prefix.
+    #[test]
+    fn block_if_marker_crash_with_fired_flag_surfaces_reason() {
+        let outcomes = vec![PluginOutcome {
+            plugin_name: "validate-unvalidated-mutation-marker".to_string(),
+            plugin_version: "1.0.0".to_string(),
+            on_error: OnError::BlockIfMarker,
+            result: PluginResult::Crashed {
+                trap_string: "unreachable".to_string(),
+                stderr: String::new(),
+                elapsed_ms: 1,
+                fuel_consumed: 0,
+            },
+            block_if_marker_fired: true,
+            block_if_marker_fields: None,
+        }];
+
+        let (blocking_plugins, block_reason) = super::extract_block_info(&outcomes);
+
+        assert_eq!(
+            blocking_plugins, "validate-unvalidated-mutation-marker",
+            "TD #71 / BC-1.18.002 PC5: blocking_plugins MUST be non-empty for \
+             BlockIfMarker crash with block_if_marker_fired=true"
+        );
+        assert!(
+            block_reason.starts_with("fail-closed-recoverable:"),
+            "TD #71 / BC-1.18.002 PC5: block_reason MUST start with \
+             'fail-closed-recoverable:' for BlockIfMarker crash-block; got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("unvalidated-mutation.marker"),
+            "block_reason MUST name the marker file so the human operator (T3) knows \
+             which file break-glass rm targets; got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("ADR-048"),
+            "block_reason MUST cite ADR-048 for traceability; got: {block_reason:?}"
+        );
+    }
+
+    /// F-P2-001 (HIGH / BLOCKER) regression test — BC-1.18.002 v1.6 PC5 +
+    /// INV6/T4 (ADR-048 §Decision 3 amended v1.1 Four-Tier Recovery Model).
+    ///
+    /// The crash-path BLOCK message MUST:
+    ///   1. contain all four marker fields (plugin_name, artifact_path, cause,
+    ///      expires_at) with their actual values from the marker;
+    ///   2. present recovery options ordered T1 (agent re-validation via
+    ///      Edit/Write) before T2 (TTL auto-clear) before T3 (human
+    ///      out-of-band `rm`);
+    ///   3. NOT instruct the agent itself to run `rm` — a T3 human-action
+    ///      mention is allowed, but it must be framed as an operator action,
+    ///      never as a command the agent should execute to self-de-quarantine
+    ///      (CWE-636 per ADR-048 §Decision 3 / INV6/T4).
+    #[test]
+    fn block_if_marker_crash_message_has_fields_t1_first_and_no_agent_rm_instruction() {
+        let fields = MarkerFields {
+            timestamp: "2026-08-30T12:00:00Z".to_string(),
+            plugin_name: "validate-factory-path-staging".to_string(),
+            artifact_path: "/repo/.factory/STATE.md".to_string(),
+            cause: "fuel".to_string(),
+            trace_id: "trace-abc123".to_string(),
+            expires_at: "2026-08-31T12:00:00Z".to_string(),
+        };
+        let outcomes = vec![PluginOutcome {
+            plugin_name: "validate-unvalidated-mutation-marker".to_string(),
+            plugin_version: "1.0.0".to_string(),
+            on_error: OnError::BlockIfMarker,
+            result: PluginResult::Crashed {
+                trap_string: "unreachable".to_string(),
+                stderr: String::new(),
+                elapsed_ms: 1,
+                fuel_consumed: 0,
+            },
+            block_if_marker_fired: true,
+            block_if_marker_fields: Some(Box::new(fields)),
+        }];
+
+        let (_, block_reason) = super::extract_block_info(&outcomes);
+
+        // (1) All four mandatory marker fields, with actual values, present.
+        assert!(
+            block_reason.contains("validate-factory-path-staging"),
+            "F-P2-001: block message MUST include the marker's plugin_name; \
+             got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("/repo/.factory/STATE.md"),
+            "F-P2-001: block message MUST include the marker's artifact_path; \
+             got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("\"fuel\""),
+            "F-P2-001: block message MUST include the marker's cause; \
+             got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("2026-08-31T12:00:00Z"),
+            "F-P2-001: block message MUST include the marker's expires_at; \
+             got: {block_reason:?}"
+        );
+
+        // (2) T1 (re-run Edit/Write) ordered before T2 (TTL) ordered before
+        // T3 (human out-of-band rm).
+        let t1_pos = block_reason
+            .find("T1")
+            .expect("F-P2-001: block message MUST mention T1 (primary agent recovery)");
+        let t2_pos = block_reason
+            .find("T2")
+            .expect("F-P2-001: block message MUST mention T2 (TTL auto-clear)");
+        let t3_pos = block_reason
+            .find("T3")
+            .expect("F-P2-001: block message MUST mention T3 (human out-of-band rm)");
+        assert!(
+            t1_pos < t2_pos && t2_pos < t3_pos,
+            "F-P2-001 / BC-1.18.002 v1.6 PC5: recovery options MUST be ordered \
+             T1 first, T2 second, T3 third; got positions T1={t1_pos} T2={t2_pos} T3={t3_pos} \
+             in: {block_reason:?}"
+        );
+
+        // (3) The agent is never instructed to run rm itself — only the human
+        // operator (T3) is described as able to. The forbidden CWE-636 pattern
+        // is an unqualified imperative directed at the caller (e.g. the old
+        // "recover via `rm ...`" phrasing this test guards against).
+        assert!(
+            !block_reason.contains("recover via `rm"),
+            "F-P2-001 / ADR-048 INV6/T4: block message MUST NOT instruct the agent \
+             to run rm (CWE-636 self-de-quarantine forbidden); got: {block_reason:?}"
+        );
+        assert!(
+            block_reason.contains("this agent MUST NOT perform that action")
+                || block_reason.contains("NOT an agent action"),
+            "F-P2-001 / ADR-048 INV6/T4: the T3 rm mention MUST be explicitly framed \
+             as a human/operator action, not an agent instruction; got: {block_reason:?}"
+        );
+    }
+
+    /// BC-1.18.002 (absent-marker path):
+    /// Crash + on_error=BlockIfMarker + block_if_marker_fired=false →
+    /// extract_block_info MUST NOT surface this outcome as blocking (marker was absent).
+    #[test]
+    fn block_if_marker_crash_without_fired_flag_not_surfaced() {
+        let outcomes = vec![PluginOutcome {
+            plugin_name: "validate-unvalidated-mutation-marker".to_string(),
+            plugin_version: "1.0.0".to_string(),
+            on_error: OnError::BlockIfMarker,
+            result: PluginResult::Crashed {
+                trap_string: "unreachable".to_string(),
+                stderr: String::new(),
+                elapsed_ms: 1,
+                fuel_consumed: 0,
+            },
+            block_if_marker_fired: false,
+            block_if_marker_fields: None,
+        }];
+
+        let (blocking_plugins, block_reason) = super::extract_block_info(&outcomes);
+
+        assert!(
+            blocking_plugins.is_empty(),
+            "BC-1.18.002 absent-marker path: blocking_plugins MUST be empty when \
+             block_if_marker_fired=false (no marker present); got: {blocking_plugins:?}"
+        );
+        assert!(
+            block_reason.is_empty(),
+            "BC-1.18.002 absent-marker path: block_reason MUST be empty when \
+             block_if_marker_fired=false; got: {block_reason:?}"
+        );
+    }
+
+    /// Regression guard: existing on_error=Block crash still surfaces with the
+    /// generic fail-closed sentinel, unchanged by the BlockIfMarker addition.
+    #[test]
+    fn on_error_block_crash_still_surfaces_generic_sentinel() {
+        let outcomes = vec![PluginOutcome {
+            plugin_name: "some-gate".to_string(),
+            plugin_version: "1.0.0".to_string(),
+            on_error: OnError::Block,
+            result: PluginResult::Crashed {
+                trap_string: "unreachable".to_string(),
+                stderr: String::new(),
+                elapsed_ms: 1,
+                fuel_consumed: 0,
+            },
+            block_if_marker_fired: false,
+            block_if_marker_fields: None,
+        }];
+
+        let (blocking_plugins, block_reason) = super::extract_block_info(&outcomes);
+
+        assert_eq!(
+            blocking_plugins, "some-gate",
+            "on_error=Block crash MUST still surface as a blocker (regression guard)"
+        );
+        assert_eq!(
+            block_reason, "fail-closed: plugin crashed",
+            "on_error=Block crash reason MUST remain 'fail-closed: plugin crashed' (regression)"
         );
     }
 }

@@ -31,6 +31,10 @@ chrono = { workspace = true }
 # parse_factory_lock, LockState, extract_yaml_string_value, parse_iso8601
 # extracted here so verify-state-timestamp-refresh can reuse without duplication.
 factory-lock-parse = { path = "../../factory-lock-parse" }
+# factory-lock: canonical home for trim_git_email (AC-005 / ADR-046 Decision 2 / F-P7-001).
+# Dependency direction: verify-factory-lock → factory-lock → factory-lock-parse (allowed;
+# FORBIDDEN direction is factory-lock → hook-sdk or factory-lock → verify-factory-lock).
+factory-lock = { path = "../../factory-lock" }
 
 [dev-dependencies]
 vsdd-hook-sdk = { path = "../../hook-sdk" }

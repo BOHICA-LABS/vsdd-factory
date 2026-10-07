@@ -1,0 +1,14 @@
+---
+document_type: bc-index
+version: "2.0"
+---
+
+# BC-INDEX
+
+<!-- Fixture: over-broad exclusion mutant — A1 clean (INDEX v1.6 matches BC v1.6) -->
+<!-- Only E1 fires: outermost last_amended "(v1.5)" vs version "1.6" -->
+<!-- F-P4-007: 6-field canonical shape; Version("1.6") in field 6 matches BC frontmatter v1.6 → A1 clean -->
+
+| BC ID | Title | Status | Capabilities | Stories | Version History |
+|-------|-------|--------|--------------|---------|-----------------|
+| [BC-5.39.010](ss-05/BC-5.39.010.md) | test fixture | draft | CAP-032 | S-21.07 | v1.6 |

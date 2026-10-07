@@ -1,0 +1,39 @@
+=== Scenario C: 24h TTL deadman expiry -> TTL_EXPIRED clear ===
+[AC-021 / BC-1.18.001 PC4 / BC-1.18.003 PC4 / BC-3.08.001 Event 9 clear_mode=TTL_EXPIRED]
+
+>> Marker with an elapsed expires_at (deadman TTL exceeded):
+--- .factory/unvalidated-mutation.marker ---
+artifact_path = ".factory/STATE.md"
+cause = "epoch"
+expires_at = "2026-08-02T00:00:00Z"
+plugin_name = "validate-factory-path-staging"
+timestamp = "2026-08-01T00:00:00Z"
+trace_id = "demo-trace-expired"
+---------------------------------------------
+
+>> calling check_and_clear_expired_marker(now = 2026-09-03T00:00:00Z)...
+
+check_and_clear_expired_marker returned: Some(fields) -- cleared
+
+>> marker AFTER the TTL check:
+--- .factory/unvalidated-mutation.marker ---
+(absent)
+---------------------------------------------
+
+--- dispatcher-internal-2026-09-03.jsonl (type=marker.cleared) ---
+{
+  "actor_type": "deadman",
+  "artifact_path": ".factory/STATE.md",
+  "clear_mode": "TTL_EXPIRED",
+  "plugin_name": "validate-factory-path-staging",
+  "reason": null,
+  "schema_version": 1,
+  "session_id": "demo-session-ttl",
+  "timestamp": "2026-09-03T13:42:48-0500",
+  "trace_id": "demo-trace-expired",
+  "ts": "2026-09-03T13:42:48-0500",
+  "ts_epoch": 1788460968,
+  "type": "marker.cleared"
+}
+---------------------------------------------
+=== DEMO SCENARIO COMPLETE ===

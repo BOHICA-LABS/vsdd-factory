@@ -204,14 +204,14 @@ async fn test_BC_3_07_001_submit_returns_before_backoff_sleep() {
 /// No mutation or truncation occurs between attempts.
 ///
 /// Strategy: submit one event with a unique label. The mock requires
-/// `body_contains(label)` on every hit — if the payload was mutated
+/// `body_includes(label)` on every hit — if the payload was mutated
 /// or truncated on a retry attempt, that attempt would receive a 404
 /// (httpmock falls through to "no mock found") rather than 503, which
 /// would be treated as a non-retryable 4xx and break the retry count.
 ///
 /// max_retries=3 → all-fail → expects exactly 3 hits on the payload-checking
 /// mock. If any hit is missing the label, that attempt gets 404 (non-retried),
-/// so mock.hits() would be 1 rather than 3.
+/// so mock.calls() would be 1 rather than 3.
 ///
 /// Uses `RecordingSleepLog` so retries happen instantly (no real sleep between
 /// attempts). This makes the test fast and deterministic.
@@ -225,7 +225,7 @@ async fn test_BC_3_07_001_retry_uses_same_payload() {
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path("/events")
-            .body_contains(r#""label":"same-payload""#);
+            .body_includes(r#""label":"same-payload""#);
         then.status(503).body("unavailable");
     });
 
@@ -241,7 +241,7 @@ async fn test_BC_3_07_001_retry_uses_same_payload() {
     // All 3 attempts must have hit the payload-checking mock.
     // If the payload were mutated/dropped on any retry, that attempt would
     // get 404 (non-retried), and hits would be < 3.
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert_eq!(
         hits, 3,
         "all 3 retry attempts must carry the same payload (same label); got {hits} hits on payload-checking mock"
@@ -483,7 +483,7 @@ async fn test_BC_3_07_001_exactly_n_minus_1_sleeps_full_failure() {
     let _ = sink.flush();
 
     // Exactly 3 HTTP attempts: initial + 2 retries.
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert_eq!(
         hits, 3,
         "max_retries=3 full-failure must produce exactly 3 HTTP attempts; got {hits}"
@@ -550,7 +550,7 @@ async fn test_BC_3_07_001_no_sleep_on_single_attempt() {
     let _ = sink.flush();
 
     // Exactly 1 HTTP attempt (no retry).
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert_eq!(
         hits, 1,
         "max_retries=1 must produce exactly 1 HTTP attempt; got {hits}"
@@ -770,7 +770,7 @@ async fn test_BC_3_07_001_4xx_no_backoff() {
     let _ = sink.flush();
 
     // Exactly 1 attempt (4xx is non-retriable, no backoff sleep).
-    let hits = mock.hits();
+    let hits = mock.calls();
     assert_eq!(
         hits, 1,
         "4xx must produce exactly 1 HTTP attempt (no retry); got {hits}"

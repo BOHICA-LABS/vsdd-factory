@@ -2,54 +2,60 @@
 resolver = "2"
 members = [
     "crates/factory-dispatcher",
-    "crates/hook-sdk",
-    "crates/hook-sdk/examples/wasm_resolver_export",
-    "crates/hook-sdk-macros",
-    "crates/hook-plugins/capture-commit-activity",
-    "crates/hook-plugins/session-end-telemetry",
-    "crates/hook-plugins/session-start-telemetry",
-    "crates/hook-plugins/tool-failure-hooks",
-    "crates/hook-plugins/worktree-hooks",
-    "crates/hook-plugins/capture-pr-activity",
-    "crates/hook-plugins/legacy-bash-adapter",
+    "crates/factory-lock",
+    "crates/factory-lock-parse",
     "crates/hook-plugins/block-ai-attribution",
+    "crates/hook-plugins/capture-commit-activity",
+    "crates/hook-plugins/capture-pr-activity",
     "crates/hook-plugins/handoff-validator",
+    "crates/hook-plugins/legacy-bash-adapter",
+    "crates/hook-plugins/lint-registry-async-invariant",
     "crates/hook-plugins/pr-manager-completion-guard",
+    "crates/hook-plugins/precompact-flush",
+    "crates/hook-plugins/read-prefix-fixture",
     "crates/hook-plugins/regression-gate",
+    "crates/hook-plugins/session-end-telemetry",
     "crates/hook-plugins/session-learning",
+    "crates/hook-plugins/session-start-telemetry",
+    "crates/hook-plugins/stamp-state-timestamp",
+    "crates/hook-plugins/tool-failure-hooks",
     "crates/hook-plugins/track-agent-start",
     "crates/hook-plugins/track-agent-stop",
     "crates/hook-plugins/update-wave-state-on-merge",
-    "crates/hook-plugins/warn-pending-wave-gate",
-    "crates/hook-plugins/validate-pr-review-posted",
     "crates/hook-plugins/validate-artifact-path",
-    "crates/hook-plugins/validate-factory-path-staging",
-    "crates/hook-plugins/verify-factory-lock",
-    "crates/factory-lock-parse",
-    "crates/hook-plugins/verify-state-timestamp-refresh",
     "crates/hook-plugins/validate-burst-log",
     "crates/hook-plugins/validate-closes-completeness",
+    "crates/hook-plugins/validate-cross-site-correspondence",
     "crates/hook-plugins/validate-dispatch-advance",
-    "crates/hook-plugins/validate-index-cite-refresh",
-    "crates/hook-plugins/validate-state-structure",
-    "crates/hook-plugins/lint-registry-async-invariant",
-    "crates/hook-plugins/validate-per-story-adversary-convergence",
-    "crates/vsdd-context-resolvers",
-    "crates/hook-plugins/validate-stable-anchors",
-    "crates/hook-plugins/validate-policies-schema",
-    "crates/hook-plugins/validate-trajectory-tail-cell-completeness",
-    "crates/hook-plugins/validate-wave-handoff-completeness",
+    "crates/hook-plugins/validate-factory-path-staged",
+    "crates/hook-plugins/validate-factory-path-staging",
     "crates/hook-plugins/validate-heavy-op-delegation",
+    "crates/hook-plugins/validate-index-cite-refresh",
+    "crates/hook-plugins/validate-per-story-adversary-convergence",
+    "crates/hook-plugins/validate-policies-schema",
+    "crates/hook-plugins/validate-pr-review-posted",
+    "crates/hook-plugins/validate-stable-anchors",
+    "crates/hook-plugins/validate-state-structure",
+    "crates/hook-plugins/validate-trajectory-tail-cell-completeness",
+    "crates/hook-plugins/validate-unvalidated-mutation-marker",
+    "crates/hook-plugins/validate-wave-handoff-completeness",
+    "crates/hook-plugins/verify-factory-lock",
     "crates/hook-plugins/verify-state-timestamp-advisory",
+    "crates/hook-plugins/verify-state-timestamp-refresh",
+    "crates/hook-plugins/warn-pending-wave-gate",
+    "crates/hook-plugins/worktree-hooks",
+    "crates/hook-sdk",
+    "crates/hook-sdk-macros",
+    "crates/hook-sdk/examples/wasm_resolver_export",
+    "crates/last-amended-migrate",
+    "crates/policy15-attestation-gate",
     "crates/sink-core",
-    "crates/sink-file",
-    "crates/sink-otel-grpc",
-    "crates/sink-http",
     "crates/sink-datadog",
+    "crates/sink-file",
     "crates/sink-honeycomb",
-    "crates/factory-lock",
-    "crates/hook-plugins/precompact-flush",
-    "crates/hook-plugins/read-prefix-fixture",
+    "crates/sink-http",
+    "crates/sink-otel-grpc",
+    "crates/vsdd-context-resolvers",
 ]
 
 [workspace.package]
@@ -71,13 +77,13 @@ serde_json = "1.0"
 # See: https://crates.io/crates/serde_norway
 serde_norway = "0.9"
 toml = "0.8"
-anyhow = "1.0"
+anyhow = "1.0.104"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "io-util", "process"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-wasmtime = "44.0"
-wasmtime-wasi = "44.0"
+wasmtime = "48.0.4"
+wasmtime-wasi = "48.0.4"
 clap = { version = "4", features = ["derive"] }
 proc-macro2 = "1.0"
 quote = "1.0"
@@ -101,9 +107,30 @@ tonic = "0.14"
 tokio-stream = { version = "0.1", features = ["net"] }
 hostname = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
-httpmock = "0.7"
+httpmock = "0.8.3"
 proptest = "1.6"
 wasmparser = "0.248"
+# S-25.02 BC-1.18.008 v1.6 F-C3-P6-001: `shard_manager`'s Backfill Recovery
+# Manifest (Postcondition 3) computes SHA-256 content hashes of the
+# pre-split monolithic file and the intended final partition, used by the
+# Postcondition 5 Recovery-Confirmation Rule's exact whole-file
+# `(length, SHA-256)` comparison. Pinned patch version per this workspace's
+# "pinned" dependency convention (mirrors `anyhow = "1.0.104"`); RustCrypto's
+# `sha2` is the de-facto standard pure-Rust SHA-2 implementation, already
+# transitively present in the dependency graph via other RustCrypto crates
+# this workspace pulls in, so this is not a novel supply-chain addition.
+sha2 = "0.10.8"
+# OBL-1 (D-1232-OBL-1, S-25.02 cluster-5 T-11 discharge): fault-injection
+# harness for the B2 migration's crash-recovery `Fs` seam
+# (`crates/factory-dispatcher/src/migration_fs.rs`). Feature-gated behind
+# `factory-dispatcher/failpoints` (OFF by default — compiles out of every
+# production/shipped binary; `fail_point!` becomes a no-op macro without the
+# `fail/failpoints` cargo feature enabled). `abort`/`_exit`-style fail
+# actions model a true power-loss crash (never the `panic` fail action,
+# which unwinds and runs destructors — not a crash). Pinned per the
+# architect's OBL-1 discharge design (obl1-recover-refactor-design.md §6.1
+# item 6 / §6.3).
+fail = "0.5.1"
 
 [workspace.lints.rust]
 # VSDD traceability convention uses uppercase BC-N.NN.NNN and TV-NNN ids

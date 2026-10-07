@@ -115,6 +115,113 @@ Write all narrative as if the burst has already completed. ❌ Never
 "REMEDIATION IN PROGRESS" or "this burst remediates…". ✅ Always
 "REMEDIATED — Awaiting Pass N+1".
 
+## `last_amended` Write-Path Discipline (BC-5.45.001 / ADR-049)
+
+This discipline governs exactly 5 files — the D-1149 files:
+`STORY-INDEX.md`, `BC-INDEX.md`, `ARCH-INDEX.md`, `VP-INDEX.md`, and
+`STATE.md`. It does NOT extend to any other `.factory/` artifact's own
+`last_amended` field (BC-5.45.001 §Out of scope — those remain governed,
+where checked at all, by the pre-existing position-0 `(vX.Y)` parity
+check, unaffected by this discipline).
+
+Whenever this burst writes a new history entry to one of the 5 files'
+`last_amended:` frontmatter field:
+
+1. **Overwrite, never wrap.** Write `last_amended:` as a single-line,
+   double-quoted YAML scalar holding ONLY the new entry
+   (`"YYYY-MM-DD (vX.Y) — <summary>"`, D-1144-escaped — an embedded
+   literal `"` becomes `\"`). NEVER read the existing value and
+   concatenate it into the new value as a `[Prior: ...]` bracket or any
+   other nested form. This read-wrap-rewrite pattern is exactly what
+   produced the 323,499-char `STORY-INDEX.md` mega-line (D-1149) and the
+   743 fuel-timeouts/day WASM validator symptom it caused.
+2. **Prepend the displaced entry to `changelog:`.** For `ARCH-INDEX.md`,
+   `BC-INDEX.md`, `VP-INDEX.md`, and `STORY-INDEX.md` (all four carry a
+   frontmatter `changelog:` sequence), PREPEND exactly ONE new list item
+   — the entry `last_amended` held immediately before this write,
+   verbatim (including any trailing `[Prior history → ...]` pointer
+   note) — to the top of `changelog:`. Every existing `changelog:` item
+   is left byte-for-byte untouched: this is a list-item prepend, never a
+   rewrite-in-place of the sequence or of any existing item.
+3. **`STATE.md` has no `changelog:` counterpart.** Apply step 1 only; do
+   NOT add a frontmatter `changelog:` field to STATE.md. The displaced
+   entry is superseded by STATE.md's own already-append-only body-level
+   `## Decisions Log`/`## Phase Progress` sections, which are the durable
+   historical record for this file.
+4. **Never emit an inline chain.** No write under this discipline ever
+   produces a `last_amended` value containing a nested
+   `[Prior: <date> (vX.Y) — ...]` bracket referring to a DIFFERENT dated
+   entry than the current one. (The static, non-growing
+   `[Prior history → <file>-amendment-history.md]` pointer note is NOT
+   this pattern — it never grows and carries no dated entry of its own —
+   and MAY be retained/repeated verbatim across writes.)
+5. **Every emitted value is strictly-valid YAML.** Escape embedded
+   literal `"` per D-1144 in both the `last_amended` scalar and any
+   `changelog:` item's text field so the frontmatter parses cleanly under
+   strict YAML `safe_load`.
+
+**Pre-push guard.** Before pushing any burst that edits one or more of
+the 5 governed files, run:
+
+```bash
+cargo run -p last-amended-migrate -- migrate --check
+```
+
+Exit 0 means every governed file is already in the current-entry-only +
+`changelog:` shape — no drift. A non-zero exit means at least one of the
+5 files still needs migrating or D-1144 escape remediation; do NOT
+hand-patch it — re-run the same subcommand without `--check` to apply, or
+see Recovery below if the drift is an inline chain.
+
+**Recovery — if a mega-line/inline `[Prior: ...]` chain is ever
+detected** on one of the 5 files, at any scale: this is BC-10.13.001's
+sanctioned **full-recovery-split** remedy (PC7), NOT a fresh
+POL-3/TD-FACTORY-HOOK-BYPASS-001 exception request. Run:
+
+```bash
+cargo run -p last-amended-migrate -- migrate --path <file>
+```
+
+For `STORY-INDEX.md`, `BC-INDEX.md`, `ARCH-INDEX.md`, and `VP-INDEX.md`,
+the tool splits the chain in place — the current entry stays in
+`last_amended`; every chained historical entry is RELOCATED into
+`changelog:` as a new item, newest-first, verbatim (D-1144-escaped) — via
+a bounded/streaming linear scan safe on arbitrarily long input, up to and
+beyond the D-1149 323K-350K-char calibration scale. Invoking the tool is
+the sanctioned path for this failure class going forward; no human
+POL-3 exception is needed or should be requested (BC-10.13.001 PC7,
+S-15.03 AC-010).
+
+**`STATE.md` is different (S-15.03 pr-reviewer B2-R) — the tool REFUSES
+by default, it does not silently relocate.** `STATE.md` has no
+`changelog:` field to relocate the chained entries into (ADR-049
+Decision 4), and PC6 forbids this tool from ever writing them into the
+frozen `STATE-amendment-history.md` sidecar — so, unlike the other 4
+files, there is no real destination for the recovered text. Running
+`migrate --path <file>` (or a bare `migrate`) against a `STATE.md` chain
+therefore returns `Err(MigrateError::StateChainDiscardNotAuthorized)` and
+mutates nothing (in both `--check` and apply mode) UNLESS you explicitly
+pass `--discard-state-chain`:
+
+```bash
+# Refuses (default) — leaves STATE.md untouched, prints the entry count
+# that would be lost and where to look instead:
+cargo run -p last-amended-migrate -- migrate --path .factory/STATE.md
+
+# Explicit, human-directed acknowledgment that the chained entries will be
+# PERMANENTLY DISCARDED (only after confirming their substantive content
+# already lives in STATE.md's own body-level ## Decisions Log — see the
+# Write-Path Discipline above):
+cargo run -p last-amended-migrate -- migrate --path .factory/STATE.md --discard-state-chain
+```
+
+Before passing `--discard-state-chain`, manually verify the chained
+entries' substantive text is already recorded in `## Decisions Log`/
+`## Phase Progress` — a surviving inline chain is itself evidence this
+discipline may not have been followed for those specific entries, so do
+not assume it without checking. If it is NOT already recorded, copy the
+substantive content into the body first, THEN run the discard.
+
 ## Apply changes — mandatory renew step
 
 Before staging the commit, renew the factory lock (if one is held) to advance
@@ -200,7 +307,8 @@ bash .factory/hooks/verify-sha-currency.sh
 | In-progress voice in narrative | Hook tense-flip WARN | Edit narrative to past-tense before push |
 | Cross-record SHA drift between STATE.md and wave-state.yaml | Hook DRIFT report | Fix the disagreeing record (per Schema Semantics in checklist) |
 | Develop SHA in STATE.md does not match actual develop HEAD | Hook FAIL | Update the develop cite to the current develop HEAD |
-| Skipping renew before `git add` while lock is held | `verify-state-timestamp-refresh` WASM guard blocks the subsequent STATE.md write (LockExpiryStale) | Run `bash plugins/vsdd-factory/bin/factory-lock-write.sh renew .factory/STATE.md`; then retry the Edit/Write/MultiEdit to STATE.md |
+| Skipping renew before `git add` while lock is held | `verify-state-timestamp-refresh` is retired (registry entry removed per ADR-046 Decision 2; no longer invoked, does not block). The `stamp-state-timestamp` PostToolUse hook now auto-stamps `timestamp:` and renews `factory_lock.expires_at` after every tool-mediated Edit/Write/MultiEdit to STATE.md (fail-open). | The mandatory `factory-lock-write.sh renew` step (see "Apply changes — mandatory renew step" above) remains required before `git add`. The `stamp-state-timestamp` PostToolUse hook mechanizes timestamp re-stamp and lock renewal ONLY for tool-mediated STATE.md edits (Edit/Write/MultiEdit). Non-tool-mediated writes — specifically the `factory-lock-write.sh` bash writer itself and git-layer state-burst pushes — do NOT trigger the PostToolUse hook, so the manual renew step before `git add` is the authoritative mechanism on those paths. |
+| Read-wrap-rewrite of `last_amended` as an inline `[Prior: ...]` bracket on one of the 5 D-1149 files (`STORY-INDEX.md`/`BC-INDEX.md`/`ARCH-INDEX.md`/`VP-INDEX.md`/`STATE.md`) | `cargo run -p last-amended-migrate -- migrate --check` reports drift, or an inline chain is found on inspection | Never hand-patch. Run `cargo run -p last-amended-migrate -- migrate --path <file>` — full-recovery split (BC-10.13.001 PC7) — not a POL-3 exception (see "`last_amended` Write-Path Discipline" above). **STATE.md is special-cased:** this refuses by default (`StateChainDiscardNotAuthorized`, no mutation) — pass `--discard-state-chain` to opt in; see above |
 
 ## When to bypass
 

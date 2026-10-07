@@ -173,7 +173,7 @@ fn parse_leading_digits(s: &str) -> Option<(u32, usize)> {
 ///
 /// Uses hand-rolled scanning: locate each `INDEX v` token, parse the
 /// digits, skip malformed tokens.  No regex crate — keeps WASM fuel
-/// consumption within the 10M default budget.
+/// consumption within the 20M default budget (ADR-042 §Decision 1).
 ///
 /// Each returned `VersionCite` carries the 1-based line number where the
 /// cite appears, so callers can populate `Violation::location`.

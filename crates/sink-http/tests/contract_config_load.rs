@@ -52,7 +52,7 @@ url = "{}/events"
     sink.flush().expect("flush must not error");
 
     // Zero calls to the mock server — the core assertion for AC-2.
-    mock.assert_hits(0);
+    mock.assert_calls(0);
 }
 
 /// BC-3.01.002 — unknown sink type logs warning and returns Ok(None).

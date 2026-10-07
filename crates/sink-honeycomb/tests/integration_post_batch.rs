@@ -61,7 +61,7 @@ fn test_BC_3_01_001_events_posted_as_json_array() {
         when.method(POST)
             .path(format!("/1/events/{dataset}"))
             .header("Content-Type", "application/json")
-            .body_contains("["); // JSON array starts with [
+            .body_includes("["); // JSON array starts with [
         then.status(200);
     });
 
@@ -91,7 +91,7 @@ fn test_BC_3_01_001_each_event_has_time_field_rfc3339() {
         when.method(POST)
             .path(format!("/1/events/{dataset}"))
             // time field in RFC3339 contains 'T' and 'Z' or '+' offset.
-            .body_contains("\"time\"");
+            .body_includes("\"time\"");
         then.status(200);
     });
 
@@ -119,7 +119,7 @@ fn test_BC_3_01_001_time_field_rfc3339_format_from_ts_epoch() {
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path(format!("/1/events/{dataset}"))
-            .body_contains("2023-11-14T22:13:20");
+            .body_includes("2023-11-14T22:13:20");
         then.status(200);
     });
 
@@ -147,7 +147,7 @@ fn test_BC_3_01_001_missing_ts_epoch_uses_wall_clock_time() {
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path(format!("/1/events/{dataset}"))
-            .body_contains("\"time\"");
+            .body_includes("\"time\"");
         then.status(200);
     });
 
@@ -187,7 +187,7 @@ fn test_BC_3_01_001_batch_of_multiple_events_posted_in_one_request() {
     sink.shutdown();
 
     // Exactly one POST for the batch.
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn test_BC_3_01_001_ec002_retry_on_429_rate_limit() {
 
     // The mock was hit at least once.
     assert!(
-        rate_limit_mock.hits() >= 1,
+        rate_limit_mock.calls() >= 1,
         "sink must attempt the POST even when expecting 429"
     );
 }

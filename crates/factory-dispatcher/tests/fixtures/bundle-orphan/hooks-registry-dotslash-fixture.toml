@@ -1,0 +1,24 @@
+# hooks-registry-dotslash-fixture.toml
+# Fixture for S-21.09 AC-006 T-014 (BLOCKER-1 dotslash mutant test).
+#
+# Declares ghost-guard-dotslash.wasm using the leading-dotslash form:
+#   plugin = "./hook-plugins/ghost-guard-dotslash.wasm"
+# This is TOML-legal. The dispatcher's registry.rs resolve_plugin_paths() joins
+# relative paths against the registry file's parent directory — both "./hook-plugins/foo"
+# and "hook-plugins/foo" resolve to the same absolute path. The v1 parse_plugin_refs()
+# checked for `hook-plugins/` prefix but "./hook-plugins/" != "hook-plugins/", producing
+# a silent miss (false negative in the declared − tracked direction).
+#
+# Used by T-014 to prove that parse_plugin_refs() (toml-crate version) normalizes the
+# leading "./" and extracts ghost-guard-dotslash.wasm into the declared set.
+#
+# Story: S-21.09
+schema_version = 2
+
+[[hooks]]
+name = "ghost-guard-dotslash"
+event = "PreToolUse"
+tool = "^Bash$"
+plugin = "./hook-plugins/ghost-guard-dotslash.wasm"
+timeout_ms = 5000
+on_error = "continue"

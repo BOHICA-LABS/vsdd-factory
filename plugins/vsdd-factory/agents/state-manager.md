@@ -174,6 +174,89 @@ historical changelog entry), explicitly note this in the commit message with jus
 This discipline closes F-027 from s6.01-pass-1.md: state-manager declared "count
 change complete" after updating only 2 of 4 index files.
 
+### `last_amended` Write-Path Discipline (BC-5.45.001 / ADR-049 / S-15.03 AC-005)
+
+This standing rule applies on EVERY burst that writes a new history entry
+to `last_amended:` on exactly 5 files: `STORY-INDEX.md`, `BC-INDEX.md`,
+`ARCH-INDEX.md`, `VP-INDEX.md`, and `STATE.md`. It does NOT extend to any
+other `.factory/` artifact's own `last_amended` field (BC-5.45.001
+§Out of scope).
+
+`last_amended` is **never** assembled via string-concatenation/prepend of
+the prior value. Concretely, on every governed burst:
+
+- **Overwrite `last_amended`** with a single-line, double-quoted YAML
+  scalar (`"YYYY-MM-DD (vX.Y) — <summary>"`, D-1144-escaped) holding ONLY
+  the new current entry. Do NOT read the existing value and wrap it in a
+  `[Prior: ...]` bracket, and do NOT write the concatenation back as one
+  larger scalar — that is the exact defect that produced the
+  323,499-char `STORY-INDEX.md` mega-line (D-1149) and the
+  743-fuel-timeouts/day symptom it caused.
+- **Prepend the displaced entry to `changelog:`** for `STORY-INDEX.md`,
+  `BC-INDEX.md`, `ARCH-INDEX.md`, and `VP-INDEX.md` — exactly ONE new
+  list item, verbatim, at the top of the sequence. Every pre-existing
+  `changelog:` item stays byte-for-byte untouched.
+- **`STATE.md` has no `changelog:` field.** Its body-level `## Decisions
+  Log`/`## Phase Progress` sections are the durable record instead; do
+  not add one.
+- **Never re-introduce an inline chain.** No write ever produces a
+  `last_amended` value nesting a `[Prior: <date> (vX.Y) — ...]`
+  bracket for a different dated entry (the static
+  `[Prior history → <file>-amendment-history.md]` pointer note is not
+  this pattern and may be kept verbatim).
+
+**Pre-push guard (mandatory).** Before pushing any burst that edits one
+or more of the 5 governed files, run:
+
+```bash
+cargo run -p last-amended-migrate -- migrate --check
+```
+
+A non-zero exit means one of the 5 files is out of shape (drift or a
+D-1144 escape defect) — fix it via the tool (see Recovery), never by
+hand-patching the YAML.
+
+**Recovery mode — NOT a POL-3 exception.** If a mega-line / inline
+`[Prior: ...]` chain is ever found on one of the 5 files (a regression or
+an inherited file), the sanctioned remedy is BC-10.13.001's
+full-recovery-split (PC7), invoked directly with no human
+POL-3/TD-FACTORY-HOOK-BYPASS-001 exception request:
+
+```bash
+cargo run -p last-amended-migrate -- migrate --path <file>
+```
+
+For `STORY-INDEX.md`, `BC-INDEX.md`, `ARCH-INDEX.md`, and `VP-INDEX.md`,
+this splits the chain in place (current entry stays in `last_amended`;
+every chained entry RELOCATES into `changelog:`, newest-first, verbatim,
+D-1144-escaped) via a bounded/streaming linear scan safe at any input
+scale, including the D-1149 323K-350K-char calibration ceiling
+(BC-10.13.001 PC7, S-15.03 AC-010). Do not ask for a POL-3 exception for
+this failure class — the tool is the sanctioned path.
+
+**`STATE.md` REFUSES by default (S-15.03 pr-reviewer B2-R) — it does
+NOT silently relocate a chain like the other 4 files.** `STATE.md` has
+no `changelog:` field to relocate into (ADR-049 Decision 4), and PC6
+forbids ever writing the chained entries into the frozen
+`STATE-amendment-history.md` sidecar — there is no real destination for
+them. Running `migrate --path <file>` against a `STATE.md` chain returns
+`Err(MigrateError::StateChainDiscardNotAuthorized)` and mutates nothing,
+in both `--check` and apply mode, unless `--discard-state-chain` is
+explicitly passed:
+
+```bash
+cargo run -p last-amended-migrate -- migrate --path .factory/STATE.md --discard-state-chain
+```
+
+Before passing this flag, verify the chained entries' substantive content
+is already recorded in STATE.md's own `## Decisions Log`/
+`## Phase Progress` sections — a surviving chain is itself evidence this
+may not hold for those specific entries, so confirm rather than assume;
+copy the content into the body first if it is missing, THEN discard.
+
+Full write-path contract: BC-5.45.001 (`.factory/specs/behavioral-contracts/ss-05/BC-5.45.001.md`).
+Tool contract: BC-10.13.001 (`.factory/specs/behavioral-contracts/ss-10/BC-10.13.001.md`).
+
 ### Anti-Patterns (NEVER do these)
 
 - **NEVER** append full burst narratives to STATE.md
@@ -264,10 +347,15 @@ commits invoke renew, the burst-close ordering) is agent behavior described here
    `factory-lock-write.sh renew` step before `git add` (D10, S-17.04) is the
    executable equivalent of this prose obligation. See
    `plugins/vsdd-factory/skills/state-burst/SKILL.md` §"Apply changes — mandatory
-   renew step". The `verify-state-timestamp-refresh` WASM guard (D16, S-17.04)
-   enforces freshness at write-time: any Edit, Write, or MultiEdit to `.factory/STATE.md` that
-   does not advance `timestamp:` (and `factory_lock.expires_at` when a lock is held)
-   is blocked before the write lands on disk.
+   renew step". The `verify-state-timestamp-refresh` WASM guard (D16, S-17.04) has
+   been retired: its registry entry was removed per ADR-046 Decision 2 (crate source
+   retained but plugin no longer registered or invoked, so it does not block any
+   writes). Freshness is now mechanized by the `stamp-state-timestamp` PostToolUse
+   hook: after every tool-mediated Edit, Write, or MultiEdit to `.factory/STATE.md`,
+   the hook unconditionally re-stamps `timestamp:` to wall-clock now (PC1) and renews
+   `factory_lock.expires_at` iff the writer is the current lock holder and the lock is
+   not already expired (PC2). The hook is fail-open (PostToolUse — it never blocks the
+   preceding tool call).
 
 3. **Clear is atomic with the unlock-grant commit.** The `factory_lock` key MUST
    be removed in the same commit that records the unlock in STATE.md.

@@ -31,15 +31,36 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Pre-build factory-dispatcher test binaries
-        # T-012 in host-abi-hygiene.bats runs `timeout 120 cargo test -p
-        # factory-dispatcher --all-targets`. On a cold runner without a Rust
-        # cargo cache, compilation alone can exceed the 120-second bats timeout
-        # (exit code 124, rc.23 release run 29656342082). Pre-building here
-        # warms target/ so the bats test only executes the already-compiled
-        # binary within its window. --no-run = compile only; the actual test
-        # assertions still run inside the bats 120-second timeout as intended.
-        run: cargo test -p factory-dispatcher --all-targets --no-run
+      - name: Run full workspace test suite (pre-warms target/ for bats T-012)
+        # Historically this step was "Pre-build factory-dispatcher test
+        # binaries" — a `cargo test -p factory-dispatcher --all-targets
+        # --no-run` compile-only warm-up, because T-012 in host-abi-hygiene.bats
+        # used to run the equivalent test command for real and could blow its
+        # 120-second bats timeout on a cold runner (exit code 124, rc.23
+        # release run 29656342082).
+        #
+        # PR #783 narrowed T-012 to `cargo test -p factory-dispatcher --lib --
+        # s19_09` (6 unit tests) to eliminate an async e2e wall-clock flake in
+        # full_stack_plugin_invocation.rs — see the T-012 comment in
+        # host-abi-hygiene.bats for the full rationale. In ci.yml that
+        # narrowing doesn't drop coverage: the separate `cargo-host` job runs
+        # `cargo test --workspace --all-targets` independently of the bats
+        # path. release.yml has no equivalent independent job — the bats run
+        # below was, until now, the ONLY step here that executed test
+        # assertions, and it no longer covers the full suite.
+        #
+        # This step is release.yml's replacement for that lost coverage: it
+        # actually EXECUTES `cargo test --workspace --all-targets` (not
+        # --no-run), restoring release-gate parity with ci.yml's cargo-host
+        # job. It still incidentally warms target/ ahead of bats' T-012 (a
+        # strict superset of `-p factory-dispatcher --lib -- s19_09`), so a
+        # separate compile-only pre-build step is no longer needed — running
+        # the full suite once here, before ./run-all.sh, avoids paying to
+        # compile factory-dispatcher's test targets twice.
+        env:
+          CI_REQUIRE_ARTIFACTS: "1"
+          VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
+        run: cargo test --workspace --all-targets
 
       - name: Run test suite
         run: cd plugins/vsdd-factory/tests && ./run-all.sh
@@ -157,7 +178,14 @@ jobs:
             --exclude sink-core --exclude sink-file --exclude sink-otel-grpc \
             --exclude sink-http --exclude sink-datadog --exclude sink-honeycomb \
             --exclude vsdd-hook-sdk-macros \
-            --exclude read-prefix-fixture  # fixture crate for S-19.06 AC-007 compile/link gate (bats T-009f); test-only, never a release artifact (POLICY 20)
+            --exclude read-prefix-fixture \
+            --exclude policy15-attestation-gate \
+            --exclude last-amended-migrate \
+            --exclude verify-state-timestamp-refresh
+          # read-prefix-fixture: fixture crate for S-19.06 AC-007 compile/link gate (bats T-009f); test-only, never a release artifact (POLICY 20).
+          # policy15-attestation-gate: native CLI binary (src/main.rs); no wasm target — ci.yml invokes it as a host process; must not be bundle-globbed into hook-plugins/ (S-19.04 orphan-check fix).
+          # last-amended-migrate: standalone native CLI (S-15.03 AC-006, BC-10.13.001), no vsdd-hook-sdk dependency and no wasm32-wasip1 target by design (see crate's own Cargo.toml header comment) — must not be bundle-globbed into hook-plugins/ (orphan-bundle fix, maintenance/fix-orphan-wasm-bundle).
+          # verify-state-timestamp-refresh: deregistered PreToolUse guard, superseded by stamp-state-timestamp per ADR-046 Decision 3 (S-17.05). ADR-046's File-Change Plan directs "leave source + tests in place for a follow-up deletion story" but deregisters the hooks-registry.toml entry — so its wasm must never be re-bundled into hook-plugins/ (would also violate the ADR-046-mandated XOR invariant: hooks-registry.toml may declare at most one of verify-state-timestamp-refresh / stamp-state-timestamp) (orphan-bundle fix, maintenance/fix-orphan-wasm-bundle).
       - name: Stage artifact directory
         shell: bash
         run: |
@@ -188,6 +216,9 @@ jobs:
                     *) echo "skip lib-target stub: $name"; continue ;;
                   esac ;;
                 read-prefix-fixture.wasm) echo "skip stale-cache fixture artifact: $name (POLICY 20)"; continue ;;
+                policy15-attestation-gate.wasm) echo "skip native-binary crate artifact: $name (S-19.04 orphan-fix — defense-in-depth against --exclude regression)"; continue ;;
+                last-amended-migrate.wasm) echo "skip native-CLI crate artifact: $name (orphan-bundle fix — defense-in-depth against --exclude regression)"; continue ;;
+                verify-state-timestamp-refresh.wasm) echo "skip deregistered hook artifact: $name (ADR-046 supersession by stamp-state-timestamp — defense-in-depth against --exclude regression)"; continue ;;
               esac
               cp "$wasm" artifact/
             done
@@ -324,6 +355,9 @@ jobs:
                   *) echo "skip lib-target stub: $name"; continue ;;
                 esac ;;
               read-prefix-fixture.wasm) echo "skip stale-cache fixture artifact: $name (POLICY 20)"; continue ;;
+              policy15-attestation-gate.wasm) echo "skip native-binary crate artifact: $name (S-19.04 orphan-fix — defense-in-depth against --exclude regression)"; continue ;;
+              last-amended-migrate.wasm) echo "skip native-CLI crate artifact: $name (orphan-bundle fix — defense-in-depth against --exclude regression)"; continue ;;
+              verify-state-timestamp-refresh.wasm) echo "skip deregistered hook artifact: $name (ADR-046 supersession by stamp-state-timestamp — defense-in-depth against --exclude regression)"; continue ;;
             esac
             cp "$wasm" plugins/vsdd-factory/hook-plugins/
             echo "staged $name"

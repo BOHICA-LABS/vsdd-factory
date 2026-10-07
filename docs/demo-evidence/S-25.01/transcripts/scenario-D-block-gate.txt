@@ -1,0 +1,76 @@
+=== S-25.01 Layer-1 Two-Arm Next-Advance Gate (validate-unvalidated-mutation-marker) ===
+
+--- Scenario 1 [AC-010]: marker ABSENT, Agent dispatch ---
+outcome: Continue (exit_code=0, dispatch ALLOWED)
+exit_code: 0
+---------------------------------------------
+
+--- Scenario 2 [AC-007]: marker PRESENT, Agent dispatch (Arm 1) ---
+outcome: Block (exit_code=2, dispatch BLOCKED)
+{
+  "blocked_by": "validate-unvalidated-mutation-marker",
+  "marker_artifact_path": ".factory/STATE.md",
+  "marker_cause": "fuel",
+  "marker_plugin_name": "validate-factory-path-staging",
+  "marker_trace_id": "demo-trace-fuel",
+  "recovery": {
+    "tier_1_revalidate": "Edit or re-write the artifact at '.factory/STATE.md' so that 'validate-factory-path-staging' produces exit_code=0 on the next dispatch; this clears the quarantine via the REVALIDATED path",
+    "tier_2_ttl_expiry": "If immediate re-validation is not possible, the quarantine auto-expires after 24 h via TTL_EXPIRED auto-clear",
+    "tier_3_operator_break_glass": "Human operator only: rm .factory/unvalidated-mutation.marker — this agent MUST NOT perform rm operations to bypass the gate"
+  }
+}
+exit_code: 2
+---------------------------------------------
+
+--- Scenario 3 [AC-009]: marker PRESENT, 'git status' Bash dispatch (non-advancing, filter passes through) ---
+outcome: Continue (exit_code=0, dispatch ALLOWED)
+exit_code: 0
+---------------------------------------------
+
+--- Scenario 4 [AC-008]: marker PRESENT, 'git commit' Bash dispatch (Arm 2) ---
+outcome: Block (exit_code=2, dispatch BLOCKED)
+{
+  "blocked_by": "validate-unvalidated-mutation-marker",
+  "marker_artifact_path": ".factory/STATE.md",
+  "marker_cause": "fuel",
+  "marker_plugin_name": "validate-factory-path-staging",
+  "marker_trace_id": "demo-trace-fuel",
+  "recovery": {
+    "tier_1_revalidate": "Edit or re-write the artifact at '.factory/STATE.md' so that 'validate-factory-path-staging' produces exit_code=0 on the next dispatch; this clears the quarantine via the REVALIDATED path",
+    "tier_2_ttl_expiry": "If immediate re-validation is not possible, the quarantine auto-expires after 24 h via TTL_EXPIRED auto-clear",
+    "tier_3_operator_break_glass": "Human operator only: rm .factory/unvalidated-mutation.marker — this agent MUST NOT perform rm operations to bypass the gate"
+  }
+}
+exit_code: 2
+---------------------------------------------
+
+--- Scenario 4b [AC-008]: marker PRESENT, 'git push' Bash dispatch (Arm 2) ---
+outcome: Block (exit_code=2, dispatch BLOCKED)
+{
+  "blocked_by": "validate-unvalidated-mutation-marker",
+  "marker_artifact_path": ".factory/STATE.md",
+  "marker_cause": "fuel",
+  "marker_plugin_name": "validate-factory-path-staging",
+  "marker_trace_id": "demo-trace-fuel",
+  "recovery": {
+    "tier_1_revalidate": "Edit or re-write the artifact at '.factory/STATE.md' so that 'validate-factory-path-staging' produces exit_code=0 on the next dispatch; this clears the quarantine via the REVALIDATED path",
+    "tier_2_ttl_expiry": "If immediate re-validation is not possible, the quarantine auto-expires after 24 h via TTL_EXPIRED auto-clear",
+    "tier_3_operator_break_glass": "Human operator only: rm .factory/unvalidated-mutation.marker — this agent MUST NOT perform rm operations to bypass the gate"
+  }
+}
+exit_code: 2
+---------------------------------------------
+
+>> Human operator break-glass: rm .factory/unvalidated-mutation.marker
+
+--- Scenario 5 [BC-1.18.003 PC3 escape hatch]: marker removed by operator, Agent dispatch ---
+outcome: Continue (exit_code=0, dispatch ALLOWED)
+exit_code: 0
+---------------------------------------------
+
+--- Scenario 5b: marker removed by operator, 'git commit' Bash dispatch ---
+outcome: Continue (exit_code=0, dispatch ALLOWED)
+exit_code: 0
+---------------------------------------------
+
+=== DEMO SCENARIO COMPLETE ===

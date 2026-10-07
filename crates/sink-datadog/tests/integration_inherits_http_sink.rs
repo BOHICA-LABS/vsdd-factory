@@ -94,7 +94,7 @@ async fn test_VP_012_datadog_inherits_http_sink_5xx_retry_then_success() {
 
     // Total request count must be > 1 (at least one retry occurred).
     // Sum hits across all three mocks to get total request count.
-    let total_hits = fail_mock.hits() + fail_mock2.hits() + success_mock.hits();
+    let total_hits = fail_mock.calls() + fail_mock2.calls() + success_mock.calls();
     assert!(
         total_hits >= 2,
         "sink must have retried at least once (inherited from HttpSink), got {total_hits} total requests"

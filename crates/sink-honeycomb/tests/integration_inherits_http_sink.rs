@@ -55,7 +55,7 @@ fn test_VP_011_submit_returns_before_http_round_trip() {
     sink.flush().expect("flush");
     sink.shutdown();
 
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 /// VP-011: Overflow drops events without blocking (queue_full_count tracks
@@ -142,9 +142,9 @@ fn test_BC_3_01_001_inherits_5xx_retry_from_http_sink() {
 
     // Must have retried (at least 2 attempts == 1 retry).
     assert!(
-        mock.hits() >= 2,
+        mock.calls() >= 2,
         "5xx must trigger retries, got {} hits",
-        mock.hits()
+        mock.calls()
     );
 }
 
@@ -167,5 +167,5 @@ fn test_BC_3_01_001_flush_blocks_until_post_complete() {
     sink.shutdown();
 
     // After flush, the POST is guaranteed to have completed.
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }

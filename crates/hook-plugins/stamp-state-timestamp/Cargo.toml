@@ -1,0 +1,38 @@
+[package]
+name = "stamp-state-timestamp"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "WASM hook plugin: PostToolUse unconditional STATE.md timestamp re-stamp + identity-gated factory_lock.expires_at renewal (BC-4.17.001 / ADR-046 / S-17.05)"
+publish = false
+
+# Hook plugins ship as WASI commands (_start entry point) built via
+# `cargo build --target wasm32-wasip1`. The [lib] target carries testable
+# logic; [[bin]] wraps the macro-generated entry point that calls into the lib.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "stamp-state-timestamp"
+path = "src/main.rs"
+
+[dependencies]
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+# factory-lock-parse: shared parse primitives + TTL_SECONDS / STATE_MD_MAX_BYTES constants.
+# Architecture Compliance Rule 7: TTL_SECONDS MUST be imported from this crate, never redeclared.
+factory-lock-parse = { path = "../../factory-lock-parse" }
+# factory-lock: renew_lock_if_holder + classify_identity_resolution + trim_git_email.
+# guard_logic calls these for PC2 identity-gated expires_at renewal (S-17.06 deliverables).
+factory-lock = { path = "../../factory-lock" }
+# chrono 0.4 for Utc::now() wall-clock read and YYYY-MM-DDTHH:MM:SSZ formatting.
+chrono = { workspace = true }
+
+[dev-dependencies]
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

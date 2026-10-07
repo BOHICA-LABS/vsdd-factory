@@ -28,20 +28,85 @@ path = "src/lib.rs"
 # DI-019 v1.6 preserved: release.yml builds factory-dispatcher WITHOUT this feature
 # so shipped artifacts always use ASYNC_DRAIN_WINDOW_MS = 100 ms.
 test-support = []
+# OBL-1 (D-1232-OBL-1): enables `fail`'s `fail_point!` macro at the B2
+# migration's `Fs`-trait boundaries (`shard_manager::migration_fs::StdFs`)
+# for the test-writer's crash-injection integration suite. OFF by default:
+# `fail = { optional = true }` below means the dependency is not even
+# compiled into a normal build, and `fail_point!` compiles to nothing
+# (`fail::fail_point!` requires BOTH the crate's own `failpoints` cargo
+# feature AND this workspace feature to have any effect) unless a caller
+# builds with `--features factory-dispatcher/failpoints` AND runtime-enables
+# the specific named failpoint via `fail::cfg(...)`/`FailScenario`.
+# `fail/failpoints` (the `fail` crate's OWN feature, distinct from this
+# crate's `failpoints` feature of the same name) is what actually flips
+# `fail_point!` from a compiled-out no-op to a live check — required in
+# addition to `dep:fail`, per the `fail` crate's own documented wiring
+# pattern.
+failpoints = ["dep:fail", "fail/failpoints"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+# S-25.02 BC-1.18.005 Postcondition 8: `shard_manager::read_changelog_item_count`
+# parses a `[[shard]]`-registered artifact's frontmatter `changelog:` sequence
+# to count its items. `serde_norway` is already a workspace dependency (used
+# by `factory-lock-parse`, `last-amended-migrate`, `vsdd-context-resolvers`);
+# this is the same general-purpose-YAML-on-a-bounded-frontmatter-block usage
+# pattern `last-amended-migrate/src/yaml_guard.rs` documents for its own
+# `MinimalFrontmatter`/`ChangelogOnly` structs — never the hand-rolled
+# unbounded-single-scalar-line scan `factory-lock-parse`/`frontmatter.rs` use
+# for a different (unrelated) bounded-resource reason.
+serde_norway.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 regex.workspace = true
 chrono.workspace = true
+# S-25.02 BC-1.18.008 v1.6 F-C3-P6-001: SHA-256 hashing for the Backfill
+# Recovery Manifest / Postcondition 5 Recovery-Confirmation Rule (see
+# workspace Cargo.toml's `sha2` entry for the full justification).
+sha2.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# S-25.02 BC-1.18.005: `shard_manager` reuses the canonical `HookResult`
+# three-variant contract (Continue/Block/Error) rather than inventing a
+# parallel result type for the native shard-cap gate check.
+vsdd-hook-sdk = { path = "../hook-sdk" }
+# S-25.02 BC-1.18.006 (cluster-2, roll-before-write): the staged roll
+# sequence's steps (c)-(d) (atomic-truncate canonical, publish shard-index)
+# reuse `write_atomic`'s existing temp-file-then-rename primitive verbatim
+# (BC-1.18.006 Architecture Anchors; no new atomic-write primitive is
+# introduced for THOSE two steps). CORRECTED (MINOR-6, PR #824 pr-review
+# cycle 3): step (b) (`publish_sealed_shard`) does NOT reuse `write_atomic`
+# — it uses a purpose-built `write_exclusive`/`stage_temp_file` +
+# `publish_staged_temp_file` pair over `OpenOptions::create_new` +
+# `hard_link` + a local `random_nonce()`, deliberately NOT `rename(2)`,
+# because `rename` clobbers an existing destination and this path must be
+# write-once (a sealed shard must never silently overwrite prior sealed
+# history). The dependency below is still justified by steps (c)/(d)
+# alone; step (b)'s own write-once primitive needs no new dependency
+# either. `factory-dispatcher` -> `last-amended-migrate` is the ONLY
+# allowed direction of this workspace-internal edge (ADR-051 §8
+# dependency-acyclicity check; story S-25.02 Architecture Compliance Rules
+# "Forbidden dependency" row) — `last-amended-migrate` MUST NOT gain a
+# reverse dependency on `factory-dispatcher`.
+#
+# NIT-5 (PR #824 pr-review cycle 3): `last-amended-migrate` is a
+# `clap`-based operator CLI crate; taking it as a normal (non-dev)
+# dependency here pulls `clap` into `factory-dispatcher`'s own build graph
+# for one ~40-line `write_atomic` helper. ACCEPTED as-is: `clap` is already
+# a workspace dependency (no new external crate, `Cargo.lock` unaffected
+# beyond this one edge), the unused CLI surface is linker-dropped from the
+# shipped binary, and CI/lock impact is nil. Hoisting `write_atomic` into a
+# leaf crate both `factory-dispatcher` and `last-amended-migrate` could
+# depend on would be the architecturally cleaner edge, but is not
+# justified purely to shave an already-workspace-resident dependency off
+# one crate's build graph; revisit only if `last-amended-migrate` grows
+# additional CLI-only dependencies that make the asymmetry more costly.
+last-amended-migrate = { path = "../last-amended-migrate", version = "0.0.1" }
 factory-lock-parse = { path = "../factory-lock-parse", version = "0.0.1" }
 sink-core = { path = "../sink-core", version = "0.0.1" }
 sink-datadog = { path = "../sink-datadog", version = "0.0.1" }
@@ -49,6 +114,10 @@ sink-file = { path = "../sink-file", version = "0.0.1" }
 sink-honeycomb = { path = "../sink-honeycomb", version = "0.0.1" }
 sink-http = { path = "../sink-http", version = "0.0.1" }
 sink-otel-grpc = { path = "../sink-otel-grpc", version = "0.0.1" }
+# OBL-1: optional, `failpoints`-feature-gated fault-injection points in
+# `shard_manager::migration_fs::StdFs` — see the `failpoints` feature
+# comment above and the workspace `fail` dependency comment.
+fail = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

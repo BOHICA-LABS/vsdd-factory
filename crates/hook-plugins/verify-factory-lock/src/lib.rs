@@ -268,11 +268,6 @@ pub fn is_expired(
     now >= expires_at
 }
 
-/// Trim trailing whitespace (including `\n`) from a git subprocess stdout line.
-pub fn trim_git_email(raw: &str) -> String {
-    raw.trim_end().to_string()
-}
-
 // ---------------------------------------------------------------------------
 // Core guard logic (injectable callbacks — testable without WASM runtime)
 // ---------------------------------------------------------------------------
@@ -469,7 +464,9 @@ where
     };
 
     // Step 7: Trim trailing newline from git email output.
-    let caller_email = trim_git_email(&git_email_raw);
+    // Delegates to factory_lock::trim_git_email — the canonical home per
+    // F-P7-001 single-canonical-home principle (AC-005 / ADR-046 Decision 2).
+    let caller_email = factory_lock::trim_git_email(&git_email_raw);
 
     // Step 8: If holder == caller_email: return Continue (PC3 self-held).
     if lock.holder == caller_email {
@@ -1370,7 +1367,7 @@ mod tests {
     /// GREEN: pure helper implemented; test verifies this case.
     #[test]
     fn test_BC_4_13_001_trim_git_email_strips_trailing_newline() {
-        let result = trim_git_email("dev@example.com\n");
+        let result = factory_lock::trim_git_email("dev@example.com\n");
         assert_eq!(result, "dev@example.com");
     }
 
@@ -1379,7 +1376,7 @@ mod tests {
     /// GREEN: pure helper implemented; test verifies this case.
     #[test]
     fn test_BC_4_13_001_trim_git_email_unchanged_when_no_newline() {
-        let result = trim_git_email("dev@example.com");
+        let result = factory_lock::trim_git_email("dev@example.com");
         assert_eq!(result, "dev@example.com");
     }
 
@@ -2099,6 +2096,78 @@ mod tests {
             warns.is_empty(),
             "F-P1-002 (b): no-lock 35KB-frontmatter must produce zero warns. Got: {:?}",
             *warns
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // S-17.06 AC-005 test — verify-factory-lock delegates trim_git_email
+    // -----------------------------------------------------------------------
+
+    /// AC-005 (BC-4.17.001 Precondition 2, F-P7-001 single-canonical-home):
+    /// `crates/hook-plugins/verify-factory-lock/src/lib.rs` MUST delegate its
+    /// `trim_git_email` usage to `factory_lock::trim_git_email`. No local
+    /// re-implementation is permitted in any crate after S-17.06 ships.
+    ///
+    /// Source scan: assert that this file contains "factory_lock::trim_git_email"
+    /// (a delegation call or re-export). Currently the file contains a local
+    /// `fn trim_git_email` body (`raw.trim_end().to_string()`) — no delegation.
+    ///
+    /// Red Gate: the string "factory_lock::trim_git_email" is absent from the
+    /// current source → the assertion FAILS (correct Red Gate).
+    /// After T-3 wires delegation: the string is present → test PASSES.
+    #[test]
+    fn test_verify_factory_lock_delegates_trim_git_email() {
+        // AC-005 / F-P7-001: after T-3, verify-factory-lock must delegate its
+        // trim_git_email usage to factory_lock::trim_git_email (the canonical home).
+        //
+        // Source-scan strategy: assemble the delegation call pattern at runtime from
+        // split parts so the assembled string does not appear literally in this test's
+        // own source text (include_str! is self-referential — any literal occurrence of
+        // the target string in this file would cause the scan to pass vacuously).
+        //
+        // Expected delegation form after T-3:
+        //   pub fn trim_git_email(raw: &str) -> String {
+        //     factory_lock :: trim_git_email(raw)    ← qualif. call, no spaces in real code
+        //   }
+        let source = include_str!("lib.rs");
+        // Pieces split to prevent the assembled form from appearing in this source.
+        let crate_prefix = "factory_lock";
+        let fn_suffix = concat!("::", "trim_git_email(");
+        let delegation_pattern = format!("{}{}", crate_prefix, fn_suffix);
+        assert!(
+            source.contains(&delegation_pattern),
+            "verify-factory-lock must delegate the trim_git_email call to the canonical \
+             factory_lock crate (AC-005, F-P7-001 single-canonical-home). \
+             Local re-implementation still present. Wire delegation in T-3 (S-17.06)."
+        );
+
+        // AC-005 hardening: also assert that NO local fn trim_git_email definition
+        // exists in this source (absence-of-local-body). Kills a mutant where a future
+        // developer re-introduces a local wrapper that silently bypasses the canonical home.
+        //
+        // Strategy: strip comment lines (lines starting with `///` or `//`) before scanning
+        // so that the `pub fn trim_git_email(raw: &str)` line in the doc-comment block above
+        // does not cause a false-positive. The fn-definition pattern is split into two variables
+        // so the assembled form does not appear literally in this test's own source text (the
+        // same technique as the delegation_pattern above).
+        let non_comment_source: String = source
+            .lines()
+            .filter(|line| {
+                let t = line.trim_start();
+                !t.starts_with("//")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Split the fn-definition pattern to prevent self-referential false-match.
+        let fn_kw = "fn ";
+        let fn_name_part = concat!("trim_git_email", "(");
+        let local_def_pattern = format!("{}{}", fn_kw, fn_name_part);
+        assert!(
+            !non_comment_source.contains(&local_def_pattern),
+            "verify-factory-lock must NOT define a local fn trim_git_email — \
+             delegation to factory_lock::trim_git_email is the only permitted form \
+             (AC-005, F-P7-001 single-canonical-home). A local re-introduction would \
+             silently bypass the canonical home."
         );
     }
 }

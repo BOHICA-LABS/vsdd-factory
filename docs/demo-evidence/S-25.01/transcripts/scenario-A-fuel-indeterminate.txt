@@ -1,0 +1,47 @@
+=== Scenario A: fuel exhaustion on PostToolUse fail-closed plugin 'validate-factory-path-staging' -> INDETERMINATE(cause=fuel) ===
+[AC-001 / AC-005 / AC-006 / BC-1.18.001 / BC-3.08.001 Event 8 + Event 10]
+
+>> dispatching PostToolUse Edit(.factory/STATE.md) through the real execute_tiers path...
+
+execute_tiers summary: exit_code=0 block_intent=false
+
+--- .factory/unvalidated-mutation.marker ---
+artifact_path = ".factory/STATE.md"
+cause = "fuel"
+expires_at = "2026-09-04T18:42:48.925845+00:00"
+plugin_name = "validate-factory-path-staging"
+timestamp = "2026-09-03T18:42:48.925845+00:00"
+trace_id = "demo-trace-fuel"
+---------------------------------------------
+
+--- dispatcher-internal-2026-09-03.jsonl (type=plugin.indeterminate) ---
+{
+  "artifact_path": ".factory/STATE.md",
+  "cause": "fuel",
+  "failure_policy": "fail-closed",
+  "plugin_name": "validate-factory-path-staging",
+  "schema_version": 1,
+  "session_id": "demo-session-fuel",
+  "timestamp": "2026-09-03T13:42:48-0500",
+  "trace_id": "demo-trace-fuel",
+  "ts": "2026-09-03T13:42:48-0500",
+  "ts_epoch": 1788460968,
+  "type": "plugin.indeterminate"
+}
+---------------------------------------------
+
+--- dispatcher-internal-2026-09-03.jsonl (type=marker.written) ---
+{
+  "artifact_path": ".factory/STATE.md",
+  "cause": "fuel",
+  "expires_at": "2026-09-04T18:42:48.925845+00:00",
+  "plugin_name": "validate-factory-path-staging",
+  "schema_version": 1,
+  "session_id": "demo-session-fuel",
+  "trace_id": "demo-trace-fuel",
+  "ts": "2026-09-03T13:42:48-0500",
+  "ts_epoch": 1788460968,
+  "type": "marker.written"
+}
+---------------------------------------------
+=== DEMO SCENARIO COMPLETE ===

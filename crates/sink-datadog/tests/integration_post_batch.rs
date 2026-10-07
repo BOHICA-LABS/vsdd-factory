@@ -50,9 +50,9 @@ async fn test_BC_3_01_001_events_posted_as_json_array_to_datadog_endpoint() {
         when.method(POST)
             .path("/api/v2/logs")
             .header("DD-API-KEY", api_key)
-            .body_contains(r#""message":"event-a""#)
-            .body_contains(r#""message":"event-b""#)
-            .body_contains(r#""message":"event-c""#);
+            .body_includes(r#""message":"event-a""#)
+            .body_includes(r#""message":"event-b""#)
+            .body_includes(r#""message":"event-c""#);
         then.status(202).body("{}");
     });
 
@@ -65,7 +65,7 @@ async fn test_BC_3_01_001_events_posted_as_json_array_to_datadog_endpoint() {
     sink.flush().expect("flush must succeed");
 
     // All 3 events batched into 1 POST with auth header.
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 /// AC-5 — Datadog schema fields present in POST body.
@@ -80,9 +80,9 @@ async fn test_BC_3_01_001_datadog_schema_fields_present_in_post_body() {
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path("/api/v2/logs")
-            .body_contains("ddsource")
-            .body_contains("service")
-            .body_contains("message");
+            .body_includes("ddsource")
+            .body_includes("service")
+            .body_includes("message");
         then.status(202).body("{}");
     });
 
@@ -98,7 +98,7 @@ async fn test_BC_3_01_001_datadog_schema_fields_present_in_post_body() {
     );
     sink.flush().expect("flush must succeed");
 
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }
 
 /// VP-011 — DatadogSink submit is non-blocking (does not block caller thread).

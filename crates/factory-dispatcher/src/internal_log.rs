@@ -82,6 +82,34 @@ pub const PLUGIN_INVOKED: &str = "plugin.invoked";
 pub const PLUGIN_COMPLETED: &str = "plugin.completed";
 pub const PLUGIN_TIMEOUT: &str = "plugin.timeout";
 pub const PLUGIN_CRASHED: &str = "plugin.crashed";
+/// S-25.01 / BC-3.08.001 Event 8: emitted for every INDETERMINATE outcome
+/// (both fail-closed and fail-open). Carries all 8 mandatory fields.
+pub const PLUGIN_INDETERMINATE: &str = "plugin.indeterminate";
+/// ADR-048 v1.1 / BC-3.08.001 Event 9: emitted whenever the
+/// `.factory/unvalidated-mutation.marker` is cleared. The `trace_id` field
+/// on this event equals the marker's stored `trace_id`, linking back to the
+/// originating `plugin.indeterminate` (Event 8) that wrote the marker.
+///
+/// Mandatory fields: `type`, `trace_id`, `session_id`, `plugin_name`,
+/// `artifact_path`, `clear_mode` ∈ {REVALIDATED|TTL_EXPIRED|OPERATOR_OVERRIDE},
+/// `actor_type` ∈ {validator|deadman|operator}, `reason` (null unless
+/// `clear_mode == OPERATOR_OVERRIDE`).
+pub const PLUGIN_MARKER_CLEARED: &str = "marker.cleared";
+/// ADR-048 v1.4 / BC-3.08.001 Event 10: emitted whenever
+/// `write_indeterminate_marker` returns `Ok(())` — the positive, durable
+/// creation record for the `.factory/unvalidated-mutation.marker` file.
+/// Emitted ONLY on a confirmed successful write (never before the write is
+/// attempted, never on a write failure), so an unmatched `marker.written`
+/// with no subsequent `marker.cleared` is proof-by-construction that a
+/// marker was durably written and has since become absent through a path
+/// other than the three already-audited clears (REVALIDATED, TTL_EXPIRED,
+/// SUPERSEDED) — i.e. a human out-of-band `rm` (OPERATOR_OVERRIDE).
+/// `reconcile_raw_delete` scans for this event type (S-25.01 adversary pass
+/// 6 F-P6-001 MEDIUM resolution).
+///
+/// Mandatory fields: `type`, `trace_id`, `session_id`, `plugin_name`,
+/// `artifact_path`, `cause` ∈ {fuel|epoch|output-too-large}, `expires_at`.
+pub const PLUGIN_MARKER_WRITTEN: &str = "marker.written";
 pub const INTERNAL_CAPABILITY_DENIED: &str = "internal.capability_denied";
 pub const INTERNAL_HOST_FUNCTION_PANIC: &str = "internal.host_function_panic";
 pub const INTERNAL_SINK_ERROR: &str = "internal.sink_error";

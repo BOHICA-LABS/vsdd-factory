@@ -67,8 +67,22 @@ impl HookPayload {
     /// Parse from a raw byte buffer. Used by both stdin reading and
     /// tests that want to feed a fixture without round-tripping
     /// through a real pipe.
+    ///
+    /// Pre-processes the JSON to canonicalize `hook_event_name` /
+    /// `event_name`: when both are present (e.g. test payloads that
+    /// include both for completeness), `hook_event_name` is removed
+    /// so the serde alias does not see a duplicate field.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, PayloadError> {
-        let parsed: Self = serde_json::from_slice(bytes)?;
+        // Parse to Value first so we can strip the duplicate before
+        // the typed deserialization sees the alias conflict.
+        let mut value: serde_json::Value = serde_json::from_slice(bytes)?;
+        if let Some(obj) = value.as_object_mut() {
+            // Both present: keep event_name (canonical), drop alias.
+            if obj.contains_key("event_name") && obj.contains_key("hook_event_name") {
+                obj.remove("hook_event_name");
+            }
+        }
+        let parsed: Self = serde_json::from_value(value)?;
         parsed.validate()?;
         Ok(parsed)
     }

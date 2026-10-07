@@ -28,7 +28,7 @@ use thiserror::Error;
 use wasmtime::{Engine, Module, Store, Trap};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::{DirPerms, FilePerms, I32Exit, WasiCtxBuilder};
+use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
 
 use crate::engine::timeout_ms_to_epochs;
 use crate::host::{HostContext, setup_linker};
@@ -226,7 +226,18 @@ pub enum PluginResult {
         /// a partial message because the plugin was interrupted.
         stderr: String,
         elapsed_ms: u64,
+        /// Instructions executed before the interrupt. Useful telemetry for
+        /// the event log. Note: on `Trap::OutOfFuel`, `fuel_consumed_from_store`
+        /// returns `cap.saturating_sub(remaining)` where `remaining == 0`, so
+        /// `fuel_consumed == fuel_cap` on every fuel trap — it does not convey
+        /// demand independently of the cap. Use `fuel_cap` for the operator
+        /// message when communicating what limit was hit.
         fuel_consumed: u64,
+        /// The configured fuel budget at the time of invocation. Always
+        /// reflects the actual cap set on the wasmtime Store, independent of
+        /// whether `get_fuel()` succeeds. Use this field — not `fuel_consumed`
+        /// — when constructing operator-facing messages about which cap to raise.
+        fuel_cap: u64,
     },
     Crashed {
         trap_string: String,
@@ -255,6 +266,18 @@ pub enum TimeoutCause {
     Fuel,
 }
 
+/// ADR-042 §Decision 1: global fuel cap raised 10M → 20M (measurement-validated).
+/// Worst-case legacy-bash-adapter payload consumed 10,406,058 fuel
+/// (ARCH-INDEX + 50 KB last_assistant_message, 377,109 payload bytes),
+/// exhausting the former 10M cap. 20M leaves ~9.6M headroom (92% margin).
+///
+/// This constant is the single source of truth for the ADR-042 fuel cap.
+/// Both `InvokeLimits::default()` and `RegistryDefaults::default()` reference it,
+/// so any future deliberate cap change is made in one place and propagates
+/// atomically to both — structural enforcement rather than test-only enforcement.
+/// Any change to this value requires updating the ADR-042 §Decision 1 rationale.
+pub const DEFAULT_FUEL_CAP: u64 = 20_000_000;
+
 /// Per-invocation budget. Defaults live in
 /// `RegistryDefaults`; callers usually get these from a
 /// `RegistryEntry` with fallback.
@@ -268,7 +291,7 @@ impl Default for InvokeLimits {
     fn default() -> Self {
         Self {
             timeout_ms: 5_000,
-            fuel_cap: 10_000_000,
+            fuel_cap: DEFAULT_FUEL_CAP,
         }
     }
 }
@@ -291,13 +314,22 @@ pub enum InvokeError {
 /// [`HostContext`]. The `payload_json` is written to the plugin's
 /// stdin; the plugin is expected to write a `HookResult` JSON line to
 /// stdout, which the caller is responsible for parsing.
+/// Invoke a plugin and return the raw result plus the per-invocation
+/// `host_output_too_large_seen` flag (S-25.01 AC-003).
+///
+/// The `bool` is `true` iff any host function returned `OUTPUT_TOO_LARGE(-3)`
+/// during this invocation. Callers pass it to `classify_outcome` to detect
+/// the Indeterminate(OutputTooLarge) case (BC-1.18.001 invariant 5).
+///
+/// The flag is only meaningful when `PluginResult::Ok { exit_code: 0, .. }`;
+/// for Timeout and Crashed results it is always `false`.
 pub fn invoke_plugin(
     engine: &Engine,
     module: &Module,
     host_ctx: HostContext,
     payload_json: &[u8],
     limits: InvokeLimits,
-) -> Result<PluginResult, InvokeError> {
+) -> Result<(PluginResult, bool), InvokeError> {
     // Set up wasmtime store with both host context and WASI context.
     // We use a wrapper type so both live in the store's data slot.
     let stdout = MemoryOutputPipe::new(64 * 1024);
@@ -319,7 +351,8 @@ pub fn invoke_plugin(
         // No project dir — build without filesystem preopen.
     } else if let Err(e) = wasi_builder.preopened_dir(
         // W-15 wave gate (SEC-001 / CRIT-W15-003): WASI preopens grant
-        // DirPerms::all() | FilePerms::all() to plugins. This is the sandbox
+        // FsPerms::ReadWrite (wasmtime-wasi 48 unified DirPerms::all() |
+        // FilePerms::all()) to plugins. This is the sandbox
         // boundary; capability-gated host functions (e.g., write_file) provide
         // ADDITIONAL bounded mechanisms but do not constrain native WASI calls.
         // See crates/hook-sdk/HOST_ABI.md "Filesystem Access Model". v1.1 will
@@ -327,8 +360,7 @@ pub fn invoke_plugin(
         // declarations.
         &host_ctx.cwd,
         ".",
-        DirPerms::all(),
-        FilePerms::all(),
+        FsPerms::ReadWrite,
     ) {
         // Non-fatal: log and continue without filesystem access.
         // Plugin may still function if it doesn't need std::fs.
@@ -343,6 +375,9 @@ pub fn invoke_plugin(
     let store_data = StoreData {
         host: host_ctx,
         wasi: wasi_ctx,
+        // S-25.01 AC-003: per-invocation reset happens before func.call() (not only here).
+        // This initialization sets the starting state; the implementer adds the pre-call reset.
+        host_output_too_large_seen: false,
     };
     let mut store = Store::new(engine, store_data);
 
@@ -371,10 +406,20 @@ pub fn invoke_plugin(
         .get_typed_func::<(), ()>(&mut store, "_start")
         .map_err(|_| InvokeError::MissingStart)?;
 
+    // S-25.01 AC-003: per-invocation reset immediately before func.call().
+    // A new Store is constructed per invocation so the field is already false,
+    // but we reset explicitly here to make the invariant unambiguous and to
+    // guard against any future Store-reuse refactors.
+    store.data_mut().host_output_too_large_seen = false;
+
     let started = Instant::now();
     let call_result = start_export.call(&mut store, ());
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let fuel_consumed = fuel_consumed_from_store(&store, limits.fuel_cap);
+
+    // S-25.01 AC-003: capture the flag AFTER func.call() (before next reset).
+    // This is the authoritative read for the per-invocation OutputTooLarge state.
+    let output_too_large = store.data().host_output_too_large_seen;
 
     // WASI command convention: `_start` returns () on exit(0); any
     // other exit code arrives as a trap whose downcast yields an
@@ -383,13 +428,16 @@ pub fn invoke_plugin(
         Ok(()) => {
             let out = stdout_to_string(&stdout);
             let err_text = stderr_to_string(&stderr);
-            Ok(PluginResult::Ok {
-                exit_code: 0,
-                stdout: out,
-                stderr: err_text,
-                elapsed_ms,
-                fuel_consumed,
-            })
+            Ok((
+                PluginResult::Ok {
+                    exit_code: 0,
+                    stdout: out,
+                    stderr: err_text,
+                    elapsed_ms,
+                    fuel_consumed,
+                },
+                output_too_large,
+            ))
         }
         Err(err) => classify_trap(
             anyhow::Error::from(err),
@@ -397,7 +445,11 @@ pub fn invoke_plugin(
             &stderr,
             elapsed_ms,
             fuel_consumed,
-        ),
+            limits.fuel_cap,
+        )
+        // For Timeout/Crashed results, output_too_large is irrelevant:
+        // classify_outcome ignores the flag for non-Ok results (BC-1.18.001).
+        .map(|r| (r, false)),
     }
 }
 
@@ -407,6 +459,7 @@ fn classify_trap(
     stderr: &MemoryOutputPipe,
     elapsed_ms: u64,
     fuel_consumed: u64,
+    fuel_cap: u64,
 ) -> Result<PluginResult, InvokeError> {
     let stderr_text = stderr_to_string(stderr);
     // WASI `exit(n)` propagates as an `I32Exit` in wasmtime-wasi's
@@ -429,12 +482,14 @@ fn classify_trap(
                 stderr: stderr_text,
                 elapsed_ms,
                 fuel_consumed,
+                fuel_cap,
             },
             Trap::OutOfFuel => PluginResult::Timeout {
                 cause: TimeoutCause::Fuel,
                 stderr: stderr_text,
                 elapsed_ms,
                 fuel_consumed,
+                fuel_cap,
             },
             other => PluginResult::Crashed {
                 trap_string: other.to_string(),
@@ -695,7 +750,14 @@ fn setup_host_on_store_data(
                     let ctx = caller.data().host.clone();
                     match crate::host::read_file::prepare(&ctx, &path, max_bytes) {
                         Ok((bytes, _)) => bytes,
-                        Err(code) => return code,
+                        Err(code) => {
+                            // S-25.01 AC-003: flag OutputTooLarge for the
+                            // post-call classify_outcome path.
+                            if code == codes::OUTPUT_TOO_LARGE {
+                                caller.data_mut().host_output_too_large_seen = true;
+                            }
+                            return code;
+                        }
                     }
                 };
 
@@ -858,7 +920,14 @@ fn setup_host_on_store_data(
                 let host = caller.data().host.clone();
                 match crate::host::write_file::prepare(&host, &path, &contents, max_bytes) {
                     Ok(()) => codes::OK,
-                    Err(code) => code,
+                    Err(code) => {
+                        // S-25.01 AC-003: flag OutputTooLarge for the
+                        // post-call classify_outcome path.
+                        if code == codes::OUTPUT_TOO_LARGE {
+                            caller.data_mut().host_output_too_large_seen = true;
+                        }
+                        code
+                    }
                 }
             },
         )
@@ -921,6 +990,9 @@ fn setup_host_on_store_data(
                 // Returns bytes written (positive) on success or a
                 // negative error code. Mirrors host/exec_subprocess.rs.
                 if envelope.len() as u32 > result_buf_cap {
+                    // S-25.01 AC-003: flag OutputTooLarge for the
+                    // post-call classify_outcome path.
+                    caller.data_mut().host_output_too_large_seen = true;
                     return codes::OUTPUT_TOO_LARGE;
                 }
                 match write_wasm_bytes_sd(&mut caller, result_buf_ptr, result_buf_cap, &envelope) {
@@ -1038,9 +1110,30 @@ fn write_wasm_u32_sd(
 /// Per-invocation store data: the HostContext S-1.4 populates plus the
 /// wasmtime-wasi preview-1 context the SDK needs to talk to stdin /
 /// stdout.
+///
+/// # S-25.01: host_output_too_large_seen (BC-1.18.001 invariant 5)
+///
+/// `host_output_too_large_seen` is DISPATCHER-INTERNAL state — it MUST reside here
+/// and MUST NOT be exposed in `crates/hook-sdk/` or any public hook-sdk ABI type.
+/// Plugin WASM binaries observe the `OutputTooLarge(-3)` return code from host
+/// functions but cannot read or write this flag directly.
+///
+/// Per-invocation reset invariant (BC-1.18.001 invariant 1; AC-003): the flag
+/// MUST be reset to `false` immediately BEFORE each `func.call()` invocation —
+/// NOT only at Store creation. The reset ensures that a prior invocation's OTL
+/// event does not bleed into the next invocation's classification.
+///
+/// No HOST_ABI_VERSION bump is required for this field (dispatcher-internal only).
 pub struct StoreData {
     pub host: HostContext,
     pub wasi: WasiP1Ctx,
+    /// Set to `true` by any host function that returns `OutputTooLarge(-3)` to
+    /// the WASM guest during the current invocation. Reset to `false` before
+    /// each `func.call()`. Read after `func.call()` to supply the `output_too_large`
+    /// parameter to `classify_outcome`.
+    ///
+    /// S-25.01 AC-003/AC-018 — BC-1.18.001 invariant 1 + invariant 5.
+    pub host_output_too_large_seen: bool,
 }
 
 #[cfg(test)]
@@ -1057,6 +1150,100 @@ mod tests {
         HostContext::new("plugin", "0.0.1", "sess", "trace")
     }
 
+    // ADR-042 §Decision 1: global fuel cap raised 10M → 20M (measurement-validated).
+    // 838 fuel-exhaustion events across 35 plugins confirmed by perf-engineer;
+    // worst-case payload (ARCH-INDEX + 50 KB assistant message) measured 10,406,058 fuel.
+    #[test]
+    fn invoke_limits_default_fuel_cap_is_20m() {
+        assert_eq!(InvokeLimits::default().fuel_cap, DEFAULT_FUEL_CAP);
+    }
+
+    // Proves the dispatcher enforces the fuel ceiling at the boundary: a synthetic WAT
+    // workload of ~10.8M fuel crosses from trapped to completing when the ceiling
+    // moves from 10M to 20M. This is a ceiling-enforcement test, not a production
+    // model: the WAT loop runs with an empty payload and no host calls, so it does
+    // not reflect the regression formula measured by the perf-engineer
+    // (fuel = 29,452 + 27.514 × payload_bytes). The ~10.8M estimate is based on
+    // the loop structure (1,200,000 iterations × ~9 WASM instructions each); the
+    // actual observed value is asserted in the 20M branch below.
+    #[test]
+    fn fuel_workload_exhausts_10m_completes_at_20m() {
+        let engine = build_engine().unwrap();
+        // Arithmetic loop: 1,200,000 iterations x ~9 instructions ≈ 10.8M fuel.
+        let module = compile(
+            &engine,
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (func (export "_start")
+                (local $i i32)
+                (local.set $i (i32.const 0))
+                (block $done
+                  (loop $l
+                    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                    (br_if $done (i32.ge_u (local.get $i) (i32.const 1200000)))
+                    (br $l)))))
+            "#,
+        );
+
+        // At the former 10M cap: fuel exhaustion.
+        let (res_10m, _) = invoke_plugin(
+            &engine,
+            &module,
+            bare_ctx(),
+            b"",
+            InvokeLimits {
+                timeout_ms: 30_000,
+                fuel_cap: 10_000_000,
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                res_10m,
+                PluginResult::Timeout {
+                    cause: TimeoutCause::Fuel,
+                    ..
+                }
+            ),
+            "expected Timeout{{Fuel}} at 10M cap, got {res_10m:?}"
+        );
+
+        // At the new 20M cap: completes successfully.
+        let (res_20m, _) = invoke_plugin(
+            &engine,
+            &module,
+            bare_ctx(),
+            b"",
+            InvokeLimits {
+                timeout_ms: 30_000,
+                fuel_cap: DEFAULT_FUEL_CAP,
+            },
+        )
+        .unwrap();
+        // Assert both the exit code and the observed fuel so a future wasmtime
+        // accounting change fails with a message stating the actual cost rather
+        // than an opaque pattern-match mismatch.
+        match res_20m {
+            PluginResult::Ok {
+                exit_code,
+                fuel_consumed,
+                ..
+            } => {
+                assert_eq!(exit_code, 0, "expected exit_code=0 at 20M cap");
+                assert!(
+                    fuel_consumed > 10_000_000,
+                    "fuel_consumed should be > 10M (workload is ~10.8M), got {fuel_consumed}"
+                );
+                assert!(
+                    fuel_consumed < DEFAULT_FUEL_CAP,
+                    "fuel_consumed should be < cap ({DEFAULT_FUEL_CAP}), got {fuel_consumed}"
+                );
+            }
+            other => panic!("expected Ok(exit_code=0) at 20M cap, got {other:?}"),
+        }
+    }
+
     #[test]
     fn invoke_normal_plugin_returns_ok() {
         // Minimal WASI command that just returns successfully.
@@ -1069,7 +1256,7 @@ mod tests {
               (func (export "_start")))
             "#,
         );
-        let res =
+        let (res, _) =
             invoke_plugin(&engine, &module, bare_ctx(), b"", InvokeLimits::default()).unwrap();
         match res {
             PluginResult::Ok { exit_code, .. } => assert_eq!(exit_code, 0),
@@ -1094,7 +1281,7 @@ mod tests {
                 (loop (br 0))))
             "#,
         );
-        let res = invoke_plugin(
+        let (res, _) = invoke_plugin(
             &engine,
             &module,
             bare_ctx(),
@@ -1132,7 +1319,7 @@ mod tests {
                   (br $l))))
             "#,
         );
-        let res = invoke_plugin(
+        let (res, _) = invoke_plugin(
             &engine,
             &module,
             bare_ctx(),
@@ -1164,7 +1351,7 @@ mod tests {
                 unreachable))
             "#,
         );
-        let res =
+        let (res, _) =
             invoke_plugin(&engine, &module, bare_ctx(), b"", InvokeLimits::default()).unwrap();
         match res {
             PluginResult::Crashed { .. } => {}
@@ -1183,7 +1370,7 @@ mod tests {
               (func (export "_start")))
             "#,
         );
-        let res = invoke_plugin(
+        let (res, _) = invoke_plugin(
             &engine,
             &module,
             bare_ctx(),
@@ -1244,6 +1431,7 @@ mod tests {
         let store_data = StoreData {
             host: bare_ctx(),
             wasi: wasi_ctx,
+            host_output_too_large_seen: false,
         };
         let mut store = Store::new(&engine, store_data);
         store
@@ -1336,6 +1524,7 @@ mod tests {
         let store_data = StoreData {
             host: ctx,
             wasi: wasi_ctx,
+            host_output_too_large_seen: false,
         };
         let mut store = Store::new(&engine, store_data);
         store
@@ -1418,6 +1607,170 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // MINOR-5 (S-25.02 cluster-2 PR #824 pr-review cycle 3): concrete
+    // demonstration of the ordering side effect `main.rs`'s catch-point-(i)
+    // placement rationale did not previously mention. Because
+    // `reconcile_replace_all_overcap_if_qualifying` runs BEFORE the
+    // registry-driven PostToolUse tier loop in `main::run`, a PostToolUse
+    // WASM plugin matched for the SAME `Edit`/`MultiEdit` dispatch that
+    // fires the roll observes the canonical artifact ALREADY truncated to 0
+    // bytes — not the content the tool call just wrote.
+    //
+    // This reproduces that exact sequence: the REAL production
+    // reconciliation function runs first (identical to `main::run`'s own
+    // call order), then a REAL `read_prefix` host-function round-trip (the
+    // SAME production `setup_host_on_store_data` linker path T-002 above
+    // proves correct) reads the SAME canonical path a PostToolUse validator
+    // would read. If catch point (i) were ever reordered to run AFTER the
+    // tier loop, this fixture's `out_len` would equal the over-cap content
+    // length instead of 0 and this assertion would fail — a regression
+    // detector for the documented ordering trade-off, not merely a
+    // characterization.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_MINOR5_post_tool_use_validator_observes_truncated_canonical_after_catch_point_i() {
+        use crate::registry::{Capabilities, ReadPrefixCaps};
+
+        let dir = tempfile::tempdir().expect("tempdir for MINOR-5 fixture");
+        let target = dir.path().join("decision-log.md");
+        let over_cap_content = "z".repeat(49_500);
+        std::fs::write(&target, &over_cap_content).expect("write over-cap fixture content");
+
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory dir");
+        std::fs::write(
+            factory_dir.join("shard-config.toml"),
+            "[[shard]]\n\
+             artifact_stem = \"decision-log\"\n\
+             artifact_path = \"decision-log.md\"\n\
+             practical_fuel_ceiling = 8000000\n\
+             worst_case_fuel_per_byte = 106.36\n\
+             max_single_record_bytes = 16384\n\
+             safety_margin = 8192\n\
+             shard_cap_bytes = 49152\n\
+             shape = \"flat\"\n",
+        )
+        .expect("write shard-config.toml fixture");
+
+        let payload_value = serde_json::json!({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Edit",
+            "session_id": "sess-minor5",
+            "tool_input": {
+                "file_path": target.to_string_lossy(),
+                "old_string": "some old text",
+                "new_string": "some new text",
+                "replace_all": true,
+            },
+            "tool_response": {"success": true},
+        });
+        let payload: crate::payload::HookPayload = serde_json::from_value(payload_value)
+            .expect("HookPayload must deserialize from a well-formed PostToolUse envelope");
+
+        // Step 1 (real production call, the SAME function `main::run` invokes
+        // BEFORE the tier loop): reconciles the over-cap write, truncating
+        // the canonical to 0 bytes.
+        reconcile_replace_all_overcap_if_qualifying(&payload, dir.path());
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().len(),
+            0,
+            "precondition: catch point (i) must have truncated the canonical to 0 bytes before \
+             the PostToolUse validator step below runs"
+        );
+
+        // Step 2: a PostToolUse WASM validator, matched for the SAME
+        // Edit/MultiEdit dispatch, re-reads the canonical via the REAL
+        // production `read_prefix` host binding (the identical linker path
+        // T-002 proves correct above) — exactly what a content-inspecting
+        // validator would do.
+        let path_str = target.to_str().expect("path to str").to_string();
+        let mut ctx = bare_ctx();
+        ctx.capabilities = Capabilities {
+            read_prefix: Some(ReadPrefixCaps {
+                path_allow: vec![path_str.clone()],
+            }),
+            ..Capabilities::default()
+        };
+
+        let engine = build_engine().unwrap();
+        let mut linker: wasmtime::Linker<StoreData> = wasmtime::Linker::new(&engine);
+        setup_host_on_store_data(&mut linker).expect("setup_host_on_store_data must not error");
+
+        let module = compile(
+            &engine,
+            r#"(module
+              (import "vsdd" "read_prefix" (func $rp (param i32 i32 i32 i32 i32 i32) (result i32)))
+              (memory (export "memory") 2)
+              (func (export "call_rp") (param $path_ptr i32) (param $path_len i32) (result i32)
+                (call $rp
+                  (local.get $path_ptr)
+                  (local.get $path_len)
+                  (i32.const 65536)
+                  (i32.const 0)
+                  (i32.const 0)
+                  (i32.const 4)
+                )
+              )
+            )"#,
+        );
+
+        let wasi_ctx = WasiCtxBuilder::new().build_p1();
+        let store_data = StoreData {
+            host: ctx,
+            wasi: wasi_ctx,
+            host_output_too_large_seen: false,
+        };
+        let mut store = Store::new(&engine, store_data);
+        store
+            .set_fuel(1_000_000)
+            .expect("engine has fuel metering enabled");
+        store.set_epoch_deadline(u64::MAX);
+
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .expect("MINOR-5: instantiation must succeed");
+
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .expect("module exports memory");
+        let path_bytes = path_str.as_bytes();
+        memory
+            .write(&mut store, 128, path_bytes)
+            .expect("write path bytes to WASM memory");
+
+        let call_rp = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "call_rp")
+            .expect("module exports call_rp");
+        let ret = call_rp
+            .call(&mut store, (128, path_bytes.len() as i32))
+            .expect("call_rp must not trap");
+        assert_eq!(
+            ret, 0,
+            "MINOR-5: read_prefix must return codes::OK (0) for the allowed canonical path; got {}",
+            ret
+        );
+
+        let mem_data: Vec<u8> = memory.data(&store).to_vec();
+        let out_len = u32::from_le_bytes(
+            mem_data[4..8]
+                .try_into()
+                .expect("memory[4:8] must be 4 bytes"),
+        );
+        assert_eq!(
+            out_len,
+            0,
+            "MINOR-5: a PostToolUse validator reading the canonical AFTER catch point (i) ran \
+             (the real main::run ordering — this call precedes the tier loop) must observe 0 \
+             bytes, not the {}-byte over-cap content just written — if this is nonzero, either \
+             catch point (i) no longer runs before PostToolUse plugin execution (a correctness \
+             regression of the current documented ordering) or this fixture no longer reproduces \
+             the qualifying condition",
+            over_cap_content.len()
+        );
+        // dir goes out of scope here; tempfile::TempDir::drop auto-cleans the directory.
+    }
+
+    // -----------------------------------------------------------------------
     // S-19.09 T-002b — AC-002 head-c bound (D19 GREEN gate)
     //
     // read_prefix with a file LARGER than max_bytes must:
@@ -1478,6 +1831,7 @@ mod tests {
         let store_data = StoreData {
             host: ctx,
             wasi: wasi_ctx,
+            host_output_too_large_seen: false,
         };
         let mut store = Store::new(&engine, store_data);
         store
@@ -1596,6 +1950,7 @@ mod tests {
         let store_data = StoreData {
             host: ctx,
             wasi: wasi_ctx,
+            host_output_too_large_seen: false,
         };
         let mut store = Store::new(&engine, store_data);
         store
@@ -1707,6 +2062,7 @@ mod tests {
         let store_data = StoreData {
             host: ctx,
             wasi: wasi_ctx,
+            host_output_too_large_seen: false,
         };
         let mut store = Store::new(&engine, store_data);
         store
@@ -2123,6 +2479,331 @@ pub fn inject_git_context_if_qualifying(
     // (deserialized into HookPayload.extra via #[serde(flatten)]). AC-005.
     if let Some(map) = payload_value.as_object_mut() {
         map.insert("git_context".to_string(), git_ctx.to_json());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S-25.02 BC-1.18.006 Postcondition 7 catch point (i) qualifying wrapper
+// (story AC-024; ADR-051 §Decision 15)
+// ---------------------------------------------------------------------------
+//
+// `true` iff `tool_input` is an `Edit` call with `replace_all: true`, or a
+// `MultiEdit` call whose `edits` array contains at least one block with
+// `replace_all: true` (BC-1.18.006 Postcondition 7's scope predicate,
+// mirrored from Precondition 4). Real, cheap, structural — see
+// `detect_replace_all_overcap_candidate`'s own doc comment for why this was
+// always real, non-`todo!()` code, even while `shard_manager`'s roll bodies
+// were still stubbed.
+fn tool_input_has_replace_all_true(tool_input: &serde_json::Value) -> bool {
+    if tool_input.get("replace_all").and_then(|v| v.as_bool()) == Some(true) {
+        return true;
+    }
+    tool_input
+        .get("edits")
+        .and_then(|v| v.as_array())
+        .is_some_and(|edits| {
+            edits
+                .iter()
+                .any(|e| e.get("replace_all").and_then(|v| v.as_bool()) == Some(true))
+        })
+}
+
+/// Structural (real, non-`todo!()`) pre-filter for BC-1.18.006 Postcondition
+/// 7 catch point (i). Mirrors [`detect_git_commit_event`]'s own cheap-
+/// detect-then-act shape (used by [`inject_git_context_if_qualifying`]
+/// above) and `executor.rs::shard_cap_precheck`'s zero-cost-bypass
+/// precedent — both already-shipped, non-stub native checks reached
+/// unconditionally from `main::run`.
+///
+/// **Corrected cost framing (NIT-4, S-25.02 cluster-2 PR #824 pr-review
+/// cycle 3; supersedes an earlier revision's "every check here is cheap and
+/// structural" claim, retracted for the identical PreToolUse-leg claim by
+/// [`find_matching_entry`]'s own doc comment, PR #818 fix-burst finding
+/// B4):** the `event_name`/`tool_name`/`replace_all` checks ARE cheap and
+/// structural — pure `serde_json::Value` field lookups, no I/O. `[[shard]]`
+/// config-match is NOT: `ShardRegistry::load` performs a real (bounded, but
+/// non-zero) TOML parse of the whole config file whenever one exists on
+/// disk, exactly as `executor.rs::shard_cap_precheck`'s sibling PreToolUse
+/// gate does. This is still BC-1.18.006 Postcondition 7's OWN "zero added
+/// cost outside the narrow case" requirement — the ~99% of dispatches that
+/// are not a qualifying `PostToolUse` `Edit`/`MultiEdit` `replace_all` call
+/// never reach the config-match step at all (the cheap checks above return
+/// `None` first) — not a claim that the config-match step itself is free.
+/// It was DELIBERATELY kept real (never `todo!()`), even while
+/// `shard_manager`'s roll bodies were still stubbed during the original
+/// stub-architect burst: had this filter itself been `todo!()`, EVERY
+/// PostToolUse dispatch of ANY kind would have panicked against ADR-051
+/// §Decision 15 point 4's mandatory unconditional call site in `main::run`
+/// (see that call site's own doc comment) — a catastrophic regression of the
+/// ENTIRE cluster-1 BC-1.18.005 suite plus every other integration/bats test
+/// that drives the dispatcher at all. The BC's own tested
+/// `stat()`-and-retroactive-roll behavior lives entirely inside
+/// `shard_manager::reconcile_post_write_replace_all_overcap` (now fully
+/// implemented) — this function never touches that behavior, only decides
+/// whether to call into it.
+fn detect_replace_all_overcap_candidate(
+    original_payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Option<(crate::shard_manager::ShardEntry, std::path::PathBuf)> {
+    if original_payload.event_name != "PostToolUse" {
+        return None;
+    }
+    if !matches!(original_payload.tool_name.as_str(), "Edit" | "MultiEdit") {
+        return None;
+    }
+    if !tool_input_has_replace_all_true(&original_payload.tool_input) {
+        return None;
+    }
+    // NIT-4 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `file_path`
+    // extraction is free (a `serde_json::Value` field lookup) and must run
+    // BEFORE the `shard_config_path.exists()` probe / `ShardRegistry::load`
+    // parse below — ordering the free check first skips the parse entirely
+    // on a malformed payload, rather than paying for a parse whose result
+    // would be discarded once `file_path` turns out to be missing/non-string.
+    let Some(target_path) = original_payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+    else {
+        // MINOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): the sibling
+        // PreToolUse path (`executor.rs::shard_cap_precheck`) treats a
+        // missing or non-string `tool_input.file_path` as fail-loud ("MUST
+        // fail loud, never silently resolve to an empty PathBuf"). This leg
+        // has no `HookResult` to return (Decision 15 point 2 — a janitor,
+        // not a gate), but the same "never silent" argument applies here:
+        // warn rather than silently returning `None` with zero telemetry.
+        tracing::warn!(
+            tool_name = %original_payload.tool_name,
+            "BC-1.18.006 Postcondition 7 catch point (i): tool_input is missing a valid string \
+             \"file_path\" while checking for a qualifying replace_all overcap candidate; \
+             skipping reconciliation for this dispatch"
+        );
+        return None;
+    };
+    let shard_config_path = cwd.join(crate::executor::SHARD_CONFIG_RELATIVE_PATH);
+    if !shard_config_path.exists() {
+        return None;
+    }
+    let registry = match crate::shard_manager::ShardRegistry::load(&shard_config_path) {
+        Ok(registry) => registry,
+        Err(e) => {
+            // F-C2-P1-005 (MINOR, S-25.02 cluster-2 LOCAL adversary pass-1):
+            // a malformed `[[shard]]` config is a genuine, actionable
+            // condition (config authors would want to know) — silently
+            // discarding it here (falling through to `None`, this leg's own
+            // "no candidate" outcome) would leave no telemetry at all,
+            // asymmetric with `build_git_context`'s own fail-open-but-logged
+            // sibling paths above. This leg's own "no HookResult signaling"
+            // contract (Decision 15 point 2) is preserved — fail-open, never
+            // propagated as an error to the caller — but never silent.
+            tracing::warn!(
+                shard_config_path = %shard_config_path.display(),
+                error = %e,
+                "BC-1.18.006 Postcondition 7 catch point (i): failed to load [[shard]] config \
+                 while checking for a qualifying replace_all overcap candidate; skipping \
+                 reconciliation for this dispatch"
+            );
+            return None;
+        }
+    };
+    let entry = match crate::shard_manager::find_matching_entry(&registry, &target_path) {
+        Ok(Some(entry)) => entry.clone(),
+        Ok(None) => return None,
+        Err(e) => {
+            // MINOR-1 (S-25.02 cluster-2 PR #824 pr-review cycle 3):
+            // `find_matching_entry`'s `Err(ShardConfigError::DuplicateArtifactStem)`
+            // is documented as a normal, fail-loud condition callers MUST
+            // handle — the PreToolUse leg (`shard_cap_gate_check`) converts it
+            // to `HookResult::Error`. This leg has no `HookResult` to return
+            // (Decision 15 point 2 — a janitor, not a gate), but silently
+            // discarding it via `.ok()` (this leg's PRIOR behavior) left zero
+            // telemetry for a genuinely ambiguous `[[shard]]` config —
+            // asymmetric with the F-C2-P1-005 registry-load-failure arm
+            // immediately above, whose own rationale ("fail-open, never
+            // propagated as an error to the caller — but never silent")
+            // applies identically here.
+            tracing::warn!(
+                target_path = %target_path.display(),
+                error = %e,
+                "BC-1.18.006 Postcondition 7 catch point (i): ambiguous [[shard]] config \
+                 (duplicate artifact_stem match) while checking for a qualifying replace_all \
+                 overcap candidate; skipping reconciliation for this dispatch"
+            );
+            return None;
+        }
+    };
+    // MAJOR-2 (S-25.02 cluster-2 PR #824 pr-review cycle 3): `find_matching_entry`
+    // only compares `artifact_stem` against `file_stem()` and calls
+    // `path_falls_under_or_equals` — it validates nothing about the entry
+    // itself. `execute_roll` (reached via `reconcile_post_write_replace_all_overcap`
+    // below) is DESTRUCTIVE: it seals and then truncates the canonical to 0
+    // bytes. `shard_cap_gate_check` (the PreToolUse leg) never reaches
+    // `execute_roll` without first calling `validate_entry` — an entry that
+    // fails EC-022 (e.g. `artifact_path = "."` or `"./"`, which normalizes to
+    // an empty registered-component vector whose suffix test then matches ANY
+    // path sharing `artifact_stem`) is refused loud there. Without this same
+    // gate on THIS leg, a config entry the PreToolUse gate would reject could
+    // silently seal-and-empty a file the config never legitimately governed —
+    // the exact raw behavior EC-022's `validate_entry` check exists to make
+    // unreachable via config (the same bypass also covers the EC-010/011/
+    // 013/015/017 cap-sanity checks `reconcile_post_write_replace_all_overcap`
+    // relies on downstream). Fail-open-but-never-silent, matching this leg's
+    // documented contract (Decision 15 point 2) and the F-C2-P1-005 registry-
+    // load-failure arm immediately above: on `Err`, warn and return `None`
+    // rather than propagating an error to the caller or silently proceeding.
+    if let Err(e) = crate::shard_manager::validate_entry(&entry) {
+        tracing::warn!(
+            artifact_stem = %entry.artifact_stem,
+            error = %e,
+            "BC-1.18.006 Postcondition 7 catch point (i): matched [[shard]] config entry failed \
+             validate_entry; skipping reconciliation for this dispatch rather than reaching the \
+             destructive execute_roll path with an entry the PreToolUse gate would have refused"
+        );
+        return None;
+    }
+    // F-C2-P2-002 (MAJOR, S-25.02 cluster-2 LOCAL adversary pass-2):
+    // Postcondition 7 catch point (i) is scoped to the `"flat"` byte-size
+    // roll mechanism ONLY — the `replace_all` occurrence-multiplicity
+    // under-projection gap it exists to catch is a defect of
+    // BC-1.18.005's byte-size formula alone, never the
+    // `"frontmatter-changelog-array"` item-count mechanism (a wholly
+    // different trigger/rotation scheme owned by BC-1.18.009). Without this
+    // shape check, a byte-over-cap `replace_all` call against a matched
+    // `"frontmatter-changelog-array"`-shaped entry (e.g. a real index-style
+    // artifact like `BC-INDEX.md`, whose rotation is item-count-driven and
+    // has nothing to do with byte size) would incorrectly byte-roll and
+    // empty it — cross-mechanism data corruption.
+    if entry.shape != Some(crate::shard_manager::ShardShape::Flat) {
+        return None;
+    }
+    Some((entry, target_path))
+}
+
+/// BC-1.18.006 Postcondition 7 catch point (i) qualifying wrapper (story
+/// AC-024; ADR-051 §Decision 15). Called unconditionally from `main::run`
+/// BEFORE its `sync_tiers.is_empty() && partition.async_group.is_empty()`
+/// early-return guard (Decision 15 point 4's load-bearing placement
+/// caveat) — mirrors [`inject_git_context_if_qualifying`]'s own
+/// detect-then-act call shape. Silent filesystem side effect: emits NO
+/// `HookResult` of its own (Decision 15 point 2 — this leg is a janitor,
+/// not a gate) and never influences the caller's own dispatch outcome.
+///
+/// MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051 §Decision
+/// 17): a prior revision of this doc comment claimed this placement already
+/// prevented "the exact 'silently stop firing if the plugin set changes'
+/// failure mode" **for the PreToolUse leg** — false at the time: the
+/// PreToolUse-scoped native shard-cap gate (`executor::shard_cap_precheck`,
+/// BC-1.18.005) ran only INSIDE `execute_tiers`, called from `main::run`
+/// AFTER the very early-return guard this leg's placement precedes, so an
+/// empty matched-plugin set silently defeated it — the asymmetric twin of
+/// the failure mode this leg's OWN placement (correctly) prevents. MAJOR-3
+/// hoists `shard_cap_precheck` to the SAME call site as this leg (computed
+/// once, threaded into `execute_tiers` as a parameter, never recomputed —
+/// see `executor::shard_cap_precheck` and `executor::execute_tiers`'s own
+/// doc comments) so the guarantee now genuinely holds for BOTH legs.
+///
+/// The qualification filter ([`detect_replace_all_overcap_candidate`]) and
+/// the reconciliation behavior it delegates into
+/// ([`crate::shard_manager::reconcile_post_write_replace_all_overcap`]) are
+/// both fully implemented. A failure there is logged (fail-open, matching
+/// this leg's own "no `HookResult` signaling" contract — this leg never
+/// blocks or errors the calling dispatch), not propagated.
+pub fn reconcile_replace_all_overcap_if_qualifying(
+    original_payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) {
+    let Some((entry, target_path)) = detect_replace_all_overcap_candidate(original_payload, cwd)
+    else {
+        return;
+    };
+    if let Err(e) =
+        crate::shard_manager::reconcile_post_write_replace_all_overcap(&entry, &target_path)
+    {
+        tracing::warn!(
+            artifact_stem = %entry.artifact_stem,
+            error = %e,
+            "BC-1.18.006 Postcondition 7 catch point (i): retroactive reconciliation failed"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S-25.02 cluster-2 LOCAL adversary pass-1 finding F-C2-P1-006 — coverage
+// unit tests for `tool_input_has_replace_all_true`'s `MultiEdit` `edits[]`-
+// array branch (BC-1.18.006 Precondition 4 / Postcondition 7 scope
+// predicate: "a `MultiEdit` call containing at least one edit block whose
+// `replace_all` field is `true`"). `tool_input_has_replace_all_true` is a
+// real (non-`todo!()`), already-shipped structural pre-filter — this is a
+// COVERAGE test asserting the branch behaves correctly, not a Red Gate test
+// for unimplemented behavior. If either assertion below fails, that is a
+// latent bug in the already-shipped `MultiEdit` `edits[]` branch, not an
+// expected-red TDD state.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod f_c2_p1_006_replace_all_multi_edit_tests {
+    use super::*;
+
+    /// A `MultiEdit` call whose `edits[]` array contains a per-block
+    /// `replace_all: true` in one of its entries (here, the SECOND block,
+    /// so the branch's `.any(...)` scan must not stop at the first,
+    /// non-qualifying block) qualifies — `tool_input_has_replace_all_true`
+    /// must return `true`.
+    #[test]
+    fn test_F_C2_P1_006_multi_edit_edits_array_per_block_replace_all_true_qualifies() {
+        let tool_input = serde_json::json!({
+            "file_path": "decision-log.md",
+            "edits": [
+                {
+                    "old_string": "first old",
+                    "new_string": "first new",
+                    "replace_all": false
+                },
+                {
+                    "old_string": "second old",
+                    "new_string": "second new",
+                    "replace_all": true
+                }
+            ]
+        });
+
+        assert!(
+            tool_input_has_replace_all_true(&tool_input),
+            "F-C2-P1-006: a MultiEdit whose edits[] array contains a per-block \
+             `replace_all: true` in ANY block must qualify (BC-1.18.006 Precondition 4's \
+             MultiEdit scope: \"a MultiEdit call containing at least one edit block whose \
+             replace_all field is true\")"
+        );
+    }
+
+    /// A negative case: a `MultiEdit` whose `edits[]` array has NO block with
+    /// `replace_all: true` (either omitted entirely, or explicitly `false`)
+    /// must NOT qualify — `tool_input_has_replace_all_true` must return
+    /// `false`.
+    #[test]
+    fn test_F_C2_P1_006_multi_edit_edits_array_without_replace_all_does_not_qualify() {
+        let tool_input = serde_json::json!({
+            "file_path": "decision-log.md",
+            "edits": [
+                {
+                    "old_string": "first old",
+                    "new_string": "first new"
+                },
+                {
+                    "old_string": "second old",
+                    "new_string": "second new",
+                    "replace_all": false
+                }
+            ]
+        });
+
+        assert!(
+            !tool_input_has_replace_all_true(&tool_input),
+            "F-C2-P1-006: a MultiEdit whose edits[] array contains NO block with \
+             `replace_all: true` must NOT qualify — a plain MultiEdit without replace_all is \
+             unaffected by BC-1.18.006 Precondition 4/Postcondition 7 (per Precondition 4's own \
+             closure-scope statement)"
+        );
     }
 }
 

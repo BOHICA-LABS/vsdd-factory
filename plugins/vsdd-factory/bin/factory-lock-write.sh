@@ -62,6 +62,7 @@ trap '_cleanup_tmpfiles' EXIT
 
 # ---------------------------------------------------------------------------
 # TTL constant — non-configurable (BC-5.40.001 Invariant 2)
+# Canonical TTL: see crates/factory-lock-parse/src/lib.rs pub const TTL_SECONDS: u32 = 2700 (AC-012/ADR-046 F-006).
 # ---------------------------------------------------------------------------
 TTL_SECONDS=2700
 

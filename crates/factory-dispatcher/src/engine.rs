@@ -1,5 +1,6 @@
 //! Shared `wasmtime::Engine` with epoch-interruption + fuel consumption
-//! enabled.
+//! enabled and the component model explicitly disabled (ADR-003: WASI
+//! preview-1 core modules only).
 //!
 //! The engine is expensive to build (~100 ms) so we construct one per
 //! dispatcher process and hand out references. An `EpochTicker` thread
@@ -37,6 +38,10 @@ pub fn build_engine() -> Result<Engine, EngineError> {
     // WASI preview-1 needs imports registered per-instance; preview-2
     // is explicitly out of scope for v1.0 (ADR-003).
     config.wasm_reference_types(true);
+    // ADR-003: core modules only. Explicitly disable the component model
+    // (wasmtime 48 enables it by default) so component binaries are
+    // rejected at compile time rather than relying on the default.
+    config.wasm_component_model(false);
     Engine::new(&config).map_err(|e| EngineError::Config(e.to_string()))
 }
 
@@ -107,6 +112,25 @@ mod tests {
         // time; we can't read back flags from an Engine, but a smoke
         // construct-and-drop proves config validation passed.
         drop(engine);
+    }
+
+    /// ADR-003: preview-2 / the component model is out of scope. The engine
+    /// must not compile component binaries (defence in depth: no component
+    /// parsing attack surface reachable from untrusted plugin bytes).
+    #[test]
+    fn engine_rejects_component_binaries() {
+        let engine = build_engine().expect("engine should build");
+        let bytes = wat::parse_str("(component)").expect("minimal component wat");
+        let err = match wasmtime::component::Component::new(&engine, &bytes) {
+            Ok(_) => panic!("component must NOT compile: component model must be disabled"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}").to_lowercase();
+        assert!(
+            msg.contains("component")
+                && (msg.contains("support") || msg.contains("enabled") || msg.contains("disabled")),
+            "expected a component-model-disabled error, got: {msg}"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@
 //!
 //! Oracle:
 //! - Mock HTTP server receives exactly 1 POST with `X-Honeycomb-Team` header
-//!   (enforced via httpmock 0.7 `when.header()` matcher)
+//!   (enforced via httpmock 0.8 `when.header()` matcher)
 //!
 //! Note: Honeycomb payload schema is uncontracted-by-BC in v1.0. AC-14 verifies
 //! behavior shipped via S-4.03 without a formal v1.0 BC anchor.
@@ -68,7 +68,7 @@ fn test_BC_v1_1_honeycomb_sink_posts_with_x_honeycomb_team_header() {
     sink.shutdown();
 
     // Oracle: mock with X-Honeycomb-Team constraint received exactly 1 hit.
-    hc_team_mock.assert_hits(1);
+    hc_team_mock.assert_calls(1);
 }
 
 /// v1.1 BC candidate: honeycomb-sink-payload-format — posts to correct endpoint URL.
@@ -108,7 +108,7 @@ fn test_BC_v1_1_honeycomb_sink_posts_to_correct_dataset_path() {
     sink.shutdown();
 
     // Oracle: request hit the `/1/events/my-dataset` path.
-    path_mock.assert_hits(1);
+    path_mock.assert_calls(1);
 }
 
 /// v1.1 BC candidate: honeycomb-time-field-rfc3339 — sink enriches with time field.
@@ -151,9 +151,9 @@ fn test_BC_v1_1_honeycomb_sink_sends_events_to_endpoint() {
     sink.shutdown();
 
     assert!(
-        any_mock.hits() >= 1,
+        any_mock.calls() >= 1,
         "AC-14 v1.1 honeycomb: HoneycombSink must POST to endpoint; got {} hits",
-        any_mock.hits()
+        any_mock.calls()
     );
 }
 
@@ -209,7 +209,7 @@ fn test_BC_v1_1_honeycomb_sink_reachable_through_router_submit() {
     router.shutdown();
 
     assert!(
-        hc_mock.hits() >= 1,
+        hc_mock.calls() >= 1,
         "AC-14 Router path: HoneycombSink must POST with X-Honeycomb-Team via Router::submit()"
     );
 }

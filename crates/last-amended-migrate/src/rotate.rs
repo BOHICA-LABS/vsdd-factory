@@ -1,0 +1,396 @@
+//! Rotation subcommand orchestration (BC-10.13.001 PC5, PC6).
+
+use crate::error::MigrateError;
+use crate::migrate::MigrationMode;
+use std::path::{Path, PathBuf};
+
+/// Tool-default number of most-recent `changelog:` items to retain in the
+/// source file when a `--keep-recent` count is not supplied
+/// (BC-10.13.001 PC5 "all-but-the-most-recent-K by tool default").
+pub const DEFAULT_KEEP_RECENT: usize = 20;
+
+/// Outcome of a single rotation invocation.
+#[derive(Debug, Clone)]
+pub struct RotationReport {
+    pub path: PathBuf,
+    pub archive_path: PathBuf,
+    /// Number of `changelog:` items moved out of `path` into the archive.
+    /// `0` for a below-threshold no-op (EC-004).
+    pub items_moved: usize,
+    pub mutated: bool,
+}
+
+/// Derive the archive destination path: the nearest `.factory/` ancestor
+/// directory of `path` (walking upward — `Path::ancestors` yields the most
+/// specific ancestor first), joined with
+/// `cycles/<cycle_name>/<file-basename>-changelog-archive.md` (PC5's own
+/// literal naming convention). Falls back to a `.factory/` sibling of
+/// `path`'s own parent directory when no `.factory` ancestor component is
+/// found at all (defensive — every real target file lives under `.factory/`,
+/// but `rotate_changelog` has no separate `factory_root` parameter to lean
+/// on, unlike `migrate_all`).
+fn resolve_archive_path(path: &Path, cycle_name: &str) -> Result<PathBuf, MigrateError> {
+    let basename = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+        MigrateError::FrontmatterParse {
+            path: path.to_path_buf(),
+            reason: "cannot derive a file stem for the archive naming convention".to_string(),
+        }
+    })?;
+    let archive_filename = format!("{basename}-changelog-archive.md");
+
+    let factory_root = path
+        .ancestors()
+        .find(|a| a.file_name().is_some_and(|n| n == ".factory"))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            path.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".factory")
+        });
+
+    Ok(factory_root
+        .join("cycles")
+        .join(cycle_name)
+        .join(archive_filename))
+}
+
+/// Determine whether `archive_path` exists, distinguishing a genuine
+/// "does not exist" (`NotFound`) from any other, ambiguous filesystem error
+/// (e.g. `PermissionDenied` on an unreadable/unsearchable ancestor
+/// directory).
+///
+/// PR #842 item 2 fix: a bare `archive_path.exists()` check (which collapses
+/// EVERY failure mode — `NotFound`, `PermissionDenied`, or anything else —
+/// to a single `false`) cannot be distinguished from a genuine absence by
+/// its caller. Treating an ambiguous/ERROR result as "absent, safe to
+/// proceed with an empty archive" causes [`rotate_changelog_at`] to silently
+/// OVERWRITE an archive file that may hold real prior content it simply
+/// could not read right now — irrecoverable data loss, not a parse failure.
+///
+/// Returns:
+/// - `Ok(false)` — the path genuinely does not exist (`NotFound`); safe to
+///   proceed with an empty `archive_content`.
+/// - `Ok(true)` — the path exists; the caller must read it.
+/// - `Err(_)` — the existence could not be determined for any other reason;
+///   the caller MUST fail loud rather than guess.
+fn check_archive_exists(archive_path: &Path) -> Result<bool, MigrateError> {
+    match std::fs::metadata(archive_path) {
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(MigrateError::Io {
+            path: archive_path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// Remove every line starting with `prefix` from `text` — used to drop a
+/// pre-existing `changelog_archive:` discoverability-pointer line before
+/// writing a fresh one, so repeated genuine rotations never accumulate
+/// duplicate pointer lines.
+fn remove_lines_with_prefix(text: &str, prefix: &str) -> String {
+    text.split_inclusive('\n')
+        .filter(|line| !line.starts_with(prefix))
+        .collect()
+}
+
+/// Rewrite `raw`'s `changelog:` sequence to hold only `keep_items` (in
+/// order), followed by a `changelog_archive:` discoverability pointer line
+/// naming `archive_path` (PC5) — every other byte of `raw` is left
+/// untouched.
+fn rewrite_source_after_rotation(
+    path: &Path,
+    raw: &str,
+    keep_items: &[String],
+    archive_path: &Path,
+) -> Result<String, MigrateError> {
+    let (seq_start, seq_end) =
+        crate::frontmatter::changelog_sequence_bounds(raw).ok_or_else(|| {
+            MigrateError::FrontmatterParse {
+                path: path.to_path_buf(),
+                reason: "changelog: sequence not found while rewriting after rotation".to_string(),
+            }
+        })?;
+
+    let mut new_seq = String::new();
+    for item in keep_items {
+        new_seq.push_str(item);
+    }
+
+    let tail = remove_lines_with_prefix(&raw[seq_end..], "changelog_archive:");
+    // S-15.03 Windows-CI fix: `archive_path.display()` is a raw filesystem
+    // path, not a pre-escaped YAML scalar body. On Windows it renders with
+    // `\`-separated components, which are illegal unescaped inside a YAML
+    // double-quoted scalar (YAML permits `\` only immediately before `\`,
+    // `"`, `n`, `r`, `t`, or `xHH`) — route it through this crate's own
+    // `escape::escape_raw_value` before embedding it.
+    //
+    // Deliberately NOT `escape::escape_value`: that function's "is this
+    // already an escaped token" lookahead is designed for idempotently
+    // re-processing prose text this tool may have escaped on a PRIOR run
+    // (PC4) — a raw, always-freshly-computed filesystem path has no such
+    // concern, and reusing that heuristic here is actively wrong. A `\`
+    // path separator immediately followed by a component that starts with
+    // `n`/`r`/`t`/`x`+hex/`\`/`"` (e.g. a cycle name like `test-cycle`, or a
+    // username like `runner` — thoroughly ordinary on Windows) would
+    // collide with `escape_value`'s recognized-escape-token lookahead and be
+    // left unescaped, so strict YAML `safe_load` would silently decode it
+    // back as an actual tab/newline/CR byte instead of the literal
+    // backslash — silent path corruption, not a parse failure (see
+    // `escape_raw_value`'s doc comment for the full analysis).
+    //
+    // B1 portability fix: write a repo-root-relative path into the
+    // `changelog_archive:` pointer (e.g.
+    // `.factory/specs/behavioral-contracts/BC-INDEX-changelog-archive.md`),
+    // not an absolute machine-local path. Absolute paths bake the developer's
+    // or CI runner's filesystem prefix into a versioned factory-artifacts-branch
+    // document, making it non-portable across checkouts.
+    //
+    // Resolution: walk `path`'s ancestors for a `.factory` component (the
+    // canonical factory root marker), take its parent as the repo root, and
+    // strip that prefix from `archive_path`. Falls back to writing
+    // `archive_path` as-is when the `.factory` ancestor cannot be found (e.g.
+    // test fixtures that land in a bare tempdir with no `.factory` above them)
+    // or when `strip_prefix` fails (archive does not live under the repo root —
+    // defensive, should not occur in production).
+    let relative_archive: Option<PathBuf> = if archive_path.is_absolute() {
+        path.ancestors()
+            .find(|a| a.file_name().is_some_and(|n| n == ".factory"))
+            .and_then(|factory_dir| factory_dir.parent())
+            .and_then(|repo_root| archive_path.strip_prefix(repo_root).ok())
+            .map(|p| p.to_path_buf())
+    } else {
+        None
+    };
+    let effective_path: &Path = relative_archive.as_deref().unwrap_or(archive_path);
+    let pointer_line = format!(
+        "changelog_archive: \"{}\"\n",
+        crate::escape::escape_raw_value(&effective_path.display().to_string())
+    );
+
+    let mut result = String::with_capacity(raw.len() + pointer_line.len());
+    result.push_str(&raw[..seq_start]);
+    result.push_str(&new_seq);
+    result.push_str(&pointer_line);
+    result.push_str(&tail);
+    Ok(result)
+}
+
+/// Rotate `path`'s `changelog:` sequence using a caller-supplied,
+/// pre-resolved `archive_path` directly — for callers that cannot derive an
+/// archive path from a `cycle_name` (e.g. `BC-INDEX.md`, which is a catalog
+/// artifact, not a cycle-scoped log file).
+///
+/// Identical behaviour to [`rotate_changelog`] in all other respects: moves
+/// the oldest items past `keep_recent` verbatim into `archive_path`, removes
+/// exactly those items from `path`, and leaves a `changelog_archive:`
+/// discoverability pointer (BC-10.13.001 PC5). No-op (EC-004) when the
+/// sequence does not exceed `keep_recent`. Creates `archive_path`'s parent
+/// directory if it does not already exist (EC-005 precedent).
+///
+/// BC-1.18.009 Architecture Anchors: "a small, NAMED, bounded extension to
+/// the primitive's path-resolution surface — a generalized `archive_path:
+/// &Path` parameter... pre-computed by the dispatcher's B1 handler as the
+/// FIXED, non-cycle, BC-INDEX-sibling path."
+pub fn rotate_changelog_at(
+    path: &Path,
+    archive_path: &Path,
+    keep_recent: usize,
+    mode: MigrationMode,
+) -> Result<RotationReport, MigrateError> {
+    let doc = crate::frontmatter::parse_frontmatter(path)?;
+    // SEC-001 (CWE-22): reject any caller-supplied `archive_path` that
+    // contains `..` (parent-directory) components.  `rotate_changelog` is
+    // constrained by `resolve_archive_path` which anchors the output inside
+    // `.factory/cycles/`; `rotate_changelog_at` accepts a pre-computed path
+    // from the caller and must apply its own structural guard.  A `..`
+    // component is the sole traversal vector for workspace-internal callers;
+    // absolute-path containment is enforced by the outer allowlist in
+    // `path_guard.rs` before any mutation reaches this function.
+    if archive_path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(MigrateError::InvalidPath {
+            path: archive_path.to_path_buf(),
+            reason: "archive_path must not contain parent-directory (..) traversal components"
+                .to_string(),
+        });
+    }
+    let total = doc.changelog_items_raw.len();
+
+    if total <= keep_recent {
+        // EC-004: below-threshold no-op.
+        return Ok(RotationReport {
+            path: path.to_path_buf(),
+            archive_path: archive_path.to_path_buf(),
+            items_moved: 0,
+            mutated: false,
+        });
+    }
+
+    let items_moved = total - keep_recent;
+    // `changelog_items_raw` is newest-first: keep the newest `keep_recent`
+    // items in the source, move the rest (the oldest) to the archive.
+    let (keep_items, move_items) = doc.changelog_items_raw.split_at(keep_recent);
+
+    if mode == MigrationMode::Check {
+        return Ok(RotationReport {
+            path: path.to_path_buf(),
+            archive_path: archive_path.to_path_buf(),
+            items_moved,
+            mutated: false,
+        });
+    }
+
+    if let Some(parent) = archive_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| MigrateError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+
+    let mut archive_content = if check_archive_exists(archive_path)? {
+        std::fs::read_to_string(archive_path).map_err(|source| MigrateError::Io {
+            path: archive_path.to_path_buf(),
+            source,
+        })?
+    } else {
+        String::new()
+    };
+    // Boundary normalization: the last `changelog:` item in a frontmatter
+    // document is captured verbatim by `changelog_items_raw`, and because
+    // `frontmatter_bounds` sets `fm_end` at the `\n` character that immediately
+    // precedes the closing `---` fence, that terminal newline is NOT included
+    // in the last item's raw text. This means that if the existing archive is
+    // non-empty (i.e., a prior rotation already appended items to it), the
+    // last byte of the archive content may be a non-newline character such as
+    // `"`. Appending the next rotation's first `  - ` item directly would
+    // concatenate it mid-line, creating an invalid YAML block sequence entry
+    // ("block sequence entries are not allowed in this context"). Ensuring a
+    // separator newline before appending is the correct fix: it is a no-op when
+    // the archive already ends with `\n` (all non-last items, and files where
+    // the source sequence DID have a trailing blank line before `---`), and it
+    // repairs the boundary only when needed.
+    if !archive_content.is_empty() && !archive_content.ends_with('\n') {
+        archive_content.push('\n');
+    }
+    for item in move_items {
+        archive_content.push_str(item);
+    }
+    // S-15.03 SEC-001 (BC-10.13.001 Invariant 4): validate the archive's
+    // relocated `changelog:` sequence content parses cleanly before writing.
+    crate::yaml_guard::validate_changelog_sequence_yaml(archive_path, &archive_content)?;
+    // S-15.03 SEC-003: write-then-rename, not a direct in-place write.
+    crate::atomic_write::write_atomic(archive_path, &archive_content)?;
+
+    let new_raw = rewrite_source_after_rotation(path, &doc.raw, keep_items, archive_path)?;
+    // S-15.03 SEC-001: validate the rewritten source file's frontmatter
+    // before writing it back.
+    crate::yaml_guard::validate_frontmatter_yaml(path, &new_raw)?;
+    // S-15.03 SEC-003: write-then-rename for the source rewrite too.
+    crate::atomic_write::write_atomic(path, &new_raw)?;
+
+    Ok(RotationReport {
+        path: path.to_path_buf(),
+        archive_path: archive_path.to_path_buf(),
+        items_moved,
+        mutated: true,
+    })
+}
+
+/// Rotate `path`'s `changelog:` sequence: move the oldest items past
+/// `keep_recent` verbatim into
+/// `.factory/cycles/<cycle_name>/<file-basename>-changelog-archive.md`,
+/// removing exactly those items from `path` and leaving a discoverability
+/// pointer (BC-10.13.001 PC5).
+///
+/// No-op (EC-004) when the sequence does not exceed `keep_recent`. Creates
+/// `.factory/cycles/<cycle_name>/` if it does not already exist (EC-005).
+/// Every `changelog:` item's `date:`/`summary:` text is preserved verbatim —
+/// only its location (source vs. archive) changes (PC5). Re-running rotation
+/// immediately after a successful rotation, before the threshold is
+/// exceeded again, is a verified-clean no-op (Invariant 2).
+///
+/// This is a thin wrapper around [`rotate_changelog_at`] that derives the
+/// archive path from `cycle_name` using `resolve_archive_path`. Callers that
+/// supply an explicit archive path (e.g. the BC-1.18.009 B1 gate in
+/// `shard_manager.rs`) should call [`rotate_changelog_at`] directly.
+pub fn rotate_changelog(
+    path: &Path,
+    cycle_name: &str,
+    keep_recent: usize,
+    mode: MigrationMode,
+) -> Result<RotationReport, MigrateError> {
+    let archive_path = resolve_archive_path(path, cycle_name)?;
+    rotate_changelog_at(path, &archive_path, keep_recent, mode)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// PR #842 item 2: a genuinely absent archive path must report
+    /// `Ok(false)` — the `NotFound` case is the one place `rotate_changelog_at`
+    /// is correct to proceed with an empty `archive_content`.
+    #[test]
+    fn test_check_archive_exists_returns_ok_false_for_genuinely_absent_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist-archive.md");
+        assert!(!check_archive_exists(&missing).unwrap());
+    }
+
+    /// PR #842 item 2: an existing path reports `Ok(true)`.
+    #[test]
+    fn test_check_archive_exists_returns_ok_true_for_present_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let present = dir.path().join("present-archive.md");
+        std::fs::write(&present, "prior content").unwrap();
+        assert!(check_archive_exists(&present).unwrap());
+    }
+
+    /// PR #842 item 2 (the actual defect): a non-`NotFound` I/O error (here,
+    /// `PermissionDenied` from an unsearchable containing directory) on a
+    /// path that GENUINELY, PHYSICALLY exists must be reported as `Err`, not
+    /// collapsed to `Ok(false)` the way `Path::exists()` would. This is the
+    /// discriminating test for the fix: the OLD call site used
+    /// `archive_path.exists()` directly, which returns a bare `bool` and can
+    /// never distinguish this case from genuine absence — silently causing
+    /// `rotate_changelog_at` to treat a real, unreadable archive as empty and
+    /// overwrite it. `check_archive_exists` must return `Err` here so the
+    /// caller fails loud instead.
+    #[cfg(unix)]
+    #[test]
+    fn test_check_archive_exists_permission_denied_is_not_collapsed_to_absent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let locked_dir = dir.path().join("locked");
+        std::fs::create_dir_all(&locked_dir).unwrap();
+        let archive = locked_dir.join("archive.md");
+        std::fs::write(
+            &archive,
+            "prior content that must not be silently discarded",
+        )
+        .unwrap();
+
+        // Remove search/traverse permission on the containing directory:
+        // `std::fs::metadata(archive)` now fails with `PermissionDenied`,
+        // NOT `NotFound` — the file is still physically present.
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = check_archive_exists(&archive);
+
+        // Restore permissions unconditionally before any assertion so the
+        // tempdir can always be cleaned up on Drop.
+        std::fs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            matches!(result, Err(MigrateError::Io { .. })),
+            "PermissionDenied on an existing archive path must surface as Err, not be \
+             silently treated as absent. Got: {result:?}"
+        );
+    }
+}

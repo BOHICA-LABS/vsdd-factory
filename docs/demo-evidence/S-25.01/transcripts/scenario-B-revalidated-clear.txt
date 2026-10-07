@@ -1,0 +1,39 @@
+=== Scenario B: named plugin 'validate-factory-path-staging' re-run to PASS -> REVALIDATED clear ===
+[AC-012 / AC-022 / BC-1.18.003 / BC-3.08.001 Event 9 clear_mode=REVALIDATED]
+
+>> Pre-existing marker (from a prior INDETERMINATE outcome):
+--- .factory/unvalidated-mutation.marker ---
+artifact_path = ".factory/STATE.md"
+cause = "fuel"
+expires_at = "2099-01-01T00:00:00Z"
+plugin_name = "validate-factory-path-staging"
+timestamp = "2026-09-01T00:00:00Z"
+trace_id = "demo-trace-fuel-original"
+---------------------------------------------
+
+>> re-invoking 'validate-factory-path-staging' on the SAME artifact (.factory/STATE.md) -- this time it PASSES...
+
+execute_tiers summary: exit_code=0 block_intent=false
+
+>> marker AFTER the PASS re-validation:
+--- .factory/unvalidated-mutation.marker ---
+(absent)
+---------------------------------------------
+
+--- dispatcher-internal-2026-09-03.jsonl (type=marker.cleared) ---
+{
+  "actor_type": "validator",
+  "artifact_path": ".factory/STATE.md",
+  "clear_mode": "REVALIDATED",
+  "plugin_name": "validate-factory-path-staging",
+  "reason": null,
+  "schema_version": 1,
+  "session_id": "demo-session-revalidate",
+  "timestamp": "2026-09-03T13:42:48-0500",
+  "trace_id": "demo-trace-fuel-original",
+  "ts": "2026-09-03T13:42:48-0500",
+  "ts_epoch": 1788460968,
+  "type": "marker.cleared"
+}
+---------------------------------------------
+=== DEMO SCENARIO COMPLETE ===

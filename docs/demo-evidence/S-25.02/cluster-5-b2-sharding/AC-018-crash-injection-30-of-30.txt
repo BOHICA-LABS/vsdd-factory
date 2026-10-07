@@ -1,0 +1,37 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running tests/bc_1_18_011_b2_migration_crash_injection_test.rs (target/debug/deps/bc_1_18_011_b2_migration_crash_injection_test-cb329865e13a34fb)
+
+running 30 tests
+test test_BC_1_18_011_obl1_FINDING2_crash_append_occ1_first_intent_record ... ok
+test test_BC_1_18_011_obl1_FINDING2_crash_append_occ4_last_intent_record ... ok
+test test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ6_staged_but_pending_moves_empty ... ok
+test test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ7_pending_moves_not_yet_persisted ... ok
+test test_BC_1_18_011_obl1_FINDING3_crash_fsync_file_occ5_completed_json_durable_gate_stuck ... ok
+test test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_gate_stuck ... ok
+test test_BC_1_18_011_obl1_crash_append_occ5_first_done_record_post_swap_resumes ... ok
+test test_BC_1_18_011_obl1_crash_fsync_dir_occ1_generation_dir_sync_discards ... ok
+test test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_pointer_swap_barrier_resumes_via_staging_reinvocation ... ok
+test test_BC_1_18_011_obl1_crash_fsync_dir_occ3_post_rename_barrier_resumes_via_treat_done ... ok
+test test_BC_1_18_011_obl1_crash_fsync_file_occ1_redundant_barrier_is_harmless ... ok
+test test_BC_1_18_011_obl1_crash_remove_during_discard_incomplete_staging_eventually_converges ... ok
+test test_BC_1_18_011_obl1_crash_rename_occ1_first_canonical_move_resumes ... ok
+test test_BC_1_18_011_obl1_crash_rename_occ3_mid_sequence_resumes ... ok
+test test_BC_1_18_011_obl1_crash_write_temp_occ1_before_any_txn_record_clean_restart ... ok
+test test_BC_1_18_011_obl1_crash_write_temp_occ2_generation_id_not_yet_persisted_discards ... ok
+test test_BC_1_18_011_obl1_crash_write_temp_occ3_partial_staging_discards_via_census_mismatch ... ok
+test test_BC_1_18_011_obl1_crash_write_temp_occ8_at_sole_commit_point_resumes_correctly ... ok
+test test_BC_1_18_011_obl1_crash_write_temp_occ9_commit_landed_label_stale_staging ... ok
+test test_BC_1_18_011_obl1_graceful_err_append_return_write_zero_self_heals_via_abort_staging ... ok
+test test_BC_1_18_011_obl1_graceful_err_canonical_shard_directory_collision_pre_swap ... ok
+test test_BC_1_18_011_obl1_graceful_err_current_json_directory_collision_at_commit ... ok
+test test_BC_1_18_011_obl1_graceful_err_fsync_dir_return_unexpected_eof_discards ... ok
+test test_BC_1_18_011_obl1_graceful_err_fsync_file_return_interrupted ... ok
+test test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_resumes_from_staging ... ok
+test test_BC_1_18_011_obl1_graceful_err_remove_return_out_of_memory_best_effort_cleanup_still_converges ... ok
+test test_BC_1_18_011_obl1_graceful_err_rename_return_already_exists_forward_recovers ... ok
+test test_BC_1_18_011_obl1_graceful_err_write_temp_return_storage_full ... ok
+test test_BC_1_18_011_obl1_pointer_swap_is_the_sole_commit_point_atomic_across_crash ... ok
+test test_OBL1_crash_injection_child_entrypoint ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.10s
+

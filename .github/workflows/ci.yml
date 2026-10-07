@@ -137,20 +137,56 @@ jobs:
       - name: cargo check (workspace, all targets)
         run: cargo check --workspace --all-targets
 
+      - name: cargo check validate-unvalidated-mutation-marker (wasm32-wasip1)
+        # MEDIUM-2 / TD #74 (S-25.01): Explicit wasm-compat gate for the shell-words
+        # dependency added to validate-unvalidated-mutation-marker. shell-words 1.1.x is
+        # pure-Rust/zero-dep but this step enforces that any future dependency change that
+        # breaks wasm32-wasip1 compilation is caught on every PR, not just at release time.
+        # The workspace "cargo build (all native WASM plugins, wasm32-wasip1)" step below
+        # also covers this crate; this explicit check adds a fast-fail signal earlier in
+        # the job and makes the TD #74 compliance intent visible (docs/dispatch-package-authoring.md).
+        run: cargo check --target wasm32-wasip1 -p validate-unvalidated-mutation-marker
+
+      - name: Mount factory artifacts
+        # .factory/ is needed by two consumers in this job:
+        #   1. Corpus tests in validate-cross-site-correspondence (cargo test step below) —
+        #      the compensating BC/BC-INDEX sync invariant requires .factory/ to be present
+        #      so corpus tests execute under CI_REQUIRE_ARTIFACTS=1 rather than silently
+        #      skipping (F-S2107-P7-003 fix: mount now precedes cargo test).
+        #   2. perf-baseline.bats (later step) — needs .factory/ script + fixture + baseline
+        #      doc. Must remain in cargo-host (not validate) because setup_file() calls
+        #      `cargo build --release -p factory-dispatcher` when the binary is absent, and
+        #      the validate job has no Rust toolchain.
+        run: |
+          git fetch origin factory-artifacts:refs/remotes/origin/factory-artifacts
+          git rev-parse origin/factory-artifacts || (echo "factory-artifacts ref missing" >&2; exit 1)
+          git worktree add .factory origin/factory-artifacts
+
       - name: cargo test (workspace, all targets)
-        # VSDD_SKIP_PRODUCTION_STATE_MD_TEST=1: validate-dispatch-advance
-        # has load-bearing production-file tests (validate_production_state_md_no_false_positive,
-        # validate_production_edp1_index_md_no_false_positive) that read
-        # .factory/STATE.md and .factory/cycles/.../INDEX.md from the
-        # factory-artifacts orphan branch. The Mount factory artifacts step
-        # in this job runs AFTER cargo test (it needs the Rust toolchain
-        # that precedes it, and must precede the bats steps that follow).
-        # The tests support an explicit opt-out via this env var for exactly
-        # this scenario — ephemeral CI runners without a factory worktree
-        # mounted at test time. Local dev (where .factory/ is always mounted)
-        # continues to exercise these tests without the env var set.
+        # F-S2107-P7-003 fix: mount precedes cargo test (prior ordering was reversed,
+        # making all 11 corpus tests silently skip on every CI run).
+        #
+        # CI_REQUIRE_ARTIFACTS=1: corpus tests in validate-cross-site-correspondence
+        # (corpus_arm_a1_*, corpus_arm_b1_*, corpus_version_sync_*, etc.) skip gracefully
+        # when .factory/ is absent. With CI_REQUIRE_ARTIFACTS=1 they FAIL instead of
+        # skipping — the flag converts absence from silent skip to hard failure.
+        # The mount step above is what actually enables execution: it places .factory/
+        # at the workspace root so the 8-level parent-walk from CARGO_MANIFEST_DIR finds it.
+        #
+        # VSDD_CORPUS_ROOT: belt-and-braces explicit override. live_factory_root() checks
+        # this env var first; if the path is_dir() AND contains specs/behavioral-contracts/
+        # it is used, otherwise the var is silently ignored and parent-walk discovery runs.
+        # In CI the mount is the real source; this var adds one extra hop of explicitness,
+        # not a different codepath.
+        #
+        # VSDD_SKIP_PRODUCTION_STATE_MD_TEST: removed. .factory/ is now mounted before
+        # this step, so validate-dispatch-advance production-file tests
+        # (validate_production_state_md_no_false_positive,
+        # validate_production_edp1_index_md_no_false_positive) run and pass on every PR.
+        # Verified locally: both pass against the live factory-artifacts worktree.
         env:
-          VSDD_SKIP_PRODUCTION_STATE_MD_TEST: "1"
+          CI_REQUIRE_ARTIFACTS: "1"
+          VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
         run: cargo test --workspace --all-targets
 
       - name: cargo publish --dry-run (hook-sdk crates) (S-2.5)
@@ -206,16 +242,6 @@ jobs:
           fi
           echo "Built $count wasm files (floor: $expected wasm-producing crates in crates/hook-plugins/)."
 
-      - name: Mount factory artifacts (for perf-baseline bats)
-        # perf-baseline.bats needs .factory/ (script + fixture + baseline doc).
-        # Must run in cargo-host (not validate) because setup_file() calls
-        # `cargo build --release -p factory-dispatcher` when the binary is absent,
-        # and the validate job has no Rust toolchain.
-        run: |
-          git fetch origin factory-artifacts:refs/remotes/origin/factory-artifacts
-          git rev-parse origin/factory-artifacts || (echo "factory-artifacts ref missing" >&2; exit 1)
-          git worktree add .factory origin/factory-artifacts
-
       - name: Stage WASM plugins to hook-plugins directory
         # plugins/vsdd-factory/hook-plugins/ is gitignored (.gitignore:58) —
         # the committed directory holds machine-local builds and is never checked in.
@@ -259,7 +285,7 @@ jobs:
           ls plugins/vsdd-factory/hook-plugins/
 
       - name: Build factory-dispatcher (release, for e2e bats)
-        # The verify-state-timestamp-refresh e2e bats tests invoke the dispatcher binary
+        # The stamp-state-timestamp e2e bats tests invoke the dispatcher binary
         # at target/release/factory-dispatcher (set in bats setup() as $DISPATCHER).
         # The preceding WASM build steps use --target wasm32-wasip1 only and never
         # produce a native binary — cargo-host had no release dispatcher build at all.
@@ -270,15 +296,15 @@ jobs:
         # the final factory-dispatcher link step runs here (fast, ~10s).
         run: cargo build --release -p factory-dispatcher
 
-      - name: Run verify-state-timestamp-refresh e2e tests (P5-M1)
-        # P5-M1 (S-17.04): verify-state-timestamp-refresh.bats has 6 dispatcher+WASM
-        # e2e tests (T-1..T-6) that call _require_artifacts() and hard-fail under
+      - name: Run stamp-state-timestamp e2e tests (S-17.05)
+        # S-17.05: stamp-state-timestamp.bats exercises the stamp-state-timestamp guard
+        # (dispatcher+WASM e2e tests) that call _require_artifacts() and hard-fail under
         # CI_REQUIRE_ARTIFACTS=1 if either artifact is absent (no silent skip-pass).
         #
         # Artifact paths _require_artifacts() checks:
         #   $DISPATCHER  = <repo-root>/target/release/factory-dispatcher
         #                  (built by the preceding step)
-        #   $GUARD_WASM  = plugins/vsdd-factory/hook-plugins/verify-state-timestamp-refresh.wasm
+        #   $GUARD_WASM  = plugins/vsdd-factory/hook-plugins/stamp-state-timestamp.wasm
         #                  (staged by "Stage WASM plugins to hook-plugins directory" above)
         # Both are now guaranteed present before this step runs.
         shell: bash
@@ -286,7 +312,7 @@ jobs:
           CI_REQUIRE_ARTIFACTS: "1"
         run: |
           sudo apt-get install -y jq bats 2>/dev/null || brew install jq bats 2>/dev/null || true
-          bats plugins/vsdd-factory/tests/verify-state-timestamp-refresh.bats
+          bats plugins/vsdd-factory/tests/stamp-state-timestamp.bats
 
       - name: Run S-9.00 perf-baseline tests
         # Requires: Rust toolchain (for setup_file cargo build), jq, and .factory/
@@ -313,6 +339,133 @@ jobs:
           bats plugins/vsdd-factory/tests/resolver-integration.bats
           bats plugins/vsdd-factory/tests/resolver-capability-confinement.bats
           bats tests/integration/E-8-hook-plugins/warn-pending-wave-gate.bats
+
+  policy-15-attestation-location:
+    # POLICY 15 ATTESTATION-LOCATION GATE (ADR-040 §Decisions 7-9; closes the D-969 /
+    # [P0] F-S2107-P10-001 CI-WIRING residual — the crate half landed at 19cb57e6 (#777)).
+    #
+    # DEDICATED job, own checkout step — does NOT reuse cargo-host's or any other job's
+    # checkout (they use the default shallow fetch-depth: 1, which this gate cannot use;
+    # see below). Required-check job name per ADR-040 §Decision 9 Ruling 9(a): exactly
+    # `policy-15-attestation-location` (this job's key).
+    #
+    # PR-ONLY — gated to pull_request events via `if: github.event_name == 'pull_request'`
+    # (ADR-040 v1.19 Ruling 9(c) item 1). This gate is a PR-diff gate: on a direct push to
+    # develop/main there is no PR commit range, so the binary exits EMPTY-or-UNREACHABLE
+    # (empty range = false FAIL), reddening the develop status checks on every post-merge push.
+    # The `if:` event-type condition is NOT a paths: filter — a job skipped via paths: reports
+    # SUCCESS as a required check (vacuous pass; ADR-040 §Decision 7 Ruling 7(a)), which is
+    # the exact defect class this gate exists to prevent. Event-type gating instead causes the
+    # job to be SKIPPED on push events; branch protection for this check must be configured
+    # for pull_request contexts only (not push) so skipped-on-push is not treated as a failure.
+    # No `paths:` filter is added at workflow or job level — the gate still runs on every PR
+    # regardless of which files changed. `merge_group:` is intentionally NOT in the workflow
+    # `on:` block — this repository does not use a GitHub merge queue (grep of every workflow
+    # in .github/workflows/ for `merge_group` returns no hits; CLAUDE.md's Git Workflow
+    # section documents a standard PR-merge model with no queue).
+    name: policy-15-attestation-location
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        # ADR-040 §Decision 9 Ruling 9(c):
+        #   - fetch-depth: 0 (item 2) — the gate computes `git merge-base HEAD
+        #     origin/<base_branch>` and reads `red-gate-log.md` at arbitrary commits in the
+        #     PR's history via `git show <C>:<path>`. The default shallow (depth: 1) clone
+        #     used by every other job in this workflow breaks both: merge-base fails or
+        #     misreports, and per-commit iteration silently truncates. Full history is
+        #     required. (This is also why fetch-depth: 0 pulls all branches/tags, which is
+        #     what makes `origin/<base_branch>` resolvable without a separate explicit
+        #     `git fetch` step, unlike this workflow's factory-artifacts orphan-branch mounts
+        #     elsewhere, which fetch history unrelated to develop/main.)
+        #   - ref: pull_request.head.sha, NOT the default synthetic `refs/pull/<N>/merge`
+        #     two-parent merge commit (item 5, added v1.17). That synthetic commit's first
+        #     parent is the base branch's tip AT THE MOMENT THE CI RUN STARTED — a moving
+        #     target no real attestation heading in red-gate-log.md was ever written against
+        #     — and would inject a spurious extra commit into `merge_base..HEAD`, producing
+        #     either a false FAIL or a wrong commit range. Falls back to `github.sha` on
+        #     `push` events, where `github.event.pull_request` is absent and no synthetic
+        #     merge commit exists to avoid in the first place.
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust toolchain
+        # Pinned in rust-toolchain.toml — keep this version in sync with that file.
+        # Native binary only (crates/policy15-attestation-gate has no wasm target);
+        # wasm32-wasip1 is intentionally not requested here.
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache cargo
+        # Pinned to commit SHA for security (TD #74); resolves to v2.9.1.
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+        with:
+          shared-key: policy-15-attestation-location
+          cache-on-failure: true
+
+      - name: Build policy15-attestation-gate (release)
+        run: cargo build --release -p policy15-attestation-gate
+
+      - name: Run POLICY 15 ATTESTATION-LOCATION GATE
+        # CLI contract (crates/policy15-attestation-gate/src/main.rs): argv[1] is the base
+        # branch name; the gate computes merge-base(HEAD, origin/<base_branch>). Pass the
+        # PR's actual base ref rather than a hardcoded 'develop' (ADR-040 §Decision 9
+        # Ruling 9(a) CI-invocation note: hardcoding is wrong; the crate honors the CLI arg
+        # with CLI > BASE_BRANCH env > 'develop'-default precedence) — falls back to
+        # 'develop' on push events, where `pull_request.base` is absent, matching the
+        # binary's own default.
+        #
+        # Four-outcome verdict / exit codes (ADR-040 §Decision 9 Ruling 9(a)):
+        #   0 = PASS-N-activations or PASS-zero-activations
+        #   2 = FAIL (obligation violated) or EMPTY-or-UNREACHABLE (stale pin / empty commit
+        #       range / unmeasurable diff — a CI setup or scope-staleness defect, never a
+        #       silent clean pass)
+        #   1 = hard error (git not found, repository inaccessible, unexpected I/O)
+        # The binary prints a greppable outcome identifier to stdout (e.g.
+        # "PASS-3-activations", "FAIL: obligation violated",
+        # "EMPTY-or-UNREACHABLE: stale pin") and exits with the matching code above, so a
+        # bare invocation is sufficient to gate the job — no separate `if` check is needed.
+        run: ./target/release/policy15-attestation-gate "${{ github.event.pull_request.base.ref || 'develop' }}"
+
+  attestation-gate-non-vacuity-controls:
+    # ADR-040 §Decision 10 Ruling 10(c)+10(d): the POLICY 15 gate's non-vacuity controls are
+    # the 16 `#[test]` functions in crates/policy15-attestation-gate/src/lib.rs (one per
+    # `GateOutcome`/`UnreachableCause`/`FailReason` variant plus correctness properties —
+    # see Ruling 10(b)'s table). They are EICAR-style synthetic fixtures (`mktemp -d` scratch
+    # repos; ADR-040 Ruling 10(a)) with no dependency on any commit SHA in this repository's
+    # history, so they cannot be orphaned by squash-merge or invalidated by force-push.
+    #
+    # These tests already execute under cargo-host's `cargo test --workspace --all-targets`
+    # step, so this job does not add net coverage. It exists ONLY because ADR-040 Ruling
+    # 10(c) explicitly names `attestation-gate-non-vacuity-controls` as the REQUIRED-CHECK
+    # job name distinct from the general workspace test run, and Ruling 10(d) explicitly
+    # specifies its invocation (`cargo test -p policy15-attestation-gate`) as "the controls
+    # job" for this gate — i.e. the ADR treats "the non-vacuity controls ran, standalone and
+    # identifiably" as itself part of the gate's evidence trail, not merely a byproduct of
+    # the wider test suite. Kept intentionally minimal (single crate, no workspace-wide
+    # build) so it stays fast and cheap alongside the dedicated gate job above.
+    name: attestation-gate-non-vacuity-controls
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        # Pinned in rust-toolchain.toml — keep this version in sync with that file.
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Cache cargo
+        # Pinned to commit SHA for security (TD #74); resolves to v2.9.1.
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+        with:
+          shared-key: attestation-gate-non-vacuity-controls
+          cache-on-failure: true
+
+      - name: cargo test -p policy15-attestation-gate
+        # ADR-040 §Decision 10 Ruling 10(d): "No separate inline bash script is needed — the
+        # crate IS the controls job." The 16 `#[test]` functions ARE the non-vacuity controls
+        # for the gate's four-outcome verdict (FAIL / PASS-N-activations /
+        # PASS-zero-activations / EMPTY-or-UNREACHABLE).
+        run: cargo test -p policy15-attestation-gate
 
   platforms-drift:
     # Single source of truth: ci/platforms.yaml. The build-dispatcher
@@ -444,6 +597,18 @@ jobs:
         if: matrix.use_cross
         run: cross build --release --target ${{ matrix.target }}
 
+      - name: Mount factory artifacts (corpus tests)
+        if: ${{ matrix.run_tests && !matrix.use_cross }}
+        # Corpus tests in validate-cross-site-correspondence require .factory/ to be
+        # present so they execute under CI_REQUIRE_ARTIFACTS=1 rather than silently
+        # skipping. F-S2107-P7-003 class fix — sweeps build-dispatcher in addition to
+        # cargo-host; mount precedes Test (cargo) on every test-enabled matrix entry.
+        shell: bash
+        run: |
+          git fetch origin factory-artifacts:refs/remotes/origin/factory-artifacts
+          git rev-parse origin/factory-artifacts || (echo "factory-artifacts ref missing" >&2; exit 1)
+          git worktree add .factory origin/factory-artifacts
+
       - name: Test (cargo)
         if: ${{ matrix.run_tests && !matrix.use_cross }}
         # --workspace runs every package's tests; --all-targets includes
@@ -451,14 +616,17 @@ jobs:
         # cargo-host. We don't pass --target here for native runs because
         # the host triple equals matrix.target; passing it makes cargo
         # rebuild std-test infrastructure for no benefit.
-        # VSDD_SKIP_PRODUCTION_STATE_MD_TEST=1: validate-dispatch-advance
-        # has production-file tests that read .factory/STATE.md and
-        # .factory/cycles/.../INDEX.md from the factory-artifacts orphan
-        # branch, which is not mounted in this job. Tests skip gracefully
-        # when this env var is set — local dev (where .factory/ is always
-        # mounted) exercises these tests without the env var.
+        # F-S2107-P7-003 class fix. The mount step above places .factory/ at the workspace
+        # root so the 8-level parent-walk from CARGO_MANIFEST_DIR finds it; CI_REQUIRE_ARTIFACTS=1
+        # converts absent-corpus from silent skip to hard failure; VSDD_CORPUS_ROOT is an
+        # explicit override that is used only when valid (is_dir() + specs/behavioral-contracts/),
+        # otherwise falls through silently to parent-walk — it is belt-and-braces, not the
+        # load-bearing mechanism.
+        # VSDD_SKIP_PRODUCTION_STATE_MD_TEST: removed. .factory/ is mounted before this step,
+        # so validate-dispatch-advance production-file tests run and pass on every matrix entry.
         env:
-          VSDD_SKIP_PRODUCTION_STATE_MD_TEST: "1"
+          CI_REQUIRE_ARTIFACTS: "1"
+          VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
         run: cargo test --release --features factory-dispatcher/test-support --target ${{ matrix.target }} --workspace
 
       - name: Build all native WASM plugins (release)
@@ -637,6 +805,21 @@ jobs:
             esac
             cp "$wasm" plugins/vsdd-factory/hook-plugins/
           done
+          # F-S2107-P1-008 (a): count-floor guard — sibling parity with cargo-host
+          # "Stage WASM plugins to hook-plugins directory" step which already has this
+          # guard. Without it a silent build regression drops WASM files and the bats
+          # suite reports all-skipped (false-green) because the dispatcher treats missing
+          # plugins as non-fatal in advisory mode. Floor is derived from wasm-producing
+          # crates only (those with [[bin]]) per P5-H1 (S-17.04).
+          expected=$(grep -rl '^\[\[bin\]\]' crates/hook-plugins/*/Cargo.toml | grep -v read-prefix-fixture | wc -l | tr -d ' ')
+          count=$(ls plugins/vsdd-factory/hook-plugins/*.wasm 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$count" -lt "$expected" ]; then
+            echo "::error::Only $count WASM plugins staged; expected >= $expected (wasm-producing crates in crates/hook-plugins/ with [[bin]]). Build output:"
+            ls target/wasm32-wasip1/release/*.wasm 2>/dev/null || echo "  (no wasm files in release target)"
+            exit 1
+          fi
+          echo "Staged $count WASM plugins to hook-plugins/ (floor: $expected wasm-producing crates in crates/hook-plugins/)."
+          ls plugins/vsdd-factory/hook-plugins/
 
       - name: Run full bats suite (run-all.sh)
         # This is the canonical gate that release.yml runs. Running it on every PR
@@ -650,6 +833,15 @@ jobs:
         # runner exits 0) executes its real path exclusively on this Linux job.
         # WASM: pr-manager-completion-guard.wasm is staged above (workspace build);
         # setup_file() on-demand build is a no-op when the artifact is already present.
+        # F-S2107-P1C-018 (b): CI_REQUIRE_ARTIFACTS=1 converts _require_artifacts()
+        # skips into hard failures — prevents the suite from reporting "All tests passed."
+        # when the dispatcher binary or a required WASM is absent and every test in the
+        # affected suites silently skips. Without this, a broken staging step produces
+        # a false-green run with 0 active coverage. Blast radius: all ~37 payload tests
+        # including AC-004 (fail-closed primary-target invariant), AC-018, and AC-019.
+        shell: bash
+        env:
+          CI_REQUIRE_ARTIFACTS: "1"
         run: cd plugins/vsdd-factory/tests && ./run-all.sh
 
   bats-wave-handoff-macos:
@@ -739,11 +931,25 @@ jobs:
     #   grep -qE '^  bats-darwin-leg-macos:$' .github/workflows/ci.yml
     #
     # SCOPE: runs pr-manager-hardening.bats on macOS under /bin/bash 3.2.x.
-    #   T-001 skips if factory-dispatcher not pre-built (set-up step copies from
-    #   the bundled darwin binary to target/release/ to enable T-001).
+    #   T-001 skips if factory-dispatcher not pre-built (set-up step downloads
+    #   the build-dispatcher matrix job's fresh source-built darwin artifact to
+    #   target/release/ to enable T-001).
     #   T-009 skips on Darwin (EC-003: Linux-runner test).
+    #
+    # ADR-050 (CI Darwin-Leg Source-Build Discipline for Registry-Schema Forward
+    # Compatibility): T-001's dispatcher binary MUST come from this PR's own
+    # `build-dispatcher` source build, NOT from the committed
+    # plugins/vsdd-factory/hooks/dispatcher/bin/darwin-*/ bundle. The bundle is
+    # rebuilt only by release.yml at release time (CLAUDE.md "Dispatcher binary
+    # discipline"), so it is always one release behind whatever registry schema
+    # a feature PR introduces (e.g. S-25.01's `on_error = "block_if_marker"`
+    # variant) and testing against it produces false CI failures unrelated to
+    # the PR's own code. DO NOT revert to copying the committed bundle here to
+    # "save CI time" — see ADR-050 for the full rationale. The committed bundle
+    # still gets a narrow integrity smoke-test below (ADR-050 §Decision 2).
     name: bats-darwin-leg (macos, /bin/bash 3.2)
     runs-on: macos-latest
+    needs: build-dispatcher
     steps:
       - uses: actions/checkout@v6
 
@@ -759,22 +965,91 @@ jobs:
           }
           echo "Interpreter OK: $(/bin/bash --version | head -1)"
 
+      - name: Determine darwin artifact platform
+        # macos-latest is currently arm64 (macos-15 alias; see build-dispatcher
+        # job's runner-label notes) but this runner's arch is detected directly
+        # rather than assumed, so the job stays correct if GitHub's alias target
+        # ever changes. Selects the matching build-dispatcher matrix artifact
+        # name (factory-dispatcher-darwin-arm64 / factory-dispatcher-darwin-x64).
+        id: darwin-arch
+        run: |
+          ARCH="$(uname -m)"
+          if [[ "${ARCH}" == "arm64" ]]; then
+            echo "platform=darwin-arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "platform=darwin-x64" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download source-built dispatcher artifact (ADR-050 §Decision 1)
+        # Downloads the build-dispatcher matrix job's fresh, THIS-PR's-own-source
+        # darwin binary (already built + tested on every PR; previously unused
+        # downstream) instead of the stale, always-one-release-behind committed
+        # bundle. This is what lets T-001 correctly parse registry entries using
+        # a schema value (e.g. `block_if_marker`) newly introduced in this PR.
+        uses: actions/download-artifact@v4
+        with:
+          name: factory-dispatcher-${{ steps.darwin-arch.outputs.platform }}
+          path: artifact-download
+
       - name: Set up dispatcher binary for T-001
-        # T-001 looks for target/release/factory-dispatcher. Copy the pre-built
-        # darwin binary from the repository bundle to avoid a full cargo build
-        # (~15 min) on each macOS CI run. Architecture detection selects
-        # darwin-arm64 (M1/M2/M3 runner) or darwin-x64 (Intel runner).
+        # T-001 looks for target/release/factory-dispatcher. Stage the
+        # source-built artifact downloaded above (ADR-050) rather than the
+        # committed bundle.
         run: |
           mkdir -p target/release
+          cp artifact-download/factory-dispatcher target/release/factory-dispatcher
+          chmod +x target/release/factory-dispatcher
+          echo "Dispatcher: $(target/release/factory-dispatcher --version 2>/dev/null || echo 'binary staged')"
+
+      - name: Committed-bundle smoke test (ADR-050 §Decision 2)
+        # Narrow artifact-integrity signal on the binary operators actually
+        # receive (plugins/vsdd-factory/hooks/dispatcher/bin/darwin-*/), kept
+        # deliberately separate from T-001's registry-parsing gate above. This
+        # step MUST NOT parse hooks-registry.toml against the committed
+        # binary — that coupling to registry-schema forward-compatibility is
+        # exactly what ADR-050 removes. It only asserts the checked-in bundle
+        # is a non-empty, executable Mach-O binary for the expected arch —
+        # NOT that it can be invoked (factory-dispatcher has no --version
+        # flag; it's a hook dispatcher, not a CLI with flags).
+        run: |
           ARCH="$(uname -m)"
           if [[ "${ARCH}" == "arm64" ]]; then
             DARWIN_BIN="plugins/vsdd-factory/hooks/dispatcher/bin/darwin-arm64/factory-dispatcher"
+            EXPECTED_ARCH="arm64"
           else
             DARWIN_BIN="plugins/vsdd-factory/hooks/dispatcher/bin/darwin-x64/factory-dispatcher"
+            EXPECTED_ARCH="x86_64"
           fi
-          cp "${DARWIN_BIN}" target/release/factory-dispatcher
-          chmod +x target/release/factory-dispatcher
-          echo "Dispatcher: $(target/release/factory-dispatcher --version 2>/dev/null || echo 'binary staged')"
+
+          if [[ ! -s "${DARWIN_BIN}" ]]; then
+            echo "DARWIN_BUNDLE_SMOKE_TEST_FAILED: ${DARWIN_BIN} is missing or empty" >&2
+            exit 1
+          fi
+
+          chmod +x "${DARWIN_BIN}"
+          if [[ ! -x "${DARWIN_BIN}" ]]; then
+            echo "DARWIN_BUNDLE_SMOKE_TEST_FAILED: ${DARWIN_BIN} is not executable after chmod +x" >&2
+            exit 1
+          fi
+
+          # factory-dispatcher has no --version flag (it's a hook dispatcher
+          # that reads a JSON payload from stdin, not a CLI with flags), so
+          # this step does NOT invoke the binary. It asserts file integrity
+          # instead: a non-empty, executable, correctly-architected Mach-O
+          # binary. Invoking the dispatcher here would also re-trip
+          # hooks-registry.toml parsing against the stale committed bundle —
+          # exactly the coupling ADR-050 removes.
+          FILE_OUTPUT="$(file "${DARWIN_BIN}")"
+          if ! grep -q "Mach-O" <<<"${FILE_OUTPUT}"; then
+            echo "DARWIN_BUNDLE_SMOKE_TEST_FAILED: ${DARWIN_BIN} is not a Mach-O binary: ${FILE_OUTPUT}" >&2
+            exit 1
+          fi
+          if ! grep -q "${EXPECTED_ARCH}" <<<"${FILE_OUTPUT}"; then
+            echo "DARWIN_BUNDLE_SMOKE_TEST_FAILED: ${DARWIN_BIN} is not ${EXPECTED_ARCH}: ${FILE_OUTPUT}" >&2
+            exit 1
+          fi
+
+          echo "Committed bundle OK: ${FILE_OUTPUT}"
 
       - name: Install Rust wasm32-wasip1 target
         # pr-manager-hardening.bats setup_file() builds pr-manager-completion-guard.wasm
@@ -789,3 +1064,28 @@ jobs:
         # setup_file() builds pr-manager-completion-guard.wasm if absent (T-001 gate).
         run: |
           bats plugins/vsdd-factory/tests/pr-manager-hardening.bats
+
+  deny-advisories:
+    # AC-007 (S-21.12): cargo-deny advisories CI gate.
+    # Runs on every pull_request event via the shared top-level on.pull_request trigger
+    # (no paths: filter — this job fires on ALL PRs regardless of which files changed,
+    # closing the PR-007 process gap where RUSTSEC-2026-0188 sat silently on develop).
+    #
+    # AC-007 Test 2 invariant: the top-level on.pull_request trigger block in this file
+    # MUST NOT carry a paths: key. GitHub Actions has no per-job paths: filtering;
+    # a paths: filter at the workflow level would skip the advisory check on PRs that
+    # do not touch Cargo files — recreating the exact gap this job exists to close.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: cargo deny check advisories
+        # AC-007: advisories-only check against the workspace deny.toml at ./Cargo.toml.
+        # Pinned to commit SHA for supply-chain security (TD #74); resolves to v2.1.1.
+        # command: check + command-arguments: advisories → runs `cargo deny check advisories`.
+        # deny.toml [advisories] ignore = [] (deny-all posture); exits non-zero if any
+        # unignored advisory is present in the dependency graph.
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25  # v2.1.1
+        with:
+          command: check
+          command-arguments: advisories

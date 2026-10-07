@@ -254,8 +254,12 @@ fn invoke_hook(wasm_path: &Path, cwd: &Path, payload_json: &[u8]) -> PluginResul
         fuel_cap: 50_000_000,
     };
 
-    invoke_plugin(&engine, &module, host_ctx, payload_json, limits)
-        .expect("invoke_plugin must not fail with InvokeError")
+    // S-25.01: invoke_plugin now returns (PluginResult, bool). Discard the
+    // output_too_large flag — this test helper only needs the PluginResult.
+    let (result, _output_too_large) =
+        invoke_plugin(&engine, &module, host_ctx, payload_json, limits)
+            .expect("invoke_plugin must not fail with InvokeError");
+    result
 }
 
 /// Assert that a PluginResult carries a block intent (exit_code 2 and

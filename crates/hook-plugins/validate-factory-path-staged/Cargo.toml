@@ -1,0 +1,33 @@
+[package]
+name = "validate-factory-path-staged"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "WASM hook plugin: post-hoc detective mirror of validate-factory-path-staging (BC-4.16.002); detects .factory/ paths staged on product branches after a Bash command completes, giving S-25.01's INDETERMINATE marker-write mechanism its first structurally-reachable PostToolUse trigger"
+publish = false
+
+# Hook plugins ship as WASI commands (_start entry point) built via
+# `cargo build --target wasm32-wasip1`. The [lib] target carries testable
+# logic; [[bin]] wraps the macro-generated entry point that calls into the lib.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "validate-factory-path-staged"
+path = "src/main.rs"
+
+[dependencies]
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+proptest = { workspace = true }
+vsdd-hook-sdk = { path = "../../hook-sdk" }
+
+[lints]
+workspace = true

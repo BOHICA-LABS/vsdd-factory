@@ -34,25 +34,25 @@ url = "{url}"
 /// Exercises: HttpSink::new, Sink::submit (x3), Sink::flush.
 /// Mock server asserts:
 ///   - exactly 1 POST request received
-///   - body is a JSON array (body_contains "[")
+///   - body is a JSON array (body_includes "[")
 ///   - all 3 event labels present in the body
 ///
-/// Single mock with chained body_contains() matchers. httpmock 0.7 routes each
+/// Single mock with chained body_includes() matchers. httpmock routes each
 /// request to the first matching mock by ascending mock ID; registering additional
-/// mocks for label sub-checks would never receive hits because the primary mock
+/// mocks for label sub-checks would never receive calls because the primary mock
 /// matches first and consumes the request. All assertions are expressed on one mock.
 #[tokio::test]
 async fn test_TV_events_batched_and_posted_as_json_array() {
     let server = MockServer::start();
 
     // One mock that requires the batch body to contain all 3 labels.
-    // Chained body_contains() calls are AND-ed: every substring must appear.
+    // Chained body_includes() calls are AND-ed: every substring must appear.
     let mock = server.mock(|when, then| {
         when.method(POST)
             .path("/events")
-            .body_contains(r#""label":"a""#)
-            .body_contains(r#""label":"b""#)
-            .body_contains(r#""label":"c""#);
+            .body_includes(r#""label":"a""#)
+            .body_includes(r#""label":"b""#)
+            .body_includes(r#""label":"c""#);
         then.status(200).body("{}");
     });
 
@@ -66,8 +66,8 @@ async fn test_TV_events_batched_and_posted_as_json_array() {
     sink.flush().expect("flush must succeed");
 
     // Exactly 1 POST — all 3 events batched into one request (AC-5 / AC-8).
-    // The body_contains matchers above ensure all 3 labels are in that body.
-    mock.assert_hits(1);
+    // The body_includes matchers above ensure all 3 labels are in that body.
+    mock.assert_calls(1);
 }
 
 /// AC-7 — flush() delivers the current batch synchronously before returning.
@@ -93,5 +93,5 @@ async fn test_TV_flush_sends_synchronously() {
 
     // If this assertion fails with 0 hits, flush() returned before the HTTP
     // round-trip completed — violates the AC-7 "synchronously" requirement.
-    mock.assert_hits(1);
+    mock.assert_calls(1);
 }

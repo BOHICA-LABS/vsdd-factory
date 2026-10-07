@@ -26,13 +26,167 @@ use std::time::Instant;
 use wasmtime::Engine;
 
 use crate::host::HostContext;
-use crate::internal_log::{
-    InternalEvent, InternalLog, PLUGIN_COMPLETED, PLUGIN_CRASHED, PLUGIN_INVOKED, PLUGIN_TIMEOUT,
+use crate::indeterminate_marker::{
+    MarkerFields, UNVALIDATED_MUTATION_MARKER_TTL_SECONDS, block_if_marker_check,
+    check_and_clear_expired_marker, delete_marker_if_pass, emit_marker_cleared,
+    emit_write_tied_audit_events, read_all_marker_fields, read_marker_plugin_name,
+    reconcile_raw_delete, should_write_marker, write_indeterminate_marker,
 };
-use crate::invoke::{InvokeLimits, PluginResult, TimeoutCause, invoke_plugin};
+use crate::internal_log::{
+    InternalEvent, InternalLog, PLUGIN_COMPLETED, PLUGIN_CRASHED, PLUGIN_INDETERMINATE,
+    PLUGIN_INVOKED, PLUGIN_TIMEOUT,
+};
+use crate::invoke::{EventType, InvokeLimits, PluginResult, TimeoutCause, invoke_plugin};
 use crate::plugin_loader::PluginCache;
-use crate::registry::{OnError, Registry, RegistryEntry};
+use crate::registry::{FailurePolicy, OnError, Registry, RegistryEntry};
 use crate::resolver::{ResolverInput, ResolverRegistry, merge_resolver_outputs};
+
+// ---------------------------------------------------------------------------
+// S-25.01: INDETERMINATE outcome class (BC-1.18.001, ADR-047 Layer 1)
+// ---------------------------------------------------------------------------
+
+/// Root cause of an INDETERMINATE dispatch outcome.
+///
+/// Distinct values for each resource-exhaustion class so operators can
+/// distinguish fuel exhaustion, epoch timeout, and OutputTooLarge events
+/// in the `plugin.indeterminate` event (BC-3.08.001 Event 8).
+///
+/// VP-102 proof harness covers the full cause-mapping table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndeterminateCause {
+    /// WASM execution ran out of fuel budget (Trap::OutOfFuel).
+    Fuel,
+    /// WASM execution exceeded epoch/wall-clock budget (Trap::Interrupt).
+    Epoch,
+    /// A host function returned OutputTooLarge(-3) and the plugin subsequently
+    /// exited with exit_code=0 — the plugin did not detect the truncation.
+    OutputTooLarge,
+}
+
+/// Three-valued dispatch outcome for a single plugin invocation.
+///
+/// This is a first-class, distinct type from the existing `PluginResult` taxonomy.
+/// `PluginResult` captures the raw invocation result; `DispatchOutcome` is the
+/// CLASSIFIED semantic outcome after applying INDETERMINATE detection rules.
+///
+/// - **Pass**: exit_code=0 AND host_output_too_large_seen=false.
+/// - **Fail**: non-zero exit_code.
+/// - **Indeterminate**: could not validate — fuel/epoch/OutputTooLarge.
+///
+/// S-25.01 BC-1.18.001 postcondition 2: these three variants are the complete,
+/// non-overlapping trichotomy. VP-102 proof harness verifies exhaustive coverage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchOutcome {
+    /// Plugin validated successfully: exit_code=0 and no OutputTooLarge flag set.
+    Pass,
+    /// Plugin returned a non-zero exit code (explicit validation failure).
+    Fail {
+        /// The non-zero exit code returned by the plugin.
+        exit_code: i32,
+    },
+    /// Plugin could not complete validation (fuel, epoch, or OutputTooLarge).
+    ///
+    /// For fail-closed plugins: triggers durable `.factory/unvalidated-mutation.marker` write.
+    /// For fail-open plugins: advisory `plugin.indeterminate` event only (BC-1.18.004).
+    Indeterminate {
+        /// Root cause distinguishing the three INDETERMINATE sub-cases.
+        cause: IndeterminateCause,
+    },
+}
+
+/// Classify a raw `PluginResult` + `FailurePolicy` + `output_too_large` flag
+/// into the three-valued `DispatchOutcome` trichotomy.
+///
+/// This is the pure-core function covering the INDETERMINATE detection logic
+/// (BC-1.18.001). It does NOT write the marker or emit events — those are
+/// effectful operations in the invocation loop.
+///
+/// # Fuel detection
+///
+/// Fuel exhaustion MUST be detected via `Trap::OutOfFuel` downcast on the
+/// `PluginResult::Timeout { cause: TimeoutCause::Fuel }` variant, NOT via
+/// `get_fuel()`. `get_fuel()` is unreliable after a Trap (BC-1.18.001 §Architecture
+/// Anchors; ADR-047 §D1 implementation note). AC-001.
+///
+/// # Non-exhaustive Trap wildcard (BC-1.18.001 invariant 2)
+///
+/// `Trap` is `#[non_exhaustive]`. The match arm for unrecognised Trap variants
+/// MUST use `_ => { /* route to on_error, NOT Indeterminate */ }`. Future unknown
+/// Trap variants MUST NOT be silently bucketed as INDETERMINATE. AC-004.
+///
+/// # OutputTooLarge invariant
+///
+/// The `output_too_large` flag MUST be captured from `StoreData` AFTER `func.call()`
+/// completes (before the per-invocation reset). It is the caller's responsibility
+/// to pass the captured value. BC-1.18.001 invariant 5: the flag is dispatcher-
+/// internal StoreData; never exposed in hook-sdk ABI. AC-003/AC-018.
+///
+/// # VP
+///
+/// VP-102 proof harness covers this function's 5 unit test cases.
+///
+/// # BC-5.38.001
+///
+/// Non-trivial body — contains branching, pattern matching, conditional returns.
+/// Fully implemented (S-25.01); all Red Gate test suites (BC-1.18.001/002/003/004) pass.
+pub fn classify_outcome(
+    plugin_result: PluginResult,
+    _policy: FailurePolicy,
+    output_too_large: bool,
+) -> DispatchOutcome {
+    // NOTE (S-25.01 orchestrator ruling): `_policy` is genuinely unused inside
+    // classify_outcome — classification is independent of policy. Policy is only
+    // used downstream by `should_write_marker`. The parameter is retained in the
+    // spec-mandated signature (spec-wins; BC-1.18.001 AC-004 signature). Surface
+    // to product-owner as possible spec-signature refinement (per orchestrator note).
+    //
+    // BC-1.18.001 postcondition 1 + postcondition 2 + postcondition 5 + invariant 2.
+    // VP-102 proof harness covers this function's 5 unit test cases.
+    match plugin_result {
+        // Timeout variants: fuel or epoch exhaustion → INDETERMINATE.
+        // Fuel detection MUST use the Timeout{cause:Fuel} variant (mapped from
+        // Trap::OutOfFuel in invoke.rs::classify_trap), NOT get_fuel(). AC-001/AC-002.
+        PluginResult::Timeout {
+            cause: crate::invoke::TimeoutCause::Fuel,
+            ..
+        } => DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Fuel,
+        },
+        PluginResult::Timeout {
+            cause: crate::invoke::TimeoutCause::Epoch,
+            ..
+        } => DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Epoch,
+        },
+
+        // Ok variant: trichotomy depends on exit_code + output_too_large flag.
+        // AC-003: exit_code=0 + output_too_large=true → Indeterminate(OutputTooLarge).
+        // AC-004: exit_code=0 + output_too_large=false → Pass.
+        // AC-004: exit_code≠0 → Fail{exit_code} (policy-orthogonal).
+        PluginResult::Ok { exit_code, .. } => {
+            if output_too_large && exit_code == 0 {
+                DispatchOutcome::Indeterminate {
+                    cause: IndeterminateCause::OutputTooLarge,
+                }
+            } else if exit_code == 0 {
+                DispatchOutcome::Pass
+            } else {
+                DispatchOutcome::Fail { exit_code }
+            }
+        }
+
+        // Crashed variant: unrecognized/future Trap variant (wildcard `_ =>` arm in
+        // invoke.rs::classify_trap). MUST NOT yield INDETERMINATE per BC-1.18.001
+        // invariant 2 (`Trap` is `#[non_exhaustive]`). Route to existing on_error
+        // handling by returning Fail (non-zero). AC-004/AC-011.
+        PluginResult::Crashed { .. } => {
+            // BC-1.18.001 invariant 2: wildcard Trap arm routes to on_error, not INDETERMINATE.
+            // Existing plugin_fail_closed() checks Crashed+on_error=Block → exit 2.
+            // classify_outcome returns Fail so the executor can apply on_error logic.
+            DispatchOutcome::Fail { exit_code: 1 }
+        }
+    }
+}
 
 /// Owned per-plugin outcome with a name attached so callers don't have
 /// to zip with the original tier vec. `RegistryEntry` is cloned here —
@@ -44,6 +198,41 @@ pub struct PluginOutcome {
     pub plugin_version: String,
     pub on_error: OnError,
     pub result: PluginResult,
+    /// Set to `true` by `execute_tiers` when `plugin_block_if_marker` returned `true`
+    /// for this outcome — i.e., `on_error == BlockIfMarker` AND the
+    /// `.factory/unvalidated-mutation.marker` was present and non-expired at dispatch time.
+    ///
+    /// Used by `extract_block_info` (TD #71 surfacing path) to populate
+    /// `blocking_plugins` + `block_reason` for the recoverable-block case
+    /// (ADR-048 §Decision 1 / BC-1.18.002 PC5).
+    ///
+    /// `false` for all other outcomes (advisory block, fail-closed Block,
+    /// async plugins, load failures).
+    pub block_if_marker_fired: bool,
+    /// The marker's parsed fields, populated by `execute_tiers` when
+    /// `block_if_marker_fired` is `true` (best-effort read of
+    /// `.factory/unvalidated-mutation.marker` at the moment the crash-path
+    /// block was confirmed).
+    ///
+    /// Used by `extract_block_info` (TD #71 surfacing path) / `main.rs`'s
+    /// crash-path BLOCK message construction to populate the mandatory
+    /// `plugin_name`, `artifact_path`, `cause`, `expires_at` fields required
+    /// by BC-1.18.002 v1.6 PC5 — the message MUST name the concrete marker
+    /// so the operator/agent can act on it, not just assert a marker exists.
+    ///
+    /// `None` when `block_if_marker_fired` is `false` (no marker to read),
+    /// or on the defensive fallback where the marker could not be re-read
+    /// (e.g., concurrently deleted between the crash-path check and the
+    /// field read — the marker's prior presence already satisfied PC5's
+    /// block decision; a `None` here degrades the message gracefully
+    /// rather than fabricating field values).
+    ///
+    /// Boxed: `MarkerFields` carries six owned `String`s, and `PluginOutcome`
+    /// is stored inline in `JoinWrap::Ready` alongside a bare `JoinHandle`
+    /// (8 bytes) — an unboxed `Option<MarkerFields>` would blow up
+    /// `clippy::large_enum_variant` on `JoinWrap`. `Option<Box<_>>` keeps
+    /// this field pointer-sized regardless of `MarkerFields`' own size.
+    pub block_if_marker_fields: Option<Box<MarkerFields>>,
 }
 
 /// Aggregated result of running every tier in order.
@@ -90,20 +279,681 @@ pub struct ExecutorInputs<'a> {
     pub resolver_registry: Arc<ResolverRegistry>,
 }
 
+/// Well-known path (relative to the project cwd) of the `[[shard]]` config
+/// file the native shard-cap gate check reads (BC-1.18.005 Precondition 2).
+/// TBD-at-F4 per BC-1.18.005's Architecture Anchors — a sibling
+/// `shard-config.toml` rather than `hooks-registry.toml` itself, so the
+/// gate's config surface can evolve independently of the WASM plugin
+/// registry schema.
+// S-25.02 BC-1.18.006 cluster-2: widened from private to `pub(crate)` so
+// `invoke::detect_replace_all_overcap_candidate` (Postcondition 7 catch
+// point (i)'s qualification filter) can reuse the SAME well-known path
+// rather than duplicating this string literal — visibility-only change, no
+// behavior change to this constant's pre-existing PreToolUse call site
+// below.
+pub(crate) const SHARD_CONFIG_RELATIVE_PATH: &str = ".factory/shard-config.toml";
+
+/// Native (non-WASM) shard-cap gate invocation point (S-25.02 BC-1.18.005
+/// T-2). MAJOR-3 (S-25.02 cluster-2 PR #824 pr-review cycle 3; ADR-051
+/// §Decision 17): decoupled from [`ExecutorInputs`] and `execute_tiers` —
+/// called ONCE from `main::run`, at the SAME call site as
+/// `invoke::reconcile_replace_all_overcap_if_qualifying`, BEFORE the
+/// `sync_tiers.is_empty() && partition.async_group.is_empty()` early-return
+/// guard, mirroring that guard's own widened form
+/// (`shard_gate_precheck_result.is_none() && sync_tiers.is_empty() &&
+/// partition.async_group.is_empty()`). Prior to MAJOR-3, this check ran
+/// only INSIDE `execute_tiers`, which `main::run` skips entirely whenever no
+/// plugin matched the dispatch — silently defeating the PreToolUse
+/// shard-cap gate for exactly that configuration, the mirror image of the
+/// "silently stop firing if the plugin set changes" failure mode Decision 1's
+/// own placement rule already prevents for the git-context injection leg.
+/// The result this function returns is computed EXACTLY ONCE per dispatch —
+/// `main::run` threads the `Option<HookResult>` into `execute_tiers` as a
+/// parameter, which consumes it without ever recomputing it: the fired
+/// branch reaches `shard_manager::execute_roll`, a destructive seal+
+/// truncate-to-0 operation, so a second evaluation would corrupt state
+/// rather than merely waste cycles.
+///
+/// # Guarded call site (BC-5.38.001 Red Gate discipline)
+///
+/// [`crate::shard_manager::shard_cap_gate_check`] and `ShardRegistry::load`
+/// are fully implemented (S-25.02 F4 BC-cluster 1 — no longer stubs). This
+/// function still applies TWO cheap, real guards before reaching them —
+/// themselves a direct extension of Postcondition 1's zero-cost-bypass
+/// spirit, not the BC's tested formula/trigger logic — so that every dispatch
+/// that isn't a candidate for BC-1.18.005's check pays zero cost:
+///
+/// 1. **Tool-name filter.** Only `Edit`/`Write`/`MultiEdit` PreToolUse calls
+///    are candidates at all (Precondition 1). A cheap string compare, no I/O.
+/// 2. **Config-presence filter.** The native gate is a no-op when no
+///    `[[shard]]` config file exists at [`SHARD_CONFIG_RELATIVE_PATH`] —
+///    none of this crate's pre-existing test fixtures ship one, so this
+///    guard is what keeps every pre-existing dispatch unaffected by the
+///    gate. The test-writer stage's BC-1.18.005 Red Gate fixtures place a
+///    real `[[shard]]` config file under a test's `cwd`, which is exactly
+///    what drives a matching call past the guard and into the live
+///    `ShardRegistry::load` / `shard_cap_gate_check` gate logic.
+///
+/// Returns `None` when any guard short-circuits (no gate check performed);
+/// `Some(HookResult)` when the gate was actually invoked.
+///
+/// # PreToolUse-scoped (F-C1-P2-004, S-25.02 Phase F4 LOCAL adversary pass-2
+/// cluster-1, LOW; BC-1.18.005 Precondition 1)
+///
+/// The native shard-cap gate is a `PreToolUse`-only check — it exists to stop
+/// a mutation BEFORE it lands, not to audit one after the fact. The
+/// `event_name` guard below reads `payload.event_name`'s `EventType`
+/// classification (mirroring `main.rs`'s own
+/// `EventType::from_event_str(&payload.event_name)` use) and short-circuits
+/// for any event that is not `PreToolUse` — e.g. a `PostToolUse`
+/// Edit/Write/MultiEdit call against the exact same matched, malformed
+/// `[[shard]]` entry that would legitimately block a PreToolUse call.
+/// `payload::HookPayload::event_name` is a required (non-`Option`) field, so
+/// a real dispatcher payload always carries a genuine value here —
+/// `EventType::from_event_str("")` resolves to `EventType::Other`, never
+/// `PreToolUse`, so an empty string is correctly treated as NOT PreToolUse
+/// (no absent-field special case is needed post-decoupling, unlike the
+/// pre-MAJOR-3 `ExecutorInputs`-based signature this replaced, which read an
+/// untyped `serde_json::Value` that could omit the key entirely).
+pub fn shard_cap_precheck(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
+        return None;
+    }
+
+    let tool_name = payload.tool_name.as_str();
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit") {
+        return None;
+    }
+
+    let shard_config_path = cwd.join(SHARD_CONFIG_RELATIVE_PATH);
+    if !shard_config_path.exists() {
+        return None;
+    }
+
+    // A `[[shard]]` config file is present and this is a candidate tool —
+    // from here on, real BC-1.18.005 gate logic runs: structural TOML
+    // config load, followed by `shard_cap_gate_check`'s entry-match-time
+    // semantic validation (EC-009/EC-010/EC-011/EC-012/Postcondition 9, via
+    // `validate_entry`) and the trigger-boundary check itself.
+    let registry = match crate::shard_manager::ShardRegistry::load(&shard_config_path) {
+        Ok(reg) => reg,
+        Err(e) => return Some(e.into()),
+    };
+    // PR #818 cycle-2 review finding B-2: an absent or non-string
+    // `tool_input.file_path` MUST fail loud, never silently resolve to an
+    // empty `PathBuf` — an empty path has no `file_stem()`, so
+    // `find_matching_entry` would resolve `None` and this whole gate would
+    // silently `Continue` for a malformed payload exactly as if the
+    // dispatch matched no `[[shard]]` entry at all. `file_path` is MORE
+    // load-bearing than `content`/`old_string`/`new_string` (the m3/M-1
+    // `required_str_len_bytes` precedent this mirrors): those three govern
+    // the computed SIZE once a match is already known; this one governs
+    // whether the gate applies AT ALL.
+    let Some(target_path) = payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+    else {
+        return Some(vsdd_hook_sdk::HookResult::Error {
+            message: format!(
+                "BC-1.18.005: {tool_name} tool_input is missing a valid string \"file_path\" — \
+                 refusing to silently skip the shard-cap gate for a malformed payload."
+            ),
+        });
+    };
+    Some(crate::shard_manager::shard_cap_gate_check(
+        &registry,
+        tool_name,
+        &target_path,
+        &payload.tool_input,
+    ))
+}
+
+/// BC-1.18.011 Precondition 6(b)/(c) — native OPEN/DRAINING writer-
+/// admission precheck for the BC-1.18.011 governed one-time B2 migration
+/// (S-25.02 cluster-5, T-11; ADR-052 §Decision 5a). Structurally mirrors
+/// [`shard_cap_precheck`] immediately above it: a `PreToolUse`-only,
+/// non-WASM native check consulted before the registry-driven plugin loop
+/// (Invariant 1 precedent), short-circuiting to `None` for every dispatch
+/// that is not a genuine mutation-tool candidate against a BC-INDEX path
+/// with migration state present on disk.
+///
+/// **FULLY IMPLEMENTED (S-25.02 cluster-5, T-11):** this function's body is
+/// real, load-bearing production logic, not a stub — see the call-site
+/// wiring in `main.rs` (computed exactly once alongside
+/// `shard_gate_precheck_result`, before `build_engine()`, via
+/// [`crate::executor::resolve_shard_gate_precedence`]). The ADR-052
+/// §Decision 5a admission logic it delegates to
+/// (`shard_manager::admit_or_block_bc_index_writer`,
+/// `shard_manager::reconcile_stale_admission_gate`) is likewise fully
+/// implemented in `shard_manager.rs`.
+///
+/// Unlike `shard_cap_precheck`, this gate additionally covers `Bash`
+/// dispatches whose write effect targets `.factory/specs/behavioral-
+/// contracts/` or `.factory/cycles/` (ADR-052 §Decision 5a "Bash admission
+/// and reservation") — the `^Bash$` full-command pre-shell classifier
+/// (§Decision 5c) is a SEPARATE guard from this function and is not
+/// implemented here; this function's own tool-kind guard below covers only
+/// the `Edit`/`Write`/`MultiEdit` admission path, matching
+/// `shard_cap_precheck`'s own scoping. The `Bash`-classifier arm is a
+/// distinct, not-yet-scheduled piece of this ADR's guard stack (S-25.02
+/// cluster-5 explicitly excludes it — see the cluster-5 fix-burst scope
+/// note; not reintroduced here).
+///
+/// The `.factory/migration-state/` presence guard below is the same real
+/// short-circuit `shard_cap_precheck`'s own real `shard_config_path
+/// .exists()` check mirrors immediately above it: for every dispatch with
+/// no `.factory/migration-state/` directory on disk (the common case — no
+/// migration ever activated), this function returns `None` immediately,
+/// without evaluating any admission logic at all.
+pub fn bc_index_migration_admission_precheck(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
+        return None;
+    }
+
+    let tool_name = payload.tool_name.as_str();
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit") {
+        return None;
+    }
+
+    let migration_state_dir = cwd.join(".factory/migration-state");
+    if !migration_state_dir.exists() {
+        return None;
+    }
+
+    // In-scope ONLY for a dispatch that targets `.factory/specs/behavioral-
+    // contracts/` or `.factory/cycles/` — everything else (an unrelated
+    // Edit/Write) stays out of this gate's scope even while a migration
+    // txn is in flight.
+    let target_path = payload
+        .tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)?;
+    let normalized = target_path.to_string_lossy().replace('\\', "/");
+    let in_scope = normalized.contains(".factory/specs/behavioral-contracts")
+        || normalized.contains(".factory/cycles");
+    if !in_scope {
+        return None;
+    }
+
+    // NOTE (surfaced, not silently fixed — see final report): OBL-1's
+    // drain-procedure wiring (below, in `run_bc_index_migration`'s
+    // fresh-run branch) can leave the gate at DRAINING/LOCKED if the
+    // migration binary crashes or errors between the gate flip and the
+    // next covered abort/completion point.
+    // `shard_manager::reconcile_stale_admission_gate` already exists as
+    // the documented self-heal mechanism for exactly this case, and a
+    // full-crate grep confirms it is never called from anywhere in the
+    // real dispatch path today (dead code) — its own "self-heals by the
+    // next PreToolUse dispatch" doc-comment claim is therefore not
+    // actually true in production yet. Wiring it in here (the natural
+    // call site) was attempted in this burst but reverted: it broke
+    // `test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_precheck_never_runs_no_roll`,
+    // whose STAGING fixture (`write_migration_txn`) does not hold the
+    // `exclusive.lock` a live coordinator would hold — `reconcile_stale_
+    // admission_gate`'s Branch A/B then (correctly, per its own ratified
+    // spec) treats the fixture's generation-id-less STAGING record as an
+    // abandoned pre-generation crash and self-heals it to ABORTED+OPEN,
+    // which defeats that test's "still blocked while genuinely STAGING"
+    // scenario. This is a genuine pre-existing gap this burst's O-5
+    // wiring makes newly load-bearing (before this burst, a stuck gate
+    // had no automatic drain path TO get stuck from) — not something
+    // this burst's own change introduces net-new — but closing it safely
+    // requires the STAGING test fixture to first be updated to hold the
+    // lock (test-writer's domain, not implementer's), so it is left
+    // unwired here rather than silently breaking that test.
+    let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
+        Ok(state) => state,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
+                ),
+            });
+        }
+    };
+
+    // OBL-1 §4 fail-open structural fix (TD-VSDD-060 sibling-site sweep):
+    // this precheck previously duplicated its own ad hoc
+    // `matches!(txn.state, Staging | Committing)` check and NEVER
+    // consulted the persisted OPEN/DRAINING/LOCKED gate state at all — a
+    // dispatch arriving during the drain window (gate flipped to DRAINING/
+    // LOCKED but no txn record created yet, e.g. a crash between
+    // `write_admission_gate_state(Draining)` and the txn-record write) was
+    // silently admitted.
+    //
+    // OBL-1 §5 (O-5 fold-in): when the real Claude Code PreToolUse envelope
+    // carries `tool_use_id` (captured by `HookPayload::extra`'s
+    // `#[serde(flatten)]` catch-all — this dispatcher-native struct does
+    // not promote it to a named field), this precheck now calls
+    // `admit_or_block_bc_index_writer` directly: the SAME
+    // `is_bc_index_admission_open` classification this precheck used to
+    // duplicate ad hoc, PLUS (on admission) creation of the writer
+    // reservation `drain_bc_index_writers` polls for quiescence — closing
+    // the O-5 drain-wiring gap in the same call that fixes the fail-open
+    // gap, one shared call site instead of two independently-maintained
+    // checks.
+    //
+    // A payload with no `tool_use_id` (a malformed/non-conforming
+    // envelope, or a fixture/shape that predates this field) falls back to
+    // a check-only admission decision: no reservation is created, so this
+    // write proceeds untracked by the drain procedure. This is a
+    // deliberate non-blocking degradation, not a silently fabricated key —
+    // per the O-5 assessment's own conclusion, an untracked writer is
+    // "ACCEPTABLE-AS-IS for data integrity... no corruption path" because
+    // Postcondition 3a's TOCTOU fingerprint recheck independently
+    // backstops content integrity regardless of whether this specific
+    // writer was tracked by the drain procedure.
+    if let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) {
+        return match crate::shard_manager::admit_or_block_bc_index_writer(
+            &migration_state_dir,
+            tool_use_id,
+        ) {
+            Ok(()) => None,
+            Err(crate::shard_manager::BcIndexMigrationError::WriterAdmissionRefused { reason }) => {
+                Some(vsdd_hook_sdk::HookResult::Block {
+                    reason: format!("BC-1.18.011 E-MAINTENANCE-001: {reason}"),
+                })
+            }
+            Err(e) => Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!("BC-1.18.011: writer-admission check failed: {e}"),
+            }),
+        };
+    }
+
+    let active_txn = match crate::shard_manager::read_active_txn_record(
+        &crate::shard_manager::migration_fs::StdFs,
+        &migration_state_dir,
+    ) {
+        Ok(txn) => txn,
+        Err(e) => {
+            return Some(vsdd_hook_sdk::HookResult::Error {
+                message: format!(
+                    "BC-1.18.011: failed to read the active BC-INDEX migration txn record: {e}"
+                ),
+            });
+        }
+    };
+
+    if crate::shard_manager::is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
+        return None;
+    }
+
+    let reason = match &active_txn {
+        Some(txn)
+            if matches!(
+                txn.state,
+                crate::shard_manager::BcIndexMigrationTxnState::Staging
+                    | crate::shard_manager::BcIndexMigrationTxnState::Committing
+            ) =>
+        {
+            format!(
+                "BC-1.18.011 E-MAINTENANCE-001: a governed BC-INDEX migration (txn {}, \
+                 state={:?}) is currently in flight — this write is refused; retry after the \
+                 migration completes",
+                txn.txn_id, txn.state
+            )
+        }
+        _ => format!(
+            "BC-1.18.011 E-MAINTENANCE-001: the BC-INDEX writer-admission gate is not OPEN \
+             (state={gate_state:?}) — this write is refused; retry once the gate self-heals or \
+             the current maintenance window completes"
+        ),
+    };
+    Some(vsdd_hook_sdk::HookResult::Block { reason })
+}
+
+/// OBL-1 §5 (O-5 fold-in) — PostToolUse counterpart to
+/// [`bc_index_migration_admission_precheck`]: releases the writer
+/// reservation the SAME `tool_use_id`'s PreToolUse admission created (if
+/// any), so [`crate::shard_manager::drain_bc_index_writers`]'s quiescence
+/// poll sees this dispatch as complete.
+///
+/// Fire-and-forget, best-effort, NEVER produces a `HookResult` — a
+/// missing `tool_use_id`, a missing `.factory/migration-state/`
+/// directory, or a release I/O failure must never affect the tool
+/// dispatch's own already-completed outcome. The reservation is
+/// drain-procedure bookkeeping, not a correctness gate (mirrors
+/// [`crate::shard_manager::release_bc_index_writer_reservation`]'s own doc
+/// comment: "a missing file... is a no-op, not an error").
+pub fn bc_index_migration_reservation_release(
+    payload: &crate::payload::HookPayload,
+    cwd: &std::path::Path,
+) {
+    if EventType::from_event_str(&payload.event_name) != EventType::PostToolUse {
+        return;
+    }
+    if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
+        return;
+    }
+    let migration_state_dir = cwd.join(".factory/migration-state");
+    if !migration_state_dir.exists() {
+        return;
+    }
+    let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if let Err(e) =
+        crate::shard_manager::release_bc_index_writer_reservation(&migration_state_dir, tool_use_id)
+    {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            error = %e,
+            "bc_index_migration_reservation_release: best-effort writer-reservation release \
+             failed (non-fatal) -- the reservation, if it still exists, will be reclaimed by \
+             drain_bc_index_writers's own TTL GC pass instead"
+        );
+    }
+}
+
+/// BC-1.18.011 Architect Ruling 1 (D-1232-OBL, S-25.02 cluster-5 T-11): the
+/// native-gate PRECEDENCE decision between the migration-admission gate and
+/// the shard-cap gate, extracted as a pure, lib-testable helper (F-C5-P1-006
+/// — this function was previously inlined at `main.rs`'s
+/// `shard_gate_precheck_result` call site, unreachable from any integration
+/// test since it lives in the binary crate).
+///
+/// A fired migration-admission verdict (`migration_verdict = Some(_)`) wins
+/// unconditionally: `shard_cap` is STRUCTURALLY SKIPPED — never invoked at
+/// all, not merely evaluated and then discarded — because `shard_cap`'s
+/// fired branch reaches `shard_manager::execute_roll`, a DESTRUCTIVE seal-
+/// and-truncate-to-0 operation that must never run once a BC-INDEX-path
+/// write is already blocked by a STAGING/COMMITTING migration txn. This is
+/// why `shard_cap` is a lazy closure (`FnOnce`) rather than an
+/// eagerly-computed `Option` parameter: the "never invoked" guarantee is
+/// then something a caller (or a test, via a closure that records whether
+/// it ran) can observe directly, not merely infer from the returned value.
+///
+/// `main::run`'s `shard_gate_precheck_result` call site delegates to this
+/// function with an unchanged effective outcome — this extraction is wiring
+/// only, no behavior change.
+pub fn resolve_shard_gate_precedence(
+    migration_verdict: Option<vsdd_hook_sdk::HookResult>,
+    shard_cap: impl FnOnce() -> Option<vsdd_hook_sdk::HookResult>,
+) -> Option<vsdd_hook_sdk::HookResult> {
+    match migration_verdict {
+        Some(verdict) => Some(verdict),
+        None => shard_cap(),
+    }
+}
+
+/// Synthesize a blocking [`PluginOutcome`] for the native shard-cap gate's
+/// own fail-loud verdict (F-C1-P2-001, S-25.02 Phase F4 LOCAL adversary
+/// pass-2 cluster-1, MEDIUM).
+///
+/// Before this fix, `execute_tiers`'s shard-gate match arm only flipped the
+/// local `block_intent` bool for a `HookResult::Error`/`HookResult::Block`
+/// verdict — it never appended anything to `all_outcomes` (the
+/// `Vec<PluginOutcome>` that becomes `TierExecutionSummary::per_plugin_results`).
+/// `main.rs::extract_block_info` (the TD #71 operator-facing surfacing path)
+/// derives `block_reason` EXCLUSIVELY by scanning `per_plugin_results`, so an
+/// empty tier list (the native gate's own "nothing else runs" shape) meant
+/// `block_reason` was always `""` for a malformed `[[shard]]` config —
+/// silently dropping the artifact_stem + failure-kind diagnostic
+/// `ShardConfigError`'s own `Display` impl already carries.
+///
+/// This synthesizes a `PluginOutcome` shaped exactly like a real WASM
+/// plugin's advisory-block verdict — `stdout` carrying
+/// `{"outcome":"block","reason":"..."}`, `on_error = Block`, `exit_code = 2`
+/// — so it flows through `extract_block_info`'s existing `is_blocking`
+/// check (the `advisory` arm) and `extract_reason_from_outcome`'s existing
+/// JSON-reason parse exactly the way a real plugin's verdict would, with no
+/// parallel surfacing path required. `plugin_name` is `"shard-cap-gate"` so
+/// an operator can distinguish this native gate's own verdict from a WASM
+/// plugin's in `blocking_plugins`. `message` is either `ShardConfigError`'s
+/// own `Display` text (`HookResult::Error` case — already names the
+/// offending `artifact_stem` and the `EC-009`/`EC-011`/`EC-013` BC-1.18.005
+/// failure-kind marker) or a `HookResult::Block`'s `reason` (reserved for a
+/// later cluster's fired-trigger block outcome; `shard_cap_gate_check` does
+/// not construct one today — see `shard_cap_precheck`'s doc comment).
+///
+/// `plugin_version` (PR #818 fix-burst finding m5, corrected from an
+/// earlier revision that hardcoded `String::new()`): callers pass
+/// `inputs.base_host_ctx.plugin_version.clone()` — the same dispatcher-own
+/// version every OTHER `PluginOutcome` in this file populates via
+/// `host_ctx.plugin_version`/`base_host_ctx.plugin_version` (this native
+/// gate is dispatcher code, not a versioned WASM plugin, so there is no
+/// separate "shard-cap-gate plugin version" to report; the dispatcher's own
+/// version is the accurate value, consistent with how this file already
+/// reports `plugin_version` for its OTHER native/sentinel outcomes, e.g. the
+/// `payload serialize`/`plugin load failed` crash paths above).
+///
+/// On `plugins_run` counting (m5's second half): this function's outcome
+/// intentionally DOES count toward `TierExecutionSummary::per_plugin_results
+/// .len()` (and therefore the operator-facing `plugins_run` telemetry field
+/// in `main.rs`) exactly like this file's other native/sentinel outcomes —
+/// the `spawn_blocking` join-error `"<unknown>"` crash outcome, the
+/// `"payload serialize"` crash outcome, and the `"plugin load failed"` crash
+/// outcome all count identically despite none of them representing a
+/// successfully-executed WASM plugin. `plugins_run` has always meant "number
+/// of outcome-producing checks this dispatch ran," not "number of WASM
+/// modules that executed successfully" — this native gate check fits that
+/// established, pre-existing semantics precisely. (Reviewed against a fix
+/// suggestion to exclude this outcome from the count: doing so would
+/// actually be the INCONSISTENT choice, singling out this one native check
+/// while leaving the other three sentinel-outcome sites uncorrected.)
+fn shard_gate_block_outcome(reason: String, plugin_version: String) -> PluginOutcome {
+    let stdout = serde_json::json!({ "outcome": "block", "reason": reason }).to_string();
+    PluginOutcome {
+        plugin_name: "shard-cap-gate".to_string(),
+        plugin_version,
+        on_error: OnError::Block,
+        result: PluginResult::Ok {
+            exit_code: 2,
+            stdout,
+            stderr: String::new(),
+            elapsed_ms: 0,
+            fuel_consumed: 0,
+        },
+        block_if_marker_fired: false,
+        block_if_marker_fields: None,
+    }
+}
+
+/// Synthesize a `PluginOutcome` for a gate fail-loud `HookResult::Error`
+/// verdict — the FAIL-LOUD path distinct from `shard_gate_block_outcome`'s
+/// successful-rotation Block path.
+///
+/// BC-1.18.009 cluster-4 added a genuine distinction between two gate outcomes:
+///
+/// - `HookResult::Block` — rotate_changelog_at SUCCEEDED; gate returns the
+///   block-and-retry instruction (Postcondition 2). Serialized by
+///   [`shard_gate_block_outcome`] as `{"outcome":"block","reason":"..."}`.
+///
+/// - `HookResult::Error` — rotate_changelog_at FAILED or a config validation
+///   error fired (ShardConfigError, E-SHD-004, etc.); gate returns fail-loud.
+///   Serialized here as `{"outcome":"error","message":"..."}` so observers (VP-131
+///   test, main.rs `extract_reason_from_outcome`, operator stderr) can
+///   distinguish a genuine gate failure from a successful rotation's retry
+///   instruction. `exit_code: 2` ensures `extract_block_info`'s
+///   `wasi_block = exit_code == 2 && on_error == Block` path still marks this
+///   outcome as blocking; `block_intent = true` is set independently in
+///   `shard_gate_verdict_outcomes` for the same reason (belt-and-suspenders).
+fn shard_gate_error_outcome(message: String, plugin_version: String) -> PluginOutcome {
+    let stdout = serde_json::json!({ "outcome": "error", "message": message }).to_string();
+    PluginOutcome {
+        plugin_name: "shard-cap-gate".to_string(),
+        plugin_version,
+        on_error: OnError::Block,
+        result: PluginResult::Ok {
+            exit_code: 2,
+            stdout,
+            stderr: String::new(),
+            elapsed_ms: 0,
+            fuel_consumed: 0,
+        },
+        block_if_marker_fired: false,
+        block_if_marker_fields: None,
+    }
+}
+
 /// Run every tier and return the aggregated summary.
+///
+/// `shard_gate_precheck_result` (MAJOR-3, S-25.02 cluster-2 PR #824
+/// pr-review cycle 3; ADR-051 §Decision 17): the PRECOMPUTED verdict from
+/// [`shard_cap_precheck`], called ONCE by `main::run` before this function
+/// (and before its own `sync_tiers.is_empty() && partition.async_group.is_empty()`
+/// early-return guard) — never recomputed here. `execute_tiers` only
+/// CONSUMES this value; calling `shard_cap_precheck` a second time would
+/// re-run its potentially-destructive `execute_roll` branch against
+/// already-mutated on-disk state.
+/// Translate a precomputed [`shard_cap_precheck`] verdict into synthesized
+/// [`PluginOutcome`]s plus whether the verdict constitutes a block — the
+/// EXACT logic `execute_tiers` runs on the verdict before its own
+/// registry-driven tier loop (see that function's inline call site below).
+///
+/// Factored out (MINOR-N1 fix, S-25.02 cluster-2 PR #824 pr-review cycle 4)
+/// so `main::run`'s empty-tier-groups short-circuit can translate a FIRED
+/// verdict to its exit code via this SAME path — reusing
+/// `extract_block_info`'s existing `is_blocking`/reason-extraction contract
+/// against the outcome this function synthesizes — without needing a
+/// `wasmtime::Engine` (this function does no I/O and touches no engine/cache
+/// state). This matters because the fired branch of
+/// [`shard_cap_precheck`]/`shard_cap_gate_check` has ALREADY run the
+/// destructive `execute_roll` (seal + truncate-to-0) by the time this
+/// function is called — a verdict this function reports must never be
+/// silently downgraded behind an unrelated fallible engine build.
+///
+/// S-25.02 BC-1.18.005 T-2 — native shard-cap gate verdict, consumed BEFORE
+/// the registry-driven tier loop (Invariant 1). MAJOR-3: this value is
+/// COMPUTED by the caller (`main::run`, via `shard_cap_precheck`) and
+/// threaded in as a parameter — see `execute_tiers`'s own doc comment and
+/// `shard_cap_precheck`'s doc comment for the full placement/no-recompute
+/// rationale. `None` for every dispatch that isn't both an
+/// Edit/Write/MultiEdit PreToolUse call AND has a `[[shard]]` config file
+/// present, which covers 100% of this crate's pre-existing test fixtures.
+///
+/// F-001 fix (S-25.02 Phase F4 LOCAL adversary pass-1 cluster-1, HIGH): a
+/// fail-loud `HookResult::Error` from `shard_cap_gate_check`'s
+/// entry-match-time `validate_entry` call (EC-009 missing `shape`; EC-011
+/// `low_water_mark >= N`) is BC-1.18.005's OWN postcondition and MUST become
+/// a BLOCKING dispatch outcome here — the same way
+/// `plugin_fail_closed`/`plugin_requests_block` translate a WASM plugin's
+/// fail-closed verdict into `block_intent` in `execute_tiers`'s tier loop.
+/// `HookResult::Block` is translated identically. **CORRECTED (F-C2-P7-003,
+/// MINOR, cluster-2 LOCAL adversary pass-7):** this comment previously
+/// claimed `shard_cap_gate_check` "does not construct [a Block] today" and
+/// that the gate "still returns Continue + warn for a fired trigger" for
+/// every shape — stale as of cluster-2 (BC-1.18.006). The `ShardShape::Flat`
+/// arm's fired size-trigger branch now returns a REAL `HookResult::Block`
+/// (the roll-before-write block-and-retry outcome, via `execute_roll`) or
+/// `HookResult::Error` (a genuine `E-SHD-NNN` roll failure), both handled by
+/// this same match — no further change was needed for that shape. The "gate
+/// returns `Continue` + non-fatal `tracing::warn!` advisory for a fired
+/// trigger, out of scope for this cluster" description now applies ONLY to
+/// the item-count shape (`ShardShape::FrontmatterChangelogArray` /
+/// BC-1.18.009's rotate-and-retry contract), which remains unimplemented;
+/// this match arm was wired ahead of that shape landing so that hand-off
+/// requires no further change when it does.
+///
+/// F-C1-P2-001 fix (S-25.02 Phase F4 LOCAL adversary pass-2 cluster-1,
+/// MEDIUM): a fail-loud verdict here MUST also be appended to the returned
+/// outcomes vec (via `shard_gate_block_outcome`) — not just flip
+/// `block_intent` — so `main.rs::extract_block_info`'s scan over
+/// `TierExecutionSummary::per_plugin_results` (or, on the MINOR-N1
+/// short-circuit path, over this function's own return value directly) has
+/// something to find. See `shard_gate_block_outcome`'s doc comment for the
+/// full rationale.
+/// Returns `(outcomes, block_intent)`.
+pub fn shard_gate_verdict_outcomes(
+    verdict: Option<vsdd_hook_sdk::HookResult>,
+    plugin_version: String,
+) -> (Vec<PluginOutcome>, bool) {
+    let mut outcomes: Vec<PluginOutcome> = Vec::new();
+    let mut block_intent = false;
+    if let Some(shard_gate_result) = verdict {
+        match shard_gate_result {
+            // Gate fail-loud: config validation error (EC-009/EC-011/EC-013),
+            // rotate_changelog_at failure (E-SHD-004, BC-1.18.009 PC6), or
+            // counter-method divergence (E-SHD-014, BC-1.18.009 v1.6 Inv-5).
+            // ALL Error variants are BLOCKING (exit_code=2, block_intent=true).
+            // Serialized as {"outcome":"error","message":"..."} so VP-131's test
+            // and extract_reason_from_outcome can distinguish a genuine gate
+            // failure from a successful rotation's block-and-retry outcome.
+            //
+            // E-SHD-014 does NOT reintroduce the self-DoS loop (Inv-5): the
+            // Error variant carries no "retry your write" instruction (unlike
+            // HookResult::Block), so the agent fails loud and halts for manual
+            // inspection — it does NOT auto-retry. "never Block" in Inv-5 means
+            // never the HookResult::Block retry variant, NOT non-blocking.
+            vsdd_hook_sdk::HookResult::Error { message } => {
+                block_intent = true;
+                outcomes.push(shard_gate_error_outcome(message, plugin_version));
+            }
+            // Successful rotate_changelog_at (BC-1.18.009 PC2) OR successful
+            // execute_roll (BC-1.18.006 PC1): gate returns the retry instruction.
+            // Serialized as {"outcome":"block","reason":"..."}.
+            vsdd_hook_sdk::HookResult::Block { reason } => {
+                block_intent = true;
+                outcomes.push(shard_gate_block_outcome(reason, plugin_version));
+            }
+            vsdd_hook_sdk::HookResult::Continue => {}
+        }
+    }
+    (outcomes, block_intent)
+}
+
 pub async fn execute_tiers(
     inputs: ExecutorInputs<'_>,
     tiers: Vec<Vec<&RegistryEntry>>,
+    shard_gate_precheck_result: Option<vsdd_hook_sdk::HookResult>,
 ) -> TierExecutionSummary {
     let started = Instant::now();
-    let mut all_outcomes: Vec<PluginOutcome> = Vec::new();
-    let mut block_intent = false;
+
+    // Native shard-cap gate verdict, consumed BEFORE the registry-driven
+    // tier loop below (Invariant 1) — see [`shard_gate_verdict_outcomes`]'s
+    // doc comment for the full translation rationale (shared with
+    // `main::run`'s MINOR-N1 empty-tier-groups short-circuit).
+    let (mut all_outcomes, mut block_intent) = shard_gate_verdict_outcomes(
+        shard_gate_precheck_result,
+        inputs.base_host_ctx.plugin_version.clone(),
+    );
 
     for tier in tiers {
-        let tier_outcomes = execute_tier(&inputs, tier).await;
-        for outcome in &tier_outcomes {
+        let mut tier_outcomes = execute_tier(&inputs, tier).await;
+        for outcome in tier_outcomes.iter_mut() {
+            let bim_fired = plugin_block_if_marker(
+                &outcome.result,
+                outcome.on_error,
+                &inputs.base_host_ctx.cwd,
+                chrono::Utc::now(),
+            );
+            // Record per-plugin whether block_if_marker fired so extract_block_info
+            // can surface a non-empty reason for the BlockIfMarker crash-block case
+            // (TD #71 / ADR-048 §Decision 1 / BC-1.18.002 PC5).
+            outcome.block_if_marker_fired = bim_fired;
+            // F-P2-001 fix: when the crash-path block fired, read the marker's
+            // concrete fields so the block message can name plugin_name,
+            // artifact_path, cause, and expires_at instead of asserting a
+            // marker exists without saying which one (BC-1.18.002 v1.6 PC5).
+            // Best-effort: a read failure here (e.g. the marker was cleared by
+            // a racing T1 re-validation between the crash-path check and this
+            // read) leaves the field `None` — the message construction in
+            // main.rs degrades gracefully rather than fabricating values.
+            outcome.block_if_marker_fields = if bim_fired {
+                let marker_path = inputs
+                    .base_host_ctx
+                    .cwd
+                    .join(".factory")
+                    .join("unvalidated-mutation.marker");
+                read_all_marker_fields(&marker_path)
+                    .ok()
+                    .flatten()
+                    .map(Box::new)
+            } else {
+                None
+            };
             if plugin_requests_block(&outcome.result)
                 || plugin_fail_closed(&outcome.result, outcome.on_error)
+                || bim_fired
             {
                 block_intent = true;
             }
@@ -134,6 +984,51 @@ async fn execute_tier<'a>(
             fuel_cap: entry_clone.fuel_cap(&inputs.registry.defaults),
         };
         let on_error = entry_clone.on_error(&inputs.registry.defaults);
+
+        // ADR-048 §Decision 4 v1.2 (S-25.01 LOCAL adversary pass 2 F-P2-002 HIGH +
+        // F-P2-003 MED): dispatcher-native pre-check, run BEFORE invoking any
+        // `on_error = "block_if_marker"` (Arm 1/Arm 2) plugin on the normal
+        // (non-crash) path. TTL_EXPIRED detection + auto-clear + emission and
+        // OPERATOR_OVERRIDE RAW_DELETE_DETECTED reconciliation both happen here,
+        // dispatcher-native — never via the WASM `emit_event` host ABI, whose
+        // RESERVED_FIELDS enrichment cannot carry the marker's foreign
+        // trace_id/plugin_name (see `indeterminate_marker::check_and_clear_expired_marker`
+        // doc comment). By the time the WASM gate plugin's `evaluate_gate` runs
+        // below, the marker is guaranteed absent-or-non-expired.
+        if on_error == OnError::BlockIfMarker {
+            match check_and_clear_expired_marker(
+                &inputs.base_host_ctx.cwd,
+                chrono::Utc::now(),
+                &inputs.base_host_ctx,
+            ) {
+                Ok(Some(_)) => {
+                    // TTL_EXPIRED cleared and emitted — no raw-delete reconciliation
+                    // needed; the marker's own quarantine trail is now closed.
+                }
+                Ok(None) => {
+                    // Not TTL-cleared (absent, non-expired, or legacy-conservative).
+                    // Best-effort: if genuinely absent, reconcile a possible operator
+                    // out-of-band raw delete. `reconcile_raw_delete` itself re-checks
+                    // marker absence and is a no-op when the marker is still present.
+                    if let Err(e) =
+                        reconcile_raw_delete(&inputs.base_host_ctx.cwd, &inputs.base_host_ctx)
+                    {
+                        tracing::warn!(
+                            error = %e,
+                            "reconcile_raw_delete: I/O error on normal-path pre-check; \
+                             continuing (ADR-048 §D4 v1.2 best-effort, never gates dispatch)"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "check_and_clear_expired_marker: I/O error on normal-path pre-check; \
+                         continuing without TTL clear (ADR-048 §D4 v1.2 fail-safe)"
+                    );
+                }
+            }
+        }
 
         // Build the merged plugin_config from static config + resolver outputs.
         // AC-002: zero-overhead short-circuit when needs_context is empty.
@@ -182,6 +1077,8 @@ async fn execute_tier<'a>(
                     plugin_version: inputs.base_host_ctx.plugin_version.clone(),
                     on_error,
                     result,
+                    block_if_marker_fired: false,
+                    block_if_marker_fields: None,
                 }));
                 continue;
             }
@@ -207,6 +1104,8 @@ async fn execute_tier<'a>(
                     plugin_version: host_ctx.plugin_version.clone(),
                     on_error,
                     result,
+                    block_if_marker_fired: false,
+                    block_if_marker_fields: None,
                 };
                 join_handles.push(JoinWrap::Ready(outcome));
                 continue;
@@ -216,21 +1115,173 @@ async fn execute_tier<'a>(
         emit_invoked(&internal_log, &inputs.base_host_ctx, &entry_clone);
         let base_ctx_for_event = inputs.base_host_ctx.clone();
 
+        // MEDIUM-5: extract artifact_path from tool_input.file_path before the closure
+        // moves inputs away (BC-1.18.001 PC4 — marker must record the artifact path).
+        // Empty string when no file_path is present (e.g. non-file-mutation tool events).
+        //
+        // LOW-3 (S-25.01): BC-1.18.001 PC4 requires artifact_path to be an absolute path.
+        // The Claude Code harness always emits absolute file_path values in tool event
+        // payloads (enforced by the harness itself — the Edit/Write tools require an
+        // absolute path per CLAUDE.md and the harness rejects relative paths at entry).
+        // No normalization is needed; we store the value verbatim and trust the harness
+        // invariant. If the harness ever changes this behavior, the marker will contain a
+        // relative path (degraded but non-failing — best-effort per BC-1.18.001 PC4).
+        let artifact_path_for_marker = inputs
+            .payload_value
+            .get("tool_input")
+            .and_then(|ti| ti.get("file_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         let handle = tokio::task::spawn_blocking(move || {
             let started = Instant::now();
-            let result = invoke_plugin(&engine, &module, host_ctx.clone(), &payload, limits)
-                .unwrap_or_else(|e| PluginResult::Crashed {
-                    trap_string: format!("invoke setup error: {e}"),
-                    stderr: String::new(),
-                    elapsed_ms: started.elapsed().as_millis() as u64,
-                    fuel_consumed: 0,
-                });
+            // S-25.01: invoke_plugin now returns (PluginResult, bool) where bool
+            // = host_output_too_large_seen (AC-003).
+            let (result, output_too_large) =
+                invoke_plugin(&engine, &module, host_ctx.clone(), &payload, limits).unwrap_or_else(
+                    |e| {
+                        (
+                            PluginResult::Crashed {
+                                trap_string: format!("invoke setup error: {e}"),
+                                stderr: String::new(),
+                                elapsed_ms: started.elapsed().as_millis() as u64,
+                                fuel_consumed: 0,
+                            },
+                            false,
+                        )
+                    },
+                );
             emit_lifecycle(&internal_log, &base_ctx_for_event, &entry_clone, &result);
+
+            // S-25.01: classify outcome + emit plugin.indeterminate event + marker write.
+            let failure_policy = entry_clone.failure_policy;
+            let outcome = classify_outcome(result.clone(), failure_policy, output_too_large);
+
+            // BLOCKER-1: BC-1.18.003 PC1 + INV2 — PASS from the named plugin MUST clear
+            // the marker, but ONLY if the marker's plugin_name matches this plugin (scoped).
+            // MEDIUM-1 fix (S-25.01): BC-1.18.003 PC1 requires the clear happen ONLY when the
+            // named plugin is dispatched in a PostToolUse hook and produces Pass. A PreToolUse
+            // PASS from the named plugin MUST NOT clear the marker.
+            if let DispatchOutcome::Pass = outcome {
+                let marker_path = base_ctx_for_event
+                    .cwd
+                    .join(".factory")
+                    .join("unvalidated-mutation.marker");
+                // Best-effort read; if the marker is absent or unreadable, no-op.
+                // Scoped clear: only this plugin's PostToolUse PASS clears its own marker.
+                // M-1 fix (S-25.01): pass artifact_path_for_marker so delete_marker_if_pass
+                // enforces BC-1.18.003 INV2 artifact-scoped clear internally.
+                // Log (but do not propagate) errors — a clear failure must not fail the dispatch.
+                if let Ok(Some(marker_plugin)) = read_marker_plugin_name(&marker_path)
+                    && marker_plugin == entry_clone.name
+                    && entry_clone.event == "PostToolUse"
+                {
+                    // ADR-048 v1.1: read all marker fields BEFORE delete so we have the
+                    // trace_id and other provenance fields for the marker.cleared event.
+                    let all_fields = read_all_marker_fields(&marker_path).ok().flatten();
+                    match delete_marker_if_pass(&marker_path, &artifact_path_for_marker) {
+                        Ok(true) => {
+                            // Marker was actually removed — emit marker.cleared(REVALIDATED).
+                            if let Some(ref fields) = all_fields {
+                                emit_marker_cleared(
+                                    &base_ctx_for_event,
+                                    fields,
+                                    "REVALIDATED",
+                                    "validator",
+                                    None,
+                                );
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin = %entry_clone.name,
+                                marker_path = %marker_path.display(),
+                                error = %e,
+                                "best-effort marker clear failed on PASS; dispatch continues"
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let DispatchOutcome::Indeterminate { ref cause } = outcome {
+                // Emit plugin.indeterminate for EVERY indeterminate outcome (AC-006).
+                // HIGH-1: pass real artifact_path so event and marker record the same path.
+                emit_indeterminate(
+                    &base_ctx_for_event,
+                    &entry_clone,
+                    cause,
+                    &artifact_path_for_marker,
+                );
+                // Write durable marker only for fail-closed plugins (AC-005/AC-015).
+                // BLOCKER-2: BC-1.18.001 INV4 — marker write is PostToolUse-only.
+                // PreToolUse INDETERMINATE → advisory event only; NO marker written.
+                if should_write_marker(&outcome, failure_policy)
+                    && entry_clone.event == "PostToolUse"
+                {
+                    let marker_path = base_ctx_for_event
+                        .cwd
+                        .join(".factory")
+                        .join("unvalidated-mutation.marker");
+                    let marker_now = chrono::Utc::now();
+                    let fields = MarkerFields {
+                        timestamp: marker_now.to_rfc3339(),
+                        plugin_name: entry_clone.name.clone(),
+                        // MEDIUM-5: thread artifact_path from tool_input.file_path (AC-007).
+                        artifact_path: artifact_path_for_marker,
+                        cause: cause_to_str(cause).to_string(),
+                        trace_id: base_ctx_for_event.dispatcher_trace_id.clone(),
+                        // ADR-048 §Decision 2: 24-hour deadman TTL.
+                        expires_at: (marker_now
+                            + chrono::Duration::seconds(
+                                UNVALIDATED_MUTATION_MARKER_TTL_SECONDS as i64,
+                            ))
+                        .to_rfc3339(),
+                    };
+                    // F-P3-002 (ADR-048 §D4 v1.3): read the pre-existing marker BEFORE
+                    // the overwrite so its fields are captured prior to being clobbered
+                    // by the rename. F-P9-001 (ADR-048 §D4 v1.5, symmetric to the v1.4
+                    // marker.written fix): emit marker.cleared(SUPERSEDED) for it ONLY
+                    // immediately after a confirmed successful write — never before the
+                    // write is attempted, never on Err. Emitting SUPERSEDED
+                    // unconditionally (before the write) falsely records the old marker
+                    // as overwritten even when write_indeterminate_marker returns Err
+                    // and the old marker is still on disk untouched — otherwise
+                    // reconcile_raw_delete would later mis-attribute the superseded
+                    // pair's clearance to a human OPERATOR_OVERRIDE that never happened
+                    // (BC-1.18.001 INV3 last-writer-wins requires the audit trail to
+                    // reflect what actually happened, not what was attempted).
+                    let existing_marker = read_all_marker_fields(&marker_path).ok().flatten();
+                    // HIGH-2: log marker-write failures instead of silently swallowing them.
+                    // Best-effort: write failure does NOT fail the dispatch result.
+                    // The plugin.indeterminate event was already emitted above.
+                    //
+                    // TD-VSDD-060 (F-P12-001 pre-req): the tied emission decision
+                    // (SUPERSEDED-then-written on Ok, nothing on Err) is delegated
+                    // to emit_write_tied_audit_events — the single source of truth
+                    // for this discipline, shared with spawn_async_plugin below.
+                    let write_result = write_indeterminate_marker(&fields, &marker_path);
+                    emit_write_tied_audit_events(
+                        &base_ctx_for_event,
+                        write_result,
+                        &marker_path,
+                        existing_marker.as_ref(),
+                        &fields,
+                    );
+                }
+            }
+
             PluginOutcome {
                 plugin_name: entry_clone.name.clone(),
                 plugin_version: host_ctx.plugin_version.clone(),
                 on_error,
                 result,
+                // block_if_marker_fired is set post-hoc by execute_tiers after the
+                // tier completes, so this initial value is always false.
+                block_if_marker_fired: false,
+                block_if_marker_fields: None,
             }
         });
         join_handles.push(JoinWrap::Pending(handle));
@@ -256,6 +1307,8 @@ async fn execute_tier<'a>(
                             elapsed_ms: 0,
                             fuel_consumed: 0,
                         },
+                        block_if_marker_fired: false,
+                        block_if_marker_fields: None,
                     });
                 }
             },
@@ -315,6 +1368,23 @@ pub fn spawn_async_plugin(
             &trace_id,
         );
 
+        // MEDIUM-5: extract artifact_path from tool_input.file_path before payload_value
+        // is moved into per_plugin_value (BC-1.18.001 PC4 — marker must record artifact path).
+        //
+        // LOW-3 (S-25.01): BC-1.18.001 PC4 requires artifact_path to be an absolute path.
+        // The Claude Code harness always emits absolute file_path values in tool event
+        // payloads (enforced by the harness itself — the Edit/Write tools require an
+        // absolute path per CLAUDE.md and the harness rejects relative paths at entry).
+        // No normalization is needed; we store the value verbatim and trust the harness
+        // invariant. If the harness ever changes this behavior, the marker will contain a
+        // relative path (degraded but non-failing — best-effort per BC-1.18.001 PC4).
+        let artifact_path_for_marker = payload_value
+            .get("tool_input")
+            .and_then(|ti| ti.get("file_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         // Splice this entry's per-plugin config onto the base envelope.
         let mut per_plugin_value = payload_value;
         if let Some(map) = per_plugin_value.as_object_mut() {
@@ -335,6 +1405,8 @@ pub fn spawn_async_plugin(
                     plugin_version: base_host_ctx.plugin_version.clone(),
                     on_error,
                     result,
+                    block_if_marker_fired: false,
+                    block_if_marker_fields: None,
                 };
             }
         };
@@ -354,6 +1426,8 @@ pub fn spawn_async_plugin(
                     plugin_version: base_host_ctx.plugin_version.clone(),
                     on_error,
                     result,
+                    block_if_marker_fired: false,
+                    block_if_marker_fields: None,
                 };
             }
         };
@@ -365,31 +1439,158 @@ pub fn spawn_async_plugin(
         host_ctx.plugin_name = entry.name.clone();
         host_ctx.capabilities = entry.capabilities.clone().unwrap_or_default();
 
-        let result = tokio::task::spawn_blocking(move || {
+        let (result, output_too_large) = tokio::task::spawn_blocking(move || {
             let started = std::time::Instant::now();
             invoke_plugin(&engine, &module, host_ctx, &payload, limits).unwrap_or_else(|e| {
-                PluginResult::Crashed {
-                    trap_string: format!("invoke setup error: {e}"),
-                    stderr: String::new(),
-                    elapsed_ms: started.elapsed().as_millis() as u64,
-                    fuel_consumed: 0,
-                }
+                (
+                    PluginResult::Crashed {
+                        trap_string: format!("invoke setup error: {e}"),
+                        stderr: String::new(),
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                        fuel_consumed: 0,
+                    },
+                    false,
+                )
             })
         })
         .await
-        .unwrap_or_else(|join_err| PluginResult::Crashed {
-            trap_string: format!("spawn_blocking join error: {join_err}"),
-            stderr: String::new(),
-            elapsed_ms: 0,
-            fuel_consumed: 0,
+        .unwrap_or_else(|join_err| {
+            (
+                PluginResult::Crashed {
+                    trap_string: format!("spawn_blocking join error: {join_err}"),
+                    stderr: String::new(),
+                    elapsed_ms: 0,
+                    fuel_consumed: 0,
+                },
+                false,
+            )
         });
 
         emit_lifecycle(&internal_log, &base_ctx_for_event, &entry, &result);
+
+        // S-25.01: classify + emit plugin.indeterminate + marker write (mirrors execute_tier).
+        let failure_policy = entry.failure_policy;
+        let outcome = classify_outcome(result.clone(), failure_policy, output_too_large);
+
+        // BLOCKER-1: BC-1.18.003 PC1 + INV2 — PASS from the named plugin MUST clear
+        // the marker, scoped to only the plugin named in the marker (INV2).
+        // MEDIUM-1 fix (S-25.01): BC-1.18.003 PC1 requires the clear happen ONLY when the
+        // named plugin is dispatched in a PostToolUse hook and produces Pass. A PreToolUse
+        // PASS from the named plugin MUST NOT clear the marker.
+        if let DispatchOutcome::Pass = outcome {
+            let marker_path = base_ctx_for_event
+                .cwd
+                .join(".factory")
+                .join("unvalidated-mutation.marker");
+            // Scoped clear: only this plugin's PostToolUse PASS clears its own marker.
+            // M-1 fix (S-25.01): pass artifact_path_for_marker so delete_marker_if_pass
+            // enforces BC-1.18.003 INV2 artifact-scoped clear internally.
+            // Log (but do not propagate) errors — a clear failure must not fail the dispatch.
+            if let Ok(Some(marker_plugin)) = read_marker_plugin_name(&marker_path)
+                && marker_plugin == entry.name
+                && entry.event == "PostToolUse"
+            {
+                // ADR-048 v1.1: read all marker fields BEFORE delete for marker.cleared event.
+                let all_fields = read_all_marker_fields(&marker_path).ok().flatten();
+                match delete_marker_if_pass(&marker_path, &artifact_path_for_marker) {
+                    Ok(true) => {
+                        // Marker was actually removed — emit marker.cleared(REVALIDATED).
+                        if let Some(ref fields) = all_fields {
+                            emit_marker_cleared(
+                                &base_ctx_for_event,
+                                fields,
+                                "REVALIDATED",
+                                "validator",
+                                None,
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            plugin = %entry.name,
+                            marker_path = %marker_path.display(),
+                            error = %e,
+                            "best-effort marker clear failed on PASS; dispatch continues"
+                        );
+                    }
+                }
+            }
+        }
+
+        if let DispatchOutcome::Indeterminate { ref cause } = outcome {
+            // HIGH-1: pass real artifact_path so event and marker record the same path.
+            emit_indeterminate(
+                &base_ctx_for_event,
+                &entry,
+                cause,
+                &artifact_path_for_marker,
+            );
+            // BLOCKER-2: BC-1.18.001 INV4 — marker write is PostToolUse-only.
+            // PreToolUse INDETERMINATE → advisory event only; no marker written.
+            if should_write_marker(&outcome, failure_policy) && entry.event == "PostToolUse" {
+                let marker_path = base_ctx_for_event
+                    .cwd
+                    .join(".factory")
+                    .join("unvalidated-mutation.marker");
+                let marker_now = chrono::Utc::now();
+                let fields = MarkerFields {
+                    timestamp: marker_now.to_rfc3339(),
+                    plugin_name: entry.name.clone(),
+                    // MEDIUM-5: thread artifact_path from tool_input.file_path (AC-007).
+                    artifact_path: artifact_path_for_marker,
+                    cause: cause_to_str(cause).to_string(),
+                    trace_id: base_ctx_for_event.dispatcher_trace_id.clone(),
+                    // ADR-048 §Decision 2: 24-hour deadman TTL.
+                    expires_at: (marker_now
+                        + chrono::Duration::seconds(
+                            UNVALIDATED_MUTATION_MARKER_TTL_SECONDS as i64,
+                        ))
+                    .to_rfc3339(),
+                };
+                // F-P3-002 (ADR-048 §D4 v1.3): read the pre-existing marker BEFORE
+                // the overwrite so its fields are captured prior to being clobbered
+                // by the rename. F-P9-001 (ADR-048 §D4 v1.5, symmetric to the v1.4
+                // marker.written fix): emit marker.cleared(SUPERSEDED) for it ONLY
+                // immediately after a confirmed successful write — never before the
+                // write is attempted, never on Err. Emitting SUPERSEDED
+                // unconditionally (before the write) falsely records the old marker
+                // as overwritten even when write_indeterminate_marker returns Err
+                // and the old marker is still on disk untouched — otherwise
+                // reconcile_raw_delete would later mis-attribute the superseded
+                // pair's clearance to a human OPERATOR_OVERRIDE that never happened
+                // (BC-1.18.001 INV3 last-writer-wins requires the audit trail to
+                // reflect what actually happened, not what was attempted).
+                let existing_marker = read_all_marker_fields(&marker_path).ok().flatten();
+                // HIGH-2: log marker-write failures instead of silently swallowing them.
+                // Best-effort: write failure does NOT fail the dispatch result.
+                // The plugin.indeterminate event was already emitted above.
+                //
+                // TD-VSDD-060 (F-P12-001 pre-req): the tied emission decision
+                // (SUPERSEDED-then-written on Ok, nothing on Err) is delegated
+                // to emit_write_tied_audit_events — the single source of truth
+                // for this discipline, shared with execute_tier above.
+                let write_result = write_indeterminate_marker(&fields, &marker_path);
+                emit_write_tied_audit_events(
+                    &base_ctx_for_event,
+                    write_result,
+                    &marker_path,
+                    existing_marker.as_ref(),
+                    &fields,
+                );
+            }
+        }
+
         PluginOutcome {
             plugin_name: entry.name.clone(),
             plugin_version: base_ctx_for_event.plugin_version.clone(),
             on_error,
             result,
+            // Async plugins are not processed through execute_tiers' block_if_marker loop;
+            // block_if_marker semantics are not applied to async-group outcomes
+            // (BC-1.14.001 Invariant 3 — async group excluded from tier ordering).
+            block_if_marker_fired: false,
+            block_if_marker_fields: None,
         }
     })
 }
@@ -645,6 +1846,33 @@ fn plugin_fail_closed(result: &PluginResult, on_error: OnError) -> bool {
     )
 }
 
+/// Conditional crash-path gate for `on_error = "block_if_marker"` (ADR-048 §Decision 1).
+///
+/// Returns `true` (block) iff:
+/// 1. `on_error == BlockIfMarker`, AND
+/// 2. the plugin crashed or timed out, AND
+/// 3. a non-expired `.factory/unvalidated-mutation.marker` exists under `cwd`.
+///
+/// All other combinations return `false` (allow). I/O errors reading the marker are
+/// treated as allow (fail-open on infra fault — CWE-636 balance).
+fn plugin_block_if_marker(
+    result: &PluginResult,
+    on_error: OnError,
+    cwd: &std::path::Path,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    if on_error != OnError::BlockIfMarker {
+        return false;
+    }
+    if !matches!(
+        result,
+        PluginResult::Crashed { .. } | PluginResult::Timeout { .. }
+    ) {
+        return false;
+    }
+    block_if_marker_check(cwd, now)
+}
+
 fn emit_invoked(log: &InternalLog, base_ctx: &HostContext, entry: &RegistryEntry) {
     let ev = InternalEvent::now(PLUGIN_INVOKED)
         .with_trace_id(&base_ctx.dispatcher_trace_id)
@@ -685,6 +1913,7 @@ fn emit_lifecycle(
             stderr,
             elapsed_ms,
             fuel_consumed,
+            fuel_cap,
         } => {
             let cause_str = match cause {
                 TimeoutCause::Epoch => "epoch",
@@ -703,6 +1932,7 @@ fn emit_lifecycle(
                         "stderr".to_string(),
                         serde_json::Value::String(stderr.clone()),
                     ),
+                    ("fuel_cap".to_string(), serde_json::Value::from(*fuel_cap)),
                 ],
             )
         }
@@ -745,9 +1975,748 @@ fn emit_lifecycle(
     log.write(&ev);
 }
 
+/// Convert `IndeterminateCause` to the canonical BC-3.08.001 wire string.
+fn cause_to_str(cause: &IndeterminateCause) -> &'static str {
+    match cause {
+        IndeterminateCause::Fuel => "fuel",
+        IndeterminateCause::Epoch => "epoch",
+        IndeterminateCause::OutputTooLarge => "output-too-large",
+    }
+}
+
+/// Emit a `plugin.indeterminate` event to the internal log (BC-3.08.001 Event 8).
+///
+/// Mandatory 8 fields: type, trace_id, session_id, plugin_name, artifact_path,
+/// cause, failure_policy, timestamp (provided by `InternalEvent::now`).
+///
+/// `artifact_path` MUST be the envelope `file_path` from `tool_input` when one
+/// is present; callers pass an empty string only when there is genuinely no
+/// artifact context (e.g. non-file-mutation tool events). Never hardcoded empty.
+///
+/// Called for EVERY INDETERMINATE outcome — both fail-closed and fail-open paths.
+///
+/// Routes through `base_ctx.emit_internal` (ADR-048 §D4 v1.3 F-P3-001) — the same
+/// dual-sink primitive (durable `InternalLog` write + `ctx.events` queue) every
+/// other dispatcher-native BC-3.08.001 event uses — rather than a raw
+/// `InternalLog::write` call. No new parameter: `base_ctx: &HostContext` was
+/// already threaded to every call site.
+fn emit_indeterminate(
+    base_ctx: &HostContext,
+    entry: &RegistryEntry,
+    cause: &IndeterminateCause,
+    artifact_path: &str,
+) {
+    let cause_str = cause_to_str(cause);
+    let policy_str = match entry.failure_policy {
+        FailurePolicy::FailClosed => "fail-closed",
+        FailurePolicy::FailOpen => "fail-open",
+    };
+    let ev = InternalEvent::now(PLUGIN_INDETERMINATE);
+    // BC-3.08.001 wire format: mandatory `timestamp` field distinct from `ts` (DI-017).
+    // `with_field("timestamp", ...)` adds the BC-required `timestamp` alias for `ts`.
+    let ts = ev.ts.clone();
+    let ev = ev
+        .with_trace_id(&base_ctx.dispatcher_trace_id)
+        .with_session_id(&base_ctx.session_id)
+        .with_plugin_name(&entry.name)
+        .with_field("timestamp", ts.as_str())
+        .with_field(
+            "artifact_path",
+            serde_json::Value::String(artifact_path.to_string()),
+        )
+        .with_field("cause", serde_json::Value::String(cause_str.to_string()))
+        .with_field(
+            "failure_policy",
+            serde_json::Value::String(policy_str.to_string()),
+        );
+    base_ctx.emit_internal(ev);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::indeterminate_marker::{
+        MarkerFields, delete_marker_if_pass, should_write_marker, write_indeterminate_marker,
+    };
+    use crate::invoke::DEFAULT_FUEL_CAP;
+    use crate::registry::FailurePolicy;
+
+    // ── S-25.01 Red Gate tests — BC-1.18.001/002/003/004 ─────────────────────
+    // These tests were originally Red Gate fixtures (BC-5.38.001 discipline)
+    // written before classify_outcome was implemented. All production bodies
+    // are now fully implemented (S-25.01); all tests below pass against HEAD.
+
+    // ── S-25.01 Red Gate stub 1 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_fuel_exhaustion_yields_indeterminate_for_fail_closed_plugin() {
+        // AC-001 / BC-1.18.001 postcondition 1 (fuel cause):
+        // Timeout { cause: Fuel } + fail-closed → Indeterminate { cause: Fuel }.
+        // Fuel detection MUST use Trap::OutOfFuel downcast, NOT get_fuel() (ADR-047 §D1).
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Fuel,
+            stderr: String::new(),
+            elapsed_ms: 5_000,
+            fuel_consumed: DEFAULT_FUEL_CAP,
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let outcome = classify_outcome(result, FailurePolicy::FailClosed, false);
+        assert_eq!(
+            outcome,
+            DispatchOutcome::Indeterminate {
+                cause: IndeterminateCause::Fuel
+            },
+            "AC-001: Fuel timeout + fail-closed MUST yield Indeterminate(Fuel), not Pass or Fail"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 2 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_epoch_timeout_yields_indeterminate_for_fail_closed_plugin() {
+        // AC-002 / BC-1.18.001 postcondition 1 (epoch timeout cause):
+        // Timeout { cause: Epoch } + fail-closed → Indeterminate { cause: Epoch }.
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Epoch,
+            stderr: String::new(),
+            elapsed_ms: 5_000,
+            fuel_consumed: 0,
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let outcome = classify_outcome(result, FailurePolicy::FailClosed, false);
+        assert_eq!(
+            outcome,
+            DispatchOutcome::Indeterminate {
+                cause: IndeterminateCause::Epoch
+            },
+            "AC-002: Epoch timeout + fail-closed MUST yield Indeterminate(Epoch)"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 3 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_output_too_large_then_ok_yields_indeterminate_for_fail_closed_plugin() {
+        // AC-003 / BC-1.18.001 postcondition 1 + invariant 1:
+        // output_too_large=true + exit_code=0 + fail-closed → Indeterminate(OutputTooLarge).
+        // Per-invocation reset: host_output_too_large_seen MUST be reset to false BEFORE each
+        // func.call() invocation — not only at Store creation (BC-1.18.001 INV1).
+        // The flag is captured AFTER call() and passed to classify_outcome (AC-018).
+        let result = PluginResult::Ok {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 100,
+        };
+        // output_too_large=true: a host function returned OutputTooLarge(-3) during this invocation
+        let outcome = classify_outcome(result, FailurePolicy::FailClosed, true);
+        assert_eq!(
+            outcome,
+            DispatchOutcome::Indeterminate {
+                cause: IndeterminateCause::OutputTooLarge
+            },
+            "AC-003: exit_code=0 + output_too_large=true MUST yield Indeterminate(OutputTooLarge)"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 4 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_indeterminate_is_distinct_from_pass_and_fail() {
+        // AC-004 / BC-1.18.001 postcondition 2 + postcondition 5:
+        // DispatchOutcome is a strict trichotomy: Pass, Fail, Indeterminate.
+        // PASS: exit_code=0 AND output_too_large=false.
+        // FAIL: non-zero exit_code.
+        // INDETERMINATE: the third, distinct gap (fuel/epoch/OTL).
+
+        // Pass path
+        let ok_pass = PluginResult::Ok {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 10,
+        };
+        let pass = classify_outcome(ok_pass, FailurePolicy::FailClosed, false);
+        assert_eq!(
+            pass,
+            DispatchOutcome::Pass,
+            "exit_code=0 + no OTL MUST be Pass"
+        );
+
+        // Fail path
+        let ok_fail = PluginResult::Ok {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 10,
+        };
+        let fail = classify_outcome(ok_fail, FailurePolicy::FailClosed, false);
+        assert_eq!(
+            fail,
+            DispatchOutcome::Fail { exit_code: 1 },
+            "exit_code=1 MUST be Fail{{exit_code: 1}}"
+        );
+
+        // Indeterminate is distinct from both Pass and Fail
+        let indet = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Fuel,
+        };
+        assert_ne!(
+            indet,
+            DispatchOutcome::Pass,
+            "Indeterminate MUST NOT equal Pass"
+        );
+        assert_ne!(
+            indet,
+            DispatchOutcome::Fail { exit_code: 1 },
+            "Indeterminate MUST NOT equal Fail"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 5 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_indeterminate_writes_marker_to_factory_path() {
+        // AC-005 / BC-1.18.001 postcondition 4 + invariant 3 + invariant 4:
+        // Atomic marker write via write-to-temp + rename (O_CREAT|O_WRONLY|O_TRUNC then rename).
+        // PostToolUse-only: marker write is only valid for PostToolUse events (INV4).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker_path = dir.path().join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-30T00:00:00Z".to_string(),
+            plugin_name: "validate-factory-path-staging".to_string(),
+            artifact_path: String::new(), // empty string; MUST NOT be omitted (BC-1.18.001 PC4)
+            cause: "fuel".to_string(),
+            trace_id: "test-trace-001".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path)
+            .expect("write_indeterminate_marker MUST succeed for a writable path");
+        assert!(
+            marker_path.exists(),
+            "AC-005: marker file MUST exist after write_indeterminate_marker returns Ok(())"
+        );
+        // Verify no stale .tmp file remains after atomic rename
+        let tmp_path = dir
+            .path()
+            .join(format!("{}.tmp", "unvalidated-mutation.marker"));
+        assert!(
+            !tmp_path.exists(),
+            "AC-005: temp file MUST be renamed to final path; no .tmp file should remain"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 6 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_marker_contains_required_fields() {
+        // AC-005 / BC-1.18.001 postcondition 4:
+        // Marker MUST contain all five required TOML fields:
+        //   timestamp (RFC 3339), plugin_name, artifact_path (empty ok, never omit),
+        //   cause ("fuel"|"epoch"|"output-too-large"), trace_id.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker_path = dir.path().join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-30T12:00:00Z".to_string(),
+            plugin_name: "validate-factory-path-staging".to_string(),
+            artifact_path: "/path/to/.factory/STATE.md".to_string(),
+            cause: "epoch".to_string(),
+            trace_id: "deadbeef-0001-0001-0001-000000000001".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write must succeed");
+        let contents =
+            std::fs::read_to_string(&marker_path).expect("must be able to read marker back");
+
+        // All five required field names must appear in the TOML
+        assert!(
+            contents.contains("timestamp"),
+            "AC-005: marker MUST contain 'timestamp' TOML key"
+        );
+        assert!(
+            contents.contains("plugin_name"),
+            "AC-005: marker MUST contain 'plugin_name' TOML key"
+        );
+        assert!(
+            contents.contains("artifact_path"),
+            "AC-005: marker MUST contain 'artifact_path' TOML key (even when empty)"
+        );
+        assert!(
+            contents.contains("cause"),
+            "AC-005: marker MUST contain 'cause' TOML key"
+        );
+        assert!(
+            contents.contains("trace_id"),
+            "AC-005: marker MUST contain 'trace_id' TOML key"
+        );
+        // Verify specific values were persisted
+        assert!(
+            contents.contains("validate-factory-path-staging"),
+            "AC-005: marker plugin_name MUST reflect the plugin name"
+        );
+        assert!(
+            contents.contains("epoch"),
+            "AC-005: marker cause MUST reflect the cause value"
+        );
+        assert!(
+            contents.contains("deadbeef-0001-0001-0001-000000000001"),
+            "AC-005: marker trace_id MUST reflect the trace_id value"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 7 ───────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_003_successful_revalidation_deletes_marker() {
+        // AC-012 / BC-1.18.003 postcondition 1 + invariant 2:
+        // delete_marker_if_pass deletes the marker file.
+        // Scoping: ONLY the named plugin's PASS clears the marker; caller must enforce this.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker_path = dir.path().join("unvalidated-mutation.marker");
+
+        // Pre-condition: write a marker to simulate the INDETERMINATE state
+        std::fs::write(
+            &marker_path,
+            "timestamp = \"2026-08-30T00:00:00Z\"\nplugin_name = \"test-plugin\"\n\
+             artifact_path = \"\"\ncause = \"fuel\"\ntrace_id = \"trace-test\"\n",
+        )
+        .expect("test setup: write marker");
+        assert!(
+            marker_path.exists(),
+            "pre-condition: marker must exist before delete"
+        );
+
+        // marker has artifact_path = "" (empty) → M-1 predicate: empty artifact_path →
+        // vacuously satisfied → delete regardless of current_artifact_path.
+        let deleted = delete_marker_if_pass(&marker_path, "")
+            .expect("AC-012: delete_marker_if_pass MUST return Ok(_) when file exists");
+        assert!(
+            deleted,
+            "AC-012: delete_marker_if_pass MUST return Ok(true) when the marker was removed"
+        );
+
+        assert!(
+            !marker_path.exists(),
+            "AC-012: marker MUST be deleted after delete_marker_if_pass succeeds"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 8 (DO NOT DELETE per ADR-047 §D7 alias) ─────────
+    #[test]
+    fn test_BC_1_18_004_fail_open_indeterminate_writes_no_marker() {
+        // Canonical backward-compat guard test. Cross-reference: BC-1.18.004 PC5 canonical name is
+        // test_BC_1_18_004_fail_open_default_preserves_advisory_behavior. Both names acceptable per
+        // BC-1.18.004 PC5 allowance — this is the canonical alias. DO NOT DELETE. ADR-047 §D7.
+        //
+        // AC-015 / BC-1.18.004 postcondition 1 + postcondition 2 + postcondition 3:
+        // fail-open INDETERMINATE → advisory event only; NO marker written; NO gate triggered.
+        // should_write_marker(Indeterminate, FailOpen) MUST be false.
+        // ~76 existing fail-open plugins MUST be completely unaffected by S-25.01.
+        let outcome = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Fuel,
+        };
+        let write = should_write_marker(&outcome, FailurePolicy::FailOpen);
+        assert!(
+            !write,
+            "AC-015 / BC-1.18.004 PC1: should_write_marker(Indeterminate, FailOpen) MUST return \
+             false — ~76 existing fail-open plugins MUST NOT have a marker written (DO NOT DELETE)"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 9 (DO NOT DELETE per ADR-047 §D7 canonical) ────
+    #[test]
+    fn test_BC_1_18_004_fail_open_default_preserves_advisory_behavior() {
+        // Canonical backward-compat guard test per ADR-047 §Decision 7. DO NOT DELETE.
+        // Cross-reference: test_BC_1_18_004_fail_open_indeterminate_writes_no_marker above.
+        //
+        // AC-015 / BC-1.18.004 postcondition 1–3; S-21.10 canonical:
+        // FailurePolicy::default() MUST equal FailOpen (ADR-039 §Decision 1).
+        // Validates: all four should_write_marker(_, FailOpen) cases return false.
+
+        // Fuel cause
+        let indet_fuel = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Fuel,
+        };
+        assert!(
+            !should_write_marker(&indet_fuel, FailurePolicy::FailOpen),
+            "AC-015: should_write_marker(Indeterminate(Fuel), FailOpen) MUST be false"
+        );
+
+        // Epoch cause
+        let indet_epoch = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Epoch,
+        };
+        assert!(
+            !should_write_marker(&indet_epoch, FailurePolicy::FailOpen),
+            "AC-015: should_write_marker(Indeterminate(Epoch), FailOpen) MUST be false"
+        );
+
+        // OTL cause
+        let indet_otl = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::OutputTooLarge,
+        };
+        assert!(
+            !should_write_marker(&indet_otl, FailurePolicy::FailOpen),
+            "AC-015: should_write_marker(Indeterminate(OTL), FailOpen) MUST be false"
+        );
+
+        // FailurePolicy::default() MUST equal FailOpen (S-21.10 canonical; ADR-039 §Decision 1)
+        assert!(
+            !should_write_marker(&indet_fuel, FailurePolicy::default()),
+            "AC-015 / S-21.10: FailurePolicy::default() MUST equal FailOpen; \
+             should_write_marker(Indeterminate, default()) MUST be false (DO NOT DELETE)"
+        );
+
+        // Pass and Fail with FailOpen MUST also be false (symmetry check)
+        assert!(
+            !should_write_marker(&DispatchOutcome::Pass, FailurePolicy::FailOpen),
+            "should_write_marker(Pass, FailOpen) MUST be false"
+        );
+        assert!(
+            !should_write_marker(
+                &DispatchOutcome::Fail { exit_code: 1 },
+                FailurePolicy::FailOpen
+            ),
+            "should_write_marker(Fail, FailOpen) MUST be false"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 10 ──────────────────────────────────────────────
+    #[test]
+    fn test_backward_compat_pass_fail_on_error_semantics_unchanged() {
+        // AC-004 / BC-1.18.001 postcondition 5 (backward-compat anchor):
+        // Existing PASS/FAIL semantics for PluginResult::Ok UNCHANGED by S-25.01.
+        // The policy parameter MUST NOT change the PASS/FAIL classification —
+        // policy only affects the marker-write path via should_write_marker.
+
+        // Pass path (exit_code=0, output_too_large=false) — fail-open context
+        let ok_pass = PluginResult::Ok {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 10,
+        };
+        let pass = classify_outcome(ok_pass, FailurePolicy::FailOpen, false);
+        assert_eq!(
+            pass,
+            DispatchOutcome::Pass,
+            "backward compat: exit_code=0 + output_too_large=false MUST remain Pass"
+        );
+
+        // Fail path (exit_code=2) — fail-open context
+        let ok_fail = PluginResult::Ok {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 10,
+        };
+        let fail = classify_outcome(ok_fail, FailurePolicy::FailOpen, false);
+        assert_eq!(
+            fail,
+            DispatchOutcome::Fail { exit_code: 2 },
+            "backward compat: exit_code=2 MUST remain Fail{{exit_code: 2}}"
+        );
+
+        // Policy MUST NOT change the PASS classification (policy-orthogonality)
+        let ok_pass_closed = PluginResult::Ok {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 10,
+        };
+        let pass_closed = classify_outcome(ok_pass_closed, FailurePolicy::FailClosed, false);
+        assert_eq!(
+            pass_closed,
+            DispatchOutcome::Pass,
+            "AC-004: policy=FailClosed MUST NOT change a Pass outcome to anything else"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 11 ──────────────────────────────────────────────
+    #[test]
+    fn test_BC_1_18_001_unrecognized_trap_routes_to_on_error_not_indeterminate() {
+        // AC-004 / BC-1.18.001 invariant 2 (non-exhaustive Trap wildcard):
+        // An unrecognized (future) Trap variant MUST NOT yield INDETERMINATE.
+        // In invoke.rs, unrecognized Trap variants become PluginResult::Crashed (the `_ =>` arm).
+        // classify_outcome MUST NOT classify Crashed as INDETERMINATE.
+        // The `_ =>` wildcard arm routes to existing on_error handling.
+        // Trap is `#[non_exhaustive]` — future unknown variants must be safe.
+        let crash_result = PluginResult::Crashed {
+            trap_string: "wasm trap: out of bounds memory access".to_string(),
+            stderr: String::new(),
+            elapsed_ms: 1,
+            fuel_consumed: 0,
+        };
+        let outcome = classify_outcome(crash_result, FailurePolicy::FailClosed, false);
+        assert!(
+            !matches!(outcome, DispatchOutcome::Indeterminate { .. }),
+            "AC-004 / BC-1.18.001 INV2: unrecognized Trap (PluginResult::Crashed) MUST NOT yield \
+             INDETERMINATE — wildcard `_ =>` arm routes to on_error handling, not INDETERMINATE"
+        );
+    }
+
+    // ── S-25.01 Red Gate stub 12 (upgraded to full event-body assertion) ────────
+    #[test]
+    fn test_BC_1_18_001_emits_plugin_indeterminate_event_with_required_fields() {
+        // AC-006 / BC-3.08.001 Event 8:
+        // emit_indeterminate MUST write a plugin.indeterminate JSONL event carrying
+        // all 8 mandatory fields, including artifact_path == the passed-in envelope
+        // file_path (HIGH-1 fix).
+        //
+        // Mandatory event fields (BC-3.08.001 Event 8):
+        //   type           "plugin.indeterminate"
+        //   trace_id       dispatcher_trace_id
+        //   session_id     session ID from the dispatch context
+        //   plugin_name    registry name of the plugin
+        //   artifact_path  envelope file_path (never hardcoded empty)
+        //   cause          "fuel" | "epoch" | "output-too-large"
+        //   failure_policy "fail-closed" | "fail-open"
+        //   timestamp      RFC 3339 (ts field in the event)
+        //
+        // Pattern mirrors emit_lifecycle_timeout_carries_fuel_cap_and_consumed.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = InternalLog::new(dir.path().join("logs"));
+
+        let mut base_ctx = crate::host::HostContext::new(
+            "validate-factory-path-staging",
+            "0.1.0",
+            "sess-abc",
+            "trace-xyz",
+        );
+        // ADR-048 §D4 v1.3 F-P3-001: emit_indeterminate now routes through
+        // base_ctx.emit_internal, which requires internal_log wired for the
+        // durable-sink assertion below (matches production main.rs wiring).
+        base_ctx.internal_log = Some(Arc::new(log));
+        let entry = RegistryEntry {
+            name: "validate-factory-path-staging".to_string(),
+            event: "PostToolUse".to_string(),
+            tool: None,
+            plugin: std::path::PathBuf::from("validate-factory-path-staging.wasm"),
+            priority: None,
+            enabled: true,
+            timeout_ms: None,
+            fuel_cap: None,
+            on_error: None,
+            capabilities: None,
+            config: toml::Value::Table(toml::Table::new()),
+            async_flag: false,
+            needs_context: vec![],
+            failure_policy: FailurePolicy::FailClosed,
+        };
+
+        // The artifact_path is the envelope file_path from tool_input.file_path
+        // (populated by execute_tier / spawn_async_plugin before calling emit_indeterminate).
+        let artifact_path = "/Users/dev/project/.factory/STATE.md";
+        let cause = IndeterminateCause::Fuel;
+
+        emit_indeterminate(&base_ctx, &entry, &cause, artifact_path);
+
+        // Read back the JSONL event and assert all 8 BC-3.08.001 Event 8 fields.
+        let log_dir = dir.path().join("logs");
+        let files: Vec<_> = std::fs::read_dir(&log_dir)
+            .expect("log dir must exist after emit_indeterminate write")
+            .map(|e| e.expect("dir entry").path())
+            .collect();
+        assert_eq!(files.len(), 1, "expected exactly one log file");
+        let content = std::fs::read_to_string(&files[0]).expect("read log file");
+        let event: serde_json::Value =
+            serde_json::from_str(content.trim_end()).expect("log line must be valid JSON");
+
+        // Field 1: type
+        assert_eq!(
+            event["type"].as_str(),
+            Some(PLUGIN_INDETERMINATE),
+            "BC-3.08.001 Event 8: type must be 'plugin.indeterminate'"
+        );
+        // Field 2: trace_id (BC-3.08.001 v1.7 Invariant 5 — wire key is 'trace_id')
+        assert_eq!(
+            event["trace_id"].as_str(),
+            Some("trace-xyz"),
+            "BC-3.08.001 Event 8: trace_id must equal dispatcher_trace_id"
+        );
+        // Field 3: session_id
+        assert_eq!(
+            event["session_id"].as_str(),
+            Some("sess-abc"),
+            "BC-3.08.001 Event 8: session_id must be present and match"
+        );
+        // Field 4: plugin_name
+        assert_eq!(
+            event["plugin_name"].as_str(),
+            Some("validate-factory-path-staging"),
+            "BC-3.08.001 Event 8: plugin_name must match registry entry name"
+        );
+        // Field 5: artifact_path — HIGH-1: must be the real envelope file_path,
+        // NOT a hardcoded empty string.
+        assert_eq!(
+            event["artifact_path"].as_str(),
+            Some(artifact_path),
+            "BC-3.08.001 Event 8 / HIGH-1: artifact_path MUST equal the envelope \
+             file_path passed to emit_indeterminate, not a hardcoded empty string"
+        );
+        // Field 6: cause
+        assert_eq!(
+            event["cause"].as_str(),
+            Some("fuel"),
+            "BC-3.08.001 Event 8: cause must be 'fuel' for IndeterminateCause::Fuel"
+        );
+        // Field 7: failure_policy
+        assert_eq!(
+            event["failure_policy"].as_str(),
+            Some("fail-closed"),
+            "BC-3.08.001 Event 8: failure_policy must be 'fail-closed' for FailClosed"
+        );
+        // Field 8a: the common 'ts' field (always present on every InternalEvent).
+        assert!(
+            event["ts"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+            "BC-3.08.001 Event 8: ts (timestamp) field must be present and non-empty"
+        );
+        // Field 8b (F-P10-002): BC-3.08.001 §Event 8 Wire format + Mandatory fields
+        // ALSO declares a distinct top-level `timestamp` field (ISO-8601), separate
+        // from the common `ts`/`ts_epoch` fields every InternalEvent carries — the
+        // same convention the seven sibling BC-3.08.001 emitters in
+        // `host/emit_event.rs` follow via `.with_field("timestamp", ts.as_str())`
+        // (see e.g. `test_s19_09_t013_emit_plugin_completed_async_has_timestamp_field`).
+        // No prior test asserted this field on `plugin.indeterminate`, which let the
+        // real `emit_indeterminate` implementation ship without it (F-P10-002).
+        let timestamp_value = event.get("timestamp");
+        assert!(
+            timestamp_value.is_some(),
+            "F-P10-002 / BC-3.08.001 Event 8: emit_indeterminate must emit a distinct \
+             'timestamp' field (Wire format + Mandatory fields list), separate from the \
+             common 'ts' field; field is absent"
+        );
+        let timestamp_str = timestamp_value.and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            !timestamp_str.is_empty(),
+            "F-P10-002 / BC-3.08.001 Event 8: 'timestamp' field value must be non-empty; \
+             got empty string"
+        );
+
+        // ADR-048 §D4 v1.3 F-P3-001 dual-write assertion: emit_indeterminate MUST
+        // route through base_ctx.emit_internal — proof is that the SAME event also
+        // landed on the drained-events queue, not just the durable InternalLog file.
+        let drained = base_ctx.drain_events();
+        assert_eq!(
+            drained.len(),
+            1,
+            "ADR-048 §D4 v1.3: exactly one plugin.indeterminate event must reach \
+             base_ctx.events (drain_events) — proves emit_internal, not a raw InternalLog::write"
+        );
+        assert_eq!(drained[0].type_, PLUGIN_INDETERMINATE);
+        assert_eq!(drained[0].dispatcher_trace_id.as_deref(), Some("trace-xyz"));
+        // F-P10-002: the drained (queue-sink) copy of the event must ALSO carry the
+        // distinct 'timestamp' field, not just the durable-log copy asserted above.
+        let drained_timestamp = drained[0]
+            .fields
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            !drained_timestamp.is_empty(),
+            "F-P10-002 / BC-3.08.001 Event 8: drained ctx.events copy of plugin.indeterminate \
+             must also carry a non-empty 'timestamp' field"
+        );
+
+        // F-P14-001 / BC-3.08.001 §Common Fields: "plugin_version is NOT emitted
+        // by Events 1, 4, 5, 7, and 8." Event 8's mandatory-fields list (asserted
+        // field-by-field above) is exactly the 8 fields checked above;
+        // plugin_version is NOT among them and MUST be absent from the wire
+        // event on BOTH sinks emit_indeterminate writes through.
+        assert!(
+            event.get("plugin_version").is_none(),
+            "F-P14-001 / BC-3.08.001 §Common Fields: plugin_version is NOT emitted by \
+             Event 8 (plugin.indeterminate) — the durable-log JSON must not carry a \
+             'plugin_version' field, but it does"
+        );
+        assert!(
+            drained[0].plugin_version.is_none(),
+            "F-P14-001 / BC-3.08.001 §Common Fields: plugin_version is NOT emitted by \
+             Event 8 (plugin.indeterminate) — the drained ctx.events copy must not carry \
+             a plugin_version value, but it does"
+        );
+    }
+
+    // ── End S-25.01 Red Gate stubs 1–12 ──────────────────────────────────────
+
+    // ── S-25.01 additional Red Gate tests for uncovered ACs ──────────────────
+
+    /// AC-015 / BC-1.18.004 postcondition 1–3 + BC-1.18.001 INV3:
+    /// should_write_marker(Indeterminate, FailClosed) == true (the ONLY true case).
+    /// should_write_marker(Pass/Fail, FailClosed) == false (non-INDETERMINATE outcomes never write).
+    #[test]
+    fn test_BC_1_18_001_should_write_marker_true_only_for_fail_closed_indeterminate() {
+        // AC-015 / BC-1.18.004 PC1-3 + BC-1.18.001 INV3 (single-marker policy):
+        // The only case where should_write_marker returns true:
+        //   outcome=Indeterminate AND policy=FailClosed.
+
+        // True cases (all three INDETERMINATE causes with FailClosed)
+        let indet_fuel = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Fuel,
+        };
+        assert!(
+            should_write_marker(&indet_fuel, FailurePolicy::FailClosed),
+            "BC-1.18.001: should_write_marker(Indeterminate(Fuel), FailClosed) MUST be true"
+        );
+        let indet_epoch = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::Epoch,
+        };
+        assert!(
+            should_write_marker(&indet_epoch, FailurePolicy::FailClosed),
+            "BC-1.18.001: should_write_marker(Indeterminate(Epoch), FailClosed) MUST be true"
+        );
+        let indet_otl = DispatchOutcome::Indeterminate {
+            cause: IndeterminateCause::OutputTooLarge,
+        };
+        assert!(
+            should_write_marker(&indet_otl, FailurePolicy::FailClosed),
+            "BC-1.18.001: should_write_marker(Indeterminate(OTL), FailClosed) MUST be true"
+        );
+
+        // False cases: Pass/Fail with FailClosed must NOT write marker
+        assert!(
+            !should_write_marker(&DispatchOutcome::Pass, FailurePolicy::FailClosed),
+            "should_write_marker(Pass, FailClosed) MUST be false (only INDETERMINATE writes)"
+        );
+        assert!(
+            !should_write_marker(
+                &DispatchOutcome::Fail { exit_code: 2 },
+                FailurePolicy::FailClosed
+            ),
+            "should_write_marker(Fail, FailClosed) MUST be false (only INDETERMINATE writes)"
+        );
+    }
+
+    /// AC-013 / BC-1.18.003 postcondition 2 — idempotent delete NotFound → Ok(()).
+    /// `delete_marker_if_pass` MUST return Ok(()) when the file is already absent.
+    /// `io::ErrorKind::NotFound` MUST be silently swallowed; all other errors propagated.
+    #[test]
+    fn test_BC_1_18_003_idempotent_delete_not_found_returns_ok() {
+        // AC-013 / BC-1.18.003 postcondition 2:
+        // delete_marker_if_pass is idempotent: absent file → Ok(()) (no-op).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker_path = dir.path().join("unvalidated-mutation.marker");
+        // Verify the file is NOT present (no pre-write in this test)
+        assert!(
+            !marker_path.exists(),
+            "pre-condition: marker must NOT exist for idempotent-delete test"
+        );
+        // First delete: absent file must return Ok(()) not Err(NotFound).
+        // M-1: pass empty current_artifact_path; NotFound path returns before the read.
+        let result1 = delete_marker_if_pass(&marker_path, "");
+        assert!(
+            result1.is_ok(),
+            "AC-013: delete_marker_if_pass on absent path MUST return Ok(()) — \
+             io::ErrorKind::NotFound MUST be swallowed, not propagated"
+        );
+        // Second delete: still absent → still Ok(()) (truly idempotent)
+        let result2 = delete_marker_if_pass(&marker_path, "");
+        assert!(
+            result2.is_ok(),
+            "AC-013: second delete_marker_if_pass call MUST also return Ok(()) (idempotent)"
+        );
+    }
+
+    // ── End S-25.01 additional Red Gate tests ────────────────────────────────
 
     // ── CRIT-PR59-001 regression tests: advisory-block gate ──────────────────
 
@@ -767,6 +2736,8 @@ mod tests {
                 elapsed_ms: 1,
                 fuel_consumed: 10,
             },
+            block_if_marker_fired: false,
+            block_if_marker_fields: None,
         };
         assert!(
             plugin_requests_block(&outcome.result),
@@ -791,6 +2762,8 @@ mod tests {
                 elapsed_ms: 1,
                 fuel_consumed: 5,
             },
+            block_if_marker_fired: false,
+            block_if_marker_fields: None,
         };
         assert!(
             !plugin_requests_block(&outcome.result),
@@ -840,6 +2813,7 @@ mod tests {
             stderr: String::new(),
             elapsed_ms: 5_000,
             fuel_consumed: 0,
+            fuel_cap: DEFAULT_FUEL_CAP,
         };
         assert!(!plugin_requests_block(&r));
     }
@@ -891,6 +2865,7 @@ mod tests {
             stderr: String::new(),
             elapsed_ms: 5_000,
             fuel_consumed: 0,
+            fuel_cap: DEFAULT_FUEL_CAP,
         };
         assert!(
             plugin_fail_closed(&r, OnError::Block),
@@ -901,11 +2876,13 @@ mod tests {
     /// Timeout + on_error=Continue → NOT fail-closed.
     #[test]
     fn fail_closed_timeout_with_on_error_continue_is_open() {
+        // fuel_consumed == fuel_cap on Trap::OutOfFuel (remaining=0 → cap.saturating_sub(0)=cap).
         let r = PluginResult::Timeout {
             cause: TimeoutCause::Fuel,
             stderr: String::new(),
             elapsed_ms: 5_000,
-            fuel_consumed: 1_000_000_000,
+            fuel_consumed: DEFAULT_FUEL_CAP,
+            fuel_cap: DEFAULT_FUEL_CAP,
         };
         assert!(
             !plugin_fail_closed(&r, OnError::Continue),
@@ -926,6 +2903,252 @@ mod tests {
         assert!(
             !plugin_fail_closed(&r, OnError::Block),
             "Ok result + on_error=Block must NOT trigger fail-closed (advisory path handles Ok)"
+        );
+    }
+
+    // ── emit_lifecycle telemetry field coverage ────────────────────────────
+
+    /// `plugin.timeout` events must carry both `fuel_cap` and `fuel_consumed`
+    /// so operators can see which budget was hit without opening the full trace.
+    /// CLAUDE.md Factory Hook Diagnostics Step 2 sends operators to grep
+    /// `.factory/logs/dispatcher-internal-*.jsonl` for exactly these fields.
+    #[test]
+    fn emit_lifecycle_timeout_carries_fuel_cap_and_consumed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = InternalLog::new(dir.path().join("logs"));
+        let base_ctx = crate::host::HostContext::new("test-plugin", "0.1.0", "sess-1", "trace-1");
+        let entry = RegistryEntry {
+            name: "test-plugin".to_string(),
+            event: "PreToolUse".to_string(),
+            tool: None,
+            plugin: std::path::PathBuf::from("test.wasm"),
+            priority: None,
+            enabled: true,
+            timeout_ms: None,
+            fuel_cap: None,
+            on_error: None,
+            capabilities: None,
+            config: toml::Value::Table(toml::Table::new()),
+            async_flag: false,
+            needs_context: vec![],
+            failure_policy: crate::registry::FailurePolicy::FailOpen,
+        };
+        let cap: u64 = DEFAULT_FUEL_CAP;
+        let consumed: u64 = 12_345_678;
+        let result = PluginResult::Timeout {
+            cause: TimeoutCause::Fuel,
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: consumed,
+            fuel_cap: cap,
+        };
+        emit_lifecycle(&log, &base_ctx, &entry, &result);
+
+        // Read back the JSONL and verify both fields are present.
+        let log_dir = dir.path().join("logs");
+        let files: Vec<_> = std::fs::read_dir(&log_dir)
+            .expect("log dir must exist after write")
+            .map(|e| e.expect("dir entry").path())
+            .collect();
+        assert_eq!(files.len(), 1, "expected exactly one log file");
+        let content = std::fs::read_to_string(&files[0]).expect("read log file");
+        let event: serde_json::Value =
+            serde_json::from_str(content.trim_end()).expect("log line must be valid JSON");
+        assert_eq!(
+            event["type"].as_str(),
+            Some(PLUGIN_TIMEOUT),
+            "event type must be plugin.timeout"
+        );
+        assert_eq!(
+            event["fuel_consumed"].as_u64(),
+            Some(consumed),
+            "plugin.timeout event must carry fuel_consumed"
+        );
+        assert_eq!(
+            event["fuel_cap"].as_u64(),
+            Some(cap),
+            "plugin.timeout event must carry fuel_cap (CLAUDE.md Diagnostics Step 2)"
+        );
+    }
+
+    // ── ADR-048 §Decision 1: plugin_block_if_marker unit tests (BC-1.18.002) ──
+
+    /// BC-1.18.002 PC5: Crashed + on_error=BlockIfMarker + active marker (future expires_at)
+    /// → plugin_block_if_marker returns true (Block).
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_crashed_with_marker_blocks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        let marker_path = factory_dir.join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-31T00:00:00Z".to_string(),
+            plugin_name: "p".to_string(),
+            artifact_path: String::new(),
+            cause: "fuel".to_string(),
+            trace_id: "trace-bim-unit-1".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write marker");
+        let r = PluginResult::Crashed {
+            trap_string: "unreachable".to_string(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 0,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            plugin_block_if_marker(&r, OnError::BlockIfMarker, dir.path(), now),
+            "BC-1.18.002 PC5: Crashed + BlockIfMarker + active marker MUST return true (Block)"
+        );
+    }
+
+    /// BC-1.18.002: Crashed + on_error=BlockIfMarker + no marker → false (Allow).
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_crashed_no_marker_allows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        // No marker written.
+        let r = PluginResult::Crashed {
+            trap_string: "unreachable".to_string(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 0,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            !plugin_block_if_marker(&r, OnError::BlockIfMarker, dir.path(), now),
+            "BC-1.18.002: Crashed + BlockIfMarker + absent marker MUST return false (Allow)"
+        );
+    }
+
+    /// BC-1.18.002 PC6: Crashed + on_error=BlockIfMarker + expired marker → false (Allow).
+    ///
+    /// TTL elapsed: expired marker is treated as absent per ADR-048 §Decision 2.
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_crashed_expired_marker_allows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        let marker_path = factory_dir.join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2020-01-01T00:00:00Z".to_string(),
+            plugin_name: "p".to_string(),
+            artifact_path: String::new(),
+            cause: "fuel".to_string(),
+            trace_id: "trace-bim-expired".to_string(),
+            expires_at: "2020-01-02T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write marker");
+        let r = PluginResult::Crashed {
+            trap_string: "unreachable".to_string(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 0,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            !plugin_block_if_marker(&r, OnError::BlockIfMarker, dir.path(), now),
+            "BC-1.18.002 PC6: Crashed + BlockIfMarker + expired marker MUST return false (Allow)"
+        );
+    }
+
+    /// BC-1.18.002: Timeout + on_error=BlockIfMarker + active marker → true (Block).
+    ///
+    /// Both Crashed and Timeout variants trigger the conditional block gate.
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_timeout_with_marker_blocks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        let marker_path = factory_dir.join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-31T00:00:00Z".to_string(),
+            plugin_name: "p".to_string(),
+            artifact_path: String::new(),
+            cause: "epoch".to_string(),
+            trace_id: "trace-bim-timeout".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write marker");
+        let r = PluginResult::Timeout {
+            cause: TimeoutCause::Epoch,
+            stderr: String::new(),
+            elapsed_ms: 5_000,
+            fuel_consumed: 0,
+            fuel_cap: DEFAULT_FUEL_CAP,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            plugin_block_if_marker(&r, OnError::BlockIfMarker, dir.path(), now),
+            "BC-1.18.002: Timeout + BlockIfMarker + active marker MUST return true (Block)"
+        );
+    }
+
+    /// BC-1.18.002 ADR-048 §D1: Ok result + on_error=BlockIfMarker + active marker → false.
+    ///
+    /// Only Crashed and Timeout results can trigger block_if_marker; Ok success never blocks.
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_ok_result_never_blocks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        let marker_path = factory_dir.join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-31T00:00:00Z".to_string(),
+            plugin_name: "p".to_string(),
+            artifact_path: String::new(),
+            cause: "fuel".to_string(),
+            trace_id: "trace-bim-ok".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write marker");
+        let r = PluginResult::Ok {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 100,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            !plugin_block_if_marker(&r, OnError::BlockIfMarker, dir.path(), now),
+            "BC-1.18.002 ADR-048 §D1: Ok result + BlockIfMarker MUST return false \
+             (no block on successful plugin invocation)"
+        );
+    }
+
+    /// BC-1.18.002: on_error=Continue + Crashed + active marker → false.
+    ///
+    /// block_if_marker is an exclusive gate for on_error=BlockIfMarker only;
+    /// on_error=Continue never gates on marker presence.
+    #[test]
+    fn test_BC_1_18_002_block_if_marker_on_error_continue_never_blocks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory_dir = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory_dir).expect("create .factory subdir");
+        let marker_path = factory_dir.join("unvalidated-mutation.marker");
+        let fields = MarkerFields {
+            timestamp: "2026-08-31T00:00:00Z".to_string(),
+            plugin_name: "p".to_string(),
+            artifact_path: String::new(),
+            cause: "fuel".to_string(),
+            trace_id: "trace-bim-continue".to_string(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        };
+        write_indeterminate_marker(&fields, &marker_path).expect("write marker");
+        let r = PluginResult::Crashed {
+            trap_string: "unreachable".to_string(),
+            stderr: String::new(),
+            elapsed_ms: 10,
+            fuel_consumed: 0,
+        };
+        let now = chrono::Utc::now();
+        assert!(
+            !plugin_block_if_marker(&r, OnError::Continue, dir.path(), now),
+            "BC-1.18.002: on_error=Continue + Crashed + active marker MUST return false \
+             (block_if_marker only triggers for on_error=BlockIfMarker)"
         );
     }
 }

@@ -25,7 +25,8 @@ path = "src/main.rs"
 
 [dependencies]
 vsdd-hook-sdk = { path = "../../hook-sdk" }
-# factory-lock: native lock renewal (renew_lock, RenewOutcome, LockError).
+# factory-lock: identity-gated lock renewal (renew_lock_if_holder, classify_identity_resolution,
+# RenewOutcome, SkipReason, IdentityResolution, LockError).
 # Dependency direction: precompact-flush → factory-lock → factory-lock-parse (no cycles).
 factory-lock = { path = "../../factory-lock" }
 # chrono: UTC ISO-8601 timestamps for the log entry and commit message.
