@@ -1292,10 +1292,11 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
     match txn.raw.get("generation_id") {
         Some(serde_json::Value::Null) => Ok(true),
         Some(serde_json::Value::String(_)) => Ok(false),
-        _ => Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!(
+        _ => Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: format!(
                 "malformed txn record at {}: generation_id is absent or not a JSON string/null",
-                txn.path.display()
+                sanitize_diagnostic(&txn.path.display().to_string(), 256)
             ),
         }),
     }

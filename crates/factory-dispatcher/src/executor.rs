@@ -669,17 +669,27 @@ pub fn migration_reservation_release(
     let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
         Ok(Some(root)) => root,
         Ok(None) => return Vec::new(),
-        // Unstatable `.factory`: release is never a verdict (ADR-052 v1.23 §5a);
-        // no-op, and the reservation, if any, is reclaimed by the drain-start TTL GC.
+        // Unstatable `.factory` (ELOOP/EACCES/...): release is never a verdict
+        // (ADR-052 v1.23 §5a "Factory-root lookup mapping", release row;
+        // BC-1.18.013 EC-042 / PC 10(c)). Exactly ONE advisory
+        // (`reservation_release_failed`); the reservation, if any, is left
+        // untouched and reclaimed by the drain-start TTL GC.
         Err(e) => {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 error = %e,
-                "migration_reservation_release: .factory is unstatable (non-fatal) -- \
-                 the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
-                 own TTL GC pass instead"
+                "migration_reservation_release: .factory is unstatable (non-fatal)"
             );
-            return Vec::new();
+            let tool_use_id_len = payload
+                .extra
+                .get("tool_use_id")
+                .and_then(|v| v.as_str())
+                .map(|id| id.len() as u64);
+            return vec![reservation_release_failed_advisory(
+                &e,
+                tool_use_id_len,
+                true,
+            )];
         }
     };
     let migration_state_dir = factory_root.migration_state_dir();
@@ -698,7 +708,22 @@ pub fn migration_reservation_release(
                  the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
                  own TTL GC pass instead"
             );
-            return Vec::new();
+            // A release-leg failure is exactly ONE `reservation_release_failed`
+            // advisory (BC-1.18.013 Postcondition 10(c)); never a verdict. The
+            // path is the fixed `<root>/.factory/migration-state`, safe to echo.
+            let tool_use_id_len = payload
+                .extra
+                .get("tool_use_id")
+                .and_then(|v| v.as_str())
+                .map(|id| id.len() as u64);
+            return vec![reservation_release_failed_advisory(
+                &crate::shard_manager::BcIndexMigrationError::Io {
+                    path: migration_state_dir.clone(),
+                    source: e,
+                },
+                tool_use_id_len,
+                true,
+            )];
         }
     }
     let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
@@ -712,25 +737,48 @@ pub fn migration_reservation_release(
         Err(e) => {
             // Best-effort, never a verdict: the reservation, if it still exists,
             // is reclaimed by `drain_bc_index_writers`'s TTL GC. Recorded as ONE
-            // `migration.admission_advisory` (`reservation_release_failed`) with
-            // the error kind+message and the id's byte length only (the error's
-            // path embeds the raw id and is deliberately NOT echoed).
-            use crate::shard_manager::{
-                AdmissionAdvisory, AdmissionDiagnostic, AdvisoryReason, sanitize_diagnostic,
-            };
-            let mut advisory = AdmissionAdvisory::new(AdvisoryReason::ReservationReleaseFailed);
-            advisory.detail = Some(match &e {
-                crate::shard_manager::BcIndexMigrationError::Io { source, .. } => format!(
-                    "{:?}: {}",
-                    source.kind(),
-                    sanitize_diagnostic(&source.to_string(), 256)
-                ),
-                other => sanitize_diagnostic(&other.to_string(), 256),
-            });
-            advisory.tool_use_id_len = Some(tool_use_id.len() as u64);
-            vec![AdmissionDiagnostic::Advisory(advisory)]
+            // `migration.admission_advisory` (`reservation_release_failed`).
+            vec![reservation_release_failed_advisory(
+                &e,
+                Some(tool_use_id.len() as u64),
+                false,
+            )]
         }
     }
+}
+
+/// Builds the single `reservation_release_failed` advisory for a release-leg
+/// failure. `include_path` is `true` only for the unstatable-`.factory` lookup
+/// failure (the path is the fixed `<root>/.factory`, safe to echo); the
+/// reservation-unlink failure deliberately omits it because that error's path
+/// embeds the raw `tool_use_id`. Detail carries the `ErrorKind` Debug and the
+/// sanitized OS message.
+fn reservation_release_failed_advisory(
+    e: &crate::shard_manager::BcIndexMigrationError,
+    tool_use_id_len: Option<u64>,
+    include_path: bool,
+) -> crate::shard_manager::AdmissionDiagnostic {
+    use crate::shard_manager::{
+        AdmissionAdvisory, AdmissionDiagnostic, AdvisoryReason, BcIndexMigrationError,
+        sanitize_diagnostic,
+    };
+    let mut advisory = AdmissionAdvisory::new(AdvisoryReason::ReservationReleaseFailed);
+    advisory.detail = Some(match e {
+        BcIndexMigrationError::Io { path, source } if include_path => format!(
+            "{}: {:?}: {}",
+            sanitize_diagnostic(&path.display().to_string(), 256),
+            source.kind(),
+            sanitize_diagnostic(&source.to_string(), 256)
+        ),
+        BcIndexMigrationError::Io { source, .. } => format!(
+            "{:?}: {}",
+            source.kind(),
+            sanitize_diagnostic(&source.to_string(), 256)
+        ),
+        other => sanitize_diagnostic(&other.to_string(), 256),
+    });
+    advisory.tool_use_id_len = tool_use_id_len;
+    AdmissionDiagnostic::Advisory(advisory)
 }
 
 /// One-stat presence probe for the release leg's `.factory/migration-state`
