@@ -17,6 +17,7 @@
 // |----------------------------------------------------------------|-------|
 // | test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range| AC-008|
 // | test_crossbeam_epoch_satisfies_rustsec_2026_0204_patched_range | AC-009|
+// | test_wasmtime_lockstep_satisfies_rustsec_2026_0316_set_floor   | ADR-035 v1.2 D6 |
 //
 // Mechanism (per AC-008 §Confirmed mechanism):
 //   Cargo.lock is a TOML file with [[package]] entries. At wasmtime 44.0.3
@@ -86,6 +87,34 @@ fn semver_ge(version: &str, min: (u64, u64, u64)) -> bool {
     v >= min
 }
 
+/// Return true iff `version` is strictly below the tuple `(major, minor, patch)`.
+fn semver_lt(version: &str, max_exclusive: (u64, u64, u64)) -> bool {
+    !semver_ge(version, max_exclusive)
+}
+
+/// ADR-035 v1.2 §Decision 6 floor: wasmtime and wasmtime-wasi MUST be in
+/// lockstep (identical version), >= 48.0.4 and < 49.0.0. Pure function over
+/// Cargo.lock content so the guard itself can be exercised against fixtures.
+fn check_wasmtime_lockstep_floor(lock_content: &str) -> Result<String, String> {
+    let wasmtime = parse_cargo_lock_version(lock_content, "wasmtime")
+        .ok_or_else(|| "wasmtime package entry not found in Cargo.lock".to_string())?;
+    let wasi = parse_cargo_lock_version(lock_content, "wasmtime-wasi")
+        .ok_or_else(|| "wasmtime-wasi package entry not found in Cargo.lock".to_string())?;
+    for (name, v) in [("wasmtime", &wasmtime), ("wasmtime-wasi", &wasi)] {
+        if !semver_ge(v, (48, 0, 4)) || !semver_lt(v, (49, 0, 0)) {
+            return Err(format!(
+                "{name} resolved to {v}, expected >= 48.0.4 and < 49.0.0"
+            ));
+        }
+    }
+    if wasmtime != wasi {
+        return Err(format!(
+            "wasmtime ({wasmtime}) and wasmtime-wasi ({wasi}) are not in lockstep"
+        ));
+    }
+    Ok(wasmtime)
+}
+
 /// Resolve the absolute path to the workspace-root Cargo.lock from the
 /// factory-dispatcher crate's CARGO_MANIFEST_DIR (two directories up).
 fn workspace_cargo_lock() -> std::path::PathBuf {
@@ -122,6 +151,54 @@ fn test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range() {
          expected >= 46.0.2 (RUSTSEC-2026-0188 / CVE-2026-58494 FilePerms bypass \
          and RUSTSEC-2026-0222 type-index confusion are NOT patched on 44.x/45.x; \
          patched range for both starts at wasmtime >= 46.0.2)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-035 v1.2 §Decision 6: wasmtime + wasmtime-wasi lockstep, >= 48.0.4, < 49
+// ---------------------------------------------------------------------------
+
+/// Version-floor regression guard for RUSTSEC-2026-0316, -0314, -0321, -0322,
+/// -0323, -0324 and -0327 (all patched in wasmtime >= 48.0.4), per ADR-035
+/// v1.2 §Decision 6. Both `wasmtime` and `wasmtime-wasi` in Cargo.lock MUST be
+/// the same version, >= 48.0.4 and < 49.0.0. The floor implies the earlier
+/// RUSTSEC-2026-0188/0222 range (>= 46.0.2), which stays asserted separately
+/// by `test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range`.
+#[test]
+fn test_wasmtime_lockstep_satisfies_rustsec_2026_0316_set_floor() {
+    let lock_path = workspace_cargo_lock();
+    let content = std::fs::read_to_string(&lock_path)
+        .unwrap_or_else(|e| panic!("Failed to read {lock_path:?}: {e}"));
+    if let Err(msg) = check_wasmtime_lockstep_floor(&content) {
+        panic!(
+            "ADR-035 v1.2 D6 floor gate FAILED: {msg} \
+             (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 are unpatched below 48.0.4)"
+        );
+    }
+}
+
+/// Self-test of the guard: vulnerable or non-lockstep lock fixtures MUST be
+/// rejected; a valid 48.x lockstep fixture MUST be accepted.
+#[test]
+fn test_wasmtime_lockstep_guard_rejects_vulnerable_fixtures() {
+    let lock = |wt: &str, wasi: &str| {
+        format!(
+            "[[package]]\nname = \"wasmtime\"\nversion = \"{wt}\"\n\n\
+             [[package]]\nname = \"wasmtime-wasi\"\nversion = \"{wasi}\"\n"
+        )
+    };
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.3", "48.0.3")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("46.0.3", "46.0.3")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("49.0.0", "49.0.0")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.5", "48.0.4")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.5", "46.0.3")).is_err());
+    assert_eq!(
+        check_wasmtime_lockstep_floor(&lock("48.0.4", "48.0.4")),
+        Ok("48.0.4".to_string())
+    );
+    assert_eq!(
+        check_wasmtime_lockstep_floor(&lock("48.1.0", "48.1.0")),
+        Ok("48.1.0".to_string())
     );
 }
 
