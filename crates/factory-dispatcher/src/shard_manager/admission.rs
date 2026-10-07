@@ -54,9 +54,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnRecord,
-    BcIndexMigrationTxnState, StaleGateReconciliationPlan, TerminalReconcileInputs,
-    WriterReservation, is_bc_index_admission_open, migrate_err_to_io,
+    BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnState,
+    StaleGateReconciliationPlan, TerminalReconcileInputs, WriterReservation, migrate_err_to_io,
     plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
     write_admission_gate_state,
 };
@@ -604,7 +603,7 @@ fn verify_admission(
     tracing::warn!(
         target: "bc_1_18_011_migration",
         migration_id = sanitize_diagnostic_id(live.map(|t| t.migration_id()).unwrap_or("none")),
-        txn_id = sanitize_diagnostic_id(live.map(|t| t.record.txn_id.as_str()).unwrap_or("none")),
+        txn_id = sanitize_diagnostic_id(live.map(|t| t.txn_id()).unwrap_or("none")),
         gate_state = ?second.gate,
         reconciliation = ?reconciliation,
         scope = family.scope(),
@@ -691,7 +690,7 @@ pub fn reconcile_stale_admission_gate(
             }
             None => false,
         },
-        txn_state: live.map(|t| t.record.state),
+        txn_state: live.map(|t| t.state),
         // The effectful verification (parse the record; txn_id / generation_id
         // / canonical_paths_count equality; every canonical sha256) is
         // S-25.06's deliverable (AC-021/022/023/031). Until it lands the seam
@@ -706,7 +705,22 @@ pub fn reconcile_stale_admission_gate(
         txn_migration_known: terminal_record_name.is_some(),
     };
 
-    let live_generation_id_is_null = live.is_some_and(|t| t.record.generation_id.is_none());
+    // Tier 1 (ADR-052 v1.23 "Txn-record interpretation — tiers"): `generation_id`
+    // is read, from the raw object, ONLY under the exact Branch B execution
+    // conditions (known migration + STAGING + lock acquired — see above — +
+    // terminal record ABSENT). The tri-state is resolved here, in the shell,
+    // BEFORE the planner is called, so the planner and its VP-147 proofs are
+    // unchanged. Every other leg passes `false` (the planner ignores it).
+    let live_generation_id_is_null = match live {
+        Some(t)
+            if terminal_record_name.is_some()
+                && t.state == BcIndexMigrationTxnState::Staging
+                && !inputs.record_present =>
+        {
+            branch_b_generation_id_is_null(t)?
+        }
+        _ => false,
+    };
 
     // The branch selection is the pure planner (VP-147); this shell only
     // performs the effects it names. `plan` names a txn-bearing branch
@@ -742,8 +756,8 @@ pub fn reconcile_stale_admission_gate(
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 migration_id = sanitize_diagnostic_id(live.migration_id()),
-                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
-                txn_state = ?live.record.state,
+                txn_id = sanitize_diagnostic_id(live.txn_id()),
+                txn_state = ?live.state,
                 failing_check = "terminal record present; verification is fail-closed in this \
                                  build (STAGING + record always; COMMITTING unverified)",
                 "Branch C: completion-record mismatch -- no txn write, no gate write"
@@ -757,7 +771,7 @@ pub fn reconcile_stale_admission_gate(
             tracing::error!(
                 target: "bc_1_18_011_migration",
                 migration_id = sanitize_diagnostic_id(live.migration_id()),
-                txn_id = sanitize_diagnostic_id(&live.record.txn_id),
+                txn_id = sanitize_diagnostic_id(live.txn_id()),
                 "Branch C: FinalizeThenOpenGate decided but the finalize effect is not wired; \
                  failing closed"
             );
@@ -768,6 +782,23 @@ pub fn reconcile_stale_admission_gate(
             | StaleGateReconciliationPlan::FinalizeThenOpenGate,
             None,
         ) => Ok(StaleGateReconciliation::CompletionRecordMismatch),
+    }
+}
+
+/// Branch B Tier 1 read: `generation_id` from the raw txn object. Key PRESENT
+/// with JSON `null` -> `true` (null generation, discard); PRESENT string ->
+/// `false` (not Branch B, live block); ABSENT key or any other type ->
+/// `state_integrity` with no txn or gate write ("absent is not null").
+fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigrationError> {
+    match txn.raw.get("generation_id") {
+        Some(serde_json::Value::Null) => Ok(true),
+        Some(serde_json::Value::String(_)) => Ok(false),
+        _ => Err(BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!(
+                "malformed txn record at {}: generation_id is absent or not a JSON string/null",
+                txn.path.display()
+            ),
+        }),
     }
 }
 
@@ -814,26 +845,35 @@ fn terminal_record_file_name(migration_id: &str) -> Option<&'static str> {
     }
 }
 
-/// One `txn-*.json` file: the raw JSON (so a rewrite preserves every field,
-/// including ones this build does not model) and its typed view.
+/// One `txn-*.json` file after the Tier 0 shape check (ADR-052 v1.23): the raw
+/// JSON object (so a rewrite preserves every field, including ones this build
+/// does not model), its parsed `state`, and the effective `migration_id`.
+/// Every other field is Tier 1 and is read lazily from `raw` by the consuming
+/// branch.
 struct TxnFile {
     path: PathBuf,
     raw: serde_json::Value,
-    record: BcIndexMigrationTxnRecord,
+    state: BcIndexMigrationTxnState,
+    /// Absent reads as [`MIGRATION_ID_B2`]; a present non-string is rejected at read.
+    migration_id: String,
 }
 
 impl TxnFile {
-    /// The record's `migration_id`; absent reads as [`MIGRATION_ID_B2`].
     fn migration_id(&self) -> &str {
+        &self.migration_id
+    }
+
+    /// Informational diagnostic `txn_id`: the raw field if a string, else `unknown`.
+    fn txn_id(&self) -> &str {
         self.raw
-            .get("migration_id")
+            .get("txn_id")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or(MIGRATION_ID_B2)
+            .unwrap_or("unknown")
     }
 
     fn is_live(&self) -> bool {
         matches!(
-            self.record.state,
+            self.state,
             BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing
         )
     }
@@ -874,10 +914,9 @@ impl AdmissionSnapshot {
     /// Dual check: gate OPEN AND no live txn (ADR-052 §5a step 4/5).
     fn is_admissible(&self) -> Result<bool, BcIndexMigrationError> {
         let live = self.live_txn()?;
-        Ok(is_bc_index_admission_open(
-            self.gate,
-            live.map(|t| &t.record),
-        ))
+        // Non-live (COMPLETED/ABORTED) records with a valid Tier 0 shape are
+        // admitted; `is_live` covers STAGING/COMMITTING only.
+        Ok(self.gate == BcIndexAdmissionGateState::Open && live.is_none())
     }
 }
 
@@ -920,27 +959,32 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
                 message: format!("malformed txn record at {}: {e}", path.display()),
             }
         })?;
-        let record: BcIndexMigrationTxnRecord =
-            serde_json::from_value(raw.clone()).map_err(|e| {
-                BcIndexMigrationError::BinaryIntegrityFailure {
-                    message: format!("malformed txn record at {}: {e}", path.display()),
-                }
-            })?;
-        // A PRESENT non-string `migration_id` (including JSON `null`) is a MALFORMED
-        // record — `E-MAINTENANCE-002` `state_integrity` — never "foreign"
-        // (BC-1.18.013 v1.8 EC-030). An ABSENT key reads as B2 (serde default).
-        if raw
-            .get("migration_id")
-            .is_some_and(|v| !matches!(v, serde_json::Value::String(_)))
-        {
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!(
-                    "malformed txn record at {}: migration_id is not a JSON string",
-                    path.display()
-                ),
-            });
-        }
-        files.push(TxnFile { path, raw, record });
+        // Tier 0: a JSON object with a known `state` ...
+        let malformed = |detail: &str| BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!("malformed txn record at {}: {detail}", path.display()),
+        };
+        let Some(object) = raw.as_object() else {
+            return Err(malformed("not a JSON object"));
+        };
+        let state: BcIndexMigrationTxnState = object
+            .get("state")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .ok_or_else(|| malformed("state is absent or not a known txn state"))?;
+        // ... and, if PRESENT, a string `migration_id` (a present non-string,
+        // including JSON `null`, is MALFORMED — never "foreign"; BC-1.18.013
+        // v1.8 EC-030). An ABSENT key reads as B2.
+        let migration_id = match object.get("migration_id") {
+            None => MIGRATION_ID_B2.to_string(),
+            Some(serde_json::Value::String(id)) => id.clone(),
+            Some(_) => return Err(malformed("migration_id is not a JSON string")),
+        };
+        files.push(TxnFile {
+            path,
+            raw,
+            state,
+            migration_id,
+        });
     }
     Ok(files)
 }
