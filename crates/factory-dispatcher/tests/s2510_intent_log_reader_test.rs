@@ -337,6 +337,170 @@ fn test_BC_1_18_011_EC066_valid_prefix_then_garbage_then_a_valid_record_is_mid_l
     assert_no_failures("mid-log corruption (A-1 sandwich)", failures);
 }
 
+/// ADR-054 1.7 (iv) v1.1: "followed by a valid record" is decided at ANY BYTE POSITION, not
+/// only at line starts. Garbage with no trailing LF followed by a complete valid record puts
+/// the record's marker mid-line; it must still be `MidLogCorruption`, with `first_bad_offset`
+/// = the end of the valid prefix and `later_valid_offset` = the R3 byte start.
+#[test]
+fn test_BC_1_18_011_EC066_garbage_without_trailing_lf_then_a_valid_record_is_mid_log_corruption_at_any_byte_position()
+ {
+    let r1 = Rec::sample(TXN, 0, "INTENT", 1);
+    let r2 = Rec::sample(TXN, 1, "INTENT", 1);
+    let r3 = Rec::sample(TXN, 2, "INTENT", 1);
+    let (e1, e2, e3) = (encode(&r1), encode(&r2), encode(&r3));
+    let end_line = "END_INTENT_LOG_RECORD\n".len();
+
+    let mut cases: Vec<(String, Vec<u8>)> = vec![
+        ("zzzz (no LF)".into(), b"zzzz".to_vec()),
+        (
+            "partial start marker INTENT_LOG_RECO".into(),
+            b"INTENT_LOG_RECO".to_vec(),
+        ),
+        ("a single byte".into(), b"x".to_vec()),
+        ("a lone 0xff byte".into(), vec![0xff]),
+        ("one NUL".into(), vec![0u8]),
+        (
+            "start marker text without LF".into(),
+            b"INTENT_LOG_RECORD_V1".to_vec(),
+        ),
+        (
+            "R2 torn inside its END line".into(),
+            e2[..e2.len() - end_line + 5].to_vec(),
+        ),
+        (
+            "R2 minus only its final LF".into(),
+            e2[..e2.len() - 1].to_vec(),
+        ),
+        (
+            "R2 missing its whole END line".into(),
+            e2[..e2.len() - end_line].to_vec(),
+        ),
+    ];
+    // Every proper, non-empty cut of R2 followed by R3: the probe finds R3 at len(R1)+cut.
+    for cut in 1..e2.len() {
+        cases.push((
+            format!("R2 cut at byte {cut}/{}", e2.len()),
+            e2[..cut].to_vec(),
+        ));
+    }
+
+    let mut failures = Vec::new();
+    for (label, middle) in cases {
+        let log = concat(&[e1.clone(), middle.clone(), e3.clone()]);
+        let want = (e1.len(), e1.len() + middle.len());
+        match mid_log_err(read_log(&log, TXN)) {
+            Some(got) if got == want => {}
+            other => failures.push(format!(
+                "[{label}] expected Err(MidLogCorruption {{ first_bad_offset: {}, \
+                 later_valid_offset: {} }}); got {other:?} (raw: {:?})",
+                want.0,
+                want.1,
+                read_log(&log, TXN).map(|l| l.records.len())
+            )),
+        }
+    }
+    assert_no_failures("byte-position mid-log corruption", failures);
+}
+
+/// ADR-054 1.7 v1.1 explicit vectors: `R1 + "zzzz" + R3`, `R1 + "INTENT_LOG_RECO" + R3` and
+/// `R1 + (R2 torn inside its END line) + R3`, plus the same with garbage ALSO at the front
+/// of an otherwise empty valid prefix (prefix length 0).
+#[test]
+fn test_BC_1_18_011_EC066_explicit_byte_position_vectors_report_the_exact_offsets() {
+    let r1 = Rec::sample(TXN, 0, "INTENT", 1);
+    let r2 = Rec::sample(TXN, 1, "INTENT", 1);
+    let r3 = Rec::sample(TXN, 2, "INTENT", 1);
+    let (e1, e2, e3) = (encode(&r1), encode(&r2), encode(&r3));
+
+    let log = concat(&[e1.clone(), b"zzzz".to_vec(), e3.clone()]);
+    assert_eq!(
+        mid_log_err(read_log(&log, TXN)),
+        Some((e1.len(), e1.len() + 4)),
+        "R1 + zzzz + R3"
+    );
+
+    let log = concat(&[e1.clone(), b"INTENT_LOG_RECO".to_vec(), e3.clone()]);
+    assert_eq!(
+        mid_log_err(read_log(&log, TXN)),
+        Some((e1.len(), e1.len() + "INTENT_LOG_RECO".len())),
+        "R1 + INTENT_LOG_RECO + R3: later_valid_offset is R3's byte start"
+    );
+
+    let torn_end = &e2[..e2.len() - "END_INTENT_LOG_RECORD\n".len() + 10];
+    let log = concat(&[e1.clone(), torn_end.to_vec(), e3.clone()]);
+    assert_eq!(
+        mid_log_err(read_log(&log, TXN)),
+        Some((e1.len(), e1.len() + torn_end.len())),
+        "R1 + R2 torn inside its END line + R3"
+    );
+
+    let log = concat(&[b"zzzz".to_vec(), e3.clone()]);
+    assert_eq!(
+        mid_log_err(read_log(&log, TXN)),
+        Some((0, 4)),
+        "garbage at byte 0 then a valid record: prefix length 0"
+    );
+}
+
+/// ADR-054 1.7 v1.1 re-check of properties (i)-(iii) under byte-position probing: a torn
+/// tail with NO later valid record is still ABSENT (never an error), for every cut of every
+/// record AND with a stored valid record that sits entirely BEFORE the cut (so the probe has
+/// bytes to scan but finds nothing). Also: a record whose bytes occur inside a PATH value
+/// (the marker text in a path) must not be taken for a later record.
+#[test]
+fn test_BC_1_18_011_EC065_byte_position_probe_does_not_turn_a_lone_torn_tail_into_an_error() {
+    let recs = three_records();
+    let parts: Vec<Vec<u8>> = recs.iter().map(encode).collect();
+    let log = concat(&parts);
+    let bounds = ends(&parts);
+    let mut failures = Vec::new();
+    for cut in 0..=log.len() {
+        let complete = bounds.iter().filter(|&&e| e <= cut).count();
+        let want_len = if complete == 0 {
+            0
+        } else {
+            bounds[complete - 1]
+        };
+        // torn tail followed by various garbage that never forms a complete record
+        for tail in [
+            &b""[..],
+            b"zzzz",
+            b"\r\n",
+            b"INTENT_LOG_RECORD_V1\n",
+            b"INTENT_LOG_RECORD_V1\ntxn_id=",
+        ] {
+            let mut bytes = log[..cut].to_vec();
+            bytes.extend_from_slice(tail);
+            match read_log(&bytes, TXN) {
+                Ok(lr)
+                    if lr.valid_prefix_len == want_len
+                        && lr.records == to_intents(&recs[..complete]) => {}
+                other => failures.push(format!(
+                    "cut {cut}, tail {:?}: a torn tail without a later valid record is absent; \
+                     got {:?}",
+                    String::from_utf8_lossy(tail),
+                    other.map(|l| (l.records.len(), l.valid_prefix_len))
+                )),
+            }
+        }
+    }
+    assert_no_failures("lone torn tails under byte-position probing", failures);
+
+    // Marker text inside a path value is not a forged record.
+    let mut rec = Rec::sample(TXN, 0, "INTENT", 1);
+    rec.target = "/x/INTENT_LOG_RECORD_V1".into();
+    let mut bytes = encode(&rec);
+    let torn = bytes.len();
+    bytes.extend_from_slice(&encode(&rec)[..40]);
+    match read_log(&bytes, TXN) {
+        Ok(lr) if lr.records.len() == 1 && lr.valid_prefix_len == torn => {}
+        other => panic!(
+            "marker text inside a path must not forge a later record; got {:?}",
+            other.map(|l| (l.records.len(), l.valid_prefix_len))
+        ),
+    }
+}
+
 // ===========================================================================
 // AC-007 / T5 -- grammar strictness
 // ===========================================================================
@@ -586,6 +750,26 @@ fn test_BC_1_18_011_15b_value_rules_are_enforced_by_the_reader_even_when_the_che
     put("unknown record_type", 3, b"record_type=COMMIT".to_vec());
     put("empty target_canonical", 4, b"target_canonical=".to_vec());
     put(
+        "target_canonical ending in a space (v1.1 rule 2)",
+        4,
+        b"target_canonical=/p/x ".to_vec(),
+    );
+    put(
+        "target_canonical beginning with a space (v1.1 rule 2)",
+        4,
+        b"target_canonical= /p/x".to_vec(),
+    );
+    put(
+        "staging_path ending in a space (v1.1 rule 2)",
+        5,
+        b"staging_path=/s/x ".to_vec(),
+    );
+    put(
+        "staging_path beginning with a space (v1.1 rule 2)",
+        5,
+        b"staging_path= /s/x".to_vec(),
+    );
+    put(
         "target_canonical with a C0 control (0x1f)",
         4,
         b"target_canonical=/p/\x1f/x".to_vec(),
@@ -724,6 +908,11 @@ fn test_BC_1_18_011_15b_value_rules_are_enforced_by_the_reader_even_when_the_che
             "target_canonical containing the marker text",
             4,
             b"target_canonical=/p/END_INTENT_LOG_RECORD".to_vec(),
+        );
+        put_ok(
+            "target_canonical with a space adjacent to '/' (interior, valid)",
+            4,
+            b"target_canonical=/p/a /b".to_vec(),
         );
         put_ok(
             "target_canonical with multi-byte UTF-8",
@@ -918,6 +1107,72 @@ fn test_BC_1_18_011_EC068_log_invariants_l1_to_l4_fail_closed_with_first_violati
                 d0.clone(),
             ],
             Invariant::L4,
+            1,
+        ),
+        // v1.1 "first violating record": the LATER conflicting INTENT is the L2 offset, the
+        // first-seen INTENT is the reference even if a later one repeats the conflict.
+        v(
+            "L2 offset is the first conflicting INTENT, not the earlier reference nor a repeat",
+            vec![
+                i0.clone(),
+                Rec {
+                    post: sha256_hex(b"other"),
+                    ..i0.clone()
+                },
+                Rec {
+                    post: sha256_hex(b"other"),
+                    ..i0.clone()
+                },
+            ],
+            Invariant::L2,
+            1,
+        ),
+        // Several checks fail on the SAME record: the first in the order L1, L2, L3, L4.
+        v(
+            "same record fails L1 and L4: L1 is reported",
+            vec![
+                Rec {
+                    fencing: 5,
+                    ..i0.clone()
+                },
+                Rec {
+                    fencing: 1,
+                    txn_id: "foreign-txn".into(),
+                    ..i1.clone()
+                },
+            ],
+            Invariant::L1,
+            1,
+        ),
+        v(
+            "same record fails L2 and L4: L2 is reported",
+            vec![
+                Rec {
+                    fencing: 5,
+                    ..i0.clone()
+                },
+                Rec {
+                    fencing: 1,
+                    post: sha256_hex(b"other"),
+                    ..i0.clone()
+                },
+            ],
+            Invariant::L2,
+            1,
+        ),
+        v(
+            "same record fails L3 and L4: L3 is reported",
+            vec![
+                Rec {
+                    fencing: 5,
+                    ..i0.clone()
+                },
+                Rec {
+                    fencing: 1,
+                    ..d1.clone()
+                },
+            ],
+            Invariant::L3,
             1,
         ),
         // Earliest violation wins, whatever its class.

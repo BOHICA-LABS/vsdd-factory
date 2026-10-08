@@ -131,6 +131,85 @@ fn test_BC_1_18_011_EC067_validate_path_returns_the_closed_domain_reason_for_eac
         Ok(()),
     ));
     cases.push(("lone '/'".into(), PathBuf::from("/"), Ok(())));
+    // ADR-054 v1.1 rule 2: a leading or trailing U+0020 is rejected (never trimmed); interior
+    // spaces, including one adjacent to '/', stay legal.
+    for (label, p) in [
+        ("leading space", " /a"),
+        ("trailing space", "/a "),
+        ("a single space", " "),
+        ("two spaces", "  "),
+        ("leading and trailing", " /a "),
+        ("two trailing spaces", "/a  "),
+    ] {
+        cases.push((
+            label.into(),
+            PathBuf::from(p),
+            Err("leading_or_trailing_space"),
+        ));
+    }
+    for (label, p) in [
+        ("interior space (control)", "/a b"),
+        ("space adjacent to '/' (control)", "/a /b"),
+        ("space after the leading slash (control)", "/ a"),
+        ("U+00A0 trailing is ordinary text, not U+0020", "/a\u{a0}"),
+    ] {
+        cases.push((label.into(), PathBuf::from(p), Ok(())));
+    }
+    // v1.1 reason precedence: empty, over_4096_bytes, not_utf8, contains_control_character,
+    // leading_or_trailing_space (the first listed wins).
+    cases.push((
+        "NUL + trailing space: control beats space".into(),
+        PathBuf::from("/a\0 "),
+        Err("contains_control_character"),
+    ));
+    cases.push((
+        "leading space + LF: control beats space".into(),
+        PathBuf::from(" /a\nb"),
+        Err("contains_control_character"),
+    ));
+    cases.push((
+        "trailing TAB is a control, not a space".into(),
+        PathBuf::from("/a\t"),
+        Err("contains_control_character"),
+    ));
+    cases.push((
+        "4097 bytes ending in a space: over_4096_bytes beats space".into(),
+        PathBuf::from(format!("/{} ", "a".repeat(4095))),
+        Err("over_4096_bytes"),
+    ));
+    cases.push((
+        "4097 bytes with a NUL: over_4096_bytes beats control".into(),
+        PathBuf::from(format!("/{}\0", "a".repeat(4095))),
+        Err("over_4096_bytes"),
+    ));
+    cases.push((
+        "exactly 4096 bytes ending in a space: space (length is fine)".into(),
+        PathBuf::from(format!("/{} ", "a".repeat(4094))),
+        Err("leading_or_trailing_space"),
+    ));
+    #[cfg(unix)]
+    {
+        cases.push((
+            "4097 bytes with a non-UTF-8 byte: over_4096_bytes beats not_utf8".into(),
+            non_utf8(&[b"/".as_slice(), &[b'a'; 4095], b"\xff"].concat()),
+            Err("over_4096_bytes"),
+        ));
+        cases.push((
+            "NUL + non-UTF-8: not_utf8 beats control".into(),
+            non_utf8(b"/a\0\xff"),
+            Err("not_utf8"),
+        ));
+        cases.push((
+            "non-UTF-8 + trailing space: not_utf8 beats space".into(),
+            non_utf8(b"/a\xff "),
+            Err("not_utf8"),
+        ));
+        cases.push((
+            "non-UTF-8 + leading space + NUL: not_utf8 beats both".into(),
+            non_utf8(b" /a\0\xff"),
+            Err("not_utf8"),
+        ));
+    }
     #[cfg(unix)]
     {
         cases.push((
@@ -213,6 +292,21 @@ fn test_BC_1_18_011_EC067_writer_rejects_each_hostile_value_zero_bytes_appended(
             "contains_control_character",
         );
         path_case("empty", PathBuf::new(), "empty");
+        path_case(
+            "leading space",
+            PathBuf::from(" /a"),
+            "leading_or_trailing_space",
+        );
+        path_case(
+            "trailing space",
+            PathBuf::from("/a "),
+            "leading_or_trailing_space",
+        );
+        path_case(
+            "NUL + trailing space (control wins)",
+            PathBuf::from("/a\0 "),
+            "contains_control_character",
+        );
         path_case(
             "4097 bytes",
             PathBuf::from(format!("/{}", "a".repeat(4096))),
@@ -406,6 +500,8 @@ fn test_BC_1_18_011_EC067_benign_paths_with_equals_pipe_space_and_marker_text_ro
         "/a=b",
         "/a|b",
         "/a b/c d",
+        "/a /b",
+        "/ a",
         "/x/END_INTENT_LOG_RECORD",
         "/x/INTENT_LOG_RECORD_V1",
         "/x/record_checksum=0123",

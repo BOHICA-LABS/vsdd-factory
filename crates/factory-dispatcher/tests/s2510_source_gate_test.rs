@@ -15,6 +15,7 @@
 //! | AC-001 | `..._15a_intent_log_markers_only_in_shared_module_source_gate` |
 //! | AC-001 | `..._15a_four_b2_format_originals_are_deleted_source_gate` |
 //! | AC-001 / AC-008 | `..._15a_fs_append_is_replaced_by_append_durable_and_truncate_durable_in_every_impl_source_gate` |
+//! | AC-008 (v1.1) | `..._15c_strict_barrier_primitive_is_public_and_both_std_fs_methods_use_it_source_gate` |
 //! | AC-001 / AC-011 | `..._15a_migration_code_uses_the_shared_module_and_never_discards_an_append_source_gate` |
 //! | AC-005 | `..._EC067_plan_construction_never_converts_paths_lossily_source_gate` |
 //!
@@ -231,6 +232,88 @@ fn test_BC_1_18_011_15a_fs_append_is_replaced_by_append_durable_and_truncate_dur
     assert!(
         failures.is_empty(),
         "every Fs implementation must move to append_durable / truncate_durable:\n  - {}",
+        failures.join("\n  - ")
+    );
+}
+
+// ===========================================================================
+// AC-008 (ADR-054 v1.1 1.9 step 5): the strict file-barrier primitive
+// ===========================================================================
+
+/// Body of `fn <name>(` in `src` (brace-matched), or panic.
+fn fn_body(src: &str, name: &str) -> String {
+    let needle = format!("fn {name}(");
+    let start = src
+        .find(&needle)
+        .unwrap_or_else(|| panic!("source must define `{needle}`"));
+    let open = start + src[start..].find('{').expect("fn body");
+    let mut depth = 0usize;
+    for (i, c) in src[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return src[open..open + i + 1].to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unbalanced braces after `{needle}`");
+}
+
+/// ADR-054 v1.1 Decision 1.9 step 5 "Strict barrier primitive" (every platform, not only
+/// macOS): `last_amended_migrate::atomic_write` exposes
+/// `pub fn sync_file_strict_durable(&File) -> Result<(), MigrateError>` (the file-handle
+/// sibling of `sync_dir_strict_durable`; the platform `cfg` lives INSIDE it), and the two
+/// production `StdFs` methods `append_durable` / `truncate_durable` call exactly that
+/// primitive: their bodies contain neither `.sync_all(` nor `.sync_data(` and DO contain
+/// `strict_durable`. (`factory-dispatcher` has no libc/FFI of its own.)
+#[test]
+fn test_BC_1_18_011_15c_strict_barrier_primitive_is_public_and_both_std_fs_methods_use_it_source_gate()
+ {
+    let aw = std::fs::read_to_string(crates_dir().join("last-amended-migrate/src/atomic_write.rs"))
+        .expect("crates/last-amended-migrate/src/atomic_write.rs");
+    let mut failures = Vec::new();
+    let decl = Regex::new(
+        r"pub\s+fn\s+sync_file_strict_durable\s*\(\s*\w+\s*:\s*&\s*(?:std::fs::)?File\s*\)\s*->\s*Result<\(\),\s*MigrateError>",
+    )
+    .unwrap();
+    if !decl.is_match(&aw) {
+        failures.push(
+            "atomic_write.rs must declare `pub fn sync_file_strict_durable(<f>: &File) -> \
+             Result<(), MigrateError>` (ADR-054 v1.1 1.9 step 5)"
+                .to_string(),
+        );
+    }
+
+    let src =
+        std::fs::read_to_string(manifest_dir().join("src/shard_manager/migration_fs.rs")).unwrap();
+    let prod = src.split("#[cfg(test)]").next().unwrap();
+    let prod = &prod[prod
+        .find("impl Fs for StdFs")
+        .expect("migration_fs.rs must keep `impl Fs for StdFs`")..];
+    for name in ["append_durable", "truncate_durable"] {
+        let body = fn_body(prod, name);
+        for bad in [".sync_all(", ".sync_data("] {
+            if body.contains(bad) {
+                failures.push(format!(
+                    "`StdFs::{name}` body must not contain `{bad}` (use the shared strict \
+                     primitive; a bare sync is not durable to media on Apple platforms)"
+                ));
+            }
+        }
+        if !body.contains("strict_durable") {
+            failures.push(format!(
+                "`StdFs::{name}` body must contain `strict_durable` (it calls \
+                 `last_amended_migrate::atomic_write::sync_file_strict_durable`)"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "strict barrier primitive gate:\n  - {}",
         failures.join("\n  - ")
     );
 }

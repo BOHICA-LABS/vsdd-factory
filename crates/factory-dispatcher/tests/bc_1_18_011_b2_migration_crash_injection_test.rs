@@ -121,6 +121,15 @@
 //!     fixture list above); see the fsync_dir test section below for the
 //!     occurrence-to-scenario mapping
 //!
+//! RESUMED run (v1.1 retry closure): when the generation's intent log ALREADY EXISTS and holds
+//! no `DONE` (a prior run crashed or failed at or before the creating sync), the resumed
+//! coordinator calls `Fs::fsync_dir(<parent of the log>)` ONCE, BEFORE its INTENT batch,
+//! because that run's `append_durable` reports `created == false` and the writer would never
+//! sync the entry. A resumed run's `fsync_dir` occurrences are therefore numbered:
+//! 1 = the retry-closure sync, 2 = the pointer-swap barrier, 3-6 = the four post-rename
+//! barriers (a FRESH run keeps the 1..7 numbering above; the resume path has no gen-dir sync
+//! and no creating append).
+//!
 //! `remove` (0 occurrences on the happy path): reachable only via
 //! `abort_staging`'s (PC1/PC2 verification failure) or
 //! `discard_incomplete_staging`'s (STAGING-resume verification failure)
@@ -1385,6 +1394,134 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_log_creation_directory_sync_resume
     );
     assert_genuinely_fully_migrated(dir.path());
     assert_recovery_is_idempotent(dir.path());
+}
+
+/// The intent-log files in `msd` (there is exactly one per generation).
+fn intent_logs_in(msd: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(msd)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("intent-") && n.ends_with(".log"))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// ADR-054 1.9 step 5 "Retry closure" (v1.1), crash form. Run 1 dies at the creating
+/// `fsync_dir` (occurrence 2): the log exists with the whole INTENT batch, no `DONE`, the
+/// txn is STAGING. Run 2 (the re-run) finds the log existing, so its INTENT-batch append
+/// reports `created == false`; the coordinator must therefore sync the log's parent
+/// directory ITSELF, BEFORE the INTENT batch: the resumed run's FIRST `fsync_dir`
+/// (occurrence 1) is that sync, and when the process dies exactly there the log must still
+/// be byte-identical (no batch appended yet). Run 3 converges.
+#[test]
+fn test_BC_1_18_011_obl1_crash_fsync_dir_resume_occ1_retry_closure_syncs_the_log_directory_before_the_intent_batch()
+ {
+    let _fp = fail_point_scope();
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    let first = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
+    assert_child_aborted(&first, "migration_fs::fsync_dir", 2);
+    let logs = intent_logs_in(&msd);
+    assert_eq!(
+        logs.len(),
+        1,
+        "fixture: the creating run left one intent log"
+    );
+    let original = std::fs::read(&logs[0]).unwrap();
+    assert!(
+        !original.is_empty(),
+        "fixture: the INTENT batch was written"
+    );
+    assert!(
+        !String::from_utf8_lossy(&original).contains("record_type=DONE"),
+        "fixture: the pre-rename phase (no DONE)"
+    );
+
+    // The resumed run's FIRST fsync_dir is the retry-closure sync of the log's directory.
+    let second = spawn_crash_child("migration_fs::fsync_dir", 1, dir.path());
+    assert_child_aborted(&second, "resumed run: migration_fs::fsync_dir", 1);
+    let after_crash = std::fs::read(&logs[0]).unwrap();
+    assert!(
+        after_crash == original,
+        "the retry-closure directory sync precedes the INTENT batch: nothing may be appended \
+         before the resumed run's first fsync_dir (log was {} bytes, now {})",
+        original.len(),
+        after_crash.len()
+    );
+    assert_admission_blocked(dir.path(), "probe");
+
+    let outcome = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "got {outcome:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
+
+/// Same closure, graceful form: the retry-closure directory sync is a real, separately
+/// failable step. With the creating run crashed at occurrence 2, a re-run whose FIRST
+/// `fsync_dir` fails (`PermissionDenied`) surfaces exactly that `Io` error, and the log is
+/// still byte-identical: the failure happens BEFORE any INTENT-batch append.
+#[test]
+fn test_BC_1_18_011_obl1_graceful_err_fsync_dir_resume_retry_closure_failure_is_io_and_precedes_the_intent_batch()
+ {
+    let _fp = fail_point_scope();
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let msd = migration_state_dir(dir.path());
+
+    let first = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
+    assert_child_aborted(&first, "migration_fs::fsync_dir", 2);
+    let logs = intent_logs_in(&msd);
+    assert_eq!(logs.len(), 1);
+    let original = std::fs::read(&logs[0]).unwrap();
+
+    fail::cfg("migration_fs::fsync_dir", "1*return(permission_denied)")
+        .expect("configuring the fsync_dir failpoint must succeed");
+    let outcome = run_bc_index_migration(dir.path());
+    fail::cfg("migration_fs::fsync_dir", "off").expect("resetting the fsync_dir failpoint");
+    assert!(
+        matches!(
+            outcome,
+            Err(BcIndexMigrationError::Io { ref source, .. })
+                if source.kind() == std::io::ErrorKind::PermissionDenied
+        ),
+        "the resumed run's first fsync_dir (the retry-closure sync) failed: expected a \
+         PermissionDenied Io error, got {outcome:?}"
+    );
+    let after_failure = std::fs::read(&logs[0]).unwrap();
+    assert!(
+        after_failure == original,
+        "no INTENT batch may be appended once the closure sync failed (log was {} bytes, now {})",
+        original.len(),
+        after_failure.len()
+    );
+
+    let outcome = run_recovery_to_convergence(dir.path(), 4);
+    assert!(
+        matches!(
+            outcome,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "got {outcome:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
 }
 
 /// Occurrence 3 (formerly 2) was, before the OBL-1 FINDING 1 fix, the FIRST post-rename

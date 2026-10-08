@@ -13,6 +13,7 @@
 //! |---|---|
 //! | AC-008 / T12 | `..._15c_append_durable_syncs_the_directory_when_it_creates_the_log` |
 //! | AC-008 / T12 | `..._15c_a_batch_is_one_append_durable_call_and_a_non_creating_call_does_no_directory_sync` |
+//! | AC-008 / T12 (v1.1 retry closure, writer side) | `..._15c_retry_state_reopen_and_append_do_no_directory_sync_the_coordinator_owns_it` |
 //! | AC-008 / T12 | `..._15c_std_fs_append_durable_reports_created_and_appends` |
 //! | AC-008 / T12 | `..._15c_std_fs_truncate_durable_shortens_the_file_to_the_requested_length` |
 //! | AC-008 / T2 | `..._EC065_tail_truncation_goes_through_truncate_durable_before_the_first_append` |
@@ -226,6 +227,53 @@ fn test_BC_1_18_011_15c_a_batch_is_one_append_durable_call_and_a_non_creating_ca
     assert_eq!(
         std::fs::read(&log).unwrap(),
         concat(&(0..=3).map(|i| encode(&r(i))).collect::<Vec<_>>())
+    );
+}
+
+/// ADR-054 1.9 step 5 "Retry closure" (v1.1), writer side. A creating batch whose directory
+/// sync FAILED leaves the log on disk with no `DONE`; the re-run's writer finds the log
+/// existing, so `open` does NOTHING mutating (no truncation, NO `fsync_dir`: the closure is a
+/// COORDINATOR step, not a writer-reopen side effect) and its append reports
+/// `created == false`, hence performs no directory sync either. That gap is exactly what the
+/// coordinator's own `fsync_dir(parent_of_log)` before the INTENT batch closes (pinned
+/// black-box with failpoints in `bc_1_18_011_b2_migration_crash_injection_test.rs`:
+/// `..._fsync_dir_resume_occ1_retry_closure_...`).
+#[test]
+fn test_BC_1_18_011_15c_retry_state_reopen_and_append_do_no_directory_sync_the_coordinator_owns_it()
+{
+    let (dir, log) = setup();
+    let fs = RecFs::default();
+    fs.fail_dir_sync.set(true);
+    {
+        let mut w = IntentLogWriter::open(&fs, &log, TXN).unwrap();
+        w.append_batch(&[to_intent(&r(0)), to_intent(&r(1))])
+            .expect_err("the creating directory sync failed");
+    }
+    let bytes_after_failed_first_run = std::fs::read(&log).unwrap();
+    assert_eq!(
+        bytes_after_failed_first_run,
+        concat(&[encode(&r(0)), encode(&r(1))]),
+        "the failed creating run left the whole batch on disk (no DONE)"
+    );
+
+    // The re-run: a fresh double, the directory sync healthy now.
+    fs.clear();
+    fs.fail_dir_sync.set(false);
+    let mut w = IntentLogWriter::open(&fs, &log, TXN).expect("reopen the clean pre-rename log");
+    assert!(
+        fs.mutating_ops().is_empty(),
+        "IntentLogWriter::open on a clean existing log performs NO mutating op, in particular \
+         no fsync_dir (the retry closure is a coordinator step): {:?}",
+        fs.mutating_ops()
+    );
+    w.append_batch(&[to_intent(&r(0)), to_intent(&r(1))])
+        .expect("the re-run's INTENT batch (idempotent duplicates are legal, L2)");
+    let total = encode(&r(0)).len() + encode(&r(1)).len();
+    assert_eq!(
+        fs.mutating_ops(),
+        vec![format!("append_durable {} {total}", log.display())],
+        "created == false: the writer does no directory sync of {}",
+        dir.path().display()
     );
 }
 

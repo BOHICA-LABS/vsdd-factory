@@ -673,23 +673,29 @@ fn test_BC_1_18_011_INV3_execute_canonical_path_moves_halts_not_aborts_on_single
         },
     ];
 
-    // The production flow always appends the INTENT batch (the WAL boundary) before any
-    // rename; seed the first move's INTENT exactly as `append_intent_records_for_pending_moves`
-    // would (ADR-054 Decision 1.8 L3: a DONE must have an INTENT to copy).
-    write_intent_records(
-        &intent_log_path,
-        "txn-test",
-        &[IntentRecord {
-            txn_id: "txn-test".to_string(),
-            fencing_generation: 1,
-            record_type: RecordType::Intent,
-            target_canonical: dir.path().join("shards/BC-INDEX-SS-01.md"),
-            staging_path: dir.path().join("gen-abc/shards/BC-INDEX-SS-01.md"),
-            expected_post_hash: sha256_hex_of_bytes(b"content"),
-            expected_pre_state: None,
-            timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
-        }],
-    );
+    // The production flow always appends the INTENT batch (the WAL boundary) for EVERY pending
+    // move before any rename; seed both moves' INTENTs exactly as
+    // `append_intent_records_for_pending_moves` would (ADR-054 Decision 1.8 L3: a DONE must
+    // have an INTENT to copy). The second move therefore fails because its STAGING FILE is
+    // missing, not because it lacks an INTENT (the no-INTENT row is S-25.11's, ADR-054 v1.1
+    // ruling 2; this test pins neither error).
+    let intent_one = IntentRecord {
+        txn_id: "txn-test".to_string(),
+        fencing_generation: 1,
+        record_type: RecordType::Intent,
+        target_canonical: dir.path().join("shards/BC-INDEX-SS-01.md"),
+        staging_path: dir.path().join("gen-abc/shards/BC-INDEX-SS-01.md"),
+        expected_post_hash: sha256_hex_of_bytes(b"content"),
+        expected_pre_state: None,
+        timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
+    };
+    let intent_two = IntentRecord {
+        target_canonical: dir.path().join("shards/MISSING.md"),
+        staging_path: dir.path().join("gen-abc/shards/MISSING.md"),
+        expected_post_hash: sha256_hex_of_bytes(b"never-staged"),
+        ..intent_one.clone()
+    };
+    write_intent_records(&intent_log_path, "txn-test", &[intent_one, intent_two]);
 
     let completed_count =
         execute_canonical_path_moves(&StdFs, &pending, &intent_log_path, "txn-test", 1).expect(
