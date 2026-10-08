@@ -16,6 +16,7 @@
 //! |---------|------|
 //! | F-007(a) | `..._F007_resumed_txn_fencing_generation_is_carried_by_every_intent_log_record` |
 //! | F-012 | `..._F012_non_io_cleanup_failure_still_names_the_original_code_token` |
+//! | F-004 (lstat / read seam) | `..._F004_completed_json_lstat_failure_is_io_...`, `..._F004_completed_json_read_failure_is_io_...` |
 //!
 //! `fail::cfg` is PROCESS-GLOBAL, so every test takes `LOCK`; the failpoints are reset on drop.
 #![cfg(feature = "failpoints")]
@@ -64,6 +65,12 @@ shape = \"flat\"
 
 const REMOVE: &str = "migration_fs::remove";
 const POINTER_SWAP: &str = "migration_fs::pointer_swap";
+// ADR-052 v1.25 item 11(c) rulings 1-2: the `completed.json` probe is an lstat-class
+// `symlink_metadata` call and the record read is a separate call; each is a distinct `Fs`
+// operation and so a distinct `migration_fs::<op>` failpoint (the same naming as the existing
+// seams). Both must be routed through the `Fs` seam by `read_completed_under_lock`.
+const SYMLINK_METADATA: &str = "migration_fs::symlink_metadata";
+const READ: &str = "migration_fs::read";
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -86,7 +93,7 @@ impl Drop for Serial {
 }
 
 fn reset() {
-    for name in [REMOVE, POINTER_SWAP] {
+    for name in [REMOVE, POINTER_SWAP, SYMLINK_METADATA, READ] {
         fail::remove(name);
     }
 }
@@ -283,4 +290,172 @@ fn test_BC_1_18_011_F012_non_io_cleanup_failure_still_names_the_original_code_to
         "item 11(d): the cleanup failure must still name the ORIGINAL failure's code token \
          `{original_token}` so the root cause stays visible; got: {e}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// F-004 -- the `completed.json` lstat / read FAILURE verdicts through the `Fs` seam
+// ---------------------------------------------------------------------------
+
+/// lstat-based snapshot of a whole tree (symlinks recorded, never followed).
+fn raw_tree(root: &Path) -> std::collections::BTreeMap<String, String> {
+    fn walk(base: &Path, dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let rel = p.strip_prefix(base).unwrap().to_string_lossy().to_string();
+            let md = std::fs::symlink_metadata(&p).unwrap();
+            if md.file_type().is_symlink() {
+                out.insert(rel, "symlink".to_string());
+            } else if md.is_dir() {
+                out.insert(format!("{rel}/"), "dir".to_string());
+                walk(base, &p, out);
+            } else {
+                out.insert(
+                    rel,
+                    format!(
+                        "file:{}",
+                        String::from_utf8_lossy(&std::fs::read(&p).unwrap_or_default())
+                    ),
+                );
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// A project whose `migration-state/` already holds the lock file, an OPEN gate and the
+/// reservations directory, so a run that stops at the `completed.json` verdict changes
+/// NOTHING (the coordinator creates those three before the lock otherwise).
+fn project_with_quiet_migration_state() -> tempfile::TempDir {
+    let dir = fresh_project();
+    std::fs::create_dir_all(ms(dir.path()).join("reservations")).unwrap();
+    std::fs::write(ms(dir.path()).join("exclusive.lock"), b"").unwrap();
+    std::fs::write(ms(dir.path()).join("gate-state.json"), "\"OPEN\"").unwrap();
+    dir
+}
+
+fn assert_completed_json_io(
+    label: &str,
+    r: Result<BcIndexMigrationOutcome, BcIndexMigrationError>,
+    injected_kind: std::io::ErrorKind,
+) {
+    let e = r.expect_err(&format!(
+        "[{label}] a failed lstat/read of completed.json leaves existence UNKNOWN: Io, never \
+         Ok (neither a fresh run nor ALREADY_MIGRATED)"
+    ));
+    assert_eq!(e.process_exit_code(), 2, "[{label}] exit 2: {e}");
+    match &e {
+        BcIndexMigrationError::Io { path, source } => {
+            assert!(
+                path.ends_with("completed.json"),
+                "[{label}] the Io must name completed.json; got {path:?}"
+            );
+            assert_eq!(
+                source.kind(),
+                injected_kind,
+                "[{label}] the Io carries the FAILED CALL'S OWN error (kind preserved); got {source:?}"
+            );
+        }
+        other => panic!("[{label}] expected BcIndexMigrationError::Io; got {other:?}"),
+    }
+    assert!(
+        e.to_string()
+            .starts_with("BC-INDEX migration: I/O error at "),
+        "[{label}] the one-line form is `BC-INDEX migration: I/O error at <path>: <os error>`; got {e}"
+    );
+}
+
+/// F-004, verdict 2(b) at the LSTAT call (ADR-052 v1.25 item 11(c) rulings 1-2): "Any other lstat
+/// error (EACCES, ELOOP in a parent component, ENOTDIR, EIO, EMFILE, ...) leaves existence
+/// UNKNOWN" => `Io { path: completed.json, source }`, exit 2, nothing read further or written.
+/// The injected failure replaces the lstat of a completed.json that is genuinely ABSENT, so the
+/// only way to a non-Ok verdict is to treat the failed probe as unknown (the pre-v1.25
+/// `fs.exists(..)` mapped it to "absent" and started a FRESH run). Three kinds, so a
+/// kind-specific shortcut (e.g. special-casing PermissionDenied) cannot satisfy the test; the
+/// seam's tag vocabulary has no EIO tag, so `storage_full` / `unexpected_eof` / `interrupted`
+/// stand in for "any non-NotFound error". CONTROL: with no failpoint armed the same fixture runs
+/// fresh to completion.
+#[test]
+fn test_BC_1_18_011_F004_completed_json_lstat_failure_is_io_exit_2_nothing_written() {
+    let _serial = Serial::take();
+    // CONTROL.
+    {
+        let dir = project_with_quiet_migration_state();
+        let r = run_bc_index_migration(dir.path());
+        assert!(
+            matches!(r, Ok(BcIndexMigrationOutcome::Completed { .. })),
+            "control: the fixture must migrate when nothing is injected; got {r:?}"
+        );
+    }
+    for (tag, kind) in [
+        ("permission_denied", std::io::ErrorKind::PermissionDenied),
+        ("storage_full", std::io::ErrorKind::StorageFull),
+        ("unexpected_eof", std::io::ErrorKind::UnexpectedEof),
+    ] {
+        let dir = project_with_quiet_migration_state();
+        let before = raw_tree(dir.path());
+        fail::cfg(SYMLINK_METADATA, &format!("return({tag})")).unwrap();
+        let r = run_bc_index_migration(dir.path());
+        fail::remove(SYMLINK_METADATA);
+        assert_completed_json_io(&format!("lstat {tag}"), r, kind);
+        assert_eq!(
+            raw_tree(dir.path()),
+            before,
+            "[lstat {tag}] nothing may be written (no fresh run, no gate flip, no txn)"
+        );
+    }
+}
+
+/// F-004, verdict 2(b) at the READ call: the lstat sees a regular, schema-valid record, then the
+/// read fails (EACCES / EIO class). Same verdict: `Io` naming completed.json, exit 2, nothing
+/// written -- not "present" (which would be exit 0 on a record that was never read) and not
+/// "absent". CONTROL: the identical fixture with no failpoint is `ALREADY_MIGRATED`.
+#[test]
+fn test_BC_1_18_011_F004_completed_json_read_failure_is_io_exit_2_nothing_written() {
+    let _serial = Serial::take();
+    let fixture = || {
+        let dir = project_with_quiet_migration_state();
+        std::fs::write(
+            ms(dir.path()).join("completed.json"),
+            serde_json::to_vec(&json!({
+                "generation_id": "gen-0000",
+                "txn_id": "act-0000",
+                "completed_at": "2026-10-07T00:00:00Z",
+                "canonical_paths_count": 4,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        dir
+    };
+    // CONTROL.
+    {
+        let dir = fixture();
+        let r = run_bc_index_migration(dir.path());
+        assert!(
+            matches!(r, Ok(BcIndexMigrationOutcome::AlreadyMigrated)),
+            "control: a readable valid record is ALREADY_MIGRATED; got {r:?}"
+        );
+    }
+    for (tag, kind) in [
+        ("permission_denied", std::io::ErrorKind::PermissionDenied),
+        ("storage_full", std::io::ErrorKind::StorageFull),
+        ("unexpected_eof", std::io::ErrorKind::UnexpectedEof),
+    ] {
+        let dir = fixture();
+        let before = raw_tree(dir.path());
+        fail::cfg(READ, &format!("return({tag})")).unwrap();
+        let r = run_bc_index_migration(dir.path());
+        fail::remove(READ);
+        assert_completed_json_io(&format!("read {tag}"), r, kind);
+        assert_eq!(
+            raw_tree(dir.path()),
+            before,
+            "[read {tag}] nothing may be written"
+        );
+    }
 }

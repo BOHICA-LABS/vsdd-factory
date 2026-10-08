@@ -9,7 +9,7 @@
 //! 007(b) / 009 / 010 / 014 (default features; the failpoint-gated half -- 007(a) and 012 --
 //! lives in `s2509_pass1_l1_failpoints_test.rs`).
 //!
-//! Authority: ADR-052 v1.24 items 8, 11(c), 11(d); BC-1.18.011 v1.21 Precondition 6(f)(ii)
+//! Authority: ADR-052 v1.25 items 8, 11(c), 11(d), 11(f); BC-1.18.011 v1.21 Precondition 6(f)(ii)
 //! (1a), 6(f)(iii); BC-1.18.013 v1.13 Postcondition 10 (incl. 10(c) and the "Coordinators"
 //! clause); BC-3.08.001 v1.37 Events 12 and 13 ("truncated to 64 characters for any
 //! data-derived substring").
@@ -17,10 +17,11 @@
 //! | Finding | Test |
 //! |---------|------|
 //! | F-003 | `..._F003_drain_timeout_gate_open_write_failure_...` |
-//! | F-004 (i)(ii) | `..._F004_dangling_symlink_completed_json_...`, `..._F004_eloop_completed_json_...`, control `..._F004_control_...` |
+//! | F-004 (i)(ii) | `..._F004_dangling_symlink_completed_json_...`, `..._F004_eloop_completed_json_...`, `..._F004_directory_...`, `..._F004_unreadable_eacces_...`, `..._F004_completed_json_that_is_not_a_record_...`, controls `..._F004_control_...`, `..._F004_valid_completed_json_control_...`, `..._F004_symlink_to_a_valid_record_...` |
+//! | F-004 reader parity | `..._F004_reader_parity_dangling_symlink_...`, `..._F004_reader_parity_non_record_...`, `..._F004_reader_parity_valid_and_absent_controls` |
 //! | F-004 (iii) | `..._F004_recover_receives_the_under_lock_read_...` (source gate + controls) |
 //! | F-005 | `..._F005_admitter_own_release_failure_...`, `..._F005_main_rs_release_on_block_failure_...` |
-//! | F-006 | `..._F006_finish_committing_gate_open_failure_...`, `..._F006_archive_terminal_record_failure_...`, `..._F006_canonical_move_halt_reasons_...` |
+//! | F-006 | `..._F006_gate_open_reset_failed_advisory_...`, `..._F006_terminal_txn_archive_failed_advisory_...`, `..._F006_staging_dir_remove_failed_advisory_...`, `..._F006_oversized_row_subshard_advisory_...` (canonical-move halt reasons moved to S-25.11 AC-015) |
 //! | F-007(b) | `..._F007_intent_log_path_exact_string_variants_...` |
 //! | F-009 | `..._F009_old_entry_point_names_absent_source_gate` (+ positive / negative controls) |
 //! | F-010 | `..._F010_event_12_13_detail_data_derived_substrings_truncated_to_64_...` |
@@ -37,7 +38,8 @@ use std::time::{Duration, Instant};
 
 use factory_dispatcher::shard_manager::migration_fs::StdFs;
 use factory_dispatcher::shard_manager::{
-    MigrationLockGuard, read_active_txn_record, try_acquire_migration_lock,
+    BcIndexAddressingError, BcIndexMigrationReadState, MigrationLockGuard,
+    detect_migration_read_state, read_active_txn_record, try_acquire_migration_lock,
 };
 use serde_json::{Value, json};
 
@@ -204,13 +206,6 @@ impl Coord {
     }
 }
 
-/// `true` when some stderr line starts with the coordinator's one-line prefix
-/// (`migrate-bc-index: `) and contains every needle.
-fn stderr_line_with(err: &str, needles: &[&str]) -> bool {
-    err.lines()
-        .any(|l| l.starts_with("migrate-bc-index: ") && needles.iter().all(|n| l.contains(n)))
-}
-
 // ===========================================================================
 // F-003 -- drain-timeout branch: a failed gate-OPEN write is surfaced, never claimed
 // ===========================================================================
@@ -349,48 +344,74 @@ fn assert_no_fresh_run(
     }
 }
 
-/// ADR-052 v1.24 item 11(c): "Acquired => THEN read `completed.json` (existence and content
-/// ...) UNDER the lock; any pre-lock existence probe is a hint only and MUST NOT select the
-/// branch ... absent => the recovery path". A `completed.json` that is a DANGLING SYMLINK is
-/// not absent: an lstat sees an entry, `Path::exists()` (which follows the link) reports
-/// `false`, and the current `fs.exists(..)` therefore starts a FRESH migration on a tree
-/// with a completion marker. Fail-closed requirement: no fresh run, tree byte-identical.
-/// (The ADR does not say which verdict -- the marker's presence short-circuits to the
-/// gate-reconciled exit 0 `ALREADY_MIGRATED`, or an unreadable marker is `Io` exit 2; both
-/// are accepted, a fresh run is not.)
+const COMPLETED_IO_PREFIX: &str = "migrate-bc-index: BC-INDEX migration: I/O error at ";
+
+/// The one-line verdict ADR-052 v1.25 item 11(c) rulings 2(a)-(c) give an unusable
+/// `completed.json`: exit 2, empty stdout, exactly ONE stderr line
+/// `migrate-bc-index: BC-INDEX migration: I/O error at <path>: <os error>` naming
+/// `completed.json`, and a tree byte-identical to the fixture (no fresh run, no repair,
+/// no gate flip). Failures are appended to `failures`, tagged with `label`.
+fn assert_completed_json_io_exit_2(
+    label: &str,
+    c: &Coord,
+    before: &BTreeMap<String, String>,
+    out: &Output,
+    failures: &mut Vec<String>,
+) {
+    let err = stderr_of(out);
+    if out.status.code() != Some(2) || !out.stdout.is_empty() {
+        failures.push(format!(
+            "[{label}] expected exit 2 with empty stdout; got {:?} / {} stdout bytes, stderr {err:?}",
+            out.status.code(),
+            out.stdout.len()
+        ));
+    }
+    if err.lines().count() != 1 || !err.starts_with(COMPLETED_IO_PREFIX) {
+        failures.push(format!(
+            "[{label}] expected ONE `{COMPLETED_IO_PREFIX}<path>: <os error>` line; stderr {err:?}"
+        ));
+    } else {
+        let rest = &err[COMPLETED_IO_PREFIX.len()..];
+        let path_part = rest.split(": ").next().unwrap_or("");
+        if !path_part.ends_with("completed.json") || rest.trim_end().ends_with(": ") {
+            failures.push(format!(
+                "[{label}] the Io line must name `.../completed.json` and carry an os error text; \
+                 stderr {err:?}"
+            ));
+        }
+    }
+    assert_no_fresh_run(label, c, before, failures);
+}
+
+/// ADR-052 v1.25 item 11(c) ruling 1: "Absence is a fact about the DIRECTORY ENTRY, never
+/// about the link target. The probe is `symlink_metadata` ... ONLY `NotFound` from that call
+/// means absent." Ruling 2(a): a DANGLING SYMLINK (lstat sees an entry; the read returns
+/// `NotFound` of the TARGET) is `Io { path: completed.json }`, exit 2, ONE stderr line --
+/// "NOT absent (a fresh run), and NOT exit 0 `ALREADY_MIGRATED`" (an unreadable entry is not
+/// a record). Identical to the ELOOP verdict below; no exit 0 is accepted.
 #[cfg(unix)]
 #[test]
-fn test_BC_1_18_011_F004_dangling_symlink_completed_json_does_not_start_a_fresh_run_blackbox() {
+fn test_BC_1_18_011_F004_dangling_symlink_completed_json_is_io_exit_2_not_a_fresh_run_blackbox() {
     let c = Coord::new();
     std::os::unix::fs::symlink("no-such-target.json", c.ms().join("completed.json")).unwrap();
     let before = raw_tree(c.root());
     let out = c.run();
-    let err = stderr_of(&out);
     let mut failures = Vec::new();
-    assert_no_fresh_run("dangling completed.json", &c, &before, &mut failures);
-    match out.status.code() {
-        Some(0) => {}
-        Some(2) if err.contains("completed.json") && err.starts_with("migrate-bc-index: ") => {}
-        other => failures.push(format!(
-            "expected exit 0 (marker present, gate reconciled) or exit 2 Io naming completed.json; \
-             got {other:?}, stderr {err:?}"
-        )),
-    }
-    if c.ms().join("completed.json").is_file() {
-        failures.push("completed.json must remain a dangling symlink, not a written file".into());
+    assert_completed_json_io_exit_2("dangling completed.json", &c, &before, &out, &mut failures);
+    let md = std::fs::symlink_metadata(c.ms().join("completed.json"));
+    if !md.map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        failures.push("completed.json must remain the dangling symlink, not a written file".into());
     }
     assert_no_failures(
-        "test_BC_1_18_011_F004_dangling_symlink_completed_json_does_not_start_a_fresh_run_blackbox",
+        "test_BC_1_18_011_F004_dangling_symlink_completed_json_is_io_exit_2_not_a_fresh_run_blackbox",
         failures,
     );
 }
 
-/// ADR-052 v1.24 item 11(c) + the stat-failure principle of BC-1.18.011 Precondition 7 /
-/// ADR-052 v1.22 ("a non-ENOENT stat/read CALL failure leaves existence UNKNOWN => `Io`,
-/// exit 2"): `completed.json` is a self-referential symlink (ELOOP, every uid). The current
-/// `fs.exists(..)` maps the stat error to `false` ("absent") and starts a fresh run.
-/// Required: exit 2, ONE stderr line that is the `Io` text naming `completed.json`, tree
-/// unchanged.
+/// ADR-052 v1.25 item 11(c) ruling 2(b): a non-`NotFound` lstat/read error (here ELOOP:
+/// `completed.json` is a self-referential symlink; every uid) leaves existence UNKNOWN =>
+/// the same `Io`, exit 2, ONE line, tree unchanged. (The pre-v1.25 `fs.exists(..)` mapped the
+/// stat error to "absent" and started a fresh run.)
 #[cfg(unix)]
 #[test]
 fn test_BC_1_18_011_F004_eloop_completed_json_is_io_exit_2_not_a_fresh_run_blackbox() {
@@ -398,24 +419,392 @@ fn test_BC_1_18_011_F004_eloop_completed_json_is_io_exit_2_not_a_fresh_run_black
     std::os::unix::fs::symlink("completed.json", c.ms().join("completed.json")).unwrap();
     let before = raw_tree(c.root());
     let out = c.run();
-    let err = stderr_of(&out);
     let mut failures = Vec::new();
-    assert_no_fresh_run("ELOOP completed.json", &c, &before, &mut failures);
-    let io_prefix = "migrate-bc-index: BC-INDEX migration: I/O error at ";
-    if out.status.code() != Some(2)
-        || !out.stdout.is_empty()
-        || err.lines().count() != 1
-        || !err.starts_with(io_prefix)
-        || !err.contains("completed.json")
-    {
-        failures.push(format!(
-            "expected exit 2 and ONE `{io_prefix}...completed.json...` line; got exit {:?}, \
-             stderr {err:?}",
-            out.status.code()
-        ));
-    }
+    assert_completed_json_io_exit_2("ELOOP completed.json", &c, &before, &out, &mut failures);
     assert_no_failures(
         "test_BC_1_18_011_F004_eloop_completed_json_is_io_exit_2_not_a_fresh_run_blackbox",
+        failures,
+    );
+}
+
+/// A schema-valid `CompletedMigrationRecord` (ADR-052 v1.25 item 11(c) ruling 2(c):
+/// `generation_id` string, `txn_id` string, `completed_at` string, `canonical_paths_count`
+/// non-negative integer fitting `u64`; unknown extra keys are ignored).
+fn valid_completed_record() -> Value {
+    json!({
+        "generation_id": "gen-0000",
+        "txn_id": "act-0000",
+        "completed_at": "2026-10-07T00:00:00Z",
+        "canonical_paths_count": 4,
+    })
+}
+
+/// Every non-record content ruling 2(c) names (not UTF-8, empty, truncated, unparseable,
+/// not an object, an object that does not deserialize), as `(label, bytes)`.
+fn non_record_completed_vectors() -> Vec<(String, Vec<u8>)> {
+    let mut v: Vec<(String, Vec<u8>)> = vec![
+        ("empty".into(), b"".to_vec()),
+        (
+            "truncated".into(),
+            b"{\"generation_id\": \"gen-0000\", \"txn_id".to_vec(),
+        ),
+        ("unparseable".into(), b"this is not json".to_vec()),
+        ("not UTF-8".into(), vec![0xff, 0xfe, b'{', b'}']),
+        ("json array".into(), b"[]".to_vec()),
+        ("json null".into(), b"null".to_vec()),
+        ("json string".into(), b"\"completed\"".to_vec()),
+        ("empty object".into(), b"{}".to_vec()),
+    ];
+    for key in [
+        "generation_id",
+        "txn_id",
+        "completed_at",
+        "canonical_paths_count",
+    ] {
+        let mut rec = valid_completed_record();
+        rec.as_object_mut().unwrap().remove(key);
+        v.push((
+            format!("missing key {key}"),
+            serde_json::to_vec(&rec).unwrap(),
+        ));
+    }
+    let wrong: [(&str, Value); 12] = [
+        ("generation_id", json!(7)),
+        ("generation_id", Value::Null),
+        ("txn_id", json!(["act"])),
+        ("txn_id", Value::Null),
+        ("completed_at", json!(20261007)),
+        ("completed_at", Value::Null),
+        ("canonical_paths_count", json!(-1)),
+        ("canonical_paths_count", json!(1.5)),
+        ("canonical_paths_count", json!("4")),
+        ("canonical_paths_count", Value::Null),
+        // Not representable as u64 (serde_json parses it as a float).
+        ("canonical_paths_count", json!(1.8446744073709552e19)),
+        ("canonical_paths_count", json!(true)),
+    ];
+    for (key, bad) in wrong {
+        let mut rec = valid_completed_record();
+        rec[key] = bad.clone();
+        v.push((
+            format!("wrong-typed {key} = {bad}"),
+            serde_json::to_vec(&rec).unwrap(),
+        ));
+    }
+    v
+}
+
+/// ADR-052 v1.25 item 11(c) ruling 2(c) (+ ruling 3): a `completed.json` that READS but is
+/// not a record (not UTF-8, empty, truncated, unparseable, not an object, or an object
+/// missing / mistyping any of the four required keys) is
+/// `Io { path: completed.json, source: InvalidData(..) }`, exit 2, ONE line, "never exit 0,
+/// never a fresh run", nothing written. Presence-only semantics select the BRANCH, but the
+/// marker must be a readable schema-shaped record before it may select the exit-0 branch.
+#[test]
+fn test_BC_1_18_011_F004_completed_json_that_is_not_a_record_is_io_exit_2_nothing_written_blackbox()
+{
+    let mut failures = Vec::new();
+    for (label, bytes) in non_record_completed_vectors() {
+        let c = Coord::new();
+        std::fs::write(c.ms().join("completed.json"), &bytes).unwrap();
+        let before = raw_tree(c.root());
+        let out = c.run();
+        assert_completed_json_io_exit_2(&label, &c, &before, &out, &mut failures);
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_F004_completed_json_that_is_not_a_record_is_io_exit_2_nothing_written_blackbox",
+        failures,
+    );
+}
+
+/// Ruling 2(b): "EISDIR when it is a directory" -- an entry that cannot be READ is `Io`
+/// exit 2, not absent and not a record.
+#[test]
+fn test_BC_1_18_011_F004_directory_completed_json_is_io_exit_2_nothing_written_blackbox() {
+    let c = Coord::new();
+    std::fs::create_dir(c.ms().join("completed.json")).unwrap();
+    let before = raw_tree(c.root());
+    let out = c.run();
+    let mut failures = Vec::new();
+    assert_completed_json_io_exit_2("directory completed.json", &c, &before, &out, &mut failures);
+    assert_no_failures(
+        "test_BC_1_18_011_F004_directory_completed_json_is_io_exit_2_nothing_written_blackbox",
+        failures,
+    );
+}
+
+/// Ruling 2(b): EACCES on the read (lstat succeeds; the file is mode 000). Skipped when the
+/// process can read a mode-000 file (uid 0 -- permission bits do not bind root). The EACCES
+/// of an lstat itself is not reachable black-box (a parent without search permission would
+/// fail the earlier `exclusive.lock` open instead); the `Fs`-seam twin lives in the
+/// failpoints file.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_011_F004_unreadable_eacces_completed_json_is_io_exit_2_nothing_written_blackbox() {
+    use std::os::unix::fs::PermissionsExt;
+    let c = Coord::new();
+    let marker = c.ms().join("completed.json");
+    std::fs::write(
+        &marker,
+        serde_json::to_vec(&valid_completed_record()).unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&marker).is_ok() {
+        // Running as root: the mode bits do not bind; the scenario cannot be staged.
+        std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return;
+    }
+    let before = raw_tree(c.root());
+    let out = c.run();
+    let mut failures = Vec::new();
+    assert_completed_json_io_exit_2("EACCES completed.json", &c, &before, &out, &mut failures);
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_no_failures(
+        "test_BC_1_18_011_F004_unreadable_eacces_completed_json_is_io_exit_2_nothing_written_blackbox",
+        failures,
+    );
+}
+
+/// Valid-record CONTROL (ruling 2(d) + the "clean steady state ... performs zero filesystem
+/// mutation" row of ADR-052 §4e): a readable, schema-valid `completed.json` beside an OPEN
+/// gate and no txn is `ALREADY_MIGRATED`: exit 0, ZERO writes, EMPTY stdout AND stderr
+/// (the v1.23 exit-0 silence; no advisory applies). Unknown extra keys are ignored. Without
+/// this the exit-2 vectors above could pass because the fixture can never short-circuit.
+#[test]
+fn test_BC_1_18_011_F004_valid_completed_json_control_is_exit_0_zero_writes_silent_blackbox() {
+    let mut failures = Vec::new();
+    let mut with_extra = valid_completed_record();
+    with_extra["future_field"] = json!({"ignored": true});
+    for (label, record) in [
+        ("valid record", valid_completed_record()),
+        ("valid record with an unknown extra key", with_extra),
+    ] {
+        let c = Coord::new();
+        std::fs::write(
+            c.ms().join("completed.json"),
+            serde_json::to_vec_pretty(&record).unwrap(),
+        )
+        .unwrap();
+        let before = raw_tree(c.root());
+        let out = c.run();
+        if out.status.code() != Some(0) || !out.stdout.is_empty() || !out.stderr.is_empty() {
+            failures.push(format!(
+                "[{label}] expected exit 0 with EMPTY stdout and stderr; got {:?}, stdout {} \
+                 bytes, stderr {:?}",
+                out.status.code(),
+                out.stdout.len(),
+                stderr_of(&out)
+            ));
+        }
+        assert_no_fresh_run(label, &c, &before, &mut failures);
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_F004_valid_completed_json_control_is_exit_0_zero_writes_silent_blackbox",
+        failures,
+    );
+}
+
+/// Ruling 2(d): "a regular file, or a symlink whose target reads and validates" is present.
+/// A symlink to a valid record is therefore `ALREADY_MIGRATED` exactly like the regular
+/// file (exit 0, zero writes, silent) -- the lstat-first probe must not conflate "is a
+/// symlink" with "unreadable".
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_011_F004_symlink_to_a_valid_record_is_present_exit_0_zero_writes_silent_blackbox() {
+    let c = Coord::new();
+    std::fs::write(
+        c.ms().join("real-completed.json"),
+        serde_json::to_vec_pretty(&valid_completed_record()).unwrap(),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("real-completed.json", c.ms().join("completed.json")).unwrap();
+    let before = raw_tree(c.root());
+    let out = c.run();
+    let mut failures = Vec::new();
+    if out.status.code() != Some(0) || !out.stdout.is_empty() || !out.stderr.is_empty() {
+        failures.push(format!(
+            "expected exit 0 with EMPTY stdout and stderr; got {:?}, stderr {:?}",
+            out.status.code(),
+            stderr_of(&out)
+        ));
+    }
+    assert_no_fresh_run("symlink to a valid record", &c, &before, &mut failures);
+    assert_no_failures(
+        "test_BC_1_18_011_F004_symlink_to_a_valid_record_is_present_exit_0_zero_writes_silent_blackbox",
+        failures,
+    );
+}
+
+/// Reader parity (ADR-052 v1.25 item 11(c) ruling 5, TD-VSDD-060 sibling):
+/// `detect_migration_read_state` must use the SAME lstat-first classification and record-shape
+/// validation as the coordinator (verdicts a-d; `BcIndexAddressingError::Io` for a-c). A
+/// reader that reports `NotStarted` ("not migrated") beside a coordinator that says
+/// "unknown" is the divergence the ruling closes: the dangling `completed.json` used to fall
+/// through (`read_to_string` NotFound) to `CURRENT.json` / `NotStarted`.
+fn parity_verdict(
+    label: &str,
+    r: Result<BcIndexMigrationReadState, BcIndexAddressingError>,
+    failures: &mut Vec<String>,
+) {
+    match r {
+        Err(BcIndexAddressingError::Io { path, .. }) if path.ends_with("completed.json") => {}
+        other => failures.push(format!(
+            "[{label}] expected Err(BcIndexAddressingError::Io {{ path: .../completed.json }}); \
+             got {other:?}"
+        )),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_011_F004_reader_parity_dangling_symlink_is_io_never_not_migrated() {
+    let mut failures = Vec::new();
+
+    // Dangling symlink, nothing else: must NOT be NotStarted.
+    {
+        let d = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("no-such-target.json", d.path().join("completed.json")).unwrap();
+        parity_verdict(
+            "dangling",
+            detect_migration_read_state(d.path()),
+            &mut failures,
+        );
+    }
+    // Dangling symlink BESIDE a committing CURRENT.json: must not fall through to Committing.
+    {
+        let d = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("no-such-target.json", d.path().join("completed.json")).unwrap();
+        std::fs::write(
+            d.path().join("CURRENT.json"),
+            br#"{"status":"committing","generation_id":"gen-1"}"#,
+        )
+        .unwrap();
+        parity_verdict(
+            "dangling beside committing CURRENT.json",
+            detect_migration_read_state(d.path()),
+            &mut failures,
+        );
+    }
+    // ELOOP.
+    {
+        let d = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("completed.json", d.path().join("completed.json")).unwrap();
+        parity_verdict(
+            "ELOOP",
+            detect_migration_read_state(d.path()),
+            &mut failures,
+        );
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_F004_reader_parity_dangling_symlink_is_io_never_not_migrated",
+        failures,
+    );
+}
+
+/// Reader parity for ruling 2(c): the same non-record vectors the coordinator refuses are
+/// `Io` for the reader (it used to answer `Completed` for any parseable JSON, e.g. `{}` or a
+/// record with a missing / mistyped key), plus the directory case.
+#[test]
+fn test_BC_1_18_011_F004_reader_parity_non_record_completed_json_is_io_never_completed() {
+    let mut failures = Vec::new();
+    for (label, bytes) in non_record_completed_vectors() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("completed.json"), &bytes).unwrap();
+        parity_verdict(&label, detect_migration_read_state(d.path()), &mut failures);
+    }
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir(d.path().join("completed.json")).unwrap();
+    parity_verdict(
+        "directory",
+        detect_migration_read_state(d.path()),
+        &mut failures,
+    );
+    assert_no_failures(
+        "test_BC_1_18_011_F004_reader_parity_non_record_completed_json_is_io_never_completed",
+        failures,
+    );
+}
+
+/// Reader parity CONTROLS (ruling 2(d) and "NotFound only means absent"): a valid record
+/// (regular file, or a symlink to one, unknown keys ignored) is `Completed`; a truly absent
+/// entry with no `CURRENT.json` is `NotStarted`; absent beside a committing `CURRENT.json` is
+/// `Committing`. These keep the Io vectors above honest: a reader that returned `Err` for
+/// everything would pass them.
+#[test]
+fn test_BC_1_18_011_F004_reader_parity_valid_and_absent_controls() {
+    let mut failures = Vec::new();
+    let mut check = |label: &str,
+                     r: Result<BcIndexMigrationReadState, BcIndexAddressingError>,
+                     want: BcIndexMigrationReadState| match r {
+        Ok(got) if got == want => {}
+        other => failures.push(format!("[{label}] expected Ok({want:?}); got {other:?}")),
+    };
+
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("completed.json"),
+        serde_json::to_vec(&valid_completed_record()).unwrap(),
+    )
+    .unwrap();
+    check(
+        "valid record",
+        detect_migration_read_state(d.path()),
+        BcIndexMigrationReadState::Completed,
+    );
+
+    let mut extra = valid_completed_record();
+    extra["future_field"] = json!(1);
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("completed.json"),
+        serde_json::to_vec(&extra).unwrap(),
+    )
+    .unwrap();
+    check(
+        "valid record with an unknown extra key",
+        detect_migration_read_state(d.path()),
+        BcIndexMigrationReadState::Completed,
+    );
+
+    #[cfg(unix)]
+    {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("real.json"),
+            serde_json::to_vec(&valid_completed_record()).unwrap(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("real.json", d.path().join("completed.json")).unwrap();
+        check(
+            "symlink to a valid record",
+            detect_migration_read_state(d.path()),
+            BcIndexMigrationReadState::Completed,
+        );
+    }
+
+    let d = tempfile::tempdir().unwrap();
+    check(
+        "absent",
+        detect_migration_read_state(d.path()),
+        BcIndexMigrationReadState::NotStarted,
+    );
+
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("CURRENT.json"),
+        br#"{"status":"committing","generation_id":"gen-1"}"#,
+    )
+    .unwrap();
+    check(
+        "absent beside committing CURRENT.json",
+        detect_migration_read_state(d.path()),
+        BcIndexMigrationReadState::Committing {
+            generation_id: "gen-1".into(),
+        },
+    );
+    assert_no_failures(
+        "test_BC_1_18_011_F004_reader_parity_valid_and_absent_controls",
         failures,
     );
 }
@@ -823,12 +1212,25 @@ fn test_BC_1_18_013_F005_main_rs_release_on_block_failure_writes_one_reservation
 // written to stderr as one `E-...`/`<VARIANT>`-prefixed line; a `tracing::error!` there is
 // only an additional developer trace."
 //
-// The parenthetical lists EXAMPLES of tracing-only diagnostics; the operative words are
-// "EACH failure or advisory they previously sent only to tracing". Nothing in the clause
-// exempts a best-effort/non-fatal anomaly. The exact `E-...`/`<VARIANT>` token for the
-// three anomalies below is not specified, so the tests pin only what the clause fixes: a
-// stderr line in the coordinator's one-line `migrate-bc-index: ` form that names the
-// anomaly's subject (path / step). Reported to the dispatcher as an ambiguity.
+// ADR-052 v1.25 item 11(f) rules the clause an OPEN set and fixes the shape and the closed
+// token domain of NON-FATAL advisories:
+//
+//     <subcommand>: <TOKEN> (advisory): <path>: <os error>; <one clause saying what is true now>
+//
+// stdout stays empty, one line per condition, exit status UNCHANGED (normally 0; "an exit-0
+// run prints nothing EXCEPT advisory lines"). The domain for this build is
+// GATE_OPEN_RESET_FAILED, TERMINAL_TXN_ARCHIVE_FAILED, STAGING_DIR_REMOVE_FAILED and, only
+// if reachable from a coordinator process, OVERSIZED_ROW_SUBSHARD. Every test below pins
+// (1) the exact token and line shape, (2) that the clause is TRUE of the on-disk state, and
+// (3) that the run's verdict and exit are identical to a no-fault CONTROL run.
+//
+// Canonical-move HALT REASONS (rename / dir-sync / parent-create / FailClosed / post-rename
+// verification / DONE-append failures in `execute_canonical_path_moves`) are NOT an S-25.09
+// deliverable (ADR-052 v1.25 item 11(f)(4)): they are carried by S-25.11's
+// `CANONICAL_MOVE_HALTED (exit 2): move to <target> halted: <reason>; ...` (AC-014/AC-015,
+// which also owns their pass-1 black-box vectors). The former
+// `..._F006_canonical_move_halt_reasons_are_stderr_lines_blackbox` test was REMOVED from this
+// story for that reason; do not re-add halt-reason vectors here.
 
 /// A COMMITTING record with a string `generation_id`, the matching generation dir and
 /// `intent_log_path`, and the given `pending_canonical_moves`; gate LOCKED.
@@ -860,12 +1262,141 @@ fn committing_fixture(c: &Coord, pending: Value) {
     std::fs::write(c.ms().join("gate-state.json"), "\"LOCKED\"").unwrap();
 }
 
-/// F-006 (a): `finish_committing_migration`'s best-effort gate-OPEN failure after the txn
-/// reached COMPLETED. The migration still completes (exit 0, ADR-052 item 11(d): "the
-/// gate-OPEN write after a SUCCESSFUL txn COMPLETED write stays best-effort"), but the
-/// failure is an advisory the Coordinators clause sends to stderr.
+/// The part of a run's outcome an advisory must NOT change: exit status, the
+/// `canonical_paths_count` of `completed.json`, and how many live-looking `txn-*.json`
+/// records are in each state.
+#[derive(Debug, PartialEq, Eq)]
+struct Verdict {
+    exit: Option<i32>,
+    completed_paths: Option<u64>,
+    txn_states: Vec<String>,
+}
+
+fn verdict_of(c: &Coord, out: &Output) -> Verdict {
+    let completed_paths = std::fs::read(c.ms().join("completed.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["canonical_paths_count"].as_u64());
+    let mut txn_states: Vec<String> = c
+        .txn_files()
+        .iter()
+        .filter(|n| n.ends_with(".json"))
+        .filter_map(|n| std::fs::read(c.ms().join(n)).ok())
+        .filter_map(|b| serde_json::from_slice::<Value>(&b).ok())
+        .map(|v| v["state"].as_str().unwrap_or("?").to_string())
+        .collect();
+    txn_states.sort();
+    Verdict {
+        exit: out.status.code(),
+        completed_paths,
+        txn_states,
+    }
+}
+
+/// Validate every stderr line of a run as an advisory/known line and pin ONE advisory line
+/// for `token`: `migrate-bc-index: <TOKEN> (advisory): <path>: <os error>; <clause>`, where
+/// `<path>` ends with `path_suffix`, `<os error>` is non-empty and `<clause>` contains every
+/// `clause_needles` entry and none of `clause_forbidden`. Returns the failures.
+fn check_advisory_line(
+    label: &str,
+    err: &str,
+    token: &str,
+    path_suffix: &str,
+    clause_needles: &[&str],
+    clause_forbidden: &[&str],
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let head = format!("migrate-bc-index: {token} (advisory): ");
+    let lines: Vec<&str> = err.lines().filter(|l| l.contains(token)).collect();
+    if lines.len() != 1 {
+        failures.push(format!(
+            "[{label}] expected exactly ONE `{head}...` stderr line; found {} in stderr {err:?}",
+            lines.len()
+        ));
+        return failures;
+    }
+    let line = lines[0];
+    let Some(rest) = line.strip_prefix(&head) else {
+        failures.push(format!(
+            "[{label}] the advisory line must start with `{head}`; got {line:?}"
+        ));
+        return failures;
+    };
+    let Some((path, after_path)) = rest.split_once(": ") else {
+        failures.push(format!(
+            "[{label}] shape is `<path>: <os error>; <clause>`; no `: ` after the path in {line:?}"
+        ));
+        return failures;
+    };
+    if !path.ends_with(path_suffix) {
+        failures.push(format!(
+            "[{label}] <path> must end with {path_suffix:?}; got {path:?} in {line:?}"
+        ));
+    }
+    let Some((os_error, clause)) = after_path.split_once("; ") else {
+        failures.push(format!(
+            "[{label}] shape is `<path>: <os error>; <clause>`; no `; ` clause separator in {line:?}"
+        ));
+        return failures;
+    };
+    if os_error.trim().is_empty() {
+        failures.push(format!(
+            "[{label}] <os error> must be non-empty in {line:?}"
+        ));
+    }
+    for needle in clause_needles {
+        if !clause.contains(needle) {
+            failures.push(format!(
+                "[{label}] the clause must say {needle:?}; clause {clause:?}"
+            ));
+        }
+    }
+    for bad in clause_forbidden {
+        if clause.contains(bad) {
+            failures.push(format!(
+                "[{label}] the clause must not claim {bad:?} (it would be false); clause {clause:?}"
+            ));
+        }
+    }
+    failures
+}
+
+/// "an exit-0 run prints nothing EXCEPT advisory lines" (v1.25 item 11(f)(3)): stdout empty
+/// and every stderr line is an `(advisory)` line.
+fn check_exit_0_only_advisories(label: &str, out: &Output) -> Vec<String> {
+    let mut failures = Vec::new();
+    let err = stderr_of(out);
+    if !out.stdout.is_empty() {
+        failures.push(format!(
+            "[{label}] stdout must stay empty; got {} bytes",
+            out.stdout.len()
+        ));
+    }
+    for l in err.lines().filter(|l| !l.contains("(advisory)")) {
+        failures.push(format!(
+            "[{label}] an exit-0 run may print only `(advisory)` lines; got {l:?}"
+        ));
+    }
+    failures
+}
+
+/// F-006 (a): `finish_committing_migration`'s best-effort gate-OPEN write FAILS after the txn
+/// reached COMPLETED. ADR-052 v1.25 item 11(f)(2): token `GATE_OPEN_RESET_FAILED`; the exit
+/// stays 0 and the clause is "the migration completed; the gate stays <state> until the next
+/// admission check or `migrate-bc-index` run reconciles it", which "must be true and must not
+/// claim OPEN".
+///
+/// The gate file is replaced by a directory (root-safe: every gate write fails). CONTROL: the
+/// identical fixture without the sabotage completes silently with the gate OPEN; the sabotaged
+/// run's verdict (exit, `completed.json`, txn states) must equal the control's.
 #[test]
-fn test_BC_1_18_013_F006_finish_committing_gate_open_failure_is_a_stderr_line_blackbox() {
+fn test_BC_1_18_013_F006_gate_open_reset_failed_advisory_exit_0_verdict_unchanged_blackbox() {
+    // CONTROL.
+    let control = Coord::new();
+    committing_fixture(&control, json!([]));
+    let control_out = control.run();
+    let control_verdict = verdict_of(&control, &control_out);
+
     let c = Coord::new();
     committing_fixture(&c, json!([]));
     let gate = c.ms().join("gate-state.json");
@@ -873,142 +1404,354 @@ fn test_BC_1_18_013_F006_finish_committing_gate_open_failure_is_a_stderr_line_bl
     std::fs::create_dir(&gate).unwrap();
     let out = c.run();
     let err = stderr_of(&out);
+
     let mut failures = Vec::new();
+    if control_out.status.code() != Some(0)
+        || !control_out.stdout.is_empty()
+        || !control_out.stderr.is_empty()
+        || std::fs::read_to_string(control.ms().join("gate-state.json"))
+            .map(|s| !s.contains("OPEN"))
+            .unwrap_or(true)
+    {
+        failures.push(format!(
+            "control: the unsabotaged fixture must complete silently (exit 0, empty stdout and \
+             stderr) with the gate OPEN; got {:?}, stderr {:?}",
+            control_out.status.code(),
+            stderr_of(&control_out)
+        ));
+    }
     if out.status.code() != Some(0) {
         failures.push(format!(
-            "setup/contract: the best-effort gate reset must not change the Completed outcome \
-             (exit 0); got {:?}, stderr {err:?}",
+            "the advisory must not change the exit (0); got {:?}, stderr {err:?}",
             out.status.code()
         ));
     }
-    if !c.ms().join("completed.json").is_file() {
-        failures.push("setup: the forward recovery must have written completed.json".into());
-    }
-    if !stderr_line_with(&err, &["gate-state.json"]) {
+    failures.extend(check_exit_0_only_advisories("GATE_OPEN_RESET_FAILED", &out));
+    failures.extend(check_advisory_line(
+        "GATE_OPEN_RESET_FAILED",
+        &err,
+        "GATE_OPEN_RESET_FAILED",
+        "gate-state.json",
+        &["gate stays", "reconcile"],
+        &["stays OPEN", "returned to OPEN", "is OPEN", "is now OPEN"],
+    ));
+    // The clause is TRUE: completed, txn COMPLETED, the gate is still not OPEN.
+    let v = verdict_of(&c, &out);
+    if v != control_verdict {
         failures.push(format!(
-            "Postcondition 10 Coordinators clause: the failed gate-OPEN write must be written \
-             to stderr as one `migrate-bc-index: `-prefixed line naming gate-state.json; \
-             stderr {err:?}"
+            "the advisory must leave the verdict unchanged; control {control_verdict:?}, got {v:?}"
         ));
     }
+    if !c.ms().join("gate-state.json").is_dir() {
+        failures.push("setup: the gate must still be the sabotaged directory".into());
+    }
     assert_no_failures(
-        "test_BC_1_18_013_F006_finish_committing_gate_open_failure_is_a_stderr_line_blackbox",
+        "test_BC_1_18_013_F006_gate_open_reset_failed_advisory_exit_0_verdict_unchanged_blackbox",
         failures,
     );
 }
 
-/// F-006 (b): `archive_terminal_txn_record`'s best-effort archive failure. A stale ABORTED
-/// record is archived before the fresh run; the archive name is occupied by a non-empty
-/// directory so the rename fails with a non-ENOENT error. The fresh run completes (exit 0)
-/// and the failure must reach stderr.
+/// F-006 (b): `archive_terminal_txn_record`'s best-effort rename FAILS with a non-ENOENT
+/// error. ADR-052 v1.25 item 11(f)(2): token `TERMINAL_TXN_ARCHIVE_FAILED`, same shape, clause
+/// "the stale terminal record stays in place and is skipped as non-live"; exit stays 0.
+///
+/// A stale ABORTED record is archived before the fresh run; the archive name is occupied by a
+/// non-empty directory so the rename fails (root-safe). CONTROL: without the blocker the
+/// record is archived silently and the fresh run completes; verdicts agree on exit and
+/// `completed.json`.
 #[test]
-fn test_BC_1_18_013_F006_archive_terminal_record_failure_is_a_stderr_line_blackbox() {
+fn test_BC_1_18_013_F006_terminal_txn_archive_failed_advisory_exit_0_verdict_unchanged_blackbox() {
+    let stale = |c: &Coord| {
+        std::fs::write(
+            c.ms().join("txn-act-old.json"),
+            serde_json::to_vec_pretty(&json!({"state": "ABORTED", "migration_id": MIGRATION_ID}))
+                .unwrap(),
+        )
+        .unwrap();
+    };
+    // CONTROL.
+    let control = Coord::new();
+    stale(&control);
+    let control_out = control.run();
+    let control_verdict = verdict_of(&control, &control_out);
+
     let c = Coord::new();
-    std::fs::write(
-        c.ms().join("txn-act-old.json"),
-        serde_json::to_vec_pretty(&json!({"state": "ABORTED", "migration_id": MIGRATION_ID}))
-            .unwrap(),
-    )
-    .unwrap();
+    stale(&c);
     let blocker = c.ms().join("txn-act-old.json.archived");
     std::fs::create_dir(&blocker).unwrap();
     std::fs::write(blocker.join("pin"), b"x").unwrap();
     let out = c.run();
     let err = stderr_of(&out);
+
     let mut failures = Vec::new();
-    if out.status.code() != Some(0) || !c.ms().join("completed.json").is_file() {
+    if control_out.status.code() != Some(0)
+        || !control_out.stdout.is_empty()
+        || !control_out.stderr.is_empty()
+        || !control.ms().join("txn-act-old.json.archived").is_file()
+    {
         failures.push(format!(
-            "setup/contract: the best-effort archive failure must not change the outcome (fresh \
-             run completes, exit 0); got {:?}, stderr {err:?}",
+            "control: the unblocked fixture must archive the stale record and complete silently \
+             (exit 0, empty stdout and stderr); got {:?}, stderr {:?}",
+            control_out.status.code(),
+            stderr_of(&control_out)
+        ));
+    }
+    if out.status.code() != Some(0) {
+        failures.push(format!(
+            "the advisory must not change the exit (0); got {:?}, stderr {err:?}",
             out.status.code()
         ));
     }
-    if !stderr_line_with(&err, &["txn-act-old.json"]) {
+    failures.extend(check_exit_0_only_advisories(
+        "TERMINAL_TXN_ARCHIVE_FAILED",
+        &out,
+    ));
+    failures.extend(check_advisory_line(
+        "TERMINAL_TXN_ARCHIVE_FAILED",
+        &err,
+        "TERMINAL_TXN_ARCHIVE_FAILED",
+        "txn-act-old.json",
+        &[
+            "stale terminal record stays in place",
+            "skipped as non-live",
+        ],
+        &[],
+    ));
+    // The clause is TRUE: the stale record is still in place; the run still completed.
+    if !c.ms().join("txn-act-old.json").is_file() || !blocker.join("pin").is_file() {
+        failures.push("the stale terminal record must stay in place beside the blocker".into());
+    }
+    let v = verdict_of(&c, &out);
+    if v.exit != control_verdict.exit || v.completed_paths != control_verdict.completed_paths {
         failures.push(format!(
-            "Postcondition 10 Coordinators clause: the failed archive of the stale terminal \
-             record must be written to stderr as one `migrate-bc-index: `-prefixed line naming \
-             txn-act-old.json; stderr {err:?}"
+            "the advisory must leave the verdict unchanged; control {control_verdict:?}, got {v:?}"
         ));
     }
     assert_no_failures(
-        "test_BC_1_18_013_F006_archive_terminal_record_failure_is_a_stderr_line_blackbox",
+        "test_BC_1_18_013_F006_terminal_txn_archive_failed_advisory_exit_0_verdict_unchanged_blackbox",
         failures,
     );
 }
 
-/// F-006 (c): `execute_canonical_path_moves` halt reasons. The final error only says
-/// "canonical path moves halted after N/M"; the REASON (which step failed, on which path) is
-/// tracing-only. Each halt reason must be a stderr line naming the halted move's path.
-#[test]
-fn test_BC_1_18_013_F006_canonical_move_halt_reasons_are_stderr_lines_blackbox() {
-    let mut failures = Vec::new();
+/// Make `dir/<file>` impossible to remove, independent of uid where the platform allows.
+/// macOS/BSD: the user-immutable flag (`chflags uchg`), which binds root too. Other unix: an
+/// unwritable parent directory (mode 0500), which does NOT bind root -- `None` is returned
+/// then so the caller skips. Restores everything on drop so the tempdir can be cleaned up.
+struct Unremovable {
+    dir: PathBuf,
+    file: PathBuf,
+    flagged: bool,
+}
 
-    // Halt 1: the rename fails (staging file missing => ENOENT).
-    {
-        let c = Coord::new();
-        let staging = c.ms().join("gen-gen-1/missing-staged.md");
-        let canonical = c
-            .root()
-            .join(".factory/specs/behavioral-contracts/shards/halt1.md");
-        committing_fixture(
-            &c,
-            json!([{
-                "staging_path": staging.to_string_lossy(),
-                "canonical_path": canonical.to_string_lossy(),
-            }]),
-        );
-        let out = c.run();
-        let err = stderr_of(&out);
-        if out.status.code() != Some(2) {
-            failures.push(format!(
-                "[rename failure] expected the halted-moves exit 2; got {:?}, stderr {err:?}",
-                out.status.code()
-            ));
+impl Unremovable {
+    #[cfg(unix)]
+    fn pin(dir: &Path) -> Option<Unremovable> {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.join("pinned.bin");
+        std::fs::write(&file, b"pinned").unwrap();
+        if cfg!(target_os = "macos") {
+            let st = Command::new("chflags")
+                .arg("uchg")
+                .arg(&file)
+                .stdin(Stdio::null())
+                .status()
+                .expect("chflags");
+            assert!(st.success(), "setup: chflags uchg failed");
+            return Some(Unremovable {
+                dir: dir.to_path_buf(),
+                file,
+                flagged: true,
+            });
         }
-        if !stderr_line_with(&err, &["missing-staged.md", "No such file"]) {
-            failures.push(format!(
-                "[rename failure] the halt reason (the failed rename of missing-staged.md and \
-                 its OS error) must be a `migrate-bc-index: `-prefixed stderr line; stderr {err:?}"
-            ));
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let probe = dir.join("probe");
+        if std::fs::write(&probe, b"x").is_ok() {
+            // Permission bits do not bind this uid (root): the scenario cannot be staged.
+            let _ = std::fs::remove_file(&probe);
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return None;
+        }
+        Some(Unremovable {
+            dir: dir.to_path_buf(),
+            file,
+            flagged: false,
+        })
+    }
+}
+
+impl Drop for Unremovable {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if self.flagged {
+                let _ = Command::new("chflags")
+                    .arg("nouchg")
+                    .arg(&self.file)
+                    .stdin(Stdio::null())
+                    .status();
+            } else {
+                let _ = std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o755));
+            }
         }
     }
+}
 
-    // Halt 2: the canonical parent directory cannot be created (a regular file occupies
-    // the parent path).
+/// A STAGING record (generation `gen-1`, its `gen-gen-1` directory present) whose staged
+/// generation is empty, so `resume_from_staging` rejects it and the coordinator discards the
+/// incomplete generation through `discard_incomplete_staging`.
+fn staging_fixture(c: &Coord) {
+    let mut rec = committing_record(json!([]));
+    rec["state"] = json!("STAGING");
+    std::fs::write(
+        c.ms().join("txn-act-1.json"),
+        serde_json::to_vec_pretty(&rec).unwrap(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(c.ms().join("gen-gen-1/shards")).unwrap();
+    std::fs::write(c.ms().join("gate-state.json"), "\"LOCKED\"").unwrap();
+}
+
+/// F-006 (d): `discard_incomplete_staging`'s generation-directory removal FAILS. ADR-052
+/// v1.25 item 11(f)(2): token `STAGING_DIR_REMOVE_FAILED`, same shape, clause "the orphaned
+/// generation directory is inert; the txn is ABORTED". The run's own failure (the resume
+/// rejection, exit and line) is the verdict and must be IDENTICAL to the no-fault CONTROL; the
+/// advisory is one additional line. The removal failure is injected with an unremovable file
+/// inside the generation directory (uid-independent on macOS via `chflags uchg`; elsewhere
+/// the test skips under uid 0).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_F006_staging_dir_remove_failed_advisory_verdict_unchanged_blackbox() {
+    // CONTROL: no pin -> the generation directory is removed, the txn is ABORTED, no advisory.
+    let control = Coord::new();
+    staging_fixture(&control);
+    let control_out = control.run();
+    let control_err = stderr_of(&control_out);
+    let control_verdict = verdict_of(&control, &control_out);
+
+    let c = Coord::new();
+    staging_fixture(&c);
+    let gen_dir = c.ms().join("gen-gen-1");
+    let Some(_pin) = Unremovable::pin(&gen_dir.join("shards")) else {
+        return;
+    };
+    let out = c.run();
+    let err = stderr_of(&out);
+
+    let mut failures = Vec::new();
+    if control_out.status.code() == Some(0)
+        || control.ms().join("gen-gen-1").exists()
+        || control_verdict.txn_states != ["ABORTED"]
+        || control_err.contains("(advisory)")
     {
-        let c = Coord::new();
-        let staging = c.ms().join("gen-gen-1/staged.md");
-        std::fs::create_dir_all(c.ms().join("gen-gen-1")).unwrap();
-        std::fs::write(&staging, b"staged").unwrap();
-        let blocker = c.root().join(".factory/specs/behavioral-contracts/shards");
-        std::fs::create_dir_all(blocker.parent().unwrap()).unwrap();
-        std::fs::write(&blocker, b"i am a file, not a directory").unwrap();
-        let canonical = blocker.join("halt2.md");
-        committing_fixture(
-            &c,
-            json!([{
-                "staging_path": staging.to_string_lossy(),
-                "canonical_path": canonical.to_string_lossy(),
-            }]),
-        );
-        let out = c.run();
-        let err = stderr_of(&out);
-        if out.status.code() != Some(2) {
-            failures.push(format!(
-                "[parent dir failure] expected the halted-moves exit 2; got {:?}, stderr {err:?}",
-                out.status.code()
-            ));
-        }
-        if !stderr_line_with(&err, &["shards"]) {
-            failures.push(format!(
-                "[parent dir failure] the halt reason (canonical parent dir `shards` cannot be \
-                 created) must be a `migrate-bc-index: `-prefixed stderr line naming the \
-                 parent; stderr {err:?}"
-            ));
-        }
+        failures.push(format!(
+            "control: the unpinned fixture must be rejected (non-zero exit), remove the \
+             generation directory, ABORT the txn and print no advisory; got exit {:?}, \
+             gen-gen-1 exists={}, states {:?}, stderr {control_err:?}",
+            control_out.status.code(),
+            control.ms().join("gen-gen-1").exists(),
+            control_verdict.txn_states
+        ));
+    }
+    if out.status.code() != control_out.status.code() {
+        failures.push(format!(
+            "the advisory must not change the exit; control {:?}, got {:?}, stderr {err:?}",
+            control_out.status.code(),
+            out.status.code()
+        ));
+    }
+    let non_advisory = |s: &str| -> Vec<String> {
+        s.lines()
+            .filter(|l| !l.contains("(advisory)"))
+            .map(str::to_string)
+            .collect()
+    };
+    if non_advisory(&err) != non_advisory(&control_err) {
+        failures.push(format!(
+            "apart from the advisory line the stderr must equal the control's (the run's own \
+             failure line is unchanged); control {control_err:?}, got {err:?}"
+        ));
+    }
+    failures.extend(check_advisory_line(
+        "STAGING_DIR_REMOVE_FAILED",
+        &err,
+        "STAGING_DIR_REMOVE_FAILED",
+        "gen-gen-1",
+        &["orphaned generation directory is inert", "ABORTED"],
+        &[],
+    ));
+    // The clause is TRUE: the directory is still there, inert, and the txn is ABORTED.
+    let v = verdict_of(&c, &out);
+    if !gen_dir.is_dir() || v.txn_states != ["ABORTED"] {
+        failures.push(format!(
+            "the clause must be true: gen-gen-1 must remain (exists={}) and the txn must be \
+             ABORTED; states {:?}",
+            gen_dir.is_dir(),
+            v.txn_states
+        ));
     }
     assert_no_failures(
-        "test_BC_1_18_013_F006_canonical_move_halt_reasons_are_stderr_lines_blackbox",
+        "test_BC_1_18_013_F006_staging_dir_remove_failed_advisory_verdict_unchanged_blackbox",
+        failures,
+    );
+}
+
+/// F-006 (e): `OVERSIZED_ROW_SUBSHARD`. Call-graph audit (ADR-052 v1.25 item 11(f)(2) makes
+/// the token conditional on reachability from a coordinator process): REACHABLE.
+/// `run_bc_index_migration_core` (fresh-run path) -> `chunk_subsystem_rows_into_sub_shards`
+/// -> `close_sub_shard_chunk`, whose `tracing::warn!` fires for a lone row whose sub-shard
+/// body exceeds `shard_cap_bytes`; a grep finds exactly one production call
+/// site of `chunk_subsystem_rows_into_sub_shards`. The migration still COMPLETES (the over-cap sub-shard is emitted as its own file,
+/// ADR-051 Decision 18), so this is a degraded success: exit 0 + an advisory line. The line
+/// names the offending row (`BC-1.01.001`, the sub-shard's range) so the operator can find
+/// it; the `<os error>` slot of the item-11(f) shape does not apply (no OS call failed), so
+/// only the token, the `(advisory)` marker, the row id and the exit-0 contract are pinned.
+#[test]
+fn test_BC_1_18_013_F006_oversized_row_subshard_advisory_exit_0_verdict_unchanged_blackbox() {
+    let big_title = "x".repeat(2_000);
+    let content = ORIGINAL_CONTENT.replace("Registry rejects unknown schema version", &big_title);
+    // CONTROL: the default cap -> no sub-split, silent success.
+    let control = Coord::new();
+    std::fs::write(control.canonical(), &content).unwrap();
+    let control_out = control.run();
+
+    let c = Coord::new();
+    std::fs::write(c.canonical(), &content).unwrap();
+    // A cap smaller than the single oversized row.
+    let small_cap = SHARD_CONFIG.replace("shard_cap_bytes = 100000", "shard_cap_bytes = 1500");
+    std::fs::write(c.root().join(".factory/shard-config.toml"), small_cap).unwrap();
+    let out = c.run();
+    let err = stderr_of(&out);
+    let v = verdict_of(&c, &out);
+
+    let mut failures = Vec::new();
+    if control_out.status.code() != Some(0) || !control_out.stderr.is_empty() {
+        failures.push(format!(
+            "control: the default-cap fixture must complete silently; got {:?}, stderr {:?}",
+            control_out.status.code(),
+            stderr_of(&control_out)
+        ));
+    }
+    if out.status.code() != Some(0) || v.completed_paths.is_none() {
+        failures.push(format!(
+            "setup/contract: an over-cap lone row is a degraded SUCCESS (exit 0, completed.json \
+             written); got {:?}, stderr {err:?}",
+            out.status.code()
+        ));
+    }
+    failures.extend(check_exit_0_only_advisories("OVERSIZED_ROW_SUBSHARD", &out));
+    let head = "migrate-bc-index: OVERSIZED_ROW_SUBSHARD (advisory): ";
+    let lines: Vec<&str> = err
+        .lines()
+        .filter(|l| l.contains("OVERSIZED_ROW_SUBSHARD"))
+        .collect();
+    if lines.len() != 1 || !lines[0].starts_with(head) || !lines[0].contains("BC-1.01.001") {
+        failures.push(format!(
+            "expected exactly ONE `{head}...BC-1.01.001...` line; stderr {err:?}"
+        ));
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_F006_oversized_row_subshard_advisory_exit_0_verdict_unchanged_blackbox",
         failures,
     );
 }
