@@ -12897,13 +12897,12 @@ pub enum BcIndexMigrationError {
     )]
     RecoveryRequiresReauthorization,
 
-    #[error(
-        "BC-INDEX migration: activation manifest expired or absent at STAGING resume \
-         (EXPIRY_ABORT, exit 1); the staged generation was discarded and the txn record moved \
-         to ABORTED (RecoveryDecision::CleanAbortExpiredStaging) so the writer-admission gate \
-         self-heals; no canonical paths were changed; re-activation required"
-    )]
-    ExpiryAbort,
+    /// `EXPIRY_ABORT` (exit 1; ADR-052 v1.23 item 8): ONE code and exit, two
+    /// arm-specific normative renderings. Constructed only AFTER the txn record
+    /// was rewritten ABORTED and THEN the gate written OPEN, so the past-tense
+    /// claims in the text are true when printed.
+    #[error("{}", .arm.detail())]
+    ExpiryAbort { arm: ExpiryAbortArm },
 
     #[error(
         "BC-INDEX migration: source files changed between the quiescence snapshot and the \
@@ -13037,6 +13036,36 @@ pub enum BcIndexMigrationError {
     ShardCapConfigUnavailable { detail: String },
 }
 
+/// The two normative renderings of `EXPIRY_ABORT` (ADR-052 v1.23 item 8).
+/// `recover()` returns one decision for "expired" and "absent" and no
+/// armed-manifest reader exists, so they share one arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpiryAbortArm {
+    ManifestExpiredOrAbsent,
+    NullGeneration,
+}
+
+impl ExpiryAbortArm {
+    /// The normative `Display` text (single line).
+    #[must_use]
+    pub fn detail(self) -> &'static str {
+        match self {
+            Self::ManifestExpiredOrAbsent => {
+                "BC-INDEX migration: activation manifest expired or absent at STAGING resume \
+                 (EXPIRY_ABORT, exit 1); the staged generation was discarded, the txn record is \
+                 ABORTED and the writer gate is OPEN; no canonical path changed; re-activation \
+                 required"
+            }
+            Self::NullGeneration => {
+                "BC-INDEX migration: pre-generation STAGING record discarded (EXPIRY_ABORT, \
+                 exit 1); the prior run crashed before any generation was created (generation_id \
+                 null), nothing was staged, the txn record is ABORTED and the writer gate is \
+                 OPEN; no canonical path changed; re-activation required"
+            }
+        }
+    }
+}
+
 /// S-25.08 Red-Gate STUB (ADR-052 v1.21 F-012): closed classification of an
 /// admission-side state-integrity failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13106,7 +13135,7 @@ impl BcIndexMigrationError {
             // `state_integrity`.
             BcIndexMigrationError::BinaryIntegrityFailure { .. }
             | BcIndexMigrationError::RecoveryRequiresReauthorization
-            | BcIndexMigrationError::ExpiryAbort
+            | BcIndexMigrationError::ExpiryAbort { .. }
             | BcIndexMigrationError::FingerprintMismatchAbort
             | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
             | BcIndexMigrationError::DrainTimeoutAbort
@@ -13128,7 +13157,7 @@ impl BcIndexMigrationError {
     /// variant here is exit 2.
     pub fn process_exit_code(&self) -> i32 {
         match self {
-            BcIndexMigrationError::ExpiryAbort => 1,
+            BcIndexMigrationError::ExpiryAbort { .. } => 1,
             _ => 2,
         }
     }
@@ -13749,97 +13778,141 @@ fn classify_txn_records(
 /// while one is in flight) -- finding more than one is a genuine integrity
 /// violation, surfaced fail-loud rather than silently picking one.
 pub fn read_active_txn_record(
-    fs: &impl Fs,
-    _migration_state_dir: &Path,
+    _fs: &impl Fs,
+    migration_state_dir: &Path,
 ) -> Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
-    let records = read_all_txn_records(fs, _migration_state_dir)?;
-    let (live, terminal) = classify_txn_records(&records);
-    match live.len() {
-        0 => Ok(terminal.into_iter().next().cloned()),
-        1 => Ok(live.into_iter().next().cloned()),
-        n => Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!(
-                "found {n} coexisting LIVE (STAGING/COMMITTING) txn records in {} -- \
-                 Precondition 6(b)'s writer-exclusion invariant requires at most one active \
-                 migration in flight at a time",
-                _migration_state_dir.display()
-            ),
-        }),
+    // Tier 0 read (the SAME reader admission uses), then the strict-presence
+    // typed decode of ONLY the selected record (ADR-052 v1.23 items 3-4).
+    let files = admission::read_txn_files(migration_state_dir)?;
+    let chosen = match admission::select_live_txn(&files)? {
+        Some(live) => Some(live),
+        None => files.iter().find(|f| !f.is_live()),
+    };
+    chosen.map(decode_txn_record_strict).transpose()
+}
+
+/// The `BcIndexMigrationTxnRecord` keys that MUST be present in a raw txn
+/// object for the strict-presence typed decode (`Option` fields included: they
+/// must be present, JSON `null` allowed). `migration_id` is a Tier 0
+/// discriminator, not a record field.
+const TXN_RECORD_REQUIRED_KEYS: [&str; 11] = [
+    "txn_id",
+    "activation_id",
+    "fencing_generation",
+    "state",
+    "generation_id",
+    "source_sha256",
+    "source_body_row_sha256",
+    "intent_log_path",
+    "pending_canonical_moves",
+    "created_at",
+    "updated_at",
+];
+
+fn txn_record_malformed(path: &Path, detail: &str) -> BcIndexMigrationError {
+    BcIndexMigrationError::AdmissionStateIntegrity {
+        kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+        detail: format!(
+            "{}: {detail}",
+            admission::sanitize_diagnostic(&path.display().to_string(), 256)
+        ),
     }
 }
 
-/// Gather EVERY `txn-*.json` record present in `migration_state_dir`,
-/// parsed but otherwise unfiltered/unclassified — the raw slice
-/// [`recover`] itself requires as its own primary input (its exhaustiveness
-/// argument depends on seeing the FULL set, live and terminal alike, in one
-/// call — see [`recover`]'s own doc comment). Shared by
-/// [`read_active_txn_record`] (which additionally applies its own
-/// live-preferred-over-terminal selection on top of this) and by
-/// [`run_bc_index_migration`]'s `recover()`-dispatch prologue, so the two
-/// call sites can never drift on what "enumerate every txn record on disk"
-/// means (TD-VSDD-060).
-fn read_all_txn_records(
-    fs: &impl Fs,
-    migration_state_dir: &Path,
-) -> Result<Vec<BcIndexMigrationTxnRecord>, BcIndexMigrationError> {
-    // Directory-listing enumeration deliberately stays a thin,
-    // production-only `std::fs::read_dir` scan, NOT part of the `Fs` seam
-    // (OBL-1 design §1.2's own exclusion: "no generic directory-listing op
-    // beyond what exists/read need" — enumerating a glob is not itself a
-    // crash-recovery decision input, only the per-candidate CONTENT reads
-    // below are). This function gathers a `Vec<PathBuf>` and calls
-    // `Fs::read` per candidate, exactly as the design directs.
-    let entries = match std::fs::read_dir(migration_state_dir) {
-        Ok(entries) => entries,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(BcIndexMigrationError::Io {
-                path: migration_state_dir.to_path_buf(),
-                source,
-            });
-        }
+/// Strict-presence typed decode (ADR-052 v1.23 item 4; BC-1.18.011 Precondition
+/// 6(f)(iii)) of the ONE live (or selected) known record, from its raw object.
+/// EVERY key is required (an `Option` key must be present, `null` allowed) and a
+/// non-`Option` key may not be `null`; there is deliberately no
+/// `#[serde(default)]` on the txn fields, so nothing is ever defaulted and
+/// written back by [`write_txn_record`]. Any absent or ill-typed key is
+/// `AdmissionStateIntegrity { TxnRecordMalformed }`. The detail names only the
+/// closed key list and the serde error category, never record content.
+fn decode_txn_record_strict(
+    file: &admission::TxnFile,
+) -> Result<BcIndexMigrationTxnRecord, BcIndexMigrationError> {
+    let Some(object) = file.raw.as_object() else {
+        return Err(txn_record_malformed(&file.path, "not a JSON object"));
     };
-
-    let mut txn_paths: Vec<PathBuf> = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|source| BcIndexMigrationError::Io {
-            path: migration_state_dir.to_path_buf(),
-            source,
-        })?;
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
-        if name.starts_with("txn-") && name.ends_with(".json") {
-            txn_paths.push(entry.path());
-        }
+    let missing: Vec<&str> = TXN_RECORD_REQUIRED_KEYS
+        .iter()
+        .copied()
+        .filter(|k| !object.contains_key(*k))
+        .collect();
+    if !missing.is_empty() {
+        return Err(txn_record_malformed(
+            &file.path,
+            &format!("required key(s) absent: {}", missing.join(", ")),
+        ));
     }
-    // Deterministic ordering regardless of filesystem enumeration order —
-    // both this function's callers depend on it (terminal tie-breaking in
-    // `read_active_txn_record`; deterministic `Quarantine` reporting of
-    // `live.len()` in `recover()`'s dispatch).
-    txn_paths.sort();
-
-    let mut records: Vec<BcIndexMigrationTxnRecord> = Vec::new();
-    for path in &txn_paths {
-        let bytes = fs.read(path)?.ok_or_else(|| BcIndexMigrationError::Io {
-            path: path.clone(),
-            source: io::Error::new(
-                io::ErrorKind::NotFound,
-                "txn record disappeared between directory listing and read",
+    serde_json::from_value(file.raw.clone()).map_err(|e| {
+        txn_record_malformed(
+            &file.path,
+            &format!(
+                "a required key is ill-typed or null ({:?} error)",
+                e.classify()
             ),
-        })?;
-        let content = String::from_utf8(bytes).map_err(|e| BcIndexMigrationError::Io {
-            path: path.clone(),
-            source: io::Error::new(io::ErrorKind::InvalidData, e),
-        })?;
-        let record: BcIndexMigrationTxnRecord = serde_json::from_str(&content).map_err(|e| {
-            BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!("malformed txn record at {}: {e}", path.display()),
-            }
-        })?;
-        records.push(record);
-    }
+        )
+    })
+}
 
-    Ok(records)
+/// Planner-only projection of a raw txn object into the record shape
+/// [`recover`] consumes. `recover()` and its plan functions are unchanged
+/// (OBL-1 / VP-147); only the input adaptation lives in the shell. Only
+/// `state` and `generation_id` (already resolved from the raw tri-state) drive
+/// the decision; the remaining fields are echoed into tracing only and are
+/// best-effort here. This value is NEVER written to disk: the mutating arms
+/// re-decode the real record with [`decode_txn_record_strict`].
+fn planner_view(
+    file: &admission::TxnFile,
+    generation_id: Option<String>,
+) -> BcIndexMigrationTxnRecord {
+    let text = |key: &str| {
+        file.raw
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    BcIndexMigrationTxnRecord {
+        txn_id: text("txn_id"),
+        activation_id: text("activation_id"),
+        fencing_generation: file
+            .raw
+            .get("fencing_generation")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+        state: file.state,
+        generation_id,
+        source_sha256: None,
+        source_body_row_sha256: None,
+        intent_log_path: None,
+        pending_canonical_moves: Vec::new(),
+        created_at: text("created_at"),
+        updated_at: text("updated_at"),
+    }
+}
+
+/// Resolve the `generation_id` tri-state of the one live known record in the
+/// shell, BEFORE [`recover`] (ADR-052 v1.23 item 5; shared with admission Branch
+/// B). STAGING: key present + `null` => `None` (the null-generation discard),
+/// string => `Some`, absent / any other type => integrity failure with nothing
+/// mutated. COMMITTING must hold a string: null, absent or other => integrity
+/// failure (supersedes `Quarantine { CommittingWithoutGenerationId }`).
+fn resolve_live_generation_id(
+    file: &admission::TxnFile,
+) -> Result<Option<String>, BcIndexMigrationError> {
+    match (file.state, file.raw.get("generation_id")) {
+        (_, Some(serde_json::Value::String(id))) => Ok(Some(id.clone())),
+        (BcIndexMigrationTxnState::Staging, Some(serde_json::Value::Null)) => Ok(None),
+        (BcIndexMigrationTxnState::Staging, _) => Err(txn_record_malformed(
+            &file.path,
+            "generation_id is absent or not a JSON string/null",
+        )),
+        _ => Err(txn_record_malformed(
+            &file.path,
+            "generation_id of a COMMITTING record is absent or not a JSON string",
+        )),
+    }
 }
 
 /// Best-effort housekeeping: rename a stale terminal (COMPLETED/ABORTED)
@@ -13849,14 +13922,16 @@ fn read_all_txn_records(
 /// renamed, never deleted (audit trail retained), and a failure to archive
 /// is non-fatal -- it simply means this record is scanned (and correctly
 /// skipped, since it is never the LIVE selection) again next time.
-fn archive_terminal_txn_record(migration_state_dir: &Path, activation_id: &str) {
-    let path = migration_state_dir.join(format!("txn-{activation_id}.json"));
-    let archived_path = migration_state_dir.join(format!("txn-{activation_id}.json.archived"));
+fn archive_terminal_txn_record(path: &Path) {
+    // Derived from the FILE path, never from the record's `activation_id`
+    // field (ADR-052 v1.23): a terminal record is not required to carry one.
+    let mut archived_name = path.as_os_str().to_os_string();
+    archived_name.push(".archived");
+    let archived_path = PathBuf::from(archived_name);
     // `rename_with_retry` (TD-VSDD-060 sibling-site sweep, PR #842
     // Windows-CI transient-rename-denial fix) rather than a bare
     // `std::fs::rename`.
-    if let Err(source) =
-        last_amended_migrate::atomic_write::rename_with_retry(&path, &archived_path)
+    if let Err(source) = last_amended_migrate::atomic_write::rename_with_retry(path, &archived_path)
         && source.kind() != io::ErrorKind::NotFound
     {
         tracing::warn!(
@@ -15320,9 +15395,10 @@ pub fn resume_from_staging(
     _migration_state_dir: &Path,
 ) -> Result<(), BcIndexMigrationError> {
     let generation_id = _txn_record.generation_id.as_deref().ok_or_else(|| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: "resume_from_staging: STAGING txn record has no generation_id -- \
-                           cannot locate the staged generation to re-verify"
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: "resume_from_staging: STAGING txn record has no generation_id -- cannot \
+                     locate the staged generation to re-verify"
                 .to_string(),
         }
     })?;
@@ -15955,26 +16031,21 @@ fn finish_committing_migration(
     })
 }
 
-/// [`run_bc_index_migration`]'s `recover()`-dispatch prologue clones the
-/// single live txn record (if any) BEFORE calling [`recover`], since
-/// several [`RecoveryDecision`] arms need an owned, mutable
-/// [`BcIndexMigrationTxnRecord`] to drive `resume_from_staging`/
-/// `discard_incomplete_staging`/`finish_committing_migration`. Those arms
-/// (`DiscardPreGeneration`, `CleanAbortExpiredStaging`, `ResumeFromStaging`,
-/// `ForwardRecovery`) only ever fire when `recover()`'s own classification
-/// found exactly one live record — this helper turns "that record must
-/// therefore be present" into a fail-closed `BinaryIntegrityFailure` rather
-/// than an `unwrap()`/`expect()`, so a future refactor that decouples the
-/// two call sites fails loud instead of panicking.
-fn require_live_txn(
-    live_txn: Option<BcIndexMigrationTxnRecord>,
+/// The `recover()` arms that mutate (`DiscardPreGeneration`,
+/// `CleanAbortExpiredStaging`, `ResumeFromStaging`, `ForwardRecovery`) only ever
+/// fire when exactly one live known record was read. This helper turns "that
+/// record must therefore be present" into a fail-closed
+/// `BinaryIntegrityFailure` rather than an `unwrap()`/`expect()`, so a future
+/// refactor that decouples the two sites fails loud instead of panicking.
+fn require_live_file<'a>(
+    live_file: Option<&'a admission::TxnFile>,
     decision_arm: &str,
-) -> Result<BcIndexMigrationTxnRecord, BcIndexMigrationError> {
-    live_txn.ok_or_else(|| BcIndexMigrationError::BinaryIntegrityFailure {
+) -> Result<&'a admission::TxnFile, BcIndexMigrationError> {
+    live_file.ok_or_else(|| BcIndexMigrationError::BinaryIntegrityFailure {
         message: format!(
             "recover() returned RecoveryDecision::{decision_arm}, which is only reachable when \
-             classify_txn_records found exactly one live txn record, but none was found -- \
-             internal invariant violated"
+             exactly one live txn record was read, but none was found -- internal invariant \
+             violated"
         ),
     })
 }
@@ -16120,52 +16191,70 @@ fn run_bc_index_migration_core(
     })?;
 
     // Resume path: `recover()` (OBL-1 §2) is the SINGLE recovery-decision
-    // authority — no parallel ad hoc `match txn.state { .. }` discriminator
-    // exists alongside it. Gather every input `recover()`'s exhaustiveness
-    // argument depends on seeing simultaneously (the FULL txn-record slice,
-    // never a first-found/short-circuited scan) up front.
-    let all_txn_records = read_all_txn_records(&fs, &migration_state_dir)?;
-    // At most one LIVE (STAGING/COMMITTING) record can legitimately exist
-    // (Precondition 6(b)); `recover()` itself fails closed via
-    // `QuarantineReason::MultipleLiveTxnRecords` if that invariant is ever
-    // violated, so cloning `.first()` here is safe -- when `recover()`
-    // returns a live-txn-derived decision, exactly this record is the one
-    // it derived it from.
-    let live_txn: Option<BcIndexMigrationTxnRecord> = {
-        let (live, _terminal) = classify_txn_records(&all_txn_records);
-        live.first().map(|t| (*t).clone())
-    };
-    let gen_dir_exists = live_txn
-        .as_ref()
-        .and_then(|t| t.generation_id.as_deref())
+    // authority -- no parallel ad hoc `match txn.state { .. }` discriminator
+    // exists alongside it. The txn records are read with the SAME Tier 0 raw
+    // reader admission uses (ADR-052 v1.23 "Migration binaries -- recovery and
+    // finalize legs" item 3): ascending filename, first failure wins, UTF-8
+    // failure included; NO record is deserialized into
+    // `BcIndexMigrationTxnRecord` at read time.
+    let txn_files = admission::read_txn_files(&migration_state_dir)?;
+    let live_file = admission::select_live_txn(&txn_files)?;
+    // A live record of another migration (`backfill-append-logs`) or with
+    // `migration_id` not in K keeps foreign precedence: refused, no Tier 1 field
+    // read, nothing mutated.
+    if let Some(live) = live_file
+        && live.migration_id() != admission::MIGRATION_ID_B2
+    {
+        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
+            message: "another migration coordinator already holds the exclusive migration lock"
+                .to_string(),
+        });
+    }
+    // Tier 1 `generation_id` tri-state, resolved here in the shell BEFORE the
+    // planner (item 5), so `recover()` and the VP-147/OBL-1 proofs are unchanged.
+    let live_generation_id = live_file
+        .map(resolve_live_generation_id)
+        .transpose()?
+        .flatten();
+    // Planner input: this migration's records only (a foreign terminal record is
+    // never read for a Tier 1 field and never archived), sorted ascending.
+    let terminal_files: Vec<&admission::TxnFile> = txn_files
+        .iter()
+        .filter(|f| !f.is_live() && f.migration_id() == admission::MIGRATION_ID_B2)
+        .collect();
+    let planner_records: Vec<BcIndexMigrationTxnRecord> = txn_files
+        .iter()
+        .filter(|f| f.migration_id() == admission::MIGRATION_ID_B2)
+        .map(|f| {
+            planner_view(
+                f,
+                if f.is_live() {
+                    live_generation_id.clone()
+                } else {
+                    None
+                },
+            )
+        })
+        .collect();
+    let gen_dir_exists = live_generation_id
+        .as_deref()
         .is_some_and(|gid| fs.exists(&migration_state_dir.join(format!("gen-{gid}"))));
     // OBL-1 §4/§0.2: no armed-activation-manifest system (ADR-052 §Decision
     // 4e/7c's durable, independently timestamped authorization artifact) is
     // implemented anywhere in this codebase yet -- see `ManifestStatus`'s
     // own doc comment, which names this a genuine gap in the wider
-    // migration system, deliberately not silently fabricated. Building that
-    // reader is explicitly out of this refactor's scope (activation-
-    // boundary concern, not a resume-dispatch concern). Before this
-    // refactor, `run_bc_index_migration`'s ad hoc STAGING/COMMITTING resume
-    // match consulted no manifest concept at all and always attempted
-    // forward progress unconditionally on a live txn record; passing
-    // `StillValid` here is the honest "no manifest-based authorization gate
-    // exists to contradict resuming" reading of that same absence (never
-    // "a real manifest was read and found valid") and is what preserves
-    // that pre-`recover()` behavior exactly, so wiring `recover()` in does
-    // not regress STAGING/COMMITTING resume into `ExpiryAbort`/
-    // `RecoveryRequiresReauthorization` for every caller merely because no
-    // manifest reader exists. Once a real reader is built, this becomes its
-    // call site.
+    // migration system, deliberately not silently fabricated. Passing
+    // `StillValid` is the honest "no manifest-based authorization gate exists
+    // to contradict resuming" reading of that same absence (never "a real
+    // manifest was read and found valid"); once a real reader is built, this
+    // becomes its call site.
     let manifest_status = ManifestStatus::StillValid;
     // `completed.json`'s presence was already checked (Branch 2, above) and
-    // this call holds the exclusive migration lock, so a concurrent writer
-    // cannot have created it since -- `None` is the honest current read,
-    // not an unchecked assumption. `current_pointer` is `None` per
-    // `recover()`'s own doc comment: it is accepted for future extension
-    // but not independently consulted by today's classification.
+    // this call holds the exclusive migration lock, so `None` is the honest
+    // current read. `current_pointer` is `None` per `recover()`'s own doc
+    // comment.
     let decision = recover(
-        &all_txn_records,
+        &planner_records,
         None,
         None,
         gen_dir_exists,
@@ -16182,28 +16271,34 @@ fn run_bc_index_migration_core(
             // relying on the caller having already checked.
             return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
         }
-        RecoveryDecision::AbortedTerminal { activation_id } => {
+        RecoveryDecision::AbortedTerminal { .. } => {
             // Fall through to a fresh run below. F-C5-P2-001 follow-on:
             // archive this stale terminal record first so it stops
-            // accumulating in future read_active_txn_record scans.
-            archive_terminal_txn_record(&migration_state_dir, &activation_id);
+            // accumulating in future read_active_txn_record scans. The
+            // planner picked `terminal.first()` of `planner_records`; that is
+            // `terminal_files.first()` (same order, same filter), and the
+            // archive path is derived from the FILE path, not `activation_id`.
+            if let Some(terminal) = terminal_files.first() {
+                archive_terminal_txn_record(&terminal.path);
+            }
         }
         RecoveryDecision::DiscardPreGeneration { activation_id } => {
             tracing::debug!(
                 target: "bc_1_18_011_migration",
                 activation_id = %activation_id,
                 "recover(): DiscardPreGeneration -- STAGING txn crashed before a generation_id \
-                 was ever assigned; nothing durable was published, discarding and restarting"
+                 was ever assigned (generation_id is JSON null); nothing durable was published, \
+                 discarding through the shared abort_null_generation_txn primitive"
             );
-            let mut txn = require_live_txn(live_txn, "DiscardPreGeneration")?;
-            // Best-effort, per the established `let _ =` pattern this
-            // function already uses for its other abort-path txn-record
-            // writes -- the descriptive error below is always what's
-            // surfaced to the caller, mirroring the pre-`recover()`
-            // behavior for this same condition.
-            let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: "resumed STAGING txn record has no generation_id".to_string(),
+            let live = require_live_file(live_file, "DiscardPreGeneration")?;
+            // ONE shared raw-object primitive (ADR-052 v1.23 item 5): the same
+            // record is discarded by admission Branch B and by this coordinator
+            // or by neither. ABORTED + abort_reason, THEN gate OPEN. A failure
+            // here is surfaced (no best-effort swallow): exit 1 is claimed only
+            // when the discard actually landed.
+            admission::abort_null_generation_txn(&migration_state_dir, &live.path, &live.raw)?;
+            return Err(BcIndexMigrationError::ExpiryAbort {
+                arm: ExpiryAbortArm::NullGeneration,
             });
         }
         RecoveryDecision::CleanAbortExpiredStaging {
@@ -16217,9 +16312,18 @@ fn run_bc_index_migration_core(
                 "recover(): CleanAbortExpiredStaging -- activation manifest expired or absent at \
                  STAGING resume; discarding the staged generation and requiring re-activation"
             );
-            let mut txn = require_live_txn(live_txn, "CleanAbortExpiredStaging")?;
-            let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-            return Err(BcIndexMigrationError::ExpiryAbort);
+            let mut txn = decode_txn_record_strict(require_live_file(
+                live_file,
+                "CleanAbortExpiredStaging",
+            )?)?;
+            // ABORTED first, THEN gate OPEN; a failure of either is that
+            // write's own error (exit 2), never EXPIRY_ABORT (ADR-052 v1.23
+            // item 8(b): the printed claims must be true).
+            discard_incomplete_staging(&fs, &migration_state_dir, &mut txn)?;
+            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open)?;
+            return Err(BcIndexMigrationError::ExpiryAbort {
+                arm: ExpiryAbortArm::ManifestExpiredOrAbsent,
+            });
         }
         RecoveryDecision::ResumeFromStaging {
             activation_id,
@@ -16231,7 +16335,8 @@ fn run_bc_index_migration_core(
                 generation_id = %generation_id,
                 "recover(): ResumeFromStaging"
             );
-            let mut txn = require_live_txn(live_txn, "ResumeFromStaging")?;
+            let mut txn =
+                decode_txn_record_strict(require_live_file(live_file, "ResumeFromStaging")?)?;
 
             // SEC-001 v3 FIX (fresh-eyes pr-reviewer finding on PR #842's
             // v2 redesign): a PRIOR (crashed) invocation -- either an
@@ -16474,7 +16579,8 @@ fn run_bc_index_migration_core(
                 pending_moves = pending.len(),
                 "recover(): ForwardRecovery"
             );
-            let mut txn = require_live_txn(live_txn, "ForwardRecovery")?;
+            let mut txn =
+                decode_txn_record_strict(require_live_file(live_file, "ForwardRecovery")?)?;
             return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
         }
         RecoveryDecision::RequiresReauthorization { activation_id } => {
@@ -16496,8 +16602,28 @@ fn run_bc_index_migration_core(
             // The safety-net arm: physical/structural state contradicts
             // what the txn-record state implies it must be. NEVER
             // blind-overwrite, NEVER fail-open -- nothing is touched.
-            return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-                message: format!("recover(): quarantined -- {reason:?}"),
+            return Err(match reason {
+                // Txn-shape problems are record-integrity failures
+                // (MIGRATION_STATE_INTEGRITY_FAILURE), not the digest code
+                // (ADR-052 v1.23 items 1 and 5). Both are pre-empted by the
+                // shell above; mapped here as defence in depth.
+                QuarantineReason::MultipleLiveTxnRecords { count } => {
+                    BcIndexMigrationError::AdmissionStateIntegrity {
+                        kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
+                        detail: format!("found {count} coexisting LIVE txn records"),
+                    }
+                }
+                QuarantineReason::CommittingWithoutGenerationId { .. } => {
+                    BcIndexMigrationError::AdmissionStateIntegrity {
+                        kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+                        detail: "generation_id of a COMMITTING record is absent or not a JSON \
+                                 string"
+                            .to_string(),
+                    }
+                }
+                other => BcIndexMigrationError::BinaryIntegrityFailure {
+                    message: format!("recover(): quarantined -- {other:?}"),
+                },
             });
         }
     }

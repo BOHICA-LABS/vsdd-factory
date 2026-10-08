@@ -1364,16 +1364,16 @@ fn terminal_record_file_name(migration_id: &str) -> Option<&'static str> {
 /// does not model), its parsed `state`, and the effective `migration_id`.
 /// Every other field is Tier 1 and is read lazily from `raw` by the consuming
 /// branch.
-struct TxnFile {
-    path: PathBuf,
-    raw: serde_json::Value,
-    state: BcIndexMigrationTxnState,
+pub(super) struct TxnFile {
+    pub(super) path: PathBuf,
+    pub(super) raw: serde_json::Value,
+    pub(super) state: BcIndexMigrationTxnState,
     /// Absent reads as [`MIGRATION_ID_B2`]; a present non-string is rejected at read.
-    migration_id: String,
+    pub(super) migration_id: String,
 }
 
 impl TxnFile {
-    fn migration_id(&self) -> &str {
+    pub(super) fn migration_id(&self) -> &str {
         &self.migration_id
     }
 
@@ -1385,12 +1385,34 @@ impl TxnFile {
             .unwrap_or("unknown")
     }
 
-    fn is_live(&self) -> bool {
+    pub(super) fn is_live(&self) -> bool {
         matches!(
             self.state,
             BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing
         )
     }
+}
+
+/// The single live (STAGING/COMMITTING) txn among `txns`, if any. At most one may
+/// exist across both migrations; more is a genuine integrity violation surfaced
+/// fail-loud (`MultipleLiveTxns`) rather than silently picking one. Shared by
+/// admission and the migration coordinators (ADR-052 v1.23: one record
+/// interpretation, two surfaces).
+pub(super) fn select_live_txn(txns: &[TxnFile]) -> Result<Option<&TxnFile>, BcIndexMigrationError> {
+    let mut live = txns.iter().filter(|t| t.is_live());
+    let first = live.next();
+    if live.next().is_some() {
+        let count = txns.iter().filter(|t| t.is_live()).count();
+        return Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
+            detail: format!(
+                "found {count} coexisting LIVE (STAGING/COMMITTING) txn records -- the \
+                 writer-exclusion invariant requires at most one active migration in flight \
+                 at a time across both governed migrations"
+            ),
+        });
+    }
+    Ok(first)
 }
 
 /// A consistent read of the shared admission state (gate + every txn record).
@@ -1410,20 +1432,7 @@ impl AdmissionSnapshot {
     /// across both migrations; more is a genuine integrity violation surfaced
     /// fail-loud rather than silently picking one.
     fn live_txn(&self) -> Result<Option<&TxnFile>, BcIndexMigrationError> {
-        let mut live = self.txns.iter().filter(|t| t.is_live());
-        let first = live.next();
-        if live.next().is_some() {
-            let count = self.txns.iter().filter(|t| t.is_live()).count();
-            return Err(BcIndexMigrationError::AdmissionStateIntegrity {
-                kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
-                detail: format!(
-                    "found {count} coexisting LIVE (STAGING/COMMITTING) txn records -- the \
-                     writer-exclusion invariant requires at most one active migration in flight \
-                     at a time across both governed migrations"
-                ),
-            });
-        }
-        Ok(first)
+        select_live_txn(&self.txns)
     }
 
     /// Dual check: gate OPEN AND no live txn (ADR-052 §5a step 4/5).
@@ -1436,7 +1445,9 @@ impl AdmissionSnapshot {
 }
 
 /// Parse every `txn-*.json` in `migration_state_dir` (sorted, deterministic).
-fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMigrationError> {
+pub(super) fn read_txn_files(
+    migration_state_dir: &Path,
+) -> Result<Vec<TxnFile>, BcIndexMigrationError> {
     let entries = match std::fs::read_dir(migration_state_dir) {
         Ok(entries) => entries,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

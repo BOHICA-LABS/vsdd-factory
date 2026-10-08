@@ -1105,7 +1105,13 @@ fn test_BC_1_18_011_EC061_run_bc_index_migration_idempotent_noop_when_completed_
 
 #[test]
 fn test_BC_1_18_011_process_exit_code_expiry_abort_maps_to_exit_1() {
-    assert_eq!(BcIndexMigrationError::ExpiryAbort.process_exit_code(), 1);
+    assert_eq!(
+        BcIndexMigrationError::ExpiryAbort {
+            arm: factory_dispatcher::shard_manager::ExpiryAbortArm::ManifestExpiredOrAbsent
+        }
+        .process_exit_code(),
+        1
+    );
 }
 
 #[test]

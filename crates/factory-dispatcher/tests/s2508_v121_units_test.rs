@@ -325,7 +325,7 @@ fn expected_cause(e: &BcIndexMigrationError) -> AdmissionFailureCause {
         }
         BcIndexMigrationError::BinaryIntegrityFailure { .. }
         | BcIndexMigrationError::RecoveryRequiresReauthorization
-        | BcIndexMigrationError::ExpiryAbort
+        | BcIndexMigrationError::ExpiryAbort { .. }
         | BcIndexMigrationError::FingerprintMismatchAbort
         | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
         | BcIndexMigrationError::DrainTimeoutAbort
