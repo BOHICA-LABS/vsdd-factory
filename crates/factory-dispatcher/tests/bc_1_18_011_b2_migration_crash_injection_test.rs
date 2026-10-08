@@ -280,6 +280,29 @@ fn bc_index_target(cwd: &Path) -> PathBuf {
     cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md")
 }
 
+/// The production session-project-root rule canonicalizes the project root
+/// (ADR-052 v1.23 §5a "Single anchoring rule": canonicalized
+/// `CLAUDE_PROJECT_DIR`), so on macOS a tempdir spelled `/var/...` is reported
+/// as `/private/var/...`. The target file may already be deleted, so
+/// canonicalize its nearest existing ancestor and re-append the remainder.
+fn session_anchored(path: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut cur = path;
+    while let Some(parent) = cur.parent() {
+        if let Ok(c) = parent.canonicalize() {
+            let mut out = c;
+            out.push(cur.file_name().expect("path has a file name"));
+            for t in tail.iter().rev() {
+                out.push(t);
+            }
+            return out;
+        }
+        tail.push(cur.file_name().expect("path has a file name").to_owned());
+        cur = parent;
+    }
+    path.to_path_buf()
+}
+
 fn migration_state_dir(cwd: &Path) -> PathBuf {
     cwd.join(".factory/migration-state")
 }
@@ -2631,7 +2654,8 @@ fn test_BC_1_18_011_SEC004_run_bc_index_migration_recheck_source_read_io_error_a
     );
     if let Err(BcIndexMigrationError::Io { path, .. }) = &outcome {
         assert_eq!(
-            path, &canonical_path,
+            path,
+            &session_anchored(&canonical_path),
             "SEC-004: the Io error must be the recheck's OWN read of the canonical source, not \
              some other path"
         );
@@ -2760,7 +2784,8 @@ fn test_BC_1_18_011_F1_resume_from_staging_recheck_source_read_io_error_aborts_a
     );
     if let Err(BcIndexMigrationError::Io { path, .. }) = &outcome {
         assert_eq!(
-            path, &canonical_path,
+            path,
+            &session_anchored(&canonical_path),
             "F1: the Io error must be the RESUME-PATH recheck's OWN read of the canonical \
              source, not some other path"
         );
