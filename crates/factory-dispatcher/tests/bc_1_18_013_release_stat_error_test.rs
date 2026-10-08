@@ -9,12 +9,17 @@
 //! EACCES / EIO / ELOOP too, so a stat error is silently treated as the
 //! no-op ENOENT path (the sibling of F-S2508-L3-009's `.factory` fix).
 //!
-//! OBSERVABILITY (honest scope): S-25.08 has no event channel (S-25.09 adds the
+//! OBSERVABILITY: S-25.08 has no event channel (S-25.09 adds the
 //! `migration.release_failed` advisory), and `reservation_release` returns `()`
-//! and only logs through `tracing`. The warn-vs-silent distinction is therefore
-//! NOT observable through the real binary in S-25.08 -- the black-box vector
-//! (`s2508_admission_blackbox_test.rs`, ELOOP `migration-state` symlink) pins only
-//! the externally visible half (exit 0, nothing deleted), which passes today.
+//! and only logs through `tracing`. The warn-vs-silent distinction is NOT
+//! observable through the real binary's exit code or filesystem effects -- the
+//! black-box vector (`s2508_admission_blackbox_test.rs`, ELOOP `migration-state`
+//! symlink) pins only that externally visible half (exit 0, nothing deleted),
+//! which passes today. It IS observable in-process: `s2508_diagnostics_test.rs`
+//! (F-S2508-L5-001) installs a capturing `tracing` subscriber around the `pub`
+//! `bc_index_migration_reservation_release` and asserts exactly one WARN
+//! (`error_kind` != NotFound, `path` naming migration-state) for a stat error and
+//! none for ENOENT.
 //! The error-path classification is pinned HERE against the factored helper the
 //! implementer must introduce in `executor.rs`:
 //!

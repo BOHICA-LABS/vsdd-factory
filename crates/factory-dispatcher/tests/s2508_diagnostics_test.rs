@@ -330,3 +330,95 @@ fn test_BC_1_18_013_PC6b_as_given_spelling_ignored_when_empty_or_not_absolute() 
         "lexical normalization only (collapse //, ., ..), no symlink resolution"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-S2508-L5-001 -- release-leg migration-state stat error: exactly one warn
+// ---------------------------------------------------------------------------
+
+fn completion_payload(event: &str) -> factory_dispatcher::payload::HookPayload {
+    let value = serde_json::json!({
+        "hook_event_name": event,
+        "tool_name": "Edit",
+        "session_id": "sess-l5-001",
+        "tool_use_id": "toolu_l5_001",
+        "tool_input": {},
+    });
+    serde_json::from_value(value).expect("completion envelope must deserialize")
+}
+
+fn release_warns(events: &[Fields]) -> Vec<&Fields> {
+    events
+        .iter()
+        .filter(|f| {
+            field(f, "target") == Some("bc_1_18_011_migration") && field(f, "level") == Some("WARN")
+        })
+        .collect()
+}
+
+/// BC-1.18.013 EC-021 / AC-011 (F-S2508-L4-001 / F-S2508-L5-001): a non-ENOENT
+/// stat error on `.factory/migration-state` (self-referential symlink => ELOOP
+/// for every uid) makes the release leg emit EXACTLY ONE non-fatal WARN on target
+/// `bc_1_18_011_migration`, carrying an `error_kind` that is not `NotFound` and a
+/// `path` naming `migration-state`; for both completion events. This is observable
+/// in-process via the capturing subscriber (`bc_index_migration_reservation_release`
+/// is `pub`).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L5_001_release_stat_error_emits_exactly_one_warn() {
+    for event in ["PostToolUse", "PostToolUseFailure"] {
+        let dir = tempfile::tempdir().unwrap();
+        let factory = dir.path().join(".factory");
+        std::fs::create_dir_all(&factory).unwrap();
+        std::os::unix::fs::symlink("migration-state", factory.join("migration-state")).unwrap();
+
+        let payload = completion_payload(event);
+        let ((), events) = captured(|| {
+            factory_dispatcher::executor::bc_index_migration_reservation_release(
+                &payload,
+                dir.path(),
+            );
+        });
+
+        let warns = release_warns(&events);
+        assert_eq!(
+            warns.len(),
+            1,
+            "{event}: a migration-state stat error must emit exactly one WARN, got {events:?}"
+        );
+        let kind = field(warns[0], "error_kind")
+            .unwrap_or_else(|| panic!("{event}: WARN must carry error_kind, got {:?}", warns[0]));
+        assert_ne!(
+            kind, "NotFound",
+            "{event}: error_kind must not be NotFound (ELOOP is not absence)"
+        );
+        let path = field(warns[0], "path")
+            .unwrap_or_else(|| panic!("{event}: WARN must carry path, got {:?}", warns[0]));
+        assert!(
+            path.contains("migration-state"),
+            "{event}: path field must name migration-state, got {path:?}"
+        );
+    }
+}
+
+/// ENOENT control: `.factory` exists but has no `migration-state` => genuinely
+/// absent, silent no-op (zero warns) for both completion events.
+#[test]
+fn test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn() {
+    for event in ["PostToolUse", "PostToolUseFailure"] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".factory")).unwrap();
+
+        let payload = completion_payload(event);
+        let ((), events) = captured(|| {
+            factory_dispatcher::executor::bc_index_migration_reservation_release(
+                &payload,
+                dir.path(),
+            );
+        });
+
+        assert!(
+            release_warns(&events).is_empty(),
+            "{event}: ENOENT migration-state must be a silent no-op, got {events:?}"
+        );
+    }
+}
