@@ -50,7 +50,7 @@
 //!
 //! `&impl Fs` is now threaded through the real migration call graph:
 //! `execute_canonical_path_moves`, `commit_current_generation_pointer`,
-//! `stage_new_generation`, `append_intent_log_record`, `read_intent_log`,
+//! `stage_new_generation`, `intent_log::read_log`, `intent_log::IntentLogWriter`,
 //! `read_active_txn_record`, `write_txn_record`,
 //! `append_intent_records_for_pending_moves`, `discard_incomplete_staging`,
 //! `finish_committing_migration`, `admit_or_block_bc_index_writer`,
@@ -200,26 +200,6 @@ pub trait Fs {
     /// failure here must never be treated as migration-correctness
     /// failure (ADR-052 §7c step 9: cleanup is optional housekeeping).
     fn remove(&self, path: &Path) -> Result<(), BcIndexMigrationError>;
-
-    /// Durably append `content` to `path` (creating it if absent) — the
-    /// intent log's own I/O pattern (ADR-052 §Decision 7b), which is
-    /// fundamentally an append-only WAL, not a whole-file replace. Added
-    /// alongside [`Fs::write_temp`]/[`Fs::fsync_file`] rather than modeled
-    /// as one of them: the OBL-1 design's own fault-injection boundary list
-    /// (research §6.3) names `append+fsync(intent, ...)` as ITS OWN
-    /// boundary, distinct from `write(temp) -> fsync(temp)`, so collapsing
-    /// it onto `write_temp` would both be semantically wrong (an append is
-    /// never a temp-then-rename publish) and would silently merge two
-    /// fault-injection boundaries the design treats as separate. Production
-    /// bundles the write+fsync into one call (mirroring the
-    /// `write_temp`/`fsync_file` granularity note above) — delegates to the
-    /// SAME `OpenOptions::append(true)` + `write_all` + `sync_all` sequence
-    /// [`super::append_intent_log_record`] already performed before this
-    /// seam existed. Model (Kani, formal-verifier's harness): appends to
-    /// the abstract `live` namespace's content for `path`'s `FileId`, not
-    /// yet `durable` until a harness-level promotion (mirrors
-    /// `write_temp`'s own live/durable split).
-    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError>;
 
     /// Durably append `content` to `path` on an `O_APPEND` handle in ONE
     /// `write_all`, create the file if absent, apply the platform FILE barrier
@@ -471,31 +451,6 @@ impl Fs for StdFs {
         }
     }
 
-    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
-        migration_failpoint!("migration_fs::append", path);
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|source| BcIndexMigrationError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        use std::io::Write as _;
-        file.write_all(content)
-            .map_err(|source| BcIndexMigrationError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        // WAL boundary (ADR-052 §Decision 7b step 2/5): fsync before
-        // returning, same discipline `write_temp`'s bundled durable-write
-        // primitive already provides for staging publishes.
-        file.sync_all().map_err(|source| BcIndexMigrationError::Io {
-            path: path.to_path_buf(),
-            source,
-        })
-    }
-
     fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError> {
         migration_failpoint!("migration_fs::append_durable", path);
         // `created` is decided ATOMICALLY by `create_new` (O_CREAT|O_EXCL),
@@ -665,8 +620,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("intent.log");
         let fs = StdFs;
-        fs.append(&path, b"first-").unwrap();
-        fs.append(&path, b"second").unwrap();
+        fs.append_durable(&path, b"first-").unwrap();
+        fs.append_durable(&path, b"second").unwrap();
         assert_eq!(fs.read(&path).unwrap(), Some(b"first-second".to_vec()));
     }
 }

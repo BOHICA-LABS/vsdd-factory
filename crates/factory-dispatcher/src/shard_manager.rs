@@ -12859,35 +12859,6 @@ pub struct BcIndexMigrationTxnRecord {
     pub updated_at: String,
 }
 
-/// One framed, checksummed record of the intent log
-/// (`.factory/migration-state/intent-<generation_uuid>.log`, ADR-052
-/// §Decision 7b). A torn record (truncated, checksum mismatch, missing
-/// terminator) MUST be treated as absent, never as a partial INTENT/DONE —
-/// enforced by the (stubbed) parser, not by this data type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntentLogRecordType {
-    Intent,
-    Done,
-    Aborted,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IntentLogRecord {
-    pub txn_id: String,
-    pub fencing_generation: u64,
-    pub record_type: IntentLogRecordType,
-    pub target_canonical: PathBuf,
-    pub staging_path: PathBuf,
-    pub expected_post_hash: String,
-    /// `None` represents the `missing` sentinel (target did not exist at
-    /// intent-write time).
-    pub expected_pre_state: Option<String>,
-    pub timestamp_utc: String,
-    /// SHA-256 of all the above fields concatenated — the record's own
-    /// tamper/torn-record checksum.
-    pub record_checksum: String,
-}
-
 /// The atomic pointer file `.factory/migration-state/CURRENT.json`
 /// (ADR-052 §Decision 7c step 6 — the sole commit-point for the whole
 /// multi-file migration).
@@ -15004,168 +14975,6 @@ pub fn drain_bc_index_writers(
 // expected-hash recovery.
 // ---------------------------------------------------------------------------
 
-/// Append one framed record to the intent log (append-only). Callers MUST
-/// `fsync` the underlying fd immediately after this call per the WAL
-/// boundary discipline (ADR-052 §Decision 7b step 2/step 5) — this
-/// function's own `todo!()` implementation will own that fsync call.
-/// Framed intent-log record boundary markers (ADR-052 §Decision 7b) — a
-/// plain, line-oriented `key=value` block between these two literal
-/// markers. A block whose closing marker is missing (truncated mid-write)
-/// is a torn record and MUST be discarded, never parsed as partial.
-const INTENT_LOG_RECORD_START: &str = "INTENT_LOG_RECORD_V1\n";
-const INTENT_LOG_RECORD_END: &str = "END_INTENT_LOG_RECORD\n";
-
-fn intent_log_record_type_str(record_type: IntentLogRecordType) -> &'static str {
-    match record_type {
-        IntentLogRecordType::Intent => "INTENT",
-        IntentLogRecordType::Done => "DONE",
-        IntentLogRecordType::Aborted => "ABORTED",
-    }
-}
-
-/// The exact byte sequence this record's `record_checksum` is computed
-/// over — shared by both `append_intent_log_record` (which computes the
-/// checksum to write) and `read_intent_log` (which recomputes it to
-/// validate a parsed record, detecting tampering/corruption beyond a
-/// simple missing-terminator tear). Takes a full [`IntentLogRecord`]
-/// reference (its own `record_checksum` field is NOT read) rather than
-/// eight positional fields.
-fn intent_log_checksum_input(record: &IntentLogRecord) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
-        record.txn_id,
-        record.fencing_generation,
-        intent_log_record_type_str(record.record_type),
-        record.target_canonical.display(),
-        record.staging_path.display(),
-        record.expected_post_hash,
-        record.expected_pre_state.as_deref().unwrap_or("MISSING"),
-        record.timestamp_utc,
-    )
-}
-
-pub fn append_intent_log_record(
-    fs: &impl Fs,
-    _intent_log_path: &Path,
-    _record: &IntentLogRecord,
-) -> Result<(), BcIndexMigrationError> {
-    let checksum = sha256_hex(intent_log_checksum_input(_record).as_bytes());
-
-    let mut block = String::new();
-    block.push_str(INTENT_LOG_RECORD_START);
-    block.push_str(&format!("txn_id={}\n", _record.txn_id));
-    block.push_str(&format!(
-        "fencing_generation={}\n",
-        _record.fencing_generation
-    ));
-    block.push_str(&format!(
-        "record_type={}\n",
-        intent_log_record_type_str(_record.record_type)
-    ));
-    block.push_str(&format!(
-        "target_canonical={}\n",
-        _record.target_canonical.display()
-    ));
-    block.push_str(&format!(
-        "staging_path={}\n",
-        _record.staging_path.display()
-    ));
-    block.push_str(&format!(
-        "expected_post_hash={}\n",
-        _record.expected_post_hash
-    ));
-    block.push_str(&format!(
-        "expected_pre_state={}\n",
-        _record.expected_pre_state.as_deref().unwrap_or("MISSING")
-    ));
-    block.push_str(&format!("timestamp_utc={}\n", _record.timestamp_utc));
-    block.push_str(&format!("record_checksum={checksum}\n"));
-    block.push_str(INTENT_LOG_RECORD_END);
-
-    // OBL-1 Fs-seam: `Fs::append` bundles the WAL boundary's
-    // open(append)+write+fsync sequence into one call (see its own doc
-    // comment) — routing through here makes `migration_fs::append`
-    // reachable as its own fault-injection boundary, distinct from
-    // `migration_fs::write_temp`.
-    fs.append(_intent_log_path, block.as_bytes())
-}
-
-fn parse_intent_log_block(body: &str) -> Option<IntentLogRecord> {
-    let mut fields: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-    for line in body.lines() {
-        if let Some((k, v)) = line.split_once('=') {
-            fields.insert(k, v);
-        }
-    }
-    let txn_id = (*fields.get("txn_id")?).to_string();
-    let fencing_generation = fields.get("fencing_generation")?.parse::<u64>().ok()?;
-    let record_type = match *fields.get("record_type")? {
-        "INTENT" => IntentLogRecordType::Intent,
-        "DONE" => IntentLogRecordType::Done,
-        "ABORTED" => IntentLogRecordType::Aborted,
-        _ => return None,
-    };
-    let target_canonical = PathBuf::from(*fields.get("target_canonical")?);
-    let staging_path = PathBuf::from(*fields.get("staging_path")?);
-    let expected_post_hash = (*fields.get("expected_post_hash")?).to_string();
-    let pre_state_raw = *fields.get("expected_pre_state")?;
-    let expected_pre_state = if pre_state_raw == "MISSING" {
-        None
-    } else {
-        Some(pre_state_raw.to_string())
-    };
-    let timestamp_utc = (*fields.get("timestamp_utc")?).to_string();
-    let record_checksum = (*fields.get("record_checksum")?).to_string();
-
-    let record = IntentLogRecord {
-        txn_id,
-        fencing_generation,
-        record_type,
-        target_canonical,
-        staging_path,
-        expected_post_hash,
-        expected_pre_state,
-        timestamp_utc,
-        record_checksum: record_checksum.clone(),
-    };
-    let expected_checksum = sha256_hex(intent_log_checksum_input(&record).as_bytes());
-    if expected_checksum != record_checksum {
-        // Corrupted/tampered record — treated identically to a torn one.
-        return None;
-    }
-
-    Some(record)
-}
-
-/// Parse the intent log, discarding any torn (truncated, checksum-
-/// mismatched, or unterminated) trailing record — a torn record MUST be
-/// treated as absent, never as a partial INTENT or DONE (ADR-052 §Decision
-/// 7b).
-pub fn read_intent_log(
-    fs: &impl Fs,
-    _intent_log_path: &Path,
-) -> Result<Vec<IntentLogRecord>, BcIndexMigrationError> {
-    let Some(bytes) = fs.read(_intent_log_path)? else {
-        return Ok(Vec::new());
-    };
-    let content = String::from_utf8(bytes).map_err(|e| BcIndexMigrationError::Io {
-        path: _intent_log_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::InvalidData, e),
-    })?;
-
-    let mut records = Vec::new();
-    for raw_block in content.split(INTENT_LOG_RECORD_START).skip(1) {
-        let Some(body) = raw_block.strip_suffix(INTENT_LOG_RECORD_END) else {
-            // Torn (truncated mid-write, missing terminator) -- discard.
-            continue;
-        };
-        if let Some(record) = parse_intent_log_block(body) {
-            records.push(record);
-        }
-    }
-    Ok(records)
-}
-
 /// The recovery decision for one target, per ADR-052 §Decision 7b's
 /// recovery decision table (all cases fail closed except the two
 /// explicitly marked safe).
@@ -15188,7 +14997,7 @@ pub enum IntentLogRecoveryDecision {
 pub fn decide_intent_log_recovery(
     _canonical_hash: Option<&str>,
     _staging_hash: Option<&str>,
-    _record: Option<&IntentLogRecord>,
+    _record: Option<&intent_log::IntentRecord>,
 ) -> IntentLogRecoveryDecision {
     let Some(record) = _record else {
         return IntentLogRecoveryDecision::FailClosed {
@@ -15618,9 +15427,9 @@ fn read_current_generation_pointer_if_present(
 /// renamed file at all (the ARIES WAL-ordering violation ADR-052 §7b's own
 /// ratified sequence already forbids).
 ///
-/// [`append_intent_log_record`] already calls `file.sync_all()` before
-/// returning (its own doc comment: "WAL boundary... fsync before
-/// returning"), so by the time THIS function returns `Ok(())`, every
+/// [`intent_log::IntentLogWriter::append_batch`] applies the platform file
+/// barrier (and, when it created the log, the parent-directory sync) before
+/// returning (ADR-054 Decision 1.9 step 5), so by the time THIS function returns `Ok(())`, every
 /// target's forward-recovery intent is durable on disk and
 /// [`decide_intent_log_recovery`] can safely classify a crash at ANY later
 /// point in the publication sequence — including before the pointer swap
@@ -15643,6 +15452,7 @@ fn append_intent_records_for_pending_moves(
     fencing_generation: u64,
     pending: &[PendingCanonicalMove],
 ) -> Result<(), BcIndexMigrationError> {
+    let mut records = Vec::with_capacity(pending.len());
     for mv in pending {
         let staging = PathBuf::from(&mv.staging_path);
         let canonical = PathBuf::from(&mv.canonical_path);
@@ -15660,25 +15470,39 @@ fn append_intent_records_for_pending_moves(
 
         let expected_pre_state = fs.read(&canonical)?.map(|bytes| sha256_hex(&bytes));
 
-        let record = IntentLogRecord {
+        records.push(intent_log::IntentRecord {
             txn_id: txn_id.to_string(),
             fencing_generation,
-            record_type: IntentLogRecordType::Intent,
+            record_type: intent_log::RecordType::Intent,
             target_canonical: canonical,
             staging_path: staging,
             expected_post_hash,
             expected_pre_state,
             timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            // Unused on write -- `append_intent_log_record` computes and
-            // writes its own checksum from the other fields (never trusts
-            // a caller-supplied one), matching the existing convention
-            // `execute_canonical_path_moves`'s own DONE-record construction
-            // below already uses (`record_checksum: String::new()`).
-            record_checksum: String::new(),
-        };
-        append_intent_log_record(fs, intent_log_path, &record)?;
+        });
     }
-    Ok(())
+
+    // ADR-054 Decision 1.9 step 2: open and repair the log under the held flock (a torn
+    // tail is durably truncated BEFORE the first append; mid-log corruption or an L1-L4
+    // violation is `IntentLogCorrupt` with nothing mutated).
+    let mut writer = intent_log::IntentLogWriter::open(fs, intent_log_path, txn_id)?;
+
+    // ADR-054 Decision 1.9 step 5 "Retry closure": a creating append whose directory sync
+    // failed leaves the log on disk, so this (re-run's) append reports `created == false`
+    // and the writer would never sync the log's directory entry. A log found already
+    // existing with no `DONE` (the pre-rename phase) therefore gets ONE directory sync here,
+    // BEFORE the INTENT batch; the first creation (the writer syncs via `created`) and the
+    // rename phase (a `DONE` is present) get none. A failure is an `Io` error that
+    // precedes the batch.
+    if writer.log_existed_at_open()
+        && !writer.holds_done_record()
+        && let Some(log_dir) = intent_log_path.parent()
+    {
+        fs.fsync_dir(log_dir)?;
+    }
+
+    // Validates EVERY record before any byte; ONE durable append for the whole batch.
+    writer.append_batch(&records)
 }
 
 /// ADR-052 §Decision 7c step 7 — execute the canonical path moves,
@@ -15711,11 +15535,31 @@ pub fn execute_canonical_path_moves(
     txn_id: &str,
     fencing_generation: u64,
 ) -> Result<u64, BcIndexMigrationError> {
-    let existing_intent_records = read_intent_log(fs, _intent_log_path)?;
+    // ADR-054 Decision 1.9 step 2: the shared writer reads the log through `read_log`
+    // (mid-log corruption / L1-L4 violation => `IntentLogCorrupt`, nothing mutated), durably
+    // truncates a torn tail before the first append, and keeps the records it read.
+    let mut writer = intent_log::IntentLogWriter::open(fs, _intent_log_path, txn_id)?;
+    let existing_intent_records: Vec<intent_log::IntentRecord> = writer.records().to_vec();
     let mut completed_count: u64 = 0;
     for mv in _pending {
         let staging = PathBuf::from(&mv.staging_path);
         let canonical = PathBuf::from(&mv.canonical_path);
+
+        // ADR-054 Decision 3 (v1.1 ruling): a `DONE` is only ever derived from an `INTENT`.
+        // A move with NO valid `INTENT` in the log FAILS CLOSED -- no rename, no `DONE`
+        // append -- and is carried by this call site's pre-existing non-success path (the
+        // count shortfall `finish_committing_migration` already rejects).
+        let Some(intent) = existing_intent_records.iter().rev().find(|r| {
+            r.target_canonical == canonical && r.record_type == intent_log::RecordType::Intent
+        }) else {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                canonical = %canonical.display(),
+                "execute_canonical_path_moves: no INTENT record for this target; failing \
+                 closed (no rename, no DONE)"
+            );
+            break;
+        };
 
         // F-C5-P2-002 forward-recovery check: the most recent intent-log
         // record for THIS target, if any, decides whether the move is
@@ -15818,8 +15662,8 @@ pub fn execute_canonical_path_moves(
         // durably completed, so `finish_committing_migration`'s
         // `completed_count < pending.len()` check surfaces a named
         // `BinaryIntegrityFailure` forward-recovery error to the caller.
-        let post_hash = match fs.read(&canonical) {
-            Ok(Some(bytes)) => sha256_hex(&bytes),
+        match fs.read(&canonical) {
+            Ok(Some(_)) => {}
             Ok(None) => {
                 tracing::warn!(
                     target: "bc_1_18_011_migration",
@@ -15841,17 +15685,21 @@ pub fn execute_canonical_path_moves(
                 );
                 break;
             }
-        };
-        let record = IntentLogRecord {
+        }
+        // AC-011 / ADR-054 Decision 3 B-2 item (c) copy rule: the `DONE` copies
+        // `target_canonical`, `staging_path`, `expected_post_hash` and `expected_pre_state`
+        // from the `INTENT` it completes (a mechanical field copy; the observed-hash
+        // COMPARISON and its halt are S-25.11's), with the live txn's id and the current
+        // fencing generation. This keeps the log self-consistent under the reader's L3.
+        let record = intent_log::IntentRecord {
             txn_id: txn_id.to_string(),
             fencing_generation,
-            record_type: IntentLogRecordType::Done,
-            target_canonical: canonical.clone(),
-            staging_path: staging.clone(),
-            expected_post_hash: post_hash,
-            expected_pre_state: None,
+            record_type: intent_log::RecordType::Done,
+            target_canonical: intent.target_canonical.clone(),
+            staging_path: intent.staging_path.clone(),
+            expected_post_hash: intent.expected_post_hash.clone(),
+            expected_pre_state: intent.expected_pre_state.clone(),
             timestamp_utc: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            record_checksum: String::new(),
         };
         // O-6: reconciled with the dir-sync-failure arm above -- the rename
         // itself already landed, but with NO durable DONE record for
@@ -15861,7 +15709,7 @@ pub fn execute_canonical_path_moves(
         // inconsistency with no principled justification: neither arm has
         // positive durable evidence of completion to hand the next
         // invocation).
-        if let Err(e) = append_intent_log_record(fs, _intent_log_path, &record) {
+        if let Err(e) = writer.append_batch(std::slice::from_ref(&record)) {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
                 error = %e,
@@ -16039,10 +15887,7 @@ fn recompute_pending_canonical_moves_from_staged_generation(
             continue;
         };
         let canonical_path = shards_canonical_root.join(filename);
-        pending_moves.push(PendingCanonicalMove {
-            staging_path: staging_path.to_string_lossy().into_owned(),
-            canonical_path: canonical_path.to_string_lossy().into_owned(),
-        });
+        pending_moves.push(planned_move(staging_path, &canonical_path)?);
     }
 
     // The staged lean BC-INDEX.md body lives directly under `gen_dir`
@@ -16077,16 +15922,81 @@ fn recompute_pending_canonical_moves_from_staged_generation(
             ),
         });
     }
-    pending_moves.push(PendingCanonicalMove {
-        staging_path: staged_bc_index_path.to_string_lossy().into_owned(),
-        canonical_path: canonical_bc_index_path.to_string_lossy().into_owned(),
-    });
+    pending_moves.push(planned_move(
+        &staged_bc_index_path,
+        &canonical_bc_index_path,
+    )?);
     // `pending_moves` is guaranteed non-empty at this point (the staged
     // BC-INDEX.md body above was just unconditionally pushed, or this
     // function already returned `Err` if it was missing) -- no separate
     // empty-check needed.
 
     Ok(pending_moves)
+}
+
+/// ADR-054 Decision 1.9 step 1, plan-build time: one plan path rendered as the text the
+/// plan stores, validated with the SAME rule the writer applies ([`intent_log::validate_path`]:
+/// reason precedence `empty`, `over_4096_bytes`, `not_utf8`, `contains_control_character`,
+/// `leading_or_trailing_space`) and converted with `Path::to_str` (a non-UTF-8 path is
+/// rejected, never rewritten lossily). `field` is the plan field named by
+/// `INTENT_LOG_VALUE_REJECTED`.
+fn plan_path_text(path: &Path, field: &str) -> Result<String, BcIndexMigrationError> {
+    let rejected = |reason: &str| BcIndexMigrationError::IntentLogValueRejected {
+        field: field.to_string(),
+        reason: reason.to_string(),
+    };
+    intent_log::validate_path(path).map_err(rejected)?;
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| rejected("not_utf8"))
+}
+
+/// One validated plan entry (`staging_path`, `canonical_path`).
+fn planned_move(
+    staging: &Path,
+    canonical: &Path,
+) -> Result<PendingCanonicalMove, BcIndexMigrationError> {
+    Ok(PendingCanonicalMove {
+        staging_path: plan_path_text(staging, "staging_path")?,
+        canonical_path: plan_path_text(canonical, "canonical_path")?,
+    })
+}
+
+/// Plan-build prologue (ADR-054 Decision 1.9 step 1): validate the roots every plan path is
+/// derived from BEFORE the generation directory, the txn record or any gate write exists, so
+/// a hostile project root stages nothing and aborts with `INTENT_LOG_VALUE_REJECTED`.
+fn validate_plan_roots(
+    migration_state_dir: &Path,
+    bc_dir: &Path,
+) -> Result<(), BcIndexMigrationError> {
+    plan_path_text(migration_state_dir, "staging_path")?;
+    plan_path_text(&bc_dir.join("shards"), "canonical_path")?;
+    plan_path_text(&bc_dir.join("BC-INDEX.md"), "canonical_path")?;
+    Ok(())
+}
+
+/// Fresh-run plan growth once the generation directory exists: a rejected path takes the
+/// pre-commit abort path (ADR-052 §Decision 7c step 3c shape: txn ABORTED, THEN the gate
+/// OPEN, both complete before the error is printed; a failed abort write is that write's own
+/// `Io`, see [`abort_cleanup_outcome`]).
+fn push_planned_move(
+    fs: &impl Fs,
+    migration_state_dir: &Path,
+    txn: &mut BcIndexMigrationTxnRecord,
+    moves: &mut Vec<PendingCanonicalMove>,
+    staging: &Path,
+    canonical: &Path,
+) -> Result<(), BcIndexMigrationError> {
+    match planned_move(staging, canonical) {
+        Ok(planned) => {
+            moves.push(planned);
+            Ok(())
+        }
+        Err(rejection) => {
+            let cleanup = discard_and_reopen_gate(fs, migration_state_dir, txn);
+            Err(abort_cleanup_outcome(rejection, cleanup))
+        }
+    }
 }
 
 /// F-C5-P2-003 (EC-002/EC-003 recovery action): discard a STAGING txn's
@@ -17171,6 +17081,13 @@ fn run_bc_index_migration_core(
                     &generation_id,
                 ) {
                     Ok(moves) => moves,
+                    // ADR-054 Decision 1.9 step 1: a plan path the value rules reject, once
+                    // the generation directory exists, takes the pre-commit abort path --
+                    // txn ABORTED, THEN the gate OPEN, both before the line is printed.
+                    Err(e @ BcIndexMigrationError::IntentLogValueRejected { .. }) => {
+                        let cleanup = discard_and_reopen_gate(&fs, &migration_state_dir, &mut txn);
+                        return Err(abort_cleanup_outcome(e, cleanup));
+                    }
                     Err(e) => {
                         let cleanup =
                             discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
@@ -17354,6 +17271,11 @@ fn run_bc_index_migration_core(
         }
     }
 
+    // ADR-054 Decision 1.9 step 1, plan-build prologue: the roots every plan path derives from
+    // are validated BEFORE the gate, the txn record or the generation directory exists, so a
+    // hostile project root stages nothing (`INTENT_LOG_VALUE_REJECTED`, exit 2).
+    validate_plan_roots(&migration_state_dir, &bc_dir)?;
+
     // OBL-1 §5 (O-5 fold-in): ADR-052 §Decision 5a drain procedure steps
     // 1-4/6, run once before the fresh-run quiescence snapshot is taken —
     // ensures no writer holding a reservation from BEFORE this migration
@@ -17482,10 +17404,14 @@ fn run_bc_index_migration_core(
                 fs.write_temp(&sub_staging_path, chunk.body.as_bytes())?;
                 staged_bodies.push(chunk.body.clone());
                 let sub_canonical_path = shards_canonical_root.join(&sub_filename);
-                pending_moves.push(PendingCanonicalMove {
-                    staging_path: sub_staging_path.to_string_lossy().into_owned(),
-                    canonical_path: sub_canonical_path.to_string_lossy().into_owned(),
-                });
+                push_planned_move(
+                    &fs,
+                    &migration_state_dir,
+                    &mut txn,
+                    &mut pending_moves,
+                    &sub_staging_path,
+                    &sub_canonical_path,
+                )?;
                 sub_range_entries.push(SubShardRangeEntry {
                     sub_shard_id: chunk.sub_shard_id.clone(),
                     path: format!("shards/{sub_filename}"),
@@ -17509,10 +17435,14 @@ fn run_bc_index_migration_core(
             // D-1232-OBL-2(a): staging publish of the sub-shard manifest.
             fs.write_temp(&sub_manifest_staging_path, sub_manifest_toml.as_bytes())?;
             let sub_manifest_canonical_path = shards_canonical_root.join(&sub_manifest_filename);
-            pending_moves.push(PendingCanonicalMove {
-                staging_path: sub_manifest_staging_path.to_string_lossy().into_owned(),
-                canonical_path: sub_manifest_canonical_path.to_string_lossy().into_owned(),
-            });
+            push_planned_move(
+                &fs,
+                &migration_state_dir,
+                &mut txn,
+                &mut pending_moves,
+                &sub_manifest_staging_path,
+                &sub_manifest_canonical_path,
+            )?;
 
             // F-C5-P1-005: BC-1.18.010 Postcondition 3's schema annotation
             // says a sub-sharded subsystem's top-level manifest entry `path`
@@ -17535,10 +17465,14 @@ fn run_bc_index_migration_core(
             // D-1232-OBL-2(a): staging publish of the sub-sharded stub-pointer file.
             fs.write_temp(&stub_staging_path, stub_body.as_bytes())?;
             let stub_canonical_path = shards_canonical_root.join(&stub_filename);
-            pending_moves.push(PendingCanonicalMove {
-                staging_path: stub_staging_path.to_string_lossy().into_owned(),
-                canonical_path: stub_canonical_path.to_string_lossy().into_owned(),
-            });
+            push_planned_move(
+                &fs,
+                &migration_state_dir,
+                &mut txn,
+                &mut pending_moves,
+                &stub_staging_path,
+                &stub_canonical_path,
+            )?;
 
             manifest_entries.push(SubsystemShardManifestEntry {
                 ss_id: ss_id.clone(),
@@ -17557,10 +17491,14 @@ fn run_bc_index_migration_core(
         fs.write_temp(&staging_path, section_body.as_bytes())?;
         staged_bodies.push(section_body.clone());
         let canonical_path = shards_canonical_root.join(&shard_filename);
-        pending_moves.push(PendingCanonicalMove {
-            staging_path: staging_path.to_string_lossy().into_owned(),
-            canonical_path: canonical_path.to_string_lossy().into_owned(),
-        });
+        push_planned_move(
+            &fs,
+            &migration_state_dir,
+            &mut txn,
+            &mut pending_moves,
+            &staging_path,
+            &canonical_path,
+        )?;
         manifest_entries.push(SubsystemShardManifestEntry {
             ss_id: ss_id.clone(),
             bc_prefix,
@@ -17582,13 +17520,14 @@ fn run_bc_index_migration_core(
     let top_manifest_staging_path = shards_dir.join("BC-INDEX.shard-manifest.toml");
     // D-1232-OBL-2(a): staging publish of the top-level shard manifest.
     fs.write_temp(&top_manifest_staging_path, top_manifest_toml.as_bytes())?;
-    pending_moves.push(PendingCanonicalMove {
-        staging_path: top_manifest_staging_path.to_string_lossy().into_owned(),
-        canonical_path: shards_canonical_root
-            .join("BC-INDEX.shard-manifest.toml")
-            .to_string_lossy()
-            .into_owned(),
-    });
+    push_planned_move(
+        &fs,
+        &migration_state_dir,
+        &mut txn,
+        &mut pending_moves,
+        &top_manifest_staging_path,
+        &shards_canonical_root.join("BC-INDEX.shard-manifest.toml"),
+    )?;
 
     // F-C5-P1-001 (BC-1.18.010 Postcondition 1): the lean staged body is the
     // ORIGINAL content's preamble — frontmatter, `## Summary`,
@@ -17617,10 +17556,14 @@ fn run_bc_index_migration_core(
         &staged_bc_index_staging_path,
         staged_bc_index_body.as_bytes(),
     )?;
-    pending_moves.push(PendingCanonicalMove {
-        staging_path: staged_bc_index_staging_path.to_string_lossy().into_owned(),
-        canonical_path: canonical_bc_index_path.to_string_lossy().into_owned(),
-    });
+    push_planned_move(
+        &fs,
+        &migration_state_dir,
+        &mut txn,
+        &mut pending_moves,
+        &staged_bc_index_staging_path,
+        &canonical_bc_index_path,
+    )?;
 
     // Step 3b gate: content-preservation (PC1) + independent census (PC2),
     // BOTH independently mandatory (Invariant 2). Any failure aborts with

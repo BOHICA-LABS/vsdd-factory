@@ -1917,17 +1917,6 @@ impl Fs for InMemoryFs {
         Ok(())
     }
 
-    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
-        // The intent-log append is modeled at generation-tag granularity:
-        // the latest tag written to `live`, durable only after its own
-        // fsync (production bundles write+fsync; the model keeps them
-        // separable — a conservative superset).
-        let gen_tag = content.first().copied().unwrap_or(0);
-        let mut slots = self.slots.borrow_mut();
-        slots[file_id_index(file_id_of(path))].live = Some(gen_tag);
-        Ok(())
-    }
-
     fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError> {
         // Same generation-tag model as `append` (live only, durable after
         // its own fsync); `created` is true iff the file did not exist.
@@ -2003,7 +1992,7 @@ fn proof_obl1_h5_pointer_swap_crash_atomicity() {
     }
     // op 2: WAL boundary — intent record durable BEFORE any commit/rename
     if crash_at > 2 {
-        let _ = fs.append(intent, &[GEN_NEW]);
+        let _ = fs.append_durable(intent, &[GEN_NEW]);
         let _ = fs.fsync_file(intent);
     }
     // op 3: write the new CURRENT pointer to a temp (live)
