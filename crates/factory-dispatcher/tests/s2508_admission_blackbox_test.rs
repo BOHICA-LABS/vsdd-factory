@@ -2944,6 +2944,108 @@ fn test_BC_1_18_011_PC6d_terminal_record_stat_error_fails_closed_never_branch_b_
     assert!(!p.reservation("TS").exists(), "no reservation left behind");
 }
 
+/// CAUSE PIN (F-S2508-L4-001 sibling sweep): an `exclusive.lock` STAT ERROR at
+/// step-3.5 reconciliation must surface as `E-MAINTENANCE-002 (io)`. A
+/// self-referential symlink `exclusive.lock` makes `try_exists` return
+/// `Err(ELOOP)` for EVERY uid (root-safe).
+///
+/// HONEST LIMIT: this test does NOT discriminate `try_exists()` from the older
+/// `!exists()`. It was verified to PASS with the production line temporarily
+/// reverted to `!lock_path.exists()`. Reason: `exists()` reads ELOOP as "absent",
+/// so the code then calls `std::fs::write(lock_path)`, which follows the same
+/// self-referential symlink and fails with the same ELOOP, surfacing as the same
+/// `BcIndexMigrationError::Io` on the same path. The stat and the create-write
+/// fail identically, so the two forms are outcome-equivalent here and no
+/// root-safe fixture was found where the stat fails but the create does not.
+/// The test pins the io-cause outcome for this state, not the line.
+///
+/// Reaching state: gate LOCKED (non-OPEN => not admissible on the first read),
+/// no txn (Branch A would otherwise reopen the gate), so the write reaches
+/// `reconcile_stale_admission_gate`, whose first act is the lock probe.
+///
+/// BC-1.18.013 Precondition 6(c) `<cause>` total decision rule, rule 2: "`io` --
+/// an OS-level filesystem call made by the admission check returned an error:
+/// ... failing with anything other than `ENOENT` on the FILE ITSELF (EACCES,
+/// EPERM, EROFS, ENOSPC, EIO, EISDIR ..., ELOOP, EMFILE, ...)"; ADR-052 §Error
+/// Code Semantics: `E-MAINTENANCE-002 (io)`. The check stops at the first
+/// failure: nothing created (no lock file, no reservation left), gate and tree
+/// byte-identical.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_PC6c_exclusive_lock_stat_error_is_io_never_treated_as_absent_regression_pin() {
+    /// Symlink-aware byte snapshot (a dangling/self-referential symlink is
+    /// recorded by its target, never followed).
+    fn snap(base: &Path) -> BTreeMap<String, Vec<u8>> {
+        fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+            let Ok(rd) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in rd.flatten() {
+                let path = e.path();
+                let rel = path
+                    .strip_prefix(base)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                let meta = std::fs::symlink_metadata(&path).unwrap();
+                if meta.file_type().is_symlink() {
+                    let target = std::fs::read_link(&path).unwrap();
+                    out.insert(
+                        format!("{rel}@symlink"),
+                        target.to_string_lossy().as_bytes().to_vec(),
+                    );
+                } else if meta.is_dir() {
+                    out.insert(format!("{rel}/"), Vec::new());
+                    walk(base, &path, out);
+                } else {
+                    out.insert(rel, std::fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(base, base, &mut out);
+        out
+    }
+
+    let p = Project::new();
+    write_gate(&p.ms(), "LOCKED");
+    let lock = p.ms().join("exclusive.lock");
+    std::fs::remove_file(&lock).unwrap();
+    std::os::unix::fs::symlink("exclusive.lock", &lock).unwrap();
+    assert!(
+        lock.try_exists().is_err(),
+        "fixture: stat of the self-referential symlink must be ELOOP"
+    );
+    let before = snap(&p.ms());
+    let target = p.abs(BC_PATH);
+    let out = run(
+        &p,
+        &envelope("PreToolUse", "Write", Some("TL"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "an exclusive.lock stat error must fail closed; stderr: {err}"
+    );
+    assert!(
+        err.contains("E-MAINTENANCE-002: writer-admission check failed (io)"),
+        "an exclusive.lock stat error is `io` (rule 2), never absent and never a plain \
+         E-MAINTENANCE-001 block; stderr: {err}"
+    );
+    assert!(
+        !err.contains("E-MAINTENANCE-001"),
+        "must not be reported as a plain block; stderr: {err}"
+    );
+    assert!(!p.reservation("TL").exists(), "no reservation left behind");
+    assert_eq!(
+        snap(&p.ms()),
+        before,
+        "nothing created or mutated: no lock file written through/over the symlink, gate still LOCKED"
+    );
+    assert_eq!(p.gate(), "LOCKED", "gate untouched");
+}
+
 // ---------------------------------------------------------------------------
 // F-009 / EC-026 -- tool_use_id validity
 // ---------------------------------------------------------------------------
