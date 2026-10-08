@@ -728,7 +728,7 @@ pub fn migration_reservation_release(
                 error = %e,
                 error_kind = ?e.kind(),
                 path = %migration_state_dir.display(),
-                "bc_index_migration_reservation_release: migration-state stat failed (non-fatal) -- \
+                "migration_reservation_release: migration-state stat failed (non-fatal) -- \
                  the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
                  own TTL GC pass instead"
             );

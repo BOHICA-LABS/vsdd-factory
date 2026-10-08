@@ -4,7 +4,7 @@
 //!
 //! BC-1.18.013 EC-021 / AC-011: the writer-reservation release is best-effort;
 //! a NON-ENOENT release error is a NON-FATAL `tracing::warn!` (never a verdict).
-//! `bc_index_migration_reservation_release` currently guards with
+//! `migration_reservation_release` currently guards with
 //! `if !migration_state_dir.exists() { return; }`; `Path::exists()` is false on
 //! EACCES / EIO / ELOOP too, so a stat error is silently treated as the
 //! no-op ENOENT path (the sibling of F-S2508-L3-009's `.factory` fix).
@@ -28,7 +28,7 @@
 //! ) -> Result<bool, std::io::Error>;
 //! ```
 //!
-//! and `bc_index_migration_reservation_release` must branch on it
+//! and `migration_reservation_release` must branch on it
 //! (`Ok(false)` => return; `Err(e)` => `tracing::warn!` + return).
 //! RED at authoring time = compile failure (the helper does not exist yet).
 
