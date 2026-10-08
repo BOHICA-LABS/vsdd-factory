@@ -353,7 +353,9 @@ fn test_BC_1_18_013_PC6c_admission_state_integrity_display_exit_code_and_cause()
         assert_eq!(kind.token(), expected_kind_token(kind));
         let e = BcIndexMigrationError::AdmissionStateIntegrity {
             kind,
-            detail: "gate-state.json: bad".to_string(),
+            subject: Some("gate-state.json".to_string()),
+            message: "bad".to_string(),
+            names: Vec::new(),
         };
         assert_eq!(
             e.to_string(),
@@ -461,7 +463,11 @@ fn test_BC_1_18_013_PC6c_admission_raise_sites_use_state_integrity_variant_with_
     for (label, mk, kind) in cases {
         let (_dir, ms) = mk();
         match admit_protected_write(&ms, Some("T1"), ProtectedPathFamily::Cycles) {
-            Err(BcIndexMigrationError::AdmissionStateIntegrity { kind: got, detail }) => {
+            Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                kind: got,
+                message: detail,
+                ..
+            }) => {
                 if got != kind {
                     failures.push(format!("[{label}] kind {got:?} != {kind:?}"));
                 }

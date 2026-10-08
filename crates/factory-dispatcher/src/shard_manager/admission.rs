@@ -382,17 +382,13 @@ pub fn as_given_factory_root_spelling(raw: &std::ffi::OsStr) -> Option<PathBuf> 
     Some(lexical_normalize(&project_dir.join(".factory")))
 }
 
-/// The `detail` of a malformed-record failure: path plus the parse error's
+/// The `message` of a malformed-record failure (the path is the RAW `subject`): the parse error's
 /// CATEGORY and position — never the serde message, which can echo record
 /// content (an unknown variant name, a literal) into the diagnostic.
 #[must_use]
-pub(crate) fn parse_failure_detail(path: &Path, e: &serde_json::Error) -> String {
+pub(crate) fn parse_failure_message(e: &serde_json::Error) -> String {
     format!(
-        "{}: {:?} error at line {} column {}",
-        sanitize_diagnostic(
-            &path.display().to_string(),
-            EVENT_DETAIL_SUBSTRING_MAX_CHARS
-        ),
+        "{:?} error at line {} column {}",
         e.classify(),
         e.line(),
         e.column()
@@ -1337,13 +1333,10 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
         Some(serde_json::Value::String(_)) => Ok(false),
         _ => Err(BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: format!(
-                "malformed txn record at {}: generation_id is absent or not a JSON string/null",
-                sanitize_diagnostic(
-                    &txn.path.display().to_string(),
-                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
-                )
-            ),
+            subject: Some(txn.path.display().to_string()),
+            message: "malformed txn record: generation_id is absent or not a JSON string/null"
+                .to_string(),
+            names: Vec::new(),
         }),
     }
 }
@@ -1369,13 +1362,9 @@ pub(super) fn abort_null_generation_txn(
     let Some(object) = raw.as_object_mut() else {
         return Err(BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: format!(
-                "{}: not a JSON object",
-                sanitize_diagnostic(
-                    &txn_path.display().to_string(),
-                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
-                )
-            ),
+            subject: Some(txn_path.display().to_string()),
+            message: "not a JSON object".to_string(),
+            names: Vec::new(),
         });
     };
     object.insert("state".to_string(), serde_json::json!("ABORTED"));
@@ -1386,10 +1375,12 @@ pub(super) fn abort_null_generation_txn(
     let json = serde_json::to_string_pretty(&raw).map_err(|e| {
         BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: format!(
+            subject: None,
+            message: format!(
                 "failed to serialize aborted txn record ({:?})",
                 e.classify()
             ),
+            names: Vec::new(),
         }
     })?;
     // ONE atomic write-temp + fsync + rename + dir-sync (§7d): no observable
@@ -1473,11 +1464,13 @@ fn newer_schema_error(digits: &str) -> BcIndexMigrationError {
     let shown: String = digits.chars().take(20).collect();
     BcIndexMigrationError::AdmissionStateIntegrity {
         kind: AdmissionStateIntegrityKind::TxnRecordNewerSchema,
-        detail: format!(
+        subject: None,
+        message: format!(
             "txn record schema_version {shown} is newer than the supported \
              {TXN_RECORD_SCHEMA_VERSION}; it was probably written by a newer build; recover it \
              with that build; nothing was changed"
         ),
+        names: Vec::new(),
     }
 }
 
@@ -1532,11 +1525,13 @@ pub(super) fn select_live_txn(txns: &[TxnFile]) -> Result<Option<&TxnFile>, BcIn
         let count = txns.iter().filter(|t| t.is_live()).count();
         return Err(BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
-            detail: format!(
+            subject: None,
+            message: format!(
                 "found {count} coexisting LIVE (STAGING/COMMITTING) txn records -- the \
                  writer-exclusion invariant requires at most one active migration in flight \
                  at a time across both governed migrations"
             ),
+            names: Vec::new(),
         });
     }
     Ok(first)
@@ -1610,19 +1605,17 @@ pub(super) fn read_txn_files(
         let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::AdmissionStateIntegrity {
                 kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-                detail: parse_failure_detail(&path, &e),
+                subject: Some(path.display().to_string()),
+                message: parse_failure_message(&e),
+                names: Vec::new(),
             }
         })?;
         // Tier 0: a JSON object with a known `state` ...
-        let malformed = |detail: &str| BcIndexMigrationError::AdmissionStateIntegrity {
+        let malformed = |message: &str| BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: format!(
-                "{}: {detail}",
-                sanitize_diagnostic(
-                    &path.display().to_string(),
-                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
-                )
-            ),
+            subject: Some(path.display().to_string()),
+            message: message.to_string(),
+            names: Vec::new(),
         };
         let Some(object) = raw.as_object() else {
             return Err(malformed("not a JSON object"));
@@ -1642,13 +1635,9 @@ pub(super) fn read_txn_files(
             Some(_) => {
                 return Err(BcIndexMigrationError::AdmissionStateIntegrity {
                     kind: AdmissionStateIntegrityKind::TxnMigrationIdNotString,
-                    detail: format!(
-                        "{}: migration_id is not a JSON string",
-                        sanitize_diagnostic(
-                            &path.display().to_string(),
-                            EVENT_DETAIL_SUBSTRING_MAX_CHARS
-                        )
-                    ),
+                    subject: Some(path.display().to_string()),
+                    message: "migration_id is not a JSON string".to_string(),
+                    names: Vec::new(),
                 });
             }
         };
@@ -1701,10 +1690,12 @@ fn create_writer_reservation(
     let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
         BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::ReservationSerialization,
-            detail: format!(
+            subject: None,
+            message: format!(
                 "failed to serialize writer reservation ({:?})",
                 e.classify()
             ),
+            names: Vec::new(),
         }
     })?;
     let path = reservations_dir.join(format!("{tool_use_id}.reservation"));

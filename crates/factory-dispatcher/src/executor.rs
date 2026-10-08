@@ -622,9 +622,19 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
             source.kind(),
             sanitize_diagnostic(&source.to_string(), EVENT_DETAIL_SUBSTRING_MAX_CHARS)
         ),
-        BcIndexMigrationError::AdmissionStateIntegrity { detail, .. } => {
-            sanitize_diagnostic(detail, 256)
-        }
+        // ADR-052 v1.25 item 11(g): built from the RAW slots, each data-derived
+        // substring escaped and capped at 64 exactly once (no re-truncation).
+        BcIndexMigrationError::AdmissionStateIntegrity {
+            subject,
+            message,
+            names,
+            ..
+        } => crate::shard_manager::admission_state_integrity_detail(
+            subject.as_deref(),
+            message,
+            names,
+            EVENT_DETAIL_SUBSTRING_MAX_CHARS,
+        ),
         other => sanitize_diagnostic(&other.to_string(), 256),
     };
     let _: AdmissionFailureCause = cause;

@@ -196,7 +196,9 @@ fn instances() -> Vec<(String, BcIndexMigrationError)> {
             format!("AdmissionStateIntegrity/{}", kind.token()),
             BcIndexMigrationError::AdmissionStateIntegrity {
                 kind,
-                detail: "d".into(),
+                subject: None,
+                message: "d".into(),
+                names: Vec::new(),
             },
         ));
     }
@@ -494,7 +496,18 @@ fn kind_and_detail(
     r: Result<Option<BcIndexMigrationTxnRecord>, BcIndexMigrationError>,
 ) -> Result<(String, String), String> {
     match r {
-        Err(BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }) => {
+        Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind,
+            subject,
+            message,
+            names,
+        }) => {
+            let detail = factory_dispatcher::shard_manager::admission_state_integrity_detail(
+                subject.as_deref(),
+                &message,
+                &names,
+                256,
+            );
             Ok((kind.token().to_string(), detail))
         }
         other => Err(format!("{other:?}")),

@@ -13000,10 +13000,22 @@ pub enum BcIndexMigrationError {
     /// integrity sites (gate/txn record malformed, non-string `migration_id`, more
     /// than one live txn, reservation serialization, newer-schema record) and by the
     /// coordinator's shared Tier 0/Tier 1 readers.
-    #[error("migration admission: state integrity failure ({}): {detail}", .kind.token())]
+    #[error(
+        "migration admission: state integrity failure ({}): {}",
+        .kind.token(),
+        admission_state_integrity_detail(.subject.as_deref(), .message, .names, ADMISSION_STDERR_SUBSTRING_MAX_CHARS)
+    )]
     AdmissionStateIntegrity {
         kind: AdmissionStateIntegrityKind,
-        detail: String,
+        /// ADR-052 v1.25 item 11(g): the data-derived subject (e.g. the record path),
+        /// carried RAW (unsanitized); sanitized at render time by the surface that
+        /// renders it (256 on the operator stderr, 64 in the Event 12 `detail`).
+        subject: Option<String>,
+        /// A fixed string or a serde error category; never on-disk record content.
+        message: String,
+        /// Data-derived names (e.g. unknown record keys), carried RAW; each is
+        /// sanitized at render time at the per-surface cap.
+        names: Vec<String>,
     },
 
     /// ADR-052 v1.21 "Single anchoring rule" (b) / error-taxonomy
@@ -13990,17 +14002,64 @@ const TXN_RECORD_REQUIRED_KEYS: [&str; 12] = [
     "updated_at",
 ];
 
-fn txn_record_malformed(path: &Path, detail: &str) -> BcIndexMigrationError {
+fn txn_record_malformed(path: &Path, message: &str) -> BcIndexMigrationError {
     BcIndexMigrationError::AdmissionStateIntegrity {
         kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-        detail: format!(
-            "{}: {detail}",
-            admission::sanitize_diagnostic(
-                &path.display().to_string(),
-                admission::EVENT_DETAIL_SUBSTRING_MAX_CHARS
-            )
-        ),
+        subject: Some(path.display().to_string()),
+        message: message.to_string(),
+        names: Vec::new(),
     }
+}
+
+/// [`txn_record_malformed`] plus RAW data-derived names (unknown record keys), sanitized
+/// at render time at the per-surface cap (ADR-052 v1.25 item 11(g)).
+fn txn_record_malformed_with_names(
+    path: &Path,
+    message: &str,
+    names: Vec<String>,
+) -> BcIndexMigrationError {
+    BcIndexMigrationError::AdmissionStateIntegrity {
+        kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+        subject: Some(path.display().to_string()),
+        message: message.to_string(),
+        names,
+    }
+}
+
+/// Maximum characters of each data-derived substring on the OPERATOR stderr surface
+/// (ADR-052 v1.25 item 11(g)): the Display of a `BcIndexMigrationError` and the
+/// coordinator lines. The `InternalLog` event surface caps at
+/// [`EVENT_DETAIL_SUBSTRING_MAX_CHARS`] (64) instead.
+pub const ADMISSION_STDERR_SUBSTRING_MAX_CHARS: usize = 256;
+
+/// Renders an `AdmissionStateIntegrity`'s RAW slots for one surface: each data-derived
+/// slot (`subject`, every `names` entry) is escaped and capped at `cap` characters
+/// exactly once, at render time; `message` is a fixed string / serde category and is
+/// never re-truncated (ADR-052 v1.25 item 11(g)).
+#[must_use]
+pub fn admission_state_integrity_detail(
+    subject: Option<&str>,
+    message: &str,
+    names: &[String],
+    cap: usize,
+) -> String {
+    let mut out = String::new();
+    if let Some(subject) = subject {
+        out.push_str(&sanitize_diagnostic(subject, cap));
+        out.push_str(": ");
+    }
+    out.push_str(message);
+    if !names.is_empty() {
+        out.push_str(": ");
+        out.push_str(
+            &names
+                .iter()
+                .map(|n| sanitize_diagnostic(n, cap))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    out
 }
 
 /// Strict-presence typed decode (ADR-052 v1.23 item 4; BC-1.18.011 Precondition
@@ -14048,16 +14107,10 @@ fn decode_txn_record_strict(
             .filter(|k| *k != "migration_id" && !TXN_RECORD_REQUIRED_KEYS.contains(k))
             .collect();
         if !unknown.is_empty() {
-            return Err(txn_record_malformed(
+            return Err(txn_record_malformed_with_names(
                 &file.path,
-                &format!(
-                    "unknown top-level key(s) on a live record: {}",
-                    unknown
-                        .iter()
-                        .map(|k| admission::sanitize_diagnostic(k, 64))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+                "unknown top-level key(s) on a live record",
+                unknown.iter().map(|k| (*k).to_string()).collect(),
             ));
         }
     }
@@ -14140,15 +14193,13 @@ fn check_pending_canonical_moves(
         let unknown: Vec<String> = element
             .keys()
             .filter(|k| !ELEMENT_KEYS.contains(&k.as_str()))
-            .map(|k| admission::sanitize_diagnostic(k, 64))
+            .cloned()
             .collect();
         if !unknown.is_empty() {
-            return Err(txn_record_malformed(
+            return Err(txn_record_malformed_with_names(
                 path,
-                &format!(
-                    "pending_canonical_moves[{index}] has unknown key(s): {}",
-                    unknown.join(", ")
-                ),
+                &format!("pending_canonical_moves[{index}] has unknown key(s)"),
+                unknown,
             ));
         }
         for key in ELEMENT_KEYS {
@@ -14413,7 +14464,9 @@ pub(crate) fn read_admission_gate_state(
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::AdmissionStateIntegrity {
                 kind: AdmissionStateIntegrityKind::GateRecordMalformed,
-                detail: admission::parse_failure_detail(&path, &e),
+                subject: Some(path.display().to_string()),
+                message: admission::parse_failure_message(&e),
+                names: Vec::new(),
             }
         }),
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
@@ -15805,9 +15858,11 @@ pub fn resume_from_staging(
     let generation_id = _txn_record.generation_id.as_deref().ok_or_else(|| {
         BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: "resume_from_staging: STAGING txn record has no generation_id -- cannot \
-                     locate the staged generation to re-verify"
+            subject: None,
+            message: "resume_from_staging: STAGING txn record has no generation_id -- cannot \
+                      locate the staged generation to re-verify"
                 .to_string(),
+            names: Vec::new(),
         }
     })?;
     let shards_dir = _migration_state_dir
@@ -16105,12 +16160,17 @@ fn abort_cleanup_outcome(
                 .code_token()
                 .map_or_else(|| original.to_string(), str::to_string);
             match other {
-                BcIndexMigrationError::AdmissionStateIntegrity { kind, detail } => {
-                    BcIndexMigrationError::AdmissionStateIntegrity {
-                        kind,
-                        detail: format!("{detail} (while handling {while_handling})"),
-                    }
-                }
+                BcIndexMigrationError::AdmissionStateIntegrity {
+                    kind,
+                    subject,
+                    message,
+                    names,
+                } => BcIndexMigrationError::AdmissionStateIntegrity {
+                    kind,
+                    subject,
+                    message: format!("{message} (while handling {while_handling})"),
+                    names,
+                },
                 BcIndexMigrationError::BinaryIntegrityFailure { message } => {
                     BcIndexMigrationError::BinaryIntegrityFailure {
                         message: format!("{message} (while handling {while_handling})"),
@@ -16632,9 +16692,11 @@ fn recorded_intent_log_path(
     factory_root: &admission::FactoryRoot,
     txn: &BcIndexMigrationTxnRecord,
 ) -> Result<PathBuf, BcIndexMigrationError> {
-    let malformed = |detail: &str| BcIndexMigrationError::AdmissionStateIntegrity {
+    let malformed = |message: &str| BcIndexMigrationError::AdmissionStateIntegrity {
         kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-        detail: detail.to_string(),
+        subject: None,
+        message: message.to_string(),
+        names: Vec::new(),
     };
     let recorded = txn
         .intent_log_path
@@ -17223,15 +17285,19 @@ fn run_bc_index_migration_core(
                 QuarantineReason::MultipleLiveTxnRecords { count } => {
                     BcIndexMigrationError::AdmissionStateIntegrity {
                         kind: AdmissionStateIntegrityKind::MultipleLiveTxns,
-                        detail: format!("found {count} coexisting LIVE txn records"),
+                        subject: None,
+                        message: format!("found {count} coexisting LIVE txn records"),
+                        names: Vec::new(),
                     }
                 }
                 QuarantineReason::CommittingWithoutGenerationId { .. } => {
                     BcIndexMigrationError::AdmissionStateIntegrity {
                         kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-                        detail: "generation_id of a COMMITTING record is absent or not a JSON \
-                                 string"
+                        subject: None,
+                        message: "generation_id of a COMMITTING record is absent or not a JSON \
+                                  string"
                             .to_string(),
+                        names: Vec::new(),
                     }
                 }
                 other => BcIndexMigrationError::BinaryIntegrityFailure {

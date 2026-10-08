@@ -2426,10 +2426,12 @@ fn test_BC_1_18_011_EC049_nested_unknown_key_rendered_by_the_shared_sanitizer_tr
     let hostile = "evil\n\u{1b}[31mFAKE\tline".to_string();
     let hostile_escaped = "evil\\n\\u{1b}[31mFAKE\\tline";
     let long = "k".repeat(100);
+    let longer = "k".repeat(300);
     for (arm, state) in REWRITING_ARMS {
         for (what, key) in [
             ("control characters", hostile.clone()),
             ("100-char key", long.clone()),
+            ("300-char key", longer.clone()),
         ] {
             let label = format!("{arm}: {what}");
             let rec = with(
@@ -2460,10 +2462,21 @@ fn test_BC_1_18_011_EC049_nested_unknown_key_rendered_by_the_shared_sanitizer_tr
                      {err:?}"
                 ));
             }
-            if what == "100-char key" && (err.contains(&long) || !err.contains(&"k".repeat(40))) {
+            // ADR-052 v1.25 item 11(g): the operator stderr caps each data-derived
+            // substring at 256 (the 64-char cap is the InternalLog event's only).
+            if what == "100-char key" && !err.contains(&long) {
                 failures.push(format!(
-                    "[{label}] the 100-char key must be TRUNCATED (cap 64) yet its prefix \
-                     shown; stderr {err:?}"
+                    "[{label}] a 100-char key fits the 256-char stderr cap and must be shown \
+                     in full; stderr {err:?}"
+                ));
+            }
+            if what == "300-char key"
+                && (err.contains(&"k".repeat(256))
+                    || !err.contains(&format!("{}…", "k".repeat(255))))
+            {
+                failures.push(format!(
+                    "[{label}] the 300-char key must be TRUNCATED to 256 characters with a `…` \
+                     marker on stderr; stderr {err:?}"
                 ));
             }
         }
