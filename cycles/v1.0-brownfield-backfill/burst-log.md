@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "f88d5fd"
+input-hash: "d42c473"
 traces_to: STATE.md
 ---
 
@@ -2422,3 +2422,70 @@ D-1253, v10.86→v10.87. Single-commit TD-VSDD-053 registration burst (state-man
 **Closes:** Drift Item [D-1252-OWED] partially (split, S-12.16 reverse edge, `root_source`/`check` domain, ADR-052 nine-token + read-failure ruling); STATE.md `pipeline: PAUSED` -> `in_progress`. **Opens:** [D-1253-BC118011-STATUS] (human), [D-1253-PG-001] (-> S-12.16).
 
 Summary: Registered the executed S-25.08/S-25.09 split (AC-027 stays in S-25.08), ADR-052 v1.22 and BC/VP/story propagation; BC-INDEX v5.108, VP-INDEX v3.31, ARCH-INDEX v4.52, STORY-INDEX v4.487; resumed the pipeline; archived the v10.86 checkpoint.
+
+## Burst: HUMAN-DECISIONS-ADR054-HARDENED-INTENT-LOG-S2510-S2511-S2512-REGISTRATION (2026-10-08)
+
+D-1254, v10.87→v10.88. Single-commit TD-VSDD-053 registration burst (state-manager). Pipeline stays `in_progress`. Registers everything since D-1253: human decisions 2026-10-07/08 (a)-(g), ADR-052 v1.23/v1.24 + NEW ADR-054 v1.0, the hardening split S-25.10/S-25.11/S-25.12, BC-INDEX catalog sync, the S-25.08 pass-3 record, and the code-state ledger.
+
+**Parent-commit:** `b5c8fd2c` (factory-artifacts HEAD immediately prior, v10.87 / D-1253). Code parents (local-only, nothing pushed): `feature/S-25.08` @ `d1df7d10`; `feature/S-25.09` @ `5632964d`; `feature/S-25.10`, `feature/S-25.11`, `feature/S-25.12` each @ `5632964d` (no commits yet).
+
+**Adversary verdict:** none this burst (no adversary pass run). Registered the pass-3 record for S-25.08: NOT CLEAN (F-S2508-L3-001..009 + deferred D-L3-1; streak 0/3), persisted as a RECONSTRUCTED record at `code-delivery/S-25.08/adv-local-pass-3.md` — the original adversary report was never saved; the file carries an explicit provenance note and does not state severities or novelty (not recorded anywhere). LOCAL streaks: S-25.08 0/3 (pass 4 next), S-25.09 0/3 (pass 1 next).
+
+**Files touched (Dim-1):** 38 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, BC-INDEX.md, `code-delivery/S-25.08/adv-local-pass-3.md`, BC-1.18.011 `lifecycle_status` line, STORY-INDEX hash-parity cites + one `\"` escape; the remainder specialist-authored (architect, product-owner, story-writer, research-agent, formal-verifier) or hook-written telemetry (`regression-state.json`, `sidecar-learning.md`), committed as-is with hash currency verified):
+- STATE.md (v10.87→v10.88)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1254)
+- cycles/v1.0-brownfield-backfill/lessons.md (4 D-1254 lessons)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.87 archived)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- regression-state.json (hook-written telemetry)
+- sidecar-learning.md (hook-written learning)
+- code-delivery/S-25.08/adv-local-pass-3.md (NEW, reconstructed)
+- research/adr-052-v123-architect-calls-validation.md (NEW)
+- research/adr-052-intent-log-format-and-move-list-semantics.md (NEW)
+- specs/architecture/decisions/ADR-054-governed-migration-intent-log-format-fixed-move-plan-and-crash-recovery.md (NEW v1.0)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.24)
+- specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md (one-line rename)
+- specs/architecture/ARCH-INDEX.md (v4.54)
+- specs/architecture/verification-architecture.md (v1.46)
+- specs/architecture/verification-coverage-matrix.md (v1.44)
+- specs/behavioral-contracts/BC-INDEX.md (v5.108→v5.109)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.21; lifecycle_status draft→active)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.13)
+- specs/behavioral-contracts/ss-03/BC-3.08.001.md (v1.37)
+- specs/prd-supplements/error-taxonomy.md (v1.41)
+- specs/verification-properties/VP-079.md (v1.26)
+- specs/verification-properties/VP-133.md (v1.9)
+- specs/verification-properties/VP-143.md (v1.8)
+- specs/verification-properties/VP-146.md (v1.5)
+- specs/verification-properties/VP-147.md (v1.5)
+- specs/verification-properties/VP-INDEX.md (v3.33; 147 VPs)
+- stories/STORY-INDEX.md (v4.488)
+- stories/epics/E-25-validation-integrity.md (v1.7)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.12)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.6)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (v1.1)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (v1.2)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (NEW v1.0)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (NEW v1.0)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (NEW v1.0)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (hash-only)
+- stories/S-25.02-artifact-sharding-layer2.md (hash-only)
+
+**Codifications:** D-1254(a)-(k) in decision-log.md; STATE.md Decisions Log summary row; lessons: L-BB-D1245 recurrence x9, failpoints CI gap, validate-factory-path-staging worktree-branch defect, ADR-052 size + verify-claimed-anomaly.
+
+**Dim-2 Attestations (literal shell, captured stdout; D-449(a)):**
+- `cargo test -p validate-cross-site-correspondence` BEFORE the BC-INDEX sync: `BC-1.18.011: BC frontmatter version="1.21" ... does not match BC-INDEX last-chain-entry version="1.19"` / `BC-1.18.013: ... "1.13" ... "1.11"` / `BC-3.08.001: ... "1.37" ... "1.36"`; `test result: FAILED. 0 passed; 1 failed`. AFTER (BC-INDEX v5.109 + STORY-INDEX hash parity): `test tests::test_BC_corpus_version_sync_all_indexed_bcs_match_frontmatter ... ok` and `test result: ok. 231 passed; 0 failed`. (An intermediate run failed `test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` for six stories whose STORY-INDEX line-96 blockquote cited pre-cascade hashes; fixed by re-syncing line 96 and the catalog rows to the post-cascade hashes, then green.)
+- `compute-input-hash <f> --update` cascade (sanctioned tool, hash-only): round 1 updated 17 files (session-checkpoints, ADR-052, BC-INDEX → 4435342, BC-1.18.011 → c8f000e, BC-1.18.013 → 6524e4d, error-taxonomy → 2521b13, VP-079, S-12.16, S-25.02 → 84d990a, S-25.06, S-25.08 → ae12810, S-25.09 → a01f63f, S-26.06 → 2d7b1c6, E-25 → 84fbc01, S-25.10 → ddda9f7, S-25.11 → 51979f5, S-25.12 → 68a4a3e); round 2 updated 4 (session-checkpoints, S-12.16 → f5dd34c, S-25.06 → b752d21, E-25 → 6865f6f); round 3 `updated=0`. STORY-INDEX catalog rows + POLICY 18 blockquote re-synced to those hashes (S-25.12=68a4a3e, S-25.11=51979f5, S-25.10=ddda9f7, S-25.09=a01f63f, S-25.08=ae12810, S-25.06=b752d21, E-25 epic=6865f6f, S-25.02=84d990a, S-12.16=f5dd34c, S-26.06=2d7b1c6).
+- `printf '{"tool_name":"Edit","tool_input":{"file_path":".../VP-INDEX.md"}}' | bash plugins/vsdd-factory/hooks/validate-vp-consistency.sh` -> `vp-consistency exit=0`.
+- `cargo run -q -p last-amended-migrate -- migrate --check` first showed `.factory/stories/STORY-INDEX.md: ... escape_fixed=true ... mutated=true` and `migrate --path` refused (`YAML produced by this tool failed strict safe_load validation ... line 10 column 5781`): the story-writer's last_amended contained one unescaped `"(pre-rebase)"` pair; fixed with a single Edit to `\"(pre-rebase)\"`; re-run: all 5 governed files `escape_fixed=false entries_relocated=0 entries_discarded=0 mutated=false`; `migrate-check exit=0`. OBSERVATION: STORY-INDEX `last_amended` is a ~5.8K-char pipe-chained line (story-writer authored); it is not the forbidden `[Prior: ...]` bracket pattern and the tool accepts it, but it is not the single-current-entry shape of BC-5.45.001 — flagged to the story-writer, not rewritten by the state-manager.
+- BC-1.18.011 `lifecycle_status: draft`→`active` applied with one Edit (frontmatter line only); `status: active` unchanged.
+
+**Dim-5:** Count-propagation: total_bcs 2007 and total_vps 147 UNCHANGED. STORY-INDEX (story-writer): registered 251→254 (211 story files + 43 index-only stubs), ready 8→11, Total (active) 230→233; STATE.md Identifier Conventions updated to match (254 registered, ADR count 52→54, E-25 story_count 9→12, BC-INDEX v5.109, VP-INDEX v3.33). BC-INDEX: version cells BC-1.18.011 v1.19→v1.21 (history v1.20, v1.21 appended), BC-1.18.013 v1.11→v1.13, BC-3.08.001 v1.36→v1.37; Stories cells BC-1.18.011 += S-25.10/S-25.11/S-25.12, BC-1.18.013 += S-25.10/S-25.11 (from the story files' `behavioral_contracts`; the BC bodies' Story Anchor sections still name S-25.10 for all v1.21 obligations — OWED to the product-owner, [D-1254-BC-ANCHOR-OWED]). Old-count sweep: no count changed except the story count 251 and ADR count 52, both replaced in STATE.md.
+
+**Dim-6:** No new adversary findings; no tech-debt-register entries. Open recommendations to the human recorded as Drift Items, not deferrals: [D-1254-RELEASE-GATING] (human: decide later), [D-1254-ADR052-SPLIT]; hook defect [D-1254-HOOK-FP-003] attached to S-26.02 with justification (story-writer/product-owner amendments routed).
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` mutations (compute-input-hash and last-amended-migrate are the sanctioned tools; one blocked attempt to use `sed -i` on STATE.md was stopped by destructive-command-guard and redone with Edit); L-BB-D1245 recurrence x9 recorded.
+
+**Closes:** [D-1253-BC118011-STATUS]; failing test `test_BC_corpus_version_sync_all_indexed_bcs_match_frontmatter`; failpoints CI gap (CI part, `d1df7d10`). **Opens:** [D-1254-RELEASE-GATING] (human), [D-1254-ADR052-SPLIT] (human recommendation), [D-1254-HOOK-FP-003], [D-1254-BC-ANCHOR-OWED].
+
+Summary: Registered the 2026-10-07/08 human decisions, ADR-054 v1.0 + ADR-052 v1.24, the S-25.10/S-25.11/S-25.12 chain and the spec/story propagation; BC-INDEX v5.109, VP-INDEX v3.33, ARCH-INDEX v4.54, STORY-INDEX v4.488; persisted the S-25.08 pass-3 record (reconstructed); recorded local code state and the open release-gating decision; archived the v10.87 checkpoint.

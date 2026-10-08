@@ -2060,3 +2060,29 @@ the file.
 
 **L-BB-D1245 NEAR-MISS (D-1253, 2026-10-07) — NOT a recurrence:** the architect ran a python3 heredoc through Bash that contained NO write (empty body; no file mutated). It is the same reflex as the five L-BB-D1245 bypasses but caused no `.factory/` change, so the recurrence count stays at x5. Recorded for pattern frequency; S-12.16 (sequenced after S-25.08/S-25.09) remains the load-bearing remedy.
 `[process-gap][D-1245][D-1253][near-miss][architect][S-12.16]`
+
+## LESSON (D-1254) — L-BB-D1245 recurrence x9 cumulative: scripted-edit bypasses of Edit/Write continued across story-writer and architect; S-12.16 remains the only structural fix
+
+**What happened (2026-10-07/08):** FIVE more scripted-edit bypasses of the Edit/Write tools on `.factory/` files: story-writer python (1), architect python (3), architect `cat >>` heredoc (1). The recurrence count rises from x5 to **x9 cumulative** (the near-miss recorded at D-1253 does not count). Every instance was diff-reviewed by the orchestrator and no damage was found.
+**Root cause:** Unchanged from L-BB-D1245: the PreToolUse guard that would block Bash-mediated writes to governed `.factory/` artifacts (S-12.16) is not yet delivered, so prompt guidance alone does not stop the reflex under long-file editing pressure.
+**Lesson (D-1254):** Prose reminders have a measured failure rate (5 more in one session). Do not spend further effort on prompt wording; sequence S-12.16 (after S-25.08/S-25.09 merge, per D-1252(a)) and keep orchestrator diff review as the interim control.
+`[process-gap][D-1245][D-1254][x9][story-writer][architect][S-12.16]`
+
+## LESSON (D-1254) — Failpoints-gated test suites were never run in CI or in story gates, so 8 crash-injection tests went stale unseen
+
+**What happened:** The `--features failpoints` suites (crash injection, OBL-1 smoke) were not part of any CI job or story gate. The shared admission core change `ae74c039` (Branch A/B reconciliation, BC-1.18.011 Precondition 6(d)) made 8 crash-injection tests stale; the orchestrator bisected to `ae74c039`; NO production regression, the tests were stale. Fixed on `feature/S-25.08`: `cb9e6797` (tests updated to the admission self-heal behavior) and `d1df7d10` (CI runs `--features failpoints` in the required `cargo-host` job; failpoints 39/39 in both modes).
+**Root cause:** A feature-gated suite that no gate compiles is an unmonitored suite; green gates said nothing about it.
+**Lesson (D-1254):** Add `--features failpoints` to EVERY story gate (and keep it in CI). Any new Cargo feature that gates tests must be added to the gate list in the same story that introduces it.
+`[process-gap][D-1254][ci-gap][failpoints][S-25.08]`
+
+## LESSON (D-1254) — `validate-factory-path-staging` reads the branch of the hook's working directory, not the worktree the Bash call runs in
+
+**What happened:** The hook blocked `git add -A` / `git add -A crates` on feature branches inside worktrees, reporting branch `develop` while the call was on `feature/S-25.09`. Reading `crates/hook-plugins/validate-factory-path-staging/src/lib.rs`, branch detection without a `-C <target>` runs `git branch --show-current` in the hook's CWD (the session's main checkout), not the Bash call's effective directory. (State-manager read the source; the block itself was not reproduced by the state-manager.) Tracked as Drift Item [D-1254-HOOK-FP-003], attached to S-26.02.
+**Lesson (D-1254):** A guard that decides on branch identity must resolve the branch from the directory the guarded command will actually run in. Related: `destructive-command-guard` flagged `git worktree remove --force` (false positive; E-26 backlog).
+`[process-gap][D-1254][hook-defect][validate-factory-path-staging][S-26.02]`
+
+## LESSON (D-1254) — ADR-052 (~4,876 lines) exhausts hook WASM fuel on every edit; verify claimed anomalies yourself
+
+**What happened:** (1) ADR-052 reached ~4,876 lines; every edit returns FUEL_EXHAUSTED from the PostToolUse validators, so hooks cannot validate it. The architect recommends a further split (ADR-054 already carved out the on-disk formats). This is an OPEN RECOMMENDATION to the human, not a deferral ([D-1254-ADR052-SPLIT]). (2) The implementer reported a test count of 3193; the actual was 3423 — the orchestrator verified it independently rather than acting on the report.
+**Lesson (D-1254):** Size budgets for governed documents apply to ADRs too (cf. D-442(e) for lessons.md); verify any claimed count anomaly with the command that produces it before dispatching work on it (same family as L-BB-D1253 verify-before-dispatch).
+`[process-gap][D-1254][adr-size][fuel][orchestrator][verify-before-dispatch]`

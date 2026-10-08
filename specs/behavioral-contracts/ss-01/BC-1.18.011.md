@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.19"
+version: "1.21"
 status: active
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -9,19 +9,21 @@ phase: F2
 inputs:
   - .factory/specs/architecture/decisions/ADR-051-layer-2-two-mechanism-size-triggered-shard-rotation-append-logs-and-bc-index-sharding.md
   - .factory/specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md
+  - .factory/specs/architecture/decisions/ADR-054-governed-migration-intent-log-format-fixed-move-plan-and-crash-recovery.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.010.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
-input-hash: "fe8c755"
+input-hash: "c8f000e"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
 subsystem: "SS-01"
 capability: "CAP-043"
-lifecycle_status: draft
+lifecycle_status: active
+last_amended: "2026-10-08 (v1.21) — ADR-054 v1.0 §Downstream \"BC wording owed\" + ADR-052 v1.24 (human-authorized spec amendment 2026-10-08; research `.factory/research/adr-052-intent-log-format-and-move-list-semantics.md`; story S-25.10): `pending_canonical_moves` RENAMED `canonical_move_plan` (struct `PlannedCanonicalMove`; key set still TWELVE; old key now an unknown top-level key) in the strict-presence key list and nested strictness (Precondition 6(f)(iii)); Precondition 5 now cites the HARDENED intent-log format (ADR-054 §Decision 1) and the fixed plan persisted before the pointer swap and never rewritten; Postcondition 9(b) hash source (`DONE == INTENT == sha256(file)`, hardened reader surface mapping); NEW Postconditions 12 (B-1 recovery appends DONE, idempotent), 13 (B-2 txn-bound, INTENT-confirmed DONE; truthful pre-state), 14 (B-3 non-empty plan equal to the INTENT target set, fail closed `txn_record_malformed`), 15 (hardened-log reader/writer obligations by ADR-054 §-anchor citation) and the coordinator outcomes `INTENT_LOG_CORRUPT`, `INTENT_LOG_VALUE_REJECTED`, `CANONICAL_MOVE_HALTED` (exit 2); NEW Invariant 7 (txn record not rewritten per move); operator-recovery steps 2-3 reworded; EC-045/EC-053/EC-058 renamed/extended; NEW EC-059..EC-068; EC-069 (`generation_id`/`intent_log_path` pairing rule, Precondition 6(f)(iii); EC-045 control reworded). EC numbering now EC-001..EC-069. Prior: 2026-10-07 (v1.20) — ADR-052 v1.23 §Downstream (S-25.08 local adversary pass 3: F-S2508-L3-009 absent-vs-unstatable `.factory` classification; F-S2508-L3-001 two-tier txn-record interpretation); mirrors BC-1.18.013 v1.12; EC-029 reworded, EC-035..EC-042 added. Same-version extension for the ADR-052 v1.23 binary-leg ruling (\"Migration binaries — recovery and finalize legs\", \"Branch C hash source\"): NEW Precondition 6(f) (Tier 0 coordinator loader, strict-presence decode, `generation_id` tri-state, shared `abort_null_generation_txn`, null-generation discard = exit 1 `EXPIRY_ABORT` per §4e), Postcondition 9(b) hash source, EC-043..EC-047. Status unchanged. SECOND same-version extension (ADR-052 v1.23 \"Migration binaries — recovery and finalize legs\" items 8-11, \"second binary-leg extension\" Downstream block): Precondition 6(e)/6(f)(ii) `FOREIGN_MIGRATION_REFUSED` (exit 2, exact line) replaces the retired \"LockContention-class\" label with the precedence flock → Tier-0 loader → one-live-txn → foreign refusal → recover(); Precondition 6(f)(iii) enumerates the 11 required keys, types, null rules and the unknown-top-level-key rule; Precondition 6(f)(iv) carries the two exact `EXPIRY_ABORT` stderr lines (printed only after ABORTED + gate OPEN writes; write failure → Io exit 2); Postcondition 9(e) INTERIM `completed.json` short-circuit (retired by S-25.06 AC-031); EC-045 one vector per remaining key + wrong-typed `fencing_generation`; EC-046(e)(f) and EC-047 exact lines; NEW EC-048 (flock contention → `MIGRATION_LOCK_CONTENTION` exit 1), EC-049 (unknown top-level key), EC-050 (interim short-circuit a/b/c). THIRD same-version extension (ADR-052 v1.23 \"third binary-leg extension\": items 7(e), 9, 10(a)-(d), 11(c)-(e)): exit-1 class (Precondition 6(f)(vi)); `MIGRATION_LOCK_CONTENTION` exit 1 on every path, never exit 0, with `completed.json` read under the lock (Precondition 6(e)/6(f)(ii), Postcondition 9(e)(a0), EC-048 edited, EC-050 (c3) corrected, EC-051/EC-052); the key set is now TWELVE (adds required `schema_version: u32 = 1`; the \"11 required keys\" above is superseded), nested `pending_canonical_moves[]` strictness and the version gate (EC-053/EC-054, sixth kind `txn_record_newer_schema`, BC-3.08.001 v1.37); discard version gate and preservation controls (EC-055); NEW Postcondition 11 (COMPLETED-write and abort-path propagation, EC-056); exit-code exhaustiveness (EC-057); NEW \"Operator recovery of the interim block\" subsection (EC-058). EC numbering now EC-001..EC-058."
 introduced: v1.0-brownfield-backfill
-modified: []
+modified: ["2026-10-07 (v1.20)", "2026-10-08 (v1.21)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -74,18 +76,34 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    specification.
 
 5. A durable transaction record at `.factory/migration-state/txn-<activation_uuid>.json`
-   and a framed checksummed intent log at
-   `.factory/migration-state/intent-<generation_uuid>.log` are maintained across the full
-   migration lifecycle:
+   and an intent log at `.factory/migration-state/intent-<generation_uuid>.log` in the HARDENED
+   wire format of ADR-054 §Decision 1 (v1.21; formerly "a framed checksummed intent log" per
+   ADR-052 §Decision 7b, which is now a pointer to ADR-054) are maintained across the full
+   migration lifecycle. The format (grammar §Decision 1.2, value rules, byte-exact checksum §Decision 1.4,
+   operator recipe §Decision 1.5, byte-level reader §Decision 1.7, log invariants L1-L4 §Decision 1.8,
+   writer algorithm §Decision 1.9) is NORMATIVE IN ADR-054 and is not restated here; this BC cites
+   the ADR §-anchors (POLICY 19). The reader and writer are ONE shared module (ADR-054 §Decision 4,
+   `shard_manager/intent_log.rs`) used by `migrate-bc-index` and `backfill-append-logs`
+   (story attribution v1.21: **S-25.10** owns the module, the hardened format, the fixed plan and the
+   B-1/B-2/B-3 behavior; S-25.06 consumes the module; S-25.09 keeps only the `txn_id`, `intent_log_path` and
+   `DONE` `txn_id`/`fencing_generation` plumbing).
    - State STAGING: flock held; quiescence reached; staging generation built; intent log
-     written with per-target expected hashes + pre-states; all fsync barriers applied;
-     authorization gate check pending.
-   - State COMMITTING (the pivot): CURRENT.json pointer swap executed atomically; from this
-     point forward recovery is mandatory; authorization expiry does NOT abort.
-   - State COMPLETED: all canonical path moves complete and hash-verified; completed.json
+     written with per-target expected hashes + pre-states (`expected_pre_state` recorded truthfully
+     at INTENT time: `sha256(canonical)` or `MISSING` only if the canonical file was observed absent);
+     all fsync barriers applied; authorization gate check pending.
+   - State COMMITTING (the pivot): the complete, ordered, immutable `canonical_move_plan`
+     (ADR-054 §Decision 2) is persisted in the txn-record write that precedes the CURRENT.json
+     pointer swap, after every INTENT is durable (WAL boundary); the pointer swap is executed atomically;
+     from this point forward recovery is mandatory; authorization expiry does NOT abort. The plan is
+     NEVER rewritten afterwards: there is no per-move txn-record rewrite (Invariant 8); progress lives
+     only in the intent log.
+   - State COMPLETED: all canonical path moves complete and hash-verified; completion is recorded ONLY
+     by txn-bound, INTENT-confirmed `DONE` records (Postconditions 12-14); completed.json
      written at stable path; PERMANENT.
    EC-003 resume logic reads the intent log + txn record to determine which canonical path
-   moves succeeded (matching-destination-hash rule) and resumes from first uncompleted move.
+   moves succeeded (matching-destination-hash rule, ADR-054 §Decision 3 per-move recovery table) and
+   resumes from first uncompleted move; "remaining" is derived (plan minus targets with a satisfying
+   `DONE` whose canonical file hashes to its `expected_post_hash`), never stored.
 
 6. A WRITER-EXCLUSION maintenance boundary is in force during migration execution via two
    independent mechanisms:
@@ -137,8 +155,10 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        `CLAUDE_PROJECT_DIR` wins, canonicalized with an as-given fallback — never the cwd; absent
        or empty ⇒ the process cwd exactly; NO ancestor walk, NO `git rev-parse`); factory root =
        `resolve_factory_root(project_root)` (the real form of `<project_root>/.factory` via
-       `resolve_target_path`; it MUST exist as a directory, else the gate is out of scope for the
-       dispatch and NEVER creates `.factory`); `migration-state/` = `FactoryRoot::migration_state_dir()`
+       `resolve_target_path`; it MUST exist as a directory, else — ONLY when `.factory` is ABSENT, per
+       (iii) below, never on a non-ENOENT `stat` failure — the gate is out of scope for the
+       dispatch and NEVER creates `.factory`; v1.20: returns `Result<Option<FactoryRoot>,
+       BcIndexMigrationError>`); `migration-state/` = `FactoryRoot::migration_state_dir()`
        = `<factory_root>/migration-state`, never derived from the written path. Admission, the
        release leg AND both coordinator binaries (`migrate-bc-index`, `backfill-append-logs`;
        Precondition 7) use this ONE function; a `.factory` symlink resolves to the real root so
@@ -157,7 +177,18 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        `x.factory/…`) are OUT OF SCOPE: admitted, NO reservation, NO directory creation, NO read
        of migration-state; accepted residual — a session in project A writing into project B's
        protected paths is not serialized by B's gate; B's §Decision 7c step-5 fingerprint recheck
-       (`FINGERPRINT_MISMATCH_ABORT`) is the backstop. (iv) **Target path resolution** —
+       (`FINGERPRINT_MISMATCH_ABORT`) is the backstop. **Absent vs unstatable `.factory` (v1.20;
+       ADR-052 §Decision 5a "Factory-root lookup mapping (v1.23 ruling)"; normative text BC-1.18.013
+       Precondition 6(b)(iii); closes F-S2508-L3-009):** `factory_root` is OUT OF SCOPE only when
+       `<project_root>/.factory` is ABSENT — `stat` reports `ENOENT` (including a DANGLING
+       `.factory` symlink) or `ENOTDIR`, or succeeds on a non-directory (including a regular file). A
+       `stat` failure of any other kind (EACCES, EPERM, EIO, ESTALE, ELOOP, …) leaves the existence
+       of the directory unknown and FAILS CLOSED: `E-MAINTENANCE-002` `<cause>` = `io`, one
+       `migration.admission_failed`, no reservation, nothing created, the write not admitted; on the
+       release leg it is no verdict plus one `migration.admission_advisory`
+       `reservation_release_failed` (`detail` = sanitized path + `ErrorKind` + message); on the
+       coordinator it is exit 2 with the existing `BcIndexMigrationError::Io`, NOT
+       `FACTORY_ROOT_NOT_FOUND` (Precondition 7). Vectors: EC-035, EC-036, EC-037. (iv) **Target path resolution** —
        `resolve_target_path` returns `(T_real, T_lex)`: `T_lex` collapses `//`, drops `.`,
        applies `..` lexically; `T_real` is the POSIX-correct left-to-right walk (symlinks
        spliced in at their position, ≤ 40 hops, the first `NotFound` ends resolution and the
@@ -221,13 +252,29 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
          B2 path; closes S-25.08 AC-018):** `invalid_tool_use_id` = a PRESENT `tool_use_id`
          that is a non-string / empty / grammar-violating value, decided from the payload alone
          before any filesystem access; `io` = an OS-level call made by the admission check
-         failed other than ENOENT of the file itself (directory/reservation create, or
+         failed other than ENOENT of the file itself (the `stat` of `<project_root>/.factory` (v1.20; a
+         failure outside the closed ABSENT set of BC-1.18.013 Precondition 6(b)(iii)), directory/reservation create, or
          open/read/readdir/stat of `gate-state.json`, a `txn-*.json` record, the terminal
          record or, on the Branch C verification path, a canonical file — EACCES/EPERM/EROFS/ENOSPC/EIO/EISDIR/ELOOP/EMFILE/short read), content never
          examined after a failed call; `state_integrity` = every byte was read but the content
          is unusable (not UTF-8, empty/truncated/unparseable JSON, wrong JSON type/shape —
          `gate-state.json` is a bare JSON string `"OPEN"`/`"DRAINING"`/`"LOCKED"` —, unknown
-         state value, a PRESENT non-string `migration_id`, more than one live txn). First
+         state value, a PRESENT non-string `migration_id`, more than one live txn).
+         **Txn-record interpretation — two tiers (v1.20; ADR-052 §Error Code Semantics "Txn-record
+         interpretation — tiers (v1.23 ruling)"; normative text BC-1.18.013 Precondition 6(c) rule 3;
+         closes F-S2508-L3-001):** Tier 0 (a JSON object, a known `state`, a string `migration_id`
+         if PRESENT) is the ONLY interpretation applied at read time, to EVERY `txn-*.json`; no full
+         typed deserialize at read. Every other field is Tier 1, read LAZILY from the raw object by
+         the consuming branch only (Branch B: `generation_id`; Branch C verification:
+         `activation_id`, `generation_id`, `intent_log_path` — the Branch C hash is the `expected_post_hash` of the intent log's DONE record located via `intent_log_path` (v1.21: required equal to the matching INTENT's, ADR-054 §Decision 3 B-2), NOT a `canonical_move_plan` field). A PRESENT `generation_id`
+         that is JSON `null` is the null generation; a string is not; an ABSENT key or any other
+         type is `E-MAINTENANCE-002 (state_integrity)` (`txn_record_malformed`) with no txn or gate
+         write — an absent `generation_id` is NEVER read as null. A shape-valid live record that no
+         consuming branch reaches blocks with plain `E-MAINTENANCE-001`; a foreign record
+         (`migration_id ∉ K`) is refused plain with no field beyond Tier 0 read; non-live
+         COMPLETED/ABORTED records of valid Tier 0 shape (foreign or known) are ADMITTED (or Branch A
+         reopens the gate), never modified; only LIVE records count toward "more than one live
+         txn". Vectors: EC-038..EC-042. First
          failure wins in the order tool_use_id → reservation create (W1) → `gate-state.json` →
          `txn-*.json` (ascending filename) → terminal record. Reservation files are never read
          by admission (the drain's reservation GC is a binary surface, not `E-MAINTENANCE-002`);
@@ -247,7 +294,10 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
          "Admission state-integrity variant"; closes F-012).** `state_integrity` is
          `BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }` with `kind` ∈
          {`gate_record_malformed`, `txn_record_malformed`, `txn_migration_id_not_string`,
-         `multiple_live_txns`, `reservation_serialization`} — it is NOT `BinaryIntegrityFailure`;
+         `multiple_live_txns`, `reservation_serialization`, `txn_record_newer_schema`} (SIX kinds; the
+         sixth, v1.20 third binary-leg extension, is a `schema_version` ≥ 2 txn record written by a newer
+         build — same code, exit 2, distinct operator message; see Precondition 6(f)(iii) version gate) —
+         it is NOT `BinaryIntegrityFailure`;
          its Display (`migration admission: state integrity failure (<kind-token>): <detail>`)
          MUST NOT contain `BINARY_INTEGRITY_FAILURE`; exit 2; `detail` is the already-sanitized
          path/parse message, never record content. The coordinator surfaces the same variant as
@@ -293,7 +343,10 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
          `"PostToolUseFailure"`) in `invoke.rs`; no new `EventType` variant. A missing file or an
          invalid-grammar id is a silent no-op; a non-ENOENT release error is non-fatal and is
          recorded as one `migration.admission_advisory` InternalLog event with `reason =
-         reservation_release_failed` (the release leg returns it as data; `main.rs` writes it). Neither event arriving ⇒ the reservation leaks until
+         reservation_release_failed` (the release leg returns it as data; `main.rs` writes it); the
+         same advisory fires when `resolve_factory_root` reports the `.factory` `stat` as UNSTATABLE
+         (v1.20; `detail` carries the sanitized path, `ErrorKind` and message; never a verdict;
+         an ABSENT `.factory` is a silent no-op with no event). Neither event arriving ⇒ the reservation leaks until
          `MAX_RESERVATION_TTL` (TTL backstop; manual deletion before that). The release runs at
          the registry-independent position (6(d) lead).
        - **Reservation timestamp rules (v1.16; normative text in BC-1.18.013 Precondition 6(c);
@@ -424,7 +477,7 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        only to the `migration.admission_blocked` InternalLog event (field `migration_id`,
        `branch = foreign_migration`; Postcondition 10). A `migration_id` that is not a JSON string is a
        MALFORMED record ⇒ admission error `E-MAINTENANCE-002` (`state_integrity`), not "foreign".
-       The cross-migration refusal of Precondition 6(e) (binary exit 2 `LockContention`-class) is
+       The cross-migration refusal of Precondition 6(e) (binary exit 2 `FOREIGN_MIGRATION_REFUSED`) is
        unchanged and is a property of the migration BINARIES' recovery path only; a
        formally-unreachable-for-two-known-ids `RefuseForeignMigration` is retained in the core so
        that totality over `txn_migration_known = false` makes forward-compatible ids fail closed.
@@ -450,8 +503,33 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        (`canonical_paths_count` = N for the migration; for B2 the number of canonical paths in
        its txn record/intent log). **Cross-migration recovery refusal:** the `migrate-bc-index`
        binary recovers, resumes, finalizes or aborts ONLY a live txn whose `migration_id` is
-       `"migrate-bc-index"`; a live txn of `backfill-append-logs` ⇒ exit 2 (`LockContention`-
-       class), NO mutation, `recover()` NOT run over the foreign record. This refusal is a property
+       `"migrate-bc-index"`; a live txn of `backfill-append-logs` ⇒ exit 2 `FOREIGN_MIGRATION_REFUSED`
+       (v1.20 same-version extension; ADR-052 v1.23 item 9 — the former "`LockContention`-class" label is
+       RETIRED: it was prose with no variant, token or text), NO mutation, `recover()` NOT run over the
+       foreign record. The new variant is `BcIndexMigrationError::ForeignMigrationRefused {
+       live_migration_id: String }` (mirrored by `AppendLogMigrationError`), taxonomy code
+       `FOREIGN_MIGRATION_REFUSED`, process exit **2** (an operator must complete or recover that migration
+       with the build/subcommand that owns it; re-running this subcommand cannot help). EXACT stderr line
+       (single line, no newline; `<id>` is the record's `migration_id` rendered by the SAME function as the
+       v1.21 admission diagnostic — truncated to 64 chars, control characters escaped, so a hostile id
+       cannot forge terminal output):
+       `migrate-bc-index: BC-INDEX migration: refused: a live migration transaction owned by migration_id "<id>" is in progress (FOREIGN_MIGRATION_REFUSED, exit 2); this subcommand never recovers, finalizes or aborts another migration's record; nothing was changed`
+       (the `backfill-append-logs` binary prints `backfill-append-logs: refused: …` with the same tail and no
+       `BC-INDEX migration: ` label). The binary-side `E-MAINTENANCE-001` is never a process exit code (it is
+       a guard-layer `HookResult`) and `BINARY_INTEGRITY_FAILURE` is the digest/TOCTOU code, so neither
+       fits. A PRESENT non-string `migration_id` is `TxnMigrationIdNotString` (integrity, exit 2), not
+       foreign. **Sibling — flock contention (ADR-052 v1.23 item 9):** `flock(exclusive.lock,
+       LOCK_EX|LOCK_NB)` EWOULDBLOCK on a coordinator run is NOT the digest-coded
+       `BinaryIntegrityFailure("another migration coordinator already holds the exclusive migration
+       lock")`; it is `BcIndexMigrationError::MigrationLockContention`, taxonomy code
+       `MIGRATION_LOCK_CONTENTION`, exit **1** (retry later, nothing changed), EXACT stderr line
+       `migrate-bc-index: BC-INDEX migration: another migration coordinator holds the exclusive migration lock (MIGRATION_LOCK_CONTENTION, exit 1); nothing was changed; retry after it exits`
+       (EC-048). **On EVERY path (ADR-052 v1.23 item 11(c), third binary-leg extension):** the
+       flock is attempted BEFORE any state the coordinator will act on is read, so "not acquired" is
+       `MIGRATION_LOCK_CONTENTION`, exit **1**, whether or not `completed.json` exists, whether or not a
+       txn record (own or foreign) is live, and **NEVER exit 0** (`ALREADY_MIGRATED` is emitted only for a
+       state read UNDER the lock; Postcondition 9(e), EC-048, EC-051). Exit 1 is a CLASS (Precondition
+       6(f)(vi)): *no harm done, safe to re-run; the stderr code token says what to do next*. This refusal is a property
        of the migration BINARIES' recovery path only, where "own" is the invoking subcommand
        (v1.16; ADR-052 §Decision 7e "Definition of foreign" (5)); on the dispatcher
        (shared-core) path "foreign" means ONLY `migration_id ∉ K` (6(d) decision table) and a
@@ -461,6 +539,191 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        `gate-state.json` (the physical name of the logical "gate-state" file), one
        `reservations/` directory and one `txn-*.json` directory are shared; at most ONE live txn
        exists across both migrations.
+   (f) **`migrate-bc-index` recovery leg — the same record interpretation as admission (v1.20
+       same-version extension; ADR-052 §Error Code Semantics "Migration binaries — recovery and
+       finalize legs" items 1–6; normative sibling text BC-1.18.013 Precondition 6(c) rule 3 and
+       Postcondition 5a; owner S-25.09 for the `migrate-bc-index` coordinator leg, S-25.06 for
+       `backfill-append-logs` recovery and Branch C verification).** The tier rules bind the
+       migration BINARY exactly as they bind admission: one record interpretation, two surfaces that
+       differ only in how the verdict is delivered.
+       (i) *Variant, code, exit.* A txn record that fails Tier 0, or a Tier 1 field the executing arm
+       consumes and finds absent or ill-typed, is `BcIndexMigrationError::AdmissionStateIntegrity {
+       kind: TxnRecordMalformed | TxnMigrationIdNotString, detail }` — taxonomy
+       `MIGRATION_STATE_INTEGRITY_FAILURE`, process exit **2**. It is NOT `BinaryIntegrityFailure`
+       (digest/TOCTOU only; this supersedes the coordinator's former
+       `Quarantine { CommittingWithoutGenerationId }` → `BinaryIntegrityFailure` mapping and its
+       full-typed-decode failure mapping), NOT `ExpiryAbort` (exit 1: a corrupt record is not fixed by
+       re-activating), and NOT `COMPLETION_RECORD_MISMATCH_ABORT` (well-formed-but-disagreeing
+       fields only). The error is raised BEFORE the arm's first mutation: the txn record, the gate,
+       the terminal record, any `gen-<id>/` directory, the intent log, staging and canonical files
+       are byte-identical; no gate flip, no `COMPLETED` rewrite, no discard or abort; nothing is
+       "repaired" by the tool that cannot interpret it.
+       (ii) *Loader — the Tier 0 raw reader (same as admission).* The coordinator reads every
+       `txn-*.json` with the Tier 0 raw reader, ascending filename, first failure wins: a UTF-8
+       failure is `TxnRecordMalformed` (NOT `Io`); the read yields the raw object, `state`, the
+       effective `migration_id` and the path, nothing else. Full typed deserialize into
+       `BcIndexMigrationTxnRecord` AT READ TIME is FORBIDDEN. A live record of another migration or
+       with `migration_id ∉ K` is refused (Precondition 6(e): exit 2 `FOREIGN_MIGRATION_REFUSED`, exact
+       line above) with no Tier 1 field read; terminal (COMPLETED/ABORTED) and foreign records are NEVER
+       rejected for a missing Tier 1 field and never modified (a stale terminal record's archive rename is
+       derived from the file path, not from its `activation_id` field). **Precedence (ADR-052 v1.23 item
+       9; first match wins, each step runs only if every earlier step passed):** (1) `flock(exclusive.lock,
+       LOCK_EX|LOCK_NB)` — EWOULDBLOCK ⇒ exit 1 `MIGRATION_LOCK_CONTENTION` on EVERY path (including
+       `completed.json` present; NEVER exit 0), nothing read or changed (the
+       records cannot be read safely without the lock, so contention beside a foreign record reports
+       contention; the same on-disk state therefore never yields different fail-closed verdicts depending
+       on who else holds the lock — EC-048, EC-051); (1a) THEN, under the lock, `completed.json` is
+       read ONCE and that read is what `recover()` receives (Postcondition 9(e); any pre-lock existence
+       probe is a hint only and MUST NOT select the branch; EC-052 TOCTOU); (2) the Tier 0 loader over every `txn-*.json` (ascending filename; a Tier 0 failure of
+       ANY record wins, exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE`); (3) the one-live-txn check (two live
+       records ⇒ `MIGRATION_STATE_INTEGRITY_FAILURE` `multiple_live_txns`, NOT the foreign refusal); (4)
+       the foreign refusal (exit 2 `FOREIGN_MIGRATION_REFUSED`; a foreign STAGING record with
+       `generation_id: null` is NOT discarded); (5) only then `recover()` and the arm-entry decode.
+       (iii) *Strict-presence decode at arm entry.* An arm that rewrites the txn record
+       (`ResumeFromStaging`, `ForwardRecovery`, `CleanAbortExpiredStaging`) decodes the ONE live
+       known record into `BcIndexMigrationTxnRecord` from the raw object at the top of the arm,
+       before its first mutation, with EVERY field of `BcIndexMigrationTxnRecord` required to be
+       PRESENT with the right type (an `Option` field must be present, JSON `null` allowed;
+       `#[serde(default)]` is forbidden on txn fields — a defaulted field written back by
+       `write_txn_record` would fabricate state). Any absent, ill-typed or — for a field the arm
+       requires to hold a value — null field ⇒ (i). Every record this build wrote carries every key
+       (serialize emits `None` as `null`), so the strictness rejects only hand-edited,
+       truncated-but-parseable or foreign-schema records. **`generation_id` / `intent_log_path`
+       pairing rule (v1.21; ADR-052 v1.24 "Branch C hash source" ruling (i) and item 11(e) step 3):**
+       `intent_log_path` is written TOGETHER WITH `generation_id` (the S-25.09 plumbing) and is NEVER
+       derived or back-filled at read or recovery time. At the COORDINATOR's arm entry, a live record that
+       is COMMITTING, or STAGING with a STRING `generation_id`, MUST carry an `intent_log_path` that is a
+       JSON string EQUAL to `.factory/migration-state/intent-<generation_id>.log`; a `null`, absent,
+       non-string or mismatching value ⇒ (i) `txn_record_malformed` (exit 2
+       `MIGRATION_STATE_INTEGRITY_FAILURE`), nothing mutated. The ONLY valid `null` pairing is
+       `generation_id: null` with `intent_log_path: null` (the pre-generation record, discard path (v)).
+       `ResumeFromStaging` NEVER fills in a missing `intent_log_path`; it may only rewrite the IDENTICAL
+       value. "A record this build wrote" therefore means every key present AND the pair consistent: a
+       record with a string `generation_id` and `intent_log_path: null` is NOT one this build wrote and is
+       malformed (EC-069). **The 12 required keys (ADR-052 v1.23 item
+       10 and sub-rule (b); EC-045's earlier three named keys were examples, not the set; the eleven
+       below plus `schema_version`):**
+       - `txn_id`, `activation_id`, `created_at`, `updated_at` — JSON strings; `null` is rejected;
+       - `fencing_generation` — a JSON non-negative integer fitting `u64`; `null`, a float (`3.5`), a
+         string (`"3"`) and a negative number (`-1`) are all rejected;
+       - `canonical_move_plan` (v1.21; ADR-054 §Decision 2.5; renamed from `pending_canonical_moves`, which
+         is now an UNKNOWN top-level key and fails `txn_record_malformed`) — a JSON array; `null` is rejected;
+         for a txn in `COMMITTING` it MUST be NON-EMPTY (Postcondition 14); EVERY element is strictly decoded
+         the same way: **nested strictness (ADR-052 item 10(a))** — each element MUST be a JSON object whose
+         key set is EXACTLY `{staging_path, canonical_path}`, both JSON strings (not `null`); a non-object
+         element, a missing or ill-typed key, or ANY other key ⇒ (i) `txn_record_malformed`, nothing mutated,
+         with `detail` naming `canonical_move_plan[<index>]` and the offending key rendered by the SAME
+         sanitizer as the top-level check (truncated to 64 chars, control characters escaped — a hostile key
+         must not forge terminal output). The check is an explicit key-set comparison on the raw element
+         performed BEFORE the typed decode (`#[serde(deny_unknown_fields)]` on `PlannedCanonicalMove` is
+         permitted as defense in depth, but a serde error string MUST NEVER reach stderr or `detail`
+         unsanitized) and is evaluated AFTER the version gate below, so a newer-schema element is reported
+         as newer-schema;
+       - `schema_version` — **REQUIRED** JSON integer (`u32`), the current value being **1**
+         (`TXN_RECORD_SCHEMA_VERSION = 1`, written by record creation and by every `write_txn_record`
+         call, NO `#[serde(default)]`; ADR-052 item 10(b)). See the **version gate** below for the
+         outcome of every value;
+       - `state` — one of the known states (already enforced by Tier 0);
+       - `generation_id`, `source_sha256`, `source_body_row_sha256`, `intent_log_path` — the four
+         `Option` keys: the key MUST be PRESENT; the value is a JSON string or JSON `null`; any other
+         type (number, array, object, bool) ⇒ (i). Arm-specific must-hold-a-value rules sit on top
+         (COMMITTING `generation_id` must be a string, (iv)); this ruling promotes no further `Option`
+         field to non-null.
+       - `migration_id` is Tier 0, NOT part of the decode: it may be present (`"migrate-bc-index"`) or
+         absent, and a PRESENT value is preserved VERBATIM on rewrite.
+       **Version gate (ADR-052 item 10(b); newer-schema handling) — evaluated FIRST at every Tier 1
+       consumer that reads the record (the three rewriting arms; the null-generation discard (v); the
+       lazy Branch C reads when wired), before ANY other field, nested element or unknown key is
+       examined, and before the `generation_id` tri-state (iv):**
+       (1) `schema_version` key PRESENT and a JSON integer ≥ 2 (ANY magnitude, e.g. `4294967296`) ⇒ NEWER
+       SCHEMA: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` with the DISTINCT kind
+       `txn_record_newer_schema` (`AdmissionStateIntegrityKind::TxnRecordNewerSchema`), nothing mutated,
+       no gate flip; it WINS over every other defect on the same record (unknown top-level keys, unknown
+       nested keys, missing keys); (2) PRESENT and integer `1` ⇒ proceed to the strict decode; (3) PRESENT
+       and anything else (`0`, negative, float such as `1.5`, string such as `"1"`, `null`, array, object)
+       ⇒ (i) `txn_record_malformed`; (4) ABSENT ⇒ `txn_record_malformed` at the three REWRITING arms (a
+       required key), but "NOT CONSUMED, proceed" at the null-generation discard (v) and at the lazy
+       Branch C reads, which consume only the fields they name (a minimal hand-built `{state,
+       migration_id, generation_id}` record stays admissible there). The gate does not alter Tier 0, the
+       foreign refusal, the one-live-txn check or terminal-record handling: a foreign record is still
+       refused as foreign before ANY field is read. Downgrade is therefore "refuse, mutate nothing, tell
+       the operator to recover with the newer build" — never "interpret and rewrite". The
+       `Display` for kind `txn_record_newer_schema` (stderr = `<subcommand>: ` + it; normative, ADR-052
+       item 10(c)): `migration admission: state integrity failure (txn_record_newer_schema): txn record
+       schema_version <N> is newer than the supported 1; it was probably written by a newer build; recover
+       it with that build; nothing was changed`, `<N>` the decimal rendering truncated to 20 characters;
+       it MUST NOT contain `txn_record_malformed`, `corrupt` or `BINARY_INTEGRITY_FAILURE`. The
+       `E-MAINTENANCE-002` `<cause>` stays `state_integrity` (the cause domain is unchanged).
+       **Unknown-top-level-key rule:** any OTHER top-level key on a live known record at a rewriting arm
+       whose `schema_version` is the supported one (a newer schema's field) ⇒ (i) `txn_record_malformed`: the typed rewrite cannot preserve a field
+       it does not model, and silently dropping it is the same fabricated-state hazard the
+       `#[serde(default)]` ban exists for (EC-049). The version gate is evaluated first; the `generation_id` tri-state of (iv) is resolved
+       next, before any other key: a STAGING record with the key PRESENT and `null` takes the raw-object discard and decodes
+       NO other key; every other record is decoded whole, BEFORE the arm's first mutation.
+       Non-rewriting outcomes (`AlreadyMigrated`, quarantine, the foreign refusal) decode nothing.
+       (iv) *`generation_id` tri-state.* Same as Branch B, resolved BEFORE `recover()` (the pure
+       decision table and its OBL-1 / VP-147 harnesses are unchanged): on a STAGING record the key
+       PRESENT and JSON `null` ⇒ the null-generation discard, with the EXISTING ADR-052 §4e semantics
+       (txn → ABORTED retained with `abort_reason: "null_generation"`, gate → OPEN, exit **1**
+       `EXPIRY_ABORT` — the third `EXPIRY_ABORT` arm, a non-error sentinel; the code that today
+       returns `BinaryIntegrityFailure` after the discard is reconciled to `EXPIRY_ABORT` in the same
+       change) — AFTER the version gate: a `schema_version` ≥ 2 on that record is `txn_record_newer_schema`
+       and NOT the discard (txn bytes unchanged), because a newer schema may rename `generation_id`, and
+       that must read as "newer", not "malformed" (ADR-052 item 10(d)); `schema_version` ABSENT or `1`
+       proceeds, and an unknown extra top-level key does NOT block the discard (it is PRESERVED in the
+       ABORTED record: the unknown-key rejection exists only for rewrites that keep the record live; a
+       terminal record is never advanced again, so every preserved field is inert forensic data);
+       PRESENT string ⇒ the planner (resume / clean-abort); ABSENT key or any other type ⇒
+       (i) with NO mutation — an absent key is NEVER read as null. On a COMMITTING record
+       `generation_id` MUST be a string: absent, null or ill-typed ⇒ (i).
+       **`EXPIRY_ABORT` stderr (ADR-052 v1.23 item 8 — one code, one exit, two normative lines).**
+       `EXPIRY_ABORT` stays ONE taxonomy code, exit **1**, three trigger arms; the variant is
+       `BcIndexMigrationError::ExpiryAbort { arm: ExpiryAbortArm }` with `ExpiryAbortArm ∈ {
+       ManifestExpiredOrAbsent, NullGeneration }` (two renderings: `recover()` returns the single
+       `CleanAbortExpiredStaging` for "expired" and "absent", and `ManifestStatus` is fixed at
+       `StillValid`, so the binary cannot and need not tell them apart). The stderr line is
+       `migrate-bc-index: ` followed by exactly one of (single line, no newline):
+       - `ManifestExpiredOrAbsent`: `BC-INDEX migration: activation manifest expired or absent at STAGING resume (EXPIRY_ABORT, exit 1); the staged generation was discarded, the txn record is ABORTED and the writer gate is OPEN; no canonical path changed; re-activation required`
+       - `NullGeneration`: `BC-INDEX migration: pre-generation STAGING record discarded (EXPIRY_ABORT, exit 1); the prior run crashed before any generation was created (generation_id null), nothing was staged, the txn record is ABORTED and the writer gate is OPEN; no canonical path changed; re-activation required`
+       Rules: (a) the token `EXPIRY_ABORT` and the literal `exit 1` appear in both; neither contains
+       `BINARY_INTEGRITY_FAILURE` or `state integrity failure`, the internal identifier
+       `RecoveryDecision::CleanAbortExpiredStaging`, or the retired "so the gate self-heals" wording;
+       (b) **printed only after ABORTED + gate OPEN writes; write failure → `Io` exit 2:** the line is
+       produced only AFTER the txn record was rewritten ABORTED (kept at its original path;
+       `abort_reason: "null_generation"` for the null arm) and THEN the gate was written OPEN (txn
+       before gate — the `gate=OPEN ⇒ no live txn` order of §5c Branch 2), so its past-tense claims
+       ("discarded", "is ABORTED", "is OPEN") are TRUE when printed; if either write fails the result
+       is that write's own error (`Io`, exit **2**), NEVER `EXPIRY_ABORT` — the existing
+       `let _ = discard_incomplete_staging(..)` best-effort-then-claim-success pattern is a TD-VSDD-059
+       paper-fix and is removed; (c) the discard is the SAME for both binaries and both surfaces ((v));
+       the `backfill-append-logs` line differs only by its `backfill-append-logs: ` prefix and the
+       absence of the `BC-INDEX migration: ` label (its own variant, S-25.06).
+       (v) *One shared discard primitive.* The null-generation discard rewrites the raw object and
+       needs no other field, so it is ONE shared raw-object primitive, `abort_null_generation_txn`,
+       used by admission Branch B and by the coordinator: the same record is discarded by both
+       surfaces or by neither. It applies the version gate (iii) FIRST on BOTH surfaces (a
+       `schema_version` ≥ 2 ⇒ `txn_record_newer_schema`, bytes unchanged, before the `generation_id`
+       tri-state), and otherwise preserves unknown top-level keys. Vectors: EC-043..EC-058.
+       (vi) *Exit-code classes (ADR-052 §Error Code Semantics item 7(e), as amended; supersedes the earlier
+       "exit 1 = re-activation" definition, which `MIGRATION_LOCK_CONTENTION` contradicted).* Within the
+       migration subcommands (`migrate-bc-index`; `backfill-append-logs` mirrors it): exit **0** = the
+       requested end state holds AND was read under the lock (`Completed`, or `AlreadyMigrated`
+       established by a read under `exclusive.lock`); exit **1** = *no harm done, safe to re-run; the
+       stderr code token says what to do next* — a CLASS covering exactly {`EXPIRY_ABORT` ⇒ re-activate,
+       then re-run; `MIGRATION_LOCK_CONTENTION` ⇒ re-run after the holding coordinator exits}, both safe
+       to re-invoke blindly (after `EXPIRY_ABORT` the txn is ABORTED and the gate OPEN, so a re-run takes
+       the `AbortedTerminal` → fresh-run path; after contention nothing was read or written); exit **2** =
+       fail closed, an operator must act (every other variant). The two exit-1 conditions are told apart
+       by the stderr token, never by the exit status alone; a caller branching on exit codes alone MUST
+       treat 1 as "re-run is safe" and 2 as "stop". The exit status reaches its caller as a Bash-tool
+       result, never as a hook verdict, so Claude Code's hook meaning of exit 2 does not apply.
+       `process_exit_code` is an EXHAUSTIVE `match` over `BcIndexMigrationError` with NO wildcard arm:
+       exit 1 is listed by name (`ExpiryAbort { .. } | MigrationLockContention`), exit 2 by name for every
+       other variant (the same discipline as `admission_failure_cause`, Invariant 5); the compile-time
+       table test of EC-057 enumerates every variant. "Exit 1 = re-activation" wording is RETIRED.
+       (v1.21; ADR-054 §Decision 3 "New named errors") The exit-2 class gains three named variants,
+       each listed by name and each a row of the EC-057 table: `INTENT_LOG_CORRUPT`,
+       `INTENT_LOG_VALUE_REJECTED`, `CANONICAL_MOVE_HALTED` (Postcondition 15(e)); none is exit 1.
 
 7. **Coordinator anchoring — `migrate-bc-index` resolves its factory root by the SAME single rule
    as admission (v1.18; ADR-052 §Decision 5a "Single anchoring rule (v1.21)"; normative text
@@ -474,7 +737,9 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    `…/shards`, `cycles/…`, the activation manifest) from that SAME resolved real factory root — the
    six `_cwd.join(".factory/…")` literals in `run_bc_index_migration` and its helpers are removed;
    (c) NEVER creates `.factory`, never falls back to another directory, and when
-   `resolve_factory_root` yields `None` (no `.factory` directory) mutates NOTHING and exits 2
+   `resolve_factory_root` yields `Ok(None)` (`.factory` ABSENT, per the "Absent vs unstatable `.factory`" paragraph of the
+   admission-scope text above and BC-1.18.013 Precondition 6(b)(iii): `stat` success on a non-directory, `ENOENT`
+   including a dangling symlink, or `ENOTDIR`) mutates NOTHING and exits 2
    `FACTORY_ROOT_NOT_FOUND` (`BcIndexMigrationError::FactoryRootNotFound { project_root,
    root_source }`; no `exclusive.lock`, no `migration-state/`, no gate write). The normative single stderr
    line (v1.18 follow-up; ADR-052 §Downstream item 33(e)) is `<subcommand>:
@@ -498,7 +763,13 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    process cwd — before v1.18 the coordinator passed the process cwd and the Dekker interlock of
    6(c) silently guarded nothing whenever `CLAUDE_PROJECT_DIR` ≠ the process cwd. The
    coordinator's failures and advisories are stderr lines, not `tracing` output (Postcondition 10).
-   Vectors: EC-027..EC-030.
+   **Unstatable `.factory` (v1.20; normative text BC-1.18.013 Precondition 7; closes
+   F-S2508-L3-009):** a `stat` failure of `<project_root>/.factory` other than `ENOENT` / `ENOTDIR` /
+   not-a-directory (EACCES, EPERM, EIO, ESTALE, ELOOP, …) makes `resolve_factory_root` return
+   `Err(BcIndexMigrationError::Io { path: <project_root>/.factory, source })`; the coordinator exits
+   2 with that EXISTING `Io` variant, NOT `FACTORY_ROOT_NOT_FOUND`, raised before any lock or write —
+   nothing is created or mutated.
+   Vectors: EC-027..EC-030, EC-037.
 
 ## Postconditions
 
@@ -653,12 +924,12 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    mid-migration — is REMOVED). The B2-specific clauses below (schema, N, verification) apply
    to `migrate-bc-index` txns; `backfill-append-logs` txns are verified per BC-1.18.013
    Postcondition 5a. Instead, under `flock(exclusive.lock, LOCK_EX|LOCK_NB)`
-   (EWOULDBLOCK ⇒ live coordinator ⇒ no action, binary exits 0 with the §4e warning /
-   PreToolUse blocks):
+   (EWOULDBLOCK ⇒ live coordinator ⇒ no action: the BINARY exits 1 `MIGRATION_LOCK_CONTENTION` on every
+   path — NEVER exit 0, ADR-052 v1.23 item 11(c) — and PreToolUse blocks):
    (a) the live txn must have `migration_id = "migrate-bc-index"` (absent field counts as that);
        a live txn of the OTHER migration is NEVER finalized on the strength of B2's
        `completed.json` — in the `migrate-bc-index` BINARY by cross-migration refusal
-       (Precondition 6(e): binary exit 2 `LockContention`-class, NOT
+       (Precondition 6(e): binary exit 2 `FOREIGN_MIGRATION_REFUSED`, NOT
        `COMPLETION_RECORD_MISMATCH_ABORT`; binary recovery path only), and on the PreToolUse
        (shared-core) path by SELECTION (v1.16): a live `backfill-append-logs` txn is decided
        against ITS OWN record `completed-backfill-append-logs.json`, never `completed.json`, so
@@ -668,8 +939,25 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        `state_integrity`);
    (b) **VERIFY:** `completed.json` parses; `txn_id == activation_id`; `generation_id` equal to
        the txn's; `canonical_paths_count` equals B2's N for this txn; and for EVERY canonical
-       path `sha256(path) == expected_post_hash` per the txn record/intent log; the txn must be
-       COMMITTING;
+       path `sha256(path) == expected_post_hash` of that path's DONE record in the intent log
+       located via the txn's Tier 1 `intent_log_path` (v1.20; ADR-052 "Branch C hash source" — NOT
+       a `canonical_move_plan` field; a missing intent log or a path with no DONE record is
+       `canonical_hash_mismatch`). **Hash source, v1.21 (ADR-054 §Decision 3 B-2 and §Decision 1.7
+       surface-mapping table):** the DONE record's `expected_post_hash` is REQUIRED EQUAL to the latest
+       INTENT's `expected_post_hash` for that target AND to `sha256(file)`
+       (`DONE.expected_post_hash == INTENT.expected_post_hash == sha256(file)`; a DONE whose hash was
+       self-computed from the file it verifies is circular and is a mismatch); the log is read with the
+       ADR-054 §Decision 1.7 byte-level reader through the shared module (ADR-054 §Decision 4): a torn tail
+       is ABSENT (not an error), while mid-log corruption or a §Decision 1.8 invariant (L1-L4) violation is
+       `canonical_hash_mismatch` on this verifier/admission surface (and exit 2 `INTENT_LOG_CORRUPT` on the
+       coordinator surface); a read error other than ENOENT is `E-MAINTENANCE-002` `io` on admission;
+       the `canonical_move_plan` is itself integrity-checked (Postcondition 14): absent/ill-typed/empty is
+       `state_integrity` `txn_record_malformed` at this check's position (Tier 1), and a plan that
+       disagrees with the INTENT target set is `canonical_hash_mismatch` (completion unprovable). The txn must be COMMITTING; a Tier 1 txn field consumed at a
+       check (`activation_id`, `generation_id`, `intent_log_path`) that is absent or ill-typed is
+       `MIGRATION_STATE_INTEGRITY_FAILURE` (exit 2, nothing mutated), not a mismatch, and an
+       earlier check's mismatch wins over a later field's malformation (Precondition 6(f);
+       BC-1.18.013 Postcondition 5a);
    (c) on success: atomically rewrite the txn to COMPLETED (write-temp + fsync + rename +
        dir-sync, §7d), THEN (under gate `LOCK_EX`) flip `gate-state.json` → OPEN (order
        mandatory: `gate=OPEN ⇒ no live txn`); the binary then exits 0 `ALREADY_MIGRATED`; the
@@ -701,6 +989,54 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
        (single-line messages; line breaks editorial). The foreign-migration refusal in 9(a)
        and a live coordinator (EWOULDBLOCK) carry NO suffix.
        A byte-for-byte snapshot of `.factory/migration-state/` is unchanged by the attempt.
+   (e) **INTERIM `migrate-bc-index` binary short-circuit — retired by S-25.06 AC-031 (ADR-052 v1.23
+       item 11; owner of the interim: S-25.09; owner of the verify-then-finalize that replaces it:
+       S-25.06 AC-031 / B2-2).** The `migrate-bc-index` verify-then-finalize of (a)–(d) (`completed.json`
+       + live COMMITTING txn: verify, txn → COMPLETED, THEN gate → OPEN) is S-25.06 AC-031, which also
+       owns removal of the unverified `completed.json` short-circuit and the effectful verifier shared
+       with `backfill-append-logs` (same nine-token `check` domain, same order, Precondition 6(f)(i)).
+       S-25.09 has no verifier and must not grow one. Until S-25.06 AC-031 merges, the short-circuit in
+       `run_bc_index_migration_core` is narrowed to the fail-closed subset of the §5c Branch 2 table
+       (vectors EC-050): (a) it reads txn records with the Tier 0 loader (Precondition 6(f)(ii)); a Tier
+       0 failure is exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` and is NEVER swallowed (the former
+       `if let Ok(Some(..))` discarded `Err`); (a0) **lock first, `completed.json` read UNDER the lock
+       (ADR-052 v1.23 item 11(c), third binary-leg extension):** the coordinator attempts
+       `flock(exclusive.lock, LOCK_EX|LOCK_NB)` BEFORE it reads ANY state it will act on. Not acquired ⇒
+       exit **1** `MIGRATION_LOCK_CONTENTION` on EVERY path — including `completed.json` present, an own
+       live COMMITTING txn, or a foreign live record — with zero reads of txn/gate state and zero writes,
+       NEVER exit 0 `ALREADY_MIGRATED` and never the foreign refusal (the earlier "EWOULDBLOCK ⇒ skip,
+       exit 0 `ALREADY_MIGRATED`" behavior is REJECTED: under contention neither the txn records nor the
+       gate were read, so neither disjunct of the `ALREADY_MIGRATED` predicate was established; and the
+       same on-disk state would yield exit 2 uncontended but exit 0 contended — fail-closed verdicts MUST
+       NOT depend on who else holds a lock). Acquired ⇒ THEN `completed.json` is read (existence and
+       content) UNDER the lock; any pre-lock existence probe is a hint only and MUST NOT select the
+       branch; present ⇒ the short-circuit reconciliation (a)/(b)/(c) below; absent ⇒ the recovery path
+       with `recover(&planner_records, <the under-lock completed.json read>, None, ..)` — the former
+       hard-coded `completed = None` and its "honest current read" comment are removed. This closes the
+       TOCTOU race in which `completed.json` and a COMPLETED txn appear between the probe and lock
+       acquisition: the late process then sees the terminal record via the under-lock read, starts NO
+       fresh run, leaves the gate untouched and exits 0 `AlreadyMigrated` (a state read under the lock;
+       EC-052). `ALREADY_MIGRATED` (exit 0) is emitted only for a state read under `exclusive.lock`;
+       idempotent re-invokers still get exit 0 in the steady state and see exit 1 only during real
+       concurrent execution (the correct moment to retry); (b) a LIVE record beside `completed.json` is NEVER
+       finalized and the gate is NEVER flipped on it — a foreign record ⇒ exit 2
+       `FOREIGN_MIGRATION_REFUSED` (Precondition 6(e)); the own migration's live record (STAGING or
+       COMMITTING; no verification is possible in this build) ⇒ exit 2
+       `COMPLETION_RECORD_MISMATCH_ABORT` with the EXACT interim line
+       `migrate-bc-index: BC-INDEX migration: the terminal record completed.json cannot be proven to describe the live txn (COMPLETION_RECORD_MISMATCH_ABORT, exit 2); no verification was performed in this build; txn and gate unchanged; operator investigation required`
+       (the binary twin of the S-25.08 fail-closed Branch C seam, so both surfaces refuse identically;
+       the premise "no activation has ever run, so the interim blocks no real recovery" holds only until a
+       release ships the binary, and this build can reach the blocked state on its own normal path (a crash
+       between `completed.json` and the txn rewrite; Postcondition 11) — the interim line therefore has a
+       DOCUMENTED operator remedy, "Operator recovery of the interim block" below); (c) with
+       NO live record the gate is reconciled only under `flock(exclusive.lock, LOCK_EX|LOCK_NB)`
+       (acquired first per (a0); not acquired ⇒ exit 1 `MIGRATION_LOCK_CONTENTION`, never exit 0), and only when it is not already OPEN (clean steady state = ZERO
+       filesystem writes), per §5c Branch 2 steps 0–4 — the former unconditional
+       `write_admission_gate_state(.., Open)` without the flock could open a live
+       `backfill-append-logs` coordinator's gate (the §7e D4 hazard). **Retired by S-25.06 AC-031:**
+       when it lands, (b) becomes the shared verify-then-finalize of (a)–(d) and the interim line is
+       removed (the check-specific `COMPLETION_RECORD_MISMATCH_ABORT` / `MIGRATION_STATE_INTEGRITY_FAILURE`
+       lines of Precondition 6(f) apply).
    `--census` stays read-only and never reconciles. Idempotent: a second run is a zero-mutation
    no-op.
 
@@ -746,6 +1082,171 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
     advisories, the live-coordinator warning, the lone-oversized-row note) are single
     `E-…`/`<VARIANT>`-prefixed stderr lines. Vectors: EC-031, EC-032, EC-033.
 
+11. **The build MUST NOT create the blocked state itself and report success — COMPLETED-write errors
+    propagate; abort paths write ABORTED (checked) THEN gate OPEN (v1.20 third binary-leg extension; ADR-052
+    v1.23 item 11(d); TD-VSDD-059 paper-fix removal, TD-VSDD-060 sibling sweep).**
+    (a) *COMPLETED write.* `finish_committing_migration` writes `completed.json` (the commit point) and
+    then rewrites the txn `COMPLETED`. The txn rewrite is NOT best-effort: `write_txn_record(fs,
+    migration_state_dir, txn)?` — its error is propagated as `Io` (exit **2**, stderr = the write's own
+    `Io` error) and the function MUST NOT return `Completed` (exit 0) while the own txn is still live
+    beside `completed.json`. On that error the gate is NOT written OPEN (`gate=OPEN ⇒ no live txn` stays
+    true), no success is claimed, and no `Completed` outcome is produced (the former `let _ =
+    write_txn_record(..)` is a TD-VSDD-059 paper-fix: ENOSPC/EIO/EACCES on the rename would yield a run
+    that reports success and leaves the very state Postcondition 9(e)(b) then blocks forever). This does
+    not remove the crash window (a crash between `completed.json` and the txn rewrite cannot be closed by
+    code — `completed.json` is the commit point), which is why the operator procedure below exists. The
+    gate-OPEN write after a SUCCESSFUL txn COMPLETED write stays best-effort (warn on error): that state
+    self-heals through Branch A / §5c Branch 2 and no live txn remains.
+    (b) *Abort-path cleanup rule (every abort path).* In the step-3b `abort_staging` closure
+    (census / content-preservation failure) and at each `discard_incomplete_staging(..)` call site in the
+    `ResumeFromStaging` and fingerprint/canonical-I/O failure arms: write the txn record ABORTED **and
+    CHECK the result**; ONLY if it succeeded write the gate OPEN and check that; the FIRST failure is
+    returned as that write's `Io` (exit **2**) with the ORIGINAL failure's code token named in its
+    `detail`, so the root cause stays visible; the original error alone is returned only when BOTH writes
+    succeeded. The closure becomes fallible; no `let _ =` discards a txn-record or gate write on an abort
+    path, and the gate is never written OPEN after a failed ABORTED write (otherwise a live STAGING txn
+    could sit beside an OPEN gate). (Removing the inert-gen-dir `fs.remove` best-effort, which only leaves
+    an unreferenced directory, is not required.) Vectors: EC-056.
+
+12. **B-1 — Recovery appends the `DONE` record; recovery is idempotent (v1.21; ADR-054 §Decision 3 "B-1"
+    and the per-move recovery table row 1; story S-25.10; closes the crash window between rename+directory
+    sync and the `DONE` append).** When recovery (the `ForwardRecovery` / `ResumeFromStaging` arms through
+    `finish_committing_migration`, and every other COMMITTING recovery path) finds a plan target whose
+    canonical file already hashes to the latest `INTENT`'s `expected_post_hash` and whose latest valid
+    record for that target is an `INTENT`, it MUST append the `DONE` record (then apply the log barrier,
+    ADR-054 §Decision 1.9 step 5) BEFORE counting that move complete. Counting a move complete without
+    appending the `DONE` is FORBIDDEN (it yields a migration that completes and then fails every verifier
+    forever: Postcondition 9(b) requires a `DONE`). IDEMPOTENCE: a second recovery pass over a fully
+    recovered migration finds, for every target, a latest record that is a satisfying `DONE`
+    (`AlreadyDone`, table row 2), appends NOTHING, and leaves the intent-log bytes and the txn-record bytes
+    unchanged. Vectors: EC-059, EC-060, canonical test vector "B-1 crash window".
+
+13. **B-2 — `DONE` is bound to the txn and confirmed against the `INTENT`; `expected_pre_state` is
+    recorded truthfully (v1.21; ADR-054 §Decision 3 "B-2", §Decision 1.6, §Decision 1.2 value rules 3-5;
+    story S-25.10 with the plumbing delivered by S-25.09).** A `DONE` record is appended ONLY if ALL hold,
+    otherwise the move HALTS (exit 2 `CANONICAL_MOVE_HALTED`) and NO `DONE` is appended:
+    (a) its `txn_id` is the live txn's `txn_id` (== `activation_id`) and its `fencing_generation` is the
+        txn's CURRENT fencing generation — both passed as parameters into the move executor (no scraping
+        of the log, no empty string, no `0`);
+    (b) `sha256(canonical_path)` observed after the rename (or at the B-1 `TreatDone` observation) is
+        COMPARED with the latest `INTENT`'s `expected_post_hash` and is EQUAL; the `DONE`'s
+        `expected_post_hash` is COPIED from the `INTENT`, never computed from the file it will be verified
+        against (a self-hash makes verification circular);
+    (c) `target_canonical`, `staging_path` and `expected_pre_state` are copied verbatim from the `INTENT`.
+    `expected_pre_state` is recorded TRUTHFULLY at INTENT time: `sha256(canonical)` if the canonical file
+    exists, else `MISSING` — a literal `MISSING` that was not observed is never written. Verifiers
+    (Postcondition 9(b), the S-25.06 AC-031 verifier, the operator procedure) require
+    `DONE.expected_post_hash == INTENT.expected_post_hash == sha256(file)`. Vectors: EC-061, EC-062.
+
+14. **B-3 — A COMMITTING txn requires a non-empty `canonical_move_plan` equal to the INTENT target set;
+    fail closed (v1.21; ADR-054 §Decision 3 "B-3" and §Decision 2.4; story S-25.10).**
+    `finish_committing_migration` (shared by every COMMITTING recovery arm) MUST, BEFORE the first rename,
+    require: (a) `canonical_move_plan` is a non-empty JSON array of well-formed, pairwise-distinct moves
+    (`canonical_path` values pairwise distinct; every path satisfies the ADR-054 §Decision 1.2 `path` value
+    rule); (b) the intent log reads without corruption (ADR-054 §Decision 1.7) and the plan's set of
+    `canonical_path` values EQUALS the set of distinct `target_canonical` values over the log's `INTENT`
+    records, and for each pair the plan's `staging_path` equals the `INTENT`'s. Otherwise: exit 2
+    `MIGRATION_STATE_INTEGRITY_FAILURE` with kind `txn_record_malformed` on the COORDINATOR (an empty or
+    malformed plan, or a set/pair disagreement; `detail` names the offending field and the symmetric
+    difference, sanitized per Precondition 6(f)(iii)), NOTHING moved, no `completed.json`, txn and gate
+    unchanged. (Rationale for the two classes: the coordinator is about to ACT on the record, so an
+    untrustworthy record is an integrity failure; verifiers decide whether a completion CLAIM is provable.)
+    On the verification surfaces (Postcondition 9(b), the S-25.06 verifier) a plan that is
+    absent/ill-typed/empty is `state_integrity` `txn_record_malformed` at the `canonical_hash_mismatch`
+    check's position (Tier 1), and a plan that disagrees with the INTENT set is `canonical_hash_mismatch`.
+    Before writing `completed.json`, `finish_committing_migration` re-reads the log and calls the shared
+    `verify_plan_completion(plan, log)` (every plan target has a `DONE` satisfying Postcondition 13);
+    `canonical_paths_count == len(plan)`. Vectors: EC-063, EC-064.
+
+15. **Hardened intent-log reader/writer obligations and the three new coordinator outcomes (v1.21;
+    ADR-054 §Decision 1 and §Decision 3 "New named errors"; story S-25.10 owns the shared module,
+    S-25.06 consumes it).** The wire format, byte-exact checksum, reader and writer are normative in
+    ADR-054; this BC cites the anchors and does NOT copy the grammar (POLICY 19 stable anchors). The
+    obligations binding `migrate-bc-index`:
+    (a) *One module.* Reader and writer are the ONE shared module of ADR-054 §Decision 4
+        (`shard_manager/intent_log.rs`); the `migrate-bc-index` copies are deleted, not wrapped; no other
+        source or test spells `INTENT_LOG_RECORD_V1` / `END_INTENT_LOG_RECORD` outside the module and its
+        tests.
+    (b) *Reader* (ADR-054 §Decision 1.7 + §Decision 1.8): byte-level and line-anchored, never decoding the
+        file as one UTF-8 string; a torn tail is ABSENT (not an error); corruption in the middle (bytes
+        after the valid prefix FOLLOWED by a valid record) and any log-level invariant L1-L4 violation fail
+        CLOSED — surface mapping per the §Decision 1.7 table: coordinator ⇒ exit 2 `INTENT_LOG_CORRUPT`
+        (no further move or append is made and no completion is recorded: before the move loop nothing
+        was moved or appended; at the post-loop re-read of ADR-054 §Decision 3 step 5 this run's moves
+        have already happened, `completed.json` is NOT written and the txn is untouched — ADR-054
+        §Decision 3.1 correction C-1); verifier/admission ⇒ `canonical_hash_mismatch`; admission read error
+        other than ENOENT ⇒ `E-MAINTENANCE-002` `io`.
+    (c) *Writer* (ADR-054 §Decision 1.9): validate every field against the §Decision 1.2 value rules
+        BEFORE any byte is appended and at plan-build time on every `staging_path`/`canonical_path` (a
+        violation ⇒ exit 2 `INTENT_LOG_VALUE_REJECTED`, no record of the rejected batch appended, and at
+        plan-build time nothing staged; a rejection once the generation directory exists takes the
+        pre-commit abort path of ADR-052 §Decision 7c step 3c, whose writes (txn ABORTED, THEN gate OPEN)
+        COMPLETE BEFORE the line is printed — if either write fails, that write's own `Io` error is the
+        result (exit 2), never `INTENT_LOG_VALUE_REJECTED`; ADR-054 §Decision 3.1 correction C-2); repair a torn tail by durable truncation to `valid_prefix_len` under the flock before the
+        first append; one `write_all` per batch on an `O_APPEND` handle; the platform file barrier
+        (`F_FULLFSYNC` on macOS, `fsync` elsewhere, NO silent downgrade) and, when the call created the
+        file, a parent-directory sync BEFORE the WAL boundary counts as reached.
+    (d) *Checksum* (ADR-054 §Decision 1.4, golden vector; operator recipe §Decision 1.5): SHA-256 over the
+        exact on-disk bytes of the first nine lines of the record.
+    (e) *New named coordinator outcomes (all exit **2**, none a `HookResult`; stderr = `<subcommand>: `
+        + the exact line ratified in ADR-054 §Decision 3.1, mirrored with its closed placeholder domains in
+        the error-taxonomy rows — NO `BC-INDEX migration: ` label, because the shared module serves both
+        subcommands):* `INTENT_LOG_CORRUPT` (`IntentLogCorrupt { path, kind, offset }`),
+        `INTENT_LOG_VALUE_REJECTED` (`IntentLogValueRejected { field, reason }`) and
+        `CANONICAL_MOVE_HALTED` (`CanonicalMoveHalted { target, reason }`: decision `FailClosed`, a rename
+        or sync failure, or a post-hash divergence from the `INTENT` during COMMITTING; the txn stays
+        `COMMITTING` and the log keeps its valid records so forward recovery re-runs idempotently;
+        replaces the generic `BinaryIntegrityFailure` count-shortfall carrier). They join the exit-2 class
+        of Precondition 6(f)(vi) (every variant other than `ExpiryAbort`/`MigrationLockContention`), listed
+        BY NAME in the `process_exit_code` match (no wildcard) and as rows in the EC-057 table test; they
+        classify as `StateIntegrity` in `admission_failure_cause` (Invariant 5). Vectors: EC-065..EC-068.
+
+### Operator recovery of the interim block (ADR-052 v1.23 item 11(e); **retired by S-25.06 AC-031**)
+
+Applies ONLY to the state `completed.json` present + own live txn (`COMMITTING`, or `STAGING` per
+Postcondition 9(e)(b)) + exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` with the "no verification was performed
+in this build" line, and to the identical `E-MAINTENANCE-001` + mismatch-suffix block at admission. It is
+performed by the HUMAN operator in a terminal OUTSIDE any agent session (the guard layer blocks agent
+writes to `migration-state/`; agents MUST NOT perform or script it), with NO migration coordinator process
+running (`flock(exclusive.lock)` acquirable, e.g. `flock -n .factory/migration-state/exclusive.lock true`
+exits 0). Steps, in order; stop at the first failed check and leave all files unchanged (a failed check
+means a real mismatch — escalate, do not force):
+
+1. *Snapshot.* Copy the whole `.factory/migration-state/` directory and the four affected canonical paths to
+   a safe location before any edit.
+2. *Identity binding.* Read `completed.json` (`txn_id`, `generation_id`, `canonical_paths_count`) and the
+   live `txn-<activation_uuid>.json` (`txn_id`, `activation_id`, `generation_id`, `state`,
+   `canonical_move_plan`, `intent_log_path`). Require: `completed.json.txn_id` == the txn's
+   `activation_id`; `completed.json.generation_id` == the txn's `generation_id` (string); the txn's
+   `migration_id`, if present, == the migration being finalized; N = `len(canonical_move_plan)` (v1.21;
+   ADR-054 §Decision 2.6: for `migrate-bc-index` N is txn-specific — the number of distinct
+   `target_canonical` among the INTENT records, one per staged shard, sub-shard, manifest and
+   `BC-INDEX.md`; it is NOT a constant) is NON-EMPTY, and `canonical_paths_count` == N; and the set of
+   `canonical_path` values of the plan equals the set of distinct `target_canonical` values of the log's
+   `INTENT` records (ADR-054 §Decision 3 B-3).
+3. *Content binding.* Open the intent log at `intent_log_path`. First verify its checksums with the
+   operator recipe of ADR-054 §Decision 1.5 (`sed` + `shasum`, records walked from line 1 in steps of 11,
+   stopping at the first failing record; a failing record FOLLOWED by a later verifying
+   `INTENT_LOG_RECORD_V1` record is mid-log corruption — STOP and escalate; trailing bytes with no later
+   verifying record are a torn tail and are ignored). Then for EVERY `canonical_path` in
+   `canonical_move_plan` find its `DONE` record (a record type `DONE`, never only `INTENT`) and its latest
+   `INTENT`, and require the three-way equality `DONE.expected_post_hash` == `INTENT.expected_post_hash` ==
+   `sha256(<canonical_path file>)` (ADR-054 §Decision 3 B-2).
+4. *Finalize the txn.* Only if 2 and 3 all hold: rewrite the txn file with `state` set to `COMPLETED` and
+   `updated_at` set to the current UTC time, every other key byte-for-byte preserved (including
+   `schema_version`), using write-temp + fsync + rename + directory fsync (the §7d discipline; never edit
+   in place).
+5. *Open the gate — only after step 4 is durable.* Set `gate-state.json` to the OPEN state, same encoding
+   the file currently uses, by the same atomic write. This order is mandatory (`gate=OPEN ⇒ no live txn`).
+6. *Confirm.* Re-run `factory-dispatcher migrate-bc-index` (the pinned absolute path): it must exit 0
+   `ALREADY_MIGRATED` with zero writes; then confirm a normal `.factory/` write is admitted.
+
+If step 2 or 3 fails, do NOT advance the txn or open the gate: the on-disk migration is in an unproven
+state; restore from the step-1 snapshot or the pre-migration git history and escalate. S-25.06 AC-031
+replaces this manual procedure with the shared verifier executing exactly steps 2-5 under
+`flock(exclusive.lock)`; the procedure also enters the operator runbook (devops-engineer deliverable of
+S-25.09). Vector: EC-058.
+
 ## Invariants
 
 1. **This BC's per-file write logic invokes BC-1.18.006's `write_atomic` primitive
@@ -755,7 +1256,8 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    DOES introduce new multi-file crash-atomicity machinery via ADR-052 §Decision 7: §Decision 7a
    (advisory flock on stable pre-created never-unlinked inode; durable txn record separate from the
    flock), §Decision 7b (framed checksummed intent log with WAL boundary; matching-destination-hash
-   crash recovery table), §Decision 7c (single CURRENT.json atomic pointer swap as the sole
+   crash recovery table — v1.21: the normative home of the format and the recovery table is now
+   ADR-054 §Decision 1 and §Decision 3; ADR-052 §Decision 7b is a pointer), §Decision 7c (single CURRENT.json atomic pointer swap as the sole
    commit-point; completed.json as the permanent terminal record). BC-1.18.006's `write_atomic`
    provides the per-file write primitive; ADR-052 §Decision 7 provides the multi-file atomic
    publication envelope that `write_atomic` alone cannot provide.
@@ -810,6 +1312,15 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
    no `join(".factory/…")` literal exists in `shard_manager.rs` outside the resolver (Precondition
    7; EC-027).
 
+7. **The txn record is not rewritten per canonical move (v1.21; ADR-054 §Decision 2.2; ADR-052 §Decision
+   7c step 7 sub-step d is DELETED; story S-25.10).** Between the pointer-swap txn write (which persists
+   the complete `canonical_move_plan`) and the final `COMMITTING` → `COMPLETED` (or `ABORTED`) transition,
+   the txn record changes ONLY by recovery-owner `fencing_generation` claims and `updated_at` at those
+   transitions; the plan is immutable and per-move progress lives ONLY in the intent log's `DONE` records
+   ("remaining" is derived, never stored). Test obligation: the txn file bytes are identical across all
+   moves except the final state transition (S-25.10 AC-010, T17). Corollary: the field is a PLAN, not a
+   pending list — which is why it was renamed `canonical_move_plan`.
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
@@ -826,7 +1337,7 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | EC-010 | (v1.11, wiring) Gate LOCKED/DRAINING with no active txn (Branch A), or STAGING with `generation_id = null` (Branch B), and a PreToolUse `Edit`/`Write` under `.factory/specs/behavioral-contracts/` or `.factory/cycles/` arrives through the REAL dispatcher entry with `exclusive.lock` acquirable | The production admission path runs the §5a step-3.5 reconciliation (A: gate → OPEN; B: txn → ABORTED + gate → OPEN) and then admits; with `exclusive.lock` held by a live coordinator (EWOULDBLOCK) no action and `E-MAINTENANCE-001` block. A reconciler unit-tested but not called on the production path FAILS this EC |
 | EC-011 | (v1.11, D3) `completed.json` present and valid, txn COMMITTING (matching `activation_id`/`generation_id`, `migration_id` = `migrate-bc-index` or absent), gate LOCKED, all canonical hashes at `expected_post_hash` (crash between `completed.json` fsync and the txn→COMPLETED rewrite) | (a) next PreToolUse (no binary re-invocation) runs Branch C: txn → COMPLETED THEN gate → OPEN, admitted; (b) a binary re-invocation instead finalizes identically and exits 0 `ALREADY_MIGRATED`; (c) a second run is zero-mutation; (d) crash between txn rewrite and gate flip ⇒ txn COMPLETED + gate≠OPEN ⇒ Branch A repairs next dispatch; (e) lock held by live coordinator ⇒ no action, blocked (Postcondition 9) |
 | EC-012 | (v1.11, D3 mismatch) Same fixture but `completed.json.txn_id` ≠ `activation_id`, or `generation_id` ≠, or `canonical_paths_count` ≠ N, or any canonical hash ≠ `expected_post_hash`, or txn STAGING (always fail-closed; no verification is attempted), or COMMITTING with a different `activation_id` | NO txn write, NO gate write; PreToolUse blocks `E-MAINTENANCE-001` with the path-family-keyed message plus the ` (completion-record mismatch — operator investigation required)` suffix (reason also logged; v1.13 — including the B2 STAGING + `completed.json` case); binary exits 2 `COMPLETION_RECORD_MISMATCH_ABORT`; `.factory/migration-state/` byte-for-byte unchanged. (A live `backfill-append-logs` txn is NOT this EC — in the binary it is the cross-migration refusal, EC-013; on the dispatcher path it is decided against ITS OWN record (EC-022/EC-023); B2's `completed.json` NEVER finalizes it, Postcondition 9(a).) |
-| EC-013 | (v1.11, D4; v1.16: **binary recovery path only**) The single live txn has `migration_id = "backfill-append-logs"` when the `migrate-bc-index` BINARY is invoked; or a txn record lacks `migration_id` | Other-known-migration live txn ⇒ cross-migration refusal (binary recovery path only; the dispatcher/shared-core path never refuses between the two known ids — it decides against the txn's own migration's record, EC-022/EC-023): exit 2 (`LockContention`-class), no mutation, `recover()` not run, txn untouched. Absent `migration_id` ⇒ treated as `"migrate-bc-index"` (legacy record stays valid and recoverable by this binary) |
+| EC-013 | (v1.11, D4; v1.16: **binary recovery path only**) The single live txn has `migration_id = "backfill-append-logs"` when the `migrate-bc-index` BINARY is invoked; or a txn record lacks `migration_id` | Other-known-migration live txn ⇒ cross-migration refusal (binary recovery path only; the dispatcher/shared-core path never refuses between the two known ids — it decides against the txn's own migration's record, EC-022/EC-023): exit 2 `FOREIGN_MIGRATION_REFUSED` (Precondition 6(e) exact line; replaces the retired "`LockContention`-class" label), no mutation, `recover()` not run, txn untouched. Absent `migration_id` ⇒ treated as `"migrate-bc-index"` (legacy record stays valid and recoverable by this binary) |
 | EC-014 | (v1.11, D4) `completed-backfill-append-logs.json`/`CURRENT-backfill-append-logs.json` exist (mechanism-A finished) while `completed.json`/`CURRENT.json` do not | `migrate-bc-index` is NOT `ALREADY_MIGRATED`; `detect_migration_read_state` does NOT report the BC-INDEX migration complete (readers keep legacy paths); B2 writes only `completed.json`/`CURRENT.json` and `backfill-append-logs` never does (Precondition 6(e)) |
 | EC-015 | (v1.15, first-activation race; S-25.08 finding) A protected-path PreToolUse `Edit`/`Write`/`MultiEdit` (valid `tool_use_id`) is admitted in a repository where `.factory/migration-state/` does NOT yet exist; while it is in flight (PostToolUse not fired) `migrate-bc-index` activates (creates the directory, flips DRAINING, polls `reservations/`) | The admitter created `migration-state/reservations/` idempotently and its reservation BEFORE reading the gate (Precondition 6(c) "Unconditional reservation namespace"); the coordinator's C2 lists it and WAITS (`source_sha256`/`source_body_row_sha256` not computed while it exists) until PostToolUse removes it, else `DRAIN_TIMEOUT_ABORT` at 30 s with canonical files byte-identical; the §7c step-5 fingerprint abort is NOT the handling mechanism. Concurrent first-ever admissions all succeed (idempotent create). No `tool_use_id` ⇒ check-only, no directory/reservation. Creation failure ⇒ fail-closed `HookResult::Error` `E-MAINTENANCE-002` (`io`, v1.16), no reservation left behind |
 | EC-016 | (v1.16, F-001) A protected-path `Edit`/`Write`/`MultiEdit` is admitted (reservation created), the tool call then FAILS, is interrupted or is cancelled, so the harness sends `PostToolUseFailure` (NOT `PostToolUse`) for the same `tool_use_id` — including (a) `is_interrupt: true`, (b) an envelope with NO `tool_name`, (c) a differently-shaped `tool_name` | The reservation is REMOVED (exactly that file; keyed only on `tool_use_id`, no `tool_name` filter); `is_tool_completion_event` is true for exactly `"PostToolUse"` and `"PostToolUseFailure"`; a `PostToolUseFailure` for an id with no reservation or an invalid-grammar id is a silent no-op; a non-ENOENT release error is a non-fatal warn; no new `EventType` variant; neither Post event ⇒ TTL backstop (documented residual) |
@@ -842,12 +1353,47 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | EC-026 | (v1.16, S-25.08 AC-018 ambiguity; Precondition 6(d) "`<cause>` classification") An admission-time read of `gate-state.json` (or a `txn-*.json` record, or the Branch C terminal record) that FAILS (OS call error other than ENOENT) versus one that SUCCEEDS but yields unusable content (non-UTF-8, empty/truncated/unparseable, wrong JSON type/shape, unknown state value, non-string `migration_id`, >1 live txn) | OS read failure ⇒ `E-MAINTENANCE-002 (io)`; bytes read but unusable ⇒ `E-MAINTENANCE-002 (state_integrity)`; read failure wins when both would apply; terminal record: read failure ⇒ `io`, unverifiable content (unparseable, wrong schema, count/id/hash mismatch) ⇒ NOT `E-MAINTENANCE-002` (v1.17: `E-MAINTENANCE-001` WITH the completion-record-mismatch suffix, not finalized); a canonical file read during Branch C verification (v1.19, ADR-052 v1.22 "Read-failure mapping"): read-call failure other than ENOENT ⇒ `io`, ENOENT ⇒ the `canonical_hash_mismatch` check; reservation files are never read by admission; first-failure-wins (tool_use_id → W1 → gate-state → txn ascending → terminal record); fail-closed, no reservation left behind, no writes; **(v1.18, F-012)** the `state_integrity` carrier is `BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }`, NOT `BinaryIntegrityFailure`, with `kind` ∈ {`gate_record_malformed`, `txn_record_malformed`, `txn_migration_id_not_string`, `multiple_live_txns`, `reservation_serialization`}; its Display `migration admission: state integrity failure (<kind-token>): <detail>` does NOT contain `BINARY_INTEGRITY_FAILURE`; each failing fixture writes exactly one `migration.admission_failed` event carrying `cause` and, for `state_integrity`, the matching `kind` |
 | EC-027 | (v1.18, D-2) The process cwd of the `migrate-bc-index` invocation differs from `CLAUDE_PROJECT_DIR=<P>`, and admission under the same env left a reservation `T1` | The coordinator operates on — and creates `migration-state/` only under — `<P>/.factory`; its first drain observes `<P>/.factory/migration-state/reservations/T1.reservation`; NOTHING is created under the process cwd or any other directory; no `join(".factory/…")` literal outside the resolver in `shard_manager.rs` |
 | EC-028 | (v1.18, D-2) `resolve_session_project_root(claude_project_dir, process_cwd)` over `Some(<abs existing dir>)`; `Some("")`; `None`; `Some(<abs nonexistent path>)`; `Some(<symlink to dir>)`; a `process_cwd` below a git work-tree root that has a `.factory` | The canonicalized path; `process_cwd`; `process_cwd`; the as-given path (NEVER the cwd); the resolved path; `process_cwd` exactly (no ancestor walk, no `git rev-parse`); the function is pure (testable without environment mutation) |
-| EC-029 | (v1.18, D-2) The resolved project root has NO `.factory` directory (absent, or a regular file) when `migrate-bc-index` (or `backfill-append-logs`) runs | Exit 2 `FACTORY_ROOT_NOT_FOUND` (`FactoryRootNotFound { project_root, root_source }`, `root_source: Option<ProjectRootSource>`) with the normative stderr line `<subcommand>: FACTORY_ROOT_NOT_FOUND: no .factory directory under project root <project_root> (resolved from <source>)`, `<source>` ∈ {`CLAUDE_PROJECT_DIR`, `process cwd`} — on the CLI the suffix is ALWAYS present (Precondition 7 rule (a)); only a path-only library entry (`run_bc_index_migration(&Path)` / crate-private `run_bc_index_migration_with_ttl(&Path, ttl)`) yields `root_source = None` and the suffix-less `Display`; nothing created or mutated (no `.factory`, no `migration-state/`, no `exclusive.lock`); the tree is byte-identical before and after |
+| EC-029 | (v1.18, D-2; v1.20 ADR-052 v1.23) The resolved project root has NO `.factory` directory — ABSENT, the closed set: missing (`ENOENT`), a regular file or other non-directory, a DANGLING `.factory` symlink (`ENOENT`), or a project root that is itself a regular file (`ENOTDIR`) — when `migrate-bc-index` (or `backfill-append-logs`) runs. (A `stat` failure of any OTHER kind is NOT this case: EC-037.) | Exit 2 `FACTORY_ROOT_NOT_FOUND` (`FactoryRootNotFound { project_root, root_source }`, `root_source: Option<ProjectRootSource>`) with the normative stderr line `<subcommand>: FACTORY_ROOT_NOT_FOUND: no .factory directory under project root <project_root> (resolved from <source>)`, `<source>` ∈ {`CLAUDE_PROJECT_DIR`, `process cwd`} — on the CLI the suffix is ALWAYS present (Precondition 7 rule (a)); only a path-only library entry (`run_bc_index_migration(&Path)` / crate-private `run_bc_index_migration_with_ttl(&Path, ttl)`) yields `root_source = None` and the suffix-less `Display`; nothing created or mutated (no `.factory`, no `migration-state/`, no `exclusive.lock`); the tree is byte-identical before and after |
 | EC-030 | (v1.18, D-2) `<P>/.factory` is a symlink to a real factory directory, with admission and the coordinator each under `CLAUDE_PROJECT_DIR=<P>` | One shared REAL `migration-state/` namespace: admission's reservations and the coordinator's drain/gate/txn all live in the real directory; no second namespace under `<P>/.factory` |
 | EC-031 | (v1.18, D-1) A protected-path write is blocked `E-MAINTENANCE-001` in each branch: gate-only; live txn; live coordinator; foreign migration; Branch C verification failure | Exactly ONE `migration.admission_blocked` event per blocked dispatch, written before the early return, with `scope`/`family` per the written path family, `branch` ∈ {`gate_only`, `live_txn`, `live_coordinator`, `foreign_migration`, `completion_record_mismatch`}, `gate_state`, `migration_id`/`txn_id` (sanitized; `null` for gate-only), `check` (non-null only for the mismatch branch), `reconciliation`; unchanged stderr message; no raw `tool_use_id` or record content; asserted against `dispatcher-internal-*.jsonl`, never a `tracing` capture |
 | EC-032 | (v1.18, D-1) A protected-path write fails `E-MAINTENANCE-002` for each cause (`invalid_tool_use_id`, `io`, `state_integrity`) | Exactly ONE `migration.admission_failed` event per failed dispatch: `cause` = the token; `kind` = the `AdmissionStateIntegrityKind` token for `state_integrity`, else `null`; `detail` = path / `io::Error` kind+message / byte length; never the raw `tool_use_id` (byte length only) nor record content |
 | EC-033 | (v1.18, D-1; reworded in the v1.18 follow-up per item 33(c)/(d)) Non-verdict anomalies: a non-ENOENT release error; Branch A gate re-open; Branch B null-generation discard; `decide_terminal_record_reconciliation` returns `FinalizeThenOpenGate` with the finalize effect undelivered (S-25.09 seam); S-25.06's successful verify-then-finalize; and (separately) a reservation-timestamp fallback at drain GC | Exactly ONE `migration.admission_advisory` event per anomaly with `reason` = `reservation_release_failed` / `branch_a_gate_reopened` / `branch_b_txn_aborted` / `branch_c_finalize_unwired` / `branch_c_finalized` (the closed five-token domain); `branch_c_finalize_unwired` is written IN ADDITION to the one `migration.admission_blocked`; `branch_c_finalized` is admitted (no `_blocked`) and emitted by neither S-25.08 nor S-25.09; optional context fields only from {`migration_id`, `txn_id`, `check`, `detail`, `tool_use_id_len`}, any other field forbidden; the dispatch outcome of the release/Branch A/Branch B cases is unchanged; the timestamp fallback writes NO dispatcher event — only a coordinator-drain stderr line with the `created_at_*` / `mtime_future` / `age_unknown` token |
 | EC-034 | (v1.18, F-013) A protected-path write blocked/errored by the migration admission gate versus a write blocked by `shard_cap_precheck` | The admission verdict's stderr summary line carries `blocking_plugins=migration-admission` (`block_reason` = the unchanged `E-MAINTENANCE-001`/`E-MAINTENANCE-002` text, exit 2); the shard-cap block still carries `blocking_plugins=shard-cap-gate` |
+| EC-035 | (v1.20, F-S2508-L3-009; mirrors BC-1.18.013 EC-041/EC-042) ADMISSION and RELEASE legs with the `.factory` `stat` UNSTATABLE: `chmod 000` project root (EACCES); self-referential `.factory` symlink (ELOOP); versus the ABSENT controls (regular-file `.factory`, dangling symlink, ENOTDIR project root, no `.factory`) | Admission: `E-MAINTENANCE-002 (io)` (exit 2), ONE `migration.admission_failed` (`cause=io`), no `_blocked`, no reservation, nothing created, write not admitted, for every written path spelling. Release (PostToolUse / PostToolUseFailure): no verdict, ONE `migration.admission_advisory` (`reason=reservation_release_failed`), nothing created or deleted. Absent controls: admitted / silent no-op, no event, tree byte-identical |
+| EC-036 | (v1.20, F-S2508-L3-009; mirrors BC-1.18.013 EC-043) The ABSENT vs UNSTATABLE `.factory` distinction on BOTH coordinator binaries (`migrate-bc-index`, `backfill-append-logs`) | Absent: exit 2 `FACTORY_ROOT_NOT_FOUND` exactly as EC-029. Unstatable: exit 2 with the existing `BcIndexMigrationError::Io { path: <project_root>/.factory, source }`, NOT `FACTORY_ROOT_NOT_FOUND`; raised before any lock or write; tree byte-identical |
+| EC-037 | (v1.20, F-S2508-L3-009) Coordinator, the Unstatable cases in detail: EACCES (`chmod 000` project root) and ELOOP (self-symlink) under `CLAUDE_PROJECT_DIR=<P>` | stderr names the `.factory` path and the OS error through the `Io` Display and does NOT contain `FACTORY_ROOT_NOT_FOUND`; no `.factory`, `migration-state/` or `exclusive.lock` created |
+| EC-038 | (v1.20, F-S2508-L3-001; mirrors BC-1.18.013 EC-044) FOREIGN minimal live record `{"state":"STAGING"\|"COMMITTING","migration_id":"future-migration"}` (no other field), both path families, gate OPEN / DRAINING / LOCKED | PLAIN `E-MAINTENANCE-001` (no mismatch suffix) in all combinations; never `E-MAINTENANCE-002`; no Tier 1 field read; txn and gate byte-identical; one `migration.admission_blocked` (`branch=foreign_migration`) |
+| EC-039 | (v1.20, F-S2508-L3-001; mirrors EC-045) KNOWN minimal STAGING WITHOUT `generation_id` (`{"state":"STAGING","migration_id":"migrate-bc-index"}`, and with `migration_id` absent; and `generation_id` of a non-string non-null type), gate DRAINING, `exclusive.lock` free, terminal record absent | `E-MAINTENANCE-002 (state_integrity)`, `kind=txn_record_malformed`; txn bytes UNCHANGED (not rewritten to ABORTED); gate unchanged; an absent `generation_id` is NEVER null. Control: lock held ⇒ plain `E-MAINTENANCE-001` (`branch=live_coordinator`) |
+| EC-040 | (v1.20, F-S2508-L3-001; mirrors EC-046) KNOWN STAGING with `"generation_id": null` (PRESENT), Branch B conditions; control `"generation_id":"gen-1"` | Unchanged Branch B discard (txn → ABORTED + `abort_reason: "null_generation"`, gate → OPEN, admitted, `branch_b_txn_aborted`); control: plain live block, txn unchanged |
+| EC-041 | (v1.20, F-S2508-L3-001; mirrors EC-047) KNOWN minimal COMMITTING (`{"state":"COMMITTING","migration_id":"migrate-bc-index"}`), terminal record ABSENT, gate LOCKED | PLAIN `E-MAINTENANCE-001` (`branch=live_txn`); no Tier 1 field read; txn and gate byte-identical |
+| EC-042 | (v1.20, F-S2508-L3-001; mirrors EC-048) Minimal NON-LIVE records `{"state":"COMPLETED"\|"ABORTED","migration_id":"<known>"\|"future-migration"}` (and `migration_id` absent), gate OPEN or stuck LOCKED / DRAINING with no live txn; plus fixtures with one non-live foreign record beside one live known txn, and two LIVE records | Admitted (gate OPEN) or Branch A reopen then admitted; non-live records never modified or deleted; non-live foreign records neither refuse nor count; only LIVE records count toward `multiple_live_txns` (two live ⇒ `E-MAINTENANCE-002 (state_integrity)`, `kind=multiple_live_txns`) |
+| EC-043 | (v1.20 same-version extension, ADR-052 v1.23 binary leg; Precondition 6(f)(iv)) `migrate-bc-index` BINARY recovery over a live known STAGING txn whose `generation_id` KEY IS REMOVED (and variants: `"generation_id": 7`, `["x"]`), flock acquired, terminal record absent; control `"generation_id": null`; control `"generation_id": "gen-1"` | Removed key / non-string non-null: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`AdmissionStateIntegrity`, `txn_record_malformed`); txn bytes UNCHANGED (sha256 before == after; NOT rewritten to ABORTED, no `abort_reason`; NOT the null-generation discard); gate and `migration-state/` byte-identical; an absent key is NEVER null. Control `null`: the null-generation discard with the existing §4e semantics (txn → ABORTED + `abort_reason: "null_generation"`, gate → OPEN, exit 1 `EXPIRY_ABORT`; stderr is EXACTLY `migrate-bc-index: ` + the `NullGeneration` line of Precondition 6(f)(iv), printed only after the ABORTED + gate OPEN writes succeeded). Control string: planner (resume / clean-abort) |
+| EC-044 | (v1.20 same-version extension; Precondition 6(f)(iv)) `migrate-bc-index` BINARY recovery over a live known COMMITTING txn whose `generation_id` is JSON `null`, ABSENT (key removed) or a number | Exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`) in all three; NOT `BinaryIntegrityFailure` / `BINARY_INTEGRITY_FAILURE` (supersedes the former `Quarantine { CommittingWithoutGenerationId }` mapping), NOT `EXPIRY_ABORT`, NOT a discard (a COMMITTING record is never discarded); nothing mutated (no forward recovery renames, no txn rewrite, no gate write) |
+| EC-045 | (v1.20 same-version extension; Precondition 6(f)(iii)) A live known txn (STAGING with string `generation_id` ⇒ `ResumeFromStaging` / `CleanAbortExpiredStaging`; COMMITTING ⇒ `ForwardRecovery`) MISSING a strict-presence key — ONE fixture per remaining key of the 12-key set of Precondition 6(f)(iii): (1) `txn_id`, (2) `activation_id`, (3) `created_at`, (4) `updated_at`, (5) `fencing_generation`, (6) `canonical_move_plan` (v1.21 rename; ADR-054 §Decision 2.5), (7) `source_sha256`, (8) `source_body_row_sha256`, (9) `intent_log_path`, (10) `schema_version` (its full value table is EC-054) (each removed in turn; `state` is Tier 0 and `generation_id` has its own tri-state, EC-043/EC-044); and wrong-typed variants: `activation_id` a number; `txn_id` / `created_at` / `updated_at` a number or `null`; `fencing_generation` as `"3"` (string), `3.5` (float), `-1` (negative) and `null`; `canonical_move_plan` `null` or an object, and an array with one element missing a key; and (v1.21) a record carrying the OLD key `pending_canonical_moves` (an unknown top-level key ⇒ `txn_record_malformed`, never silently ignored); `source_sha256` / `source_body_row_sha256` a number, array or object (a string and JSON `null` are VALID for these two), and `intent_log_path` a number, array or object (v1.21: for `intent_log_path`, JSON `null` is VALID only paired with `generation_id: null`; with a string `generation_id` see EC-069) | Exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`) raised at the arm entry BEFORE the first mutation: txn, gate, `gen-<id>/`, staging, intent log and canonical files byte-identical; the record is never "repaired" or re-serialized with a defaulted field. Control (v1.21 reworded): a record this build wrote — every key present, `source_sha256` / `source_body_row_sha256` as written, and the `generation_id` / `intent_log_path` pair CONSISTENT (a string `generation_id` with `intent_log_path` == `.factory/migration-state/intent-<generation_id>.log`, or both `null` for the pre-generation record) — decodes and recovers normally. A string `generation_id` with `intent_log_path: null` is NOT a control (EC-069) |
+| EC-046 | (v1.20 same-version extension; Precondition 6(f)(ii)) Loader precedence beside a live known txn: (a) a COMPLETED record from a NEWER schema (extra unknown fields, `activation_id` absent); (b) an ABORTED record missing every Tier 1 field; (c) a foreign terminal record (`migration_id: "future-migration"`); (d) a live record that is not valid UTF-8; (e) a live record of another known migration; (f) a live record with `migration_id ∉ K` | (a)(b)(c): NOT rejected, never modified or deleted, recovery of the live known txn proceeds; (d): exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`), NOT `Io`, nothing mutated; (e)(f): refused with exit 2 `FOREIGN_MIGRATION_REFUSED` and EXACTLY the Precondition 6(e) line (`migrate-bc-index: BC-INDEX migration: refused: a live migration transaction owned by migration_id "<id>" is in progress (FOREIGN_MIGRATION_REFUSED, exit 2); this subcommand never recovers, finalizes or aborts another migration's record; nothing was changed`, `<id>` truncated to 64 chars with control characters escaped), `recover()` not run, no Tier 1 field read, nothing mutated (a foreign STAGING record with `generation_id: null` is NOT discarded); precedence flock → Tier 0 loader → one-live-txn → foreign refusal → `recover()` (a Tier 0 failure of ANY record, e.g. (d), beside (e)/(f) wins; two live records ⇒ `MIGRATION_STATE_INTEGRITY_FAILURE` `multiple_live_txns`, not the refusal; a PRESENT non-string `migration_id` ⇒ `TxnMigrationIdNotString`, not foreign); full typed deserialize at read time is never performed |
+| EC-047 | (v1.20 same-version extension; Precondition 6(f)(iv)(v) — null-generation discard exit and sharing) The same pre-generation record (`state: STAGING`, `generation_id: null`, valid manifest, `source_sha256: null`) is discarded once by admission Branch B (PreToolUse) and once by `migrate-bc-index` recovery | Both surfaces call the ONE `abort_null_generation_txn` primitive and produce the same on-disk result (txn ABORTED retained at its original path with `abort_reason: "null_generation"`, other fields preserved, then gate → OPEN); admission admits with `branch_b_txn_aborted`; the binary exits 1 `EXPIRY_ABORT` per ADR-052 §4e (not `BinaryIntegrityFailure`) — exit 1 is the NON-ERROR class "no harm done, safe to re-run; the stderr code says what to do next" (here: re-activate, then re-run; the same class as `MIGRATION_LOCK_CONTENTION`, Precondition 6(f)(vi)), and the "exit 1 = re-activation" wording is retired; a second pass over the retained record is Branch A (idempotent, record not rewritten). **Exact stderr (ADR-052 v1.23 item 8):** `migrate-bc-index: BC-INDEX migration: pre-generation STAGING record discarded (EXPIRY_ABORT, exit 1); the prior run crashed before any generation was created (generation_id null), nothing was staged, the txn record is ABORTED and the writer gate is OPEN; no canonical path changed; re-activation required` for the null-generation arm, and `migrate-bc-index: BC-INDEX migration: activation manifest expired or absent at STAGING resume (EXPIRY_ABORT, exit 1); the staged generation was discarded, the txn record is ABORTED and the writer gate is OPEN; no canonical path changed; re-activation required` for the manifest expired-or-absent arm. **Printed only after ABORTED + gate OPEN writes; write failure → `Io` exit 2:** the line appears only AFTER the txn was rewritten ABORTED and THEN the gate written OPEN; if either write fails (vector: gate file unwritable) the result is that write's own `Io` error, exit 2, NEVER `EXPIRY_ABORT`/exit 1 and no `EXPIRY_ABORT` text on stderr (the former `let _ = discard_incomplete_staging(..)` is a TD-VSDD-059 paper-fix and is removed) |
+| EC-048 | (v1.20 same-version extension; ADR-052 v1.23 item 9 sibling; Precondition 6(e) flock-contention clause) `migrate-bc-index` BINARY invoked while ANOTHER coordinator holds `flock(exclusive.lock, LOCK_EX\|LOCK_NB)` (EWOULDBLOCK); variants: no txn record; a live known txn; a live FOREIGN txn (`migration_id: "backfill-append-logs"` or `future-migration`); **(v1.20 third binary-leg extension — contention on EVERY path, ADR-052 item 11(c))** `completed.json` PRESENT (with no txn, with a COMPLETED txn); `completed.json` + the OWN live COMMITTING txn; `completed.json` + a live FOREIGN record — see the EC-051 vectors | Exit **1** `MIGRATION_LOCK_CONTENTION` on every variant, NEVER exit 0 (in particular NOT `ALREADY_MIGRATED`) (`BcIndexMigrationError::MigrationLockContention`) with EXACTLY `migrate-bc-index: BC-INDEX migration: another migration coordinator holds the exclusive migration lock (MIGRATION_LOCK_CONTENTION, exit 1); nothing was changed; retry after it exits`; NOT `BinaryIntegrityFailure` / `BINARY_INTEGRITY_FAILURE` (the digest code), NOT exit 2 and NOT exit 0; exit 1 is the "no harm done, safe to re-run" class (Precondition 6(f)(vi)); the flock is checked BEFORE the Tier 0 loader and before `completed.json` is read, so no record is read: beside a foreign record the CONTENTION wins (never `FOREIGN_MIGRATION_REFUSED`); txn, gate, terminal record and `migration-state/` byte-identical (sha256 snapshot) |
+| EC-049 | (v1.20 same-version extension; Precondition 6(f)(iii) unknown-top-level-key rule) A live known STAGING (string `generation_id`, ⇒ `ResumeFromStaging` / `CleanAbortExpiredStaging`) or COMMITTING (⇒ `ForwardRecovery`) record carrying an extra top-level key (e.g. `"schema_v2_field": 1`) alongside every one of the 12 required keys (`schema_version: 1` included). Control A: the same fully-written record WITH `migration_id: "migrate-bc-index"` present and no extra key. Control B: a STAGING record with `generation_id: null` AND an unknown key | Exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`AdmissionStateIntegrity`, `txn_record_malformed`) raised at the arm entry BEFORE the first mutation: txn, gate, `gen-<id>/`, staging, intent log and canonical files byte-identical; the unknown field is never dropped by a typed rewrite. Control A: decodes, recovers normally, and the PRESENT `migration_id` is preserved VERBATIM on the rewritten record. Control B: the null-generation discard (the `generation_id` tri-state is resolved FIRST and decodes no other key; the raw-object rewrite preserves the unknown key) with exit 1 `EXPIRY_ABORT` |
+| EC-050 | (v1.20 same-version extension; ADR-052 v1.23 item 11; Postcondition 9(e) — INTERIM `migrate-bc-index` `completed.json` short-circuit, **retired by S-25.06 AC-031**) `migrate-bc-index` BINARY with a valid `completed.json` present, flock free, and: (a) a LIVE record — foreign (`backfill-append-logs` or `future-migration`) in one fixture, the OWN migration's STAGING and COMMITTING in two more; (b) a Tier 0-malformed `txn-*.json` (non-UTF-8 bytes `0xFF 0xFE`, or unknown `state`) beside `completed.json`; (c) NO live record (only COMPLETED/ABORTED or none) with the gate (c1) LOCKED/DRAINING, (c2) already OPEN, (c3) flock held by another coordinator | (a) foreign: exit 2 `FOREIGN_MIGRATION_REFUSED`, the Precondition 6(e) line; own live STAGING/COMMITTING: exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` with EXACTLY `migrate-bc-index: BC-INDEX migration: the terminal record completed.json cannot be proven to describe the live txn (COMPLETION_RECORD_MISMATCH_ABORT, exit 2); no verification was performed in this build; txn and gate unchanged; operator investigation required`; in all three the txn is NOT finalized, the gate is NOT flipped, `migration-state/` byte-identical. (b) exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` — the Tier 0 `Err` is NOT swallowed and the gate is not opened. (c1) gate reconciled to OPEN under the flock (§5c Branch 2 steps 0–4), exit 0; (c2) ZERO filesystem writes (clean steady state), exit 0; (c3) EWOULDBLOCK ⇒ exit 1 `MIGRATION_LOCK_CONTENTION`, no read, no write, NEVER exit 0 (v1.20 third binary-leg extension; supersedes the earlier "skip, exit 0"; the gate of a live `backfill-append-logs` coordinator is never opened by this binary; EC-051). `completed.json` is read UNDER the lock and that read is what `recover()` receives (EC-052). When S-25.06 AC-031 lands the verify-then-finalize of Postcondition 9(a)–(d) replaces (a)'s own-live-record line |
+| EC-051 | (v1.20 third binary-leg extension; ADR-052 v1.23 item 11(c); Precondition 6(e)/6(f)(ii)(1)/6(f)(vi), Postcondition 9(e)(a0) — contention on EVERY path, never exit 0) `migrate-bc-index` BINARY while ANOTHER coordinator holds `flock(exclusive.lock, LOCK_EX\|LOCK_NB)`, with `completed.json` PRESENT and: (a) no txn record; (b) a COMPLETED own txn; (c) the OWN live COMMITTING txn; (d) a live FOREIGN record (`backfill-append-logs` or `future-migration`). Uncontended CONTROL on (c): flock free | (a)–(d): exit **1** `MIGRATION_LOCK_CONTENTION` with EXACTLY the EC-048 line — NEVER exit 0 and NEVER `ALREADY_MIGRATED`; nothing read and nothing written (sha256 snapshot of `migration-state/` byte-identical; `completed.json` not even opened); (d) is contention, never `FOREIGN_MIGRATION_REFUSED`. Control (c) uncontended: exit **2** `COMPLETION_RECORD_MISMATCH_ABORT` with the interim line — the SAME on-disk state yields a timing-independent fail-closed verdict (exit 1 = "re-run later is safe", never a different verdict about the state) |
+| EC-052 | (v1.20 third binary-leg extension; ADR-052 item 11(c); Postcondition 9(e)(a0) — `completed.json` read UNDER the lock, TOCTOU) Via the `Fs` seam, `completed.json` is ABSENT at the pre-lock probe, then a running coordinator writes `completed.json`, marks its txn COMPLETED and releases the lock; the late `migrate-bc-index` then acquires the lock. Variant: `completed.json` present at the probe and the lock acquired normally | The late process reads `completed.json` UNDER the lock and `recover()` receives that read (NOT a hard-coded `None`): it starts NO fresh run (gate NOT moved DRAINING → LOCKED, the sharded `BC-INDEX.md` NOT re-read), the gate is untouched, no txn is created, and it exits 0 `ALREADY_MIGRATED` (a state read under the lock); `migration-state/` snapshot unchanged. The pre-lock probe never selects the branch |
+| EC-053 | (v1.20 third binary-leg extension; ADR-052 item 10(a); Precondition 6(f)(iii) nested strictness) A fully written live known STAGING (string `generation_id`) and COMMITTING record whose `canonical_move_plan[1]` is (v1.21 rename): (a) an object with an UNKNOWN extra key (e.g. `{"staging_path":"s","canonical_path":"c","x":1}`); (b) a non-object (`"s"`, `null`, `[]`); (c) missing `staging_path`; (d) missing `canonical_path`; (e) `canonical_path` a number or `null`; (f) a hostile key of 1,000 chars with control characters. Control: element with exactly the two string keys | (a)–(f): exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`) at the arm entry, BEFORE the first mutation, at each of the three rewriting arms (`ResumeFromStaging`, `ForwardRecovery`, `CleanAbortExpiredStaging`); txn sha256 and `migration-state/` snapshot byte-identical; `detail` names `canonical_move_plan[1]` and the offending key sanitized (≤ 64 chars, control characters escaped); no serde error string reaches stderr or `detail`; the unknown key is never dropped by `write_txn_record`. Control: decodes and recovers |
+| EC-054 | (v1.20 third binary-leg extension; ADR-052 item 10(b); Precondition 6(f)(iii) — `schema_version` value table and gate order) A fully written live known record (STAGING with string `generation_id`, and COMMITTING) with `schema_version` set to: absent; `0`; `-1`; `"1"`; `1.5`; `null`; `[1]`; `1`; `2`; `4294967296`. Cross cases: `schema_version: 2` AND an unknown top-level key; `2` AND an unknown nested key; `2` AND a missing required key; `1` AND an unknown top-level key | At each of the three REWRITING arms: absent / `0` / `-1` / `"1"` / `1.5` / `null` / `[1]` ⇒ exit 2 `txn_record_malformed`; `1` ⇒ strict decode proceeds (recovers normally; the rewritten record carries `schema_version: 1`, round-trip through `write_txn_record`); `2` and `4294967296` ⇒ exit 2 `txn_record_newer_schema` — the version gate WINS over every other defect in the cross cases (unknown top-level key, unknown nested key, missing key) — while `1` + unknown key ⇒ `txn_record_malformed`. Every refusal: record bytes and `migration-state/` snapshot unchanged, no gate flip. The newer-schema stderr is EXACTLY `migrate-bc-index: migration admission: state integrity failure (txn_record_newer_schema): txn record schema_version <N> is newer than the supported 1; it was probably written by a newer build; recover it with that build; nothing was changed` (`<N>` ≤ 20 chars) and contains none of `txn_record_malformed`, `corrupt`, `BINARY_INTEGRITY_FAILURE`. At the DISCARD and the lazy Branch C reads, `schema_version` ABSENT is "not consumed, proceed" (a minimal hand-built record stays admissible) |
+| EC-055 | (v1.20 third binary-leg extension; ADR-052 item 10(d); Precondition 6(f)(iv)(v) — discard version gate and preservation controls, BOTH surfaces) Pre-generation record (`state: STAGING`, `generation_id: null`, valid manifest): (a) `schema_version: 2`; (b) `schema_version: 4294967296`; (c) `schema_version` absent plus an unknown extra top-level key `"x_extra": 7` (CONTROL); (d) `schema_version: 1` plus `"x_extra": 7` (CONTROL); (e) `schema_version: "1"` (ill-typed). Each run through the coordinator AND through admission Branch B | (a)(b): `txn_record_newer_schema` on BOTH surfaces (binary exit 2; admission `E-MAINTENANCE-002 (state_integrity)` with ONE `migration.admission_failed` `kind=txn_record_newer_schema`), txn bytes UNCHANGED — NOT the discard (no `abort_reason`, no ABORTED), gate unchanged, evaluated BEFORE the `generation_id` tri-state; (c)(d): the discard SUCCEEDS (txn ABORTED + `abort_reason: "null_generation"`, gate OPEN, binary exit 1 `EXPIRY_ABORT`, admission `branch_b_txn_aborted`) and `"x_extra": 7` is PRESERVED in the ABORTED record (unknown keys block only rewrites that keep the record live); (e): `txn_record_malformed`, bytes unchanged |
+| EC-056 | (v1.20 third binary-leg extension; ADR-052 item 11(d); Postcondition 11 — COMPLETED-write and abort-path error propagation) Via the `Fs` seam: (a) the COMPLETED txn write in `finish_committing_migration` fails (ENOSPC / EIO / EACCES on the rename) after `completed.json` was written; (b) the ABORTED txn write fails in the step-3b `abort_staging` closure (census / content-preservation failure); (c) the ABORTED txn write fails in EACH of the four `discard_incomplete_staging(..)` call sites; (d) the ABORTED write succeeds but the gate-OPEN write fails; (e) both succeed (control) | (a) exit **2** `Io` (the write's own error), NOT exit 0, NO `Completed` outcome, gate NOT written OPEN, no success claimed; (b)(c) exit **2** `Io` whose `detail` names the ORIGINAL failure's code token, gate NOT written OPEN (no live STAGING txn beside an OPEN gate); (d) exit 2 `Io` for the gate write, txn ABORTED, original token named; (e) the original error alone is returned, txn ABORTED then gate OPEN, in that order. No `let _ =` remains on a txn-record or gate write on these paths (sibling-sweep grep of `shard_manager.rs`) |
+| EC-057 | (v1.20 third binary-leg extension; ADR-052 item 7(e); Precondition 6(f)(vi) — exit-code class exhaustiveness) A compile-time-exhaustive table test enumerating EVERY `BcIndexMigrationError` variant with its expected `process_exit_code` (no wildcard row), plus a source assertion over `process_exit_code` | `ExpiryAbort { .. }` and `MigrationLockContention` ⇒ 1; every other named variant ⇒ 2; `_ =>` is absent from the function body; adding a variant without a table row fails the build. The exit-1 stderr tokens differ (`EXPIRY_ABORT` vs `MIGRATION_LOCK_CONTENTION`) so callers distinguish them by token, never by status alone |
+| EC-058 | (v1.20 third binary-leg extension; ADR-052 item 11(e); "Operator recovery of the interim block" — **retired by S-25.06 AC-031**) The blocked state (`completed.json` + own live COMMITTING txn, exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` interim line), recovered by the HUMAN operator per steps 1–6 with no coordinator running; negative fixtures: (a) `completed.json.txn_id` ≠ txn `activation_id`; (b) `generation_id` mismatch; (c) `canonical_paths_count` ≠ `len(canonical_move_plan)` (v1.21 rename), or `canonical_move_plan` empty, or its set of `canonical_path` values ≠ the set of distinct `target_canonical` over the INTENT records (ADR-054 §Decision 3 B-3; step 2 N rule); (d) a canonical file whose sha256 ≠ the DONE record's `expected_post_hash`, or a DONE whose `expected_post_hash` ≠ the INTENT's (v1.21 three-way equality, step 3); (e) a path with only an `INTENT` record (no `DONE`); (f) (v1.21) a record in the log fails the step-3 checksum recipe (mid-log corruption: a failing record followed by a later verifying `INTENT_LOG_RECORD_V1` line) | Happy path: after steps 1–5 (txn COMPLETED durable, THEN gate OPEN) `migrate-bc-index` exits 0 `ALREADY_MIGRATED` with ZERO writes and a normal `.factory/` write is admitted. (a)–(e): step 2 or 3 fails ⇒ the txn is NOT advanced and the gate NOT opened, all files unchanged vs the step-1 snapshot, operator escalates (restore from snapshot / git history). The procedure is human-performed outside any agent session; the guard layer blocks agent writes to `migration-state/` |
+| EC-059 | (v1.21; ADR-054 §Decision 3 B-1; Postcondition 12; AC-011 / red test T7) CRASH WINDOW between `rename(staging→canonical)`+directory sync and the `DONE` append: a `FaultFs` failpoint fires after the rename and directory sync of target k and before its `DONE`; the process is re-run (forward recovery) | Recovery finds target k's canonical file at the INTENT's `expected_post_hash` with the latest valid record an `INTENT` (table row 1): it APPENDS the txn-bound `DONE` (barrier applied) BEFORE counting k complete; every plan target ends with a `DONE`; `verify_plan_completion` passes; `completed.json` is written; the S-25.06/Branch C verifier passes. A migration that "completes" without that `DONE` is a defect (it would fail every verifier forever) |
+| EC-060 | (v1.21; ADR-054 §Decision 3 "Idempotence"; Postcondition 12; AC-011 / T16) A SECOND recovery pass over a fully recovered migration (and a second pass after EC-059's crash recovery) | Every target is `AlreadyDone` (table row 2): NOTHING is appended; the intent-log bytes and the txn-record bytes are byte-identical (sha256 before == after) |
+| EC-061 | (v1.21; ADR-054 §Decision 3 B-2(b); Postcondition 13; AC-012 / T8) A staged file is MUTATED after the INTENT batch was durable (step 3b) and before its rename, so `sha256(canonical)` after the rename ≠ the INTENT's `expected_post_hash` | NO `DONE` is appended for that target; exit 2 `CANONICAL_MOVE_HALTED` (`CanonicalMoveHalted { target, reason }`); the txn stays `COMMITTING`; the function never returns `Completed`; `completed.json` is NOT written; the earlier `DONE` records remain. A `DONE` whose `expected_post_hash` is the post-rename file hash instead of the copied INTENT hash is NOT produced (no circular verification) |
+| EC-062 | (v1.21; ADR-054 §Decision 3 B-2(a)(c), §Decision 1.6; Postcondition 13; AC-012) Every `DONE` appended by a run over (i) a target whose canonical file existed at INTENT time (`expected_pre_state` = its sha256) and (ii) a target absent at INTENT time (`MISSING`); the executor is handed `txn_id` and the CURRENT `fencing_generation` as parameters | Each `DONE`: `txn_id` == the live txn's `txn_id`, `fencing_generation` == the txn's current fencing generation (never the empty string, never `0` unless the txn's is `0`, never scraped from the log), `expected_post_hash`, `staging_path`, `target_canonical`, `expected_pre_state` copied verbatim from the INTENT; (i) records the sha256, (ii) records `MISSING` — a literal `MISSING` is never written for a target that was observed present. L3/L4 hold (the `DONE` follows its `INTENT`; its `fencing_generation` is not lower) |
+| EC-063 | (v1.21; ADR-054 §Decision 3 B-3(a), §Decision 2.4; Postcondition 14; AC-013 / T9) A live known COMMITTING txn whose `canonical_move_plan` is EMPTY (`[]`); control: STAGING with `[]` before the plan is persisted | COMMITTING + empty plan: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` kind `txn_record_malformed`; NOTHING moved (canonical files byte-identical), no `completed.json` (NEVER the vacuous `Completed` with `canonical_paths_count: 0`), txn and gate unchanged. Control STAGING `[]`: decodes (the plan is non-empty only for COMMITTING) |
+| EC-064 | (v1.21; ADR-054 §Decision 3 B-3(b); Postcondition 14; AC-013 / T9) A live known COMMITTING txn whose plan differs from the INTENT target set by (a) one missing entry, (b) one extra entry, (c) one differing `staging_path` for a shared `canonical_path`; plus the verification-surface variants (Postcondition 9(b)): plan absent/ill-typed/empty, and plan ≠ INTENT set with `completed.json` present | Coordinator (a)-(c): exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` kind `txn_record_malformed`, `detail` names the field and the symmetric difference (sanitized, ≤ 64 chars per element, control characters escaped), nothing moved, no `completed.json`. Verifiers: absent/ill-typed/empty ⇒ `state_integrity` `txn_record_malformed`; plan ≠ INTENT set ⇒ `canonical_hash_mismatch` (completion unprovable) |
+| EC-065 | (v1.21; ADR-054 §Decision 1.7, §Decision 1.9 step 2; Postcondition 15(b)(c); AC-006/AC-008 / T1, T2, T3) A valid record R1 followed by a torn tail (garbage, 512 NUL bytes, a partial `INTENT_LOG_RECORD_V1` start marker, a partial END line, or an invalid UTF-8 byte), then the coordinator opens the log and appends R3; truncation of a multi-record log at EVERY byte offset | Reader: exactly the fully written prefix, no error, no partial record, no whole-file UTF-8 failure. Coordinator: durably truncates the tail to `valid_prefix_len` BEFORE its first append, so R1 and R3 are both returned afterwards (R1 is not lost, closes A-1) |
+| EC-066 | (v1.21; ADR-054 §Decision 1.7 (iv); Postcondition 15(b); AC-007 / T4) A bit flip in each field of a MIDDLE record that is followed by a later valid record | Coordinator: exit 2 `INTENT_LOG_CORRUPT` (`IntentLogCorrupt { path, kind, offset }`, `kind` = `mid_log_corruption`), stderr = `<subcommand>: ` + the ADR-054 §Decision 3.1 line (`INTENT_LOG_CORRUPT (exit 2): intent log <log_file> is corrupt (<kind>) at byte offset <offset>; no further move or append was made and no completion was recorded; operator investigation required`; `<offset>` = the reader's `first_bad_offset`); no further move or append, log bytes unchanged. Read BEFORE the move loop: nothing was moved or appended. Read at the post-loop re-read (Decision 3 step 5): this run's moves have already happened, `completed.json` is NOT written, the txn is untouched. Verifier/admission surface: `canonical_hash_mismatch` (never a silent drop of the bad record; torn-tail tolerance does NOT apply because a valid record follows) |
+| EC-067 | (v1.21; ADR-054 §Decision 1.2 value rules, §Decision 1.9 step 1; Postcondition 15(c); AC-004/AC-005 / T6) The writer or the plan builder is given a `staging_path`/`canonical_path` containing LF, CR, NUL, another C0 control, DEL, a non-UTF-8 byte (`OsStr::to_str() == None`), an empty value, or more than 4096 bytes; or a non-lowercase / wrong-length hash, a malformed timestamp, a non-token `txn_id`; controls: paths containing `=`, `\|`, spaces and the text `END_INTENT_LOG_RECORD` | Exit 2 `INTENT_LOG_VALUE_REJECTED` (`IntentLogValueRejected { field, reason }`, placeholders sanitized to 64 chars with control characters escaped); stderr = `<subcommand>: ` + the ADR-054 §Decision 3.1 line (`INTENT_LOG_VALUE_REJECTED (exit 2): intent-log field <field> rejected: <reason>; no record of this batch was appended`, `<field>`/`<reason>` from the closed domains of the error-taxonomy row); ZERO bytes of the rejected batch appended and, at plan-build time, nothing staged. A rejection AFTER the generation directory exists takes the pre-commit abort path (ADR-052 §7c step 3c): txn ABORTED, THEN gate OPEN, both COMPLETE BEFORE the line is printed, and if either write fails that write's own `Io` error is the result (exit 2), never this line (ADR-054 §Decision 3.1 correction C-2); no lossy `to_string_lossy` conversion. Controls round-trip exactly |
+| EC-068 | (v1.21; ADR-054 §Decision 1.8 L1-L4; Postcondition 15(b); AC-007 / T15) Log-level invariant violations over otherwise valid records: (L1) a record whose `txn_id` ≠ the live txn's; (L2) two `INTENT` records for one target disagreeing on `staging_path`, `expected_post_hash` or `expected_pre_state`; (L3) a `DONE` with no earlier `INTENT` for its target, or disagreeing with it; (L4) a decreasing `fencing_generation`, or a `DONE` lower than its `INTENT`; control: duplicate IDENTICAL INTENTs from a STAGING re-run | L1-L4: coordinator exit 2 `INTENT_LOG_CORRUPT` with `<kind>` = `log_invariant_violation` and `<offset>` = the start offset of the FIRST record in file order violating an invariant (ADR-054 §Decision 3.1); no further move or append is made (before the move loop nothing was moved or appended; at the post-loop re-read this run's moves have already happened, `completed.json` is NOT written, the txn is untouched); verifiers `canonical_hash_mismatch`. Control: accepted, the most recent INTENT is canonical |
+| EC-069 | (v1.21 orchestrator addition; ADR-052 v1.24 "Branch C hash source" ruling (i) and item 11(e) step 3; Precondition 6(f)(iii) `generation_id` / `intent_log_path` pairing rule) `migrate-bc-index` BINARY recovery at the arm entry over a live known record in each state: STAGING with string `generation_id: "gen-1"` (⇒ `ResumeFromStaging`) and COMMITTING (⇒ `ForwardRecovery`), each with `intent_log_path` = (a) JSON `null`; (b) ABSENT (key removed); (c) a non-string (`7`, `["x"]`, `{}`, `true`); (d) a string that is NOT `.factory/migration-state/intent-gen-1.log` (a different generation id, a relative or absolute variant, a trailing-space variant). CONTROLS: (e) the CORRECT pair (`generation_id: "gen-1"`, `intent_log_path: ".factory/migration-state/intent-gen-1.log"`) in STAGING and COMMITTING; (f) BOTH `null` on a STAGING pre-generation record (`generation_id: null`, `intent_log_path: null`) | (a)-(d), both states: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`, `detail` names `intent_log_path` sanitized) raised at the arm entry BEFORE the first mutation: txn, gate, `gen-<id>/`, staging, intent log and canonical files byte-identical; the value is NEVER derived from `generation_id` and `ResumeFromStaging` never fills in a missing value (no INTENT is appended, no txn rewrite). (e): decodes; `ResumeFromStaging` rewrites the IDENTICAL `intent_log_path` byte-for-byte; `ForwardRecovery` proceeds. (f): the null-generation discard (Precondition 6(f)(iv)(v)) is unchanged: txn → ABORTED, gate → OPEN, exit 1 `EXPIRY_ABORT` |
 
 ## Canonical Test Vectors
 
@@ -869,7 +1415,7 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | (v1.13, STAGING + terminal record suffix) Gate LOCKED, B2 txn STAGING (`generation_id` null, and separately `gen-1`) with `completed.json` present; PreToolUse `Edit` under `.factory/specs/behavioral-contracts/` | Exit 2; stderr = `BC-INDEX write blocked: migration window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts (completion-record mismatch — operator investigation required)`; Branch B NOT applied (txn stays STAGING, `generation_id` unchanged); migration-state byte-identical (EC-012, Postcondition 9(d)) | error |
 | (v1.11, D3) `completed.json` valid, txn COMMITTING matching, gate LOCKED, canonical files at `expected_post_hash`; then (a) PreToolUse Edit with no binary run, (b) separately `migrate-bc-index` re-run | (a) txn COMPLETED then gate OPEN then admitted; (b) exit 0 `ALREADY_MIGRATED`, same end state; second run zero-mutation (EC-011) | error |
 | (v1.11, D3 mismatch) Same fixture but `completed.json.txn_id` ≠ `activation_id` (separate fixtures: one canonical hash differs; txn STAGING + terminal record (always fail-closed, no verification attempted); `canonical_paths_count` ≠ N) | Binary exit 2 `COMPLETION_RECORD_MISMATCH_ABORT`; PreToolUse `E-MAINTENANCE-001` (path-family-keyed message + ` (completion-record mismatch — operator investigation required)` suffix, v1.13) with reason logged; txn still COMMITTING/STAGING, gate still non-OPEN; migration-state byte-identical (EC-012) | error |
-| (v1.11, D4) `completed.json` valid, live txn `{migration_id: "backfill-append-logs", COMMITTING}`, `migrate-bc-index` invoked / PreToolUse Edit | binary: refusal exit 2 (LockContention-class; binary recovery path only, EC-013) / PreToolUse: plain `E-MAINTENANCE-001` block (v1.16: the live `backfill-append-logs` txn is decided against ITS OWN record `completed-backfill-append-logs.json`, ABSENT ⇒ row 3 `NoOp` ⇒ plain block, never against `completed.json`, EC-022); txn NOT finalized, gate NOT opened | error |
+| (v1.11, D4) `completed.json` valid, live txn `{migration_id: "backfill-append-logs", COMMITTING}`, `migrate-bc-index` invoked / PreToolUse Edit | binary: refusal exit 2 `FOREIGN_MIGRATION_REFUSED` (Precondition 6(e) exact line; binary recovery path only, EC-013) / PreToolUse: plain `E-MAINTENANCE-001` block (v1.16: the live `backfill-append-logs` txn is decided against ITS OWN record `completed-backfill-append-logs.json`, ABSENT ⇒ row 3 `NoOp` ⇒ plain block, never against `completed.json`, EC-022); txn NOT finalized, gate NOT opened | error |
 | (v1.11, D4) Txn record JSON without `migration_id`, state COMMITTING; `migrate-bc-index` invoked | Treated as `migrate-bc-index`; recovered normally (EC-013) | edge-case |
 | (v1.11, D4) Only `completed-backfill-append-logs.json` + `CURRENT-backfill-append-logs.json` present; `migrate-bc-index` invoked and `detect_migration_read_state` called | Not `ALREADY_MIGRATED`; reader state not "complete" (EC-014) | edge-case |
 | (v1.15, EC-015 — no pre-existing directory) Fresh project tempdir with `.factory/` but NO `.factory/migration-state/`; PreToolUse `Write` with `tool_use_id=T1` to `.factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md` via `migration_writer_admission_precheck`; separately the same payload with NO `tool_use_id` | `None` (admitted); `.factory/migration-state/reservations/T1.reservation` EXISTS (`created_at`, `tool_use_id=T1`, no PID), no `gate-state.json`/txn written by the admitter; PostToolUse for `T1` removes exactly that file. The no-`tool_use_id` payload: admitted check-only, NO directory and NO reservation created. (Replaces the pre-v1.15 expectation "no `migration-state/` ⇒ zero-cost no-op `None` with nothing created") | edge-case |
@@ -891,7 +1437,7 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | (v1.16, EC-026 — unreadable vs malformed `gate-state.json`; protected-path PreToolUse `Write`, valid `tool_use_id`, no txn record unless stated) Fixtures: (a) `"OPEN"`; (b) `"LOCKED"`; (c) ABSENT; (d) mode `000` (open fails EACCES; use a read-failing seam when running as root); (e) `gate-state.json` is a DIRECTORY (EISDIR); (f) zero-length; (g) truncated `"OPE`; (h) invalid UTF-8 `0xFF 0xFE`; (i) unquoted `OPEN`; (j) `"open"`; (k) `"BOGUS"`; (l) `{"state":"OPEN"}`; (m) `null`; (n) `7`; (o) mode-`000` file whose bytes would also be malformed | (a) admitted + reservation; (b) plain `E-MAINTENANCE-001`; (c) admitted as `OPEN`; (d), (e), (o): exit 2 `E-MAINTENANCE-002: writer-admission check failed (io)` (content never examined, so (o) is `io`); (f)–(n): exit 2 `E-MAINTENANCE-002: writer-admission check failed (state_integrity)`; every failing fixture: `HookResult::Error`, no reservation left behind, gate-state/txn byte-identical; message carries only the cause token; the matrix repeats for a txn record (unreadable ⇒ `io`; zero-length/truncated/invalid UTF-8/array top level/unknown `state`/non-string `migration_id`/two live txns ⇒ `state_integrity`); gate-state failure precedes txn failure (first-failure-wins); terminal record: unreadable ⇒ `E-MAINTENANCE-002 (io)`, unparseable / wrong-schema ⇒ `E-MAINTENANCE-001` WITH the ` (completion-record mismatch — operator investigation required)` suffix (v1.17), not finalized, reason logged (EC-026) | error |
 | (v1.16, EC-009(d) — production TTL floor; reworded v1.18 for the crate-private seam) In-crate test calling `run_bc_index_migration_with_ttl(project_root, ttl)` (the production `run_bc_index_migration` delegates to it passing `DEFAULT_MAX_RESERVATION_TTL`) with `ttl` = 120 s, 1,799 s, 1,800 s, 3,600 s; and the `drain_bc_index_writers` seam with TTL = 1 s | 120 s and 1,799 s: exit 2 `RESERVATION_TTL_BELOW_FLOOR` (`configured_secs`, `floor_secs=1800`) from `validate_production_reservation_ttl`, the FIRST statement of the seam, with a byte-identical `migration-state/` snapshot and NO `exclusive.lock` created; 1,800 s/3,600 s proceed; `drain_bc_index_writers` unaffected (EC-009) | error |
 | (v1.18, EC-009(d) — compile-time floor on the default) Source/compile check: `const _: () = assert!(DEFAULT_MAX_RESERVATION_TTL >= MIN_PRODUCTION_RESERVATION_TTL)` is present; `run_bc_index_migration_with_ttl` is `pub(crate)` and no environment variable or argv token reaches it | A build with the default below the floor does not compile; the seam is not callable from outside the crate and no operator-controlled input can lower the production TTL (EC-009) | edge-case |
-| (v1.18, EC-026 / F-012 — carrier and Display) Unit test constructing `BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }` for each of the five kinds and calling `format!("{e}")`, `process_exit_code(&e)` and `admission_failure_cause(&e).token()`; fixtures exercising the five admission-side raise sites (gate/txn record parse, txn not-an-object in `abort_null_generation_txn`, non-string `migration_id`, more than one live txn, reservation serialize) | Display = `migration admission: state integrity failure (<kind-token>): <detail>`; NO Display contains `BINARY_INTEGRITY_FAILURE`; `process_exit_code` = 2; `.token()` = `state_integrity`; no admission-side raise site produces `BinaryIntegrityFailure` (EC-026) | error |
+| (v1.18, EC-026 / F-012 — carrier and Display) Unit test constructing `BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }` for each of the SIX kinds (`gate_record_malformed`, `txn_record_malformed`, `txn_migration_id_not_string`, `multiple_live_txns`, `reservation_serialization`, `txn_record_newer_schema`) and calling `format!("{e}")`, `process_exit_code(&e)` and `admission_failure_cause(&e).token()`; fixtures exercising the five admission-side raise sites (gate/txn record parse, txn not-an-object in `abort_null_generation_txn`, non-string `migration_id`, more than one live txn, reservation serialize) plus the version-gate raise site (`schema_version` ≥ 2 at Branch B / the coordinator rewriting arms) | Display = `migration admission: state integrity failure (<kind-token>): <detail>`; NO Display contains `BINARY_INTEGRITY_FAILURE`; `process_exit_code` = 2; `.token()` = `state_integrity`; no admission-side raise site produces `BinaryIntegrityFailure` (EC-026) | error |
 | (v1.18, Invariant 5 — exhaustive cause match) Source assertion over `admission_failure_cause`: no `_ =>` arm; every coordinator-only variant listed explicitly in one arm mapping to `StateIntegrity` | `_ =>` is absent from the function body; an unclassified new variant fails to compile (Invariant 5) | edge-case |
 | (v1.18, EC-027 — cwd ≠ `CLAUDE_PROJECT_DIR`, real binary) Project tempdir `<P>` with `.factory/`; a different cwd `<C>` with `CLAUDE_PROJECT_DIR=<P>`; dispatcher PreToolUse `Edit` `tool_use_id=T1` under `.factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md` creates a reservation; then `migrate-bc-index` is launched from `<C>` under the same env | The reservation is in `<P>/.factory/migration-state/reservations/T1.reservation`; the coordinator's first drain lists it; `migration-state/`, `exclusive.lock`, gate and txn are created only under `<P>/.factory`; NOTHING under `<C>`; `grep -n 'join(".factory' crates/factory-dispatcher/src/shard_manager.rs` returns only the resolver (EC-027) | error |
 | (v1.18, EC-028 — `resolve_session_project_root` unit table) The six inputs of EC-028 | Canonicalized path; `process_cwd` (empty ≡ absent) ×2; as-given path (never the cwd); resolved symlink; `process_cwd` (no ancestor walk) (EC-028) | edge-case |
@@ -905,6 +1451,32 @@ size alone and require immediate sub-sharding at the same F4 activation moment.
 | (v1.18 follow-up 2, EC-031 — closed `check` domain, one vector per token; same table as BC-1.18.013 EC-037 vector, `migrate-bc-index` txn with `completed.json`, N = B2's N) (1) STAGING + `completed.json`; (2) COMMITTING + unparseable / empty / non-UTF-8 `completed.json`; (3) valid JSON wrong shape; (4) `txn_id` ≠ `activation_id`; (5) `generation_id` ≠; (6) `canonical_paths_count` ≠ N; (7) a canonical file hash ≠ `expected_post_hash` (or removed); (8) S-25.09 build: COMMITTING + record present; (9) S-25.09 build: core decides `FinalizeThenOpenGate`; (10) record read CALL fails | Rows (1)–(9): ONE `migration.admission_blocked`, `branch=completion_record_mismatch`, `check` = `staging_with_terminal_record` / `terminal_record_unparseable` / `terminal_record_schema_mismatch` / `txn_id_mismatch` / `generation_id_mismatch` / `canonical_paths_count_mismatch` / `canonical_hash_mismatch` / `terminal_record_unverified` / `finalize_unwired` (+ `branch_c_finalize_unwired` advisory for (9)); first failing check in the fixed order wins; row (10) is `E-MAINTENANCE-002 (io)`, no `_blocked`; rows (8)/(9) retired by S-25.06; every non-null `check` ∈ the nine-token set (EC-031) | error |
 | (v1.18 follow-up 2, EC-029 — `FactoryRootNotFound` optionality, rule (a)) Real `migrate-bc-index` binary, no `.factory`, with and without `CLAUDE_PROJECT_DIR`; library `run_bc_index_migration(<P>)`; `run_bc_index_migration_for_session(&SessionProjectRoot{..})` for both sources | CLI stderr ALWAYS ends ` (resolved from CLAUDE_PROJECT_DIR)` / ` (resolved from process cwd)`; path-only library entry: `root_source: None`, `to_string()` == `FACTORY_ROOT_NOT_FOUND: no .factory directory under project root <P>` (no suffix, no trailing space); `_for_session`: `Some(ClaudeProjectDir)` / `Some(ProcessCwd)` with the suffix; field is `root_source` (BC-1.18.013 EC-035 vector) (EC-029) | error |
 | (v1.18, EC-034 — verdict surface label, real dispatcher stderr) A protected-path `Write` blocked by a live txn; and a write that `shard_cap_precheck` blocks | First: stderr summary line has `blocking_plugins=migration-admission` and `block_reason` = the unchanged `E-MAINTENANCE-001` text, exit 2; second: `blocking_plugins=shard-cap-gate` (EC-034) | error |
+| (v1.20, EC-035/EC-036/EC-037 — unstatable `.factory`; same fixtures as BC-1.18.013 EC-041..EC-043 vectors, `migrate-bc-index` as the coordinator) `<P>` `chmod 000` (EACCES; stat-failing seam as root) and `<P>/.factory` → self-symlink (ELOOP); PreToolUse `Write` (valid `tool_use_id=T1`) to `<P>/.factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md` and to `<P>/README.md`; real `PostToolUse` and `PostToolUseFailure` envelopes for `T1`; `migrate-bc-index` under `CLAUDE_PROJECT_DIR=<P>`. Controls: regular-file `.factory`, dangling symlink, ENOTDIR project root, no `.factory` | Admission (both paths): exit 2 `E-MAINTENANCE-002 (io)`, ONE `migration.admission_failed` (`cause=io`, `kind=null`), no `_blocked`, no reservation, nothing created. Release: exit 0, ONE `migration.admission_advisory` `reservation_release_failed` per envelope, nothing created or deleted. Coordinator: exit 2 `Io` carrying `<P>/.factory`, stderr lacks `FACTORY_ROOT_NOT_FOUND`, tree byte-identical. Controls: admitted / no-op / `FACTORY_ROOT_NOT_FOUND` with the EC-029 line (EC-035, EC-036, EC-037) | error |
+| (v1.20, EC-038 — minimal FOREIGN live record, plain block) `{"state":"STAGING","migration_id":"future-migration"}` then `{"state":"COMMITTING","migration_id":"future-migration"}` (exactly those two fields); gate `"OPEN"`, `"DRAINING"`, `"LOCKED"`; PreToolUse `Write` under `.factory/specs/behavioral-contracts/ss-01/BC-1.01.001.md` and under `.factory/cycles/c1/a.md` | All 12 combinations: exit 2 PLAIN `E-MAINTENANCE-001` with the path-family keyed message and no mismatch suffix; never `state_integrity`; one `migration.admission_blocked` (`branch=foreign_migration`); txn and gate byte-identical (EC-038) | error |
+| (v1.20, EC-039 — minimal KNOWN STAGING without `generation_id`) `{"state":"STAGING","migration_id":"migrate-bc-index"}` (variants: `migration_id` absent; `"generation_id": 7`), gate `"DRAINING"`, `exclusive.lock` free, no `completed.json`; PreToolUse `Write` under `.factory/specs/behavioral-contracts/`. Control: lock held by a live coordinator | Exit 2 `E-MAINTENANCE-002 (state_integrity)`; ONE `migration.admission_failed` (`kind=txn_record_malformed`); txn bytes unchanged (sha256 before == after; no `abort_reason` appears); gate `"DRAINING"` unchanged; no reservation. Control: plain `E-MAINTENANCE-001` (`branch=live_coordinator`) (EC-039) | error |
+| (v1.20, EC-040 — STAGING with `generation_id` null, unchanged discard) `{"state":"STAGING","migration_id":"migrate-bc-index","generation_id":null}`, gate `"DRAINING"`, lock free, no terminal record. Control: `"generation_id":"gen-1"` | Txn rewritten to ABORTED + `abort_reason: "null_generation"`, gate → OPEN, write admitted, one `branch_b_txn_aborted` advisory. Control: plain `E-MAINTENANCE-001`, txn unchanged (EC-040) | error |
+| (v1.20, EC-041 — minimal KNOWN COMMITTING) `{"state":"COMMITTING","migration_id":"migrate-bc-index"}` (and `migration_id` absent), gate `"LOCKED"`, no `completed.json`, lock free | PLAIN `E-MAINTENANCE-001` (`branch=live_txn`), no mismatch suffix; txn and gate byte-identical (EC-041) | error |
+| (v1.20, EC-042 — minimal NON-LIVE records) `{"state":"COMPLETED","migration_id":"migrate-bc-index"}`, `{"state":"ABORTED",…}`, and the same two with `"migration_id":"future-migration"`; (a) gate `"OPEN"`; (b) gate stuck `"LOCKED"`/`"DRAINING"` with no live txn; (c) one non-live foreign record beside one live known txn; (d) two live minimal records (one foreign) | (a) admitted; (b) Branch A reopens, then admitted; records never modified or deleted; (c) the live known txn decides (plain `E-MAINTENANCE-001`); (d) `E-MAINTENANCE-002 (state_integrity)`, `kind=multiple_live_txns` (EC-042) | edge-case |
+| (v1.20 same-version extension, EC-043/EC-044 — `generation_id` tri-state, binary leg) Live known txn fixtures, `migrate-bc-index` BINARY recovery, flock free, terminal record absent: (a) `{"state":"STAGING","migration_id":"migrate-bc-index","activation_id":"A1","fencing_generation":1,"canonical_move_plan":[],…}` with the `generation_id` key removed; (b) same with `"generation_id": 7`; (c) same with `"generation_id": null` (control); (d) same with `"generation_id": "gen-1"` (control); (e) `{"state":"COMMITTING",…}` with `"generation_id": null`; (f) COMMITTING with the key removed; (g) COMMITTING with `"generation_id": 7`. Snapshot `migration-state/` before and after | (a)(b): exit 2, stderr `MIGRATION_STATE_INTEGRITY_FAILURE`, txn sha256 unchanged, no `abort_reason`, snapshot byte-identical; (c): discard, txn ABORTED + `abort_reason: "null_generation"`, gate OPEN, exit 1 `EXPIRY_ABORT`; (d): planner resume / clean-abort; (e)(f)(g): exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE`, stderr lacks `BINARY_INTEGRITY_FAILURE`, snapshot byte-identical (EC-043, EC-044) | error |
+| (v1.20 same-version extension, EC-045/EC-046 — strict-presence decode and loader) Live known STAGING (`generation_id: "gen-1"`) and live known COMMITTING fixtures, each with one of `activation_id` / `fencing_generation` / `canonical_move_plan` removed (one run per key), and `activation_id: 5`; separately a fully-written record (control); and beside a valid live known txn: a COMPLETED record from a newer schema with extra fields and no `activation_id`, an ABORTED record `{"state":"ABORTED"}`, a foreign terminal record, a live non-UTF-8 record (bytes `0xFF 0xFE`), a live `backfill-append-logs` record | Missing/ill-typed key: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` before any mutation, snapshot byte-identical; control recovers; newer-schema COMPLETED, minimal ABORTED, foreign terminal: not rejected, unmodified, recovery proceeds; non-UTF-8 live record: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (not `Io`); live other-migration record: exit 2 `FOREIGN_MIGRATION_REFUSED` with the exact Precondition 6(e) line, no Tier 1 read (EC-045, EC-046) | error |
+| (v1.20 same-version extension, EC-045 — one vector per remaining key and wrong-typed `fencing_generation`) Live known STAGING (`generation_id: "gen-1"`) and live known COMMITTING, fully written, then one mutation per run: remove `txn_id` / `created_at` / `updated_at` / `source_sha256` / `source_body_row_sha256` / `intent_log_path` (six runs); `fencing_generation` set to `"3"`, `3.5`, `-1`, `null`; `canonical_move_plan` set to `null`; the OLD key `pending_canonical_moves` added to a fully written record (v1.21: unknown top-level key); `source_sha256` set to `7` | Each: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`) before any mutation, txn sha256 and `migration-state/` snapshot byte-identical; control (every key present, `generation_id` / `intent_log_path` a consistent pair, remaining `Option` keys as written) recovers (EC-045; v1.21: the former "all `Option` keys `null`" control is malformed when `generation_id` is a string, EC-069) | error |
+| (v1.20 same-version extension, EC-047 exact stderr and write-failure) `generation_id: null` STAGING record, valid manifest, gate DRAINING, flock free: (a) all writes succeed; (b) gate file made unwritable after the txn write (txn → ABORTED succeeded, gate write fails); (c) txn write fails | (a) exit 1, stderr EXACTLY `migrate-bc-index: ` + the `NullGeneration` line of Precondition 6(f)(iv), txn ABORTED + `abort_reason: "null_generation"`, gate OPEN; (b)(c) exit 2 `Io`, stderr contains NO `EXPIRY_ABORT`; the same three outcomes for the manifest expired-or-absent arm with its own exact line (EC-047) | error |
+| (v1.20 same-version extension, EC-048 — flock contention) A second coordinator process holds `flock(exclusive.lock, LOCK_EX\|LOCK_NB)`; `migrate-bc-index` invoked (i) with no txn, (ii) beside a live known txn, (iii) beside a live `future-migration` txn | Exit 1 in all three, stderr EXACTLY `migrate-bc-index: BC-INDEX migration: another migration coordinator holds the exclusive migration lock (MIGRATION_LOCK_CONTENTION, exit 1); nothing was changed; retry after it exits`; no `BINARY_INTEGRITY_FAILURE`; sha256 snapshot of `migration-state/` unchanged; (iii) is contention, not the foreign refusal (EC-048) | error |
+| (v1.20 same-version extension, EC-049 — unknown top-level key) Fully written live known STAGING (`generation_id: "gen-1"`) and COMMITTING records plus `"schema_v2_field": 1`; control A without the extra key and with `"migration_id":"migrate-bc-index"`; control B `generation_id: null` plus the extra key | Fixtures: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`), snapshot byte-identical; control A recovers and the rewritten record still carries `"migration_id":"migrate-bc-index"` verbatim; control B discards, exit 1 `EXPIRY_ABORT` (EC-049) | error |
+| (v1.20 same-version extension, EC-050 — interim `completed.json` short-circuit, retired by S-25.06 AC-031) Valid `completed.json` plus: (a) a live `backfill-append-logs` txn, a live `future-migration` txn, a live own STAGING txn, a live own COMMITTING txn; (b) a txn file of bytes `0xFF 0xFE`; (c) no live txn with the gate LOCKED, then already OPEN, then flock held elsewhere | (a) foreign ⇒ exit 2 `FOREIGN_MIGRATION_REFUSED`; own ⇒ exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` with the exact interim line of Postcondition 9(e); txn and gate unchanged; (b) exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (error not swallowed); (c) LOCKED ⇒ gate OPEN exit 0; OPEN ⇒ zero writes exit 0; flock held ⇒ exit 1 `MIGRATION_LOCK_CONTENTION`, NOT exit 0 (EC-050, EC-051) | error |
+| (v1.20 third binary-leg extension, EC-051 — contention on every path) Second coordinator holds the flock; `migrate-bc-index` with `completed.json` present and (i) no txn; (ii) own live COMMITTING txn; (iii) live foreign record (`future-migration`). Control: flock FREE with the (ii) state | (i)(ii)(iii): exit 1, stderr EXACTLY the EC-048 line, never exit 0, `migration-state/` byte-identical, `completed.json` unread; control: exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` interim line (same state, timing-independent verdict) (EC-051) | error |
+| (v1.20 third binary-leg extension, EC-052 — TOCTOU) `Fs` seam: `completed.json` absent at the probe; before lock acquisition `completed.json` + COMPLETED txn appear | Under-lock read sees `completed.json`; no fresh run, gate untouched, exit 0 `ALREADY_MIGRATED`; snapshot unchanged (EC-052) | edge-case |
+| (v1.20 third binary-leg extension, EC-053 — nested strictness) Live known STAGING/COMMITTING record, `canonical_move_plan[0]` (v1.21 rename) = `{"staging_path":"s","canonical_path":"c","x":1}`; then `"s"`; then `{"canonical_path":"c"}`; control `{"staging_path":"s","canonical_path":"c"}` | First three: exit 2 `txn_record_malformed`, `detail` names `canonical_move_plan[0]`, bytes unchanged at each rewriting arm; control recovers (EC-053) | error |
+| (v1.20 third binary-leg extension, EC-054 — `schema_version` table) `schema_version` = absent, `0`, `"1"`, `1.5`, `null`, `1`, `2`, `4294967296`; plus `2` + unknown key | absent/`0`/`"1"`/`1.5`/`null` ⇒ exit 2 `txn_record_malformed`; `1` ⇒ proceeds, written record has `schema_version: 1`; `2`/`4294967296`/`2`+unknown key ⇒ exit 2 `txn_record_newer_schema` (gate wins), bytes unchanged; absent at the discard / lazy Branch C reads ⇒ "not consumed", proceeds (EC-054) | error |
+| (v1.20 third binary-leg extension, EC-055 — discard controls) `generation_id: null` STAGING record with `schema_version` = `2`; absent + `"x_extra":7`; `1` + `"x_extra":7` | `2` ⇒ `txn_record_newer_schema` on BOTH surfaces, bytes unchanged (not the discard); absent/`1` + extra key ⇒ discard succeeds and `"x_extra":7` is preserved in the ABORTED record (EC-055) | error |
+| (v1.20 third binary-leg extension, EC-056 — write-error propagation) `Fs`-seam fault on (a) the COMPLETED txn write; (b) the ABORTED write in `abort_staging`; (c) the ABORTED write in each `discard_incomplete_staging` caller; (d) gate-OPEN write after a successful ABORTED write | (a) exit 2 `Io`, not exit 0, gate not OPEN, no `Completed`; (b)(c) exit 2 `Io` naming the original token, gate NOT OPEN; (d) exit 2 `Io` (gate), txn ABORTED (EC-056) | error |
+| (v1.20 third binary-leg extension, EC-057 — exit-code table) Exhaustive table test over every `BcIndexMigrationError` variant | `ExpiryAbort`/`MigrationLockContention` ⇒ 1; all other named variants ⇒ 2; no wildcard arm (EC-057) | edge-case |
+| (v1.20 third binary-leg extension, EC-058 — operator recovery) Blocked state recovered per steps 1–6; negative fixtures with a mismatched `txn_id`, `generation_id`, count, hash, or INTENT-without-DONE | Happy path ends in exit 0 `ALREADY_MIGRATED`, zero writes; each negative leaves all files unchanged and escalates (EC-058) | edge-case |
+| (v1.21, ADR-054 §Decision 1.4 GOLDEN RECORD, normative; Postcondition 15(d), EC-065/EC-066, operator recipe step 3) With `expected_post_hash` = `sha256("lean-body")` and `expected_pre_state` = `sha256("monolith")`, the INTENT record is exactly the 11 LF-terminated lines of ADR-054 §Decision 1.4 (`txn_id=0f8e4c1a-6b7d-4e2f-9a3c-5d1b2e7f8a90`, `fencing_generation=1`, `record_type=INTENT`, `target_canonical=/proj/.factory/specs/behavioral-contracts/BC-INDEX.md`, `staging_path=/proj/.factory/migration-state/gen-7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f/BC-INDEX.md`, `timestamp_utc=2026-10-08T12:00:00Z`); the matching DONE differs only in `fencing_generation=2`, `record_type=DONE`, `timestamp_utc=2026-10-08T12:00:07Z`. The vector's bytes and checksums are NOT copied here (POLICY 19): the test reads them from ADR-054 §Decision 1.4 | `encode_record` is byte-identical to the ADR golden record; `record_checksum` equals the ADR's SHA-256 of the first nine lines for both the INTENT and the DONE; `sed -n "${S},$((S+8))p" <log> \| shasum -a 256` reproduces it for every record of a multi-record log (T10) | happy-path |
+| (v1.21, EC-059/EC-060 — B-1 crash window and idempotence) Plan of two targets T1, T2; failpoint after T2's rename+directory sync and before its DONE; re-run recovery twice | After pass 1: log holds INTENT(T1) DONE(T1) INTENT(T2) DONE(T2) with `DONE.txn_id` = live txn, `fencing_generation` = current; `completed.json` written with `canonical_paths_count: 2`; pass 2 changes zero bytes of the log and the txn (EC-059, EC-060) | happy-path |
+| (v1.21, EC-061/EC-063/EC-064 — B-2/B-3 negatives) (a) staged T2 mutated after the INTENT batch; (b) COMMITTING txn with `canonical_move_plan: []`; (c) plan missing T2 / extra T3 / T2 with a different `staging_path` | (a) exit 2 `CANONICAL_MOVE_HALTED`, no DONE for T2, txn stays COMMITTING; (b)(c) exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` `txn_record_malformed`, nothing moved, no `completed.json` | error |
+| (v1.21, EC-066/EC-067/EC-068 — log defects) (a) bit flip in the `staging_path` byte of a middle record followed by a valid record; (b) `target_canonical` containing LF; (c) a record with a foreign `txn_id`; (d) two INTENTs for T1 with different `expected_post_hash` | (a)(c)(d) exit 2 `INTENT_LOG_CORRUPT` (verifiers: `canonical_hash_mismatch`), no further move or append (nothing moved or appended when read before the move loop; after the post-loop re-read `completed.json` is not written and the txn is untouched); (b) exit 2 `INTENT_LOG_VALUE_REJECTED`, no record of the rejected batch appended, nothing staged at plan-build time (post-generation: abort writes complete first, a failed write's own `Io` wins) | error |
+| (v1.21, EC-069 — `generation_id` / `intent_log_path` pairing) Live known STAGING (`generation_id: "gen-1"`) and COMMITTING records, otherwise fully written, `intent_log_path` set to: `null`; key removed; `7`; `["x"]`; `".factory/migration-state/intent-gen-2.log"`; `"/abs/.factory/migration-state/intent-gen-1.log"`. Controls: `".factory/migration-state/intent-gen-1.log"` (correct pair) in both states; `generation_id: null` + `intent_log_path: null` (STAGING) | The six mutations × 2 states: exit 2 `MIGRATION_STATE_INTEGRITY_FAILURE` (`txn_record_malformed`) at the arm entry, snapshot byte-identical, nothing derived or filled in. Correct pair: recovers, `ResumeFromStaging` rewrites the identical value. Both-null: null-generation discard, exit 1 `EXPIRY_ABORT` (EC-069) | error |
 
 ## Verification Properties
 
@@ -964,7 +1536,8 @@ allocated by the architect under ADR-052 v1.18 (VP-INDEX v3.26); its v1.18 exten
 - ADR-052 §Decision 4 — armed-activation manifest governing pre-mutation authorization (two-phase validation: pre-lock and under-exclusion)
 - ADR-052 §Decision 5a — native admission gate in executor.rs: OPEN/DRAINING gate with writer reservations (PreToolUse-acquire/PostToolUse-release); txn record state check (STAGING/COMMITTING) blocks ordinary writers regardless of PID liveness
 - ADR-052 §Decision 7a — advisory flock on stable pre-created never-unlinked inode (`.factory/migration-state/exclusive.lock`); durable txn record separate from lock file with `fencing_generation` for recovery-owner claim
-- ADR-052 §Decision 7b — framed checksummed intent log with per-target expected post-hash + pre-state; WAL boundary after intent fsync; matching-destination-hash recovery decision table
+- ADR-052 §Decision 7b — (v1.21) POINTER heading only; the intent-log format, WAL boundary and matching-destination-hash recovery decision table are normative in ADR-054 §Decision 1 and §Decision 3
+- ADR-054 §Decision 1 (hardened intent-log wire format: 1.2 grammar and value rules, 1.4 checksum and golden record, 1.5 operator recipe, 1.7 reader, 1.8 invariants L1-L4, 1.9 writer), §Decision 2 (fixed `canonical_move_plan`, rename, no per-move txn rewrite), §Decision 3 (B-1/B-2/B-3, per-move recovery table, new named errors), §Decision 4 (one shared module `shard_manager/intent_log.rs`), §Decision 5 (fault-injection mandate) — companion of ADR-052 (v1.21)
 - ADR-052 §Decision 7c — single atomic CURRENT.json pointer swap (the commit point); completed.json as permanent terminal record; reader protocol (completed.json → CURRENT.json → legacy)
 - ADR-052 §Decision 8 — POLICY 22 exception declaration with accurate skipped-control inventory and enumerated allowed write targets
 - ADR-052 §Decision 5a v1.20 sub-sections — "Evaluation position" (6(d) lead, O1–O4), "Admission scope anchoring" and "Target path resolution" (6(b) events/tools/scope), PostToolUse/PostToolUseFailure release, "Reservation timestamp rules", "`tool_use_id` presence and validity" (6(c)); ADR-052 §Decision 7e "Definition of foreign in the shared admission core" (6(d) decision table, 6(e), Postcondition 9); ADR-052 §Error Code Semantics v1.20 (`E-MAINTENANCE-002`, `RESERVATION_TTL_BELOW_FLOOR`)
@@ -1035,6 +1608,46 @@ D-1252(f)). Each obligation names the story that delivers it:
   `migration-admission` label), the F-006 TTL seam, the F-012 `AdmissionStateIntegrity` carrier
   and the F-014 neutral entry-point names.
 
+Story attribution of the v1.20 obligations (ADR-052 v1.23 "Code ownership"; identical to
+BC-1.18.013 v1.12): **S-25.08** owns the `resolve_factory_root` classification
+(`Result<Option<FactoryRoot>, BcIndexMigrationError>`), the admission and release legs and the
+Tier 0 / Tier 1 txn read (EC-035 admission/release, EC-038..EC-042); **S-25.09** owns the
+coordinator `Io` mapping (EC-036, EC-037), the `admission_failed` event for the unstatable
+admission case, the release `admission_advisory` event, and `TxnRecordMalformed` carrying the
+Branch B unusable-`generation_id` failure; **S-25.06** owns Tier 1 Branch C field consumption
+(`activation_id`, `generation_id`, `intent_log_path`; hash from the intent-log DONE record) and the
+`backfill-append-logs` recovery/verifier/finalize binary leg. **Binary leg (v1.20 same-version
+extension; Precondition 6(f), Postcondition 9(e), EC-043..EC-050; third binary-leg extension below, EC-051..EC-058):** **S-25.09** owns the `migrate-bc-index`
+coordinator leg — Tier 0 raw loader replacing `read_all_txn_records`' full typed deserialize, the
+strict-presence decode at the `ResumeFromStaging` / `ForwardRecovery` / `CleanAbortExpiredStaging`
+arm entries, the `generation_id` tri-state resolved before `recover()`, `DiscardPreGeneration`
+routed through the shared `abort_null_generation_txn` with exit 1 `EXPIRY_ABORT`, and the
+`Quarantine::CommittingWithoutGenerationId` / malformed-record mappings moved from
+`BinaryIntegrityFailure` to `AdmissionStateIntegrity` (exit 2); **S-25.09** also owns the second
+binary-leg extension (ADR-052 v1.23 items 8–11): the `ExpiryAbort { arm }`,
+`ForeignMigrationRefused` and `MigrationLockContention` variants and their exhaustive-match sites,
+the txn-then-gate write order before any `EXPIRY_ABORT` line, the 12-key strict decode (adds
+`schema_version`) with unknown-key and nested-element rejection and the version gate, and the INTERIM
+`completed.json` short-circuit of Postcondition 9(e) (EC-050); **S-25.09 also owns the third binary-leg
+extension (ADR-052 v1.23 items 7(e), 9, 10(a)-(d), 11(c)-(e); EC-051..EC-058)**: lock-first contention on
+every path and the under-lock `completed.json` read (EC-051, EC-052), the exhaustive `process_exit_code`
+(EC-057), COMPLETED-write and abort-path propagation (Postcondition 11, EC-056), the operator-runbook entry
+(EC-058, devops-engineer deliverable) and the `TxnRecordNewerSchema` kind (EC-053..EC-055);
+**S-25.06** (AC-031) owns the `migrate-bc-index` verify-then-finalize that RETIRES that interim, and
+reuses that loader (no second loader).
+
+**Story attribution of the v1.21 obligations (ADR-054 v1.0 §Downstream; human-authorized spec amendment
+2026-10-08):** **S-25.10** ("Hardened intent log, fixed canonical-move plan and completion evidence",
+stacked on S-25.09, blocks S-25.06 and any `migrate-bc-index` release) owns ALL of: the shared
+`intent_log` module and the hardened format/reader/writer (Precondition 5 citation, Postcondition 15,
+EC-065..EC-068), the rename `pending_canonical_moves` → `canonical_move_plan` / `PlannedCanonicalMove`
+(Precondition 6(f)(iii), EC-045/EC-053/EC-058), the fixed-plan model (Precondition 5, Invariant 7), and
+B-1/B-2/B-3 (Postconditions 12-14, EC-059..EC-064) plus the operator-recovery steps 2-3. **S-25.06**
+(rebased after S-25.10) CONSUMES the shared module and the Postcondition 9(b) verifier
+(`verify_plan_completion`) and deletes its copies. **S-25.09** keeps ONLY the `txn_id` (= `activation_id`),
+`intent_log_path` (persisted with `generation_id`) and DONE `txn_id`/`fencing_generation` parameter
+plumbing into the move executor; it MUST NOT introduce log scraping.
+
 **Delivery / promotion condition (POL-14, v1.19):** this BC is anchored by S-25.02 (merged,
 cluster 5), S-25.06, S-25.08 AND S-25.09. Precondition 7 and Postcondition 10 (and the other v1.18
 deltas) land with S-25.09, so the draft→active promotion of the S-25.08/S-25.09 scope MUST occur
@@ -1057,8 +1670,8 @@ that merge.)
 | Capability Anchor Justification | Anchoring to CAP-043: "Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Append-Logs and BC-INDEX Structured-Catalog Sharding" — because this BC describes the governed one-time migration that establishes mechanism B2's split end-state (BC-1.18.010) correctly and safely for `BC-INDEX.md`, which is exactly what CAP-043 defines per `capabilities.md` §CAP-043: "This capability has two mechanisms for two artifact shapes: mechanism A shards four append-only cycle logs... mechanism B shards `BC-INDEX.md`... via two sub-mechanisms: B1... and B2 splits the file's ten already-existing `### SS-NN` per-subsystem body sections into individually-addressable shard files." CAP-043 ("Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Append-Logs and BC-INDEX Structured-Catalog Sharding") per capabilities.md §CAP-043 — no existing capability other than CAP-043 covers a governed one-time migration establishing B2's split end-state; CAP-041 (INDETERMINATE detection/quarantine) and CAP-042 (the `rotate_changelog`/`last_amended` write-path fix) are both distinguishable per capabilities.md's own CAP-043 entry, and neither covers a BC-INDEX body-structure migration. |
 | L2 Domain Invariants | none (dispatcher runtime architectural invariant, not an L2 domain-spec DI-NNN — consistent with the sibling BC-1.18.005–010 precedent for this class of dispatcher-mechanics contract) |
 | Architecture Module | SS-01 (Hook Dispatcher Core — `shard_manager.rs` one-time B2 migration logic) |
-| ADR | ADR-051 §Decision 10 (governed one-time migration for the B2 BC-INDEX body split, fix-burst addition F-S2502-F2-002); ADR-051 §Decision 7 (B2 end-state design this migration produces); ADR-051 §Decision 8 (shard-manifest schema this migration publishes); ADR-052 §Decision 4 (armed-activation manifest governing pre-mutation authorization); ADR-052 §Decision 5a (native admission gate: OPEN/DRAINING gate with writer reservations; txn state check blocks ordinary writers regardless of PID liveness); ADR-052 §Decision 7a (advisory flock on stable never-unlinked inode; durable txn record separate from lock file); ADR-052 §Decision 7b (framed checksummed intent log + WAL boundary + matching-destination-hash recovery decision table); ADR-052 §Decision 7c (single atomic CURRENT.json pointer swap + completed.json permanent terminal record + generation-first/canonical-fallback reader protocol); ADR-052 §Decision 8 (POLICY 22 exception declaration with enumerated allowed write targets) |
-| Stories | S-25.02, S-25.06 (S-25.06 delivers B2-1..B2-4 conformance behavior under this BC; human-approved 2026-10-06), S-25.08 (shared admission core: Preconditions 6(a)–(e), Postconditions 5/9, EC-015, EC-026), S-25.09 (Precondition 6(b)(i) anchoring, Precondition 7, Invariant 6, Postcondition 10, EC-027..EC-034; ADR-052 v1.21 scope). POL-14: promote draft→active only after BOTH S-25.08 and S-25.09 merge (Precondition 7 and Postcondition 10 land with S-25.09) |
+| ADR | ADR-051 §Decision 10 (governed one-time migration for the B2 BC-INDEX body split, fix-burst addition F-S2502-F2-002); ADR-051 §Decision 7 (B2 end-state design this migration produces); ADR-051 §Decision 8 (shard-manifest schema this migration publishes); ADR-052 §Decision 4 (armed-activation manifest governing pre-mutation authorization); ADR-052 §Decision 5a (native admission gate: OPEN/DRAINING gate with writer reservations; txn state check blocks ordinary writers regardless of PID liveness); ADR-052 §Decision 7a (advisory flock on stable never-unlinked inode; durable txn record separate from lock file); ADR-052 §Decision 7b (pointer heading; v1.21: normative content moved to ADR-054 §Decision 1 hardened intent-log format + WAL boundary and §Decision 3 recovery table); ADR-054 §Decision 1/2/3/4/5 (v1.21: hardened format, fixed `canonical_move_plan`, B-1/B-2/B-3, shared module, fault-injection mandate); ADR-052 §Decision 7c (single atomic CURRENT.json pointer swap + completed.json permanent terminal record + generation-first/canonical-fallback reader protocol); ADR-052 §Decision 8 (POLICY 22 exception declaration with enumerated allowed write targets) |
+| Stories | S-25.02, S-25.06 (S-25.06 delivers B2-1..B2-4 conformance behavior under this BC; human-approved 2026-10-06), S-25.08 (shared admission core: Preconditions 6(a)–(e), Postconditions 5/9, EC-015, EC-026), S-25.09 (Precondition 6(b)(i) anchoring, Precondition 7, Invariant 6, Postcondition 10, EC-027..EC-034; ADR-052 v1.21 scope). POL-14: promote draft→active only after BOTH S-25.08 and S-25.09 merge (Precondition 7 and Postcondition 10 land with S-25.09). v1.20: S-25.08 owns the `resolve_factory_root` classification, admission/release legs and Tier 0/Tier 1 (EC-035, EC-038..EC-042); S-25.09 owns the coordinator `Io` mapping and the `admission_failed` / release `admission_advisory` events (EC-036, EC-037); S-25.06 owns Tier 1 Branch C field consumption. v1.21: **S-25.10** (ADR-054: hardened intent log, fixed `canonical_move_plan`, B-1/B-2/B-3 — Preconditions 5 and 6(f)(iii), Postconditions 9(b) and 12-15, Invariant 7, EC-059..EC-068, operator-recovery steps 2-3) owns all of it; S-25.06 consumes the shared module; S-25.09 keeps only the `txn_id`/`intent_log_path`/DONE `txn_id`+`fencing_generation` plumbing |
 | Cycle | v1.0-brownfield-backfill (F2 — product-owner spec-evolution fix-burst) |
 | Feature | E-25 — Validation Integrity and Large-Artifact Resilience |
 
@@ -1066,6 +1679,9 @@ that merge.)
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.21 | 2026-10-08 | product-owner | Application of ADR-054 v1.0 §Downstream "BC wording owed" and ADR-052 v1.24 (human-authorized spec amendments of 2026-10-08, CLAUDE.md rule 12; research `.factory/research/adr-052-intent-log-format-and-move-list-semantics.md`; verdicts A = CHANGE-BOTH, B = AMEND-SPEC-TO-CODE with three code fixes; bugs B-1/B-2/B-3; story S-25.10, with S-25.06 consuming the shared module and S-25.09 keeping only the `txn_id`/`intent_log_path`/DONE plumbing). Additive; same-day successor of v1.20 (which was uncommitted from the ADR-052 v1.23 burst). (1) RENAME `pending_canonical_moves` → `canonical_move_plan` (struct `PendingCanonicalMove` → `PlannedCanonicalMove`) in Precondition 6(f)(iii) strict-presence key list and nested strictness (key set still TWELVE; nested `detail` names `canonical_move_plan[<index>]`; the old key is an unknown top-level key ⇒ `txn_record_malformed`; `TXN_RECORD_SCHEMA_VERSION` stays 1), Postcondition 9(b), the Tier-1 bullet of Precondition 6(c), EC-045/EC-053/EC-058 and their canonical vectors; HISTORY rows of this changelog and the `last_amended` history keep the old name by design. (2) Precondition 5: hardened intent-log format cited by ADR-054 §Decision 1 anchors (grammar NOT copied; POLICY 19); plan persisted before the pointer swap, never rewritten; completion recorded only by txn-bound INTENT-confirmed DONE; EC-003 resume rule re-pointed to ADR-054 §Decision 3. (3) Postcondition 9(b): hash source = DONE located via `intent_log_path`, `DONE == INTENT == sha256(file)`, hardened-reader surface mapping (torn tail absent; mid-log corruption ⇒ `canonical_hash_mismatch`; non-ENOENT read error ⇒ `io`). (4) NEW Postconditions 12 (B-1), 13 (B-2), 14 (B-3), 15 (reader/writer obligations; `INTENT_LOG_CORRUPT`, `INTENT_LOG_VALUE_REJECTED`, `CANONICAL_MOVE_HALTED` exit 2; Precondition 6(f)(vi) exit-code class and EC-057 table extended by name). (5) NEW Invariant 7 (txn record not rewritten per move); Invariant 1 pointer note. (6) "Operator recovery of the interim block" steps 2-3: renamed field; N = `len(canonical_move_plan)` = distinct INTENT targets, non-empty (the former "1 for `migrate-bc-index`" is superseded); step 3 gains the checksum recipe (ADR-054 §Decision 1.5) and the three-way hash equality. (7) NEW EC-059..EC-068 (B-1 crash window; idempotent second pass; DONE hash divergence; DONE binding and truthful pre-state; empty plan; plan/INTENT-set mismatch; torn tail then append; mid-log corruption; value rejection; L1-L4 conflicting INTENTs and foreign `txn_id`) and four new canonical vector rows including the ADR-054 golden record (referenced, not copied). EC numbering now EC-001..EC-069. (7a) ADR-054 §Decision 3.1 (architect-ratified stderr text, corrections C-1..C-4): Postcondition 15(b)/(c)/(e), EC-066, EC-067, EC-068 and the log-defect vector reworded to the truthful claims — INTENT_LOG_CORRUPT: "no further move or append was made and no completion was recorded" (before the loop nothing moved; at the post-loop re-read `completed.json` is not written and the txn untouched), INTENT_LOG_VALUE_REJECTED: "no record of this batch was appended" with the post-generation abort writes (txn ABORTED, THEN gate OPEN) completing before the line prints and a failed write's own `Io` winning; `<kind>`/`<offset>` per the ADR. (7b) Orchestrator addition (ADR-052 v1.24 "Branch C hash source" ruling (i), item 11(e) step 3): Precondition 6(f)(iii) gains the `generation_id`/`intent_log_path` PAIRING RULE (at the coordinator arm entry a COMMITTING record, or STAGING with a string `generation_id`, requires `intent_log_path` == `.factory/migration-state/intent-<generation_id>.log`; null/absent/non-string/mismatch ⇒ `txn_record_malformed`; STAGING resume never fills in a value); EC-045 "a record this build wrote" wording and its controls corrected; NEW EC-069 with vectors (null/absent/non-string/mismatch × STAGING-with-gen/COMMITTING, correct-pair and both-null controls). (8) Frontmatter inputs gain ADR-054; Architecture Anchors, Story Anchor (S-25.10 attribution) and Traceability updated. Unchanged: BC-1.18.008, BC-1.18.010, BC-3.08.001 (grep: no `pending_canonical_moves` or format reference). VP citations changed: see the report (VP-133, VP-143, VP-146, VP-147 are architect-owned and updated in parallel). Stories affected by BC changes: S-25.10 (new, story-writer), S-25.06, S-25.09, S-25.02. |
+| 1.20 (third binary-leg extension, same version) | 2026-10-07 | product-owner | Application of the ADR-052 v1.23 "third binary-leg extension" (independent validation `.factory/research/adr-052-v123-architect-calls-validation.md`; items 7(e), 9, 10(a)-(d), 11(c)-(e)); extends v1.20 in place, mirrors BC-1.18.013 v1.12. No new taxonomy CODE; one new `AdmissionStateIntegrityKind` token (`txn_record_newer_schema`, BC-3.08.001 v1.37). **(1) Exit-1 class** (Precondition 6(e)/6(f)(vi), EC-047, Postcondition 9): exit 1 = "no harm done, safe to re-run; the stderr code says what to do next", covering `EXPIRY_ABORT` AND `MIGRATION_LOCK_CONTENTION`; the "exit 1 = re-activation" wording is retired; `process_exit_code` exhaustive, no wildcard (EC-057). **(2) Contention on every path** (Precondition 6(e), 6(f)(ii)(1); Postcondition 9 lead-in and 9(e)(a0)/(c); EC-048 edited, EC-050 (c3) corrected, EC-051): flock-not-acquired is `MIGRATION_LOCK_CONTENTION` exit 1 on every path including `completed.json` present, NEVER exit 0; the earlier "EWOULDBLOCK ⇒ skip, exit 0" is superseded. **(3) Under-lock `completed.json` read** (Postcondition 9(e)(a0), Precondition 6(f)(ii)(1a), EC-052 TOCTOU): the under-lock read is what `recover()` receives. **(4) 12-key set** (Precondition 6(f)(iii); EC-045/EC-049 updated): adds REQUIRED `schema_version: u32 = 1` (no default); nested `pending_canonical_moves[]` strictness (exactly `{staging_path, canonical_path}` strings, sanitized detail naming `pending_canonical_moves[<i>]`; EC-053); version gate FIRST at every Tier 1 consumer (newer ≥ 2 ⇒ `txn_record_newer_schema`, wins over other defects; other values ⇒ malformed; absent ⇒ malformed at the rewriting arms, "not consumed" at the discard and lazy Branch C reads; EC-054); normative newer-schema `Display`. **(5) Discard** (Precondition 6(f)(iv)(v); EC-055): version gate precedes the `generation_id` tri-state on BOTH surfaces; unknown keys preserved otherwise (controls). **(6) NEW Postcondition 11** (EC-056): COMPLETED-write error propagation (`Io`, exit 2, gate not OPEN, no success claim) and the checked-ABORTED-then-gate-OPEN abort-path rule. **(7) NEW "Operator recovery of the interim block"** subsection mirroring ADR item 11(e) steps 1-6, retired by S-25.06 AC-031 (EC-058). EC numbers EC-051..EC-058 are new (highest prior EC-050). Postcondition 9(e) premise "no activation has ever run" corrected per ADR 11(b). Stories affected: S-25.09, S-25.08, S-25.06 (story-writer must propagate). |
+| 1.20 | 2026-10-07 | product-owner | Application of ADR-052 v1.23 §Downstream (S-25.08 local adversary pass 3: F-S2508-L3-009, F-S2508-L3-001); shared-core sibling sweep with BC-1.18.013 v1.12 (normative text lives there; this BC mirrors it at its parallel clauses, no divergence). No state-machine, taxonomy-code, VP-count or module change. **(F-S2508-L3-009)** The admission-scope anchor text ((i) "Anchor" and a NEW "Absent vs unstatable `.factory`" paragraph after (iii)) now states that the gate is OUT OF SCOPE only when `.factory` is ABSENT (`stat` `ENOENT` incl. dangling symlink, `ENOTDIR`, or success on a non-directory); any other `stat` failure is `E-MAINTENANCE-002` `io` (fail closed, one `migration.admission_failed`, no reservation, write not admitted); release leg ⇒ no verdict + `reservation_release_failed` advisory; `resolve_factory_root` returns `Result<Option<FactoryRoot>, BcIndexMigrationError>`. The `<cause>` classification `io` list gains the `.factory` `stat`; the release-leg sentence gains the unstatable case; Precondition 7 gains the unstatable-coordinator clause (exit 2 existing `Io`, NOT `FACTORY_ROOT_NOT_FOUND`, nothing mutated) and its `None` is conformed to `Ok(None)` = ABSENT. EC-029 reworded (dangling symlink / ENOTDIR also absent); NEW EC-035, EC-036, EC-037 + one test vector. **(F-S2508-L3-001)** The `<cause>` classification gains the two-tier txn-record interpretation: Tier 0 (object, known `state`, string-if-present `migration_id`) is the ONLY interpretation at read time for every `txn-*.json` (no full typed deserialize); Tier 1 fields are read lazily by the consuming branch (Branch B `generation_id`: PRESENT `null` = null generation, string = not Branch B, ABSENT key or other type ⇒ `state_integrity` `txn_record_malformed`, no txn/gate write — absent is NEVER null; Branch C fields at the check's position); shape-valid live records no branch consumes block plain `E-MAINTENANCE-001`; foreign records read no field beyond Tier 0; non-live COMPLETED/ABORTED records of valid Tier 0 shape are admitted (or Branch A reopens the gate) and never modified; only live records count toward "more than one live txn". NEW EC-038..EC-042 + five test vectors. Story Anchor and Traceability Stories row record the S-25.08 / S-25.09 / S-25.06 attribution. Frontmatter `status` / `lifecycle_status` UNCHANGED (POL-14 reconciliation stays with the state-manager at merge). **Same-version extension (ADR-052 v1.23 binary-leg ruling "Migration binaries — recovery and finalize legs" + "Branch C hash source"; no version bump, no new code/variant/kind; sibling BC-1.18.013 v1.12 extended in place):** (1) NEW Precondition 6(f) `migrate-bc-index` recovery leg: the coordinator uses the SAME Tier 0 raw reader as admission (UTF-8 failure ⇒ `TxnRecordMalformed`, not `Io`; terminal and foreign records are never rejected for a missing Tier 1 field; full typed deserialize at read time forbidden); strict-presence decode (every key present, `null` allowed for `Option` fields) at arm entry for `ResumeFromStaging` / `ForwardRecovery` / `CleanAbortExpiredStaging`; `generation_id` tri-state (null ⇒ discard with the EXISTING §4e semantics — which ADR-052 §4e assigns to `EXPIRY_ABORT`, exit 1, third arm, stated consistently here; string ⇒ planner; absent or other ⇒ `MIGRATION_STATE_INTEGRITY_FAILURE` exit 2, nothing mutated; COMMITTING requires a string); the shared `abort_null_generation_txn` primitive. (2) Postcondition 9(b) and Precondition 6(d) Tier 1 field list: hash source is the intent-log DONE record via `intent_log_path`, malformed Tier 1 field ⇒ `MIGRATION_STATE_INTEGRITY_FAILURE`, earlier check wins. (3) NEW EC-043 (STAGING with `generation_id` key removed ⇒ exit 2, txn unchanged, not a discard), EC-044 (COMMITTING `generation_id` null / absent / number), EC-045 (live record missing `activation_id` / `fencing_generation` / `pending_canonical_moves`), EC-046 (loader precedence incl. a COMPLETED record from a newer schema not rejected), EC-047 (shared discard primitive and exit 1) + two test vectors. Story attribution: S-25.09 owns the `migrate-bc-index` coordinator leg; S-25.06 owns `backfill-append-logs` recovery and Branch C verification. **SECOND same-version extension (ADR-052 v1.23 items 8-11, "second binary-leg extension" Downstream block; closes the four S-25.09 red-test questions; still no version bump, no VP-count or state-machine change; two taxonomy codes added: `FOREIGN_MIGRATION_REFUSED`, `MIGRATION_LOCK_CONTENTION` — this SUPERSEDES the earlier "no taxonomy-code" statement above for these two codes only):** (Q1/item 8) Precondition 6(f)(iv) and EC-047 gain the two exact `EXPIRY_ABORT` stderr lines (`ExpiryAbort { arm }`, arms ManifestExpiredOrAbsent / NullGeneration), "printed only after ABORTED + gate OPEN writes; write failure → `Io` exit 2"; EC-043's null control cites the null-generation line. (Q2/item 9) Precondition 6(e), 6(f)(ii), the Precondition 6(d) cross-reference, Postcondition 9(a), EC-013, EC-046(e)(f) and the two matching test vectors replace "`LockContention`-class" with `FOREIGN_MIGRATION_REFUSED` (exit 2, exact line, `<id>` truncated to 64 chars/control chars escaped); the precedence flock → Tier-0 loader → one-live-txn → foreign refusal → `recover()` is stated at 6(f)(ii); the flock-contention sibling (`MIGRATION_LOCK_CONTENTION`, exit 1, exact line, replaces the digest-coded `BinaryIntegrityFailure` text) is stated at 6(e) with NEW EC-048. (Q3/item 10) Precondition 6(f)(iii) enumerates the 11 required keys with types and null rules (`txn_id`/`activation_id`/`created_at`/`updated_at` strings; `fencing_generation` non-negative `u64`; `pending_canonical_moves` array with strictly decoded elements; `state`; four `Option` keys present as string-or-null), the `migration_id` preservation rule, "`generation_id` tri-state first; null-generation decodes no other key", and the unknown-top-level-key rule; EC-045 gains one vector per remaining key plus wrong-typed `fencing_generation` (`"3"`, `3.5`, `-1`, `null`); NEW EC-049. (Q4/item 11) NEW Postcondition 9(e) and EC-050 describe the INTERIM `migrate-bc-index` short-circuit (Tier 0 read with `Err` not swallowed; foreign ⇒ `FOREIGN_MIGRATION_REFUSED`; own live record ⇒ exit 2 `COMPLETION_RECORD_MISMATCH_ABORT` with the exact interim line; no live record ⇒ flock-gated gate reconciliation, zero writes in the clean steady state), marked "retired by S-25.06 AC-031". Five new/extended test vectors; Story Anchor extended. **EC numbering:** committed max was EC-042; EC-043..EC-047 (this uncommitted v1.20) are unchanged and the new rows are EC-048, EC-049, EC-050 — no collision, no renumber. **Stories affected by BC changes:** S-25.06, S-25.09 — story-writer must propagate under bc_array_changes_propagate_to_body_and_acs. **VP citations changed in:** none. |
 | 1.19 | 2026-10-07 | product-owner | Story-anchor re-attribution after the human-approved split of S-25.08 into S-25.08 + NEW S-25.09 (D-1252(f), amended so AC-027 stays in S-25.08). Documentary only — NO Precondition/Postcondition/Invariant/EC/test-vector semantics changed. The v1.18 deltas (Precondition 6(b)(i) single anchoring rule, Precondition 7, Invariant 6, Postcondition 10 with the Branch C seam tokens, EC-027..EC-034, F-006 TTL seam, F-012 carrier, F-014 neutral names) now name S-25.09 as the delivering story (the "S-25.08-seam" / "S-25.08 seam" / "never emitted by S-25.08" / "S-25.08 build" prose sites re-pointed); the first-activation race (EC-015), AC-018 `<cause>` classification (EC-026) and shared-core obligations stay S-25.08. Story Anchor and Traceability Stories row now enumerate S-25.02 / S-25.06 / S-25.08 / S-25.09. POL-14 delivery condition recorded: promote only after BOTH S-25.08 and S-25.09 merge. Also (ADR-052 v1.22 "Read-failure mapping" ruling, same version): read-failure parity statement added to Precondition 6(d) `<cause>` classification and EC-026 (a non-ENOENT read-call failure of the terminal record or a canonical file on the Branch C verification path ⇒ `E-MAINTENANCE-002 (io)`, never a `check` token; ENOENT of a canonical file ⇒ `canonical_hash_mismatch`), matching BC-1.18.013 Precondition 6(c) rule 2; `branch_c_finalized` is emitted by neither S-25.08 nor S-25.09. Sibling sweep: BC-1.18.013 v1.11, BC-3.08.001 v1.36. |
 | 1.18 | 2026-10-07 | product-owner | Application of ADR-052 v1.21 §Downstream items 23–29 (S-25.08 local adversary pass 2: D-1/D-2/F-006/F-012/F-013/F-014); shared-core sibling sweep with BC-1.18.013 v1.10. (23, D-2) Precondition 6(b)(i): the one-sided "migration-state is ALWAYS `<factory_root>/migration-state`" anchor sentence REPLACED by the single anchoring rule (`resolve_session_project_root` → `resolve_factory_root` → `FactoryRoot::migration_state_dir()`; ONE function used by admission, the release leg AND both coordinator binaries); NEW Precondition 7 (`migrate-bc-index` coordinator anchoring; no `.factory` ⇒ exit 2 `FACTORY_ROOT_NOT_FOUND`, `.factory` never created); NEW EC-027..EC-030 + four test vectors; NEW Invariant 6. (24, D-1) the seven live `tracing::warn!` diagnostic mandates (Preconditions 6(b)/(c)/(d), Postconditions 6 and 9(d); the eighth `tracing::` mention is the v1.15 changelog row) REPLACED by the `migration.admission_blocked` / `_failed` / `_advisory` InternalLog events for the admission/release/reconciliation legs and by stderr lines for the coordinator's own anomalies (the lone-oversized-row note); NEW Postcondition 10 (exactly one event per verdict or anomaly in `dispatcher-internal-YYYY-MM-DD.jsonl`; no raw `tool_use_id` or record content; sanitized/truncated fields per EC-024); NEW EC-031..EC-033 + vectors. (25) BC-3.08.001 v1.35 catalogues Events 11–13 (Related BCs). (26, F-006) EC-009(d): "the production entry point is configured below 1,800 s" replaced by the crate-private `run_bc_index_migration_with_ttl(project_root, max_reservation_ttl)` seam (first statement `validate_production_reservation_ttl`) + compile-time const-assertion vector; the seam is NOT public and NOT env/argv-injectable. (27, F-012) the `state_integrity` carrier is named — `BcIndexMigrationError::AdmissionStateIntegrity { kind, detail }` (five kinds), NOT `BinaryIntegrityFailure`; Display-lacks-`BINARY_INTEGRITY_FAILURE` vector; NEW Invariant 5 (`admission_failure_cause` is an exhaustive match, no wildcard); EC-026 extended. (28, F-013) Precondition 6(b): an admission verdict is reported as `blocking_plugins=migration-admission` (`NativeGate::MigrationAdmission`; the shard-cap leg keeps `shard-cap-gate`); NEW EC-034 + vector. (29, F-014) Precondition 6(d) lead: single shared entry points `migration_writer_admission` / `migration_writer_admission_precheck` / `migration_reservation_release`, no per-migration delegates; EC-015 vector re-pointed. **Folded-in follow-up (ADR-052 v1.21 §Downstream item 33 (a)–(g), same version, uncommitted):** (g) undelivered finalize (`FinalizeThenOpenGate` with the S-25.08 seam) ⇒ the one `_blocked` carries `reconciliation=completion_record_mismatch`, `branch=completion_record_mismatch`, `check=finalize_unwired` plus the `_advisory` `branch_c_finalize_unwired` (replaces the earlier `branch=live_txn`); after S-25.06 delivers the finalize: no `_blocked`, `_advisory` `branch_c_finalized`, `finalize_unwired` retired (Postcondition 10, EC-033 vector); (a) Branch C verification failure = ONE `_blocked` (`branch=completion_record_mismatch`, `check`), no `_advisory`; (b) Postcondition 10 `reconciliation` = closed six-token effectful domain (`live_coordinator` / `nothing_to_reconcile` / `gate_reopened` / `null_generation_txn_aborted` / `foreign_migration_refused` / `completion_record_mismatch`; no `none`) with the total `branch` derivation and a vector per token (EC-031); (c) advisory `reason` domain = `reservation_release_failed` / `branch_a_gate_reopened` / `branch_b_txn_aborted` / `branch_c_finalize_unwired` / `branch_c_finalized`; the five timestamp tokens removed from the event and re-homed as coordinator-drain stderr tokens (EC-020, EC-033); `branch_c_finalize_unwired` in addition to the one `_blocked`, retired by S-25.06; `branch_c_finalized` S-25.06-only; (d) optional advisory context fields closed set {`migration_id`, `txn_id`, `check`, `detail`, `tool_use_id_len`}; (e) Precondition 7/EC-029: `FactoryRootNotFound { project_root, root_source }` and the normative stderr line with `<source>` ∈ {`CLAUDE_PROJECT_DIR`, `process cwd`}. **Folded-in follow-up 2 (S-25.08 implementation review @ f8726c34, same version, uncommitted):** field renamed `source` → `root_source` (`thiserror` reserves `source`); `root_source: Option<ProjectRootSource>` with rule (a) — CLI always prints the suffix, path-only library entries permitted with `None` and suffix-less `Display` (Precondition 7, EC-029 + vector); Postcondition 10 Branch C `check` is a CLOSED nine-token domain (normative: BC-1.18.013 Postcondition 10(a); EC-031 vector). Status UNCHANGED (active). |
 | 1.17 | 2026-10-07 | product-owner | Application of ADR-052 v1.20 §Downstream items 21 and 22 plus the terminal-record suffix ruling; sibling sweep with BC-1.18.013 v1.9. (21) Precondition 6(b) anchor/classification/(iv): lexical comparison against EITHER spelling of the session's own root (canonical `factory_root`; `<CLAUDE_PROJECT_DIR as given>/.factory`), no other spelling; migration-state anchored on the real root; EC-018 vector (g); EC-019 vectors 1 (canonical vs as-given identical) and 2 (look-alike/other project, no over-match); TV rows each. (22) Architect Ruling 1 re-anchored in Precondition 6(b): "structurally skipped: admission returns before `shard_cap_precheck` is reachable" (no reference to `resolve_shard_gate_precedence`). (Ruling) Terminal record read but not verifying (unparseable/wrong-schema/count/id/hash) ⇒ `E-MAINTENANCE-001` WITH the mismatch suffix, not finalized (Precondition 6(d) classification text, EC-026 + TV, new TV row); "plain" = no suffix; read-call failure stays `io`. error-taxonomy v1.38. |

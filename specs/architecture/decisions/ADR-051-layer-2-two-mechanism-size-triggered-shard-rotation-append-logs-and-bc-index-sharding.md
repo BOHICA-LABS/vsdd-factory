@@ -1758,7 +1758,7 @@ Decision changes only HOW MANY staged files an over-cap subsystem produces (N su
 sub-manifest, instead of 1 whole-section file) and WHAT CONTENT goes in each; it does not touch
 ADR-052's transaction envelope (txn record state machine, intent log, writer-exclusion, atomic
 `CURRENT.json` pointer swap) — sub-shard files and their sub-manifest are additional entries pushed
-into the SAME `pending_canonical_moves` list, staged via the SAME `migration_durable_write`
+into the SAME `canonical_move_plan` list (renamed from `pending_canonical_moves` by ADR-052 v1.24 / ADR-054 Decision 2; the plan is the immutable move list and never shrinks), staged via the SAME `migration_durable_write`
 primitive, moved via the SAME generic `execute_canonical_path_moves`/intent-log recovery path
 already used for first-level shards and the top-level manifest. Verdict: pure chunking at the
 staging-content-generation phase; zero new concurrency primitives, zero new txn states, zero new
