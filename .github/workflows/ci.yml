@@ -134,6 +134,12 @@ jobs:
       - name: cargo clippy (workspace, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: cargo clippy (factory-dispatcher, failpoints feature, deny warnings)
+        # The `failpoints` feature is OFF in every other step, so the
+        # `fail_point!` sites and the failpoints-gated test suites would
+        # otherwise never be linted (nor compiled) in CI.
+        run: cargo clippy -p factory-dispatcher --features failpoints --all-targets -- -D warnings
+
       - name: cargo check (workspace, all targets)
         run: cargo check --workspace --all-targets
 
@@ -188,6 +194,25 @@ jobs:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
         run: cargo test --workspace --all-targets
+
+      - name: cargo test (factory-dispatcher, failpoints feature)
+        # The `failpoints` cargo feature is off in every other step, so the
+        # failpoints-gated suites (bc_1_18_011_b2_migration_crash_injection_test,
+        # bc_1_18_011_b2_migration_obl1_failpoint_smoke_test, and
+        # s2509_v123_write_error_propagation_failpoints_test) compile to nothing
+        # and never ran in CI; S-25.08 left 8 of them stale unseen. Any failure
+        # fails this step (and so the required cargo-host check).
+        #
+        # No `--test-threads=1`: failpoint state is process-global, but each test
+        # binary is its own process (cargo runs binaries sequentially) and the
+        # in-process tests serialize through `fail::FailScenario::setup()`'s global
+        # lock (fail_point_scope()). Forcing one thread would mask a test that
+        # forgot the scope instead of surfacing it; the suite is deterministic
+        # under parallel threads (~15 s).
+        env:
+          CI_REQUIRE_ARTIFACTS: "1"
+          VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
+        run: cargo test -p factory-dispatcher --features failpoints --all-targets
 
       - name: cargo publish --dry-run (hook-sdk crates) (S-2.5)
         # Catches publishability regressions every push: missing
