@@ -92,8 +92,8 @@ const LOCK_CONTENTION_LINE: &str = "migrate-bc-index: BC-INDEX migration: anothe
 const INTERIM_MISMATCH_LINE: &str = "migrate-bc-index: BC-INDEX migration: the terminal record completed.json cannot be proven to describe the live txn (COMPLETION_RECORD_MISMATCH_ABORT, exit 2); no verification was performed in this build; txn and gate unchanged; operator investigation required";
 
 /// ADR-052 v1.23 item 9 / BC-1.18.011 Precondition 6(e): the EXACT
-/// `FOREIGN_MIGRATION_REFUSED` line for an id already RENDERED (truncated to 64
-/// characters, control characters escaped).
+/// `FOREIGN_MIGRATION_REFUSED` line for an id already RENDERED (truncated to 256
+/// characters per ADR-052 v1.25 items 9 and 11(g), control characters escaped).
 fn foreign_line(rendered_id: &str) -> String {
     format!(
         "migrate-bc-index: BC-INDEX migration: refused: a live migration transaction owned by \
@@ -824,31 +824,45 @@ fn test_BC_1_18_011_EC046_live_foreign_record_refused_exit_2_no_tier1_read_nothi
     );
 }
 
-/// BC-1.18.011 v1.20 Precondition 6(e): `<id>` is the record's `migration_id` rendered
-/// by the SAME function as the v1.21 admission diagnostic (`sanitize_diagnostic_id`:
-/// control characters ESCAPED with `char::escape_default`, the ESCAPED form capped so
-/// the result including a trailing `…` marker is at most 64 characters), "so a hostile
-/// id cannot forge terminal output". A 100-character id, an id with control characters
-/// (newline, ESC, tab) and an id whose ESCAPED form crosses the cap.
+/// ADR-052 v1.25 items 9 and 11(g): the `<id>` on the operator stderr
+/// `FOREIGN_MIGRATION_REFUSED` line is the record's `migration_id` rendered by the shared
+/// sanitizer at the OPERATOR cap of 256 characters (control characters ESCAPED with
+/// `char::escape_default`, the ESCAPED form capped so the result including a trailing `…`
+/// marker is at most 256 characters), "so a hostile id cannot forge terminal output". The
+/// 64-character cap applies only to the InternalLog event detail, never to this line.
+/// A 200-character id (shown in full), exactly 256 (not truncated), 257 and 300
+/// (truncated to 255 + `…`), an id with control characters (newline, ESC, tab) and an id
+/// whose ESCAPED form crosses the 256 cap.
 #[test]
-fn test_BC_1_18_011_EC046_foreign_id_rendering_truncated_to_64_and_control_chars_escaped_blackbox()
-{
+fn test_BC_1_18_011_EC046_foreign_id_rendering_capped_at_256_on_stderr_and_control_chars_escaped_blackbox()
+ {
     let mut failures = Vec::new();
-    let long_id = "x".repeat(100);
-    let long_rendered = format!("{}…", "x".repeat(63));
-    let exact_64 = "y".repeat(64);
+    let id_200 = "x".repeat(200);
+    let exact_256 = "y".repeat(256);
+    let id_257 = "z".repeat(257);
+    let id_300 = "w".repeat(300);
     let ctrl_id = "evil\n\u{1b}[31mFAKE\tline".to_string();
     let ctrl_rendered = "evil\\n\\u{1b}[31mFAKE\\tline".to_string();
-    // 70 newlines escape to 140 characters; the cap applies to the ESCAPED form:
-    // 31 `\n` pairs (62 chars) + the lone `\` (63rd) + `…`.
-    let nl_id = "\n".repeat(70);
-    let nl_rendered = format!("{}\\…", "\\n".repeat(31));
+    // 200 newlines escape to 400 characters; the cap applies to the ESCAPED form:
+    // 127 `\n` pairs (254 chars) + the lone `\` (255th) + `…`.
+    let nl_id = "\n".repeat(200);
+    let nl_rendered = format!("{}\\…", "\\n".repeat(127));
     let variants: Vec<(&str, String, String)> = vec![
-        ("100-char id", long_id, long_rendered),
+        ("200-char id shown in full", id_200.clone(), id_200),
         (
-            "exactly 64 chars is NOT truncated",
-            exact_64.clone(),
-            exact_64,
+            "exactly 256 chars is NOT truncated",
+            exact_256.clone(),
+            exact_256,
+        ),
+        (
+            "257-char id truncated",
+            id_257,
+            format!("{}…", "z".repeat(255)),
+        ),
+        (
+            "300-char id truncated",
+            id_300,
+            format!("{}…", "w".repeat(255)),
         ),
         ("control characters escaped", ctrl_id, ctrl_rendered),
         ("escaped form crosses the cap", nl_id, nl_rendered),
@@ -878,7 +892,7 @@ fn test_BC_1_18_011_EC046_foreign_id_rendering_truncated_to_64_and_control_chars
         }
     }
     assert_no_failures(
-        "test_BC_1_18_011_EC046_foreign_id_rendering_truncated_to_64_and_control_chars_escaped_blackbox",
+        "test_BC_1_18_011_EC046_foreign_id_rendering_capped_at_256_on_stderr_and_control_chars_escaped_blackbox",
         failures,
     );
 }
@@ -2413,11 +2427,12 @@ fn test_BC_1_18_011_EC049_nested_unknown_key_non_object_and_missing_key_in_pendi
     );
 }
 
-/// ADR-052 v1.23 item 10(a): "the offending key rendered by the SAME sanitizer as the
-/// top-level check (truncated to 64 chars, control characters escaped -- a hostile key
-/// must not forge terminal output)". A nested unknown key holding a newline, an ESC and a
-/// tab, and a 100-character key: ONE stderr line, no raw control character, the escaped
-/// form present, the long key truncated. The same keys at the TOP level are rendered by the
+/// ADR-052 v1.23 item 10(a) as amended by v1.25 items 9 and 11(g): "the offending key
+/// rendered by the SAME sanitizer as the top-level check (control characters escaped -- a
+/// hostile key must not forge terminal output)", capped at 256 characters on the operator
+/// stderr (the 64-char cap is the InternalLog event's only). A nested unknown key holding a
+/// newline, an ESC and a tab, a 100-character key (shown in full) and a 300-character key
+/// (255 + `…`): ONE stderr line, no raw control character, the escaped form present. The same keys at the TOP level are rendered by the
 /// existing sanitizer; the nested rendering must contain the same escaped text.
 #[test]
 fn test_BC_1_18_011_EC049_nested_unknown_key_rendered_by_the_shared_sanitizer_truncated_and_escaped_blackbox()

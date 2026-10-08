@@ -2535,3 +2535,96 @@ fn test_BC_1_18_013_ADR052_v125_11g3_admission_entry_points_write_no_coordinator
         failures,
     );
 }
+
+// ===========================================================================
+// ADR-052 v1.25 items 9 / 11(g) -- the Event 12 side of the 256/64 split
+// ===========================================================================
+
+#[cfg(unix)]
+fn event12_detail_for_txn_record(
+    rec: &Value,
+    tool_use_id: &str,
+) -> (Option<i32>, Vec<Value>, String) {
+    let plugin_root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .unwrap();
+    let (_keep, root) = long_project();
+    let ms = root.join(".factory/migration-state");
+    std::fs::create_dir_all(ms.join("reservations")).unwrap();
+    std::fs::write(ms.join("exclusive.lock"), b"").unwrap();
+    std::fs::write(ms.join("gate-state.json"), "\"OPEN\"").unwrap();
+    std::fs::write(
+        ms.join("txn-act-1.json"),
+        serde_json::to_vec_pretty(rec).unwrap(),
+    )
+    .unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let target = root.join(CYCLES_PATH);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let out = run_hook(
+        &root,
+        plugin_root.path(),
+        logs.path(),
+        &edit_envelope(&target, tool_use_id),
+    );
+    let events = read_events(logs.path());
+    let failed: Vec<Value> = of_type(&events, "migration.admission_blocked")
+        .into_iter()
+        .map(|(v, _)| v.clone())
+        .collect();
+    (out.status.code(), failed, stderr_of(&out))
+}
+
+/// ADR-052 v1.25 item 11(g): the 64-character cap applies to the InternalLog event
+/// surface and must NOT follow the operator stderr's 256. A LIVE foreign record whose
+/// `migration_id` is 100 characters, met by a hook-path protected write, is blocked; the
+/// `migration.admission_blocked` event's `migration_id` (the admission-side rendering of
+/// the same foreign id; Event 12 `migration.admission_failed` does not carry a record id,
+/// so this is the observable InternalLog rendering of it) is `63 chars + "…"` = 64.
+#[cfg(unix)]
+#[test]
+fn test_BC_3_08_001_EC046_event_foreign_id_on_the_internal_log_stays_capped_at_64_blackbox() {
+    let mut failures = Vec::new();
+    for (label, id, want) in [
+        (
+            "100-char id",
+            "m".repeat(100),
+            format!("{}…", "m".repeat(63)),
+        ),
+        (
+            "300-char id",
+            "n".repeat(300),
+            format!("{}…", "n".repeat(63)),
+        ),
+        (
+            "64-char id is not truncated",
+            "p".repeat(64),
+            "p".repeat(64),
+        ),
+    ] {
+        let rec = json!({"state": "STAGING", "migration_id": id});
+        let (code, blocked, stderr) = event12_detail_for_txn_record(&rec, "toolu_ev_foreign");
+        if code != Some(2) || blocked.len() != 1 {
+            failures.push(format!(
+                "[{label}] setup: expected exit 2 and one admission_blocked event; got exit \
+                 {code:?}, {} event(s), stderr {stderr:?}",
+                blocked.len()
+            ));
+            continue;
+        }
+        let got = blocked[0]["migration_id"].as_str().unwrap_or("");
+        if got != want {
+            failures.push(format!(
+                "[{label}] the InternalLog migration_id must stay capped at 64 characters \
+                 ({want:?}); got {got:?}"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_3_08_001_EC046_event_foreign_id_on_the_internal_log_stays_capped_at_64_blackbox",
+        failures,
+    );
+}
