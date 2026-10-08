@@ -340,6 +340,9 @@ fn expected_cause(e: &BcIndexMigrationError) -> AdmissionFailureCause {
         | BcIndexMigrationError::ForeignMigrationRefused { .. }
         | BcIndexMigrationError::MigrationLockContention
         | BcIndexMigrationError::CompletionRecordMismatchInterim
+        // S-25.10 (ADR-054 Decision 3): both new coordinator outcomes classify StateIntegrity.
+        | BcIndexMigrationError::IntentLogCorrupt { .. }
+        | BcIndexMigrationError::IntentLogValueRejected { .. }
         | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
             AdmissionFailureCause::StateIntegrity
         }

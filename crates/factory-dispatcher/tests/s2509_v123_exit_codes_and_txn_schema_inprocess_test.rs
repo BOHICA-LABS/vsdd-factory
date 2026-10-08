@@ -80,6 +80,9 @@ fn ruled(e: &BcIndexMigrationError) -> (&'static str, i32) {
         BcIndexMigrationError::Io { .. } => ("Io", 2),
         BcIndexMigrationError::WriterAdmissionRefused { .. } => ("WriterAdmissionRefused", 2),
         BcIndexMigrationError::ShardCapConfigUnavailable { .. } => ("ShardCapConfigUnavailable", 2),
+        // S-25.10 (ADR-054 Decision 3 "New named errors"): both exit 2, listed BY NAME.
+        BcIndexMigrationError::IntentLogCorrupt { .. } => ("IntentLogCorrupt", 2),
+        BcIndexMigrationError::IntentLogValueRejected { .. } => ("IntentLogValueRejected", 2),
     }
 }
 
@@ -174,6 +177,22 @@ fn instances() -> Vec<(String, BcIndexMigrationError)> {
         (
             "ShardCapConfigUnavailable".into(),
             BcIndexMigrationError::ShardCapConfigUnavailable { detail: "d".into() },
+        ),
+        // S-25.10 rows (ADR-054 Decision 3; `CanonicalMoveHalted` is S-25.11's row).
+        (
+            "IntentLogCorrupt".into(),
+            BcIndexMigrationError::IntentLogCorrupt {
+                path: PathBuf::from("/p/intent-g.log"),
+                kind: "mid_log_corruption".into(),
+                offset: 0,
+            },
+        ),
+        (
+            "IntentLogValueRejected".into(),
+            BcIndexMigrationError::IntentLogValueRejected {
+                field: "staging_path".into(),
+                reason: "empty".into(),
+            },
         ),
     ];
     for arm in [
@@ -402,7 +421,7 @@ fn test_BC_1_18_011_item7e_exit_code_table_lists_exactly_the_declared_variants()
         .map(|(_, e)| ruled(e).0.to_string())
         .collect();
     assert!(
-        declared.len() >= 19,
+        declared.len() >= 21,
         "the enum scan found only {} variants ({declared:?}); the scanner is broken",
         declared.len()
     );

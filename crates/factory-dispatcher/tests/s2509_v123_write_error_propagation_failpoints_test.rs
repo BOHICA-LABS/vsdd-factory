@@ -90,7 +90,7 @@ shape = \"flat\"
 ";
 
 const WRITE_TEMP: &str = "migration_fs::write_temp";
-const APPEND: &str = "migration_fs::append";
+const APPEND: &str = "migration_fs::append_durable";
 const POINTER_SWAP: &str = "migration_fs::pointer_swap";
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -521,7 +521,7 @@ fn test_BC_1_18_011_item11d_abort_staging_closure_aborted_txn_write_failure_fing
 }
 
 /// ADR-052 v1.23 item 11(d) sibling sweep (1), second `abort_staging` caller: the intent-log
-/// append fails (`migration_fs::append` returns `WriteZero`) -- the original failure is an
+/// append fails (`migration_fs::append_durable` returns `WriteZero`) -- the original failure is an
 /// `Io` with no taxonomy token -- and the ABORTED txn write then fails too. Same rule: that
 /// write's own `Io` (exit 2) is returned, the gate is not written OPEN, the txn stays live.
 #[test]

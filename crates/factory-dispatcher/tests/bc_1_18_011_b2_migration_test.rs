@@ -79,18 +79,21 @@ use std::path::{Path, PathBuf};
 
 use factory_dispatcher::executor::migration_writer_admission_precheck;
 use factory_dispatcher::payload::HookPayload;
+use factory_dispatcher::shard_manager::intent_log::{
+    IntentLogWriter, IntentRecord, RecordType, read_log,
+};
 use factory_dispatcher::shard_manager::migration_fs::{Fs, StdFs};
 use factory_dispatcher::shard_manager::{
     BcId, BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationOutcome,
     BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, CompletedMigrationRecord,
-    CurrentGenerationPointer, IntentLogRecord, IntentLogRecordType, IntentLogRecoveryDecision,
-    PendingCanonicalMove, admit_or_block_bc_index_writer, append_intent_log_record,
-    commit_current_generation_pointer, compute_body_row_sha256, compute_independent_census,
-    decide_intent_log_recovery, execute_canonical_path_moves, extract_and_sort_bc_rows,
-    is_bc_index_admission_open, migration_process_exit_code, pre_commit_fingerprint_recheck,
-    read_active_txn_record, read_intent_log, resume_from_staging, run_bc_index_migration,
-    stage_new_generation, try_acquire_migration_lock, verify_content_preservation,
-    verify_independent_census, write_completed_record, write_txn_record,
+    CurrentGenerationPointer, IntentLogRecoveryDecision, PendingCanonicalMove,
+    admit_or_block_bc_index_writer, commit_current_generation_pointer, compute_body_row_sha256,
+    compute_independent_census, decide_intent_log_recovery, execute_canonical_path_moves,
+    extract_and_sort_bc_rows, is_bc_index_admission_open, migration_process_exit_code,
+    pre_commit_fingerprint_recheck, read_active_txn_record, resume_from_staging,
+    run_bc_index_migration, stage_new_generation, try_acquire_migration_lock,
+    verify_content_preservation, verify_independent_census, write_completed_record,
+    write_txn_record,
 };
 use vsdd_hook_sdk::HookResult;
 
@@ -532,8 +535,12 @@ impl Fs for MutateThenFailFirstSwapAttemptFs {
         StdFs.remove(path)
     }
 
-    fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError> {
-        StdFs.append(path, content)
+    fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError> {
+        StdFs.append_durable(path, content)
+    }
+
+    fn truncate_durable(&self, path: &Path, len: u64) -> Result<(), BcIndexMigrationError> {
+        StdFs.truncate_durable(path, len)
     }
 }
 
@@ -665,6 +672,24 @@ fn test_BC_1_18_011_INV3_execute_canonical_path_moves_halts_not_aborts_on_single
                 .into_owned(),
         },
     ];
+
+    // The production flow always appends the INTENT batch (the WAL boundary) before any
+    // rename; seed the first move's INTENT exactly as `append_intent_records_for_pending_moves`
+    // would (ADR-054 Decision 1.8 L3: a DONE must have an INTENT to copy).
+    write_intent_records(
+        &intent_log_path,
+        "txn-test",
+        &[IntentRecord {
+            txn_id: "txn-test".to_string(),
+            fencing_generation: 1,
+            record_type: RecordType::Intent,
+            target_canonical: dir.path().join("shards/BC-INDEX-SS-01.md"),
+            staging_path: dir.path().join("gen-abc/shards/BC-INDEX-SS-01.md"),
+            expected_post_hash: sha256_hex_of_bytes(b"content"),
+            expected_pre_state: None,
+            timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
+        }],
+    );
 
     let completed_count =
         execute_canonical_path_moves(&StdFs, &pending, &intent_log_path, "txn-test", 1).expect(
@@ -858,42 +883,59 @@ fn test_BC_1_18_011_INV1_read_active_txn_record_returns_none_when_absent() {
 // (ADR-052 §Decision 7b).
 // ---------------------------------------------------------------------------
 
+/// An in-memory record. The `decide_intent_log_recovery` tests below never serialize it, so
+/// their short symbolic hashes are fine; anything written to disk goes through
+/// [`valid_intent_record`] (ADR-054 Decision 1.2: hashes are 64 lowercase hex digits).
 fn sample_intent_record(
     expected_post_hash: &str,
     expected_pre_state: Option<&str>,
-) -> IntentLogRecord {
-    IntentLogRecord {
+) -> IntentRecord {
+    IntentRecord {
         txn_id: "txn-sample".to_string(),
         fencing_generation: 1,
-        record_type: IntentLogRecordType::Intent,
+        record_type: RecordType::Intent,
         target_canonical: PathBuf::from("shards/BC-INDEX-SS-01.md"),
         staging_path: PathBuf::from("gen-abc/shards/BC-INDEX-SS-01.md"),
         expected_post_hash: expected_post_hash.to_string(),
         expected_pre_state: expected_pre_state.map(|s| s.to_string()),
         timestamp_utc: "2026-09-13T00:00:00Z".to_string(),
-        record_checksum: "checksum-placeholder".to_string(),
     }
+}
+
+fn valid_intent_record() -> IntentRecord {
+    sample_intent_record(&"a".repeat(64), Some(&"b".repeat(64)))
+}
+
+/// Append `records` through the shared module's writer (open-and-repair, then one batch).
+fn write_intent_records(path: &Path, txn_id: &str, records: &[IntentRecord]) {
+    let mut writer = IntentLogWriter::open(&StdFs, path, txn_id)
+        .expect("opening the intent-log writer must succeed");
+    writer
+        .append_batch(records)
+        .expect("appending well-formed records must succeed");
 }
 
 #[test]
 fn test_BC_1_18_011_intent_log_append_and_read_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let intent_log_path = dir.path().join("intent-abc.log");
-    let record = sample_intent_record("hash-post", Some("hash-pre"));
-    append_intent_log_record(&StdFs, &intent_log_path, &record)
-        .expect("appending a well-formed record must succeed");
-    let read_back =
-        read_intent_log(&StdFs, &intent_log_path).expect("reading it back must succeed");
-    assert_eq!(read_back.len(), 1);
-    assert_eq!(read_back[0].expected_post_hash, "hash-post");
+    let record = valid_intent_record();
+    write_intent_records(
+        &intent_log_path,
+        "txn-sample",
+        std::slice::from_ref(&record),
+    );
+    let bytes = std::fs::read(&intent_log_path).unwrap();
+    let read_back = read_log(&bytes, "txn-sample").expect("reading it back must succeed");
+    assert_eq!(read_back.records.len(), 1);
+    assert_eq!(read_back.records[0], record);
 }
 
 #[test]
 fn test_BC_1_18_011_intent_log_torn_trailing_record_treated_as_absent_never_partial() {
     let dir = tempfile::tempdir().unwrap();
     let intent_log_path = dir.path().join("intent-abc.log");
-    let record = sample_intent_record("hash-post", Some("hash-pre"));
-    append_intent_log_record(&StdFs, &intent_log_path, &record).expect("append must succeed");
+    write_intent_records(&intent_log_path, "txn-sample", &[valid_intent_record()]);
 
     // Truncate the file mid-record to simulate a crash during the append's
     // own write — a torn record MUST be treated as absent, never parsed as
@@ -902,10 +944,10 @@ fn test_BC_1_18_011_intent_log_torn_trailing_record_treated_as_absent_never_part
     let torn_len = full_bytes.len().saturating_sub(5).max(1);
     std::fs::write(&intent_log_path, &full_bytes[..torn_len]).unwrap();
 
-    let read_back = read_intent_log(&StdFs, &intent_log_path)
+    let read_back = read_log(&std::fs::read(&intent_log_path).unwrap(), "txn-sample")
         .expect("a torn trailing record must not itself be a parse error");
     assert!(
-        read_back.is_empty(),
+        read_back.records.is_empty(),
         "a single record truncated mid-write must be discarded entirely, not surfaced as a \
          partial record"
     );
@@ -1915,24 +1957,35 @@ fn test_BC_1_18_011_FC5P2_002_run_bc_index_migration_committing_resume_skips_don
     std::fs::write(&staging_2, b"pending-shard-content").unwrap();
     let canonical_2 = shards_canonical_root.join("BC-INDEX-SS-05.md");
 
-    // Seed the intent log with move #1's DONE record from the prior
-    // invocation, matching canonical #1's actual current content — exactly
-    // what a correct forward-recovery check consults to recognize "this
-    // move is already done."
+    // Seed the intent log exactly as the prior (crashed) invocation left it, in the ADR-054
+    // hardened format: the INTENT batch for BOTH moves (the WAL boundary precedes every
+    // rename) and move #1's DONE record, which COPIES its INTENT's fields (ADR-054 Decision 1.8
+    // L3) and matches canonical #1's actual current content -- exactly what a correct
+    // forward-recovery check consults to recognize "this move is already done."
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
-    let move_1_record = IntentLogRecord {
+    let intent_1 = IntentRecord {
         txn_id: "txn-fc5p2002".to_string(),
         fencing_generation: 1,
-        record_type: IntentLogRecordType::Done,
+        record_type: RecordType::Intent,
         target_canonical: canonical_1.clone(),
         staging_path: staging_1.clone(),
         expected_post_hash: sha256_hex_of_bytes(already_moved_content),
         expected_pre_state: None,
         timestamp_utc: "2026-09-22T00:00:00Z".to_string(),
-        record_checksum: "checksum-placeholder".to_string(),
     };
-    append_intent_log_record(&StdFs, &intent_log_path, &move_1_record)
-        .expect("seeding the prior invocation's DONE record must succeed");
+    let intent_2 = IntentRecord {
+        target_canonical: canonical_2.clone(),
+        staging_path: staging_2.clone(),
+        expected_post_hash: sha256_hex_of_bytes(b"pending-shard-content"),
+        ..intent_1.clone()
+    };
+    let done_1 = IntentRecord {
+        record_type: RecordType::Done,
+        timestamp_utc: "2026-09-22T00:00:01Z".to_string(),
+        ..intent_1.clone()
+    };
+    write_intent_records(&intent_log_path, "txn-fc5p2002", &[intent_1, intent_2]);
+    write_intent_records(&intent_log_path, "txn-fc5p2002", &[done_1]);
 
     let mut txn = sample_txn_record(BcIndexMigrationTxnState::Committing);
     txn.txn_id = "txn-fc5p2002".to_string();

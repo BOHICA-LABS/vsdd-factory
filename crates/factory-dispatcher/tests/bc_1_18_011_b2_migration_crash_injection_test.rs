@@ -96,27 +96,30 @@
 //! calls above -- occurrences 1/2/7/9/10 in `write_temp`'s own numbering):
 //!  1..5
 //!
-//! `append` (8 occurrences): 1-4 = INTENT records for the 4 pending moves
-//! (same order as the fixture list above), durable BEFORE
-//! `pending_canonical_moves` is persisted, BEFORE the fingerprint recheck,
-//! and BEFORE the pointer swap (the WAL-ordering fix, research finding
-//! #4); 5-8 = DONE records, one per successful canonical rename
-//! (post-swap), same order.
+//! `append_durable` (5 occurrences; ADR-054 Decision 1.9 replaced the per-record `append`
+//! with ONE batched `append_durable` per write): 1 = the single INTENT-batch append carrying
+//! the INTENT records of all 4 pending moves, durable BEFORE
+//! `pending_canonical_moves` is persisted, BEFORE the fingerprint recheck, and BEFORE the
+//! pointer swap (the WAL-ordering fix, research finding #4); 2-5 = DONE records, one per
+//! successful canonical rename (post-swap), same order as the fixture list above.
 //!
-//! `fsync_dir` (6 occurrences total; `rename` has 4 -- post-swap only):
+//! `fsync_dir` (7 occurrences total; `rename` has 4 -- post-swap only):
 //!  1. `stage_new_generation`'s own gen-dir sync, BEFORE `generation_id` is
 //!     persisted to the txn record
-//!  2. NEW (OBL-1 FINDING 1 fix): `commit_current_generation_pointer`'s own
+//!  2. NEW (ADR-054 Decision 1.9 step 5, S-25.10): the parent-directory sync of
+//!     `.factory/migration-state/` that follows the INTENT-batch `append_durable` because
+//!     that call CREATED the intent log (`created == true`); it must precede the WAL
+//!     boundary counting as reached. Subsequent appends (the DONE records) find the log
+//!     existing and do no directory sync.
+//!  3. (formerly 2) OBL-1 FINDING 1 fix: `commit_current_generation_pointer`'s own
 //!     Step 3 durability barrier for the `Fs::pointer_swap` rename's
 //!     directory-entry change, immediately after the sole commit-point
 //!     rename lands and BEFORE the txn record's `state=Committing` write
 //!     (`write_temp` occurrence 9) -- see FINDING 1 (RESOLVED) below
-//!  3-6. the 4 post-swap canonical-path-move `rename`+`fsync_dir` barrier
+//!  4-7. (formerly 3-6) the 4 post-swap canonical-path-move `rename`+`fsync_dir` barrier
 //!     pairs inside `execute_canonical_path_moves` (same order as the
-//!     fixture list above) -- occurrence 3 is what this suite's fsync_dir
-//!     boundary coverage used to number as occurrence 2, before the new
-//!     occurrence 2 above was inserted; see the fsync_dir test section
-//!     below for the corrected occurrence-to-scenario mapping
+//!     fixture list above); see the fsync_dir test section below for the
+//!     occurrence-to-scenario mapping
 //!
 //! `remove` (0 occurrences on the happy path): reachable only via
 //! `abort_staging`'s (PC1/PC2 verification failure) or
@@ -996,16 +999,16 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ7_pending_moves_not_yet_pe
     let _ = outcome;
 }
 
-/// FINDING 2, occurrence C: same defect class via the `append` boundary
-/// directly (crash during the first INTENT-record append, before ANY of
-/// the 4 targets has a durable intent record).
+/// FINDING 2, occurrence C: same defect class via the `append_durable` boundary
+/// directly (crash during the INTENT-batch append, before ANY of the 4
+/// targets has a durable intent record).
 #[test]
 fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ1_first_intent_record() {
     let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
-    let crash = spawn_crash_child("migration_fs::append", 1, dir.path());
-    assert_child_aborted(&crash, "migration_fs::append", 1);
+    let crash = spawn_crash_child("migration_fs::append_durable", 1, dir.path());
+    assert_child_aborted(&crash, "migration_fs::append_durable", 1);
     assert_admission_blocked(dir.path(), "probe");
 
     let outcome = run_recovery_to_convergence(dir.path(), 3);
@@ -1013,23 +1016,12 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ1_first_intent_record() {
     let _ = outcome;
 }
 
-/// FINDING 2, occurrence D: crash during the LAST INTENT-record append
-/// (3 of 4 targets already have a durable intent record) -- still before
-/// `pending_canonical_moves` is persisted, so the same false-success
-/// defect reproduces even with the intent log almost entirely durable.
-#[test]
-fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ4_last_intent_record() {
-    let _fp = fail_point_scope();
-    let dir = tempfile::tempdir().unwrap();
-    setup_fixture(dir.path());
-    let crash = spawn_crash_child("migration_fs::append", 4, dir.path());
-    assert_child_aborted(&crash, "migration_fs::append", 4);
-    assert_admission_blocked(dir.path(), "probe");
-
-    let outcome = run_recovery_to_convergence(dir.path(), 3);
-    assert_genuinely_fully_migrated(dir.path());
-    let _ = outcome;
-}
+// FINDING 2, former occurrence D ("crash during the LAST of four per-record INTENT appends"):
+// removed with ADR-054 Decision 1.9 -- the INTENT batch is ONE `append_durable` call, so there
+// is no boundary between the first and the last INTENT record; a crash anywhere in the batch is
+// occurrence C above (`migration_fs::append_durable`, occurrence 1), and the window after the
+// whole batch is durable but before the plan is persisted is the `write_temp` occurrence 7
+// scenario.
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ8_at_sole_commit_point_resumes_correctly() {
@@ -1235,15 +1227,15 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_fsync_file_occ5_completed_json_durable_g
 // ===========================================================================
 
 #[test]
-fn test_BC_1_18_011_obl1_crash_append_occ5_first_done_record_post_swap_resumes() {
+fn test_BC_1_18_011_obl1_crash_append_occ2_first_done_record_post_swap_resumes() {
     let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
-    // Occurrence 5 = the FIRST DONE record, i.e. right after the first
-    // canonical rename (post-swap) already landed -- the pointer swap and
+    // Occurrence 2 = the FIRST DONE record (occurrence 1 is the INTENT batch), i.e. right
+    // after the first canonical rename (post-swap) already landed -- the pointer swap and
     // all 4 INTENT records are already durable at this point.
-    let crash = spawn_crash_child("migration_fs::append", 5, dir.path());
-    assert_child_aborted(&crash, "migration_fs::append", 5);
+    let crash = spawn_crash_child("migration_fs::append_durable", 2, dir.path());
+    assert_child_aborted(&crash, "migration_fs::append_durable", 2);
     assert_admission_blocked(dir.path(), "probe");
 
     let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
@@ -1354,7 +1346,48 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ1_generation_dir_sync_discards() {
     assert_recovery_is_idempotent(dir.path());
 }
 
-/// Occurrence 2 was, before the OBL-1 FINDING 1 fix, the FIRST post-rename
+/// `fsync_dir`, occurrence 2 (ADR-054 Decision 1.9 step 5; S-25.10): the parent-directory
+/// sync that follows the INTENT-batch `append_durable` because that call CREATED the intent
+/// log. A crash exactly there leaves the INTENT bytes written but the WAL boundary NOT
+/// reached: the txn is still STAGING (the plan is not even persisted yet), and recovery
+/// resumes from the staged generation, re-appends the INTENT batch (idempotent duplicates are
+/// legal, ADR-054 1.8 L2) and converges to a fully migrated tree.
+#[test]
+fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_log_creation_directory_sync_resumes_via_staging_reinvocation()
+ {
+    let _fp = fail_point_scope();
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    let crash = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
+    assert_child_aborted(&crash, "migration_fs::fsync_dir", 2);
+    assert_admission_blocked(dir.path(), "probe");
+
+    let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
+    assert_eq!(
+        txn.state,
+        BcIndexMigrationTxnState::Staging,
+        "the crash precedes the pointer swap and the txn's Committing write"
+    );
+    assert!(
+        txn.generation_id.is_some(),
+        "generation_id is durable (write_temp occurrence 2) before the INTENT batch"
+    );
+
+    let outcome = run_recovery_to_convergence(dir.path(), 3);
+    assert!(
+        matches!(
+            outcome,
+            Ok(BcIndexMigrationOutcome::Completed {
+                canonical_paths_count: 4
+            })
+        ),
+        "got {outcome:?}"
+    );
+    assert_genuinely_fully_migrated(dir.path());
+    assert_recovery_is_idempotent(dir.path());
+}
+
+/// Occurrence 3 (formerly 2) was, before the OBL-1 FINDING 1 fix, the FIRST post-rename
 /// directory-fsync barrier (the scenario the docstring below used to
 /// describe). `commit_current_generation_pointer`'s new Step 3
 /// (`Fs::fsync_dir` on `migration_state_dir`, immediately after
@@ -1366,20 +1399,20 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ1_generation_dir_sync_discards() {
 /// occurrence 3 (see the next test below), which restores that coverage
 /// rather than silently dropping it.
 #[test]
-fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_pointer_swap_barrier_resumes_via_staging_reinvocation()
+fn test_BC_1_18_011_obl1_crash_fsync_dir_occ3_post_pointer_swap_barrier_resumes_via_staging_reinvocation()
  {
     let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
-    // Occurrence 2 = commit_current_generation_pointer's own Step 3
+    // Occurrence 3 = commit_current_generation_pointer's own Step 3
     // durability barrier: Fs::pointer_swap (the sole commit-point) has
     // ALREADY durably renamed CURRENT.tmp.json onto CURRENT.json -- the
     // new generation is physically live -- but the directory-entry
     // durability barrier for that rename, and the txn record's own
     // state=Committing write (write_temp occurrence 9, which happens
     // strictly AFTER this call returns), have not yet run.
-    let crash = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
-    assert_child_aborted(&crash, "migration_fs::fsync_dir", 2);
+    let crash = spawn_crash_child("migration_fs::fsync_dir", 3, dir.path());
+    assert_child_aborted(&crash, "migration_fs::fsync_dir", 3);
     assert_admission_blocked(dir.path(), "probe");
 
     let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
@@ -1419,25 +1452,25 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_pointer_swap_barrier_resumes_
 /// `fsync_dir` occurrence ahead of it (see the module header's corrected
 /// occurrence table and the occurrence-2 test above).
 #[test]
-fn test_BC_1_18_011_obl1_crash_fsync_dir_occ3_post_rename_barrier_resumes_via_treat_done() {
+fn test_BC_1_18_011_obl1_crash_fsync_dir_occ4_post_rename_barrier_resumes_via_treat_done() {
     let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
-    // Occurrence 3 = the FIRST post-rename directory-fsync barrier inside
+    // Occurrence 4 = the FIRST post-rename directory-fsync barrier inside
     // execute_canonical_path_moves: the rename already landed (the
     // canonical file physically already holds the NEW content), but the
     // durability barrier and the DONE record are not yet confirmed.
     // Exercises decide_intent_log_recovery's TreatDone arm (canonical hash
     // already == expected_post_hash) rather than a redundant re-rename.
-    let crash = spawn_crash_child("migration_fs::fsync_dir", 3, dir.path());
-    assert_child_aborted(&crash, "migration_fs::fsync_dir", 3);
+    let crash = spawn_crash_child("migration_fs::fsync_dir", 4, dir.path());
+    assert_child_aborted(&crash, "migration_fs::fsync_dir", 4);
     assert_admission_blocked(dir.path(), "probe");
 
     let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
     assert_eq!(
         txn.state,
         BcIndexMigrationTxnState::Committing,
-        "by occurrence 3, the pointer swap and the txn record's own state=Committing write \
+        "by occurrence 4, the pointer swap and the txn record's own state=Committing write \
          (write_temp occurrence 9) have both already landed durably -- this crash is strictly \
          post-commit, inside execute_canonical_path_moves' per-target rename+fsync_dir barrier \
          loop"
@@ -1926,7 +1959,7 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_file_return_interrupted() {
     assert_recovery_is_idempotent(dir.path());
 }
 
-/// `append`, occurrence 1 (the first WAL-boundary INTENT-record append,
+/// `append_durable`, occurrence 1 (the WAL-boundary INTENT-batch append,
 /// reached from the fresh-run path after all 4 targets are durably staged
 /// but before the pointer swap). Unlike the equivalent process-abort
 /// scenario (FINDING 2), a GRACEFUL error here is `?`-propagated through
@@ -1942,11 +1975,12 @@ fn test_BC_1_18_011_obl1_graceful_err_append_return_write_zero_self_heals_via_ab
     let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
-    fail::cfg("migration_fs::append", "1*return(write_zero)")
+    fail::cfg("migration_fs::append_durable", "1*return(write_zero)")
         .expect("configuring the append return(write_zero) failpoint must succeed");
 
     let outcome = run_bc_index_migration(dir.path());
-    fail::cfg("migration_fs::append", "off").expect("resetting the append failpoint must succeed");
+    fail::cfg("migration_fs::append_durable", "off")
+        .expect("resetting the append_durable failpoint must succeed");
     assert!(
         matches!(
             outcome,
@@ -2540,8 +2574,8 @@ fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_after_prior_swap_forward_rec
     let canonical_path = bc_index_target(dir.path());
     let msd = migration_state_dir(dir.path());
 
-    let crash = spawn_crash_child("migration_fs::fsync_dir", 2, dir.path());
-    assert_child_aborted(&crash, "migration_fs::fsync_dir", 2);
+    let crash = spawn_crash_child("migration_fs::fsync_dir", 3, dir.path());
+    assert_child_aborted(&crash, "migration_fs::fsync_dir", 3);
     assert_admission_blocked(dir.path(), "probe");
 
     let txn_before = read_live_txn_record(&msd).unwrap();
