@@ -12767,11 +12767,22 @@ pub enum BcIndexMigrationTxnState {
 
 /// A `{staging_path, canonical_path}` pair not yet moved (ADR-052
 /// §Decision 7a `pending_canonical_moves` field).
+//
+// `deny_unknown_fields` is defense in depth only (ADR-052 v1.23 item 10(a)): the
+// explicit key-set check in [`check_pending_canonical_moves`] runs BEFORE the typed
+// decode and renders its own sanitized detail; a serde error string never reaches
+// stderr or a `detail` (see [`decode_txn_record_strict`]).
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PendingCanonicalMove {
     pub staging_path: String,
     pub canonical_path: String,
 }
+
+/// The txn-record schema version this build writes and the only one it accepts
+/// (ADR-052 v1.23 item 10(b)). Increment for any change that adds, removes or
+/// renames a key, or changes the meaning of a key or of a state transition.
+pub const TXN_RECORD_SCHEMA_VERSION: u32 = 1;
 
 /// The durable transaction record at
 /// `.factory/migration-state/txn-<activation_uuid>.json` (BC-1.18.011
@@ -12782,6 +12793,10 @@ pub struct PendingCanonicalMove {
 /// liveness.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BcIndexMigrationTxnRecord {
+    /// REQUIRED (no serde default) txn-record schema version; always
+    /// [`TXN_RECORD_SCHEMA_VERSION`] on a record this build creates or rewrites
+    /// (ADR-052 v1.23 item 10(b)).
+    pub schema_version: u32,
     pub txn_id: String,
     pub activation_id: String,
     /// Monotonic; starts at 1; incremented by each recovery-owner claim.
@@ -13113,6 +13128,9 @@ pub enum AdmissionStateIntegrityKind {
     TxnMigrationIdNotString,
     MultipleLiveTxns,
     ReservationSerialization,
+    /// ADR-052 v1.23 item 10(c): a txn record whose `schema_version` is an
+    /// integer >= 2 -- written by a newer build; not corruption.
+    TxnRecordNewerSchema,
 }
 
 impl AdmissionStateIntegrityKind {
@@ -13124,6 +13142,7 @@ impl AdmissionStateIntegrityKind {
             Self::TxnMigrationIdNotString => "txn_migration_id_not_string",
             Self::MultipleLiveTxns => "multiple_live_txns",
             Self::ReservationSerialization => "reservation_serialization",
+            Self::TxnRecordNewerSchema => "txn_record_newer_schema",
         }
     }
 }
@@ -13193,14 +13212,82 @@ impl BcIndexMigrationError {
     }
 
     /// Map this error to the migration-binary process exit code ADR-052
-    /// §Error Code Semantics assigns it. `ExpiryAbort` ("no harm done, but
-    /// re-activation required") and `MigrationLockContention` ("nothing changed,
-    /// retry later") are exit 1; every other error variant here is exit 2.
+    /// §Error Code Semantics assigns it (v1.23 item 7(e)). Exit 1 is the class
+    /// "no harm done, safe to re-run; the stderr code says what to do next":
+    /// `ExpiryAbort` (re-activate) and `MigrationLockContention` (retry after the
+    /// other holder exits). Every other variant is exit 2.
+    ///
+    /// EXHAUSTIVE over `BcIndexMigrationError` (no `_` arm), like
+    /// [`Self::admission_failure_cause`]: adding a variant is a compile error until
+    /// it is assigned an exit class here.
+    #[must_use]
     pub fn process_exit_code(&self) -> i32 {
         match self {
             BcIndexMigrationError::ExpiryAbort { .. }
             | BcIndexMigrationError::MigrationLockContention => 1,
-            _ => 2,
+            BcIndexMigrationError::BinaryIntegrityFailure { .. }
+            | BcIndexMigrationError::RecoveryRequiresReauthorization
+            | BcIndexMigrationError::FingerprintMismatchAbort
+            | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
+            | BcIndexMigrationError::DrainTimeoutAbort
+            | BcIndexMigrationError::InvalidToolUseId { .. }
+            | BcIndexMigrationError::AdmissionStateIntegrity { .. }
+            | BcIndexMigrationError::FactoryRootNotFound { .. }
+            | BcIndexMigrationError::ArchIndexParityAbort { .. }
+            | BcIndexMigrationError::CompletionManifestRejection { .. }
+            | BcIndexMigrationError::CensusMismatchAbort { .. }
+            | BcIndexMigrationError::ContentPreservationAbort { .. }
+            | BcIndexMigrationError::ForeignMigrationRefused { .. }
+            | BcIndexMigrationError::CompletionRecordMismatchInterim
+            | BcIndexMigrationError::Io { .. }
+            | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => 2,
+        }
+    }
+
+    /// The taxonomy code token (`UPPER_SNAKE`) this error's text names, when it has
+    /// one. Used to keep the ORIGINAL failure's code visible when a cleanup write
+    /// fails while handling it (ADR-052 v1.23 item 11(d)). EXHAUSTIVE (no `_` arm).
+    #[must_use]
+    pub fn code_token(&self) -> Option<&'static str> {
+        match self {
+            BcIndexMigrationError::BinaryIntegrityFailure { .. } => {
+                Some("BINARY_INTEGRITY_FAILURE")
+            }
+            BcIndexMigrationError::RecoveryRequiresReauthorization => {
+                Some("RECOVERY_REQUIRES_REAUTHORIZATION")
+            }
+            BcIndexMigrationError::ExpiryAbort { .. } => Some("EXPIRY_ABORT"),
+            BcIndexMigrationError::FingerprintMismatchAbort => Some("FINGERPRINT_MISMATCH_ABORT"),
+            BcIndexMigrationError::ReservationTtlBelowFloor { .. } => {
+                Some("RESERVATION_TTL_BELOW_FLOOR")
+            }
+            BcIndexMigrationError::DrainTimeoutAbort => Some("DRAIN_TIMEOUT_ABORT"),
+            BcIndexMigrationError::FactoryRootNotFound { .. } => Some("FACTORY_ROOT_NOT_FOUND"),
+            BcIndexMigrationError::ArchIndexParityAbort { .. } => Some("ARCH_INDEX_PARITY_ABORT"),
+            BcIndexMigrationError::CompletionManifestRejection { .. } => {
+                Some("COMPLETION_MANIFEST_REJECTION")
+            }
+            BcIndexMigrationError::CensusMismatchAbort { .. } => Some("CENSUS_MISMATCH_ABORT"),
+            BcIndexMigrationError::ContentPreservationAbort { .. } => {
+                Some("CONTENT_PRESERVATION_ABORT")
+            }
+            BcIndexMigrationError::ForeignMigrationRefused { .. } => {
+                Some("FOREIGN_MIGRATION_REFUSED")
+            }
+            BcIndexMigrationError::MigrationLockContention => Some("MIGRATION_LOCK_CONTENTION"),
+            BcIndexMigrationError::CompletionRecordMismatchInterim => {
+                Some("COMPLETION_RECORD_MISMATCH_ABORT")
+            }
+            BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
+                Some("SHARD_CAP_CONFIG_UNAVAILABLE")
+            }
+            BcIndexMigrationError::AdmissionStateIntegrity { .. } => {
+                Some("MIGRATION_STATE_INTEGRITY_FAILURE")
+            }
+            BcIndexMigrationError::InvalidToolUseId { .. }
+            | BcIndexMigrationError::Io { .. }
+            | BcIndexMigrationError::WriterAdmissionRefused { .. } => None,
         }
     }
 }
@@ -13837,7 +13924,8 @@ pub fn read_active_txn_record(
 /// object for the strict-presence typed decode (`Option` fields included: they
 /// must be present, JSON `null` allowed). `migration_id` is a Tier 0
 /// discriminator, not a record field.
-const TXN_RECORD_REQUIRED_KEYS: [&str; 11] = [
+const TXN_RECORD_REQUIRED_KEYS: [&str; 12] = [
+    "schema_version",
     "txn_id",
     "activation_id",
     "fencing_generation",
@@ -13875,6 +13963,12 @@ fn decode_txn_record_strict(
     let Some(object) = file.raw.as_object() else {
         return Err(txn_record_malformed(&file.path, "not a JSON object"));
     };
+    // ADR-052 v1.23 item 10(b): the version gate runs FIRST, before any other key,
+    // nested element or unknown key is examined. An integer >= 2 (any magnitude) is
+    // `txn_record_newer_schema` and wins over every other defect; a present value
+    // that is not an integer >= 1 is `txn_record_malformed` naming `schema_version`.
+    // An ABSENT key is reported by the required-key check below.
+    file.version_gate()?;
     let missing: Vec<&str> = TXN_RECORD_REQUIRED_KEYS
         .iter()
         .copied()
@@ -13913,6 +14007,10 @@ fn decode_txn_record_strict(
             ));
         }
     }
+    // Nested strictness (item 10(a)): an explicit key-set check on every
+    // `pending_canonical_moves[]` element, BEFORE the typed decode, so a serde error
+    // string never reaches stderr or a `detail`.
+    check_pending_canonical_moves(&file.path, object)?;
     serde_json::from_value(file.raw.clone()).map_err(|e| {
         txn_record_malformed(
             &file.path,
@@ -13922,6 +14020,63 @@ fn decode_txn_record_strict(
             ),
         )
     })
+}
+
+/// ADR-052 v1.23 item 10(a): each `pending_canonical_moves[]` element MUST be a JSON
+/// object whose key set is exactly `{staging_path, canonical_path}`, both JSON
+/// strings. A non-object element, a missing or ill-typed key, or ANY other key is
+/// `txn_record_malformed` with a `detail` naming `pending_canonical_moves[<index>]`;
+/// an offending key is rendered by the SAME sanitizer as the top-level check
+/// (truncated to 64 characters, control characters escaped). A value that is not an
+/// array is left to the typed decode (it is an ill-typed required key).
+fn check_pending_canonical_moves(
+    path: &Path,
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), BcIndexMigrationError> {
+    const ELEMENT_KEYS: [&str; 2] = ["staging_path", "canonical_path"];
+    let Some(serde_json::Value::Array(elements)) = object.get("pending_canonical_moves") else {
+        return Ok(());
+    };
+    for (index, element) in elements.iter().enumerate() {
+        let Some(element) = element.as_object() else {
+            return Err(txn_record_malformed(
+                path,
+                &format!("pending_canonical_moves[{index}] is not a JSON object"),
+            ));
+        };
+        let unknown: Vec<String> = element
+            .keys()
+            .filter(|k| !ELEMENT_KEYS.contains(&k.as_str()))
+            .map(|k| admission::sanitize_diagnostic(k, 64))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(txn_record_malformed(
+                path,
+                &format!(
+                    "pending_canonical_moves[{index}] has unknown key(s): {}",
+                    unknown.join(", ")
+                ),
+            ));
+        }
+        for key in ELEMENT_KEYS {
+            match element.get(key) {
+                Some(serde_json::Value::String(_)) => {}
+                Some(_) => {
+                    return Err(txn_record_malformed(
+                        path,
+                        &format!("pending_canonical_moves[{index}].{key} is not a JSON string"),
+                    ));
+                }
+                None => {
+                    return Err(txn_record_malformed(
+                        path,
+                        &format!("pending_canonical_moves[{index}] is missing key {key}"),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Planner-only projection of a raw txn object into the record shape
@@ -13943,6 +14098,7 @@ fn planner_view(
             .to_string()
     };
     BcIndexMigrationTxnRecord {
+        schema_version: TXN_RECORD_SCHEMA_VERSION,
         txn_id: text("txn_id"),
         activation_id: text("activation_id"),
         fencing_generation: file
@@ -13970,6 +14126,12 @@ fn planner_view(
 fn resolve_live_generation_id(
     file: &admission::TxnFile,
 ) -> Result<Option<String>, BcIndexMigrationError> {
+    // ADR-052 v1.23 item 10(b)/(d): the version gate precedes the `generation_id`
+    // tri-state (a newer schema may rename `generation_id`, which must read as
+    // "newer", not "malformed"). ABSENT proceeds here: the rewriting arms report it
+    // as a missing required key in [`decode_txn_record_strict`], the null-generation
+    // discard does not consume it.
+    file.version_gate()?;
     match (file.state, file.raw.get("generation_id")) {
         (_, Some(serde_json::Value::String(id))) => Ok(Some(id.clone())),
         (BcIndexMigrationTxnState::Staging, Some(serde_json::Value::Null)) => Ok(None),
@@ -15731,6 +15893,72 @@ fn discard_incomplete_staging(
     write_txn_record(fs, migration_state_dir, txn)
 }
 
+/// The `source` of an `Io` produced by an abort-path cleanup write that failed
+/// WHILE handling an original failure (ADR-052 v1.23 item 11(d)): the write's own OS
+/// error, plus the original failure's identity, so the root cause stays visible in
+/// the one stderr line (`Io`'s `Display` renders its `source`). The OS error kind is
+/// preserved on the wrapping `io::Error`.
+#[derive(Debug)]
+struct CleanupWriteFailure {
+    cause: io::Error,
+    /// The original failure's taxonomy code token, or (for an original with none,
+    /// e.g. an `Io`) its rendered text.
+    while_handling: String,
+}
+
+impl std::fmt::Display for CleanupWriteFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (while handling {})", self.cause, self.while_handling)
+    }
+}
+
+impl std::error::Error for CleanupWriteFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
+/// ADR-052 v1.23 item 11(d) "Rule for every abort-path cleanup": `cleanup` is the
+/// CHECKED result of the abort's txn-ABORTED write (and, where the site opens the
+/// gate, the gate-OPEN write after it). When both succeeded the ORIGINAL error is
+/// returned unchanged; the first cleanup failure is returned as that write's own
+/// `Io` (exit 2) naming the original failure (its code token, else its text) in the
+/// detail, so the root cause is still visible. A non-`Io` cleanup failure (a record
+/// serialization failure) is returned as is.
+fn abort_cleanup_outcome(
+    original: BcIndexMigrationError,
+    cleanup: Result<(), BcIndexMigrationError>,
+) -> BcIndexMigrationError {
+    match cleanup {
+        Ok(()) => original,
+        Err(BcIndexMigrationError::Io { path, source }) => BcIndexMigrationError::Io {
+            path,
+            source: io::Error::new(
+                source.kind(),
+                CleanupWriteFailure {
+                    cause: source,
+                    while_handling: original
+                        .code_token()
+                        .map_or_else(|| original.to_string(), str::to_string),
+                },
+            ),
+        },
+        Err(other) => other,
+    }
+}
+
+/// [`discard_incomplete_staging`] then, ONLY if the txn-ABORTED write succeeded, the
+/// gate-OPEN write (ADR-052 v1.23 item 11(d)). For the abort sites that already
+/// opened the gate; the first failure is returned.
+fn discard_and_reopen_gate(
+    fs: &impl Fs,
+    migration_state_dir: &Path,
+    txn: &mut BcIndexMigrationTxnRecord,
+) -> Result<(), BcIndexMigrationError> {
+    discard_incomplete_staging(fs, migration_state_dir, txn)?;
+    write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)
+}
+
 // ---------------------------------------------------------------------------
 // Second-level sub-shard chunk-boundary algorithm (ADR-051 §Decision 18;
 // BC-1.18.011 Postcondition 6; BC-1.18.010 Postcondition 4; VP-142).
@@ -16109,7 +16337,12 @@ fn finish_committing_migration(
     write_completed_record(migration_state_dir, &record)?;
     txn.state = BcIndexMigrationTxnState::Completed;
     txn.updated_at = record.completed_at.clone();
-    let _ = write_txn_record(fs, migration_state_dir, txn);
+    // ADR-052 v1.23 item 11(d): the COMPLETED rewrite is NOT best-effort. `completed.json`
+    // (the commit point) is already durable; if the txn rewrite fails the run must not
+    // report success (nor open the gate) while the own txn is still live beside
+    // `completed.json` -- that is the very state the interim short-circuit then blocks.
+    // The write's own `Io` (exit 2) propagates.
+    write_txn_record(fs, migration_state_dir, txn)?;
 
     // OBL-1 §5 (O-5 fold-in): once COMPLETED, the writer-admission gate
     // MUST return to OPEN — otherwise whichever caller flipped it to
@@ -16258,18 +16491,17 @@ fn run_bc_index_migration_core(
     let migration_state_dir = factory_root.migration_state_dir();
 
     // Precedence (ADR-052 v1.23 items 3, 9, 11; BC-1.18.011 Precondition 6(f)(ii)):
-    // flock -> Tier 0 loader -> one-live-txn -> foreign refusal -> recover(). The
-    // flock is acquired FIRST on every path, including the `completed.json`
-    // short-circuit: the records cannot be read safely without it.
-    let completed_present = fs.exists(&migration_state_dir.join("completed.json"));
-    if !completed_present {
-        std::fs::create_dir_all(&migration_state_dir).map_err(|source| {
-            BcIndexMigrationError::Io {
-                path: migration_state_dir.clone(),
-                source,
-            }
-        })?;
-    }
+    // flock -> completed.json -> Tier 0 loader -> one-live-txn -> foreign refusal ->
+    // recover(). The flock is acquired FIRST on EVERY path, before ANY state this
+    // function acts on is read -- `completed.json` included. There is deliberately no
+    // pre-lock existence probe: a check made before the lock is only a hint, and a
+    // hint must not select the branch (a coordinator can write `completed.json`, mark
+    // its txn COMPLETED and release the lock between the probe and this lock, and the
+    // late process would then start a FRESH run on an already-migrated tree).
+    std::fs::create_dir_all(&migration_state_dir).map_err(|source| BcIndexMigrationError::Io {
+        path: migration_state_dir.clone(),
+        source,
+    })?;
     let lock_path = migration_state_dir.join("exclusive.lock");
     if !lock_path.exists() {
         std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
@@ -16277,18 +16509,33 @@ fn run_bc_index_migration_core(
             source,
         })?;
     }
-    let lock_guard = try_acquire_migration_lock(&lock_path)?;
+    // Test seam (`failpoints` builds only; compiled out otherwise): fires immediately
+    // BEFORE the lock attempt, i.e. at the exact point where a pre-lock probe used to
+    // sit, so a test can make `completed.json` appear "between probe and lock".
+    #[cfg(feature = "failpoints")]
+    fail::fail_point!("bc_index_migration_core::before_lock");
+    // ADR-052 v1.23 item 11(c): not acquired => `MigrationLockContention` (exit 1)
+    // whether or not `completed.json` exists; zero reads of txn/gate state, zero writes.
+    let _lock_guard = try_acquire_migration_lock(&lock_path)?
+        .ok_or(BcIndexMigrationError::MigrationLockContention)?;
+    // Test seam (`failpoints` builds only): fires with the lock HELD and BEFORE the
+    // first state read, so a test can prove (from inside the callback) that the lock is
+    // held and that nothing was read earlier.
+    #[cfg(feature = "failpoints")]
+    fail::fail_point!("bc_index_migration_core::after_lock_before_state_read");
 
+    // `completed.json` is read UNDER the lock and that read -- not a hard-coded `None`
+    // -- is what `recover()` receives below. Presence (the sufficient fact, ADR-052
+    // §7c step 8) selects the interim short-circuit; its content is not parsed here
+    // (the file is never modified).
+    let completed_present = fs.exists(&migration_state_dir.join("completed.json"));
     if completed_present {
-        // ADR-052 v1.23 item 11(c): another holder => the gate of a live
-        // coordinator must not be touched; skip, exit 0, zero writes.
-        let Some(_lock_guard) = lock_guard else {
-            return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
-        };
         return completed_json_interim_short_circuit(&migration_state_dir);
     }
-
-    let _lock_guard = lock_guard.ok_or(BcIndexMigrationError::MigrationLockContention)?;
+    // Absent under the lock: the value `recover()` receives for `completed`. It is
+    // derived from the SAME under-lock read that selected this branch (a present
+    // `completed.json` never reaches `recover()`), never a literal supplied by hand.
+    let completed_under_lock: Option<CompletedMigrationRecord> = None;
 
     // Resume path: `recover()` (OBL-1 §2) is the SINGLE recovery-decision
     // authority -- no parallel ad hoc `match txn.state { .. }` discriminator
@@ -16348,14 +16595,13 @@ fn run_bc_index_migration_core(
     // manifest was read and found valid"); once a real reader is built, this
     // becomes its call site.
     let manifest_status = ManifestStatus::StillValid;
-    // `completed.json`'s presence was already checked (Branch 2, above) and
-    // this call holds the exclusive migration lock, so `None` is the honest
-    // current read. `current_pointer` is `None` per `recover()`'s own doc
-    // comment.
+    // `completed` is the read made UNDER the exclusive lock above (absent here: a
+    // present `completed.json` returned through the interim short-circuit before this
+    // point). `current_pointer` is `None` per `recover()`'s own doc comment.
     let decision = recover(
         &planner_records,
         None,
-        None,
+        completed_under_lock.as_ref(),
         gen_dir_exists,
         manifest_status,
     );
@@ -16395,7 +16641,7 @@ fn run_bc_index_migration_core(
             // or by neither. ABORTED + abort_reason, THEN gate OPEN. A failure
             // here is surfaced (no best-effort swallow): exit 1 is claimed only
             // when the discard actually landed.
-            admission::abort_null_generation_txn(&migration_state_dir, &live.path, &live.raw)?;
+            admission::abort_null_generation_txn(&migration_state_dir, live)?;
             return Err(BcIndexMigrationError::ExpiryAbort {
                 arm: ExpiryAbortArm::NullGeneration,
             });
@@ -16506,13 +16752,13 @@ fn run_bc_index_migration_core(
                 // keeps finding this same stuck record). Discard the
                 // generation and move the txn to ABORTED so the gate
                 // self-heals and the next invocation restarts cleanly
-                // (EC-002 "restarts cleanly"); best-effort per the
-                // established `let _ =` pattern this function already
-                // uses for its other abort-path txn-record writes
-                // below, so the ORIGINAL resume failure `e` is always
-                // what's surfaced to the caller.
-                let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-                return Err(e);
+                // (EC-002 "restarts cleanly"). ADR-052 v1.23 item 11(d): the ABORTED
+                // write is CHECKED; when it lands the ORIGINAL resume failure `e` is
+                // what is surfaced, and when it fails that write's own `Io` is returned
+                // naming `e` (see [`abort_cleanup_outcome`]). This site never opened the
+                // gate, so it does not newly write it (admission Branch A self-heals).
+                let cleanup = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
+                return Err(abort_cleanup_outcome(e, cleanup));
             }
             // OBL-1 FINDING 2 fix: `txn.pending_canonical_moves` as read
             // from disk here may be stale/empty -- a crash between the
@@ -16547,8 +16793,9 @@ fn run_bc_index_migration_core(
                 ) {
                     Ok(moves) => moves,
                     Err(e) => {
-                        let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-                        return Err(e);
+                        let cleanup =
+                            discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
+                        return Err(abort_cleanup_outcome(e, cleanup));
                     }
                 };
             txn.pending_canonical_moves = recomputed_pending_moves;
@@ -16636,22 +16883,17 @@ fn run_bc_index_migration_core(
             ) {
                 Ok(()) => {}
                 Err(e @ BcIndexMigrationError::FingerprintMismatchAbort) => {
-                    let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-                    let _ = write_admission_gate_state(
-                        &migration_state_dir,
-                        BcIndexAdmissionGateState::Open,
-                    );
-                    return Err(e);
+                    let cleanup = discard_and_reopen_gate(&fs, &migration_state_dir, &mut txn);
+                    return Err(abort_cleanup_outcome(e, cleanup));
                 }
                 Err(BcIndexMigrationError::Io { path, source })
                     if path == canonical_bc_index_path =>
                 {
-                    let _ = discard_incomplete_staging(&fs, &migration_state_dir, &mut txn);
-                    let _ = write_admission_gate_state(
-                        &migration_state_dir,
-                        BcIndexAdmissionGateState::Open,
-                    );
-                    return Err(BcIndexMigrationError::Io { path, source });
+                    let cleanup = discard_and_reopen_gate(&fs, &migration_state_dir, &mut txn);
+                    return Err(abort_cleanup_outcome(
+                        BcIndexMigrationError::Io { path, source },
+                        cleanup,
+                    ));
                 }
                 Err(e) => return Err(e),
             }
@@ -16772,6 +17014,7 @@ fn run_bc_index_migration_core(
     let activation_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut txn = BcIndexMigrationTxnRecord {
+        schema_version: TXN_RECORD_SCHEMA_VERSION,
         txn_id: format!("txn-{activation_id}"),
         activation_id: activation_id.clone(),
         fencing_generation: 1,
@@ -16993,28 +17236,31 @@ fn run_bc_index_migration_core(
     // the staging generation discarded and BC-INDEX.md's original body
     // completely untouched (Postcondition 4) — no rename has occurred at
     // this point.
+    // ADR-052 v1.23 item 11(d): fallible. The txn is written ABORTED and the write is
+    // CHECKED; ONLY if it succeeded is the gate written OPEN (and that is checked
+    // too), so `gate=OPEN => no live txn` holds. The first failure is returned by
+    // [`abort_cleanup_outcome`] as that write's `Io` naming the original failure.
     let abort_staging = |migration_state_dir: &Path,
                          gen_dir: &Path,
-                         txn: &mut BcIndexMigrationTxnRecord| {
+                         txn: &mut BcIndexMigrationTxnRecord|
+     -> Result<(), BcIndexMigrationError> {
         let _ = fs.remove(gen_dir);
         txn.state = BcIndexMigrationTxnState::Aborted;
         txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = write_txn_record(&fs, migration_state_dir, txn);
-        // OBL-1 §5 (O-5 fold-in): every abort path resets the
-        // writer-admission gate to OPEN — best-effort, mirroring the
-        // established `let _ =` convention this closure already uses
-        // for its other cleanup writes.
-        let _ = write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open);
+        write_txn_record(&fs, migration_state_dir, txn)?;
+        // OBL-1 §5 (O-5 fold-in): every abort path resets the writer-admission gate
+        // to OPEN once the txn is durably ABORTED.
+        write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)
     };
     if let Err(e) = verify_content_preservation(&staged_bodies, &source_body_row_sha256) {
-        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
-        return Err(e);
+        let cleanup = abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(abort_cleanup_outcome(e, cleanup));
     }
     if let Err(e) =
         verify_independent_census(&original_census, &staged_bodies, &staged_bc_index_body)
     {
-        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
-        return Err(e);
+        let cleanup = abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(abort_cleanup_outcome(e, cleanup));
     }
 
     // OBL-1 WAL-ordering fix (§3, fixes research finding #4): append one
@@ -17034,8 +17280,8 @@ fn run_bc_index_migration_core(
         txn.fencing_generation,
         &pending_moves,
     ) {
-        abort_staging(&migration_state_dir, &gen_dir, &mut txn);
-        return Err(e);
+        let cleanup = abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+        return Err(abort_cleanup_outcome(e, cleanup));
     }
 
     txn.pending_canonical_moves = pending_moves;
@@ -17094,12 +17340,15 @@ fn run_bc_index_migration_core(
     ) {
         Ok(()) => {}
         Err(e @ BcIndexMigrationError::FingerprintMismatchAbort) => {
-            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
-            return Err(e);
+            let cleanup = abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(abort_cleanup_outcome(e, cleanup));
         }
         Err(BcIndexMigrationError::Io { path, source }) if path == canonical_bc_index_path => {
-            abort_staging(&migration_state_dir, &gen_dir, &mut txn);
-            return Err(BcIndexMigrationError::Io { path, source });
+            let cleanup = abort_staging(&migration_state_dir, &gen_dir, &mut txn);
+            return Err(abort_cleanup_outcome(
+                BcIndexMigrationError::Io { path, source },
+                cleanup,
+            ));
         }
         Err(e) => return Err(e),
     }

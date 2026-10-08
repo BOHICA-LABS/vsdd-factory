@@ -290,12 +290,13 @@ fn test_BC_1_18_013_EC033_no_dot_factory_join_literal_outside_the_resolver_sourc
 // F-012 -- admission state-integrity variant
 // ---------------------------------------------------------------------------
 
-const ALL_KINDS: [AdmissionStateIntegrityKind; 5] = [
+const ALL_KINDS: [AdmissionStateIntegrityKind; 6] = [
     AdmissionStateIntegrityKind::GateRecordMalformed,
     AdmissionStateIntegrityKind::TxnRecordMalformed,
     AdmissionStateIntegrityKind::TxnMigrationIdNotString,
     AdmissionStateIntegrityKind::MultipleLiveTxns,
     AdmissionStateIntegrityKind::ReservationSerialization,
+    AdmissionStateIntegrityKind::TxnRecordNewerSchema,
 ];
 
 /// Exhaustiveness pin (compile-time): matches EVERY `AdmissionStateIntegrityKind`
@@ -308,6 +309,7 @@ fn expected_kind_token(k: AdmissionStateIntegrityKind) -> &'static str {
         AdmissionStateIntegrityKind::TxnMigrationIdNotString => "txn_migration_id_not_string",
         AdmissionStateIntegrityKind::MultipleLiveTxns => "multiple_live_txns",
         AdmissionStateIntegrityKind::ReservationSerialization => "reservation_serialization",
+        AdmissionStateIntegrityKind::TxnRecordNewerSchema => "txn_record_newer_schema",
     }
 }
 

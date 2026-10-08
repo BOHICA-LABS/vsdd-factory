@@ -167,6 +167,7 @@ fn original_census() -> BTreeSet<BcId> {
 
 fn sample_txn_record(state: BcIndexMigrationTxnState) -> BcIndexMigrationTxnRecord {
     BcIndexMigrationTxnRecord {
+        schema_version: 1,
         txn_id: "txn-sample".to_string(),
         activation_id: "activation-sample".to_string(),
         fencing_generation: 1,

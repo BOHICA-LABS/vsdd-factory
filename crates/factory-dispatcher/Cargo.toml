@@ -46,7 +46,7 @@ failpoints = ["dep:fail", "fail/failpoints"]
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 toml.workspace = true
 # S-25.02 BC-1.18.005 Postcondition 8: `shard_manager::read_changelog_item_count`
 # parses a `[[shard]]`-registered artifact's frontmatter `changelog:` sequence

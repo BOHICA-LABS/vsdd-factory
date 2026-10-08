@@ -56,8 +56,9 @@ use std::path::{Path, PathBuf};
 use super::{
     AdmissionFailureCause, AdmissionStateIntegrityKind, BcIndexAdmissionGateState,
     BcIndexMigrationError, BcIndexMigrationTxnState, StaleGateReconciliationPlan,
-    TerminalReconcileInputs, WriterReservation, migrate_err_to_io, plan_stale_gate_reconciliation,
-    read_admission_gate_state, try_acquire_migration_lock, write_admission_gate_state,
+    TXN_RECORD_SCHEMA_VERSION, TerminalReconcileInputs, WriterReservation, migrate_err_to_io,
+    plan_stale_gate_reconciliation, read_admission_gate_state, try_acquire_migration_lock,
+    write_admission_gate_state,
 };
 
 /// The `migration_id` of the B2 BC-INDEX migration. A txn record that lacks the
@@ -1244,7 +1245,7 @@ fn reconcile_collecting(
         (StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate, Some(live)) => {
             // Branch B (terminal record ABSENT; STAGING with generation_id =
             // null; any gate state).
-            abort_null_generation_txn(migration_state_dir, &live.path, &live.raw)?;
+            abort_null_generation_txn(migration_state_dir, live)?;
             let mut advisory = AdmissionAdvisory::new(AdvisoryReason::BranchBTxnAborted);
             advisory.migration_id = Some(sanitize_diagnostic_id(live.migration_id()));
             advisory.txn_id = Some(sanitize_diagnostic_id(live.txn_id()));
@@ -1289,6 +1290,10 @@ fn reconcile_collecting(
 /// `false` (not Branch B, live block); ABSENT key or any other type ->
 /// `state_integrity` with no txn or gate write ("absent is not null").
 fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigrationError> {
+    // ADR-052 v1.23 item 10(b)/(d): the version gate is evaluated FIRST, before the
+    // `generation_id` tri-state (absent proceeds: this branch consumes only the
+    // fields it names).
+    txn.version_gate()?;
     match txn.raw.get("generation_id") {
         Some(serde_json::Value::Null) => Ok(true),
         Some(serde_json::Value::String(_)) => Ok(false),
@@ -1310,10 +1315,16 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
 /// identically.
 pub(super) fn abort_null_generation_txn(
     migration_state_dir: &Path,
-    txn_path: &Path,
-    txn_raw: &serde_json::Value,
+    txn: &TxnFile,
 ) -> Result<(), BcIndexMigrationError> {
-    let mut raw = txn_raw.clone();
+    let txn_path = txn.path.as_path();
+    // ADR-052 v1.23 item 10(b)/(d): NOT exempt from the version gate on either
+    // surface. A present version >= 2 refuses (`txn_record_newer_schema`) and a
+    // present non-integer is malformed, BEFORE anything is rewritten; an absent or
+    // `1` version proceeds and every unknown key is preserved verbatim (a terminal
+    // ABORTED rewrite acting on no filesystem object).
+    txn.version_gate()?;
+    let mut raw = txn.raw.clone();
     let Some(object) = raw.as_object_mut() else {
         return Err(BcIndexMigrationError::AdmissionStateIntegrity {
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
@@ -1370,6 +1381,78 @@ pub(super) struct TxnFile {
     pub(super) state: BcIndexMigrationTxnState,
     /// Absent reads as [`MIGRATION_ID_B2`]; a present non-string is rejected at read.
     pub(super) migration_id: String,
+    /// The `schema_version` member classified from its RAW JSON text (ADR-052 v1.23
+    /// item 10(b)): `serde_json::Value` turns an integer beyond `u64` into an `f64`,
+    /// which is indistinguishable from a float literal, so the classification is
+    /// taken from the literal itself at read time.
+    pub(super) schema_version: TxnSchemaVersion,
+}
+
+/// Classification of a txn record's `schema_version` member (ADR-052 v1.23 item
+/// 10(b)). Defined on the member's literal JSON text so that "a JSON integer >= 2
+/// of any magnitude" is decidable for values that do not fit any machine integer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum TxnSchemaVersion {
+    /// The key is not present.
+    Absent,
+    /// The JSON integer 1 -- the only version this build accepts.
+    Supported,
+    /// A JSON integer >= 2 of any magnitude: the DECIMAL DIGITS as written.
+    Newer(String),
+    /// Present and anything else: 0, a negative, a float (`1.0`, `1.5`, `1e0`), a
+    /// string, `null`, a boolean, an array, an object.
+    Unsupported,
+}
+
+impl TxnSchemaVersion {
+    /// Classify the literal JSON text of a PRESENT `schema_version` member.
+    fn from_literal(literal: &str) -> Self {
+        let text = literal.trim();
+        // JSON integers that are >= 0 are exactly runs of ASCII digits (no sign, no
+        // fraction, no exponent); every other token kind fails this test.
+        if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+            return Self::Unsupported;
+        }
+        match text {
+            "1" => Self::Supported,
+            // `0` and (never produced by a valid parse) leading-zero forms.
+            _ if text.starts_with('0') => Self::Unsupported,
+            _ => Self::Newer(text.to_string()),
+        }
+    }
+}
+
+/// ADR-052 v1.23 item 10(c): the newer-schema error. `<N>` is the decimal rendering
+/// of the integer truncated to 20 characters; the detail carries no path and no
+/// record content.
+fn newer_schema_error(digits: &str) -> BcIndexMigrationError {
+    let shown: String = digits.chars().take(20).collect();
+    BcIndexMigrationError::AdmissionStateIntegrity {
+        kind: AdmissionStateIntegrityKind::TxnRecordNewerSchema,
+        detail: format!(
+            "txn record schema_version {shown} is newer than the supported \
+             {TXN_RECORD_SCHEMA_VERSION}; it was probably written by a newer build; recover it \
+             with that build; nothing was changed"
+        ),
+    }
+}
+
+impl TxnFile {
+    /// The version gate (ADR-052 v1.23 item 10(b)(i)-(iii)): an integer >= 2 =>
+    /// `TxnRecordNewerSchema`; a present value that is not an integer >= 1 =>
+    /// `TxnRecordMalformed` naming `schema_version`; `1` and ABSENT pass (an absent
+    /// key is a missing REQUIRED key only at the arms that rewrite the record).
+    pub(super) fn version_gate(&self) -> Result<(), BcIndexMigrationError> {
+        match &self.schema_version {
+            TxnSchemaVersion::Absent | TxnSchemaVersion::Supported => Ok(()),
+            TxnSchemaVersion::Newer(digits) => Err(newer_schema_error(digits)),
+            TxnSchemaVersion::Unsupported => Err(super::txn_record_malformed(
+                &self.path,
+                "schema_version is present but is not a supported JSON integer (this build \
+                 accepts 1)",
+            )),
+        }
+    }
 }
 
 impl TxnFile {
@@ -1519,11 +1602,27 @@ pub(super) fn read_txn_files(
                 });
             }
         };
+        // The `schema_version` member's literal text (a second, lazy parse that
+        // borrows member texts; the `Value` above cannot represent an integer beyond
+        // `u64`). A parse failure here is impossible after the `Value` parse above
+        // succeeded; it fails closed as `Unsupported` rather than being assumed away.
+        let schema_version = match serde_json::from_slice::<
+            std::collections::BTreeMap<&str, &serde_json::value::RawValue>,
+        >(&bytes)
+        {
+            Ok(members) => members
+                .get("schema_version")
+                .map_or(TxnSchemaVersion::Absent, |literal| {
+                    TxnSchemaVersion::from_literal(literal.get())
+                }),
+            Err(_) => TxnSchemaVersion::Unsupported,
+        };
         files.push(TxnFile {
             path,
             raw,
             state,
             migration_id,
+            schema_version,
         });
     }
     Ok(files)

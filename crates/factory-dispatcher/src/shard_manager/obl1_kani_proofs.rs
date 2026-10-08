@@ -80,8 +80,8 @@ use super::{
     BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationTxnRecord,
     BcIndexMigrationTxnState, CompletedMigrationRecord, DEFAULT_MAX_RESERVATION_TTL,
     ManifestStatus, QuarantineReason, RESERVATION_CLOCK_SKEW_TOLERANCE_SECS, RecoveryDecision,
-    StaleGateReconciliationPlan, TerminalReconcileDecision, TerminalReconcileInputs,
-    decide_terminal_record_reconciliation, is_bc_index_admission_open,
+    StaleGateReconciliationPlan, TXN_RECORD_SCHEMA_VERSION, TerminalReconcileDecision,
+    TerminalReconcileInputs, decide_terminal_record_reconciliation, is_bc_index_admission_open,
     plan_stale_gate_reconciliation, recover, reservation_is_stale,
 };
 
@@ -195,6 +195,7 @@ fn make_txn_record(
         activation_id: String::new(),
         fencing_generation: 1,
         state,
+        schema_version: TXN_RECORD_SCHEMA_VERSION,
         generation_id: if has_generation_id {
             Some(String::new())
         } else {
