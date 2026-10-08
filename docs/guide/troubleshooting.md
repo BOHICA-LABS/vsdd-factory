@@ -156,6 +156,18 @@ manually edited incorrectly.
 
 ---
 
+## `migrate-bc-index` exits 2 with "operator investigation required"
+
+**Symptom:** `factory-dispatcher migrate-bc-index` exits 2 with
+`COMPLETION_RECORD_MISMATCH_ABORT ... no verification was performed in this build; txn and gate unchanged; operator investigation required`,
+and/or writes to BC-INDEX are blocked with `E-MAINTENANCE-001 ... (completion-record mismatch — operator investigation required)`.
+
+**Fix:** This is a human-only recovery, performed in a terminal outside any agent session. Follow
+[Recovering the `migrate-bc-index` interim block](migration-interim-block-recovery.md). Agents must
+not run it.
+
+---
+
 ## Brownfield ingest produces hallucinated findings
 
 **Symptom:** Analysis passes contain incorrect counts, misattributed patterns, or
