@@ -642,8 +642,23 @@ pub fn bc_index_migration_reservation_release(
         }
     };
     let migration_state_dir = factory_root.migration_state_dir();
-    if !migration_state_dir.exists() {
-        return;
+    match probe_release_migration_state_dir(&migration_state_dir) {
+        Ok(true) => {}
+        Ok(false) => return,
+        // BC-1.18.013 EC-021 / AC-011: a non-ENOENT stat error (EACCES/EIO/ELOOP) is a
+        // non-fatal warn, never a verdict and never silently collapsed into "absent".
+        Err(e) => {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                error = %e,
+                error_kind = ?e.kind(),
+                path = %migration_state_dir.display(),
+                "bc_index_migration_reservation_release: migration-state stat failed (non-fatal) -- \
+                 the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
+                 own TTL GC pass instead"
+            );
+            return;
+        }
     }
     let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
         return;
@@ -658,6 +673,26 @@ pub fn bc_index_migration_reservation_release(
              failed (non-fatal) -- the reservation, if it still exists, will be reclaimed by \
              drain_bc_index_writers's own TTL GC pass instead"
         );
+    }
+}
+
+/// One-stat presence probe for the release leg's `.factory/migration-state`
+/// directory (F-S2508-L4-001, BC-1.18.013 EC-021 / AC-011).
+///
+/// `Ok(true)` -- the stat succeeded (the release proceeds); `Ok(false)` -- ENOENT
+/// only (genuinely absent: silent no-op); `Err(e)` -- any OTHER stat error
+/// (EACCES/EIO/ELOOP/...), which the caller reports as a non-fatal warn rather
+/// than collapsing into "absent" the way `Path::exists` does.
+///
+/// # Errors
+/// Any `std::io::Error` from `std::fs::metadata` whose kind is not `NotFound`.
+pub fn probe_release_migration_state_dir(
+    migration_state_dir: &std::path::Path,
+) -> Result<bool, std::io::Error> {
+    match std::fs::metadata(migration_state_dir) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
     }
 }
 

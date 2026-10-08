@@ -32,6 +32,8 @@
 //! (`Ok(false)` => return; `Err(e)` => `tracing::warn!` + return).
 //! RED at authoring time = compile failure (the helper does not exist yet).
 
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
 use factory_dispatcher::executor::probe_release_migration_state_dir;
 
 #[test]

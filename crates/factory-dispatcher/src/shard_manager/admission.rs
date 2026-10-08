@@ -650,7 +650,14 @@ pub fn reconcile_stale_admission_gate(
     seam::record("RECONCILE");
 
     let lock_path = migration_state_dir.join("exclusive.lock");
-    if !lock_path.exists() {
+    // F-S2508-L4-001 sibling sweep: a stat error must surface, not collapse to "absent".
+    let lock_present = lock_path
+        .try_exists()
+        .map_err(|source| BcIndexMigrationError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    if !lock_present {
         std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
             path: lock_path.clone(),
             source,
