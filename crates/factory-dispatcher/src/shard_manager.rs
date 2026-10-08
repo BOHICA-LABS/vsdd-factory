@@ -14245,6 +14245,36 @@ fn resolve_live_generation_id(
     }
 }
 
+/// Coordinator stderr advisory (ADR-052 v1.25 item 11(f)(2)): a NON-FATAL condition the
+/// operator must know about, rendered as ONE line
+/// `<subcommand>: <TOKEN> (advisory): <subject>: <cause>; <one clause saying what is true now>`
+/// and written to stderr only (stdout stays empty; the verdict and exit status are
+/// unchanged). `<TOKEN>` is drawn from the CLOSED coordinator-advisory domain
+/// (`GATE_OPEN_RESET_FAILED`, `TERMINAL_TXN_ARCHIVE_FAILED`, `STAGING_DIR_REMOVE_FAILED`,
+/// `OVERSIZED_ROW_SUBSHARD`); these are not taxonomy codes and carry no exit status.
+/// `subject` and `cause` are interpolated data and pass through `sanitize_diagnostic`
+/// (control characters escaped, at most 256 characters each); the clause is fixed text.
+fn coordinator_advisory_line(token: &str, subject: &str, cause: &str, clause: &str) -> String {
+    format!(
+        "migrate-bc-index: {token} (advisory): {}: {}; {clause}",
+        sanitize_diagnostic(subject, COORDINATOR_ADVISORY_VALUE_MAX_CHARS),
+        sanitize_diagnostic(cause, COORDINATOR_ADVISORY_VALUE_MAX_CHARS),
+    )
+}
+
+/// Maximum characters of each interpolated value of a coordinator advisory line.
+const COORDINATOR_ADVISORY_VALUE_MAX_CHARS: usize = 256;
+
+/// Write one coordinator advisory line to stderr (the coordinator is a CLI process with no
+/// `tracing` subscriber: its stderr IS the operator surface, as for the drain's
+/// reservation-timestamp lines).
+fn emit_coordinator_advisory(token: &str, subject: &str, cause: &str, clause: &str) {
+    eprintln!(
+        "{}",
+        coordinator_advisory_line(token, subject, cause, clause)
+    );
+}
+
 /// Best-effort housekeeping: rename a stale terminal (COMPLETED/ABORTED)
 /// txn record out of the `txn-*.json` glob [`read_active_txn_record`]
 /// scans, so repeated migration attempts don't accumulate an unbounded
@@ -14271,6 +14301,12 @@ fn archive_terminal_txn_record(path: &Path) {
             "archive_terminal_txn_record: best-effort archive of a stale terminal txn record \
              failed (non-fatal); it remains in the txn-*.json glob and will be re-scanned (and \
              correctly skipped as non-live) on the next read_active_txn_record call"
+        );
+        emit_coordinator_advisory(
+            "TERMINAL_TXN_ARCHIVE_FAILED",
+            &path.display().to_string(),
+            &source.to_string(),
+            "the stale terminal record stays in place and is skipped as non-live",
         );
     }
 }
@@ -15974,6 +16010,7 @@ fn discard_incomplete_staging(
     migration_state_dir: &Path,
     txn: &mut BcIndexMigrationTxnRecord,
 ) -> Result<(), BcIndexMigrationError> {
+    let mut removal_failure: Option<(PathBuf, BcIndexMigrationError)> = None;
     if let Some(generation_id) = &txn.generation_id {
         let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
         // `Fs::remove` already treats a missing path as `Ok(())` (its own
@@ -15987,11 +16024,27 @@ fn discard_incomplete_staging(
                  generation directory (non-fatal -- the txn record still moves to ABORTED so \
                  the writer-admission gate self-heals; the orphaned gen-dir is inert)"
             );
+            removal_failure = Some((gen_dir, source));
         }
     }
     txn.state = BcIndexMigrationTxnState::Aborted;
     txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    write_txn_record(fs, migration_state_dir, txn)
+    write_txn_record(fs, migration_state_dir, txn)?;
+    // ADR-052 v1.25 item 11(f)(2): the advisory's clause ("the txn is ABORTED") is only
+    // true once the ABORTED write has landed, so it is emitted after that write succeeded.
+    if let Some((gen_dir, source)) = removal_failure {
+        let cause = match &source {
+            BcIndexMigrationError::Io { source, .. } => source.to_string(),
+            other => other.to_string(),
+        };
+        emit_coordinator_advisory(
+            "STAGING_DIR_REMOVE_FAILED",
+            &gen_dir.display().to_string(),
+            &cause,
+            "the orphaned generation directory is inert; the txn is ABORTED",
+        );
+    }
+    Ok(())
 }
 
 /// The `source` of an `Io` produced by an abort-path cleanup write that failed
@@ -16166,6 +16219,20 @@ fn close_sub_shard_chunk(
             "chunk_subsystem_rows_into_sub_shards: lone oversized row exceeds shard_cap_bytes; \
              emitted as its own over-cap sub-shard rather than split mid-row or failed loud \
              (ADR-051 §Decision 18 edge-case table)"
+        );
+        // ADR-052 v1.25 item 11(f)(2): a non-OS advisory -- `<subject>` is the lone row's BC
+        // id, `<cause>` the measured fact; no path (this function holds none) is invented.
+        // The clause is true by construction: the chunk is pushed unconditionally below.
+        emit_coordinator_advisory(
+            "OVERSIZED_ROW_SUBSHARD",
+            &range_start.to_string(),
+            &format!(
+                "sub-shard {sub_shard_id} body is {} bytes, exceeding shard_cap_bytes \
+                 {shard_cap_bytes}",
+                body.len()
+            ),
+            "the row is emitted as its own over-cap sub-shard (not split, not failed) and the \
+             migration completed",
         );
     }
     chunks.push(SubShardChunk {
@@ -16498,6 +16565,28 @@ fn finish_committing_migration(
              failed (non-fatal -- reconcile_stale_admission_gate self-heals this on the next \
              admission check)"
         );
+        let gate_path = migration_state_dir.join("gate-state.json");
+        let cause = match &e {
+            BcIndexMigrationError::Io { source, .. } => source.to_string(),
+            other => other.to_string(),
+        };
+        // The clause must be true and must not claim OPEN: report the gate's CURRENT
+        // state when it can be read, else say only that it stays as it was.
+        let gate_now = match read_admission_gate_state(migration_state_dir) {
+            Ok(BcIndexAdmissionGateState::Open) => "OPEN",
+            Ok(BcIndexAdmissionGateState::Draining) => "DRAINING",
+            Ok(BcIndexAdmissionGateState::Locked) => "LOCKED",
+            Err(_) => "as it was (unreadable)",
+        };
+        emit_coordinator_advisory(
+            "GATE_OPEN_RESET_FAILED",
+            &gate_path.display().to_string(),
+            &cause,
+            &format!(
+                "the migration completed; the gate stays {gate_now} until the next admission \
+                 check or `migrate-bc-index` run reconciles it"
+            ),
+        );
     }
 
     Ok(BcIndexMigrationOutcome::Completed {
@@ -16547,9 +16636,10 @@ fn recorded_intent_log_path(
         kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
         detail: detail.to_string(),
     };
-    let recorded = txn.intent_log_path.as_deref().ok_or_else(|| {
-        malformed("intent_log_path is null while generation_id is set")
-    })?;
+    let recorded = txn
+        .intent_log_path
+        .as_deref()
+        .ok_or_else(|| malformed("intent_log_path is null while generation_id is set"))?;
     let relative = recorded
         .strip_prefix(admission::FACTORY_DIR_NAME)
         .and_then(|rest| rest.strip_prefix('/'))
