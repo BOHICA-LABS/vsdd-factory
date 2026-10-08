@@ -1,8 +1,8 @@
 # Recovering the `migrate-bc-index` interim block
 
-Operator runbook for ADR-052 v1.25 item 11(e) and BC-1.18.011 v1.20 ("Operator recovery of the
-interim block", EC-058). It describes what the code at S-25.09 does today. Checked against branch
-`feature/S-25.09` at 3c62c64e (`shard_manager.rs`).
+Operator runbook for ADR-052 item 11(e) and BC-1.18.011 ("Operator recovery of the interim
+block", EC-058). It describes what the code at S-25.09 does today. Checked against branch
+`feature/S-25.09` at 0b8f08a7 (`shard_manager.rs`).
 
 > **This procedure is temporary.** S-25.06 AC-031 replaces it with a shared verify-then-finalize
 > step inside `migrate-bc-index` that runs exactly steps 2-5 below under `flock(exclusive.lock)`.
