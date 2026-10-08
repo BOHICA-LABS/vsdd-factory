@@ -897,6 +897,148 @@ fn test_BC_1_18_013_EC042_unstatable_factory_release_writes_one_reservation_rele
     );
 }
 
+/// BC-1.18.013 Postcondition 10(c) + EC-021 / AC-011; BC-3.08.001 Event 13
+/// (`reservation_release_failed`, per-substring 64-char cap). The release leg's
+/// SECOND stat site: `.factory` is statable but `.factory/migration-state` is a
+/// self-referential symlink (ELOOP; every uid, root-safe). A real `PostToolUse` and
+/// a real `PostToolUseFailure` envelope each yield exit 0 (never a verdict),
+/// EXACTLY ONE `migration.admission_advisory` (`reason=reservation_release_failed`)
+/// whose `detail` is `<64-char-capped migration-state path>: <ErrorKind>: <OS msg>`
+/// (no raw tool_use_id), no `_blocked` / `_failed`, and the tree UNCHANGED.
+/// Control: a plain ENOENT (no `migration-state` dir at all) is the silent
+/// "genuinely absent" no-op -- exit 0 and NO migration event.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_PC10c_release_migration_state_stat_error_writes_exactly_one_reservation_release_failed_advisory_blackbox()
+ {
+    let mut failures: Vec<String> = Vec::new();
+    for ev in ["PostToolUse", "PostToolUseFailure"] {
+        let label = format!("ELOOP migration-state / {ev}");
+        let p = Project::bare();
+        let logs = tempfile::tempdir().unwrap();
+        let root = p.root().to_path_buf();
+        std::fs::create_dir_all(root.join(".factory")).unwrap();
+        std::os::unix::fs::symlink("migration-state", p.ms()).unwrap();
+        // A decoy reservation elsewhere that a wrongly-targeted release must not touch.
+        let decoy = root.join(".factory/decoy/reservations");
+        std::fs::create_dir_all(&decoy).unwrap();
+        std::fs::write(decoy.join(format!("{SECRET_ID}.reservation")), b"{}").unwrap();
+        let target = p.abs(CYCLES_PATH);
+        let tree_before = raw_tree(&root);
+        let os_err = std::fs::metadata(p.ms()).unwrap_err();
+        let kind_dbg = format!("{:?}", os_err.kind());
+        let os_msg = os_err.to_string();
+        let out = run_at(
+            &p,
+            &root,
+            logs.path(),
+            &envelope(ev, "Write", Some(SECRET_ID), edit_input(&target)),
+        );
+        let err = stderr_of(&out);
+        if out.status.code() != Some(0) || err.contains("E-MAINTENANCE") {
+            failures.push(format!(
+                "[{label}] release must yield NO verdict (exit 0, no E-MAINTENANCE-*); got \
+                 {:?}: {err}",
+                out.status.code()
+            ));
+        }
+        let all = read_events(logs.path());
+        let adv = of_type(&all, "migration.admission_advisory");
+        if adv.len() != 1 {
+            failures.push(format!(
+                "[{label}] exactly ONE migration.admission_advisory expected, found {} \
+                 (migration events: {:?})",
+                adv.len(),
+                migration_event_types(&all)
+            ));
+        } else {
+            let (v, line) = adv[0];
+            if v["reason"] != "reservation_release_failed" {
+                failures.push(format!(
+                    "[{label}] reason must be `reservation_release_failed`: {v}"
+                ));
+            }
+            let detail = v["detail"].as_str().unwrap_or("");
+            let first = detail.split(": ").next().unwrap_or("");
+            let raw = root.join(".factory/migration-state").display().to_string();
+            let canon = root
+                .canonicalize()
+                .map(|c| c.join(".factory/migration-state").display().to_string())
+                .unwrap_or_else(|_| raw.clone());
+            if first.chars().count() > 64 {
+                failures.push(format!(
+                    "[{label}] path substring exceeds 64 chars: {detail:?}"
+                ));
+            }
+            if ![&raw, &canon]
+                .iter()
+                .any(|full| first == capped_path_form(full))
+            {
+                failures.push(format!(
+                    "[{label}] detail must name the (64-char-capped) migration-state path \
+                     {raw:?} (or {canon:?}): {detail:?}"
+                ));
+            }
+            if !detail.contains(&format!(": {kind_dbg}: ")) || !detail.ends_with(&os_msg) {
+                failures.push(format!(
+                    "[{label}] detail must carry ErrorKind `{kind_dbg}` and OS message \
+                     `{os_msg}`: {detail:?}"
+                ));
+            }
+            if line.contains(SECRET_ID) {
+                failures.push(format!("[{label}] raw tool_use_id leaked: {line}"));
+            }
+            if v.get("plugin_name").is_some() {
+                failures.push(format!("[{label}] plugin_name MUST NOT appear"));
+            }
+        }
+        for ty in ["migration.admission_blocked", "migration.admission_failed"] {
+            if !of_type(&all, ty).is_empty() {
+                failures.push(format!("[{label}] release must not write `{ty}`"));
+            }
+        }
+        if raw_tree(&root) != tree_before {
+            failures.push(format!(
+                "[{label}] nothing may be created or deleted by the release"
+            ));
+        }
+    }
+
+    // Control: plain ENOENT (`.factory` statable, NO migration-state) => silent no-op.
+    for ev in ["PostToolUse", "PostToolUseFailure"] {
+        let p = Project::bare();
+        let logs = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(p.root().join(".factory")).unwrap();
+        let target = p.abs(CYCLES_PATH);
+        let before = raw_tree(p.root());
+        let out = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope(ev, "Write", Some(SECRET_ID), edit_input(&target)),
+        );
+        let all = read_events(logs.path());
+        if out.status.code() != Some(0)
+            || stderr_of(&out).contains("E-MAINTENANCE")
+            || !migration_event_types(&all).is_empty()
+        {
+            failures.push(format!(
+                "[control ENOENT migration-state / {ev}] must be a silent no-op with NO \
+                 event; got exit {:?}, events {:?}",
+                out.status.code(),
+                migration_event_types(&all)
+            ));
+        }
+        if raw_tree(p.root()) != before {
+            failures.push(format!("[control ENOENT / {ev}] the tree changed"));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_PC10c_release_migration_state_stat_error_writes_exactly_one_reservation_release_failed_advisory_blackbox",
+        failures,
+    );
+}
+
 // ===========================================================================
 // Delta 4 -- AdmissionStateIntegrity kinds on the event
 // ===========================================================================
