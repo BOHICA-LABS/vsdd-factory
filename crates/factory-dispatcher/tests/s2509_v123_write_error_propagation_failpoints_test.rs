@@ -183,7 +183,8 @@ fn committing_project() -> tempfile::TempDir {
         "generation_id": "gen-1",
         "source_sha256": null,
         "source_body_row_sha256": null,
-        "intent_log_path": null,
+        // ADR-052 v1.24 ruling (i): written with generation_id, equal to the generation path.
+        "intent_log_path": ".factory/migration-state/intent-gen-1.log",
         "pending_canonical_moves": [],
         "created_at": "2026-10-07T00:00:00Z",
         "updated_at": "2026-10-07T00:00:00Z",

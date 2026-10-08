@@ -14011,6 +14011,11 @@ fn decode_txn_record_strict(
     // `pending_canonical_moves[]` element, BEFORE the typed decode, so a serde error
     // string never reaches stderr or a `detail`.
     check_pending_canonical_moves(&file.path, object)?;
+    // ADR-052 v1.24 "Branch C hash source" ruling (i): the `generation_id` /
+    // `intent_log_path` pair check runs LAST in the established order (version gate,
+    // required keys, unknown keys, nested, then this pair), still BEFORE the typed
+    // decode and therefore before any mutating arm acts on the record.
+    check_generation_intent_log_pair(file, object)?;
     serde_json::from_value(file.raw.clone()).map_err(|e| {
         txn_record_malformed(
             &file.path,
@@ -14020,6 +14025,40 @@ fn decode_txn_record_strict(
             ),
         )
     })
+}
+
+/// ADR-052 v1.24 "Branch C hash source" ruling (i): `intent_log_path` is written by the
+/// coordinator together with `generation_id` and is NEVER derived. A LIVE record that
+/// is COMMITTING, or STAGING with a string `generation_id`, MUST carry an
+/// `intent_log_path` that is a JSON string equal to
+/// [`intent_log_path_for_generation`] of its `generation_id`; null, absent, non-string
+/// or any other value is `txn_record_malformed` naming `intent_log_path`, with nothing
+/// mutated. A STAGING record whose `generation_id` is null (the exit-1 null-generation
+/// discard) and a terminal record are not subject to the pair check; a non-string
+/// `generation_id` is left to the typed decode / the tri-state resolver.
+fn check_generation_intent_log_pair(
+    file: &admission::TxnFile,
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), BcIndexMigrationError> {
+    if !file.is_live() {
+        return Ok(());
+    }
+    let Some(serde_json::Value::String(generation_id)) = object.get("generation_id") else {
+        return Ok(());
+    };
+    let expected = intent_log_path_for_generation(generation_id);
+    match object.get("intent_log_path") {
+        Some(serde_json::Value::String(recorded)) if *recorded == expected => Ok(()),
+        Some(serde_json::Value::String(_)) => Err(txn_record_malformed(
+            &file.path,
+            "intent_log_path does not equal the generation's intent-log path for the \
+             record's generation_id",
+        )),
+        _ => Err(txn_record_malformed(
+            &file.path,
+            "intent_log_path is null, absent or not a JSON string while generation_id is set",
+        )),
+    }
 }
 
 /// ADR-052 v1.23 item 10(a): each `pending_canonical_moves[]` element MUST be a JSON
@@ -14107,7 +14146,13 @@ fn planner_view(
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default(),
         state: file.state,
-        intent_log_path: generation_id.as_deref().map(intent_log_path_for_generation),
+        // Read, never derived (ADR-052 v1.24 ruling (i)): a derivation here would mask a
+        // null / mismatched recorded path from the planner view.
+        intent_log_path: file
+            .raw
+            .get("intent_log_path")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
         generation_id,
         source_sha256: None,
         source_body_row_sha256: None,
@@ -16308,11 +16353,14 @@ fn extract_subsystem_section_preamble(section_body: &str) -> String {
 /// re-runs the split itself, only the remaining publication steps).
 fn finish_committing_migration(
     fs: &impl Fs,
+    project_root: &Path,
     migration_state_dir: &Path,
     txn: &mut BcIndexMigrationTxnRecord,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     let generation_id = txn.generation_id.clone().unwrap_or_default();
-    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
+    // ADR-052 v1.24 ruling (i): the txn's RECORDED `intent_log_path`, resolved against
+    // the project root, is used as-is -- never recomputed from `generation_id`.
+    let intent_log_path = recorded_intent_log_path(project_root, txn)?;
     let completed_count = execute_canonical_path_moves(
         fs,
         &txn.pending_canonical_moves,
@@ -16404,6 +16452,23 @@ fn factory_root_source_suffix(source: &Option<ProjectRootSource>) -> String {
     source
         .map(|s| format!(" (resolved from {})", s.label()))
         .unwrap_or_default()
+}
+
+/// The txn's RECORDED `intent_log_path` resolved against the project root. A record
+/// reaching here has passed the strict pair check (or was just written by the fresh
+/// run), so an absent value is an internal-invariant failure surfaced as
+/// `txn_record_malformed`, never a silent re-derivation (ADR-052 v1.24 ruling (i)).
+fn recorded_intent_log_path(
+    project_root: &Path,
+    txn: &BcIndexMigrationTxnRecord,
+) -> Result<PathBuf, BcIndexMigrationError> {
+    match txn.intent_log_path.as_deref() {
+        Some(recorded) => Ok(project_root.join(recorded)),
+        None => Err(BcIndexMigrationError::AdmissionStateIntegrity {
+            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+            detail: "intent_log_path is null while generation_id is set".to_string(),
+        }),
+    }
 }
 
 /// ADR-052 Decision 7b / 7c step 1: the project-root-relative intent-log path persisted in
@@ -16575,6 +16640,15 @@ fn run_bc_index_migration_core(
         .map(resolve_live_generation_id)
         .transpose()?
         .flatten();
+    // ADR-052 v1.24 "Branch C hash source" ruling (i): a live record whose
+    // `generation_id` is a string is strict-decoded HERE, before the planner, so the
+    // `generation_id` / `intent_log_path` pair check (the last step of the established
+    // order: version gate, required keys, unknown keys, nested, pair) fires with nothing
+    // mutated even when the planner would otherwise quarantine on physical state (e.g. an
+    // absent generation directory). The null-generation discard is untouched.
+    if let (Some(live), Some(_)) = (live_file, live_generation_id.as_ref()) {
+        decode_txn_record_strict(live)?;
+    }
     // Planner input: this migration's records only (a foreign terminal record is
     // never read for a Tier 1 field and never archived), sorted ascending.
     let terminal_files: Vec<&admission::TxnFile> = txn_files
@@ -16752,7 +16826,12 @@ fn run_bc_index_migration_core(
                 fs.fsync_dir(&migration_state_dir)?;
                 txn.state = BcIndexMigrationTxnState::Committing;
                 write_txn_record(&fs, &migration_state_dir, &txn)?;
-                return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
+                return finish_committing_migration(
+                    &fs,
+                    project_root,
+                    &migration_state_dir,
+                    &mut txn,
+                );
             }
 
             if let Err(e) = resume_from_staging(&txn, &migration_state_dir) {
@@ -16812,7 +16891,9 @@ fn run_bc_index_migration_core(
                     }
                 };
             txn.pending_canonical_moves = recomputed_pending_moves;
-            txn.intent_log_path = Some(intent_log_path_for_generation(&generation_id));
+            // ADR-052 v1.24 ruling (i): `intent_log_path` is NOT repaired here -- the strict
+            // decode above already proved it equals the generation's path; resume rewrites
+            // only the identical existing value.
             write_txn_record(&fs, &migration_state_dir, &txn)?;
             // OBL-1 WAL-ordering fix (§3): the intent log MUST be
             // durable for every pending move BEFORE the pointer swap —
@@ -16822,8 +16903,7 @@ fn run_bc_index_migration_core(
             // `append_intent_records_for_pending_moves`'s own doc
             // comment) — safe to re-run even if the prior attempt did
             // already append these same records.
-            let resume_intent_log_path =
-                migration_state_dir.join(format!("intent-{generation_id}.log"));
+            let resume_intent_log_path = recorded_intent_log_path(project_root, &txn)?;
             append_intent_records_for_pending_moves(
                 &fs,
                 &resume_intent_log_path,
@@ -16920,7 +17000,7 @@ fn run_bc_index_migration_core(
             fs.fsync_dir(&migration_state_dir)?;
             txn.state = BcIndexMigrationTxnState::Committing;
             write_txn_record(&fs, &migration_state_dir, &txn)?;
-            return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
+            return finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn);
         }
         RecoveryDecision::ForwardRecovery {
             activation_id,
@@ -16936,7 +17016,7 @@ fn run_bc_index_migration_core(
             );
             let mut txn =
                 decode_txn_record_strict(require_live_file(live_file, "ForwardRecovery")?)?;
-            return finish_committing_migration(&fs, &migration_state_dir, &mut txn);
+            return finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn);
         }
         RecoveryDecision::RequiresReauthorization { activation_id } => {
             // Human intervention required -- this row of the ratified
@@ -17287,7 +17367,7 @@ fn run_bc_index_migration_core(
     // rename has occurred yet at this point (Postcondition 4), so a
     // failure here aborts the staging generation exactly like the
     // content-preservation/census gates immediately above.
-    let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
+    let intent_log_path = recorded_intent_log_path(project_root, &txn)?;
     if let Err(e) = append_intent_records_for_pending_moves(
         &fs,
         &intent_log_path,
@@ -17371,7 +17451,7 @@ fn run_bc_index_migration_core(
     txn.state = BcIndexMigrationTxnState::Committing;
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 
-    finish_committing_migration(&fs, &migration_state_dir, &mut txn)
+    finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn)
 }
 
 /// Maps a [`run_bc_index_migration`] result to the OS process exit code

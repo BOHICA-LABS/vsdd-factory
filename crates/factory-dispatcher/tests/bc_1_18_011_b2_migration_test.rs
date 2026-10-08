@@ -1474,10 +1474,16 @@ fn write_b2_state(cwd: &Path, gate: &str, txn: Option<(&str, serde_json::Value)>
     std::fs::write(ms.join("exclusive.lock"), b"").unwrap();
     std::fs::write(ms.join("gate-state.json"), format!("\"{gate}\"")).unwrap();
     if let Some((state, generation_id)) = txn {
+        // ADR-052 v1.24 ruling (i): intent_log_path is written with generation_id (never
+        // derived at read time); a string generation_id carries its generation's path.
+        let intent_log_path = match generation_id.as_str() {
+            Some(id) => serde_json::json!(format!(".factory/migration-state/intent-{id}.log")),
+            None => serde_json::Value::Null,
+        };
         std::fs::write(
             ms.join("txn-act-b2.json"),
             format!(
-                r#"{{"txn_id":"txn-b2","activation_id":"act-b2","fencing_generation":1,"state":"{state}","generation_id":{generation_id},"source_sha256":null,"source_body_row_sha256":null,"intent_log_path":null,"pending_canonical_moves":[],"created_at":"2026-10-06T00:00:00Z","updated_at":"2026-10-06T00:00:00Z","migration_id":"migrate-bc-index"}}"#
+                r#"{{"txn_id":"txn-b2","activation_id":"act-b2","fencing_generation":1,"state":"{state}","generation_id":{generation_id},"source_sha256":null,"source_body_row_sha256":null,"intent_log_path":{intent_log_path},"pending_canonical_moves":[],"created_at":"2026-10-06T00:00:00Z","updated_at":"2026-10-06T00:00:00Z","migration_id":"migrate-bc-index"}}"#
             ),
         )
         .unwrap();
@@ -1932,6 +1938,10 @@ fn test_BC_1_18_011_FC5P2_002_run_bc_index_migration_committing_resume_skips_don
     txn.txn_id = "txn-fc5p2002".to_string();
     txn.activation_id = "fc5p2002".to_string();
     txn.generation_id = Some(generation_id.to_string());
+    // ADR-052 v1.24 ruling (i): intent_log_path is written with generation_id, never derived.
+    txn.intent_log_path = Some(format!(
+        ".factory/migration-state/intent-{generation_id}.log"
+    ));
     txn.pending_canonical_moves = vec![
         PendingCanonicalMove {
             staging_path: staging_1.to_string_lossy().into_owned(),
@@ -2024,6 +2034,10 @@ fn test_BC_1_18_011_FC5P2_003_run_bc_index_migration_discards_incomplete_staged_
     txn.txn_id = "txn-partial-gen".to_string();
     txn.activation_id = "partial-gen".to_string();
     txn.generation_id = Some(generation_id.to_string());
+    // ADR-052 v1.24 ruling (i): intent_log_path is written with generation_id, never derived.
+    txn.intent_log_path = Some(format!(
+        ".factory/migration-state/intent-{generation_id}.log"
+    ));
     txn.source_sha256 = Some(sha256_hex_of_bytes(FC5P1001_ORIGINAL_CONTENT.as_bytes()));
     // The FULL (6-row) hash captured at quiescence — the partial (1-row)
     // staged generation cannot match it, which is exactly what forces
