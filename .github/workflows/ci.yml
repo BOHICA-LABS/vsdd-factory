@@ -196,12 +196,12 @@ jobs:
         run: cargo test --workspace --all-targets
 
       - name: cargo test (factory-dispatcher, failpoints feature)
-        # The `failpoints` cargo feature is off in every other step, so the
-        # failpoints-gated suites (bc_1_18_011_b2_migration_crash_injection_test,
-        # bc_1_18_011_b2_migration_obl1_failpoint_smoke_test, and
-        # s2509_v123_write_error_propagation_failpoints_test) compile to nothing
-        # and never ran in CI; S-25.08 left 8 of them stale unseen. Any failure
-        # fails this step (and so the required cargo-host check).
+        # The `failpoints` cargo feature is off in every other step, so every
+        # failpoints-gated test target (today:
+        # bc_1_18_011_b2_migration_crash_injection_test and
+        # bc_1_18_011_b2_migration_obl1_failpoint_smoke_test) compiles to nothing
+        # there and never ran in CI; S-25.08 left 8 of them stale unseen. Any
+        # failure fails this step (and so the required cargo-host check).
         #
         # No `--test-threads=1`: failpoint state is process-global, but each test
         # binary is its own process (cargo runs binaries sequentially) and the
@@ -212,7 +212,29 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test -p factory-dispatcher --features failpoints --all-targets
+        run: |
+          set -euo pipefail
+          cargo test -p factory-dispatcher --features failpoints --all-targets
+
+          # Positive-coverage assertion: the exit code alone cannot tell "all
+          # passed" from "the suite compiled to nothing / matched zero tests"
+          # (a dropped #[cfg(feature = "failpoints")] gate, a renamed target, a
+          # filter typo all exit 0). Re-run the crash-injection suite alone
+          # (cached build; ~12 s) and require its libtest summary to report at
+          # least MIN_TESTS passed. MIN_TESTS is a FLOOR, not an exact match:
+          # the suite currently has 39 #[test] fns, so adding tests never breaks
+          # CI, while the suite silently shrinking or vanishing does.
+          MIN_TESTS=39
+          out="$(cargo test -p factory-dispatcher --features failpoints \
+            --test bc_1_18_011_b2_migration_crash_injection_test 2>&1)"
+          printf '%s\n' "$out"
+          passed="$(printf '%s\n' "$out" \
+            | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' | tail -n 1)"
+          if [ -z "$passed" ] || [ "$passed" -lt "$MIN_TESTS" ]; then
+            echo "::error::crash-injection suite ran ${passed:-0} tests; expected >= ${MIN_TESTS}"
+            exit 1
+          fi
+          echo "crash-injection suite: ${passed} passed (floor ${MIN_TESTS})"
 
       - name: cargo publish --dry-run (hook-sdk crates) (S-2.5)
         # Catches publishability regressions every push: missing
