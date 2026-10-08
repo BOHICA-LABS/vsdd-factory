@@ -1109,22 +1109,26 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_
          this test targets)"
     );
 
+    // ADR-052 v1.23 item 11(b) (error-taxonomy `COMPLETION_RECORD_MISMATCH_ABORT`,
+    // exit 2): a LIVE COMMITTING txn beside `completed.json` is never finalized
+    // and the gate never flipped until S-25.06 AC-031 supplies the
+    // verify-then-finalize. Interim contract: fail closed, txn and gate unchanged.
     let outcome = run_recovery_to_convergence(dir.path(), 3);
     assert!(
-        matches!(outcome, Ok(BcIndexMigrationOutcome::AlreadyMigrated)),
-        "recovery must report AlreadyMigrated once completed.json exists, per ADR-052 §7c step 8 \
-         (\"no other file consulted\") -- got {outcome:?}"
+        matches!(
+            outcome,
+            Err(BcIndexMigrationError::CompletionRecordMismatchInterim)
+        ),
+        "ADR-052 v1.23 item 11(b): completed.json beside a live COMMITTING txn must fail closed \
+         with COMPLETION_RECORD_MISMATCH_ABORT until S-25.06 AC-031 -- got {outcome:?}"
     );
-    // FINDING 3 (RESOLVED -- see module header): the admission gate
-    // self-heals to OPEN once the migration is genuinely, fully complete
-    // -- content is correct (shards exist, census holds), and the
-    // completed.json short-circuit now runs its own best-effort
-    // convergence of the txn record to COMPLETED and the gate to OPEN
-    // inline, rather than leaving both stuck because
-    // finish_committing_migration's own gate-reset call is never reached
-    // again from this short-circuit. This assertion PASSES and is a
-    // load-bearing regression guard against FINDING 3 recurring.
-    assert_genuinely_fully_migrated(dir.path());
+    let txn = read_live_txn_record(&msd).expect("the live txn record must be left untouched");
+    assert_eq!(
+        txn.state,
+        BcIndexMigrationTxnState::Committing,
+        "item 11(b): no txn finalization"
+    );
+    assert_admission_blocked(dir.path(), "probe");
 }
 
 // ===========================================================================
