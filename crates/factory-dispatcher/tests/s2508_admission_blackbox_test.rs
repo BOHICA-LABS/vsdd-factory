@@ -5632,3 +5632,143 @@ fn test_BC_1_18_013_EC045_lock_held_minimal_staging_without_generation_id_is_pla
         &rows,
     );
 }
+
+// ---------------------------------------------------------------------------
+// F-S2508-L4-001 -- release leg, unstatable `migration-state` (black-box half)
+// ---------------------------------------------------------------------------
+
+/// F-S2508-L4-001 (externally visible half only; the warn-vs-silent distinction
+/// is not observable in S-25.08 -- see `bc_1_18_013_release_stat_error_test.rs`
+/// for the error-path classification pin against the factored helper). A
+/// self-referential `migration-state` symlink makes the release's stat fail
+/// ELOOP (every uid, root-safe). BC-1.18.013 EC-021 / AC-011: release is
+/// best-effort, NEVER a verdict => exit 0, no `E-MAINTENANCE`, nothing deleted
+/// or created. Green today; guards the fix against turning the stat error into a
+/// verdict or a destructive action.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L4_001_release_with_eloop_migration_state_exits_0_deletes_nothing_blackbox() {
+    for ev in ["PostToolUse", "PostToolUseFailure"] {
+        let p = bare_project();
+        let logs = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(p.root().join(".factory")).unwrap();
+        std::os::unix::fs::symlink("migration-state", p.root().join(".factory/migration-state"))
+            .unwrap();
+        // A decoy reservation elsewhere in the tree that a wrongly-targeted
+        // release must never touch.
+        let decoy = p.root().join(".factory/decoy/reservations");
+        std::fs::create_dir_all(&decoy).unwrap();
+        std::fs::write(decoy.join("TE1.reservation"), b"{}").unwrap();
+        let before = raw_tree(p.root());
+        let target = factory_target(p.root());
+        let out = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope(ev, "Edit", Some("TE1"), edit_input(&target)),
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "[{ev}] release is best-effort: a stat error must never be a verdict; stderr: {}",
+            stderr_of(&out)
+        );
+        assert!(
+            !stderr_of(&out).contains("E-MAINTENANCE"),
+            "[{ev}] no E-MAINTENANCE code on the release leg: {}",
+            stderr_of(&out)
+        );
+        assert_eq!(
+            raw_tree(p.root()),
+            before,
+            "[{ev}] the release must delete/create nothing"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// F-S2508-L4-002 -- ADR-052 v1.24 "E-MAINTENANCE-002 <cause> -- total decision rule"
+// (regression pin of the ruled order: input guards -> .factory stat -> target
+// classification -> tool_use_id check, the last only for an in-scope protected
+// write). The code already complies; these are green on arrival.
+// ---------------------------------------------------------------------------
+
+/// (1) unstatable `.factory` (ELOOP) + invalid id on a protected path: the
+/// `.factory` stat precedes the tool_use_id check => `io`, NOT `invalid_tool_use_id`.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L4_002_unstatable_factory_beats_invalid_tool_use_id_io_blackbox() {
+    let p = bare_project();
+    let logs = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(".factory", p.root().join(".factory")).unwrap();
+    let before = raw_tree(p.root());
+    let target = factory_target(p.root());
+    let out = run_at(
+        &p,
+        p.root(),
+        logs.path(),
+        &envelope("PreToolUse", "Write", Some("../x"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(2), "stderr: {err}");
+    assert!(
+        err.contains("E-MAINTENANCE-002: writer-admission check failed (io)"),
+        "unstatable .factory must win over the id check => (io); stderr: {err}"
+    );
+    assert!(
+        !err.contains("invalid_tool_use_id"),
+        "the id check must not run before the .factory stat; stderr: {err}"
+    );
+    assert_eq!(raw_tree(p.root()), before, "tree must be unchanged");
+}
+
+/// (2) statable `.factory` + OUT-of-scope target + invalid id: the id is never
+/// examined => admitted, exit 0, no reservation, nothing created.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L4_002_out_of_scope_target_ignores_invalid_tool_use_id_blackbox() {
+    let p = Project::new_bare();
+    let target = p.abs("src/lib.rs");
+    let before = raw_tree(p.root());
+    let logs = tempfile::tempdir().unwrap();
+    let out = run_at(
+        &p,
+        p.root(),
+        logs.path(),
+        &envelope("PreToolUse", "Write", Some("../x"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "an out-of-scope write must be admitted regardless of the id; stderr: {err}"
+    );
+    assert!(!err.contains("E-MAINTENANCE"), "stderr: {err}");
+    assert!(!p.ms().exists(), "no migration-state / reservation created");
+    assert_eq!(raw_tree(p.root()), before, "tree must be unchanged");
+}
+
+/// (3) statable `.factory` + IN-scope protected target + invalid id =>
+/// `E-MAINTENANCE-002 (invalid_tool_use_id)`, nothing created.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L4_002_in_scope_target_invalid_tool_use_id_fails_closed_blackbox() {
+    let p = Project::new_bare();
+    let target = p.abs(BC_PATH);
+    let before = raw_tree(p.root());
+    let logs = tempfile::tempdir().unwrap();
+    let out = run_at(
+        &p,
+        p.root(),
+        logs.path(),
+        &envelope("PreToolUse", "Write", Some("../x"), edit_input(&target)),
+    );
+    let err = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(2), "stderr: {err}");
+    assert!(
+        err.contains("E-MAINTENANCE-002: writer-admission check failed (invalid_tool_use_id)"),
+        "stderr: {err}"
+    );
+    assert!(!p.ms().exists(), "no migration-state created");
+    assert_eq!(raw_tree(p.root()), before, "tree must be unchanged");
+}

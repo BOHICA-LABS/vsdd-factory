@@ -616,9 +616,10 @@ fn assert_admission_self_heals(cwd: &Path, probe_id: &str, expect: SelfHeal) {
         SelfHeal::BranchB => {
             let pre = pre_txn_json.expect("Branch B requires a pre-existing STAGING txn");
             assert_eq!(pre["state"], "STAGING", "Branch B precondition: STAGING");
-            assert!(
-                pre["generation_id"].is_null(),
-                "Branch B precondition: generation_id null"
+            assert_eq!(
+                pre.get("generation_id"),
+                Some(&serde_json::Value::Null),
+                "Branch B precondition: generation_id PRESENT and null (a missing key is not null)"
             );
             let post = read_txn_json(&msd).expect("txn record must survive reconciliation");
             assert_eq!(post["state"], "ABORTED", "Branch B: txn must be ABORTED");
@@ -634,7 +635,9 @@ fn assert_admission_self_heals(cwd: &Path, probe_id: &str, expect: SelfHeal) {
             let strip = |v: &serde_json::Value| {
                 let mut v = v.clone();
                 let m = v.as_object_mut().unwrap();
-                for k in ["state", "abort_reason", "updated_at"] {
+                // `updated_at` is deliberately NOT stripped: abort_null_generation_txn never
+                // touches it (EC-046 / AC-029: every other field is preserved).
+                for k in ["state", "abort_reason"] {
                     m.remove(k);
                 }
                 v
@@ -642,7 +645,7 @@ fn assert_admission_self_heals(cwd: &Path, probe_id: &str, expect: SelfHeal) {
             assert_eq!(
                 strip(&pre),
                 strip(&post),
-                "Branch B must not alter any txn field other than state/abort_reason/updated_at"
+                "Branch B must not alter any txn field other than state/abort_reason"
             );
         }
     }

@@ -1247,8 +1247,13 @@ fn bc_index_payload(
     }
 }
 
+/// BC-1.18.013 Precondition 6(b) / BC-1.18.011 Precondition 6(b): the exact
+/// `E-MAINTENANCE-001` reason for a BC-INDEX-family write (live STAGING/COMMITTING txn).
+const EXACT_BC_INDEX_BLOCK_REASON: &str = "E-MAINTENANCE-001: BC-INDEX write blocked: migration \
+window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts";
+
 #[test]
-fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_and_performs_no_roll() {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_with_exact_keyed_reason() {
     let dir = tempfile::tempdir().unwrap();
     write_shard_config(dir.path(), BC_INDEX_SHARD_CONFIG);
     write_migration_txn(dir.path(), "STAGING");
@@ -1262,7 +1267,6 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_and_perfo
     // over cap under BC-1.18.005's own Write formula (projected_size =
     // len(content) alone).
     std::fs::write(&target, "y".repeat(50)).unwrap();
-    let canonical_snapshot_before = std::fs::read(&target).unwrap();
 
     let payload = bc_index_payload(
         dir.path(),
@@ -1281,34 +1285,23 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_and_perfo
         "Ruling 2: a migration-admission refusal must surface as HookResult::Block \
          (E-MAINTENANCE-001), never HookResult::Error, got {verdict:?}"
     );
-    if let HookResult::Block { reason } = &verdict {
-        let lower = reason.to_lowercase();
-        assert!(
-            lower.contains("retry") || lower.contains("migrat"),
-            "the Block reason must be retry-actionable (name the migration window and/or retry \
-             guidance), got: {reason}"
-        );
-    }
-
-    // The admission call itself must not roll: execute_roll would have truncated
-    // the canonical file to 0 bytes and published a sealed shard, neither of which
-    // the admission precheck may ever do.
     assert_eq!(
-        std::fs::read(&target).unwrap(),
-        canonical_snapshot_before,
-        "no roll/truncation side effect may occur on a BC-INDEX-path write while a txn record \
-         is STAGING, even when the write is genuinely over-cap"
+        verdict,
+        HookResult::Block {
+            reason: EXACT_BC_INDEX_BLOCK_REASON.to_string()
+        },
+        "BC-1.18.013 Precondition 6(b): the keyed E-MAINTENANCE-001 reason must be exact"
     );
-    assert!(
-        !dir.path()
-            .join(".factory/specs/behavioral-contracts/BC-INDEX.0001.md")
-            .exists(),
-        "no sealed shard file may be published while migration admission is blocking"
-    );
+    // NOTE (L4-006): this test deliberately makes NO "performs no roll" claim. The
+    // admission call never reaches execute_roll on ANY path, so a canonical-file
+    // unchanged assertion here is unfalsifiable (it passes for every implementation).
+    // The roll-skipped-on-block ordering is pinned black-box in
+    // `s2508_admission_blackbox_test.rs`.
 }
 
 #[test]
-fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_and_performs_no_roll() {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_with_exact_keyed_reason()
+{
     // Identical to the STAGING case above but for the COMMITTING state —
     // Precondition 6(b) names BOTH STAGING and COMMITTING as blocking
     // states.
@@ -1318,7 +1311,6 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_and_pe
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "y".repeat(50)).unwrap();
-    let canonical_snapshot_before = std::fs::read(&target).unwrap();
 
     let payload = bc_index_payload(
         dir.path(),
@@ -1329,11 +1321,12 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_and_pe
     let verdict = bc_index_migration_admission_precheck(&payload, dir.path())
         .expect("a live COMMITTING txn must refuse the protected write (Some(verdict))");
 
-    assert!(matches!(verdict, HookResult::Block { .. }));
     assert_eq!(
-        std::fs::read(&target).unwrap(),
-        canonical_snapshot_before,
-        "no roll/truncation side effect may occur while a txn record is COMMITTING either"
+        verdict,
+        HookResult::Block {
+            reason: EXACT_BC_INDEX_BLOCK_REASON.to_string()
+        },
+        "BC-1.18.013 Precondition 6(b): the keyed E-MAINTENANCE-001 reason must be exact"
     );
 }
 
