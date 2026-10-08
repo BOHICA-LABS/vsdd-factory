@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "d42c473"
+input-hash: "a0a1bfe"
 traces_to: STATE.md
 ---
 
@@ -2407,4 +2407,8 @@ Full verbatim text recoverable via `git -C .factory show 7f482d9c:STATE.md` (sec
 
 Full verbatim text recoverable via `git -C .factory show b5c8fd2c:STATE.md` (section "Session Resume Checkpoint"). Position at the time: PIPELINE RESUMED; develop `ce2421be`, main `51023185`, merged_count 123; S-25.08/S-25.09 split EXECUTED (AC-027 stays in S-25.08): S-25.08 v1.5 on local `feature/S-25.08` @ `5091f88f` (gates green), NEW S-25.09 v1.0 on local `feature/S-25.09` @ `39e89c59`; LOCAL adversary streak 0/3 on both (S-25.08 pass 3 and S-25.09 pass 1 not run); ADR-052 v1.22 registered (BC-INDEX v5.108, VP-INDEX v3.31, ARCH-INDEX v4.52, STORY-INDEX v4.487); OPEN [D-1253-BC118011-STATUS] (closed at D-1254(b)); NEXT was test-writer S-25.09 T-14 red tests -> implementer green; adversary pass 3 (S-25.08) + pass 1 (S-25.09) in parallel.
 
-**See STATE.md v10.88 for the current checkpoint.**
+## Session Resume Checkpoint v10.88 (2026-10-08 — HUMAN-DECISIONS-ADR054-HARDENED-INTENT-LOG-S2510-S2511-S2512-REGISTRATION; D-1254) — condensed; verbatim via `git -C .factory show 61709b2d:STATE.md`
+
+Archived by the D-1255 burst (v10.88→v10.89). Position at v10.88: E-25; S-25.08 v1.6 (8 pts) on local `feature/S-25.08` @ `d1df7d10` (pass-3 fixes done; failpoints 39/39; CI runs `--features failpoints`); S-25.09 v1.1 (15 pts, 13-pt rule waived one-time) on local `feature/S-25.09` @ `5632964d` (rebased x3); NEW ADR-054 v1.0 + ADR-052 v1.24 (hardened intent log, fixed move plan); NEW S-25.10 (8) / S-25.11 (7) / S-25.12 (3) `ready`, branches created locally at `5632964d`; chain S-25.09 -> S-25.10 -> S-25.11 -> S-25.12 -> S-25.06. Spec: BC-INDEX v5.109, VP-INDEX v3.33 (147), ARCH-INDEX v4.54 (54 ADRs), STORY-INDEX v4.488 (254), error-taxonomy v1.41, E-25 v1.7. S-25.08 pass 3 persisted as a RECONSTRUCTED record (superseded at D-1255 by the verbatim file). OPEN human decisions: [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT] (recommendation). NEXT was LOCAL adversary pass 4 (S-25.08) + pass 1 (S-25.09) in parallel, then S-25.10 -> S-25.11 -> S-25.12, then S-25.06 rebase onto S-25.12.
+
+**See STATE.md v10.89 for the current checkpoint.**

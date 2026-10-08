@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-10-08T17:12:26Z","command":"git status --short && cargo test -p factory-dispatcher --test s2509_pass1_l1_findings_test 2>&1 | grep -E \"^test |test result\"; cargo test -p factory-dispatcher --features failpoints --test s2509_pass1_l1_failpoints_test 2>&1 | grep -E \"^test |test result\""}
+{"status":"pass","timestamp":"2026-10-08T21:25:55Z","command":"(cargo test -p validate-cross-site-correspondence test_BC_corpus_version_sync_all_indexed_bcs_match_frontmatter 2>&1 | tail -25)"}

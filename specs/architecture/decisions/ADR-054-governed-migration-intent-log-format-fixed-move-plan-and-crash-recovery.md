@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-054
 level: L3
-version: "1.0"
+version: "1.1"
 status: accepted
 date: 2026-10-08
 producer: architect
@@ -168,13 +168,26 @@ utc-ts        = 4DIGIT "-" 2DIGIT "-" 2DIGIT "T" 2DIGIT ":" 2DIGIT ":" 2DIGIT [ 
 
 Value rules (apply to every record at write time AND read time; a violation makes the record INVALID):
 
-1. **Lines.** LF only. CR (`%x0D`) is never valid anywhere. No blank lines, no leading/trailing whitespace
-   on any line, no unknown keys, no duplicate keys, no reordered keys. A line splits at its FIRST `=`
-   (no key contains `=`; a path value MAY contain `=`, `|`, spaces or marker text).
+1. **Lines.** LF only. CR (`%x0D`) is never valid anywhere. No blank lines, no unknown keys, no duplicate
+   keys, no reordered keys. A line splits at its FIRST `=` (no key contains `=`; a path value MAY contain
+   `=`, `|`, spaces or marker text). **Whitespace (v1.1 ruling, closes the rule-1/rule-2 ambiguity):**
+   "whitespace" in this rule means exactly U+0020 (every other ASCII whitespace byte is a C0 control and
+   already invalid; non-ASCII whitespace such as U+00A0 is ordinary text). A line MUST NOT begin with
+   U+0020 (the key starts at byte 0), MUST NOT end with U+0020 (the byte before LF is never a space),
+   and the byte immediately after the first `=` is part of the value. Because the value is the rest of
+   the line, a line-final U+0020 would be a value-final U+0020, so a `path` value MUST NOT begin or end
+   with U+0020 (rule 2); INTERIOR spaces, including a space adjacent to `/` such as `/a /b`, are valid.
+   Every other value production (rules 3-7) excludes U+0020 by its own grammar.
 2. **`path`** (`target_canonical`, `staging_path`): well-formed UTF-8 (RFC 3629; overlongs, surrogates and
-   truncated sequences are invalid); no scalar value in U+0000..U+001F and not U+007F; 1 to 4096 BYTES.
-   A path that is not valid UTF-8 (Rust `OsStr::to_str() == None`) is NOT representable: it is rejected,
-   never lossily converted.
+   truncated sequences are invalid); no scalar value in U+0000..U+001F and not U+007F; 1 to 4096 BYTES;
+   first and last scalar value not U+0020. A path that is not valid UTF-8 (Rust `OsStr::to_str() ==
+   None`) is NOT representable: it is rejected, never lossily converted. A path with a leading or trailing
+   U+0020 is likewise NOT representable (a line-final space is invisible to operators and to any tool that
+   strips trailing whitespace, and `=` splitting must stay unambiguous): it is rejected with the reason
+   token `leading_or_trailing_space`, never trimmed. **Reason precedence when several defects co-occur
+   (the first listed wins; `validate_path` and the writer agree):** `empty`, `over_4096_bytes`, `not_utf8`,
+   `contains_control_character`, `leading_or_trailing_space`. The reader applies the same rules to the
+   bytes of a value: a record whose path value begins or ends with U+0020 is INVALID.
 3. **`txn_id`**: 1 to 128 token characters. In production it is the activation UUID (ADR-052 §7a: `txn_id`
    == `activation_id`), lowercase hyphenated; the grammar is the broader token so the reader does not
    depend on the UUID textual form.
@@ -241,8 +254,13 @@ sed -n "${S},$((S+8))p" intent-<generation_uuid>.log | shasum -a 256     # compa
 (`sha256sum` on Linux). The procedure of ADR-052 item 11(e) step 3 walks records from `S=1` in steps of 11
 and stops at the first failing record. Every record verifying and the file ending exactly at a record
 boundary (`wc -l` is a multiple of 11 and the last line is `END_INTENT_LOG_RECORD`) is a clean log.
-Bytes after the last verifying record are a torn tail ONLY IF no later `INTENT_LOG_RECORD_V1` line starts a
-record that verifies; if one does, the log is corrupt mid-stream and the operator MUST stop and escalate.
+Bytes after the last verifying record are a torn tail ONLY IF no later occurrence of the byte string
+`INTENT_LOG_RECORD_V1` followed by LF, AT ANY BYTE POSITION (including in the middle of a line, i.e. after
+garbage that has no trailing LF), starts a record that verifies; if one does, the log is corrupt mid-stream
+and the operator MUST stop and escalate. To find such occurrences the operator lists byte offsets with
+`grep -a -b -o 'INTENT_LOG_RECORD_V1' <log>` (offsets are 0-based; a marker offset past the end of the last
+verifying record is a candidate) and verifies a candidate at byte offset `O` with
+`tail -c +$((O+1)) <log> | head -n 9 | shasum -a 256` against line 10 of the same slice.
 
 #### 1.6 Operator-visible semantics of `expected_pre_state`
 
@@ -258,8 +276,11 @@ failure. The reader performs no I/O except the single read.
 
 ```
 parse_record_at(B, off) -> Ok(record, next_off) | Err
-    a record starts ONLY at off == 0 or when B[off-1] == LF
-    read exactly 11 LF-terminated lines; match each against its production in 1.2
+    PREFIX mode (the scan from offset 0): a record starts ONLY at off == 0 or when B[off-1] == LF
+    PROBE mode (the mid-log search below): no line-start requirement on `off`
+    read exactly 11 LF-terminated lines; a line longer than 4113 bytes (len("target_canonical=") +
+        4096) is invalid without reading further (bounds the probe cost); match each against its
+        production in 1.2
     validate value rules (1.2 rules 1-7) on the bytes of that record (UTF-8 checked on the path bytes only)
     recompute SHA-256 over bytes of lines 1..9; require equality with line 10's value
     require line 11 == "END_INTENT_LOG_RECORD\n"
@@ -270,9 +291,11 @@ read_log(B, txn_id):
         if off == len(B): return Clean(records)                       # exact record boundary
         match parse_record_at(B, off): Ok(r, nx) => records.push(r); off = nx ; Err => break
     valid_prefix_len = off
-    for q in line-starts of B strictly after valid_prefix_len           # q == 0 or B[q-1] == LF
-        if B[q..] begins with "INTENT_LOG_RECORD_V1\n" and parse_record_at(B, q) is Ok:
+    for q in every byte offset strictly after valid_prefix_len          # NOT only line starts
+        if B[q..] begins with "INTENT_LOG_RECORD_V1\n" and parse_record_at(B, q, PROBE) is Ok:
             return Err(MidLogCorruption { first_bad_offset: valid_prefix_len, later_valid_offset: q })
+        # q is the SMALLEST such offset; `later_valid_offset` is a BYTE offset, which is a line
+        # start only when the garbage before it ended in LF
     return Ok(records, valid_prefix_len, tail = Torn { offset: valid_prefix_len, len: len(B) - valid_prefix_len })
     then apply log-level invariants (1.8) to `records`
 ```
@@ -281,7 +304,15 @@ Properties: (i) a record is returned only if every one of its 11 lines parsed, i
 its END line is present — a "partial record" is unrepresentable; (ii) the valid prefix is the longest run
 of valid records from offset 0; (iii) a torn tail is ABSENT: not an error for the reader; (iv) bytes
 after the valid prefix FOLLOWED by any valid record are corruption in the middle of the log and the reader
-FAILS CLOSED (RocksDB `kTolerateCorruptedTailRecords` semantics: tail tolerated, middle not); (v) tearing
+FAILS CLOSED (RocksDB `kTolerateCorruptedTailRecords` semantics: tail tolerated, middle not). "Followed
+by a valid record" is decided at ANY byte position, not only at line starts (v1.1 ruling): garbage with
+no trailing LF immediately followed by a complete, checksum-valid record (`zzzz` + R3, or a record torn
+inside its END line + R3) puts R3's marker mid-line, and silently dropping R3 as part of a "torn tail"
+would lose a durable record. The writer's tail repair (1.9 step 2) makes this unreachable in normal
+operation; the probe exists for external damage. A false positive needs a complete valid record
+(11 lines, matching SHA-256) inside the post-prefix bytes, which is itself the evidence of corruption;
+a path value ending in the marker text cannot forge it because the next line must be `txn_id=`;
+(v) tearing
 that produces zeros, garbage, a partial start marker, a partial END or invalid UTF-8 in the tail is
 handled identically to a short prefix; (vi) the scan is O(n × 11 lines), bounded by the log size.
 
@@ -311,11 +342,35 @@ Violation ⇒ same verdict as MidLogCorruption (table above). Let a *target* be 
 - **L4** `fencing_generation` is non-decreasing along the file, and a `DONE` is not lower than the
   `INTENT` it completes.
 
+**"First violating record" (v1.1, normative; the reported offset).** The checker makes ONE in-order pass
+over the parsed records, keeping per-target state (the first-seen `INTENT`'s `staging_path`,
+`expected_post_hash`, `expected_pre_state`, and whether an `INTENT` has been seen) and the running maximum
+`fencing_generation`. The *first violating record* is the first record in FILE ORDER for which any check
+below fails; the reported `offset` is the byte offset of THAT record's `INTENT_LOG_RECORD_V1` line; when
+several checks fail on the same record, the invariant reported is the first in the order L1, L2, L3, L4.
+All four are judged against the PRECEDING records only, so a violation is always attributed to the record
+that introduces the conflict, never to the earlier record it conflicts with:
+
+- **L1** the first record (any type) whose `txn_id` differs from the live `txn_id`.
+- **L2** the first `INTENT` whose `staging_path`, `expected_post_hash` or `expected_pre_state` differs from
+  the first-seen `INTENT` for the same target: the LATER conflicting `INTENT` (the earlier one is the
+  reference, because an in-order scan cannot know it is the wrong one). `DONE` and `ABORTED` records are
+  not L2 subjects.
+- **L3** the first `DONE` for a target with no preceding `INTENT` for that target, or whose
+  `staging_path`, `expected_post_hash` or `expected_pre_state` differs from the target's `INTENT` (all
+  INTENTs for a target agree once L2 holds). `ABORTED` records are not L3 subjects.
+- **L4** the first record (any type) whose `fencing_generation` is lower than the maximum
+  `fencing_generation` of all preceding records. A `DONE` lower than its own `INTENT` is a special case
+  of this (the `INTENT` precedes it), so no separate clause is needed.
+
+A record that is INVALID (fails 1.2 or its checksum) is never an invariant subject: it ends the valid
+prefix and is handled by 1.7.
+
 #### 1.9 Writer algorithm (normative; under the held `exclusive.lock` flock)
 
 1. **Validate before any byte.** Every field of every record to be appended is checked against 1.2. A
-   violation returns `INTENT_LOG_VALUE_REJECTED` (names field and reason, value sanitized to 64 chars with
-   control characters escaped); NOTHING is appended. The same check runs at **plan-build time** on every
+   violation returns `INTENT_LOG_VALUE_REJECTED` (names field and reason, value rendered on operator stderr
+   per Decision 3.1: control characters escaped, each data-derived substring capped at 256 characters); NOTHING is appended. The same check runs at **plan-build time** on every
    `staging_path` and `canonical_path` of the plan (Decision 2) so a bad path is rejected with nothing
    staged; a rejection once the generation directory exists takes the normal pre-commit abort path
    (ADR-052 §7c step 3c shape: txn ABORTED, gate OPEN).
@@ -332,6 +387,37 @@ Violation ⇒ same verdict as MidLogCorruption (table above). Let a *target* be 
    `fsync` elsewhere, NO silent downgrade (a failing `F_FULLFSYNC` is an `Io` error and the WAL boundary
    is NOT reached). If this call created the file, the parent directory is synced with the same directory
    primitive §7d assigns to rename durability, BEFORE the WAL boundary counts as reached.
+
+   **Who syncs the directory (v1.1 ruling): the WRITER, not `StdFs::append_durable`.**
+   `Fs::append_durable` appends, applies the FILE barrier and reports `created: bool` (true iff THIS call
+   created the file; `StdFs` decides it atomically with `OpenOptions::create_new(true)` falling back to
+   an append-open on `AlreadyExists`, never with a prior `exists()` probe). `IntentLogWriter::append_batch`
+   then calls `Fs::fsync_dir(parent)` iff `created == true`, and a non-creating call performs NO
+   directory sync. Rationale: (1) the directory sync is a separate failure and crash point that Decision
+   5 requires the tests to inject independently of the data barrier; through the `Fs` seam it is a
+   distinct, separately failable, separately recorded operation (`migration_fs::fsync_dir`), whereas folded
+   into `StdFs::append_durable` it would share that method's failpoint and no test double (which
+   re-implements the file effect) could observe or fail it, so the "log-creation directory sync" fault
+   point of Decision 5 would be untestable in doubles; (2) the same primitive (`Fs::fsync_dir`) then
+   serves rename durability and log-creation durability, so there is one place to make it strict; (3)
+   Kani: no harness reaches `Fs` (`decide_recovery`, `recover` and the txn-record functions are pure
+   and `Fs`-free), so neither choice changes any Kani model; the ruling has no proof impact.
+   **Retry closure.** A failed creation-time `fsync_dir` is an `Io` error and the WAL boundary is not
+   reached, but the log file now exists, so a RE-RUN's first append reports `created == false` and would
+   never sync the entry. Therefore the coordinator, on the path where the generation's log is found
+   already existing and holding no `DONE` record (the pre-rename phase) and before it appends the INTENT
+   batch, calls `Fs::fsync_dir(parent_of_log)` once (a coordinator step, not a writer-reopen side effect:
+   `IntentLogWriter::open` on a clean existing log performs NO mutating op). An extra directory sync is
+   harmless; a missing one lets a power loss erase the log after renames began.
+   **Strict barrier primitive.** The file barrier is `last_amended_migrate::atomic_write::
+   sync_file_strict_durable(&File) -> Result<(), MigrateError>`: a NEW `pub` wrapper over that module's
+   existing private `sync_file_durable` (`fcntl(F_FULLFSYNC)` on macOS, `sync_all` elsewhere, the platform
+   `cfg` lives INSIDE the primitive, error propagated, no fallback to `fsync` when `F_FULLFSYNC` fails;
+   it is the file-handle sibling of the existing `sync_dir_strict_durable`). `factory-dispatcher` has
+   no libc/FFI of its own (`shard_manager.rs` comment on `F_FULLFSYNC`), so `StdFs::append_durable` and
+   `StdFs::truncate_durable` each call exactly this primitive and their bodies contain neither
+   `.sync_all(` nor `.sync_data(`; the macOS source gate's token `strict_durable` is satisfied by the
+   primitive's name.
 6. **WAL boundary.** After step 5 of the batch carrying every INTENT, every rename is recoverable.
 
 `Fs` seam additions (OBL-1 fault injection must be able to fail each): `truncate_durable(path, len)` and
@@ -432,8 +518,30 @@ in array order, under the flock):**
    a2, a5, a6) once S-25.06 rebases onto S-25.12. The existing VP-147 h1 `proof_obl1_h1_recover_totality`
    proves the txn-record `recover` function, NOT this per-target decision, and is not re-pointed.
    It adds the `AlreadyDone` outcome and the `done_present` input to the previous three-outcome function.
-4. `FailClosed`, a rename error, a directory-sync error or a hash divergence ⇒ halt further moves, leave the
-   txn `COMMITTING` (forward recovery re-runs idempotently), exit 2 `CANONICAL_MOVE_HALTED`.
+
+   **A `DONE` is only ever derived from an `INTENT` (v1.1 ruling).** A `DONE` is built by copying the
+   latest valid `INTENT` of the target (Decision 3 B-2 (c)); the shared module exposes it as a
+   constructor taking that `INTENT` (`txn_id`, `fencing_generation`, timestamp are the only other inputs),
+   so "a `DONE` with nothing to copy" is unrepresentable in the module API and S-25.10's writer can never
+   emit one. A call of the per-move procedure for a target with NO valid `INTENT` (a direct
+   `execute_canonical_path_moves` call, or a plan entry the log does not cover) is table row 7:
+   `decide_recovery` returns `FailClosed` and the move halts `CANONICAL_MOVE_HALTED` with `<reason>`
+   `fail_closed_no_intent`; no rename and no `DONE` append happens for that target. The row is
+   unreachable through the coordinator once B-3 holds (the plan equals the INTENT set before the first
+   rename) and reachable only by a direct call or a defect, which is why it is kept for totality. OWNER:
+   S-25.11 (the code, the `CanonicalMoveHalted` variant and the token test are S-25.11's). In S-25.10,
+   whose converted `execute_canonical_path_moves` still precedes the variant, the call site MUST
+   fail closed without any rename or `DONE` append and with a non-success result carried by the
+   pre-existing error for that site; S-25.10 tests assert only "no `DONE` appended, no rename, not Ok",
+   never the carrier, which S-25.11 replaces.
+4. Any of the SIX halt sites ⇒ halt further moves, leave the txn `COMMITTING` (forward recovery re-runs
+   idempotently), exit 2 `CANONICAL_MOVE_HALTED` with the site's `<reason>` token (§3.1): (1) recovery decision
+   `FailClosed` (`fail_closed_*`); (2) the parent-directory create before the rename fails
+   (`parent_dir_create_failed`); (3) the rename fails (`rename_failed`); (4) the directory sync fails
+   (`dir_sync_failed`); (5) the post-rename verification read of the canonical file fails, or the file is
+   missing (`post_rename_read_failed`), or its hash diverges from the INTENT's `expected_post_hash`
+   (`post_rename_hash_diverged`); (6) the `DONE` append or its barrier fails (`done_append_failed`). No halt
+   site may surface as `BinaryIntegrityFailure`, `Io` or any other carrier.
 5. After the loop, BEFORE writing `completed.json`: re-read the log and call
    `verify_plan_completion(plan, log)` (the SAME function the S-25.06 verifier and Branch C use): every plan
    target has a `DONE` satisfying B-2. Only then write `completed.json` with
@@ -449,7 +557,7 @@ mandate, now true because B-1 holds).
 |---|---|---|---|
 | `INTENT_LOG_CORRUPT` | `IntentLogCorrupt { path, kind, offset }` | `MidLogCorruption`, invariant L1-L4 violation, or a non-V1 record followed by a valid record | none |
 | `INTENT_LOG_VALUE_REJECTED` | `IntentLogValueRejected { field, reason }` | a plan path or record field fails the 1.2 value rules at plan-build or write time | none appended; nothing staged |
-| `CANONICAL_MOVE_HALTED` | `CanonicalMoveHalted { target, reason }` | decision `FailClosed`, rename or sync failure, or post-hash divergence from the INTENT during COMMITTING (replaces the generic `BinaryIntegrityFailure` count-shortfall carrier, which mislabels the digest code) | txn stays `COMMITTING`; log keeps its valid records |
+| `CANONICAL_MOVE_HALTED` | `CanonicalMoveHalted { target, reason }` | any of the six halt sites during COMMITTING (v1.1): decision `FailClosed`, parent-directory create failure, rename failure, directory-sync failure, post-rename read failure/missing file or post-hash divergence from the INTENT, `DONE` append failure (replaces the generic `BinaryIntegrityFailure` count-shortfall carrier, which mislabels the digest code) | txn stays `COMMITTING`; log keeps its valid records |
 
 #### 3.1 Normative stderr text of the three new codes (ratified v1.0; error-taxonomy v1.41 reviewed)
 
@@ -476,6 +584,10 @@ rows, no `BC-INDEX migration: ` label is printed; `<subcommand>` is `migrate-bc-
   distinguishing tail of `.factory/migration-state/intent-<uuid>.log` (25-char directory prefix plus
   47-char file name = 72). `<path>` is rendered as the log FILE NAME only, `intent-<generation_id>.log`
   (47 chars for a UUID, passed through the sanitizer anyway because the log path is read from a record).
+  (v1.1 extension 2: the stderr cap is now 256, see "Sanitization cap" below, so truncation no longer
+  threatens the tail; the file-name-only rendering is KEPT because the directory prefix is constant noise on
+  a one-line message and the file name is the only distinguishing part. The original 64-char reasoning is
+  historical.)
 - **C-4 (ambiguous action, `CANONICAL_MOVE_HALTED`).** "re-run recovery or escalate" is wrong for the
   deterministic `FailClosed` rows, where a re-run reproduces the halt. Replaced by the sibling exit-2
   vocabulary ("operator investigation required") plus the true idempotence statement.
@@ -489,18 +601,30 @@ CANONICAL_MOVE_HALTED (exit 2): move to <target> halted: <reason>; the transacti
 ```
 
 Placeholder rules (all rendered by the SAME sanitizer as the ADR-052 v1.21 admission diagnostic and
-`FOREIGN_MIGRATION_REFUSED`'s `<id>`: truncate to 64 characters, escape control characters; raw record
-content is never echoed beyond that, and no serde/OS error string reaches the line):
+`FOREIGN_MIGRATION_REFUSED`'s `<id>`: escape control characters and cap EACH data-derived substring at
+**256** characters; raw record content is never echoed beyond that, and no serde/OS error string reaches the
+line). **Sanitization cap (v1.1 extension 2; ADR-052 v1.25 item 11(g)).** The 64-character cap is the
+`InternalLog`-event bound ONLY; operator stderr uses 256 per data-derived substring, for every code in this
+section, so the one `sanitize_diagnostic(s, cap)` is called with 256 here. This is deliberate consistency, not a
+per-code choice: `<target>` is a validated canonical path of up to 4096 bytes (Decision 1.2) and a 64-character
+cap would cut it mid-name, and `<log_file>` is read from a record. Placeholders from closed token domains
+(`<kind>`, `<offset>`, `<field>`, both `<reason>` sets) are far below either cap and are never truncated. A
+value longer than 256 is cut after escaping, so the escaped output never exceeds 256 characters plus the
+fixed text. Tests: a 200-character `<target>` appears in full on the `CANONICAL_MOVE_HALTED` line; a hostile
+`<target>` with control characters is escaped and cannot add a second line. Stories: S-25.10 (`INTENT_LOG_CORRUPT`,
+`INTENT_LOG_VALUE_REJECTED`) and S-25.11 (`CANONICAL_MOVE_HALTED`), neither implemented yet, so no rework;
+S-25.09 carries the sibling `FOREIGN_MIGRATION_REFUSED` `<id>` change (ADR-052 item 9). Product-owner mirrors:
+BC-1.18.011 (~1466, ~1487, ~1806), BC-1.18.013 (~1549, ~1559, ~1832), error-taxonomy lines 113-116.
 
 | Placeholder | Closed domain / source |
 |---|---|
 | `<log_file>` | `intent-<generation_id>.log` (file name only, C-3) |
 | `<kind>` | `mid_log_corruption` for `MidLogCorruption` and for a non-V1 record followed by a valid record; `log_invariant_violation` for L1-L4 (Decision 1.8) |
-| `<offset>` | decimal byte offset: for `mid_log_corruption` the reader's `first_bad_offset` (= `valid_prefix_len`); for `log_invariant_violation` the start offset of the FIRST record, in file order, that violates an invariant (the reader keeps each record's start offset) |
+| `<offset>` | decimal byte offset: for `mid_log_corruption` the reader's `first_bad_offset` (= `valid_prefix_len`, NOT `later_valid_offset`); for `log_invariant_violation` the start offset of the FIRST violating record as defined in Decision 1.8 (the reader keeps each record's start offset; for L2 it is the LATER conflicting `INTENT`) |
 | `<field>` | plan time: `staging_path`, `canonical_path`; write time: `txn_id`, `fencing_generation`, `record_type`, `target_canonical`, `staging_path`, `expected_post_hash`, `expected_pre_state`, `timestamp_utc` |
-| `<reason>` (VALUE_REJECTED) | `contains_control_character`, `not_utf8`, `empty`, `over_4096_bytes`, `not_64_lowercase_hex`, `malformed_timestamp`, `not_1_to_128_token_characters`, `not_canonical_u64`, `unknown_record_type` (rules 1-7 of Decision 1.2) |
+| `<reason>` (VALUE_REJECTED) | `contains_control_character`, `not_utf8`, `empty`, `over_4096_bytes`, `leading_or_trailing_space` (v1.1; paths only), `not_64_lowercase_hex`, `malformed_timestamp`, `not_1_to_128_token_characters`, `not_canonical_u64`, `unknown_record_type` (rules 1-7 of Decision 1.2) |
 | `<target>` | the plan entry's `canonical_path` as stored |
-| `<reason>` (MOVE_HALTED) | `fail_closed_diverged_after_completion` (table row 3), `fail_closed_no_recovery_copy` (row 5), `fail_closed_matches_neither_state` (row 6), `fail_closed_no_intent` (row 7), `rename_failed`, `dir_sync_failed`, `post_rename_hash_diverged` |
+| `<reason>` (MOVE_HALTED) | `fail_closed_diverged_after_completion` (table row 3), `fail_closed_no_recovery_copy` (row 5), `fail_closed_matches_neither_state` (row 6), `fail_closed_no_intent` (row 7), `rename_failed`, `dir_sync_failed`, `post_rename_hash_diverged`; v1.1 adds `parent_dir_create_failed`, `post_rename_read_failed`, `done_append_failed` (the seven pre-existing tokens are unchanged; ten in all: four `fail_closed_*` for site 1, one each for sites 2, 3, 4 and 6, and `post_rename_read_failed` + `post_rename_hash_diverged` for site 5) |
 
 Variant payloads are unchanged (`IntentLogCorrupt { path, kind, offset }`, `IntentLogValueRejected { field,
 reason }`, `CanonicalMoveHalted { target, reason }`); `path` is the full path, the `Display` renders its file
@@ -694,7 +818,7 @@ Sizing is the story-writer's call per story against the 13-point cap.
 | AC-001 | `shard_manager/intent_log.rs` exists and is the only implementation of the format; `migrate-bc-index` uses it; the B2 originals (Decision 4) are deleted; a literal-shell grep finds `INTENT_LOG_RECORD_V1` / `END_INTENT_LOG_RECORD` only in that module and its tests. |
 | AC-002 | `encode_record` emits exactly the 11-line frame in the fixed key order; the golden record of Decision 1.4 is byte-identical and its checksum equals the vector (T10). |
 | AC-003 | The checksum is SHA-256 over the exact first nine lines; the operator recipe (Decision 1.5, `sed` + `shasum`) reproduces it for every record of a multi-record log (T10). |
-| AC-004 | Value rules: the writer rejects (named `INTENT_LOG_VALUE_REJECTED`, zero bytes appended) any path containing LF, CR, NUL, other C0, DEL, a non-UTF-8 byte, an empty path or one over 4096 bytes, a non-lowercase or wrong-length hash, a bad timestamp, a non-token `txn_id`; paths containing `=`, the pipe character, spaces and marker text round-trip exactly (T6). |
+| AC-004 | Value rules: the writer rejects (named `INTENT_LOG_VALUE_REJECTED`, zero bytes appended) any path containing LF, CR, NUL, other C0, DEL, a non-UTF-8 byte, an empty path, one over 4096 bytes, or one with a leading or trailing U+0020 (`leading_or_trailing_space`), a non-lowercase or wrong-length hash, a bad timestamp, a non-token `txn_id`; paths containing `=`, the pipe character, spaces and marker text round-trip exactly (T6). |
 | AC-005 | Plan-build validates every `staging_path`/`canonical_path` under the same rule and aborts pre-commit with nothing staged on rejection (T6). |
 | AC-006 | The reader is byte-level and line-anchored: truncation of a multi-record log at EVERY byte offset yields exactly the fully written prefix, never an error, never a partial record (T1); a tail of garbage, 512 NUL bytes, a partial start marker or invalid UTF-8 yields the prefix (T3). |
 | AC-007 | Grammar strictness: duplicate key, unknown key, blank line, CRLF, reordered keys, uppercase hex, extra whitespace each make the record invalid (T5); a bit flip in each field of a middle record followed by a valid record fails closed `INTENT_LOG_CORRUPT` (T4); L1-L4 violations fail closed (T15). |
@@ -705,7 +829,7 @@ Sizing is the story-writer's call per story against the 13-point cap.
 | AC-012 | B-2: `DONE` carries the live `txn_id` and current `fencing_generation` (parameters, no log scraping), `expected_post_hash` copied from and compared with the INTENT, `expected_pre_state` copied; a staged file mutated after step 3b yields no `DONE`, `CANONICAL_MOVE_HALTED`, never `Completed` (T8). |
 | AC-013 | B-3: a COMMITTING txn with an empty plan, or a plan differing from the INTENT target set by one entry (or by one `staging_path`), exits 2 `MIGRATION_STATE_INTEGRITY_FAILURE` `txn_record_malformed`, moves nothing, writes no `completed.json` (T9). |
 | AC-014 | `finish_committing_migration` calls `verify_plan_completion` over a fresh log read before writing `completed.json`; `canonical_paths_count == len(plan)`; the count-shortfall `BinaryIntegrityFailure` carrier is replaced by `CANONICAL_MOVE_HALTED`. |
-| AC-015 | The exhaustive exit-code table test (S-25.09) gains the three new variants; no wildcard arm. Per story: S-25.10 adds `IntentLogCorrupt` and `IntentLogValueRejected`, S-25.11 adds `CanonicalMoveHalted`. |
+| AC-015 | The exhaustive exit-code table test (S-25.09) gains the three new variants; no wildcard arm. Per story: S-25.10 adds `IntentLogCorrupt` and `IntentLogValueRejected`, S-25.11 adds `CanonicalMoveHalted` (in the S-25.11 story file this is its **AC-008**; the story renumbered locally). **S-25.11 AC-008 (ADR-054 AC-015) owns ALL SIX halt sites** of Decision 3 step 4 and the full ten-token `<reason>` domain of §3.1 (each token exercised); **S-25.09 emits NO interim halt line** (ADR-052 v1.25 item 11(f) ruling). |
 | AC-016 | (S-25.11 delivers the pure function; S-25.12 delivers the proof and the CI change.) `decide_recovery` (pure, total) replaces `decide_intent_log_recovery`; NEW harness `proof_obl1_h1_decide_recovery_totality` (VP-147 h1b, in `obl1_kani_proofs.rs`) proves it total with the exact seven-row table of Decision 3 (outcomes `TreatDone`, `AlreadyDone`, `RedoRename`, `FailClosed`; input `done_present`) and its `kani::cover!` witnesses; `.github/workflows/kani.yml` pins it (OBL-1 job `HARNESSES` + `EXPECTED_PROOFS` 10 → 11, header comment "ten" → "eleven"); VP-146 a1/a2/a5/a6 are re-pointed to it by S-25.06 after its rebase. |
 | AC-017 | The operator runbook `docs/guide/migration-interim-block-recovery.md` and ADR-052 item 11(e) steps are implemented as specified: checksum verification (Decision 1.5), plan-equals-INTENT-set, `DONE == INTENT == sha256(file)`, renamed field. |
 | AC-018 | Parity contract for S-25.06 (T11): a mechanism-agnostic fixture shows the module produces identical writer bytes and identical `DONE` field population for both migrations' parameter sets; S-25.06 consumes it. |
@@ -819,6 +943,9 @@ None for the human. Rename and format decisions are made. Remaining ADR-052 hygi
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.1 (same-version extension 2, file still uncommitted) | 2026-10-08 | architect | Consistency with ADR-052 v1.25 item 11(g): the 64-character cap is InternalLog-event-only; the stderr placeholders of `INTENT_LOG_VALUE_REJECTED`, `CANONICAL_MOVE_HALTED` and `INTENT_LOG_CORRUPT` (and ADR-052 item 9's `<id>`) use 256 per data-derived substring through the one sanitizer. Edited Decision 1.9 step 1 (parenthetical), Decision 3.1 C-3 (kept file-name-only rendering; 64 reasoning now historical) and the placeholder-rules lead-in (new "Sanitization cap" paragraph). No code token, exit code, placeholder domain or VP change. Affected: S-25.10/S-25.11 (unimplemented), S-25.09 for item 9. PO owes BC-1.18.011, BC-1.18.013, error-taxonomy mirrors. |
+| 1.1 (same-version extension 1, file still uncommitted) | 2026-10-08 | architect | S-25.10 test-writer ambiguities settled. (1) Decision 1.9 step 5: the WRITER syncs the parent directory iff `append_durable` returned `created == true` (fault-injection observability through the `Fs` seam; no Kani impact); retry closure (coordinator syncs the log's directory when the log pre-exists with no `DONE`); `created` via `create_new`; strict primitive named: new `pub last_amended_migrate::atomic_write::sync_file_strict_durable(&File)`. (2) Decision 3: a `DONE` is only constructed from an `INTENT`; no INTENT is table row 7 `fail_closed_no_intent`, owned by S-25.11; S-25.10 fails closed without rename or `DONE`. (3) Decision 1.8: precise "first violating record" for L1-L4 (L2 = the later conflicting `INTENT`). (4) Decision 1.7/1.5 DEFECT FIX: the mid-log probe now searches every byte offset, not only line starts, so garbage without a trailing LF followed by a valid record is `MidLogCorruption`; probe line-length bound 4113. (5) Decision 1.1/1.2 rules 1-2: paths with a leading or trailing U+0020 are rejected with the NEW token `leading_or_trailing_space` (reason precedence fixed); interior spaces valid; §3.1 and AC-004 updated. No change to Display text, exit code, variants, recovery table or other Decisions. |
+| 1.1 | 2026-10-08 | architect | **ADR-054 v1.0 is committed (`.factory` 61709b2d) and immutable; this is a NEW version. Widens the `CANONICAL_MOVE_HALTED` trigger and `<reason>` domain to ALL SIX halt sites of `execute_canonical_path_moves`** (recovery `FailClosed`; parent-directory create; rename; directory sync; post-rename read failure/missing file or post-hash divergence; `DONE` append), found by the S-25.09 local adversary pass 1 ruling (ADR-052 v1.25 item 11(f)). Edited: §Decision 3 per-move procedure step 4 (six sites enumerated, none may surface as `BinaryIntegrityFailure`/`Io`), the "New named errors" Trigger cell, and the §3.1 `<reason>` (MOVE_HALTED) row (the seven existing tokens kept unchanged; three NEW: `parent_dir_create_failed`, `post_rename_read_failed`, `done_append_failed`; ten tokens in all). §Downstream: S-25.11 story AC-008 (= ADR-054 AC-015, the story renumbered locally) owns all six sites and every token; S-25.09 emits NO interim halt line. No change to the Display text (§3.1 final line), the exit code (2), variant payloads, the recovery table or any other Decision. |
 | 1.0 | 2026-10-08 | architect | Initial. Companion of ADR-052; created on human authorization 2026-10-08 (research `adr-052-intent-log-format-and-move-list-semantics.md`). Moves ADR-052 §Decision 7b here and rewrites it as the HARDENED format (ABNF, byte-exact checksum, golden vector, operator recipe, byte-level reader, tail repair, durability, shared module); defines the FIXED-PLAN model with the rename `pending_canonical_moves` → `canonical_move_plan`; specifies B-1/B-2/B-3 normatively with the recovery table and three new exit-2 codes; §Downstream S-25.10 block (ACs, red-test plan, code changes, owed BC/taxonomy/VP wording). |
 | 1.0 (same-version extension, file still untracked) | 2026-10-08 | architect | Kani-impact correction found while applying the owed VP wording against `obl1_kani_proofs.rs` in the S-25.09 worktree: `proof_obl1_h1_recover_totality` calls `recover` over txn records and no OBL-1 harness calls the per-target decision, so "re-point VP-147 h1" was wrong. Corrected: NEW harness `proof_obl1_h1_decide_recovery_totality` (VP-147 h1b; `EXPECTED_PROOFS` 10 → 11 in the OBL-1 kani job); the only field-name dependency in the B2 file is the `make_txn_record` literal; mechanism-A harnesses a1, a2, a5 and a6 all call the replaced function and change in S-25.06 after its rebase (count unchanged, derived from the pinned list). Edited Decision 3 note, Decision 5, Negative Consequences, AC-016, Code changes item 8, Files to Change and the VP bullets. |
 | 1.0 (same-version extension 2, file still untracked) | 2026-10-08 | architect | Ratified the stderr message text of the three new codes (new §Decision 3.1): reviewed error-taxonomy v1.41's derived lines against the exact-line convention of EXPIRY_ABORT / FOREIGN_MIGRATION_REFUSED / MIGRATION_LOCK_CONTENTION (ADR-052 items 8, 9). Prefix, code token and `exit 2` accepted; four corrections C-1..C-4 (false "nothing was moved" on the post-loop re-read; false "nothing was staged" after the generation directory exists; `<path>` rendered as the log file name because 64-char truncation drops the distinguishing tail; "re-run recovery or escalate" replaced because a re-run reproduces a deterministic `FailClosed`). Closed placeholder domains added (`<kind>`, `<offset>`, `<field>`, both `<reason>` sets). Decision 1.7 surface-mapping cell reworded to match C-1. The product-owner mirrors the final text in error-taxonomy and BC-1.18.011 / BC-1.18.013. VP anchoring audit (VP-133 facet 11, VP-143 (b4)-(b8), VP-146/VP-147 boundary text) propagated in VP-INDEX v3.33 same-version extension 2. |

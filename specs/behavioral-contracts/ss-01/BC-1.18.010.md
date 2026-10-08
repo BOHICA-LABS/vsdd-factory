@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.10"
+version: "1.11"
 status: active
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -13,15 +13,16 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.009.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "1684ab3"
+input-hash: "3ddc377"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
 subsystem: "SS-01"
 capability: "CAP-043"
 lifecycle_status: active
+last_amended: "2026-10-08 (v1.11) — ADR-052 v1.25 item 11(c) clarification point 5 (reader parity; closes F-S2509-L1-004 sibling sweep, TD-VSDD-060): §Reader Integration step 1 (`detect_migration_read_state`) probes `completed.json` lstat-first with the same four verdicts and record-shape validation as the coordinator, through a shared `read_completed_marker` helper. Prior: 2026-09-22 (v1.10) — ADR-051 §Decision 18 addendum (Postcondition 4 chunk-boundary rule)."
 introduced: v1.0-brownfield-backfill
-modified: []
+modified: ["2026-09-22 (v1.10)", "2026-10-08 (v1.11)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -229,7 +230,22 @@ assignment, consistent with the sibling VP-128 row above. No property content ch
 
 During the B2 migration window (after CURRENT.json pointer swap, before completed.json
 written), readers accessing BC-INDEX paths MUST use the following protocol:
-1. Check `.factory/migration-state/completed.json` — if exists: canonical paths are current.
+1. Check `.factory/migration-state/completed.json` — if a valid record exists: canonical paths are
+   current. **The probe is lstat-first with record-shape validation (v1.11; ADR-052 v1.25 item 11(c)
+   clarification point 5; `detect_migration_read_state` and the coordinator's
+   `read_completed_under_lock` both call one shared `read_completed_marker` helper):** the existence
+   probe is `symlink_metadata` (lstat-class) and ONLY `NotFound` from that call means ABSENT (a fact
+   about the directory entry, never about a link target) ⇒ continue with step 2. A dangling symlink
+   (lstat sees an entry; the read returns `NotFound`, the ENOENT of the TARGET), any other lstat or read
+   error (EACCES, ELOOP, EIO, ENOTDIR, EISDIR, ...) and content that reads but is not a
+   `CompletedMigrationRecord` (not UTF-8, empty, truncated, unparseable JSON, not an object, or an object
+   whose `generation_id`/`txn_id`/`completed_at` is not a string or whose `canonical_paths_count` is not a
+   non-negative integer fitting `u64`; unknown extra keys ignored) ⇒ `BcIndexAddressingError::Io`, NEVER
+   "not migrated" and NEVER a silent fall-through to step 2/3 (a reader that reports `NotStarted` beside a
+   coordinator that reports "unknown" is the divergence this rule closes). A readable record (a regular
+   file, or a symlink whose target reads and validates) ⇒ canonical paths are current; no field of it is
+   compared with any other file by the reader (presence selects the branch). Vectors: BC-1.18.011
+   EC-070..EC-075.
 2. Check `.factory/migration-state/CURRENT.json` — if `status: committing`: for each required
    file, open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. Rationale (C-1,
    ADR-052 §Decision 7c): the canonical path holds STALE old content for in-place-overwrite
@@ -279,7 +295,10 @@ native gate as BC-1.18.006/009) is bound by.
 
 ## Story Anchor
 
-S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Artifacts
+- S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Artifacts (Postconditions 1-6, Invariants 1-4, Reader Integration steps 2-3; mechanism B2 end-state addressing)
+- S-25.09 — Reader Integration step 1 (v1.11): the lstat-first `completed.json` classification and record-shape validation in `detect_migration_read_state`, delivered through the `read_completed_marker` helper shared with the coordinator's `read_completed_under_lock` (ADR-052 v1.25 item 11(c) clarification point 5; closes F-S2509-L1-004). Reader-parity vectors BC-1.18.011 EC-070..EC-075; tests in `tests/s2509_pass1_l1_findings_test.rs`.
+
+Note: the sibling lstat-first rule for `completed-backfill-append-logs.json` is the mechanism-A backfill mirror and is NOT covered by this BC (it governs only B2's `completed.json`); that obligation is S-25.06's and is anchored on the BC that specifies the mechanism-A backfill marker, not here.
 
 ## VP Anchors
 
@@ -295,7 +314,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 | L2 Domain Invariants | none (dispatcher runtime architectural invariant, not an L2 domain-spec DI-NNN) |
 | Architecture Module | SS-01 (Hook Dispatcher Core — `shard_manager.rs` B2 artifact-shape handler) |
 | ADR | ADR-051 §Decision 7 (B2 per-subsystem sharding design); §Decision 8 (shard-manifest schema, reader/writer migration surface); §Decision 10 (governed one-time migration, BC-1.18.011); §Rationale ("Why the per-subsystem BC-INDEX partition is not a new invention") |
-| Stories | S-25.02 |
+| Stories | S-25.02, S-25.09 |
 | Cycle | v1.0-brownfield-backfill (F2 — product-owner spec-evolution burst) |
 | Feature | E-25 — Validation Integrity and Large-Artifact Resilience |
 
@@ -303,6 +322,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.11 | 2026-10-08 | product-owner | Reader-parity sibling sweep for ADR-052 v1.25 item 11(c) clarification point 5 (closes F-S2509-L1-004's `detect_migration_read_state` leg; TD-VSDD-060). §Reader Integration step 1 now specifies the lstat-first classification and record-shape validation: the probe of `.factory/migration-state/completed.json` is `symlink_metadata` (lstat-class) and ONLY `NotFound` is absent (fall through to step 2/3); a dangling symlink (the ENOENT its read returns is the ENOENT of the TARGET), any non-`NotFound` lstat or read error (EACCES, ELOOP, EIO, ENOTDIR, EISDIR, ...) and content that reads but is not a `CompletedMigrationRecord` (not UTF-8, empty, truncated, unparseable, not an object, or wrong schema: string `generation_id`/`txn_id`/`completed_at`, non-negative integer `canonical_paths_count` fitting `u64`; unknown extra keys ignored) yield `BcIndexAddressingError::Io` (never "not migrated", never a silent fall-through to `CURRENT.json` / the legacy `BC-INDEX.md`); a valid record means canonical paths are current. The reader and the coordinator share one `read_completed_marker` helper so a reader never says "not migrated" beside a coordinator that says "unknown". Other `fs.exists(..)` uses are not changed (the generation-directory probe fails CLOSED on a stat error). Normative vectors: BC-1.18.011 EC-070..EC-075. No Precondition/Postcondition/Invariant change; no VP-count change; status UNCHANGED. Story Anchor / Traceability Stories re-attributed: S-25.09 delivers the §Reader Integration step-1 obligation (`read_completed_marker`, shared with the coordinator; tests `tests/s2509_pass1_l1_findings_test.rs`, reader-parity vectors); S-25.02 retains all other obligations; the `completed-backfill-append-logs.json` mirror (S-25.06) is not covered by this BC, so S-25.06 is not attributed. **Stories affected by BC changes:** S-25.09 (owner of the shared helper per ADR-052 v1.25). **VP citations changed in:** none. |
 | 1.10 | 2026-09-22 | product-owner | ADR-051 §Decision 18 addendum encoding (spec-closure chain step 2 of 2: architect → product-owner; human-approved 2026-09-22 design proposal). Postcondition 4 amended: replaced the worked-example-only "growth-based (e.g., ... covering `BC-5.01.001`..`BC-5.30.099`)" boundary text with the actual deterministic chunk-boundary rule — sub-shard boundaries are computed by ADR-051 §Decision 18's `chunk_subsystem_rows_into_sub_shards` algorithm (canonical-BC-ID-sorted via `extract_and_sort_bc_rows`, greedy-pack-until-cap, single left-to-right pass), reusing the SAME `shard_cap_bytes` value as first-level splitting per Invariant 4 (no separately-calibrated migration-time cap), with a fixed preamble replicated verbatim into every sub-shard and counted against cap as that sub-shard's starting size. Determinism (same row set + preamble + cap always yields identical boundaries) and chunk-boundary correctness now cited to **VP-142** (proptest; hosted on BC-1.18.011 Postcondition 6, cross-referenced here since the property holds identically for migration-time and the steady-state rebuild path). VP Anchors section updated with the VP-142 cross-reference. No change to Postcondition 4's SS-05/SS-06 measured-size facts or its migration-coverage claim (still covered by BC-1.18.011). input-hash recompute owed to state-manager. |
 | 1.9 | 2026-09-13 | product-owner | ADR-052 v1.11 pass-8 reader-protocol mirror (MED-1). §Reader Integration step 2: replaced existence-check-then-read form ("try gen path FIRST; if absent, fall back to the canonical path") with the OPEN-based with ENOENT fallback form per the canonical reader protocol (ADR-052 §Decision 7c): open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. Updated "ENOENT is impossible" rationale to reference the open-with-fallback implementation: ENOENT on the gen-path signals the file was already renamed to canonical; `rename(2)` atomicity makes the protocol race-free (the canonical path is guaranteed to hold new content the moment ENOENT is observable on the gen-path). "generation-first ensures new content is always returned" rationale rephrased to "OPEN-based with ENOENT fallback ensures new content is always returned." input-hash recompute owed to state-manager. |
 | 1.8 | 2026-09-13 | product-owner | ADR-052 v1.7 re-hardening (F3 casing sweep). Corrected all path-bearing COMPLETED.json occurrences in §Reader Integration to lowercase completed.json per ADR-052 §Decision 7c step 8: (1) §Reader Integration preamble "before COMPLETED.json written" → "before completed.json written"; (2) steady-state prose "In steady state (COMPLETED.json present)" → "In steady state (completed.json present)"; (3) "COMPLETED.json is permanent and its presence is unambiguous" → "completed.json is permanent and its presence is unambiguous". Step 1's `completed.json` check (line 220) was already lowercase — confirmed correct and unchanged. |

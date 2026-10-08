@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.9"
+version: "1.10"
 status: active
 producer: product-owner
 timestamp: 2026-07-19T00:00:00Z
@@ -13,7 +13,7 @@ inputs:
   - plugins/vsdd-factory/hooks-registry.toml
   - .factory/specs/behavioral-contracts/ss-04/BC-4.13.001.md
   - .factory/specs/architecture/ARCH-INDEX.md
-input-hash: "3207a61"
+input-hash: "2e55c4a"
 traces_to: .factory/specs/architecture/ARCH-INDEX.md
 origin: brownfield
 extracted_from: null
@@ -22,6 +22,7 @@ capability: "CAP-034"
 lifecycle_status: active
 introduced: v1.0-brownfield-backfill
 modified:
+  - "2026-10-08 (v1.10) — Target-directory branch resolution amendment for [D-1254-HOOK-FP-003] (product-owner; GH #840 family; S-26.02): NEW Invariant 7 — the guard resolves the branch of the git TARGET directory (explicit `-C`/`--work-tree`/`core.worktree` value, a preceding `cd`, or the guarded Bash call's working directory), never the hook process cwd; Invariant 3 and PC1 amended; NEW EC-015..EC-018 and T-10..T-13. No change to the detection contract, the conservative path forms, PC2-PC4, fail-open or the `factory-artifacts` pass rule."
   - "2026-08-13 (v1.9) — POL-14 auto-promotion completion + frontmatter status-field parity fix (state-manager; S-21.09 PR #775 merged to develop `2e8087af` 2026-08-13T14:16:26Z; post-merge processing burst D-991): top-level `status:` field draft→active, completing the POL-14 promotion that the v1.8 burst (2026-07-23, S-21.01 PR #759 merge) applied only to `lifecycle_status:` (already `active` since v1.8) — the two fields drifted out of parity since 2026-07-23; this burst closes that gap. No behavioral/content change — Description/Preconditions/Postconditions/Invariants/Edge Cases/Canonical Test Vectors byte-identical to v1.8. BC-INDEX v4.56→v4.57 (BC-4.16.001 row version-chain cell v1.8→v1.9; status column UNCHANGED, already `active`)."
   - "2026-07-23 (v1.8) — POL-14 auto-promotion at merge (state-manager; S-21.01 PR #759 squash-merged 7bb0e797 2026-07-23): lifecycle_status draft→active. BC-INDEX v4.19→v4.20."
   - "2026-07-23 (v1.7) — Accepted Residuals record (product-owner; S-21.01 pass-6/7 adversarial cascade; documentary-only — no behavioral requirement changes): two accepted residuals added inside Invariant 6: (1) trailing-slash -C .factory/ target form not classified factory-class — rare OVER-block via CWD fallback; conservative direction, accepted (S-21.01 pass-6 sub-NITPICK); (2) single-detection-first-target semantics — chained payload with benign-first + dangerous-second factory-class target under-matched; accepted: faithful to Invariant 6 singular-target contract, near-zero realism, outside issue #342 threat model, Precondition 4 neutralizes single-mount variants (S-21.01 pass-7 NITPICK). BC-INDEX v4.18→v4.19."
@@ -39,7 +40,7 @@ removed: null
 removal_reason: null
 bc_id: BC-4.16.001
 section: "4.16"
-last_amended: "(v1.9) — POL-14 auto-promotion completion + frontmatter status-field parity fix (state-manager; S-21.09 PR #775 merged to develop `2e8087af` 2026-08-13T14:16:26Z; post-merge processing burst D-991): top-level `status:` field draft→active, completing the POL-14 promotion the v1.8 burst applied only to `lifecycle_status:` (already active since v1.8) — the two fields had drifted out of parity since 2026-07-23; this burst closes that gap. No behavioral/content change. BC-INDEX v4.56→v4.57. [Prior: (v1.8) — POL-14 auto-promotion at merge (state-manager; S-21.01 PR #759 squash-merged 7bb0e797 2026-07-23): lifecycle_status draft→active. BC-INDEX v4.19→v4.20. [Prior: (v1.7) — Accepted Residuals record (product-owner; S-21.01 pass-6/7 adversarial cascade; documentary-only — no behavioral requirement changes): two accepted residuals added inside Invariant 6: (1) trailing-slash -C .factory/ target form not classified factory-class — rare OVER-block via CWD fallback; conservative direction, accepted (S-21.01 pass-6 sub-NITPICK); (2) single-detection-first-target semantics — chained payload with benign-first + dangerous-second factory-class target under-matched; accepted: faithful to Invariant 6 singular-target contract, near-zero realism, outside issue #342 threat model, Precondition 4 neutralizes single-mount variants (S-21.01 pass-7 NITPICK). BC-INDEX v4.18→v4.19. [Prior: (v1.6) — F-P5-001 spec-tightening amendment (product-owner; S-21.01 LOCAL cascade pass 5; human gate decision 2026-07-23): Invariant 6 added (target-aware branch detection for -C and -c core.worktree= forms); Precondition 2 note added (target INSPECTION of already-consumed values, not re-classification); §Description extended; EC-012/EC-013/EC-014 added; T-7/T-8/T-9 added; sub-NITPICK --super-prefix dedicated test deferred to test-writer. BC-INDEX v4.17→v4.18. [Prior: (v1.5) — F-P4-001 + F-P4-002 spec-tightening amendments (product-owner; S-21.01 LOCAL cascade pass 4): Precondition 2 detection contract made class-complete (value-consuming git global option enumeration: -C, -c, --git-dir, --work-tree, --namespace, --super-prefix, --exec-path; conservative rule for unknown dash-prefix tokens; F-P4-002: leading shell-punctuation stripping on git candidate tokens). §Description + PC4 sibling-site sweep (TD-VSDD-060). BC-INDEX v4.16→v4.17. [Prior: (v1.4) — F-P2-002 + F-P2-003 spec-tightening amendments (product-owner; S-21.01 LOCAL cascade pass 2): Precondition 2 detection contract expanded to cover global-option forms; behavioral description 'any token sequence beginning git whose first non-option subcommand token is add or stage, tolerating intervening global options'; minimum form git\\s+(add|stage) retained; chained-form applicability explicit. Invariant 4: .factory path detection case-insensitive (conservative blocking). §Description + PC4 sibling-site sweep (TD-VSDD-060); BC-INDEX v4.15→v4.16. (v1.3) — F-P1-003 + F-P1-001 spec-tightening amendments; Precondition 2 matcher git\\s+(add|stage); Invariant 4 enumeration extended with bare .factory, ./, :/‑family; H1 + §Description + PC4 + EC-009 sibling-site sweep (TD-VSDD-060); BC-INDEX v4.14→v4.15. (v1.2) — Research validation precision amendments; Precondition 4 environmental scope note added. (v1.1) — CAP-034 backfill + crate name correction; TD-VSDD-060 sibling-site sweep. (v1.0) — Initial authoring; validate-factory-path-staging WASM guard; INV-E21-001 invariant layer. lifecycle_status: draft (POL-14).]]"
+last_amended: "2026-10-08 (v1.10) — Target-directory branch resolution amendment for [D-1254-HOOK-FP-003]: NEW Invariant 7, Invariant 3 and PC1 amended, NEW EC-015..EC-018 and T-10..T-13 (product-owner; S-26.02). Prior: (v1.9) — POL-14 auto-promotion completion + frontmatter status-field parity fix (state-manager; S-21.09 PR #775 merged to develop `2e8087af` 2026-08-13T14:16:26Z; post-merge processing burst D-991): top-level `status:` field draft→active, completing the POL-14 promotion the v1.8 burst applied only to `lifecycle_status:` (already active since v1.8) — the two fields had drifted out of parity since 2026-07-23; this burst closes that gap. No behavioral/content change. BC-INDEX v4.56→v4.57. [Prior: (v1.8) — POL-14 auto-promotion at merge (state-manager; S-21.01 PR #759 squash-merged 7bb0e797 2026-07-23): lifecycle_status draft→active. BC-INDEX v4.19→v4.20. [Prior: (v1.7) — Accepted Residuals record (product-owner; S-21.01 pass-6/7 adversarial cascade; documentary-only — no behavioral requirement changes): two accepted residuals added inside Invariant 6: (1) trailing-slash -C .factory/ target form not classified factory-class — rare OVER-block via CWD fallback; conservative direction, accepted (S-21.01 pass-6 sub-NITPICK); (2) single-detection-first-target semantics — chained payload with benign-first + dangerous-second factory-class target under-matched; accepted: faithful to Invariant 6 singular-target contract, near-zero realism, outside issue #342 threat model, Precondition 4 neutralizes single-mount variants (S-21.01 pass-7 NITPICK). BC-INDEX v4.18→v4.19. [Prior: (v1.6) — F-P5-001 spec-tightening amendment (product-owner; S-21.01 LOCAL cascade pass 5; human gate decision 2026-07-23): Invariant 6 added (target-aware branch detection for -C and -c core.worktree= forms); Precondition 2 note added (target INSPECTION of already-consumed values, not re-classification); §Description extended; EC-012/EC-013/EC-014 added; T-7/T-8/T-9 added; sub-NITPICK --super-prefix dedicated test deferred to test-writer. BC-INDEX v4.17→v4.18. [Prior: (v1.5) — F-P4-001 + F-P4-002 spec-tightening amendments (product-owner; S-21.01 LOCAL cascade pass 4): Precondition 2 detection contract made class-complete (value-consuming git global option enumeration: -C, -c, --git-dir, --work-tree, --namespace, --super-prefix, --exec-path; conservative rule for unknown dash-prefix tokens; F-P4-002: leading shell-punctuation stripping on git candidate tokens). §Description + PC4 sibling-site sweep (TD-VSDD-060). BC-INDEX v4.16→v4.17. [Prior: (v1.4) — F-P2-002 + F-P2-003 spec-tightening amendments (product-owner; S-21.01 LOCAL cascade pass 2): Precondition 2 detection contract expanded to cover global-option forms; behavioral description 'any token sequence beginning git whose first non-option subcommand token is add or stage, tolerating intervening global options'; minimum form git\\s+(add|stage) retained; chained-form applicability explicit. Invariant 4: .factory path detection case-insensitive (conservative blocking). §Description + PC4 sibling-site sweep (TD-VSDD-060); BC-INDEX v4.15→v4.16. (v1.3) — F-P1-003 + F-P1-001 spec-tightening amendments; Precondition 2 matcher git\\s+(add|stage); Invariant 4 enumeration extended with bare .factory, ./, :/‑family; H1 + §Description + PC4 + EC-009 sibling-site sweep (TD-VSDD-060); BC-INDEX v4.14→v4.15. (v1.2) — Research validation precision amendments; Precondition 4 environmental scope note added. (v1.1) — CAP-034 backfill + crate name correction; TD-VSDD-060 sibling-site sweep. (v1.0) — Initial authoring; validate-factory-path-staging WASM guard; INV-E21-001 invariant layer. lifecycle_status: draft (POL-14).]]"
 ---
 
 # BC-4.16.001: validate-factory-path-staging WASM PreToolUse guard MUST block any `git add` or `git stage` command that stages a path under `.factory/` on a product branch, and MUST pass all non-`.factory/` staging commands unconditionally
@@ -153,6 +154,10 @@ component, capturing the unnested form), AND the guard's branch detection report
    ```
 3. The `git add`/`git stage` command is NOT executed.
 
+(v1.10) `<branch>` in the message is the branch of the git TARGET directory resolved per Invariant 7,
+never the branch of the hook process's working directory; the branch the guard evaluates and the
+branch it reports are the same.
+
 **Error variant:** `FactoryPathOnProductBranch`
 
 ### PC2 — Passed: `git add`/`git stage` of non-`.factory/` paths
@@ -187,8 +192,10 @@ false` (exit code 0) immediately without path inspection.
    return `block_intent = false` (pass-through). The guard MUST be registered with
    `on_error = "continue"`. A broken guard is disruptive but never wedges the session.
 
-3. **Branch detection source:** The plugin detects the current product branch via `host::exec_subprocess`
-   (`git branch --show-current` or equivalent). If branch detection fails (git unavailable, detached
+3. **Branch detection source:** The plugin detects the product branch OF THE GIT TARGET DIRECTORY
+   (Invariant 7; v1.10 — formerly "the current product branch", which the implementation read from the
+   hook process cwd) via `host::exec_subprocess` (`git -C <target> branch --show-current` or
+   equivalent). If branch detection fails (git unavailable, detached
    HEAD, non-zero exit), the plugin MUST fail-open (pass-through). Uncertain branch state is NOT
    a blocking condition.
 
@@ -254,6 +261,39 @@ false` (exit code 0) immediately without path inspection.
       (requires two distinct `.factory` mounts in the same payload); outside issue #342's threat
       model; Precondition 4 neutralizes single-mount variants. (S-21.01 pass-7 NITPICK.)
 
+7. **Target-directory branch resolution (v1.10; closes the BC leg of [D-1254-HOOK-FP-003]; GH #840
+   family; S-26.02).** The branch that PC1, PC3 and the block message are evaluated against is the
+   branch of the git TARGET directory T of the `git add`/`git stage` invocation — the work tree the
+   command stages in — NOT the branch of the hook process's working directory. (Defect record: the
+   plugin's `exec_subprocess` runs in the dispatcher's session project root, so before v1.10 only the
+   Invariant 6 forms looked at any other directory; a `git add` aimed at a feature-branch worktree from
+   a session rooted on `develop` was judged on `develop`, and a `git add` aimed at the
+   `factory-artifacts` worktree through a non-`.factory`-class path was judged on the session branch.)
+   T is resolved from the payload, in this order, and the FIRST that applies wins:
+   1. the value of the explicit `-C <path>` global option of the (first) `git add`/`git stage`
+      invocation — ANY path, not only a `.factory`-class one (Invariant 6 is the special case of this
+      rule where the value is `.factory`-class); successive `-C` options compose as git does (each
+      relative to the previous);
+   2. otherwise the value of `--work-tree <path>` / `--work-tree=<path>` or of `-c core.worktree=<path>`;
+   3. otherwise the directory named by the last `cd <dir>` / `pushd <dir>` that precedes the git
+      invocation in the same payload (`cd <worktree> && git add …`), resolved relative to the working
+      directory of the next rule;
+   4. otherwise the working directory of the guarded Bash call itself (the directory the shell will run
+      the command in — the worktree being staged) when the hook input carries it;
+   5. only when none of 1-4 is available: the hook process's own working directory (the pre-v1.10
+      behavior, retained solely as the last-resort fallback).
+   Branch detection is `git -C <T> branch --show-current` through `host::exec_subprocess`, EXACTLY ONE
+   invocation per payload (the Invariant 6 residual 2 single-invocation constraint is kept; T is taken
+   from the first `git add`/`git stage` invocation). If detection on the resolved T fails (T is not a git
+   work tree, does not exist, git exits non-zero, empty output / detached HEAD, git unavailable) the
+   plugin FAILS OPEN with an advisory warning per Invariant 3 and MUST NOT fall back to the hook-process
+   branch (that fallback is the defect). The branch named in the PC1 block message is the branch of T.
+   What Invariant 7 does NOT change: the Precondition 2 detection contract; the Invariant 4 conservative
+   path, bulk-flag (`-A`, `--all`, `-u`, `.`, glob) and `.factory/`-argument forms and their EC-004 /
+   EC-008 / EC-010 verdicts (the staged-path predicate that would relax them is a separate amendment owed
+   to S-26.02 AC-001..AC-003); PC2-PC4; a `.factory/` path staged on a product-branch T is blocked
+   exactly as before; a T on `factory-artifacts` passes unconditionally (PC3).
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
@@ -272,6 +312,10 @@ false` (exit code 0) immediately without path inspection.
 | EC-012 | `git -C .factory add STATE.md` on `develop` where `.factory/` is NOT mounted as a worktree (unmounted checkout — CI, fresh clone) | BLOCKED: Invariant 6 fires — `-C .factory` targets a `.factory`-class path; guard runs `git -C .factory branch --show-current` → `develop` (product branch); PC1 fires; `FactoryPathOnProductBranch` error |
 | EC-013 | `git -C .factory add STATE.md` where `.factory/` IS mounted as the `factory-artifacts` worktree | PASSED: Invariant 6 fires — guard runs `git -C .factory branch --show-current` → `factory-artifacts`; PC3 passes unconditionally |
 | EC-014 | `git -c core.worktree=.factory add STATE.md` on `develop` | BLOCKED: Invariant 6 fires — `core.worktree=.factory` value names a `.factory`-class path; target branch detection → product branch; PC1 fires |
+| EC-015 | (v1.10; Invariant 7; [D-1254-HOOK-FP-003]) FEATURE-BRANCH WORKTREE staged from a session whose hook-process cwd (project root) is on `develop`: the staging target T is a worktree `W` (e.g. `/repo/.worktrees/S-25.09`) whose branch is `feature/S-25.09`, reached by (a) `git -C W add crates/hook-plugins/x/src/lib.rs`, (b) `cd W && git add crates/hook-plugins/x/src/lib.rs`, (c) a Bash call whose own working directory is `W` running `git add crates/hook-plugins/x/src/lib.rs`; and the same three forms with `.factory/STATE.md` as the path | (a)(b)(c) with the `crates/…` path: PASSED — PC2 (no `.factory/` argument), never blocked and never reported against `develop`. The three forms with `.factory/STATE.md`: BLOCKED by PC1, and the message names `product branch 'feature/S-25.09'` — NOT `develop` (the branch of the target, Invariant 7). The verdict never depends on the branch the SESSION is rooted on |
+| EC-016 | (v1.10; Invariant 7 + PC3) FACTORY-ARTIFACTS WORKTREE staged through a non-`.factory`-class path from a session rooted on `develop`: (a) `cd /repo/.factory && git add -A` (T = the `factory-artifacts` worktree via the `cd`); (b) a Bash call whose working directory is the `factory-artifacts` worktree running `git add -A`; (c) `git -C /repo/.factory-wt add STATE.md` where `/repo/.factory-wt` is a mounted `factory-artifacts` worktree whose path is not `.factory`-class | PASSED: Invariant 7 resolves T to the `factory-artifacts` worktree; PC3 passes unconditionally (the conservative `-A` of (a)(b) is moot on `factory-artifacts`). Before v1.10 these were judged on the session's `develop` and wrongly blocked |
+| EC-017 | (v1.10; Invariant 7) GENUINE `develop` STAGING of `.factory/` paths, no regression: (a) `git add .factory/STATE.md` with T = the project root on `develop` (no `-C`, no `cd`, Bash working directory = project root); (b) `git -C /repo add .factory/STATE.md` with `/repo` on `develop`; (c) `cd /repo && git add .factory/stories/S-26.02.md`; (d) the same as (a) with T on `release/v1.0.0-rc.26` | (a)–(d): BLOCKED by PC1 with `product branch 'develop'` (`'release/v1.0.0-rc.26'` for (d)) — the target IS the product branch, so the guard's true-positive case is intact (CAP-034 / INV-E21-001 enforcement) |
+| EC-018 | (v1.10; Invariant 7 fail-open and single-invocation) (a) `git -C /nonexistent add .factory/STATE.md`; (b) `git -C /tmp/not-a-repo add .factory/STATE.md`; (c) T detached HEAD; (d) a chained payload `git -C W1 add a.rs && git -C W2 add .factory/x.md` (W1 on `feature/a`, W2 on `develop`); (e) `-C` values composed: `git -C /repo -C .worktrees/S-25.09 add .factory/STATE.md` | (a)(b)(c): PASSED — fail-open per Invariant 3 with an advisory warning; the guard does NOT fall back to the session branch. (d): ONE branch detection, on the FIRST invocation's T (`W1`, `feature/a`); the second target is under-matched exactly as Invariant 6 residual 2 accepts (the block, if any, is judged against W1). (e): T = `/repo/.worktrees/S-25.09` (composition as git does) ⇒ BLOCKED with `product branch 'feature/S-25.09'` |
 
 ## Canonical Test Vectors
 
@@ -286,6 +330,10 @@ false` (exit code 0) immediately without path inspection.
 | T-7 | Branch = `develop`; `.factory/` unmounted; `-C` targeting `.factory/` | `git -C .factory add STATE.md` | BLOCKED: Invariant 6; target branch = `develop`; `FactoryPathOnProductBranch` |
 | T-8 | `.factory/` mounted as `factory-artifacts`; `-C` targeting `.factory/` | `git -C .factory add STATE.md` | PASSED: Invariant 6; target branch = `factory-artifacts`; PC3 |
 | T-9 | Branch = `develop`; `-c core.worktree=.factory` targeting `.factory/` | `git -c core.worktree=.factory add STATE.md` | BLOCKED: Invariant 6; target branch = `develop`; `FactoryPathOnProductBranch` |
+| T-10 | (v1.10, EC-015) Hook-process cwd (project root) on `develop`; target worktree `/repo/.worktrees/S-25.09` on `feature/S-25.09` | `git -C /repo/.worktrees/S-25.09 add crates/hook-plugins/x/src/lib.rs` (also `cd /repo/.worktrees/S-25.09 && git add crates/hook-plugins/x/src/lib.rs`, and the same bare command with the Bash call's working directory = the worktree) | PASSED: PC2 — not blocked, never judged on `develop` |
+| T-11 | (v1.10, EC-015) Same setup as T-10 | `git -C /repo/.worktrees/S-25.09 add .factory/STATE.md` (and the `cd`/working-directory forms) | BLOCKED: PC1; message names `product branch 'feature/S-25.09'` — NOT `develop` |
+| T-12 | (v1.10, EC-016) Hook-process cwd on `develop`; Bash working directory (or `cd` target) = the mounted `factory-artifacts` worktree `/repo/.factory` | `cd /repo/.factory && git add -A` (and `git add -A` with that working directory) | PASSED: Invariant 7 resolves T to `factory-artifacts`; PC3 |
+| T-13 | (v1.10, EC-017) Genuine `develop` staging, hook-process cwd and target both `develop` (no `-C`, no `cd`) | `git add .factory/STATE.md` | BLOCKED: PC1; `product branch 'develop'` (the true-positive case, identical to T-1) |
 
 ## SDK Grounding Evidence
 
@@ -330,7 +378,7 @@ Expected: entry present (added by S-21.01) or absent before implementation.
 | Capability Anchor Justification | CAP-034 (Nested Worktree Path Exclusivity) per ARCH-INDEX v3.07 / ADR-031 §Decision 3. This BC is the primary enforcement mechanism for CAP-034's invariant layer: the `validate-factory-path-staging` WASM guard blocks the `git add`/`git stage` surface that creates the dual-tracking condition. BC-5.43.001 is the safety-net layer of the same CAP-034 capability. |
 | L2 Domain Invariants | none (operational infrastructure) |
 | Architecture Module | `crates/hook-plugins/validate-factory-path-staging/` (new crate; to be created by S-21.01; ADR-031 §Decision 3 naming authority) |
-| Stories | S-21.01 (E-21 Wave 1) |
+| Stories | S-21.01 (E-21 Wave 1); S-26.02 (E-26; v1.10 Invariant 7 target-directory branch resolution, EC-015..EC-018, T-10..T-13 — [D-1254-HOOK-FP-003]; the staged-path predicate AC-001..AC-003 remain "pending BC-4.16.001 amendment") |
 | Source Issues | #342 (product-branch merge silently rm's a `.factory/` file) |
 | ADR Reference | ADR-031 §Decision 3 (authoritative crate naming: `validate-factory-path-staging.wasm`; `crates/hook-plugins/validate-artifact-path/` serves BC-4.11.001 Edit/Write/MultiEdit path validation since S-13.01 and cannot be reused — registry filename + cargo output collisions) |
 
@@ -350,6 +398,13 @@ Expected: entry present (added by S-21.01) or absent before implementation.
 
 S-21.01 (E-21 Wave 1 — factory artifact path guard: prevent dual-tracking and intercept product-branch merges that would clobber `.factory/` paths)
 
+S-26.02 (E-26 — validate-factory-path-staging false positives, GH #840; v1.10): delivers Invariant 7
+(target-directory branch resolution), the Invariant 3 and PC1 wording, EC-015..EC-018 and T-10..T-13
+([D-1254-HOOK-FP-003]). Note for the architect/implementer: the SDK `HookPayload` currently carries no
+working-directory field, and `host::exec_subprocess` takes no working-directory argument (it runs in the
+dispatcher's session project root); Invariant 7 rule 4 (the Bash call's working directory) therefore needs
+the host input `cwd` forwarded to the plugin, while rules 1-3 and the `git -C <T>` form need no host change.
+
 ## VP Anchors
 
 TBD — VP IDs to be assigned after VP authoring pass.
@@ -358,6 +413,7 @@ TBD — VP IDs to be assigned after VP authoring pass.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.10 | 2026-10-08 | **Target-directory branch resolution — closes the BC leg of [D-1254-HOOK-FP-003] (GH #840 family; attached to S-26.02; product-owner).** Defect (source read, `crates/hook-plugins/validate-factory-path-staging/src/lib.rs` `hook_logic` Step 3): the branch is detected by `git branch --show-current` run through `host::exec_subprocess`, whose working directory is the dispatcher's session project root (`resolve_project_cwd`), NOT the directory the guarded `git add` acts on; only the Invariant 6 forms (`-C`/`-c core.worktree=` naming a `.factory`-class path) use `git -C <target> branch --show-current`. Consequence: a `git add` run in or aimed at a feature-branch worktree (`git -C <worktree> add …`, `cd <worktree> && git add …`, or a Bash call whose own working directory is the worktree) from a session rooted on `develop` was judged on `develop` (the block message reported `develop` while the staging target was on `feature/S-25.09`); symmetrically a `git add` aimed at the `factory-artifacts` worktree through a non-`.factory`-class path was judged on the session branch instead of passing PC3. Amendment: (1) NEW Invariant 7 "Target-directory branch resolution": the branch is that of the git TARGET directory T, resolved in the order explicit `-C <path>` (any path, not only `.factory`-class; successive `-C` compose), `--work-tree`/`-c core.worktree=` value, a `cd`/`pushd <dir>` preceding the git invocation in the same payload, the guarded Bash call's working directory when the hook input carries it, and only then the hook process cwd as the last-resort fallback; detection is `git -C <T> branch --show-current`, exactly ONE `host::exec_subprocess` per payload (the Invariant 6 residual 2 constraint is kept); a failure to detect on the resolved T fails OPEN per Invariant 3 (never falling back silently to the session branch, which was the defect). (2) Invariant 3 amended: its "current product branch" is the branch of T. (3) PC1 message `<branch>` is the branch of T. (4) NEW EC-015..EC-018 and canonical test vectors T-10..T-13. Unchanged: the Precondition 2 detection contract, Invariant 4 conservative path/bulk-flag forms (so `git add -A` etc. keep their EC-004/EC-008/EC-010 verdicts until the separate staged-path predicate amendment owed to S-26.02 AC-001..AC-003), PC2-PC4, Invariants 1, 2, 5, 6 and their Accepted Residuals, fail-open, the `factory-artifacts` pass rule. No VP-count change. **Stories affected by BC changes:** S-26.02 (story-writer must add an AC for target-directory branch resolution and cite BC-4.16.001 under `bc_array_changes_propagate_to_body_and_acs`; the plugin source is not changed by this BC edit). **VP citations changed in:** none. |
 | 1.9 | 2026-08-13 | POL-14 auto-promotion completion + frontmatter status-field parity fix (state-manager; S-21.09 PR #775 merged to develop `2e8087af` 2026-08-13T14:16:26Z; post-merge processing burst D-991). Top-level `status:` field draft→active, completing the POL-14 promotion the v1.8 burst applied only to `lifecycle_status:` (already active since v1.8) — the two fields had drifted out of parity since 2026-07-23. No behavioral/content change. BC-INDEX v4.56→v4.57. |
 | 1.8 | 2026-07-23 | POL-14 auto-promotion at merge (state-manager; S-21.01 PR #759 squash-merged 7bb0e797 2026-07-23). lifecycle_status draft→active. BC-INDEX v4.19→v4.20. |
 | 1.7 | 2026-07-23 | Accepted Residuals record (product-owner; S-21.01 pass-6/7 adversarial cascade; documentary-only — no behavioral requirement changes). Two accepted residuals recorded in Invariant 6: (1) trailing-slash `-C .factory/` target forms not classified factory-class (Invariant 6 enumeration omits trailing-slash variant) — consequence is rare OVER-block via CWD fallback on mounted worktrees with non-canonical trailing-slash form; conservative direction, accepted (S-21.01 pass-6 sub-NITPICK); (2) single-detection-first-target semantics: guard performs at most ONE target branch detection per payload (`exec_subprocess` single-invocation constraint); chained payload with benign-first + dangerous-second factory-class target (`git -C .factory add x && git -C /other/.factory add y`) under-matched on second target; accepted: faithful to Invariant 6 singular-target contract, near-zero realism (requires two distinct `.factory` mounts), outside issue #342 threat model, Precondition 4 neutralizes single-mount variants (S-21.01 pass-7 NITPICK). BC-INDEX v4.18→v4.19. |

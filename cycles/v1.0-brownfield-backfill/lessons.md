@@ -2086,3 +2086,27 @@ the file.
 **What happened:** (1) ADR-052 reached ~4,876 lines; every edit returns FUEL_EXHAUSTED from the PostToolUse validators, so hooks cannot validate it. The architect recommends a further split (ADR-054 already carved out the on-disk formats). This is an OPEN RECOMMENDATION to the human, not a deferral ([D-1254-ADR052-SPLIT]). (2) The implementer reported a test count of 3193; the actual was 3423 — the orchestrator verified it independently rather than acting on the report.
 **Lesson (D-1254):** Size budgets for governed documents apply to ADRs too (cf. D-442(e) for lessons.md); verify any claimed count anomaly with the command that produces it before dispatching work on it (same family as L-BB-D1253 verify-before-dispatch).
 `[process-gap][D-1254][adr-size][fuel][orchestrator][verify-before-dispatch]`
+
+## LESSON (D-1255) — Adversary reports must be persisted verbatim by the burst that follows the pass, not reconstructed from story tables
+
+**What happened:** The S-25.08 pass-3 report was never saved by the session that ran it; D-1254(h) persisted a RECONSTRUCTED record (no severities, no novelty, no evidence) from the story table, and the pass-4 adversary then reported it as F-S2508-L4-007 (repeat of the D-1252-OWED pattern). In this burst the verbatim texts of pass 3, pass 4 and S-25.09 pass 1 were relayed by the orchestrator and persisted; two story-table subjects (S-25.08 L4-007, S-25.09 L1-007) turned out to describe the wrong finding because they were filled from commit titles, not from the review.
+**Lesson (D-1255):** The orchestrator must hand the full adversary report to the state-manager in the same turn the adversary returns; the story-writer must not fill a review table from commit titles ("the story-writer does not invent a subject" must also mean "does not infer one"). The review file is authoritative and story tables are index copies.
+`[process-gap][D-1255][adversary-persistence][S-25.08][S-25.09]`
+
+## LESSON (D-1255) — Operator docs must be re-validated when the behavior they describe changes
+
+**What happened:** S-25.09 pass 1 found two HIGH defects in `docs/guide/migration-interim-block-recovery.md`: the identity check required `txn_id == "txn-" + activation_id` after the code (since `a8ba160f`) switched to the bare id, and step 3 substituted a derived intent-log path when `intent_log_path` was null, which ADR-052 item 11(e) forbids. The runbook was written at `efd482d2`, before the behavior changed; no task re-validated it.
+**Lesson (D-1255):** Any story that changes behavior an operator runbook describes must carry a task that re-reads the runbook against the new behavior (the technical-writer deliverable is not done at first write). Candidate home: S-12.16/S-12.17-class prompt sweep or the S-25.09 T-36/T-37 verification.
+`[process-gap][D-1255][runbook][operator-docs][S-25.09]`
+
+## LESSON (D-1255) — Batch fixes on lower stack branches before re-pointing story SHA cites; avoid hash tokens in narrative blockquotes
+
+**What happened:** S-25.09 was rebased five times onto an S-25.08 that kept gaining commits, so every story cite of an S-25.09 SHA was re-pointed five times (`(earlier: ...)` chains) and every dependent story's input-hash drifted with each story edit (S-25.08 -> S-25.09 -> S-25.10 -> S-25.11 -> S-25.12, E-25). The v4.489 STORY-INDEX blockquote also carried superseded `S-NN=hash` tokens that the POLICY 18 hook read as blockquote hashes. The story-writer used `replace_all` twice for SHA re-points over protected history (verified byte-identical).
+**Lesson (D-1255):** Finish and push fixes on the lower stack branch before rebasing and re-pointing the upper stories, or cite commits by subject; finish all story edits before one `compute-input-hash --update` pass in topological order; write historical hash values in narrative blockquotes without the `S-NN=hash` form. `replace_all` over protected history stays allowed only with a byte-identity check.
+`[process-gap][D-1255][rebase-churn][input-hash-cascade][policy-18]`
+
+## LESSON (D-1255) — Implementer self-reported test counts were wrong twice more (POLICY 22 stands)
+
+**What happened:** Two implementer completion reports carried test counts that the orchestrator's re-run did not reproduce; the registered numbers (S-25.08 3386/0 and failpoints 1166/0; S-25.09 1242/0 and 1305/0) are the orchestrator's re-run values.
+**Lesson (D-1255):** Re-run every gate the registration will cite; never copy an agent's self-reported count (POLICY 22, subagent_report_fidelity_literal_shell).
+`[process-gap][D-1255][policy-22][verify-before-register]`
