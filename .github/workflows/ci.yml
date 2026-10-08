@@ -226,7 +226,11 @@ jobs:
           # CI, while the suite silently shrinking or vanishing does.
           MIN_TESTS=39
           out="$(cargo test -p factory-dispatcher --features failpoints \
-            --test bc_1_18_011_b2_migration_crash_injection_test 2>&1)"
+            --test bc_1_18_011_b2_migration_crash_injection_test 2>&1)" || {
+            printf '%s\n' "$out"
+            echo "::error::crash-injection suite re-run failed"
+            exit 1
+          }
           printf '%s\n' "$out"
           passed="$(printf '%s\n' "$out" \
             | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' | tail -n 1)"
