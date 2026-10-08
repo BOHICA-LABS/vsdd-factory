@@ -13951,11 +13951,21 @@ pub fn read_active_txn_record(
     // Tier 0 read (the SAME reader admission uses), then the strict-presence
     // typed decode of ONLY the selected record (ADR-052 v1.23 items 3-4).
     let files = admission::read_txn_files(migration_state_dir)?;
-    let chosen = match admission::select_live_txn(&files)? {
-        Some(live) => Some(live),
-        None => files.iter().find(|f| !f.is_live()),
-    };
-    chosen.map(decode_txn_record_strict).transpose()
+    if let Some(live) = admission::select_live_txn(&files)? {
+        return decode_txn_record_strict(live).map(Some);
+    }
+    // No live record: the first TERMINAL record is returned via the Tier 0 projection only.
+    // ADR-052 v1.24 item 3 / BC-1.18.011 Precondition 6(f)(ii): a terminal (COMPLETED/
+    // ABORTED) record is NEVER rejected for a missing Tier 1 field and never modified, so
+    // strict-presence decoding applies to the live record alone.
+    Ok(files.iter().find(|f| !f.is_live()).map(|terminal| {
+        let generation_id = terminal
+            .raw
+            .get("generation_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        planner_view(terminal, generation_id)
+    }))
 }
 
 /// The `BcIndexMigrationTxnRecord` keys that MUST be present in a raw txn
