@@ -220,6 +220,22 @@ pub trait Fs {
     /// yet `durable` until a harness-level promotion (mirrors
     /// `write_temp`'s own live/durable split).
     fn append(&self, path: &Path, content: &[u8]) -> Result<(), BcIndexMigrationError>;
+
+    /// Durably append `content` to `path` on an `O_APPEND` handle in ONE
+    /// `write_all`, create the file if absent, apply the platform FILE barrier
+    /// (`F_FULLFSYNC` on macOS, `fsync` elsewhere, an error PROPAGATES and is
+    /// never downgraded, ADR-052 §Decision 7d) and report whether THIS call
+    /// created the file (`Ok(true)`). It does NOT sync the parent directory:
+    /// `IntentLogWriter::append_batch` does that, via [`Fs::fsync_dir`], iff
+    /// this call returned `Ok(true)` (ADR-054 Decision 1.9 step 5), so the
+    /// creation-time directory sync stays a separate, separately failable,
+    /// separately recorded operation (`migration_fs::fsync_dir`).
+    fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError>;
+
+    /// Truncate `path` to exactly `len` bytes and apply the same platform
+    /// FILE barrier as [`Fs::append_durable`] (ADR-054 Decision 1.9 step 2:
+    /// durable removal of a torn intent-log tail before the first append).
+    fn truncate_durable(&self, path: &Path, len: u64) -> Result<(), BcIndexMigrationError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +494,74 @@ impl Fs for StdFs {
             path: path.to_path_buf(),
             source,
         })
+    }
+
+    fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError> {
+        migration_failpoint!("migration_fs::append_durable", path);
+        // `created` is decided ATOMICALLY by `create_new` (O_CREAT|O_EXCL),
+        // falling back to an append-open on `AlreadyExists`; never by a
+        // prior `exists()` probe (ADR-054 Decision 1.9 step 5).
+        let io_err = |source| BcIndexMigrationError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let (mut file, created) = match std::fs::OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(path)
+        {
+            Ok(file) => (file, true),
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => (
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(path)
+                    .map_err(io_err)?,
+                false,
+            ),
+            Err(source) => return Err(io_err(source)),
+        };
+        use std::io::Write as _;
+        file.write_all(content).map_err(io_err)?;
+        // WAL boundary file barrier: strict, propagated, no downgrade.
+        last_amended_migrate::atomic_write::sync_file_strict_durable(&file)
+            .map_err(|e| Self::barrier_error(path, e))?;
+        Ok(created)
+    }
+
+    fn truncate_durable(&self, path: &Path, len: u64) -> Result<(), BcIndexMigrationError> {
+        migration_failpoint!("migration_fs::truncate_durable", path);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|source| BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        file.set_len(len)
+            .map_err(|source| BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        last_amended_migrate::atomic_write::sync_file_strict_durable(&file)
+            .map_err(|e| Self::barrier_error(path, e))
+    }
+}
+
+impl StdFs {
+    /// Attach `path` to a `MigrateError` raised by the strict file barrier
+    /// (the barrier receives a bare handle and cannot name the path).
+    fn barrier_error(
+        path: &Path,
+        error: last_amended_migrate::MigrateError,
+    ) -> BcIndexMigrationError {
+        let source = match error {
+            last_amended_migrate::MigrateError::Io { source, .. } => source,
+            other => std::io::Error::other(other.to_string()),
+        };
+        BcIndexMigrationError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
     }
 }
 

@@ -1927,6 +1927,27 @@ impl Fs for InMemoryFs {
         slots[file_id_index(file_id_of(path))].live = Some(gen_tag);
         Ok(())
     }
+
+    fn append_durable(&self, path: &Path, content: &[u8]) -> Result<bool, BcIndexMigrationError> {
+        // Same generation-tag model as `append` (live only, durable after
+        // its own fsync); `created` is true iff the file did not exist.
+        let gen_tag = content.first().copied().unwrap_or(0);
+        let mut slots = self.slots.borrow_mut();
+        let slot = &mut slots[file_id_index(file_id_of(path))];
+        let created = slot.live.is_none();
+        slot.live = Some(gen_tag);
+        Ok(created)
+    }
+
+    fn truncate_durable(&self, path: &Path, len: u64) -> Result<(), BcIndexMigrationError> {
+        // Tag model: truncation to zero leaves an empty file (tag 0, as
+        // `write_temp` models empty content); any longer length keeps the tag.
+        if len == 0 {
+            let mut slots = self.slots.borrow_mut();
+            slots[file_id_index(file_id_of(path))].live = Some(0);
+        }
+        Ok(())
+    }
 }
 
 // ===========================================================================

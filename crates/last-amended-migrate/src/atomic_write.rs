@@ -64,7 +64,7 @@
 use crate::error::MigrateError;
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Bounded attempt count for [`rename_with_retry`]'s Windows-transient-lock
@@ -461,6 +461,23 @@ fn sync_dir_durable(_dir: &Path) -> std::io::Result<()> {
 pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
     sync_dir_durable(dir).map_err(|source| MigrateError::Io {
         path: dir.to_path_buf(),
+        source,
+    })
+}
+
+/// Public STRICT file-barrier wrapper over this module's private
+/// [`sync_file_durable`] (`fcntl(F_FULLFSYNC)` on macOS, `sync_all`
+/// elsewhere; the platform `cfg` lives inside the primitive). The error is
+/// propagated and there is NEVER a fallback to plain `fsync` when
+/// `F_FULLFSYNC` fails. It is the file-handle sibling of
+/// [`sync_dir_strict_durable`], for external crates (the intent-log `Fs`
+/// seam of `factory-dispatcher`, ADR-054 Decision 1.9 step 5) that must
+/// make an append or a truncation durable to media without introducing
+/// their own `unsafe` FFI. The handle carries no path, so the returned
+/// `MigrateError::Io` has an empty `path`; the caller attaches its own.
+pub fn sync_file_strict_durable(file: &File) -> Result<(), MigrateError> {
+    sync_file_durable(file).map_err(|source| MigrateError::Io {
+        path: PathBuf::new(),
         source,
     })
 }
