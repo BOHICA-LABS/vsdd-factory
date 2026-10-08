@@ -12992,12 +12992,13 @@ pub enum BcIndexMigrationError {
     #[error("writer admission: invalid tool_use_id ({len} bytes)")]
     InvalidToolUseId { len: usize },
 
-    /// S-25.08 Red-Gate STUB variant (ADR-052 v1.21 "Admission state-integrity
-    /// variant", F-012): the admission-side integrity failure. Display is
+    /// The admission-side integrity failure (ADR-052 v1.21 "Admission state-integrity
+    /// variant", F-012). Display is
     /// `migration admission: state integrity failure (<kind-token>): <detail>`
-    /// and MUST NOT contain `BINARY_INTEGRITY_FAILURE`. The five admission-side
-    /// raise sites still raise `BinaryIntegrityFailure` (the implementer converts
-    /// them).
+    /// and never contains `BINARY_INTEGRITY_FAILURE`. Raised by the admission-side
+    /// integrity sites (gate/txn record malformed, non-string `migration_id`, more
+    /// than one live txn, reservation serialization, newer-schema record) and by the
+    /// coordinator's shared Tier 0/Tier 1 readers.
     #[error("migration admission: state integrity failure ({}): {detail}", .kind.token())]
     AdmissionStateIntegrity {
         kind: AdmissionStateIntegrityKind,
@@ -13157,8 +13158,8 @@ impl ExpiryAbortArm {
     }
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 F-012): closed classification of an
-/// admission-side state-integrity failure.
+/// Closed classification of an admission-side state-integrity failure
+/// (ADR-052 v1.21 F-012); `token()` is the stable lowercase spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionStateIntegrityKind {
     GateRecordMalformed,
@@ -13185,8 +13186,7 @@ impl AdmissionStateIntegrityKind {
     }
 }
 
-/// S-25.08 Red-Gate STUB (ADR-052 v1.21 F-012): closed `E-MAINTENANCE-002`
-/// `<cause>` classification.
+/// Closed `E-MAINTENANCE-002` `<cause>` classification (ADR-052 v1.21 F-012).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdmissionFailureCause {
     InvalidToolUseId,
@@ -13212,7 +13212,9 @@ impl BcIndexMigrationError {
     /// `reservations/` / the reservation, or cannot read gate/txn state), or
     /// `state_integrity` (malformed gate/txn record, non-string `migration_id`,
     /// more than one live txn, any other integrity failure). The underlying
-    /// detail goes to `tracing::warn!`, never into the message.
+    /// detail is carried, sanitized (control characters escaped, 64 characters per
+    /// data-derived substring), in the `detail` field of the `migration.admission_failed`
+    /// dispatcher-internal event (BC-3.08.001 Event 12), never into the message.
     #[must_use]
     pub fn admission_failure_cause(&self) -> AdmissionFailureCause {
         // EXHAUSTIVE over `BcIndexMigrationError` (no `_` arm): adding a variant
@@ -16424,14 +16426,14 @@ fn extract_subsystem_section_preamble(section_body: &str) -> String {
 /// re-runs the split itself, only the remaining publication steps).
 fn finish_committing_migration(
     fs: &impl Fs,
-    project_root: &Path,
+    factory_root: &admission::FactoryRoot,
     migration_state_dir: &Path,
     txn: &mut BcIndexMigrationTxnRecord,
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     let generation_id = txn.generation_id.clone().unwrap_or_default();
     // ADR-052 v1.24 ruling (i): the txn's RECORDED `intent_log_path`, resolved against
-    // the project root, is used as-is -- never recomputed from `generation_id`.
-    let intent_log_path = recorded_intent_log_path(project_root, txn)?;
+    // the resolved factory root, is used as-is -- never recomputed from `generation_id`.
+    let intent_log_path = recorded_intent_log_path(factory_root, txn)?;
     let completed_count = execute_canonical_path_moves(
         fs,
         &txn.pending_canonical_moves,
@@ -16525,27 +16527,42 @@ fn factory_root_source_suffix(source: &Option<ProjectRootSource>) -> String {
         .unwrap_or_default()
 }
 
-/// The txn's RECORDED `intent_log_path` resolved against the project root. A record
-/// reaching here has passed the strict pair check (or was just written by the fresh
-/// run), so an absent value is an internal-invariant failure surfaced as
-/// `txn_record_malformed`, never a silent re-derivation (ADR-052 v1.24 ruling (i)).
+/// The txn's RECORDED `intent_log_path` resolved against the resolved [`FactoryRoot`]
+/// (ADR-052 v1.21 "Single anchoring rule": every `.factory/...` path derives from the
+/// resolved root, never from `project_root.join(".factory")`). The recorded string keeps its
+/// project-root-relative `.factory/<...>` format; its leading factory-directory component is
+/// replaced by the resolved root. A record reaching here has passed the strict pair check
+/// (or was just written by the fresh run), so an absent or differently-rooted value is an
+/// internal-invariant failure surfaced as `txn_record_malformed`, never a silent
+/// re-derivation (ADR-052 v1.24 ruling (i)).
 fn recorded_intent_log_path(
-    project_root: &Path,
+    factory_root: &admission::FactoryRoot,
     txn: &BcIndexMigrationTxnRecord,
 ) -> Result<PathBuf, BcIndexMigrationError> {
-    match txn.intent_log_path.as_deref() {
-        Some(recorded) => Ok(project_root.join(recorded)),
-        None => Err(BcIndexMigrationError::AdmissionStateIntegrity {
-            kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
-            detail: "intent_log_path is null while generation_id is set".to_string(),
-        }),
-    }
+    let malformed = |detail: &str| BcIndexMigrationError::AdmissionStateIntegrity {
+        kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+        detail: detail.to_string(),
+    };
+    let recorded = txn.intent_log_path.as_deref().ok_or_else(|| {
+        malformed("intent_log_path is null while generation_id is set")
+    })?;
+    let relative = recorded
+        .strip_prefix(admission::FACTORY_DIR_NAME)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .ok_or_else(|| malformed("intent_log_path is not rooted at the factory directory"))?;
+    Ok(factory_root.path().join(relative))
 }
 
 /// ADR-052 Decision 7b / 7c step 1: the project-root-relative intent-log path persisted in
-/// the txn record's `intent_log_path` alongside `generation_id`.
+/// the txn record's `intent_log_path` alongside `generation_id`. The format is unchanged
+/// (`.factory/migration-state/intent-<generation_id>.log`); its directory components come
+/// from the shared factory-layout constants, not a hand-written literal.
 fn intent_log_path_for_generation(generation_id: &str) -> String {
-    format!(".factory/migration-state/intent-{generation_id}.log")
+    format!(
+        "{}/{}/intent-{generation_id}.log",
+        admission::FACTORY_DIR_NAME,
+        admission::MIGRATION_STATE_DIR_NAME
+    )
 }
 
 /// The B2 coordinator's path-based entry point: `project_root` is the resolved
@@ -16895,7 +16912,7 @@ fn run_bc_index_migration_core(
                 write_txn_record(&fs, &migration_state_dir, &txn)?;
                 return finish_committing_migration(
                     &fs,
-                    project_root,
+                    &factory_root,
                     &migration_state_dir,
                     &mut txn,
                 );
@@ -16970,7 +16987,7 @@ fn run_bc_index_migration_core(
             // `append_intent_records_for_pending_moves`'s own doc
             // comment) — safe to re-run even if the prior attempt did
             // already append these same records.
-            let resume_intent_log_path = recorded_intent_log_path(project_root, &txn)?;
+            let resume_intent_log_path = recorded_intent_log_path(&factory_root, &txn)?;
             append_intent_records_for_pending_moves(
                 &fs,
                 &resume_intent_log_path,
@@ -17067,7 +17084,7 @@ fn run_bc_index_migration_core(
             fs.fsync_dir(&migration_state_dir)?;
             txn.state = BcIndexMigrationTxnState::Committing;
             write_txn_record(&fs, &migration_state_dir, &txn)?;
-            return finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn);
+            return finish_committing_migration(&fs, &factory_root, &migration_state_dir, &mut txn);
         }
         RecoveryDecision::ForwardRecovery {
             activation_id,
@@ -17083,7 +17100,7 @@ fn run_bc_index_migration_core(
             );
             let mut txn =
                 decode_txn_record_strict(require_live_file(live_file, "ForwardRecovery")?)?;
-            return finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn);
+            return finish_committing_migration(&fs, &factory_root, &migration_state_dir, &mut txn);
         }
         RecoveryDecision::RequiresReauthorization { activation_id } => {
             // Human intervention required -- this row of the ratified
@@ -17439,7 +17456,7 @@ fn run_bc_index_migration_core(
     // rename has occurred yet at this point (Postcondition 4), so a
     // failure here aborts the staging generation exactly like the
     // content-preservation/census gates immediately above.
-    let intent_log_path = recorded_intent_log_path(project_root, &txn)?;
+    let intent_log_path = recorded_intent_log_path(&factory_root, &txn)?;
     if let Err(e) = append_intent_records_for_pending_moves(
         &fs,
         &intent_log_path,
@@ -17523,7 +17540,7 @@ fn run_bc_index_migration_core(
     txn.state = BcIndexMigrationTxnState::Committing;
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 
-    finish_committing_migration(&fs, project_root, &migration_state_dir, &mut txn)
+    finish_committing_migration(&fs, &factory_root, &migration_state_dir, &mut txn)
 }
 
 /// Maps a [`run_bc_index_migration`] result to the OS process exit code

@@ -107,8 +107,8 @@ async fn main() {
     // dispatch, and must never attempt to parse a hook envelope from
     // stdin. WIRING-EXEMPT (BC-5.38.003): pure argv-routing delegation to
     // a single call, zero branching beyond the one dispatch condition —
-    // see the stub commit report WIRING-EXEMPT table. The real migration
-    // logic behind `run_migrate_bc_index_cli` is `todo!()`.
+    // see the stub commit report WIRING-EXEMPT table. The migration logic
+    // lives behind `run_migrate_bc_index_cli`.
     if std::env::args().nth(1).as_deref() == Some("migrate-bc-index") {
         // ADR-052 §5a "Single anchoring rule": the coordinator operates on the
         // SESSION project root (CLAUDE_PROJECT_DIR, else the process cwd) — the

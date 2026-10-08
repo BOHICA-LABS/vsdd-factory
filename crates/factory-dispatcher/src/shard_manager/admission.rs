@@ -306,6 +306,12 @@ fn resolve_real(path: &Path) -> Option<PathBuf> {
     Some(resolved)
 }
 
+/// The factory directory name under a project root.
+pub const FACTORY_DIR_NAME: &str = ".factory";
+
+/// The governed-migration namespace directory name under a factory root.
+pub const MIGRATION_STATE_DIR_NAME: &str = "migration-state";
+
 /// The session's own factory root: where its governed-migration namespace
 /// (`<factory_root>/migration-state`) lives (ADR-052 v1.20 §5a "Admission scope
 /// anchoring"). `real` is the symlink-free form (`None` when it could not be
@@ -331,7 +337,7 @@ impl FactoryRoot {
         self.real
             .as_deref()
             .unwrap_or(&self.lex)
-            .join("migration-state")
+            .join(MIGRATION_STATE_DIR_NAME)
     }
 }
 
@@ -513,7 +519,7 @@ fn resolve_session_project_root_path(
 pub fn resolve_factory_root(
     project_root: &Path,
 ) -> Result<Option<FactoryRoot>, BcIndexMigrationError> {
-    let dot_factory = project_root.join(".factory");
+    let dot_factory = project_root.join(FACTORY_DIR_NAME);
     match std::fs::metadata(&dot_factory) {
         Ok(meta) if meta.is_dir() => {}
         Ok(_) => return Ok(None),
