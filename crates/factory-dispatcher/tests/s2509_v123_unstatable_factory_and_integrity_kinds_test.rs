@@ -314,6 +314,58 @@ mod fault {
     }
 }
 
+/// BC-3.08.001 v1.37 Events 12/13: every data-derived substring of `detail` is
+/// sanitized and truncated to 64 characters (`sanitize_diagnostic`: when the escaped
+/// form exceeds 64 chars, keep the first 63 and append `…`, total 64). The `.factory`
+/// path is such a substring, so the expected form is computed from the ACTUAL tempdir
+/// path (platform-independent: macOS `/private/var/folders/...` paths exceed 64 chars,
+/// Linux `/tmp/...` paths usually do not). The dispatcher may report the canonical
+/// spelling of the root, so both spellings are accepted.
+fn capped_path_form(full: &str) -> String {
+    if full.chars().count() <= 64 {
+        full.to_string()
+    } else {
+        let mut s: String = full.chars().take(63).collect();
+        s.push('…');
+        s
+    }
+}
+
+/// `Err` describes how `detail` departs from `<capped .factory path>: <kind>: <msg>`.
+fn check_unstatable_detail(
+    detail: &str,
+    root: &Path,
+    kind_dbg: &str,
+    os_msg: &str,
+) -> Result<(), String> {
+    let raw = root.join(".factory").display().to_string();
+    let canon = root
+        .canonicalize()
+        .map(|c| c.join(".factory").display().to_string())
+        .unwrap_or_else(|_| raw.clone());
+    let first = detail.split(": ").next().unwrap_or("");
+    let n = first.chars().count();
+    if n > 64 {
+        return Err(format!("path substring is {n} chars (> 64): {detail:?}"));
+    }
+    // `capped_path_form` is the whole path when <= 64 chars, else its 63-char prefix
+    // plus the `…` marker; equality with it proves "proper prefix + marker" or "whole".
+    let ok_path = [&raw, &canon]
+        .iter()
+        .any(|full| first == capped_path_form(full));
+    if !ok_path {
+        return Err(format!(
+            "path substring {first:?} is not the 64-char-capped form of {raw:?} (or {canon:?}): {detail:?}"
+        ));
+    }
+    if !detail.contains(&format!(": {kind_dbg}: ")) || !detail.ends_with(os_msg) {
+        return Err(format!(
+            "detail must carry ErrorKind `{kind_dbg}` and OS message `{os_msg}`: {detail:?}"
+        ));
+    }
+    Ok(())
+}
+
 /// How to make `<root>/.factory` unstatable.
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug)]
@@ -568,18 +620,10 @@ fn test_BC_1_18_013_EC041_unstatable_factory_admission_writes_one_admission_fail
                     failures.push(format!("[{label}] kind must be PRESENT and null: {v}"));
                 }
                 let detail = v["detail"].as_str().unwrap_or("");
-                let root_leaf = root.file_name().unwrap().to_string_lossy().to_string();
-                let msg_core = os_err.to_string();
-                if !detail.contains(".factory")
-                    || !detail.contains(&root_leaf)
-                    || !detail.contains(&kind_dbg)
-                    || !detail.contains(&msg_core)
+                if let Err(why) =
+                    check_unstatable_detail(detail, &root, &kind_dbg, &os_err.to_string())
                 {
-                    failures.push(format!(
-                        "[{label}] detail must carry the sanitized `.factory` path (under \
-                         `{root_leaf}`), the ErrorKind `{kind_dbg}` and the OS message \
-                         `{msg_core}`; got {detail:?}"
-                    ));
+                    failures.push(format!("[{label}] {why}"));
                 }
                 if line.contains(SECRET_ID) {
                     failures.push(format!("[{label}] raw tool_use_id leaked: {line}"));
@@ -765,14 +809,10 @@ fn test_BC_1_18_013_EC042_unstatable_factory_release_writes_one_reservation_rele
                     ));
                 }
                 let detail = v["detail"].as_str().unwrap_or("");
-                if !detail.contains(".factory")
-                    || !detail.contains(&kind_dbg)
-                    || !detail.contains(&os_err.to_string())
+                if let Err(why) =
+                    check_unstatable_detail(detail, &root, &kind_dbg, &os_err.to_string())
                 {
-                    failures.push(format!(
-                        "[{label}] detail must carry the `.factory` path, ErrorKind `{kind_dbg}` \
-                         and message `{os_err}`; got {detail:?}"
-                    ));
+                    failures.push(format!("[{label}] {why}"));
                 }
                 if line.contains(SECRET_ID) {
                     failures.push(format!("[{label}] raw tool_use_id leaked: {line}"));

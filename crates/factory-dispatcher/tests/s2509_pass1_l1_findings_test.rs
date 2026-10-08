@@ -153,13 +153,31 @@ fn raw_tree(root: &Path) -> BTreeMap<String, String> {
 /// BC-INDEX and an (optionally populated) `.factory/migration-state/`.
 struct Coord {
     dir: tempfile::TempDir,
+    /// A nested (long) project root under `dir`, when the fixture needs a long path.
+    sub: Option<PathBuf>,
 }
 
 impl Coord {
     fn new() -> Self {
-        let c = Coord {
-            dir: tempfile::tempdir().expect("project tempdir"),
-        };
+        Self::make(None)
+    }
+    /// A fixture whose project root is `segments` nested directories of `seg_len`
+    /// characters each, under the CANONICAL tempdir (so every spelling agrees).
+    fn new_long(seg_len: usize, segments: usize) -> Self {
+        Self::make(Some((seg_len, segments)))
+    }
+    fn make(long: Option<(usize, usize)>) -> Self {
+        let dir = tempfile::tempdir().expect("project tempdir");
+        let sub = long.map(|(seg_len, segments)| {
+            let mut root = dir.path().canonicalize().unwrap();
+            for i in 0..segments {
+                let ch = char::from(b'a' + u8::try_from(i % 26).unwrap());
+                root = root.join(ch.to_string().repeat(seg_len));
+            }
+            std::fs::create_dir_all(&root).unwrap();
+            root
+        });
+        let c = Coord { dir, sub };
         std::fs::create_dir_all(c.root().join(".factory")).unwrap();
         std::fs::write(c.root().join(".factory/shard-config.toml"), SHARD_CONFIG).unwrap();
         let canon = c.canonical();
@@ -171,7 +189,7 @@ impl Coord {
         c
     }
     fn root(&self) -> &Path {
-        self.dir.path()
+        self.sub.as_deref().unwrap_or_else(|| self.dir.path())
     }
     fn ms(&self) -> PathBuf {
         self.root().join(".factory/migration-state")
@@ -2207,6 +2225,313 @@ fn test_BC_1_18_011_F014_read_active_txn_record_does_not_strict_decode_terminal_
     }
     assert_no_failures(
         "test_BC_1_18_011_F014_read_active_txn_record_does_not_strict_decode_terminal_records",
+        failures,
+    );
+}
+
+// ===========================================================================
+// ADR-052 v1.25 items 11(f)(2) / 11(g): the per-surface truncation caps
+// ===========================================================================
+//
+// The 64-character per-substring cap applies to InternalLog Events 11-13 `detail` ONLY.
+// The operator stderr line and the error Display use 256 per substring; coordinator
+// advisory `<subject>` and `<cause>` are capped at 256 EACH (`…` is the 256th character)
+// and the fixed clause is never truncated; the admission entry points write NOTHING
+// to stderr for a coordinator-advisory condition (11(g)3).
+
+/// `sanitize_diagnostic` for a path with no control characters: whole when it fits,
+/// else the first `max - 1` characters plus `…` (total `max`).
+fn capped(full: &str, max: usize) -> String {
+    if full.chars().count() <= max {
+        full.to_string()
+    } else {
+        let mut s: String = full.chars().take(max - 1).collect();
+        s.push('…');
+        s
+    }
+}
+
+/// (a) AdmissionStateIntegrity under a LONG project path: the coordinator's stderr Display
+/// shows the txn-record path in FULL (<= 256), while the hook's Event 12 `detail` shows the
+/// 64-character truncation of the SAME path. Today both are truncated to 64 (the cap is
+/// applied inside the error's own `detail`), so the stderr half is RED.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v125_11g_state_integrity_stderr_full_path_event_12_detail_capped_64_blackbox()
+ {
+    let c = Coord::new_long(40, 2);
+    let txn = c.ms().join("txn-act-bad.json");
+    std::fs::write(&txn, b"{ not json").unwrap();
+    let full = txn.display().to_string();
+    let n = full.chars().count();
+    assert!(
+        n > 64 && n <= 256,
+        "fixture path must exceed the event cap and fit the stderr cap: {n}"
+    );
+    let mut failures = Vec::new();
+
+    // Operator surface: coordinator stderr (256 per substring => the full path).
+    let out = c.run();
+    let err = stderr_of(&out);
+    if out.status.code() != Some(2)
+        || !out.stdout.is_empty()
+        || !err.contains("state integrity failure")
+    {
+        failures.push(format!(
+            "setup: expected exit 2, empty stdout and a `state integrity failure` line; got \
+             exit {:?}, stderr {err:?}",
+            out.status.code()
+        ));
+    }
+    if !err.contains(&full) {
+        failures.push(format!(
+            "stderr Display must carry the txn path in FULL ({n} chars, cap 256): {full:?}; \
+             got {err:?}"
+        ));
+    }
+
+    // Event surface: the hook's Event 12 `detail` (64 per substring).
+    let plugin_root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let target = c.root().join(CYCLES_PATH);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let hook = run_hook(
+        c.root(),
+        plugin_root.path(),
+        logs.path(),
+        &edit_envelope(&target, "toolu_v125a"),
+    );
+    let events = read_events(logs.path());
+    let failed = of_type(&events, "migration.admission_failed");
+    if hook.status.code() != Some(2)
+        || failed.len() != 1
+        || failed[0].0["cause"] != "state_integrity"
+    {
+        failures.push(format!(
+            "event setup: expected exit 2 and one cause=state_integrity event; got exit {:?}, \
+             {} event(s)",
+            hook.status.code(),
+            failed.len()
+        ));
+    } else {
+        let detail = failed[0].0["detail"].as_str().unwrap_or("");
+        let want = capped(&full, 64);
+        if !detail.starts_with(&format!("{want}: ")) || detail.contains(&full) {
+            failures.push(format!(
+                "Event 12 detail must start with the 64-char-capped path {want:?} and not carry \
+                 the full path; got {detail:?}"
+            ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v125_11g_state_integrity_stderr_full_path_event_12_detail_capped_64_blackbox",
+        failures,
+    );
+}
+
+/// (b) A coordinator advisory whose interpolated `<subject>` exceeds 256 characters: the
+/// subject is capped at 256 with `…` as the 256th character, and the fixed clause is intact
+/// (the same cap applies to `<cause>`; a >256-character OS message cannot be provoked, so the
+/// subject, a >256-character gate path under a long project root, carries the vector).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v125_11f2_advisory_subject_capped_at_256_with_marker_clause_intact_blackbox()
+ {
+    let c = Coord::new_long(120, 3);
+    committing_fixture(&c, json!([]));
+    let gate = c.ms().join("gate-state.json");
+    std::fs::remove_file(&gate).unwrap();
+    std::fs::create_dir(&gate).unwrap();
+    let full = gate.display().to_string();
+    assert!(
+        full.chars().count() > 256,
+        "fixture gate path must exceed 256"
+    );
+    let out = c.run();
+    let err = stderr_of(&out);
+    let mut failures = Vec::new();
+    let head = "migrate-bc-index: GATE_OPEN_RESET_FAILED (advisory): ";
+    let want_subject = capped(&full, 256);
+    let lines: Vec<&str> = err
+        .lines()
+        .filter(|l| l.contains("GATE_OPEN_RESET_FAILED"))
+        .collect();
+    if out.status.code() != Some(0) || lines.len() != 1 {
+        failures.push(format!(
+            "setup: expected exit 0 and ONE advisory line; got {:?}, stderr {err:?}",
+            out.status.code()
+        ));
+    } else if let Some(rest) = lines[0].strip_prefix(head) {
+        let Some(after) = rest.strip_prefix(&format!("{want_subject}: ")) else {
+            failures.push(format!(
+                "<subject> must be the 256-char cap of the gate path ({want_subject:?}, ending \
+                 in `…`); got {:?}",
+                rest.split(": ").next().unwrap_or("")
+            ));
+            return assert_no_failures("advisory_subject_cap", failures);
+        };
+        let Some((cause, clause)) = after.split_once("; ") else {
+            failures.push(format!("no `; <clause>` after the cause in {:?}", lines[0]));
+            return assert_no_failures("advisory_subject_cap", failures);
+        };
+        if cause.trim().is_empty() || cause.chars().count() > 256 {
+            failures.push(format!(
+                "<cause> must be non-empty and <= 256 chars: {cause:?}"
+            ));
+        }
+        if !clause.starts_with("the migration completed; the gate stays ")
+            && !clause.starts_with("the migration completed")
+            || !clause.ends_with("reconciles it")
+            || clause.contains('…')
+        {
+            failures.push(format!(
+                "the fixed clause must be intact (never truncated): {clause:?}"
+            ));
+        }
+    } else {
+        failures.push(format!(
+            "advisory line must start with {head:?}: {:?}",
+            lines[0]
+        ));
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v125_11f2_advisory_subject_capped_at_256_with_marker_clause_intact_blackbox",
+        failures,
+    );
+}
+
+/// (c) ADR-052 v1.25 item 11(g)3: the admission entry points (`migration_writer_admission`,
+/// `migration_writer_release`, `read_active_txn_record`, driven through the real binary on
+/// PreToolUse / PostToolUse) write NOTHING to stderr for the states that trip each
+/// coordinator advisory: a terminal txn record whose archive rename cannot succeed, a leftover
+/// staging directory, an unwritable gate file, and an over-cap-row-free clean tree. An
+/// admitted run prints nothing; a fail-closed run prints only its single `E-MAINTENANCE-002`
+/// line. No coordinator advisory token or `(advisory)` marker may ever appear.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_ADR052_v125_11g3_admission_entry_points_write_no_coordinator_advisory_to_stderr_blackbox()
+ {
+    use std::os::unix::fs::PermissionsExt as _;
+    const TOKENS: [&str; 4] = [
+        "GATE_OPEN_RESET_FAILED",
+        "TERMINAL_TXN_ARCHIVE_FAILED",
+        "STAGING_DIR_REMOVE_FAILED",
+        "OVERSIZED_ROW_SUBSHARD",
+    ];
+    let plugin_root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        plugin_root.path().join("hooks-registry.toml"),
+        "schema_version = 2\n",
+    )
+    .unwrap();
+    let mut failures = Vec::new();
+    let is_root = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false);
+
+    type Setup = fn(&Coord);
+    let cases: Vec<(&str, Setup)> = vec![
+        ("terminal COMPLETED txn record (archive candidate)", |c| {
+            let mut v = committing_record(json!([]));
+            v["state"] = json!("COMPLETED");
+            std::fs::write(
+                c.ms().join("txn-act-1.json"),
+                serde_json::to_vec_pretty(&v).unwrap(),
+            )
+            .unwrap();
+        }),
+        (
+            "terminal txn record in a read-only migration-state dir",
+            |c| {
+                let mut v = committing_record(json!([]));
+                v["state"] = json!("COMPLETED");
+                std::fs::write(
+                    c.ms().join("txn-act-1.json"),
+                    serde_json::to_vec_pretty(&v).unwrap(),
+                )
+                .unwrap();
+                std::fs::set_permissions(c.ms(), std::fs::Permissions::from_mode(0o555)).unwrap();
+            },
+        ),
+        ("leftover staging directory, no txn record", |c| {
+            std::fs::create_dir_all(c.ms().join("gen-gen-orphan")).unwrap();
+        }),
+        (
+            "gate-state.json is a directory (gate write would fail)",
+            |c| {
+                let gate = c.ms().join("gate-state.json");
+                std::fs::remove_file(&gate).unwrap();
+                std::fs::create_dir(&gate).unwrap();
+            },
+        ),
+    ];
+    for (label, setup) in cases {
+        if label.contains("read-only") && is_root {
+            eprintln!("SKIP [{label}]: running as root");
+            continue;
+        }
+        for event in ["PreToolUse", "PostToolUse"] {
+            let c = Coord::new();
+            setup(&c);
+            let logs = tempfile::tempdir().unwrap();
+            let target = c.root().join(CYCLES_PATH);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            let payload = json!({
+                "hook_event_name": event,
+                "tool_name": "Edit",
+                "session_id": "sess-v125g3",
+                "tool_use_id": "toolu_v125g3",
+                "tool_input": {
+                    "file_path": target.to_string_lossy(),
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            })
+            .to_string();
+            let out = run_hook(c.root(), plugin_root.path(), logs.path(), &payload);
+            // Restore so the tempdir can be removed.
+            let _ = std::fs::set_permissions(c.ms(), std::fs::Permissions::from_mode(0o755));
+            // The dispatcher's own always-on `factory-dispatcher trace=...` summary
+            // (two lines on PreToolUse) is not an admission-entry-point write.
+            let raw = stderr_of(&out);
+            let err: String = raw
+                .lines()
+                .filter(|l| {
+                    !l.starts_with("factory-dispatcher trace=") && !l.starts_with("  plugins_run=")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let l = format!("{label} / {event}");
+            if err.contains("(advisory)") || TOKENS.iter().any(|t| err.contains(t)) {
+                failures.push(format!(
+                    "[{l}] no coordinator advisory may reach stderr: {err:?}"
+                ));
+            }
+            match out.status.code() {
+                Some(0) if !err.is_empty() => {
+                    failures.push(format!("[{l}] an admitted run must print nothing: {err:?}"));
+                }
+                // A fail-closed run's single `E-MAINTENANCE-002` line rides on the
+                // dispatcher summary's `block_reason`; nothing else is written.
+                Some(2) if !err.is_empty() || !raw.contains("E-MAINTENANCE-002") => {
+                    failures.push(format!(
+                        "[{l}] a fail-closed run writes only the E-MAINTENANCE-002 verdict \
+                         (no extra stderr lines): {raw:?}"
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_ADR052_v125_11g3_admission_entry_points_write_no_coordinator_advisory_to_stderr_blackbox",
         failures,
     );
 }
