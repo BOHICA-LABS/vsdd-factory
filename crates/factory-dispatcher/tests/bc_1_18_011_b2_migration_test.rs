@@ -666,10 +666,11 @@ fn test_BC_1_18_011_INV3_execute_canonical_path_moves_halts_not_aborts_on_single
         },
     ];
 
-    let completed_count = execute_canonical_path_moves(&StdFs, &pending, &intent_log_path).expect(
-        "a single move's failure must HALT (not roll back/ABORT) — this function still returns \
+    let completed_count =
+        execute_canonical_path_moves(&StdFs, &pending, &intent_log_path, "txn-test", 1).expect(
+            "a single move's failure must HALT (not roll back/ABORT) — this function still returns \
          Ok with the count of moves completed before the halt",
-    );
+        );
     assert_eq!(
         completed_count, 1,
         "exactly the first move must have completed before the second move's failure halted \

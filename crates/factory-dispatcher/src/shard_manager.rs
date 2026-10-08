@@ -14107,10 +14107,10 @@ fn planner_view(
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default(),
         state: file.state,
+        intent_log_path: generation_id.as_deref().map(intent_log_path_for_generation),
         generation_id,
         source_sha256: None,
         source_body_row_sha256: None,
-        intent_log_path: None,
         pending_canonical_moves: Vec::new(),
         created_at: text("created_at"),
         updated_at: text("updated_at"),
@@ -15473,6 +15473,8 @@ pub fn execute_canonical_path_moves(
     fs: &impl Fs,
     _pending: &[PendingCanonicalMove],
     _intent_log_path: &Path,
+    txn_id: &str,
+    fencing_generation: u64,
 ) -> Result<u64, BcIndexMigrationError> {
     let existing_intent_records = read_intent_log(fs, _intent_log_path)?;
     let mut completed_count: u64 = 0;
@@ -15606,8 +15608,8 @@ pub fn execute_canonical_path_moves(
             }
         };
         let record = IntentLogRecord {
-            txn_id: String::new(),
-            fencing_generation: 0,
+            txn_id: txn_id.to_string(),
+            fencing_generation,
             record_type: IntentLogRecordType::Done,
             target_canonical: canonical.clone(),
             staging_path: staging.clone(),
@@ -16311,8 +16313,13 @@ fn finish_committing_migration(
 ) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
     let generation_id = txn.generation_id.clone().unwrap_or_default();
     let intent_log_path = migration_state_dir.join(format!("intent-{generation_id}.log"));
-    let completed_count =
-        execute_canonical_path_moves(fs, &txn.pending_canonical_moves, &intent_log_path)?;
+    let completed_count = execute_canonical_path_moves(
+        fs,
+        &txn.pending_canonical_moves,
+        &intent_log_path,
+        &txn.txn_id,
+        txn.fencing_generation,
+    )?;
 
     if (completed_count as usize) < txn.pending_canonical_moves.len() {
         // Not every move completed — forward recovery (never rollback,
@@ -16397,6 +16404,12 @@ fn factory_root_source_suffix(source: &Option<ProjectRootSource>) -> String {
     source
         .map(|s| format!(" (resolved from {})", s.label()))
         .unwrap_or_default()
+}
+
+/// ADR-052 Decision 7b / 7c step 1: the project-root-relative intent-log path persisted in
+/// the txn record's `intent_log_path` alongside `generation_id`.
+fn intent_log_path_for_generation(generation_id: &str) -> String {
+    format!(".factory/migration-state/intent-{generation_id}.log")
 }
 
 /// The B2 coordinator's path-based entry point: `project_root` is the resolved
@@ -16799,6 +16812,7 @@ fn run_bc_index_migration_core(
                     }
                 };
             txn.pending_canonical_moves = recomputed_pending_moves;
+            txn.intent_log_path = Some(intent_log_path_for_generation(&generation_id));
             write_txn_record(&fs, &migration_state_dir, &txn)?;
             // OBL-1 WAL-ordering fix (§3): the intent log MUST be
             // durable for every pending move BEFORE the pointer swap —
@@ -17015,7 +17029,7 @@ fn run_bc_index_migration_core(
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut txn = BcIndexMigrationTxnRecord {
         schema_version: TXN_RECORD_SCHEMA_VERSION,
-        txn_id: format!("txn-{activation_id}"),
+        txn_id: activation_id.clone(),
         activation_id: activation_id.clone(),
         fencing_generation: 1,
         state: BcIndexMigrationTxnState::Staging,
@@ -17031,6 +17045,7 @@ fn run_bc_index_migration_core(
 
     let generation_id = stage_new_generation(&fs, &migration_state_dir)?;
     txn.generation_id = Some(generation_id.clone());
+    txn.intent_log_path = Some(intent_log_path_for_generation(&generation_id));
     write_txn_record(&fs, &migration_state_dir, &txn)?;
 
     let gen_dir = migration_state_dir.join(format!("gen-{generation_id}"));
