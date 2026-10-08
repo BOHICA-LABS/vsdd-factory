@@ -13109,6 +13109,43 @@ pub enum BcIndexMigrationError {
     )]
     CompletionRecordMismatchInterim,
 
+    /// ADR-054 Decision 3 / 3.1 / error-taxonomy `INTENT_LOG_CORRUPT` (exit 2):
+    /// the shared intent-log reader found `MidLogCorruption` or an L1-L4
+    /// invariant violation. `path` is the full log path; Display renders its
+    /// FILE NAME only (C-3). `kind` is the closed token `mid_log_corruption` or
+    /// `log_invariant_violation`; `offset` is the reader's `first_bad_offset` or
+    /// the first violating record's start offset. Each data-derived substring
+    /// goes through [`sanitize_diagnostic`] at the operator-stderr cap
+    /// ([`ADMISSION_STDERR_SUBSTRING_MAX_CHARS`] = 256; the 64-character cap is
+    /// InternalLog-event-only, ADR-054 v1.1 "Sanitization cap").
+    #[error(
+        "INTENT_LOG_CORRUPT (exit 2): intent log {} is corrupt ({}) at byte offset {offset}; \
+         no further move or append was made and no completion was recorded; operator \
+         investigation required",
+        sanitize_diagnostic(
+            &.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            ADMISSION_STDERR_SUBSTRING_MAX_CHARS
+        ),
+        sanitize_diagnostic(.kind, ADMISSION_STDERR_SUBSTRING_MAX_CHARS)
+    )]
+    IntentLogCorrupt {
+        path: PathBuf,
+        kind: String,
+        offset: u64,
+    },
+
+    /// ADR-054 Decision 3 / 3.1 / error-taxonomy `INTENT_LOG_VALUE_REJECTED`
+    /// (exit 2): a plan path or record field failed the Decision 1.2 value
+    /// rules at plan-build or write time. `field` and `reason` are the closed
+    /// tokens of Decision 3.1; rendered through the same 256-cap sanitizer.
+    #[error(
+        "INTENT_LOG_VALUE_REJECTED (exit 2): intent-log field {} rejected: {}; no record of \
+         this batch was appended",
+        sanitize_diagnostic(.field, ADMISSION_STDERR_SUBSTRING_MAX_CHARS),
+        sanitize_diagnostic(.reason, ADMISSION_STDERR_SUBSTRING_MAX_CHARS)
+    )]
+    IntentLogValueRejected { field: String, reason: String },
+
     #[error("BC-INDEX migration: I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -13259,6 +13296,8 @@ impl BcIndexMigrationError {
             | BcIndexMigrationError::ForeignMigrationRefused { .. }
             | BcIndexMigrationError::MigrationLockContention
             | BcIndexMigrationError::CompletionRecordMismatchInterim
+            | BcIndexMigrationError::IntentLogCorrupt { .. }
+            | BcIndexMigrationError::IntentLogValueRejected { .. }
             | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
                 AdmissionFailureCause::StateIntegrity
             }
@@ -13295,6 +13334,8 @@ impl BcIndexMigrationError {
             | BcIndexMigrationError::CompletionRecordMismatchInterim
             | BcIndexMigrationError::Io { .. }
             | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::IntentLogCorrupt { .. }
+            | BcIndexMigrationError::IntentLogValueRejected { .. }
             | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => 2,
         }
     }
@@ -13335,6 +13376,10 @@ impl BcIndexMigrationError {
             }
             BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
                 Some("SHARD_CAP_CONFIG_UNAVAILABLE")
+            }
+            BcIndexMigrationError::IntentLogCorrupt { .. } => Some("INTENT_LOG_CORRUPT"),
+            BcIndexMigrationError::IntentLogValueRejected { .. } => {
+                Some("INTENT_LOG_VALUE_REJECTED")
             }
             BcIndexMigrationError::AdmissionStateIntegrity { .. } => {
                 Some("MIGRATION_STATE_INTEGRITY_FAILURE")
