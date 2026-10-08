@@ -21,8 +21,10 @@
 //!   v1.23 fourth extension, Code fix (2)).** The txn record is updated with `generation_id`
 //!   AND `intent_log_path` in the SAME write; the value is the Decision 7b path
 //!   `.factory/migration-state/intent-<generation_id>.log`, i.e. exactly the path the
-//!   coordinator appends to; it is JSON `null` ONLY while `generation_id` is null; it is
-//!   set idempotently on the STAGING-resume path.
+//!   coordinator appends to; it is JSON `null` ONLY while `generation_id` is null; a
+//!   STAGING-resume rewrite leaves the already-correct value unchanged, and a record with
+//!   a string `generation_id` but a null (or non-matching) `intent_log_path` is
+//!   `txn_record_malformed`, never repaired (ruling (i): "no derived fallback").
 //!
 //! # Deliberately NOT tested (human decision + research pending)
 //!
@@ -331,9 +333,31 @@ fn test_BC_1_18_011_intent_log_path_persisted_with_generation_id_after_fresh_run
     assert_recorded_intent_log_exists(dir.path(), &txn);
 }
 
+/// Every file under `dir` (relative path -> bytes), for byte-identity assertions.
+#[cfg(feature = "failpoints")]
+fn tree_bytes(dir: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(base: &Path, d: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for e in std::fs::read_dir(d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(base, &p, out);
+            } else {
+                out.insert(
+                    p.strip_prefix(base).unwrap().display().to_string(),
+                    std::fs::read(&p).unwrap(),
+                );
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
 #[cfg(feature = "failpoints")]
 mod mid_run {
     use super::*;
+    use factory_dispatcher::shard_manager::{AdmissionStateIntegrityKind, BcIndexMigrationError};
     use std::process::{Command, Stdio};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
@@ -527,13 +551,25 @@ mod mid_run {
         assert_recorded_intent_log_exists(dir.path(), &after);
     }
 
-    /// STAGING-resume idempotence (2/2) -- ADR-052 v1.23 fourth extension, Code fix (2):
-    /// "set ... idempotently on the STAGING-resume path". A STAGING record that has a
-    /// `generation_id` but a null `intent_log_path` (the pre-fix on-disk shape, here seeded
-    /// by hand at the crash point) is repaired by the resume: after recovery the record
-    /// carries the persisted `intent-<generation_id>.log` path.
+    /// STAGING-resume rejects a null `intent_log_path` beside a string `generation_id`
+    /// (it does NOT repair it). ADR-052 v1.24 "Branch C hash source" ruling (i): "`intent_log_path`
+    /// is written by the coordinator, not derived ... It is JSON `null` only while
+    /// `generation_id` is null ... A record that is COMMITTING, or STAGING with a string
+    /// `generation_id`, and carries a null `intent_log_path` therefore violates the spec'd
+    /// write; ... `state_integrity` / `TxnRecordMalformed` ... MUST NOT fall back to deriving
+    /// the path from `generation_id` (a derived fallback would hide the corruption forever)."
+    /// The coordinator persists the pair in ONE `write_txn_record` (Decision 7c step 1), so
+    /// this shape cannot be produced by a crash of this build and no activation of the
+    /// pre-fix build ever ran; "set idempotently on the STAGING-resume path" (v1.23 fourth
+    /// extension, Code fix (2)) means a resume rewriting the SAME already-correct value
+    /// (see `..._unchanged_by_staging_resume`), not filling in a missing one.
+    ///
+    /// REPLACES the former `..._staging_resume_sets_intent_log_path_when_null`, which asserted
+    /// that resume fills the null in (the behavior ruling (i) forbids). Seeded by hand at the
+    /// crash point: the run must fail `MIGRATION_STATE_INTEGRITY_FAILURE` /
+    /// `txn_record_malformed` and leave every byte under `.factory/` unchanged.
     #[test]
-    fn test_BC_1_18_011_staging_resume_sets_intent_log_path_when_null() {
+    fn test_BC_1_18_011_staging_resume_rejects_null_intent_log_path_with_generation_id_set() {
         let _fp = fail_point_scope();
         let dir = crashed_fixture("migration_fs::write_temp", 7);
         let msd = migration_state_dir(dir.path());
@@ -543,9 +579,23 @@ mod mid_run {
         v["intent_log_path"] = Value::Null;
         std::fs::write(&txn_file, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
 
-        converge(dir.path());
-        let after = read_txn(&msd);
-        assert_intent_log_path_persisted_with_generation(dir.path(), &after);
-        assert_recorded_intent_log_exists(dir.path(), &after);
+        let before = tree_bytes(&dir.path().join(".factory"));
+        let result = run_bc_index_migration(dir.path());
+        assert!(
+            matches!(
+                result,
+                Err(BcIndexMigrationError::AdmissionStateIntegrity {
+                    kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
+                    ..
+                })
+            ),
+            "a STAGING record with a string generation_id and a null intent_log_path is \
+             txn_record_malformed (ruling (i)), never repaired; got {result:?}"
+        );
+        assert_eq!(
+            tree_bytes(&dir.path().join(".factory")),
+            before,
+            "nothing may be mutated (the null path must not be filled in)"
+        );
     }
 }

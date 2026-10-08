@@ -260,7 +260,19 @@ fn assert_no_failures(test: &str, failures: Vec<String>) {
 /// now REQUIRES the twelfth, so every fixture that must pass the strict decode
 /// carries it. These fixtures are red until the implementer lands: today the
 /// decode rejects `schema_version` as an unknown top-level key.)
+///
+/// ADR-052 v1.24 "Branch C hash source" ruling (i): the coordinator writes
+/// `intent_log_path` in the SAME txn-record write that assigns `generation_id`, so a
+/// record this build wrote carries `intent_log_path` = `.factory/migration-state/
+/// intent-<generation_id>.log` whenever `generation_id` is a string and JSON `null`
+/// only while `generation_id` is null. `full()` therefore derives the pair the way the
+/// coordinator writes it (fixture change for ruling (i): before it, `full("STAGING",
+/// "gen-1")` carried a null `intent_log_path`, a shape the coordinator never writes and
+/// the ruling classes as `txn_record_malformed`).
 fn full(state: &str, generation_id: Value) -> Value {
+    let intent_log_path = generation_id
+        .as_str()
+        .map_or(Value::Null, |g| json!(intent_path(g)));
     json!({
         "schema_version": 1,
         "txn_id": "txn-act-1",
@@ -271,11 +283,16 @@ fn full(state: &str, generation_id: Value) -> Value {
         "generation_id": generation_id,
         "source_sha256": null,
         "source_body_row_sha256": null,
-        "intent_log_path": null,
+        "intent_log_path": intent_log_path,
         "pending_canonical_moves": [],
         "created_at": "2026-10-07T00:00:00Z",
         "updated_at": "2026-10-07T00:00:00Z",
     })
+}
+
+/// The Decision 7b path the coordinator persists and appends to.
+fn intent_path(generation_id: &str) -> String {
+    format!(".factory/migration-state/intent-{generation_id}.log")
 }
 
 fn minimal(state: &str) -> Value {
@@ -2921,6 +2938,272 @@ fn test_BC_1_18_011_EC049_null_generation_discard_is_under_the_version_gate_newe
     }
     assert_no_failures(
         "test_BC_1_18_011_EC049_null_generation_discard_is_under_the_version_gate_newer_malformed_refused_absent_or_1_discards_preserving_unknown_key_blackbox",
+        failures,
+    );
+}
+
+// ===========================================================================
+// ADR-052 v1.24 "Branch C hash source" ruling (i): intent_log_path is READ, never derived
+// ===========================================================================
+
+/// Assert the refusal is `check_integrity_refusal` AND the one stderr line names
+/// `intent_log_path` (so the rejection is for the defect under test, not some other
+/// malformation), AND the txn record bytes are unchanged (never "repaired").
+fn check_intent_log_path_refusal(
+    label: &str,
+    fx: &Fx,
+    out: &Output,
+    before: &BTreeMap<String, Option<Vec<u8>>>,
+    txn_before: &[u8],
+    failures: &mut Vec<String>,
+) {
+    let after = snapshot(fx.root());
+    check_integrity_refusal(label, out, before, &after, failures);
+    if !stderr_of(out).contains("intent_log_path") {
+        failures.push(format!(
+            "[{label}] the integrity detail must name `intent_log_path` (the offending Tier 1 \
+             key); stderr {:?}",
+            stderr_of(out)
+        ));
+    }
+    let txn_after = std::fs::read(fx.ms().join("txn-act-1.json")).unwrap_or_default();
+    if txn_after != txn_before {
+        failures.push(format!(
+            "[{label}] the txn record must be byte-identical: a record whose generation_id is \
+             set but whose intent_log_path is null or not that generation's log path must be REJECTED, never \
+             silently repaired by re-deriving the path from generation_id"
+        ));
+    }
+}
+
+/// ADR-052 v1.24 section Error Code Semantics, "Branch C hash source", ruling (i)
+/// (verbatim):
+///
+/// > **`intent_log_path` is written by the coordinator, not derived.** Decision 7c step 1
+/// > (and the drain-step-7 note) already require the coordinator to persist
+/// > `intent_log_path` in the SAME txn-record write that assigns `generation_id`; the
+/// > value is the Decision 7b path `.factory/migration-state/intent-<generation_id>.log`
+/// > (exactly the path the coordinator appends to). It is JSON `null` only while
+/// > `generation_id` is null (the pre-7c-step-1 STAGING sub-state). A record that is
+/// > COMMITTING, or STAGING with a string `generation_id`, and carries a null
+/// > `intent_log_path` therefore violates the spec'd write; the Tier 1 rule above
+/// > classifies it as `state_integrity` / `TxnRecordMalformed` ... and the verifier MUST
+/// > NOT fall back to deriving the path from `generation_id` (a derived fallback would
+/// > hide the corruption forever -- the same reasoning as "Absent is not null").
+///
+/// Plus "Migration binaries -- recovery and finalize legs" / the
+/// `MIGRATION_STATE_INTEGRITY_FAILURE` row: a Tier 1 txn field the executing recovery arm
+/// consumes that is absent or ill-typed is `AdmissionStateIntegrity { TxnRecordMalformed }`,
+/// exit 2, nothing mutated. Item 11(e) step 3: "`intent_log_path` MUST be a non-null string
+/// denoting `.factory/migration-state/intent-<generation_id>.log` ... a null or absent
+/// value, or any other path, fails this step (stop; never substitute the derived path)."
+///
+/// A live STAGING (string `generation_id`, with and without the generation directory) and
+/// a live COMMITTING record with `generation_id` "gen-1" and `intent_log_path` JSON `null`:
+/// exit 2, ONE `state integrity failure (txn_record_malformed)` line naming
+/// `intent_log_path`, tree byte-identical (no intent log created, no txn rewrite, no gate
+/// write, no renames). The resume arm must NOT fill the path in.
+#[test]
+fn test_BC_1_18_011_intent_log_path_null_with_generation_id_set_is_txn_record_malformed_nothing_mutated_blackbox()
+ {
+    let mut failures = Vec::new();
+    for state in ["STAGING", "COMMITTING"] {
+        for with_gen_dir in [false, true] {
+            let label = format!(
+                "{state}, generation_id gen-1, intent_log_path null, gen dir {}",
+                if with_gen_dir { "present" } else { "absent" }
+            );
+            let fx = Fx::new();
+            fx.txn(
+                "txn-act-1.json",
+                &with(full(state, json!("gen-1")), "intent_log_path", Value::Null),
+            );
+            if with_gen_dir {
+                fx.gen_dir("gen-1");
+            }
+            let txn_before = std::fs::read(fx.ms().join("txn-act-1.json")).unwrap();
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            check_intent_log_path_refusal(&label, &fx, &out, &before, &txn_before, &mut failures);
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_intent_log_path_null_with_generation_id_set_is_txn_record_malformed_nothing_mutated_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.24 ruling (i) + item 10 (`intent_log_path` is an Option<String> key: "string
+/// or JSON `null`; any other type => item 1", `txn_record_malformed`): a number, bool,
+/// array or object on a STAGING-with-string-generation or COMMITTING record is malformed,
+/// exit 2, nothing mutated. REGRESSION PIN: the typed strict-presence decode already
+/// rejects these at a8ba160f, so this test passes before the fix; it guards the new pair
+/// validation from loosening the type rule.
+#[test]
+fn test_BC_1_18_011_intent_log_path_non_string_with_generation_id_set_is_txn_record_malformed_nothing_mutated_blackbox()
+ {
+    let mut failures = Vec::new();
+    for state in ["STAGING", "COMMITTING"] {
+        for (vlabel, v) in [
+            ("number", json!(7)),
+            ("bool", json!(true)),
+            (
+                "array",
+                json!([".factory/migration-state/intent-gen-1.log"]),
+            ),
+            ("object", json!({"path": "x"})),
+        ] {
+            let label = format!("{state}, intent_log_path {vlabel}");
+            let fx = Fx::new();
+            fx.txn(
+                "txn-act-1.json",
+                &with(full(state, json!("gen-1")), "intent_log_path", v),
+            );
+            fx.gen_dir("gen-1");
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            let after = snapshot(fx.root());
+            check_integrity_refusal(&label, &out, &before, &after, &mut failures);
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_intent_log_path_non_string_with_generation_id_set_is_txn_record_malformed_nothing_mutated_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.24 ruling (i): "the value is the Decision 7b path
+/// `.factory/migration-state/intent-<generation_id>.log` (exactly the path the coordinator
+/// appends to)"; item 11(e) step 3: "`intent_log_path` MUST be a non-null string denoting
+/// `.factory/migration-state/intent-<generation_id>.log` ... a null or absent value, or ANY
+/// OTHER PATH, fails this step (stop; never substitute the derived path)."
+///
+/// A string naming a different file than the record's own `generation_id` implies (another
+/// generation's log, a different file name, a different directory, the empty string, a
+/// traversal) is malformed: the record's field disagrees with the `generation_id` it was
+/// persisted with, and silently using or "repairing" either side would hide the
+/// corruption. Spellings that denote the SAME file (absolute, `./`-prefixed) are
+/// deliberately not exercised: the ADR says "denoting". Exit 2 `txn_record_malformed`
+/// naming `intent_log_path`, tree byte-identical, in STAGING (string generation) and
+/// COMMITTING.
+///
+/// Inference note: the ADR states the null rule for the verifier (ruling (i)) and the
+/// "any other path" rule for the operator procedure (11(e) step 3); applying the equality
+/// at the coordinator's arm entry is the fail-closed reading of "no derived fallback" and
+/// is flagged to the architect in the report.
+#[test]
+fn test_BC_1_18_011_intent_log_path_not_equal_to_the_generation_log_path_is_txn_record_malformed_nothing_mutated_blackbox()
+ {
+    let mut failures = Vec::new();
+    let mismatches: Vec<(&str, String)> = vec![
+        (
+            "another generation's log",
+            ".factory/migration-state/intent-gen-2.log".to_string(),
+        ),
+        (
+            "different file name",
+            ".factory/migration-state/intent-gen-1.log.bak".to_string(),
+        ),
+        (
+            "different directory",
+            ".factory/intent-gen-1.log".to_string(),
+        ),
+        ("bare file name", "intent-gen-1.log".to_string()),
+        ("empty string", String::new()),
+        (
+            "traversal out of the factory root",
+            "../outside/intent-gen-1.log".to_string(),
+        ),
+    ];
+    for state in ["STAGING", "COMMITTING"] {
+        for (vlabel, path) in &mismatches {
+            let label = format!("{state}, generation_id gen-1, intent_log_path = {vlabel}");
+            let fx = Fx::new();
+            fx.txn(
+                "txn-act-1.json",
+                &with(full(state, json!("gen-1")), "intent_log_path", json!(path)),
+            );
+            fx.gen_dir("gen-1");
+            let txn_before = std::fs::read(fx.ms().join("txn-act-1.json")).unwrap();
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            check_intent_log_path_refusal(&label, &fx, &out, &before, &txn_before, &mut failures);
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_intent_log_path_not_equal_to_the_generation_log_path_is_txn_record_malformed_nothing_mutated_blackbox",
+        failures,
+    );
+}
+
+/// CONTROL for the three tests above (ruling (i): "the value is the Decision 7b path
+/// `.factory/migration-state/intent-<generation_id>.log`"): a record whose pair is correct
+/// is not rejected. STAGING reaches the planner (no `state integrity failure` line; the
+/// recorded path is preserved verbatim) and COMMITTING forward-recovers to COMPLETED
+/// (exit 0). A record with BOTH null (the legitimate pre-7c-step-1 STAGING sub-state) is
+/// still the null-generation discard (exit 1 `EXPIRY_ABORT`). Passes before the fix; the
+/// rejection tests carry the red.
+#[test]
+fn test_BC_1_18_011_intent_log_path_control_correct_pair_and_both_null_are_not_malformed_blackbox()
+{
+    let mut failures = Vec::new();
+    for with_gen_dir in [false, true] {
+        let label = format!(
+            "STAGING correct pair, gen dir {}",
+            if with_gen_dir { "present" } else { "absent" }
+        );
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &full("STAGING", json!("gen-1")));
+        if with_gen_dir {
+            fx.gen_dir("gen-1");
+        }
+        let out = fx.run();
+        let err = stderr_of(&out);
+        if err.contains("state integrity failure") {
+            failures.push(format!(
+                "[{label}] a correct generation_id / intent_log_path pair must reach the planner; \
+                 stderr {err:?}"
+            ));
+        }
+        let got = read_json(&fx.ms().join("txn-act-1.json"));
+        if got["intent_log_path"] != json!(intent_path("gen-1")) {
+            failures.push(format!(
+                "[{label}] the recorded intent_log_path must be preserved verbatim; got {got}"
+            ));
+        }
+    }
+    {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &full("COMMITTING", json!("gen-1")));
+        fx.gen_dir("gen-1");
+        let out = fx.run();
+        let got = read_json(&fx.ms().join("txn-act-1.json"));
+        if out.status.code() != Some(0)
+            || got["state"] != json!("COMPLETED")
+            || got["intent_log_path"] != json!(intent_path("gen-1"))
+        {
+            failures.push(format!(
+                "[COMMITTING correct pair] expected exit 0, txn COMPLETED with the recorded \
+                 intent_log_path preserved; got exit {:?}, stderr {:?}, txn {got}",
+                out.status.code(),
+                stderr_of(&out)
+            ));
+        }
+    }
+    {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &full("STAGING", Value::Null));
+        let out = fx.run();
+        check_exact_line(
+            "STAGING both null",
+            &out,
+            1,
+            EXPIRY_NULL_GENERATION_LINE,
+            &mut failures,
+        );
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_intent_log_path_control_correct_pair_and_both_null_are_not_malformed_blackbox",
         failures,
     );
 }
