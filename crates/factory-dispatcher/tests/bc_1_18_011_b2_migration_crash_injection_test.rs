@@ -225,7 +225,7 @@ use std::time::{Duration, Instant};
 use factory_dispatcher::shard_manager::{
     self, BcIndexAdmissionGateState, BcIndexMigrationError, BcIndexMigrationOutcome,
     BcIndexMigrationTxnRecord, BcIndexMigrationTxnState, CurrentGenerationPointer,
-    run_bc_index_migration,
+    run_bc_index_migration, try_acquire_migration_lock,
 };
 
 // ---------------------------------------------------------------------------
@@ -513,6 +513,174 @@ fn assert_admission_blocked(cwd: &Path, probe_id: &str) {
     );
 }
 
+/// Fail-point isolation for IN-PROCESS scenarios. `fail`'s registry is
+/// process-global, so under the default parallel test harness one test's
+/// `fail::cfg(..)` (or a still-armed `1*return(..)` budget) would leak into a
+/// sibling test's in-process `run_bc_index_migration`. Every test below takes
+/// this scope as its first statement: `FailScenario::setup()` holds the
+/// crate's global scenario mutex (poison-tolerant) for the whole test, so
+/// in-process scenarios are serialized, and on drop -- including on a panic
+/// unwind -- it clears every fail point, so a failed test can never leave an
+/// armed fail point behind. Crash scenarios run in child processes with their
+/// own registry and are unaffected; the scope only serializes their in-process
+/// recovery phase.
+fn fail_point_scope() -> fail::FailScenario<'static> {
+    fail::FailScenario::setup()
+}
+
+/// Which ADR-052 step-3.5 reconciliation branch admission is expected to take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelfHeal {
+    /// Branch A: gate LOCKED/DRAINING with no live txn (absent, ABORTED or
+    /// COMPLETED) -> gate OPEN; the txn record is left untouched.
+    BranchA,
+    /// Branch B: STAGING with `generation_id = null` -> txn ABORTED with
+    /// `abort_reason = "null_generation"`, then gate OPEN.
+    BranchB,
+}
+
+fn live_txn_file(msd: &Path) -> Option<PathBuf> {
+    let mut found = None;
+    for entry in std::fs::read_dir(msd).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("txn-") && name.ends_with(".json") {
+            found = Some(entry.path());
+        }
+    }
+    found
+}
+
+fn read_txn_json(msd: &Path) -> Option<serde_json::Value> {
+    let path = live_txn_file(msd)?;
+    Some(serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap())
+}
+
+/// Byte-level snapshot of every control file admission could mutate
+/// (gate-state.json + each txn record), for byte-identity assertions.
+fn snapshot_admission_state(msd: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(msd) {
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "gate-state.json" || (name.starts_with("txn-") && name.ends_with(".json")) {
+                out.push((name, std::fs::read(entry.path()).unwrap()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// BC-1.18.011 Precondition 6(d) / ADR-052 §5a step 3.5: when `exclusive.lock`
+/// is acquirable (no live coordinator), admission reconciles the reconcilable
+/// post-crash state itself and then ADMITS the writer. Calls the REAL
+/// `admit_or_block_bc_index_writer`, asserts it returns `Ok(())`, the gate is
+/// OPEN, and (Branch B) the txn is ABORTED with `abort_reason ==
+/// "null_generation"`, `generation_id` still null and every other field
+/// unchanged (Branch A leaves the record byte-identical). Finally releases the
+/// probe's reservation: an admitted, never-released reservation makes a later
+/// drain wait out `DrainTimeoutAbort` (~90 s) -- by spec, not a defect.
+fn assert_admission_self_heals(cwd: &Path, probe_id: &str, expect: SelfHeal) {
+    let msd = migration_state_dir(cwd);
+    let pre_txn_bytes = live_txn_file(&msd).map(|p| std::fs::read(p).unwrap());
+    let pre_txn_json = read_txn_json(&msd);
+    let pre_gate = read_gate_state(&msd);
+    if expect == SelfHeal::BranchA {
+        assert_ne!(
+            pre_gate,
+            BcIndexAdmissionGateState::Open,
+            "Branch A precondition: the crashed state must have a non-OPEN gate"
+        );
+    }
+
+    let result = shard_manager::admit_or_block_bc_index_writer(&msd, probe_id);
+    assert!(
+        result.is_ok(),
+        "BC-1.18.011 Pre 6(d): with exclusive.lock acquirable admission must self-heal the \
+         {expect:?} state and admit; got {result:?}"
+    );
+    assert_eq!(
+        read_gate_state(&msd),
+        BcIndexAdmissionGateState::Open,
+        "{expect:?}: the gate must be OPEN after admission-time reconciliation"
+    );
+
+    match expect {
+        SelfHeal::BranchA => {
+            let post_txn_bytes = live_txn_file(&msd).map(|p| std::fs::read(p).unwrap());
+            assert_eq!(
+                pre_txn_bytes, post_txn_bytes,
+                "Branch A only reopens the gate; the txn record (or its absence) must be untouched"
+            );
+        }
+        SelfHeal::BranchB => {
+            let pre = pre_txn_json.expect("Branch B requires a pre-existing STAGING txn");
+            assert_eq!(pre["state"], "STAGING", "Branch B precondition: STAGING");
+            assert!(
+                pre["generation_id"].is_null(),
+                "Branch B precondition: generation_id null"
+            );
+            let post = read_txn_json(&msd).expect("txn record must survive reconciliation");
+            assert_eq!(post["state"], "ABORTED", "Branch B: txn must be ABORTED");
+            assert_eq!(
+                post["abort_reason"], "null_generation",
+                "Branch B: abort_reason marker must be \"null_generation\""
+            );
+            assert!(
+                post["generation_id"].is_null(),
+                "Branch B: generation_id must remain null"
+            );
+            // Record otherwise unchanged: ignore only the fields reconciliation owns.
+            let strip = |v: &serde_json::Value| {
+                let mut v = v.clone();
+                let m = v.as_object_mut().unwrap();
+                for k in ["state", "abort_reason", "updated_at"] {
+                    m.remove(k);
+                }
+                v
+            };
+            assert_eq!(
+                strip(&pre),
+                strip(&post),
+                "Branch B must not alter any txn field other than state/abort_reason/updated_at"
+            );
+        }
+    }
+
+    shard_manager::release_bc_index_writer_reservation(&msd, probe_id)
+        .expect("releasing the probe's admitted reservation must succeed");
+}
+
+/// Control for `assert_admission_self_heals`: with a LIVE coordinator holding
+/// `exclusive.lock`, the identical post-crash state must NOT be reconciled --
+/// admission returns `WriterAdmissionRefused` (BC-1.18.011 Pre 6(d):
+/// EWOULDBLOCK -> plain block) and gate + txn stay byte-identical.
+fn assert_admission_blocked_lock_held(cwd: &Path, probe_id: &str) {
+    let msd = migration_state_dir(cwd);
+    let lock_path = msd.join("exclusive.lock");
+    if !lock_path.exists() {
+        std::fs::write(&lock_path, b"").unwrap();
+    }
+    let guard = try_acquire_migration_lock(&lock_path)
+        .expect("exclusive.lock must be openable")
+        .expect("exclusive.lock must be free after the crash (flock dies with the process)");
+    let before = snapshot_admission_state(&msd);
+    let result = shard_manager::admit_or_block_bc_index_writer(&msd, probe_id);
+    assert!(
+        matches!(
+            result,
+            Err(BcIndexMigrationError::WriterAdmissionRefused { .. })
+        ),
+        "a live coordinator (exclusive.lock held) must make admission a plain block; got {result:?}"
+    );
+    assert_eq!(
+        before,
+        snapshot_admission_state(&msd),
+        "a lock-held block must leave the gate and txn record byte-identical"
+    );
+    drop(guard);
+}
+
 /// Run `run_bc_index_migration` repeatedly (bounded) until it reaches a
 /// terminal outcome (`Completed` or `AlreadyMigrated`) or `max_attempts` is
 /// exhausted. Several `RecoveryDecision` arms (`DiscardPreGeneration`,
@@ -633,11 +801,12 @@ fn assert_recovery_is_idempotent(cwd: &Path) {
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ1_before_any_txn_record_clean_restart() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 1, dir.path());
     assert_child_aborted(&crash, "migration_fs::write_temp", 1);
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchA);
 
     let outcome = run_recovery_to_convergence(dir.path(), 3);
     assert!(
@@ -656,24 +825,26 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ1_before_any_txn_record_clean_resta
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ2_generation_id_not_yet_persisted_discards() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 2, dir.path());
     assert_child_aborted(&crash, "migration_fs::write_temp", 2);
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchB);
 
     let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
-    assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
+    assert_eq!(txn.state, BcIndexMigrationTxnState::Aborted);
     assert!(
         txn.generation_id.is_none(),
         "the on-disk record must still show no generation_id (the crash landed before the SECOND \
          write persisted it), even though stage_new_generation's gen-dir already durably exists \
-         on disk -- recover()'s DiscardPreGeneration arm is keyed on the RECORD, not the physical \
-         gen-dir, per the v1.13 LOW-1 ordering invariant"
+         on disk -- admission's Branch B reconciliation (BC-1.18.011 Pre 6(d)) is keyed on the \
+         RECORD (STAGING + generation_id null), not the physical gen-dir, per the v1.13 LOW-1 \
+         ordering invariant. It has already moved the record to ABORTED"
     );
 
-    // DiscardPreGeneration returns Err from the SAME call that discards --
-    // forward progress (a brand new fresh run) happens on the NEXT call.
+    // Admission Branch B already aborted the null-generation txn (pre-empting
+    // recover()'s DiscardPreGeneration arm), so recovery performs a fresh run.
     let outcome = run_recovery_to_convergence(dir.path(), 3);
     assert!(
         matches!(
@@ -690,6 +861,7 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ2_generation_id_not_yet_persisted_d
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ3_partial_staging_discards_via_census_mismatch() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // Aborts right before the SS-02 shard staging write -- only the SS-01
@@ -725,6 +897,7 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ3_partial_staging_discards_via_cens
 /// loop starts. `pending_canonical_moves` is still empty on disk.
 #[test]
 fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ6_staged_but_pending_moves_empty() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 6, dir.path());
@@ -759,6 +932,7 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ6_staged_but_pending_moves
 /// record".
 #[test]
 fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ7_pending_moves_not_yet_persisted() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 7, dir.path());
@@ -790,6 +964,7 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_write_temp_occ7_pending_moves_not_yet_pe
 /// the 4 targets has a durable intent record).
 #[test]
 fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ1_first_intent_record() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::append", 1, dir.path());
@@ -807,6 +982,7 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ1_first_intent_record() {
 /// defect reproduces even with the intent log almost entirely durable.
 #[test]
 fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ4_last_intent_record() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::append", 4, dir.path());
@@ -820,6 +996,7 @@ fn test_BC_1_18_011_obl1_FINDING2_crash_append_occ4_last_intent_record() {
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ8_at_sole_commit_point_resumes_correctly() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 8, dir.path());
@@ -852,6 +1029,7 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ8_at_sole_commit_point_resumes_corr
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_write_temp_occ9_commit_landed_label_stale_staging() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // CURRENT.json (occurrence 8) succeeded; the txn record's
@@ -891,6 +1069,7 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ9_commit_landed_label_stale_staging
 /// record's own COMPLETED-state write is what gets aborted.
 #[test]
 fn test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_gate_stuck() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::write_temp", 10, dir.path());
@@ -929,11 +1108,12 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_fsync_file_occ1_redundant_barrier_is_harmless() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::fsync_file", 1, dir.path());
     assert_child_aborted(&crash, "migration_fs::fsync_file", 1);
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchB);
 
     // fsync_file is a harmless, best-effort re-fsync in production --
     // write_temp's own bundled primitive already fully durably wrote the
@@ -962,6 +1142,7 @@ fn test_BC_1_18_011_obl1_crash_fsync_file_occ1_redundant_barrier_is_harmless() {
 /// txn record).
 #[test]
 fn test_BC_1_18_011_obl1_FINDING3_crash_fsync_file_occ5_completed_json_durable_gate_stuck() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::fsync_file", 5, dir.path());
@@ -985,6 +1166,7 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_fsync_file_occ5_completed_json_durable_g
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_append_occ5_first_done_record_post_swap_resumes() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // Occurrence 5 = the FIRST DONE record, i.e. right after the first
@@ -1017,6 +1199,7 @@ fn test_BC_1_18_011_obl1_crash_append_occ5_first_done_record_post_swap_resumes()
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_rename_occ1_first_canonical_move_resumes() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::rename", 1, dir.path());
@@ -1042,6 +1225,7 @@ fn test_BC_1_18_011_obl1_crash_rename_occ1_first_canonical_move_resumes() {
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_rename_occ3_mid_sequence_resumes() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let crash = spawn_crash_child("migration_fs::rename", 3, dir.path());
@@ -1068,20 +1252,22 @@ fn test_BC_1_18_011_obl1_crash_rename_occ3_mid_sequence_resumes() {
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_fsync_dir_occ1_generation_dir_sync_discards() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // Occurrence 1 = stage_new_generation's own gen-dir sync, BEFORE
     // generation_id is persisted to the txn record.
     let crash = spawn_crash_child("migration_fs::fsync_dir", 1, dir.path());
     assert_child_aborted(&crash, "migration_fs::fsync_dir", 1);
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchB);
 
     let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
-    assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
+    assert_eq!(txn.state, BcIndexMigrationTxnState::Aborted);
     assert!(
         txn.generation_id.is_none(),
         "the gen dir may already physically exist (mkdir succeeded before the fsync_dir call), \
-         but generation_id is not yet persisted to the record -- DiscardPreGeneration must fire"
+         but generation_id is not yet persisted to the record -- admission Branch B (which pre-empts \
+         recover()'s DiscardPreGeneration arm) has already ABORTED it"
     );
 
     let outcome = run_recovery_to_convergence(dir.path(), 3);
@@ -1112,6 +1298,7 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ1_generation_dir_sync_discards() {
 #[test]
 fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_pointer_swap_barrier_resumes_via_staging_reinvocation()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // Occurrence 2 = commit_current_generation_pointer's own Step 3
@@ -1163,6 +1350,7 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ2_post_pointer_swap_barrier_resumes_
 /// occurrence table and the occurrence-2 test above).
 #[test]
 fn test_BC_1_18_011_obl1_crash_fsync_dir_occ3_post_rename_barrier_resumes_via_treat_done() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     // Occurrence 3 = the FIRST post-rename directory-fsync barrier inside
@@ -1210,6 +1398,7 @@ fn test_BC_1_18_011_obl1_crash_fsync_dir_occ3_post_rename_barrier_resumes_via_tr
 
 #[test]
 fn test_BC_1_18_011_obl1_crash_remove_during_discard_incomplete_staging_eventually_converges() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
 
@@ -1344,6 +1533,7 @@ fn assert_pointer_swap_crash_converged_old_or_new_never_torn(dir: &Path) {
 
 #[test]
 fn test_BC_1_18_011_obl1_pointer_swap_is_the_sole_commit_point_atomic_across_crash() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
 
@@ -1434,6 +1624,7 @@ fn test_BC_1_18_011_obl1_pointer_swap_is_the_sole_commit_point_atomic_across_cra
 /// retrying).
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_current_json_directory_collision_at_commit() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let msd = migration_state_dir(dir.path());
@@ -1486,6 +1677,7 @@ fn test_BC_1_18_011_obl1_graceful_err_current_json_directory_collision_at_commit
 /// swap.
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_canonical_shard_directory_collision_pre_swap() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let shards_root = dir
@@ -1570,6 +1762,7 @@ fn test_BC_1_18_011_obl1_graceful_err_canonical_shard_directory_collision_pre_sw
 /// unconditional fresh retry).
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_write_temp_return_storage_full() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::write_temp", "1*return(storage_full)")
@@ -1593,7 +1786,7 @@ fn test_BC_1_18_011_obl1_graceful_err_write_temp_return_storage_full() {
         "no txn record should exist -- the injected error fired before write_temp's bundled \
          durable-write primitive ever ran, exactly like a crash at this same boundary"
     );
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchA);
 
     let outcome2 = run_recovery_to_convergence(dir.path(), 3);
     assert!(
@@ -1619,6 +1812,7 @@ fn test_BC_1_18_011_obl1_graceful_err_write_temp_return_storage_full() {
 /// crash path the equivalent fsync_file-occurrence-1 CRASH test covers.
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_fsync_file_return_interrupted() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::fsync_file", "1*return(interrupted)")
@@ -1643,10 +1837,10 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_file_return_interrupted() {
     assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
     assert!(
         txn.generation_id.is_none(),
-        "recover() must classify this as DiscardPreGeneration on the next call, not \
-         'no txn record at all'"
+        "the durable STAGING/null-generation record is what admission Branch B \
+         reconciles (not 'no txn record at all')"
     );
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchB);
 
     let outcome2 = run_recovery_to_convergence(dir.path(), 3);
     assert!(
@@ -1675,6 +1869,7 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_file_return_interrupted() {
 /// errors on this exact call path.
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_append_return_write_zero_self_heals_via_abort_staging() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::append", "1*return(write_zero)")
@@ -1738,6 +1933,7 @@ fn test_BC_1_18_011_obl1_graceful_err_append_return_write_zero_self_heals_via_ab
 /// false-success.
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_rename_return_already_exists_forward_recovers() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::rename", "1*return(already_exists)")
@@ -1785,6 +1981,7 @@ fn test_BC_1_18_011_obl1_graceful_err_rename_return_already_exists_forward_recov
 /// shape via the graceful path instead.
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_fsync_dir_return_unexpected_eof_discards() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::fsync_dir", "1*return(unexpected_eof)")
@@ -1809,10 +2006,11 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_dir_return_unexpected_eof_discards()
     assert!(
         txn.generation_id.is_none(),
         "the gen dir may already physically exist (mkdir succeeded before the fsync_dir call), \
-         but generation_id is not yet persisted -- DiscardPreGeneration must fire on the next \
-         invocation, mirroring the equivalent CRASH scenario at this same boundary"
+         but generation_id is not yet persisted -- admission Branch B (pre-empting \
+         recover()'s DiscardPreGeneration arm) reconciles it, mirroring the equivalent CRASH \
+         scenario at this same boundary"
     );
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchB);
 
     let outcome2 = run_recovery_to_convergence(dir.path(), 3);
     assert!(
@@ -1858,6 +2056,7 @@ fn test_BC_1_18_011_obl1_graceful_err_fsync_dir_return_unexpected_eof_discards()
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_retries_and_converges_within_one_call()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     fail::cfg("migration_fs::pointer_swap", "1*return(permission_denied)")
@@ -1894,6 +2093,7 @@ fn test_BC_1_18_011_obl1_graceful_err_pointer_swap_return_permission_denied_retr
 #[test]
 fn test_BC_1_18_011_obl1_graceful_err_remove_return_out_of_memory_best_effort_cleanup_still_converges()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
 
@@ -1920,7 +2120,7 @@ fn test_BC_1_18_011_obl1_graceful_err_remove_return_out_of_memory_best_effort_cl
          best-effort fs.remove failure -- only the (optional, non-fatal) gen-dir removal step \
          is best-effort"
     );
-    assert_admission_blocked(dir.path(), "probe");
+    assert_admission_self_heals(dir.path(), "probe", SelfHeal::BranchA);
 
     // A further attempt converges (mirrors the equivalent process-abort
     // chained scenario above) -- the orphaned, non-removed gen dir is
@@ -2007,6 +2207,7 @@ fn test_BC_1_18_011_obl1_graceful_err_remove_return_out_of_memory_best_effort_cl
 #[test]
 fn test_BC_1_18_011_SEC001_run_bc_index_migration_detects_concurrent_writer_mutation_before_pointer_swap()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2146,6 +2347,7 @@ fn test_BC_1_18_011_SEC001_run_bc_index_migration_detects_concurrent_writer_muta
 /// accidentally widen to cover the "genuinely not yet committed" case too.
 #[test]
 fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_no_prior_swap_aborts_and_converges() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2262,6 +2464,7 @@ fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_no_prior_swap_aborts_and_con
 #[test]
 fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_after_prior_swap_forward_recovers_never_deletes_generation()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2394,6 +2597,7 @@ fn test_BC_1_18_011_SEC001_v3_resume_mutated_source_after_prior_swap_forward_rec
 #[test]
 fn test_BC_1_18_011_SEC004_run_bc_index_migration_recheck_source_read_io_error_aborts_like_mismatch()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2501,6 +2705,7 @@ fn test_BC_1_18_011_SEC004_run_bc_index_migration_recheck_source_read_io_error_a
 /// SEC-004 test already covers.
 #[test]
 fn test_BC_1_18_011_F1_resume_from_staging_recheck_source_read_io_error_aborts_and_reopens_gate() {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2617,6 +2822,7 @@ fn test_BC_1_18_011_F1_resume_from_staging_recheck_source_read_io_error_aborts_a
 #[test]
 fn test_BC_1_18_011_F2_resume_from_staging_foreign_current_json_mismatched_txn_id_not_mistaken_for_committed()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2700,6 +2906,7 @@ fn test_BC_1_18_011_F2_resume_from_staging_foreign_current_json_mismatched_txn_i
 #[test]
 fn test_BC_1_18_011_F2_resume_from_staging_foreign_current_json_mismatched_generation_id_not_mistaken_for_committed()
  {
+    let _fp = fail_point_scope();
     let dir = tempfile::tempdir().unwrap();
     setup_fixture(dir.path());
     let canonical_path = bc_index_target(dir.path());
@@ -2766,4 +2973,44 @@ fn test_BC_1_18_011_F2_resume_from_staging_foreign_current_json_mismatched_gener
         BcIndexAdmissionGateState::Open,
         "F2: the admission gate must be reopened on this genuinely-not-committed abort path"
     );
+}
+
+// ===========================================================================
+// Lock-held controls for admission self-heal (BC-1.18.011 Precondition 6(d)):
+// the SAME post-crash states as the self-heal scenarios above, but with
+// `exclusive.lock` HELD (a live coordinator) must NOT be reconciled --
+// EWOULDBLOCK -> plain block, gate and txn byte-identical.
+// ===========================================================================
+
+#[test]
+fn test_BC_1_18_011_pre6d_control_branch_a_gate_locked_no_txn_lock_held_still_blocks() {
+    let _fp = fail_point_scope();
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    // Same state as the write_temp occ1 Branch A self-heal test.
+    let crash = spawn_crash_child("migration_fs::write_temp", 1, dir.path());
+    assert_child_aborted(&crash, "migration_fs::write_temp", 1);
+    assert_ne!(
+        read_gate_state(&migration_state_dir(dir.path())),
+        BcIndexAdmissionGateState::Open,
+        "control precondition: the crashed state has a non-OPEN gate"
+    );
+    assert_admission_blocked_lock_held(dir.path(), "probe");
+}
+
+#[test]
+fn test_BC_1_18_011_pre6d_control_branch_b_staging_null_generation_lock_held_still_blocks() {
+    let _fp = fail_point_scope();
+    let dir = tempfile::tempdir().unwrap();
+    setup_fixture(dir.path());
+    // Same state as the write_temp occ2 Branch B self-heal test.
+    let crash = spawn_crash_child("migration_fs::write_temp", 2, dir.path());
+    assert_child_aborted(&crash, "migration_fs::write_temp", 2);
+    let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
+    assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
+    assert!(txn.generation_id.is_none());
+    assert_admission_blocked_lock_held(dir.path(), "probe");
+    // Still STAGING / null generation afterwards (byte-identity already asserted).
+    let txn = read_live_txn_record(&migration_state_dir(dir.path())).unwrap();
+    assert_eq!(txn.state, BcIndexMigrationTxnState::Staging);
 }
