@@ -152,7 +152,7 @@ pub use admission::{
     derive_block_branch, diagnostics_for_undelivered_finalize, e_maintenance_block_message,
     is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
     reservation_release_failed_advisory, resolve_factory_root, resolve_session_project_root,
-    resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
+    resolve_target_path, sanitize_diagnostic,
 };
 
 // ---------------------------------------------------------------------------
@@ -13074,15 +13074,16 @@ pub enum BcIndexMigrationError {
     /// single LIVE txn record whose `migration_id` is the other known migration's
     /// or not in K. Raised after the Tier 0 loader and the one-live-txn check,
     /// before `recover()`, with no Tier 1 field read and nothing mutated. The id
-    /// is stored RAW and rendered at `Display` by the SAME function as the
-    /// admission diagnostic ([`admission::sanitize_diagnostic_id`]: control
-    /// characters escaped, capped at 64 characters) so a hostile id cannot forge
+    /// is stored RAW and rendered at `Display` by [`sanitize_diagnostic`]
+    /// at the operator-stderr substring cap ([`ADMISSION_STDERR_SUBSTRING_MAX_CHARS`] = 256,
+    /// ADR-052 v1.25 items 9 and 11(g): control characters escaped; the InternalLog
+    /// event id stays capped at 64) so a hostile id cannot forge
     /// terminal output.
     #[error(
         "BC-INDEX migration: refused: a live migration transaction owned by migration_id \
          \"{}\" is in progress (FOREIGN_MIGRATION_REFUSED, exit 2); this subcommand never \
          recovers, finalizes or aborts another migration's record; nothing was changed",
-        admission::sanitize_diagnostic_id(.live_migration_id)
+        sanitize_diagnostic(.live_migration_id, ADMISSION_STDERR_SUBSTRING_MAX_CHARS)
     )]
     ForeignMigrationRefused { live_migration_id: String },
 
