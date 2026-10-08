@@ -182,39 +182,50 @@
 //! the CORRECT invariant, which now PASSES -- these are load-bearing
 //! regression guards against FINDING 2 recurring.
 //!
-//! **FINDING 3 (RESOLVED -- was a real defect, MEDIUM severity --
-//! permanent gate lockout):** a crash between `write_completed_record`
-//! (NOT `Fs`-seamed, so not itself fault-injectable, but sequenced
-//! immediately before `write_temp` occurrence #10 / `fsync_file`
-//! occurrence #5) succeeding and the subsequent
-//! `write_admission_gate_state(Open)` call used to leave the on-disk
-//! writer-admission gate at LOCKED forever: the NEXT (and every
-//! subsequent) `run_bc_index_migration` invocation hits the
-//! `completed.json`-presence short-circuit (`BcIndexMigrationOutcome::
-//! AlreadyMigrated`, checked "no other file consulted", ADR-052 §7c step
-//! 8) at the very top of the function, BEFORE `recover()`'s dispatch and
-//! BEFORE `finish_committing_migration`'s gate-reset call are ever reached
-//! again. `reconcile_stale_admission_gate` cannot self-heal this either --
-//! its Branch A requires `active_txn == None`, but a live COMMITTING txn
-//! record still exists on disk in this exact scenario. The migration
-//! itself was always 100% correct and complete; only the gate used to get
-//! permanently stuck, blocking every future writer via
-//! `admit_or_block_bc_index_writer` with no automatic recovery path. The
-//! fix gives the `completed.json` short-circuit its own best-effort
-//! convergence: it now converges the txn record to COMPLETED and resets
-//! the gate to OPEN inline, idempotently, every time the short-circuit is
-//! hit. `test_BC_1_18_011_obl1_FINDING3_*` tests below reproduce the
-//! crash points and assert the CORRECT invariant, which now PASSES --
-//! these are load-bearing regression guards against FINDING 3 recurring.
+//! **FINDING 3 (the defect is closed; the CONTRACT is now the ADR-052 v1.23
+//! item 11(b) fail-closed INTERIM -- permanent gate lockout, MEDIUM severity,
+//! originally):** a crash between `write_completed_record` (NOT `Fs`-seamed, so not
+//! itself fault-injectable, but sequenced immediately before `write_temp`
+//! occurrence #10 / `fsync_file` occurrence #5) succeeding and the subsequent
+//! `write_admission_gate_state(Open)` call leaves the on-disk writer-admission
+//! gate at LOCKED and (for the `write_temp` #10 crash) the txn record still
+//! COMMITTING. The migration itself is 100% correct and complete; only its
+//! bookkeeping did not finish.
 //!
-//! All three findings were newly surfaced by this suite (distinct from,
-//! and in addition to, the four pass-2-era defects this refactor was
-//! built to close) and are NOT papered over: the
-//! `test_BC_1_18_011_obl1_FINDING*` tests assert the correct behavior.
-//! FINDING 1, FINDING 2, and FINDING 3 are all now RESOLVED -- every
-//! `FINDING*` assertion PASSES and serves as a load-bearing regression
-//! guard against its respective finding recurring -- see this suite's
-//! final report for routing.
+//! History: the first fix gave the `completed.json` short-circuit its own
+//! best-effort convergence (it finalized the txn to COMPLETED and opened the gate
+//! inline, so the `write_temp` #10 test asserted `AlreadyMigrated` + a self-healed
+//! gate). ADR-052 v1.23 item 11(b) REJECTED that behavior as an unverified
+//! finalize: `completed.json` is an UNBOUND marker (nothing in this build verifies
+//! that it describes the live txn: identity binding of `txn_id`/`generation_id`,
+//! `canonical_paths_count`, per-path `expected_post_hash`), and finalizing a live
+//! record on an unbound marker is a heuristic commit (the XA heuristic-hazard
+//! class; ARIES, RocksDB 2PC, PostgreSQL `PREPARE TRANSACTION` and `e2fsck -p` all
+//! refuse it). The ADR §4e / §5c Branch 2 table row (b) (`completed.json` present +
+//! the own migration's live COMMITTING txn) is therefore FAIL-CLOSED in this build:
+//! `run_bc_index_migration_core` returns
+//! `BcIndexMigrationError::CompletionRecordMismatchInterim` (exit 2
+//! `COMPLETION_RECORD_MISMATCH_ABORT`, the "no verification was performed in this
+//! build" line) with NO txn finalization and NO gate flip; the txn stays
+//! COMMITTING, the gate stays LOCKED and writer admission stays BLOCKED until a
+//! verified finalize exists.
+//!
+//! **S-25.06 AC-031 (B2-2) MUST FLIP THIS BACK:** that story supplies the
+//! effectful verify-then-finalize (ADR-052 item 11; §5c Branch 2 step 0.5: under
+//! `flock(exclusive.lock)`, re-select and verify, rewrite the txn COMPLETED, THEN
+//! gate -> OPEN), after which the `write_temp` #10 case below must again converge
+//! to `AlreadyMigrated` with the txn COMPLETED and the gate OPEN (and the interim
+//! `COMPLETION_RECORD_MISMATCH_ABORT` line is retired). Until then the interim
+//! assertion in
+//! `test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_gate_stuck`
+//! is the contract. The `fsync_file` #5 sibling (txn already COMPLETED, no live
+//! record) is unaffected: it is the no-live-record row, reconciled under the
+//! flock and exiting `AlreadyMigrated`.
+//!
+//! The `test_BC_1_18_011_obl1_FINDING*` tests assert the contract in force for
+//! their finding; FINDING 1 and FINDING 2 remain RESOLVED regression guards and
+//! FINDING 3 is held at the item 11(b) interim above -- see this suite's final
+//! report for routing.
 #![cfg(feature = "failpoints")]
 
 use std::path::{Path, PathBuf};
@@ -1109,24 +1120,53 @@ fn test_BC_1_18_011_obl1_FINDING3_crash_write_temp_occ10_completed_json_durable_
          this test targets)"
     );
 
-    // ADR-052 v1.23 item 11(b) (error-taxonomy `COMPLETION_RECORD_MISMATCH_ABORT`,
-    // exit 2): a LIVE COMMITTING txn beside `completed.json` is never finalized
-    // and the gate never flipped until S-25.06 AC-031 supplies the
-    // verify-then-finalize. Interim contract: fail closed, txn and gate unchanged.
+    // ADR-052 v1.23 item 11(b) / section 5c Branch 2 table row (b): `completed.json`
+    // beside the own migration's LIVE COMMITTING txn is never finalized and the gate
+    // never flipped -- this build has no verifier (error-taxonomy
+    // `COMPLETION_RECORD_MISMATCH_ABORT`, exit 2). Interim contract: fail closed with
+    // txn, gate and every other control file unchanged, on EVERY retry.
+    //
+    // S-25.06 AC-031 MUST FLIP THIS TEST BACK to the verified finalize: once its
+    // verify-then-finalize lands, this scenario converges to `AlreadyMigrated` with
+    // the txn COMPLETED and the gate OPEN (see the module-header FINDING 3 text).
+    let before = snapshot_admission_state(&msd);
+    let gate_before = read_gate_state(&msd);
+    assert_ne!(
+        gate_before,
+        BcIndexAdmissionGateState::Open,
+        "precondition: the crash leaves the gate non-OPEN (LOCKED)"
+    );
     let outcome = run_recovery_to_convergence(dir.path(), 3);
-    assert!(
-        matches!(
-            outcome,
-            Err(BcIndexMigrationError::CompletionRecordMismatchInterim)
+    let err = match outcome {
+        Err(e @ BcIndexMigrationError::CompletionRecordMismatchInterim) => e,
+        other => panic!(
+            "ADR-052 v1.23 item 11(b): completed.json beside a live COMMITTING txn must fail \
+             closed with COMPLETION_RECORD_MISMATCH_ABORT until S-25.06 AC-031 -- got {other:?}"
         ),
-        "ADR-052 v1.23 item 11(b): completed.json beside a live COMMITTING txn must fail closed \
-         with COMPLETION_RECORD_MISMATCH_ABORT until S-25.06 AC-031 -- got {outcome:?}"
+    };
+    assert_eq!(err.process_exit_code(), 2, "item 11(b): exit 2");
+    assert_eq!(
+        err.to_string(),
+        "BC-INDEX migration: the terminal record completed.json cannot be proven to describe \
+         the live txn (COMPLETION_RECORD_MISMATCH_ABORT, exit 2); no verification was \
+         performed in this build; txn and gate unchanged; operator investigation required",
+        "item 11(b): the normative interim line"
     );
     let txn = read_live_txn_record(&msd).expect("the live txn record must be left untouched");
     assert_eq!(
         txn.state,
         BcIndexMigrationTxnState::Committing,
         "item 11(b): no txn finalization"
+    );
+    assert_eq!(
+        snapshot_admission_state(&msd),
+        before,
+        "item 11(b): txn record and gate-state.json byte-identical after three retries"
+    );
+    assert_eq!(
+        read_gate_state(&msd),
+        gate_before,
+        "item 11(b): no gate flip"
     );
     assert_admission_blocked(dir.path(), "probe");
 }
