@@ -389,7 +389,10 @@ pub fn as_given_factory_root_spelling(raw: &std::ffi::OsStr) -> Option<PathBuf> 
 pub(crate) fn parse_failure_detail(path: &Path, e: &serde_json::Error) -> String {
     format!(
         "{}: {:?} error at line {} column {}",
-        sanitize_diagnostic(&path.display().to_string(), 256),
+        sanitize_diagnostic(
+            &path.display().to_string(),
+            EVENT_DETAIL_SUBSTRING_MAX_CHARS
+        ),
         e.classify(),
         e.line(),
         e.column()
@@ -1011,33 +1014,62 @@ pub fn admit_protected_write(
     tool_use_id: Option<&str>,
     family: ProtectedPathFamily,
 ) -> Result<AdmissionOutcome, BcIndexMigrationError> {
+    admit_protected_write_diagnosed(migration_state_dir, tool_use_id, family).0
+}
+
+/// [`admit_protected_write`] plus the Event 13 `reservation_release_failed` advisory
+/// of a release-on-block that could not unlink the admitter's OWN reservation on the
+/// `Err` path (BC-1.18.013 Postcondition 10(c)): an `Err` carries no diagnostics
+/// channel of its own, so the advisory is returned beside it. On the `Blocked` path the
+/// advisory is part of the outcome's `diagnostics` (before the one `Blocked`
+/// diagnostic), so the second tuple member is `None` there.
+pub fn admit_protected_write_diagnosed(
+    migration_state_dir: &Path,
+    tool_use_id: Option<&str>,
+    family: ProtectedPathFamily,
+) -> (
+    Result<AdmissionOutcome, BcIndexMigrationError>,
+    Option<AdmissionDiagnostic>,
+) {
     // W1 — reserve FIRST.
     let reservation = match tool_use_id {
-        Some(id) => {
-            let path = create_writer_reservation(migration_state_dir, id)?;
-            seam::record(&format!("W1_RESERVE:{id}"));
-            seam::pause_after_w1();
-            Some(path)
-        }
+        Some(id) => match create_writer_reservation(migration_state_dir, id) {
+            Ok(path) => {
+                seam::record(&format!("W1_RESERVE:{id}"));
+                seam::pause_after_w1();
+                Some(path)
+            }
+            Err(e) => return (Err(e), None),
+        },
         None => None,
     };
 
     // W2 and everything after — verify.
     match verify_admission(migration_state_dir, family) {
-        Ok((None, diagnostics)) => Ok(AdmissionOutcome::Admitted {
-            reservation,
-            diagnostics,
-        }),
-        Ok((Some(message), diagnostics)) => {
-            remove_own_reservation(reservation.as_deref());
-            Ok(AdmissionOutcome::Blocked {
-                message,
+        Ok((None, diagnostics)) => (
+            Ok(AdmissionOutcome::Admitted {
+                reservation,
                 diagnostics,
-            })
+            }),
+            None,
+        ),
+        Ok((Some(message), mut diagnostics)) => {
+            if let Some(advisory) = remove_own_reservation(reservation.as_deref()) {
+                // Advisories first, then exactly ONE `Blocked` diagnostic last.
+                let at = diagnostics.len().saturating_sub(1);
+                diagnostics.insert(at, advisory);
+            }
+            (
+                Ok(AdmissionOutcome::Blocked {
+                    message,
+                    diagnostics,
+                }),
+                None,
+            )
         }
         Err(e) => {
-            remove_own_reservation(reservation.as_deref());
-            Err(e)
+            let advisory = remove_own_reservation(reservation.as_deref());
+            (Err(e), advisory)
         }
     }
 }
@@ -1307,7 +1339,10 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
             detail: format!(
                 "malformed txn record at {}: generation_id is absent or not a JSON string/null",
-                sanitize_diagnostic(&txn.path.display().to_string(), 256)
+                sanitize_diagnostic(
+                    &txn.path.display().to_string(),
+                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
+                )
             ),
         }),
     }
@@ -1336,7 +1371,10 @@ pub(super) fn abort_null_generation_txn(
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
             detail: format!(
                 "{}: not a JSON object",
-                sanitize_diagnostic(&txn_path.display().to_string(), 256)
+                sanitize_diagnostic(
+                    &txn_path.display().to_string(),
+                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
+                )
             ),
         });
     };
@@ -1580,7 +1618,10 @@ pub(super) fn read_txn_files(
             kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
             detail: format!(
                 "{}: {detail}",
-                sanitize_diagnostic(&path.display().to_string(), 256)
+                sanitize_diagnostic(
+                    &path.display().to_string(),
+                    EVENT_DETAIL_SUBSTRING_MAX_CHARS
+                )
             ),
         };
         let Some(object) = raw.as_object() else {
@@ -1603,7 +1644,10 @@ pub(super) fn read_txn_files(
                     kind: AdmissionStateIntegrityKind::TxnMigrationIdNotString,
                     detail: format!(
                         "{}: migration_id is not a JSON string",
-                        sanitize_diagnostic(&path.display().to_string(), 256)
+                        sanitize_diagnostic(
+                            &path.display().to_string(),
+                            EVENT_DETAIL_SUBSTRING_MAX_CHARS
+                        )
                     ),
                 });
             }
@@ -1676,31 +1720,84 @@ fn create_writer_reservation(
 }
 
 /// Release-on-block for the admitter's OWN reservation. A failure to remove it
-/// is non-fatal: the TTL GC ([`super::reservation_is_stale`]) reclaims it.
-fn remove_own_reservation(reservation: Option<&Path>) {
-    release_reservation_file(reservation);
+/// is non-fatal (the TTL GC [`super::reservation_is_stale`] reclaims it) but is
+/// returned as the Event 13 `reservation_release_failed` advisory.
+fn remove_own_reservation(reservation: Option<&Path>) -> Option<AdmissionDiagnostic> {
+    release_reservation_file(reservation)
 }
 
 /// Remove a reservation file (idempotent; a missing file is a no-op). Shared by
 /// the admitter's own release-on-block and the dispatcher's release when a
 /// LATER stage of the same dispatch blocks (`main.rs`).
-pub fn release_reservation_file(reservation: Option<&Path>) {
-    let Some(path) = reservation else {
-        return;
-    };
+///
+/// A non-ENOENT unlink failure is returned AS DATA (BC-1.18.013 Postcondition 10(c):
+/// the shell writes it as ONE `migration.admission_advisory`
+/// `reason=reservation_release_failed`); the verdict is never affected. The advisory
+/// omits the path (it embeds the raw `tool_use_id`) and carries only its byte length.
+#[must_use]
+pub fn release_reservation_file(reservation: Option<&Path>) -> Option<AdmissionDiagnostic> {
+    let path = reservation?;
     match std::fs::remove_file(path) {
-        Ok(()) => {}
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(()) => None,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => None,
         Err(source) => {
             tracing::warn!(
                 target: "bc_1_18_011_migration",
-                path = %path.display(),
                 error = %source,
                 "failed to remove a writer reservation (non-fatal); drain's TTL GC will \
                  reclaim it"
             );
+            let tool_use_id_len = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().len() as u64);
+            Some(reservation_release_failed_advisory(
+                &BcIndexMigrationError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                },
+                tool_use_id_len,
+                false,
+            ))
         }
     }
+}
+
+/// Maximum characters of each data-derived substring of an Event 12 / Event 13 `detail`
+/// (BC-3.08.001 Events 12/13 "truncated to 64 characters for any data-derived substring";
+/// BC-1.18.013 Postcondition 10 Hygiene, EC-029). Applied PER substring.
+pub const EVENT_DETAIL_SUBSTRING_MAX_CHARS: usize = 64;
+
+/// Builds the single `reservation_release_failed` advisory for a release-leg
+/// failure. `include_path` is `true` only for the unstatable-`.factory` lookup
+/// failure (the path is the fixed `<root>/.factory`, safe to echo); the
+/// reservation-unlink failure deliberately omits it because that error's path
+/// embeds the raw `tool_use_id`. Detail carries the `ErrorKind` Debug and the
+/// sanitized OS message, each data-derived substring at most
+/// [`EVENT_DETAIL_SUBSTRING_MAX_CHARS`] characters.
+#[must_use]
+pub fn reservation_release_failed_advisory(
+    e: &BcIndexMigrationError,
+    tool_use_id_len: Option<u64>,
+    include_path: bool,
+) -> AdmissionDiagnostic {
+    let cap = EVENT_DETAIL_SUBSTRING_MAX_CHARS;
+    let mut advisory = AdmissionAdvisory::new(AdvisoryReason::ReservationReleaseFailed);
+    advisory.detail = Some(match e {
+        BcIndexMigrationError::Io { path, source } if include_path => format!(
+            "{}: {:?}: {}",
+            sanitize_diagnostic(&path.display().to_string(), cap),
+            source.kind(),
+            sanitize_diagnostic(&source.to_string(), cap)
+        ),
+        BcIndexMigrationError::Io { source, .. } => format!(
+            "{:?}: {}",
+            source.kind(),
+            sanitize_diagnostic(&source.to_string(), cap)
+        ),
+        other => sanitize_diagnostic(&other.to_string(), cap),
+    });
+    advisory.tool_use_id_len = tool_use_id_len;
+    AdmissionDiagnostic::Advisory(advisory)
 }
 
 /// Test-only admission seam (see the module docs). Active ONLY in

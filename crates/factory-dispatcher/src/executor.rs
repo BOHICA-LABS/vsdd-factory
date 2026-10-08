@@ -556,11 +556,12 @@ pub fn migration_writer_admission(
             Err(e) => return admission_error(&e),
         };
 
-    match crate::shard_manager::admit_protected_write(
+    let (admission, release_advisory) = crate::shard_manager::admit_protected_write_diagnosed(
         &factory_root.migration_state_dir(),
         tool_use_id,
         family,
-    ) {
+    );
+    match admission {
         Ok(crate::shard_manager::AdmissionOutcome::Admitted {
             reservation,
             diagnostics,
@@ -575,7 +576,14 @@ pub fn migration_writer_admission(
             reservation: None,
             diagnostics,
         },
-        Err(e) => admission_error(&e),
+        Err(e) => {
+            let mut failed = admission_error(&e);
+            // The admitter's own release-on-block could not unlink its reservation on
+            // this error path: ONE `reservation_release_failed` advisory beside the
+            // `Failed` diagnostic (BC-1.18.013 Postcondition 10(c)); the verdict is unchanged.
+            failed.diagnostics.extend(release_advisory);
+            failed
+        }
     }
 }
 
@@ -589,6 +597,8 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
         AdmissionDiagnostic, AdmissionFailureCause, BcIndexMigrationError, FailedDiagnostic,
         sanitize_diagnostic,
     };
+    const EVENT_DETAIL_SUBSTRING_MAX_CHARS: usize =
+        crate::shard_manager::EVENT_DETAIL_SUBSTRING_MAX_CHARS;
     let cause = e.admission_failure_cause();
     let kind = match e {
         BcIndexMigrationError::AdmissionStateIntegrity { kind, .. } => Some(*kind),
@@ -602,11 +612,15 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
         BcIndexMigrationError::InvalidToolUseId { len } => {
             format!("tool_use_id byte length {len}")
         }
+        // Each data-derived substring is capped at 64 characters (BC-3.08.001 Event 12).
         BcIndexMigrationError::Io { path, source } => format!(
             "{}: {:?}: {}",
-            sanitize_diagnostic(&path.display().to_string(), 256),
+            sanitize_diagnostic(
+                &path.display().to_string(),
+                EVENT_DETAIL_SUBSTRING_MAX_CHARS
+            ),
             source.kind(),
-            sanitize_diagnostic(&source.to_string(), 256)
+            sanitize_diagnostic(&source.to_string(), EVENT_DETAIL_SUBSTRING_MAX_CHARS)
         ),
         BcIndexMigrationError::AdmissionStateIntegrity { detail, .. } => {
             sanitize_diagnostic(detail, 256)
@@ -685,7 +699,7 @@ pub fn migration_reservation_release(
                 .get("tool_use_id")
                 .and_then(|v| v.as_str())
                 .map(|id| id.len() as u64);
-            return vec![reservation_release_failed_advisory(
+            return vec![crate::shard_manager::reservation_release_failed_advisory(
                 &e,
                 tool_use_id_len,
                 true,
@@ -716,7 +730,7 @@ pub fn migration_reservation_release(
                 .get("tool_use_id")
                 .and_then(|v| v.as_str())
                 .map(|id| id.len() as u64);
-            return vec![reservation_release_failed_advisory(
+            return vec![crate::shard_manager::reservation_release_failed_advisory(
                 &crate::shard_manager::BcIndexMigrationError::Io {
                     path: migration_state_dir.clone(),
                     source: e,
@@ -738,47 +752,13 @@ pub fn migration_reservation_release(
             // Best-effort, never a verdict: the reservation, if it still exists,
             // is reclaimed by `drain_bc_index_writers`'s TTL GC. Recorded as ONE
             // `migration.admission_advisory` (`reservation_release_failed`).
-            vec![reservation_release_failed_advisory(
+            vec![crate::shard_manager::reservation_release_failed_advisory(
                 &e,
                 Some(tool_use_id.len() as u64),
                 false,
             )]
         }
     }
-}
-
-/// Builds the single `reservation_release_failed` advisory for a release-leg
-/// failure. `include_path` is `true` only for the unstatable-`.factory` lookup
-/// failure (the path is the fixed `<root>/.factory`, safe to echo); the
-/// reservation-unlink failure deliberately omits it because that error's path
-/// embeds the raw `tool_use_id`. Detail carries the `ErrorKind` Debug and the
-/// sanitized OS message.
-fn reservation_release_failed_advisory(
-    e: &crate::shard_manager::BcIndexMigrationError,
-    tool_use_id_len: Option<u64>,
-    include_path: bool,
-) -> crate::shard_manager::AdmissionDiagnostic {
-    use crate::shard_manager::{
-        AdmissionAdvisory, AdmissionDiagnostic, AdvisoryReason, BcIndexMigrationError,
-        sanitize_diagnostic,
-    };
-    let mut advisory = AdmissionAdvisory::new(AdvisoryReason::ReservationReleaseFailed);
-    advisory.detail = Some(match e {
-        BcIndexMigrationError::Io { path, source } if include_path => format!(
-            "{}: {:?}: {}",
-            sanitize_diagnostic(&path.display().to_string(), 256),
-            source.kind(),
-            sanitize_diagnostic(&source.to_string(), 256)
-        ),
-        BcIndexMigrationError::Io { source, .. } => format!(
-            "{:?}: {}",
-            source.kind(),
-            sanitize_diagnostic(&source.to_string(), 256)
-        ),
-        other => sanitize_diagnostic(&other.to_string(), 256),
-    });
-    advisory.tool_use_id_len = tool_use_id_len;
-    AdmissionDiagnostic::Advisory(advisory)
 }
 
 /// One-stat presence probe for the release leg's `.factory/migration-state`

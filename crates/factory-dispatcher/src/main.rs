@@ -144,7 +144,16 @@ async fn main() {
     // (admitted PreToolUse Edit/Write/MultiEdit with a `tool_use_id`), recorded
     // by `run` the moment admission returns.
     let mut admission_reservation: Option<PathBuf> = None;
-    let code = match run(internal_log.clone(), &mut admission_reservation).await {
+    // `(trace_id, session_id)` of this dispatch, recorded by `run` so the release-on-block
+    // advisory below is correlated with the dispatch's other admission events.
+    let mut dispatch_ids: (String, String) = (String::new(), String::new());
+    let code = match run(
+        internal_log.clone(),
+        &mut admission_reservation,
+        &mut dispatch_ids,
+    )
+    .await
+    {
         Ok(code) => code,
         Err(err) => {
             emit_dispatcher_error(&internal_log, None, None, &err.to_string());
@@ -159,9 +168,19 @@ async fn main() {
     // `run` funnels through this one point, so the dispatch's FINAL aggregated
     // outcome (exit 2) is what decides: a blocked/errored event leaves no
     // reservation behind. An admitted event (exit 0) keeps it until PostToolUse.
-    if code == 2 {
-        factory_dispatcher::shard_manager::release_reservation_file(
+    // A non-ENOENT unlink failure is an Event 13 `reservation_release_failed` advisory
+    // (BC-1.18.013 Postcondition 10(c)), written like the other admission diagnostics;
+    // the exit code is unchanged.
+    if code == 2
+        && let Some(advisory) = factory_dispatcher::shard_manager::release_reservation_file(
             admission_reservation.as_deref(),
+        )
+    {
+        write_admission_diagnostics(
+            &internal_log,
+            &dispatch_ids.0,
+            &dispatch_ids.1,
+            std::slice::from_ref(&advisory),
         );
     }
     std::process::exit(code);
@@ -170,9 +189,11 @@ async fn main() {
 async fn run(
     internal_log: Arc<InternalLog>,
     admission_reservation: &mut Option<PathBuf>,
+    dispatch_ids: &mut (String, String),
 ) -> anyhow::Result<i32> {
     let trace_id = new_trace_id();
     let payload = HookPayload::from_reader(std::io::stdin().lock())?;
+    *dispatch_ids = (trace_id.clone(), payload.session_id.clone());
 
     // S-25.08 / ADR-052 v1.20 §5a "Evaluation position" (F-004): the native
     // writer-admission gate and the reservation release are REGISTRY-INDEPENDENT.

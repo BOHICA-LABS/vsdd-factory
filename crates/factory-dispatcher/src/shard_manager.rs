@@ -145,13 +145,14 @@ mod admission;
 mod ttl_seam_tests;
 pub use admission::{
     ABORT_REASON_NULL_GENERATION, AdmissionAdvisory, AdmissionDiagnostic, AdmissionOutcome,
-    AdvisoryReason, BlockBranch, BlockedDiagnostic, BranchCCheck, FactoryRoot, FailedDiagnostic,
-    MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2, ProjectRootSource, ProtectedPathFamily,
-    SessionProjectRoot, StaleGateReconciliation, admit_protected_write,
-    as_given_factory_root_spelling, classify_tool_use_id, derive_block_branch,
-    diagnostics_for_undelivered_finalize, e_maintenance_block_message, is_valid_tool_use_id,
-    reconcile_stale_admission_gate, release_reservation_file, resolve_factory_root,
-    resolve_session_project_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
+    AdvisoryReason, BlockBranch, BlockedDiagnostic, BranchCCheck, EVENT_DETAIL_SUBSTRING_MAX_CHARS,
+    FactoryRoot, FailedDiagnostic, MIGRATION_ID_APPEND_LOG, MIGRATION_ID_B2, ProjectRootSource,
+    ProtectedPathFamily, SessionProjectRoot, StaleGateReconciliation, admit_protected_write,
+    admit_protected_write_diagnosed, as_given_factory_root_spelling, classify_tool_use_id,
+    derive_block_branch, diagnostics_for_undelivered_finalize, e_maintenance_block_message,
+    is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
+    reservation_release_failed_advisory, resolve_factory_root, resolve_session_project_root,
+    resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
 };
 
 // ---------------------------------------------------------------------------
@@ -13994,7 +13995,10 @@ fn txn_record_malformed(path: &Path, detail: &str) -> BcIndexMigrationError {
         kind: AdmissionStateIntegrityKind::TxnRecordMalformed,
         detail: format!(
             "{}: {detail}",
-            admission::sanitize_diagnostic(&path.display().to_string(), 256)
+            admission::sanitize_diagnostic(
+                &path.display().to_string(),
+                admission::EVENT_DETAIL_SUBSTRING_MAX_CHARS
+            )
         ),
     }
 }
