@@ -16028,7 +16028,30 @@ fn abort_cleanup_outcome(
                 },
             ),
         },
-        Err(other) => other,
+        // A non-`Io` cleanup failure keeps its variant but still names the original
+        // failure (ADR-052 v1.24 item 11(d): "the ORIGINAL failure's code token named in its
+        // `detail`"), so the root cause stays visible.
+        Err(other) => {
+            let while_handling = original
+                .code_token()
+                .map_or_else(|| original.to_string(), str::to_string);
+            match other {
+                BcIndexMigrationError::AdmissionStateIntegrity { kind, detail } => {
+                    BcIndexMigrationError::AdmissionStateIntegrity {
+                        kind,
+                        detail: format!("{detail} (while handling {while_handling})"),
+                    }
+                }
+                BcIndexMigrationError::BinaryIntegrityFailure { message } => {
+                    BcIndexMigrationError::BinaryIntegrityFailure {
+                        message: format!("{message} (while handling {while_handling})"),
+                    }
+                }
+                rest => BcIndexMigrationError::BinaryIntegrityFailure {
+                    message: format!("{rest} (while handling {while_handling})"),
+                },
+            }
+        }
     }
 }
 
@@ -17119,8 +17142,13 @@ fn run_bc_index_migration_core(
     if let Err(e) =
         drain_bc_index_writers(&reservations_dir, DEFAULT_DRAIN_TIMEOUT, reservation_ttl)
     {
-        let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
-        return Err(e);
+        // ADR-052 v1.24 item 11(d): the gate-OPEN write after a failed drain is CHECKED. A
+        // failure is that write's own `Io` (exit 2) naming the original token, and the
+        // `DrainTimeoutAbort` text ("gate returned to OPEN") is never printed unless the
+        // write succeeded.
+        let reopen =
+            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
+        return Err(abort_cleanup_outcome(e, reopen));
     }
     write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Locked)?;
 
