@@ -21,9 +21,15 @@
 //! | EC-046(e)(f) | item 9: EXACT `FOREIGN_MIGRATION_REFUSED` line, id truncation / escaping | `..._EC046_live_foreign_record_refused_...`, `..._EC046_foreign_id_rendering_...` |
 //! | EC-046 | item 9: precedence flock -> Tier 0 -> one-live -> foreign | `..._EC046_precedence_...` |
 //! | EC-048 | item 9: `MIGRATION_LOCK_CONTENTION` exit 1, flock BEFORE loader | `..._EC048_...` |
-//! | EC-045 | item 10: wrong-typed strict-presence values (full 11-key set) | `..._EC045_wrong_typed_values_...` |
+//! | EC-045 | item 10: wrong-typed strict-presence values (full 12-key set after sub-rule (b)) | `..._EC045_wrong_typed_values_...` |
 //! | EC-049 | item 10: unknown top-level key; `migration_id` preserved verbatim | `..._EC049_...` |
 //! | EC-050 | item 11: INTERIM `completed.json` short-circuit | `..._EC050_...` |
+//! | EC-048 / EC-050 | item 11(c) (v1.23 third extension): flock held + `completed.json` present => exit 1 `MIGRATION_LOCK_CONTENTION` on EVERY path (REPLACES the former "flock held elsewhere => exit 0") | `..._EC050_completed_json_present_flock_held_is_lock_contention_exit_1_...` |
+//! | EC-048 / EC-050 | item 11(c) control: SAME on-disk state, lock FREE => timing-independent fail-closed verdict (exit 2 / exit 2 / exit 0) | `..._EC050_same_state_lock_free_is_the_timing_independent_verdict_...` |
+//! | EC-049 | item 10(a): nested strictness of `pending_canonical_moves[]` elements | `..._EC049_nested_...` |
+//! | EC-049 | item 10(b): `schema_version` vector table, version gate FIRST | `..._EC049_schema_version_...` |
+//! | EC-049 | item 10(c): newer-schema `Display`, pinned exactly | `..._EC049_newer_schema_display_pinned_exactly_...` |
+//! | EC-049 | item 10(d): null-generation discard under the version gate | `..._EC049_null_generation_discard_...` |
 //! | EC-043 | STAGING `generation_id` absent / non-string-non-null | `..._EC043_staging_generation_id_absent_or_ill_typed_...` |
 //! | EC-044 | COMMITTING `generation_id` null / absent / number | `..._EC044_committing_generation_id_not_a_string_...` |
 //! | EC-045 | strict-presence decode at arm entry (3 named keys, both arms) | `..._EC045_strict_presence_named_keys_...` |
@@ -248,9 +254,15 @@ fn assert_no_failures(test: &str, failures: Vec<String>) {
 }
 
 /// A record exactly as this build writes it (every key present, `Option` fields
-/// `null`), plus the `migration_id` discriminator.
+/// `null`, and -- ADR-052 v1.23 item 10(b) -- `schema_version: 1`), plus the
+/// `migration_id` discriminator. (Fixture change for the third binary-leg extension:
+/// before it, `full()` carried only the eleven pre-v1.23 keys; the supported build
+/// now REQUIRES the twelfth, so every fixture that must pass the strict decode
+/// carries it. These fixtures are red until the implementer lands: today the
+/// decode rejects `schema_version` as an unknown top-level key.)
 fn full(state: &str, generation_id: Value) -> Value {
     json!({
+        "schema_version": 1,
         "txn_id": "txn-act-1",
         "migration_id": MIGRATION_ID,
         "activation_id": "act-1",
@@ -293,11 +305,17 @@ fn check_integrity_refusal(
 ) {
     let err = stderr_of(out);
     let lines: Vec<&str> = err.lines().collect();
+    // The fixtures carry `schema_version: 1`, which the supported build accepts
+    // (ADR-052 v1.23 item 10(b)(ii)): the refusal must be for the defect UNDER TEST,
+    // never for the version key. A refusal that names `schema_version` (today: "unknown
+    // top-level key(s) on a live record: schema_version") would let a rejection test
+    // pass vacuously for the wrong reason.
     let line_ok = lines.len() == 1
         && lines[0].starts_with(INTEGRITY_PREFIX)
         && lines[0].len() > INTEGRITY_PREFIX.len()
         && !err.contains("BINARY_INTEGRITY_FAILURE")
-        && !err.contains("EXPIRY_ABORT");
+        && !err.contains("EXPIRY_ABORT")
+        && !err.contains("schema_version");
     if out.status.code() != Some(2) || !out.stdout.is_empty() || !line_ok {
         failures.push(format!(
             "[{label}] expected exit 2, empty stdout and exactly ONE stderr line starting \
@@ -1375,7 +1393,7 @@ fn test_BC_1_18_011_EC048_flock_held_by_another_coordinator_is_lock_contention_e
 }
 
 // ===========================================================================
-// Item 10 -- strict-presence scope (full 11-key set) and unknown-key rejection
+// Item 10 -- strict-presence scope (full 12-key set) and unknown-key rejection
 // ===========================================================================
 
 /// BC-1.18.011 v1.20 Precondition 6(f)(iii) + EC-045 wrong-typed vectors (ADR-052
@@ -1490,7 +1508,7 @@ fn test_BC_1_18_011_EC045_wrong_typed_values_across_the_full_key_set_rejected_be
 /// (ADR-052 v1.23 item 10): a live known STAGING (string `generation_id`, gen dir =>
 /// `ResumeFromStaging`) or COMMITTING (=> `ForwardRecovery`) record carrying an extra
 /// top-level key (`schema_v2_field`, with a number / string / null / object / array
-/// value) alongside every one of the 11 required keys => exit 2 `txn_record_malformed`
+/// value) alongside every one of the 12 required keys (incl. `schema_version: 1`) => exit 2 `txn_record_malformed`
 /// raised at the arm entry BEFORE the first mutation (a typed rewrite cannot preserve a
 /// field it does not model). Also with the `migration_id` discriminator present.
 #[test]
@@ -1928,41 +1946,981 @@ fn test_BC_1_18_011_EC050_gate_already_open_is_zero_filesystem_writes_blackbox()
     );
 }
 
-/// BC-1.18.011 v1.20 EC-050(c3) + Postcondition 9(e)(c) / ADR-052 v1.23 item 11(c): with
-/// NO live record beside a valid `completed.json` and the flock HELD by another
-/// coordinator (EWOULDBLOCK), the reconciliation is skipped: exit 0, NO gate write --
-/// the gate of a live `backfill-append-logs` coordinator (DRAINING / LOCKED) is never
-/// opened by this binary (the section 7e D4 hazard). Tree byte-identical.
+/// Pin the mtimes of `files` (relative to `migration-state/`) to 2001 so a same-bytes
+/// REWRITE is observable ("nothing read or written": a byte snapshot alone cannot see
+/// an atomic rewrite that happens to produce identical bytes).
+fn pin_mtimes(fx: &Fx, files: &[&str]) -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
+    files
+        .iter()
+        .filter(|f| fx.ms().join(f).exists())
+        .map(|f| {
+            let p = fx.ms().join(f);
+            filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_000_000_000, 0))
+                .unwrap();
+            let m = mtime_of(&p);
+            (p, m)
+        })
+        .collect()
+}
+
+/// The on-disk states of the three item 11(c) variants (plus extras), each as a
+/// `(label, files)` list of `(name, JSON)` txn records written beside a valid
+/// `completed.json`.
+fn completed_json_state_variants() -> Vec<(&'static str, Vec<(&'static str, Value)>)> {
+    vec![
+        ("plain: completed.json only, no txn record", vec![]),
+        (
+            "own live COMMITTING txn (full)",
+            vec![("txn-act-1.json", full("COMMITTING", json!("gen-1")))],
+        ),
+        (
+            "own live COMMITTING txn (minimal)",
+            vec![("txn-act-1.json", minimal("COMMITTING"))],
+        ),
+        (
+            "own live STAGING txn (full)",
+            vec![("txn-act-1.json", full("STAGING", json!("gen-1")))],
+        ),
+        (
+            "foreign live record (backfill-append-logs STAGING)",
+            vec![(
+                "txn-act-1.json",
+                json!({"state": "STAGING", "migration_id": "backfill-append-logs"}),
+            )],
+        ),
+        (
+            "foreign live record (future-migration COMMITTING)",
+            vec![(
+                "txn-act-1.json",
+                json!({"state": "COMMITTING", "migration_id": "future-migration"}),
+            )],
+        ),
+        (
+            "own terminal COMPLETED record only",
+            vec![("txn-act-1.json", full("COMPLETED", json!("gen-1")))],
+        ),
+    ]
+}
+
+/// ADR-052 v1.23 item 11(c) (third binary-leg extension; BC-1.18.011 v1.20 EC-048 /
+/// EC-050 vectors) -- REPLACES the former `..._EC050_flock_held_elsewhere_skips_gate_
+/// reconciliation_exit_0_no_write_blackbox` (which pinned "EWOULDBLOCK => skip, exit 0
+/// `ALREADY_MIGRATED`"; independent validation Call 3b REJECTED that behavior): the
+/// coordinator attempts `flock(exclusive.lock, LOCK_EX|LOCK_NB)` BEFORE it reads ANY
+/// state it will act on, and "not acquired" is `MigrationLockContention` -- exit **1**
+/// with EXACTLY the item 9 line -- on EVERY path, INCLUDING when `completed.json` is
+/// present, never exit 0, with ZERO reads of txn/gate state and ZERO writes.
+///
+/// The three required variants (plain / own live COMMITTING txn / foreign live record)
+/// plus own STAGING, a second foreign shape, an own terminal record, and a MALFORMED txn
+/// record (which, were the loader to run before the flock, would be an integrity failure
+/// instead of contention), each under the gate states LOCKED and DRAINING (the gate of a
+/// live `backfill-append-logs` coordinator). Whole tree byte-identical, and the gate /
+/// txn / `completed.json` mtimes (pinned to 2001) unchanged, so a same-bytes rewrite
+/// is also caught.
 #[test]
-fn test_BC_1_18_011_EC050_flock_held_elsewhere_skips_gate_reconciliation_exit_0_no_write_blackbox()
-{
+fn test_BC_1_18_011_EC050_completed_json_present_flock_held_is_lock_contention_exit_1_never_exit_0_zero_reads_zero_writes_blackbox()
+ {
     let mut failures = Vec::new();
+    let mut variants = completed_json_state_variants();
+    variants.push((
+        "malformed txn (non-UTF-8) beside completed.json: contention, NOT integrity",
+        vec![],
+    ));
     for gate in ["LOCKED", "DRAINING"] {
-        let label = format!("gate {gate}, flock held");
+        for (what, recs) in &variants {
+            let label = format!("gate {gate}, flock held, {what}");
+            let fx = Fx::new();
+            fx.gate(gate);
+            fx.completed_json();
+            for (name, v) in recs {
+                fx.txn(name, v);
+            }
+            if what.starts_with("malformed") {
+                fx.txn_bytes("txn-a-bad.json", &[0xFF, 0xFE]);
+            }
+            let pinned = pin_mtimes(
+                &fx,
+                &[
+                    "gate-state.json",
+                    "completed.json",
+                    "txn-act-1.json",
+                    "txn-a-bad.json",
+                ],
+            );
+            let held = fx.hold_lock();
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            let after = snapshot(fx.root());
+            drop(held);
+            check_exact_line(&label, &out, 1, LOCK_CONTENTION_LINE, &mut failures);
+            diff_trees(&label, &before, &after, &[], &mut failures);
+            for (p, m) in &pinned {
+                if mtime_of(p) != *m {
+                    failures.push(format!(
+                        "[{label}] {} was rewritten (mtime changed): contention means zero \
+                         writes",
+                        p.display()
+                    ));
+                }
+            }
+            let gate_after = read_json(&fx.ms().join("gate-state.json"));
+            if gate_after != json!(gate) {
+                failures.push(format!(
+                    "[{label}] the gate of the live coordinator must NOT be touched; got \
+                     {gate_after}"
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC050_completed_json_present_flock_held_is_lock_contention_exit_1_never_exit_0_zero_reads_zero_writes_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 11(c) reason (2) / task control (timing independence): the SAME
+/// on-disk state must yield the same fail-closed verdict whether or not someone else
+/// holds the lock, except that the lock-held run reports contention (exit 1, "retry")
+/// instead of reading anything. For each of the three variants the pair is
+/// (lock FREE => the state's own verdict: plain => exit 0 `ALREADY_MIGRATED` with the
+/// gate reconciled; own live COMMITTING => exit 2 `COMPLETION_RECORD_MISMATCH_ABORT`
+/// interim line; foreign live => exit 2 `FOREIGN_MIGRATION_REFUSED`), (lock HELD =>
+/// exit 1 `MIGRATION_LOCK_CONTENTION`, tree unchanged). Neither half is ever the
+/// contended-exit-0 of the retired behavior, and the lock-free half proves the state is
+/// the SAME state (not a different fixture). The own-live-COMMITTING + lock-free half is
+/// also pinned by the pre-existing
+/// `..._EC050_live_record_beside_completed_json_is_never_finalized_...` (cited, not
+/// removed); it is repeated here so the pairing is self-evident.
+#[test]
+fn test_BC_1_18_011_EC050_same_state_lock_free_is_the_timing_independent_verdict_exit_2_exit_2_exit_0_blackbox()
+ {
+    let mut failures = Vec::new();
+    let foreign = json!({"state": "STAGING", "migration_id": "backfill-append-logs"});
+    let cases: Vec<(&str, Vec<(&str, Value)>, i32, Option<String>)> = vec![
+        (
+            "plain",
+            vec![],
+            0,
+            None, // exit 0, gate reconciled, no stderr line pinned
+        ),
+        (
+            "own live COMMITTING txn",
+            vec![("txn-act-1.json", full("COMMITTING", json!("gen-1")))],
+            2,
+            Some(INTERIM_MISMATCH_LINE.to_string()),
+        ),
+        (
+            "foreign live record",
+            vec![("txn-act-1.json", foreign)],
+            2,
+            Some(foreign_line("backfill-append-logs")),
+        ),
+    ];
+    for (what, recs, free_exit, free_line) in cases {
+        for contended in [false, true] {
+            let label = format!("{what}, lock {}", if contended { "HELD" } else { "FREE" });
+            let fx = Fx::new();
+            fx.gate("LOCKED");
+            fx.completed_json();
+            for (name, v) in &recs {
+                fx.txn(name, v);
+            }
+            let held = contended.then(|| fx.hold_lock());
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            let after = snapshot(fx.root());
+            drop(held);
+            if contended {
+                check_exact_line(&label, &out, 1, LOCK_CONTENTION_LINE, &mut failures);
+                diff_trees(&label, &before, &after, &[], &mut failures);
+            } else if let Some(line) = &free_line {
+                check_exact_line(&label, &out, free_exit, line, &mut failures);
+                diff_trees(&label, &before, &after, &[], &mut failures);
+            } else if out.status.code() != Some(free_exit) {
+                failures.push(format!(
+                    "[{label}] expected exit {free_exit}; got {:?}, stderr {:?}",
+                    out.status.code(),
+                    stderr_of(&out)
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC050_same_state_lock_free_is_the_timing_independent_verdict_exit_2_exit_2_exit_0_blackbox",
+        failures,
+    );
+}
+
+// ===========================================================================
+// Item 10 amendments (third binary-leg extension): (a) nested strictness,
+// (b) `schema_version` version gate, (c) newer-schema Display, (d) the
+// null-generation discard under the version gate.
+// ===========================================================================
+
+/// ADR-052 v1.23 item 10(c): the exact stderr line of a newer-schema record
+/// (`migrate-bc-index: ` + the variant `Display`
+/// `migration admission: state integrity failure (txn_record_newer_schema): txn record
+/// schema_version <N> is newer than the supported 1; it was probably written by a newer
+/// build; recover it with that build; nothing was changed`). `n` is the already-rendered
+/// decimal.
+fn newer_line(n: &str) -> String {
+    format!(
+        "migrate-bc-index: migration admission: state integrity failure \
+         (txn_record_newer_schema): txn record schema_version {n} is newer than the supported \
+         1; it was probably written by a newer build; recover it with that build; nothing was \
+         changed"
+    )
+}
+
+/// The two binary rewriting arms reachable through the real binary:
+/// `ResumeFromStaging` (STAGING, string `generation_id`, its gen dir present) and
+/// `ForwardRecovery` (COMMITTING, string `generation_id`, gen dir present). The third
+/// rewriting arm, `CleanAbortExpiredStaging`, is UNREACHABLE through the binary today
+/// (`ManifestStatus` is fixed at `StillValid`); it consumes the SAME strict decoder, which
+/// `test_BC_1_18_011_EC049_shared_strict_decoder_..._inprocess` (in
+/// `s2509_v123_exit_codes_and_txn_schema_inprocess_test.rs`) pins through the public
+/// `read_active_txn_record`.
+const REWRITING_ARMS: [(&str, &str); 2] = [
+    ("ResumeFromStaging", "STAGING"),
+    ("ForwardRecovery", "COMMITTING"),
+];
+
+/// Run `rec` at a rewriting arm and return (before, output, after).
+fn run_arm(
+    state_json: &Value,
+) -> (
+    Fx,
+    BTreeMap<String, Option<Vec<u8>>>,
+    Output,
+    BTreeMap<String, Option<Vec<u8>>>,
+) {
+    let fx = Fx::new();
+    fx.txn("txn-act-1.json", state_json);
+    fx.gen_dir("gen-1");
+    let before = snapshot(fx.root());
+    let out = fx.run();
+    let after = snapshot(fx.root());
+    (fx, before, out, after)
+}
+
+/// A refusal with exit 2, empty stdout and exactly ONE stderr line that starts with the
+/// `txn_record_malformed` integrity prefix, names every `must` needle, names no
+/// `must_not` needle, is not the newer-schema line and not the digest / expiry codes;
+/// whole tree byte-identical.
+fn check_malformed_detail(
+    label: &str,
+    out: &Output,
+    before: &BTreeMap<String, Option<Vec<u8>>>,
+    after: &BTreeMap<String, Option<Vec<u8>>>,
+    must: &[&str],
+    must_not: &[&str],
+    failures: &mut Vec<String>,
+) {
+    let err = stderr_of(out);
+    let lines: Vec<&str> = err.lines().collect();
+    let ok = out.status.code() == Some(2)
+        && out.stdout.is_empty()
+        && lines.len() == 1
+        && lines[0].starts_with(INTEGRITY_PREFIX)
+        && lines[0].len() > INTEGRITY_PREFIX.len()
+        && !err.contains("txn_record_newer_schema")
+        && !err.contains("BINARY_INTEGRITY_FAILURE")
+        && !err.contains("EXPIRY_ABORT")
+        && must.iter().all(|m| err.contains(m))
+        && must_not.iter().all(|m| !err.contains(m));
+    if !ok {
+        failures.push(format!(
+            "[{label}] expected exit 2, empty stdout and ONE `{INTEGRITY_PREFIX}...` line naming \
+             {must:?} and not {must_not:?} (not newer-schema, not BINARY_INTEGRITY_FAILURE, not \
+             EXPIRY_ABORT); got exit {:?}, stdout {} bytes, stderr {err:?}",
+            out.status.code(),
+            out.stdout.len()
+        ));
+    }
+    diff_trees(label, before, after, &[], failures);
+}
+
+/// Exit 2 and EXACTLY the newer-schema line for `n`; whole tree byte-identical.
+fn check_newer(
+    label: &str,
+    out: &Output,
+    before: &BTreeMap<String, Option<Vec<u8>>>,
+    after: &BTreeMap<String, Option<Vec<u8>>>,
+    n: &str,
+    failures: &mut Vec<String>,
+) {
+    check_exact_line(label, out, 2, &newer_line(n), failures);
+    diff_trees(label, before, after, &[], failures);
+}
+
+/// ADR-052 v1.23 item 10(a) (nested strictness; BC-1.18.011 v1.20 Precondition 6(f)(iii)
+/// nested rule, EC-049 nested vectors): each `pending_canonical_moves[]` element MUST be a
+/// JSON object whose key set is exactly `{staging_path, canonical_path}`, both JSON strings
+/// (not null). At each binary rewriting arm an UNKNOWN KEY inside an element (alone, in a
+/// later element, several, or with `migration_id` absent), a NON-OBJECT element (string,
+/// number, null, array), or an element MISSING a key or holding a null / ill-typed one =>
+/// exit 2 `txn_record_malformed`, `detail` naming `pending_canonical_moves[<index>]`
+/// (and, for an unknown key, the key), nothing mutated. Today the unknown nested key is
+/// silently dropped by the typed re-serialization (serde ignores it) and the arm proceeds
+/// to mutate; the non-object / ill-typed elements are refused only with the generic
+/// "a required key is ill-typed" text that does not name the element.
+#[test]
+fn test_BC_1_18_011_EC049_nested_unknown_key_non_object_and_missing_key_in_pending_canonical_moves_element_exit_2_malformed_nothing_mutated_blackbox()
+ {
+    let mut failures = Vec::new();
+    let ok = |extra: Option<(&str, Value)>| -> Value {
+        let mut m = json!({"staging_path": "s", "canonical_path": "c"});
+        if let Some((k, v)) = extra {
+            m[k] = v;
+        }
+        m
+    };
+    // (label, moves array, needles the detail must name)
+    let vectors: Vec<(&str, Value, Vec<&str>)> = vec![
+        (
+            "unknown key `extra` in element 0",
+            json!([ok(Some(("extra", json!(1))))]),
+            vec!["pending_canonical_moves[0]", "extra"],
+        ),
+        (
+            "unknown key `status` in element 1 (element 0 valid)",
+            json!([ok(None), ok(Some(("status", json!("moved"))))]),
+            vec!["pending_canonical_moves[1]", "status"],
+        ),
+        (
+            "unknown key with an object value",
+            json!([ok(Some(("x_v2", json!({"a": [1, 2]}))))]),
+            vec!["pending_canonical_moves[0]", "x_v2"],
+        ),
+        (
+            "unknown key with a null value",
+            json!([ok(Some(("x_null", Value::Null)))]),
+            vec!["pending_canonical_moves[0]", "x_null"],
+        ),
+        (
+            "two unknown keys",
+            json!([ok(Some(("alpha", json!(1))))
+                .as_object()
+                .cloned()
+                .map(|mut o| {
+                    o.insert("beta".to_string(), json!(2));
+                    Value::Object(o)
+                })
+                .unwrap()]),
+            vec!["pending_canonical_moves[0]", "alpha", "beta"],
+        ),
+        (
+            "non-object element: string",
+            json!(["not-an-object"]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "non-object element: number (index 1)",
+            json!([ok(None), 7]),
+            vec!["pending_canonical_moves[1]"],
+        ),
+        (
+            "non-object element: null",
+            json!([Value::Null]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "non-object element: array",
+            json!([["s", "c"]]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "element missing staging_path",
+            json!([{"canonical_path": "c"}]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "element missing canonical_path (index 1)",
+            json!([ok(None), {"staging_path": "s"}]),
+            vec!["pending_canonical_moves[1]"],
+        ),
+        (
+            "element with an empty object",
+            json!([{}]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "element key null",
+            json!([{"staging_path": "s", "canonical_path": null}]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+        (
+            "element key ill-typed (number)",
+            json!([{"staging_path": 1, "canonical_path": "c"}]),
+            vec!["pending_canonical_moves[0]"],
+        ),
+    ];
+    for (arm, state) in REWRITING_ARMS {
+        for (what, moves, must) in &vectors {
+            for without_migration_id in [false, true] {
+                let mut rec = with(
+                    full(state, json!("gen-1")),
+                    "pending_canonical_moves",
+                    moves.clone(),
+                );
+                if without_migration_id {
+                    rec = without(rec, "migration_id");
+                }
+                let label = format!(
+                    "{arm}: {what}{}",
+                    if without_migration_id {
+                        ", migration_id absent"
+                    } else {
+                        ""
+                    }
+                );
+                let (_fx, before, out, after) = run_arm(&rec);
+                // The element is the defect: the version key must not be implicated, and
+                // the rejection must not be the TOP-LEVEL unknown-key rule.
+                check_malformed_detail(
+                    &label,
+                    &out,
+                    &before,
+                    &after,
+                    must,
+                    &["schema_version", "top-level"],
+                    &mut failures,
+                );
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC049_nested_unknown_key_non_object_and_missing_key_in_pending_canonical_moves_element_exit_2_malformed_nothing_mutated_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(a): "the offending key rendered by the SAME sanitizer as the
+/// top-level check (truncated to 64 chars, control characters escaped -- a hostile key
+/// must not forge terminal output)". A nested unknown key holding a newline, an ESC and a
+/// tab, and a 100-character key: ONE stderr line, no raw control character, the escaped
+/// form present, the long key truncated. The same keys at the TOP level are rendered by the
+/// existing sanitizer; the nested rendering must contain the same escaped text.
+#[test]
+fn test_BC_1_18_011_EC049_nested_unknown_key_rendered_by_the_shared_sanitizer_truncated_and_escaped_blackbox()
+ {
+    let mut failures = Vec::new();
+    let hostile = "evil\n\u{1b}[31mFAKE\tline".to_string();
+    let hostile_escaped = "evil\\n\\u{1b}[31mFAKE\\tline";
+    let long = "k".repeat(100);
+    for (arm, state) in REWRITING_ARMS {
+        for (what, key) in [
+            ("control characters", hostile.clone()),
+            ("100-char key", long.clone()),
+        ] {
+            let label = format!("{arm}: {what}");
+            let rec = with(
+                full(state, json!("gen-1")),
+                "pending_canonical_moves",
+                json!([{"staging_path": "s", "canonical_path": "c", key.clone(): 1}]),
+            );
+            let (_fx, before, out, after) = run_arm(&rec);
+            check_malformed_detail(
+                &label,
+                &out,
+                &before,
+                &after,
+                &["pending_canonical_moves[0]"],
+                &["schema_version"],
+                &mut failures,
+            );
+            let err = stderr_of(&out);
+            if err.contains('\u{1b}') || err.matches('\n').count() != 1 {
+                failures.push(format!(
+                    "[{label}] a hostile nested key forged raw control characters / extra lines \
+                     on stderr: {err:?}"
+                ));
+            }
+            if what == "control characters" && !err.contains(hostile_escaped) {
+                failures.push(format!(
+                    "[{label}] the escaped rendering `{hostile_escaped}` must appear; stderr \
+                     {err:?}"
+                ));
+            }
+            if what == "100-char key" && (err.contains(&long) || !err.contains(&"k".repeat(40))) {
+                failures.push(format!(
+                    "[{label}] the 100-char key must be TRUNCATED (cap 64) yet its prefix \
+                     shown; stderr {err:?}"
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC049_nested_unknown_key_rendered_by_the_shared_sanitizer_truncated_and_escaped_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(b) -- the `schema_version` vector table at each binary rewriting
+/// arm, exact kind / line, record unchanged:
+///  * `1` => the strict decode passes (control; observed as `ForwardRecovery` finishing
+///    COMPLETED exit 0 with the written record carrying `schema_version: 1`; at
+///    `ResumeFromStaging` simply "not a state-integrity failure");
+///  * integer >= 2 (`2`, `3`, `4294967295`, `4294967296` = u32::MAX+1) => NEWER SCHEMA: the
+///    exact item 10(c) line, nothing mutated;
+///  * newer wins over every other defect: an unknown top-level key, a missing required key,
+///    a wrong-typed key, a nested unknown key / non-object element, `migration_id` absent;
+///  * PRESENT and anything else (`0`, `-1`, `"1"`, `"2"`, `1.5`, `1.0`, `null`, `true`,
+///    `[1]`, `{}`) => `txn_record_malformed` whose detail names `schema_version` and is NOT
+///    the unknown-top-level-key text (the version key is KNOWN: it is required);
+///  * ABSENT => `txn_record_malformed` naming `schema_version` (a required key at a
+///    rewriting arm);
+///  * `1` + an unknown key => `txn_record_malformed` naming the unknown key and NOT
+///    `schema_version`.
+#[test]
+fn test_BC_1_18_011_EC049_schema_version_vector_table_at_each_rewriting_arm_exact_kind_and_unchanged_bytes_blackbox()
+ {
+    let mut failures = Vec::new();
+    for (arm, state) in REWRITING_ARMS {
+        let base = || full(state, json!("gen-1"));
+        // --- newer schema
+        let newer: Vec<(String, Value, &str)> = vec![
+            ("2".into(), with(base(), "schema_version", json!(2)), "2"),
+            ("3".into(), with(base(), "schema_version", json!(3)), "3"),
+            (
+                "u32::MAX 4294967295".into(),
+                with(base(), "schema_version", json!(4_294_967_295u64)),
+                "4294967295",
+            ),
+            (
+                "u32::MAX+1 4294967296".into(),
+                with(base(), "schema_version", json!(4_294_967_296u64)),
+                "4294967296",
+            ),
+            (
+                "2 + unknown top-level key".into(),
+                with(
+                    with(base(), "schema_version", json!(2)),
+                    "schema_v2_field",
+                    json!({"nested": 1}),
+                ),
+                "2",
+            ),
+            (
+                "2 + required key missing".into(),
+                without(with(base(), "schema_version", json!(2)), "activation_id"),
+                "2",
+            ),
+            (
+                "2 + several keys missing".into(),
+                without(
+                    without(with(base(), "schema_version", json!(2)), "txn_id"),
+                    "pending_canonical_moves",
+                ),
+                "2",
+            ),
+            (
+                "2 + wrong-typed fencing_generation".into(),
+                with(
+                    with(base(), "schema_version", json!(2)),
+                    "fencing_generation",
+                    json!("3"),
+                ),
+                "2",
+            ),
+            (
+                "2 + nested unknown key".into(),
+                with(
+                    with(base(), "schema_version", json!(2)),
+                    "pending_canonical_moves",
+                    json!([{"staging_path": "s", "canonical_path": "c", "x": 1}]),
+                ),
+                "2",
+            ),
+            (
+                "2 + non-object element".into(),
+                with(
+                    with(base(), "schema_version", json!(2)),
+                    "pending_canonical_moves",
+                    json!([7]),
+                ),
+                "2",
+            ),
+            (
+                "2 + migration_id absent".into(),
+                without(with(base(), "schema_version", json!(2)), "migration_id"),
+                "2",
+            ),
+        ];
+        for (what, rec, n) in newer {
+            let label = format!("{arm}: newer schema, {what}");
+            let (_fx, before, out, after) = run_arm(&rec);
+            check_newer(&label, &out, &before, &after, n, &mut failures);
+        }
+        // --- present and not a supported / newer integer => malformed, names the version
+        let bad: Vec<(&str, Value)> = vec![
+            ("0", json!(0)),
+            ("-1", json!(-1)),
+            ("string \"1\"", json!("1")),
+            ("string \"2\"", json!("2")),
+            ("float 1.5", json!(1.5)),
+            ("float 1.0", json!(1.0)),
+            ("null", Value::Null),
+            ("bool true", json!(true)),
+            ("array [1]", json!([1])),
+            ("object {}", json!({})),
+        ];
+        for (what, v) in bad {
+            let label = format!("{arm}: schema_version {what}");
+            let (_fx, before, out, after) = run_arm(&with(base(), "schema_version", v));
+            check_malformed_detail(
+                &label,
+                &out,
+                &before,
+                &after,
+                &["schema_version"],
+                &["unknown top-level key"],
+                &mut failures,
+            );
+        }
+        // --- absent => malformed at a rewriting arm (a required key)
+        {
+            let label = format!("{arm}: schema_version ABSENT");
+            let (_fx, before, out, after) = run_arm(&without(base(), "schema_version"));
+            check_malformed_detail(
+                &label,
+                &out,
+                &before,
+                &after,
+                &["schema_version"],
+                &["unknown top-level key"],
+                &mut failures,
+            );
+        }
+        // --- 1 + unknown key => malformed naming the unknown key, not the version
+        {
+            let label = format!("{arm}: schema_version 1 + unknown key");
+            let (_fx, before, out, after) = run_arm(&with(base(), "schema_v2_field", json!("x")));
+            check_malformed_detail(
+                &label,
+                &out,
+                &before,
+                &after,
+                &["schema_v2_field"],
+                &["schema_version"],
+                &mut failures,
+            );
+        }
+    }
+
+    // --- 1 => the decode passes.
+    {
         let fx = Fx::new();
-        fx.gate(gate);
-        fx.completed_json();
-        let held = fx.hold_lock();
-        let before = snapshot(fx.root());
+        fx.txn("txn-act-1.json", &full("COMMITTING", json!("gen-1")));
+        fx.gen_dir("gen-1");
         let out = fx.run();
-        let after = snapshot(fx.root());
-        drop(held);
-        if out.status.code() != Some(0) {
+        let got = read_json(&fx.ms().join("txn-act-1.json"));
+        if out.status.code() != Some(0)
+            || got["state"] != json!("COMPLETED")
+            || got["schema_version"] != json!(1)
+        {
             failures.push(format!(
-                "[{label}] expected exit 0 (skip); got {:?}, stderr {:?}",
+                "[ForwardRecovery: schema_version 1] the strict decode must pass: expected exit \
+                 0, txn COMPLETED carrying schema_version 1; got exit {:?}, stderr {:?}, txn {got}",
                 out.status.code(),
                 stderr_of(&out)
             ));
         }
-        if read_json(&fx.ms().join("gate-state.json")) != json!(gate) {
+    }
+    {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &full("STAGING", json!("gen-1")));
+        fx.gen_dir("gen-1");
+        let out = fx.run();
+        let err = stderr_of(&out);
+        let got = read_json(&fx.ms().join("txn-act-1.json"));
+        if err.contains("state integrity failure") || got["schema_version"] != json!(1) {
             failures.push(format!(
-                "[{label}] the gate of the live coordinator must NOT be opened by this binary"
+                "[ResumeFromStaging: schema_version 1] must pass the strict decode (no \
+                 `state integrity failure`) and a rewritten record must carry schema_version 1; \
+                 stderr {err:?}, txn {got}"
             ));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC049_schema_version_vector_table_at_each_rewriting_arm_exact_kind_and_unchanged_bytes_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(b)(i) "any magnitude" and 10(c) "`<N>` is the decimal rendering of
+/// the integer truncated to 20 characters": `schema_version` as a JSON integer that does
+/// NOT fit `u64` (`2^64` = 20 digits, a 25-digit integer) is still a NEWER SCHEMA (not
+/// malformed, not a float). The 25-digit value is rendered truncated to 20 characters
+/// (the first 20 digits; a trailing `…` marker inside the 20-character budget is also
+/// accepted -- the ADR does not say whether the cap includes a marker). Raw JSON text is
+/// used (`serde_json::Value` cannot carry these without `arbitrary_precision`).
+#[test]
+fn test_BC_1_18_011_EC049_schema_version_integer_beyond_u64_is_newer_schema_any_magnitude_and_n_truncated_to_20_blackbox()
+ {
+    let mut failures = Vec::new();
+    for (arm, state) in REWRITING_ARMS {
+        for (what, literal, rendered_ok) in [
+            (
+                "2^64 (20 digits)",
+                "18446744073709551616",
+                vec!["18446744073709551616".to_string()],
+            ),
+            (
+                "25 digits",
+                "1234567890123456789012345",
+                vec![
+                    "12345678901234567890".to_string(),
+                    "1234567890123456789\u{2026}".to_string(),
+                ],
+            ),
+        ] {
+            let label = format!("{arm}: {what}");
+            let base = full(state, json!("gen-1"));
+            let text = serde_json::to_string_pretty(&base).unwrap().replace(
+                "\"schema_version\": 1,",
+                &format!("\"schema_version\": {literal},"),
+            );
+            assert!(text.contains(literal), "fixture replace failed");
+            let fx = Fx::new();
+            fx.txn_bytes("txn-act-1.json", text.as_bytes());
+            fx.gen_dir("gen-1");
+            let before = snapshot(fx.root());
+            let out = fx.run();
+            let after = snapshot(fx.root());
+            let err = stderr_of(&out);
+            let ok = rendered_ok
+                .iter()
+                .any(|n| err == format!("{}\n", newer_line(n)));
+            if out.status.code() != Some(2) || !out.stdout.is_empty() || !ok {
+                failures.push(format!(
+                    "[{label}] expected exit 2 and the newer-schema line with N in \
+                     {rendered_ok:?}; got exit {:?}, stderr {err:?}",
+                    out.status.code()
+                ));
+            }
+            diff_trees(&label, &before, &after, &[], &mut failures);
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC049_schema_version_integer_beyond_u64_is_newer_schema_any_magnitude_and_n_truncated_to_20_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(c): the normative newer-schema `Display`, pinned EXACTLY through
+/// the real binary: `migrate-bc-index: migration admission: state integrity failure
+/// (txn_record_newer_schema): txn record schema_version 2 is newer than the supported 1; it
+/// was probably written by a newer build; recover it with that build; nothing was changed`,
+/// ONE line, exit 2, empty stdout; it MUST NOT contain `txn_record_malformed`, `corrupt` or
+/// `BINARY_INTEGRITY_FAILURE` (nor `EXPIRY_ABORT`, nor the foreign / contention codes). Both
+/// rewriting arms and the null-generation discard (a STAGING `generation_id: null` record).
+#[test]
+fn test_BC_1_18_011_EC049_newer_schema_display_pinned_exactly_one_line_exit_2_no_malformed_or_corrupt_wording_blackbox()
+ {
+    let mut failures = Vec::new();
+    let line = newer_line("2");
+    let mut recs: Vec<(String, Value)> = REWRITING_ARMS
+        .iter()
+        .map(|(arm, state)| {
+            (
+                arm.to_string(),
+                with(full(state, json!("gen-1")), "schema_version", json!(2)),
+            )
+        })
+        .collect();
+    recs.push((
+        "null-generation discard".into(),
+        with(full("STAGING", Value::Null), "schema_version", json!(2)),
+    ));
+    for (label, rec) in recs {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &rec);
+        fx.gen_dir("gen-1");
+        let before = snapshot(fx.root());
+        let out = fx.run();
+        let after = snapshot(fx.root());
+        check_exact_line(&label, &out, 2, &line, &mut failures);
+        for banned in [
+            "txn_record_malformed",
+            "corrupt",
+            "BINARY_INTEGRITY_FAILURE",
+            "EXPIRY_ABORT",
+            "FOREIGN_MIGRATION_REFUSED",
+            "MIGRATION_LOCK_CONTENTION",
+        ] {
+            if stderr_of(&out).contains(banned) {
+                failures.push(format!(
+                    "[{label}] the newer-schema line contains {banned:?}"
+                ));
+            }
         }
         diff_trees(&label, &before, &after, &[], &mut failures);
     }
     assert_no_failures(
-        "test_BC_1_18_011_EC050_flock_held_elsewhere_skips_gate_reconciliation_exit_0_no_write_blackbox",
+        "test_BC_1_18_011_EC049_newer_schema_display_pinned_exactly_one_line_exit_2_no_malformed_or_corrupt_wording_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(d) -- the null-generation discard is NOT exempt from the version
+/// gate: `abort_null_generation_txn` reads `schema_version` FIRST, before the
+/// `generation_id` tri-state, on BOTH surfaces (this is the coordinator; the admission
+/// Branch B twin is `..._EC049_branch_b_..._blackbox` in
+/// `s2509_v123_unstatable_factory_and_integrity_kinds_test.rs`).
+///  * PRESENT integer >= 2 => exit 2, the exact newer-schema line, the txn bytes AND the
+///    gate unchanged (NOT the discard), even when `generation_id` would itself be
+///    malformed (absent / a number), and for the minimal record;
+///  * PRESENT and anything else (0, "1", 1.5, null, true) => `txn_record_malformed` naming
+///    `schema_version`, nothing mutated (sub-rule (b)(iii) applies at the discard);
+///  * ABSENT or `1`, with or without an unknown extra top-level key => the discard
+///    succeeds (exit 1 `EXPIRY_ABORT`, the exact `NullGeneration` line), the extra key AND
+///    a present `migration_id` PRESERVED verbatim in the ABORTED record, gate OPEN
+///    (the unknown-key rejection exists only for rewrites that keep the record live).
+#[test]
+fn test_BC_1_18_011_EC049_null_generation_discard_is_under_the_version_gate_newer_malformed_refused_absent_or_1_discards_preserving_unknown_key_blackbox()
+ {
+    let mut failures = Vec::new();
+    // --- refused: newer schema (wins over generation_id defects), nothing mutated
+    let newer_cases: Vec<(&str, Value, &str)> = vec![
+        (
+            "full, generation_id null, schema_version 2",
+            with(full("STAGING", Value::Null), "schema_version", json!(2)),
+            "2",
+        ),
+        (
+            "minimal, generation_id null, schema_version 2",
+            with(
+                with(minimal("STAGING"), "generation_id", Value::Null),
+                "schema_version",
+                json!(2),
+            ),
+            "2",
+        ),
+        (
+            "schema_version 4294967296",
+            with(
+                full("STAGING", Value::Null),
+                "schema_version",
+                json!(4_294_967_296u64),
+            ),
+            "4294967296",
+        ),
+        (
+            "schema_version 2 + generation_id ABSENT (newer wins over malformed)",
+            without(
+                with(full("STAGING", Value::Null), "schema_version", json!(2)),
+                "generation_id",
+            ),
+            "2",
+        ),
+        (
+            "schema_version 2 + generation_id 7",
+            with(
+                with(full("STAGING", Value::Null), "schema_version", json!(2)),
+                "generation_id",
+                json!(7),
+            ),
+            "2",
+        ),
+        (
+            "schema_version 2 + unknown key",
+            with(
+                with(full("STAGING", Value::Null), "schema_version", json!(2)),
+                "schema_v2_field",
+                json!("x"),
+            ),
+            "2",
+        ),
+    ];
+    for (label, rec, n) in newer_cases {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &rec);
+        let before = snapshot(fx.root());
+        let out = fx.run();
+        let after = snapshot(fx.root());
+        check_newer(label, &out, &before, &after, n, &mut failures);
+        if read_json(&fx.ms().join("gate-state.json")) != json!("DRAINING") {
+            failures.push(format!("[{label}] the gate must be untouched (not OPEN)"));
+        }
+    }
+    // --- refused: present, not an integer >= 2 and not 1 => malformed
+    for (what, v) in [
+        ("0", json!(0)),
+        ("string \"1\"", json!("1")),
+        ("float 1.5", json!(1.5)),
+        ("null", Value::Null),
+        ("bool", json!(true)),
+    ] {
+        let label = format!("null-generation, schema_version {what}");
+        let fx = Fx::new();
+        fx.txn(
+            "txn-act-1.json",
+            &with(full("STAGING", Value::Null), "schema_version", v),
+        );
+        let before = snapshot(fx.root());
+        let out = fx.run();
+        let after = snapshot(fx.root());
+        check_malformed_detail(
+            &label,
+            &out,
+            &before,
+            &after,
+            &["schema_version"],
+            &["unknown top-level key"],
+            &mut failures,
+        );
+    }
+    // --- discards: absent or 1, with / without an unknown key; unknown key and
+    // migration_id preserved verbatim
+    let discards: Vec<(&str, Value)> = vec![
+        (
+            "schema_version ABSENT + unknown key",
+            with(
+                without(full("STAGING", Value::Null), "schema_version"),
+                "schema_v2_field",
+                json!({"nested": [1, "two"]}),
+            ),
+        ),
+        (
+            "schema_version ABSENT, no unknown key (a minimal hand-built record)",
+            with(minimal("STAGING"), "generation_id", Value::Null),
+        ),
+        (
+            "schema_version 1 + unknown key",
+            with(
+                full("STAGING", Value::Null),
+                "schema_v2_field",
+                json!({"nested": [1, "two"]}),
+            ),
+        ),
+        (
+            "schema_version 1, no unknown key",
+            full("STAGING", Value::Null),
+        ),
+    ];
+    for (label, rec) in discards {
+        let fx = Fx::new();
+        fx.txn("txn-act-1.json", &rec);
+        let out = fx.run();
+        check_exact_line(label, &out, 1, EXPIRY_NULL_GENERATION_LINE, &mut failures);
+        let mut want = rec.clone();
+        want["state"] = json!("ABORTED");
+        want["abort_reason"] = json!("null_generation");
+        let got = read_json(&fx.ms().join("txn-act-1.json"));
+        if got != want {
+            failures.push(format!(
+                "[{label}] the raw-object discard must preserve every key (unknown keys, \
+                 migration_id, schema_version as found); want {want}, got {got}"
+            ));
+        }
+        if read_json(&fx.ms().join("gate-state.json")) != json!("OPEN") {
+            failures.push(format!("[{label}] the gate must be OPEN after the discard"));
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_011_EC049_null_generation_discard_is_under_the_version_gate_newer_malformed_refused_absent_or_1_discards_preserving_unknown_key_blackbox",
         failures,
     );
 }

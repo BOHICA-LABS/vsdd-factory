@@ -20,6 +20,8 @@
 //! | 3 release advisory (EC-042, PC 10(c)) | `..._EC042_unstatable_factory_release_writes_one_reservation_release_failed_advisory_blackbox` |
 //! | 4 kinds, Tier 0 | `..._EC032_tier0_failures_event_kind_blackbox` |
 //! | 4 kinds, Tier 1 (EC-045) | `..._EC045_staging_without_generation_id_event_kind_txn_record_malformed_blackbox` |
+//! | 5 sixth kind `txn_record_newer_schema`, Branch B version gate (ADR-052 v1.23 item 10(b)-(d), third binary-leg extension) | `..._EC049_branch_b_null_generation_version_gate_event_kind_..._blackbox` |
+//! | 5 control: Branch B discard under an absent / 1 `schema_version` preserves unknown keys | `..._EC049_branch_b_discard_with_absent_or_1_schema_version_preserves_unknown_key_blackbox` |
 //!
 //! Already covered elsewhere (NOT duplicated here), all in
 //! `s2508_admission_blackbox_test.rs`:
@@ -1149,6 +1151,216 @@ fn test_BC_1_18_013_EC045_staging_without_generation_id_event_kind_txn_record_ma
     }
     assert_no_failures(
         "test_BC_1_18_013_EC045_staging_without_generation_id_event_kind_txn_record_malformed_blackbox",
+        failures,
+    );
+}
+
+// ===========================================================================
+// Delta 5 -- the sixth kind `txn_record_newer_schema` and the Branch B version
+// gate (ADR-052 v1.23 item 10(b)-(d); BC-1.18.013 v1.12 Branch B discard row).
+// ===========================================================================
+
+/// The Branch B pre-generation record: `state: STAGING`, `generation_id: null`, as
+/// the minimal hand-built shape or the full Decision-7a shape, for the given
+/// `migration_id` discriminator (`None` = key absent, read as `migrate-bc-index`).
+fn branch_b_record(minimal: bool, mig: Option<&str>) -> serde_json::Value {
+    let mut v = if minimal {
+        serde_json::json!({"state": "STAGING", "generation_id": null})
+    } else {
+        serde_json::json!({
+            "txn_id": "txn-s2509",
+            "activation_id": "act-s2509",
+            "fencing_generation": 1,
+            "state": "STAGING",
+            "generation_id": null,
+            "source_sha256": null,
+            "source_body_row_sha256": null,
+            "intent_log_path": null,
+            "pending_canonical_moves": [],
+            "created_at": "2026-10-06T00:00:00Z",
+            "updated_at": "2026-10-06T00:00:00Z",
+        })
+    };
+    if let Some(m) = mig {
+        v["migration_id"] = serde_json::json!(m);
+    }
+    v
+}
+
+/// ADR-052 v1.23 item 10(d) + 10(c), admission surface (BC-1.18.013 v1.12 Branch B
+/// discard row, "version gate FIRST, then `generation_id` tri-state"): under the exact
+/// Branch B conditions (gate DRAINING / LOCKED / OPEN, `exclusive.lock` FREE, own terminal
+/// record ABSENT) a known STAGING record with `generation_id: null` whose `schema_version`
+/// is
+///  * a JSON integer >= 2 (`2`, `4294967296`), alone or beside a `generation_id` that would
+///    itself be malformed (absent / a number) => exit 2 `E-MAINTENANCE-002
+///    (state_integrity)`, EXACTLY ONE `migration.admission_failed` with
+///    `cause=state_integrity` and `kind=txn_record_newer_schema` (the SIXTH token of the
+///    closed BC-3.08.001 Event 12 `kind` domain), no `_blocked`, no reservation, the txn
+///    and gate bytes UNCHANGED (NOT the discard);
+///  * PRESENT and any other value (`0`, `"1"`, `1.5`, `null`, `true`) => `kind =
+///    txn_record_malformed`, same shape, nothing mutated.
+/// Both path families, the three `migration_id` shapes, minimal and full records.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC049_branch_b_null_generation_version_gate_event_kind_newer_schema_and_malformed_blackbox()
+ {
+    let mut failures: Vec<String> = Vec::new();
+    let fams: [(Option<&str>, &str); 3] = [
+        (Some("migrate-bc-index"), BC_PATH),
+        (Some("backfill-append-logs"), CYCLES_PATH),
+        (None, BC_PATH),
+    ];
+    for (mig, rel) in fams {
+        for gate in ["DRAINING", "LOCKED", "OPEN"] {
+            for minimal in [true, false] {
+                let shape = if minimal { "minimal" } else { "full" };
+                let mut cases: Vec<(String, serde_json::Value, &str)> = Vec::new();
+                for (what, v) in [
+                    ("2", serde_json::json!(2)),
+                    ("4294967296", serde_json::json!(4_294_967_296u64)),
+                ] {
+                    let mut r = branch_b_record(minimal, mig);
+                    r["schema_version"] = v;
+                    cases.push((
+                        format!("{shape}, schema_version {what}"),
+                        r,
+                        "txn_record_newer_schema",
+                    ));
+                }
+                // newer wins over a malformed generation_id
+                let mut r = branch_b_record(minimal, mig);
+                r["schema_version"] = serde_json::json!(2);
+                r.as_object_mut().unwrap().remove("generation_id");
+                cases.push((
+                    format!("{shape}, schema_version 2 + generation_id ABSENT"),
+                    r,
+                    "txn_record_newer_schema",
+                ));
+                let mut r = branch_b_record(minimal, mig);
+                r["schema_version"] = serde_json::json!(2);
+                r["generation_id"] = serde_json::json!(7);
+                cases.push((
+                    format!("{shape}, schema_version 2 + generation_id 7"),
+                    r,
+                    "txn_record_newer_schema",
+                ));
+                for (what, v) in [
+                    ("0", serde_json::json!(0)),
+                    ("string \"1\"", serde_json::json!("1")),
+                    ("float 1.5", serde_json::json!(1.5)),
+                    ("null", serde_json::Value::Null),
+                    ("bool", serde_json::json!(true)),
+                ] {
+                    let mut r = branch_b_record(minimal, mig);
+                    r["schema_version"] = v;
+                    cases.push((
+                        format!("{shape}, schema_version {what}"),
+                        r,
+                        "txn_record_malformed",
+                    ));
+                }
+                for (what, rec, want_kind) in cases {
+                    assert_integrity_kind(
+                        &format!("{mig:?} {rel} gate {gate}: {what}"),
+                        gate,
+                        rel,
+                        &serde_json::to_vec(&rec).unwrap(),
+                        false,
+                        want_kind,
+                        &mut failures,
+                    );
+                }
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC049_branch_b_null_generation_version_gate_event_kind_newer_schema_and_malformed_blackbox",
+        failures,
+    );
+}
+
+/// ADR-052 v1.23 item 10(d) control, admission surface: `schema_version` ABSENT or `1`,
+/// with or without an unknown extra top-level key, under the Branch B conditions => the
+/// shared `abort_null_generation_txn` primitive discards: the request is ADMITTED (exit
+/// 0), the txn record is rewritten in place to ABORTED + `abort_reason:
+/// "null_generation"` with EVERY other key (the unknown key, `migration_id`,
+/// `schema_version` as found) PRESERVED verbatim, the gate is OPEN, and no
+/// `migration.admission_failed` / `_blocked` event is written. (The unknown-key rejection
+/// exists only for rewrites that keep the record live.)
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_EC049_branch_b_discard_with_absent_or_1_schema_version_preserves_unknown_key_blackbox()
+ {
+    let mut failures: Vec<String> = Vec::new();
+    let unknown = serde_json::json!({"nested": [1, "two"]});
+    let mut cases: Vec<(String, serde_json::Value)> = Vec::new();
+    for minimal in [true, false] {
+        let shape = if minimal { "minimal" } else { "full" };
+        let mut r = branch_b_record(minimal, Some("migrate-bc-index"));
+        r["schema_v2_field"] = unknown.clone();
+        cases.push((format!("{shape}, schema_version ABSENT + unknown key"), r));
+        let mut r = branch_b_record(minimal, Some("migrate-bc-index"));
+        r["schema_version"] = serde_json::json!(1);
+        r["schema_v2_field"] = unknown.clone();
+        cases.push((format!("{shape}, schema_version 1 + unknown key"), r));
+        let mut r = branch_b_record(minimal, Some("migrate-bc-index"));
+        r["schema_version"] = serde_json::json!(1);
+        cases.push((format!("{shape}, schema_version 1, no unknown key"), r));
+    }
+    for (label, rec) in cases {
+        let p = Project::new();
+        write_gate(&p.ms(), "DRAINING");
+        write_raw_txn(&p, &serde_json::to_vec(&rec).unwrap());
+        let logs = tempfile::tempdir().unwrap();
+        let out = run_at(
+            &p,
+            p.root(),
+            logs.path(),
+            &envelope(
+                "PreToolUse",
+                "Write",
+                Some(SECRET_ID),
+                edit_input(&p.abs(BC_PATH)),
+            ),
+        );
+        if out.status.code() != Some(0) {
+            failures.push(format!(
+                "[{label}] Branch B must discard and ADMIT (exit 0); got {:?}: {}",
+                out.status.code(),
+                stderr_of(&out)
+            ));
+        }
+        let mut want = rec.clone();
+        want["state"] = serde_json::json!("ABORTED");
+        want["abort_reason"] = serde_json::json!("null_generation");
+        let got: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(p.ms().join("txn-act-s2509.json")).unwrap_or_default(),
+        )
+        .unwrap_or(serde_json::Value::Null);
+        if got != want {
+            failures.push(format!(
+                "[{label}] the discard must preserve every key as found; want {want}, got {got}"
+            ));
+        }
+        let gate: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(p.ms().join("gate-state.json")).unwrap_or_default(),
+        )
+        .unwrap_or(serde_json::Value::Null);
+        if gate != serde_json::json!("OPEN") {
+            failures.push(format!("[{label}] the gate must be OPEN after the discard"));
+        }
+        let all = read_events(logs.path());
+        for ty in ["migration.admission_failed", "migration.admission_blocked"] {
+            if !of_type(&all, ty).is_empty() {
+                failures.push(format!(
+                    "[{label}] a successful discard must not write `{ty}`"
+                ));
+            }
+        }
+    }
+    assert_no_failures(
+        "test_BC_1_18_013_EC049_branch_b_discard_with_absent_or_1_schema_version_preserves_unknown_key_blackbox",
         failures,
     );
 }
