@@ -127,6 +127,7 @@ use vsdd_hook_sdk::HookResult;
 /// — see `migration_fs`'s own module doc comment for the trait surface,
 /// the production-granularity note, and this burst's call-graph wiring
 /// status.
+pub mod intent_log;
 pub mod migration_fs;
 use migration_fs::{Fs, StdFs};
 
