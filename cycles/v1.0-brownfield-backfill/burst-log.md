@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "a0a1bfe"
+input-hash: "a053525"
 traces_to: STATE.md
 ---
 
@@ -2556,3 +2556,53 @@ D-1255, v10.88→v10.89. Single-commit TD-VSDD-053 registration burst (state-man
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `61709b2d`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Persisted the S-25.08 pass-3/pass-4 and S-25.09 pass-1 adversary reviews verbatim (pass 3 supersedes the reconstruction), reconciled the story review tables, registered ADR-052 v1.25 / ADR-054 v1.1 and the BC/VP/story versions, synced BC-INDEX v5.110 (BC corpus test passes) and STORY-INDEX v4.490, refreshed the input-hash cascade, fixed YAML escapes, recorded local code tips, and archived the v10.88 checkpoint.
+
+## Burst: SESSION-WRAP-PAUSE-2026-10-08 (2026-10-08)
+
+D-1256, v10.89→v10.90 (pre_pause_version 10.89; one bump). Single-commit TD-VSDD-053 wrap checkpoint burst (state-manager). Pipeline PAUSED. Registers the work done by specialists after D-1255 and replaces the Session Resume Checkpoint.
+
+**Parent-commit:** `81b44098` (factory-artifacts HEAD immediately prior, v10.89 / D-1255). Code (verified with `git for-each-ref`; pushed to origin as new remote branches): `feature/S-25.08` @ `169df502`; `feature/S-25.09` @ `f5e603b3`; `feature/S-25.10` @ `19c683a9` (unverified, ungated); `feature/S-25.11`, `feature/S-25.12` @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`.
+
+**Adversary verdict:** none run in this burst; two prior verdicts persisted VERBATIM. S-25.08 pass 5 (reviewed `a7fc5930`): NOT CLEAN, 1 MEDIUM (F-S2508-L5-001) + 3 LOW (L5-002, L5-003, L5-004), novelty LOW-MEDIUM, streak 0/3, no deferred items; all four fixed on the branch. S-25.09 pass 2 (reviewed `f5e603b3`): NOT CLEAN, 5 MEDIUM (L2-001..L2-005) + 4 LOW (L2-006..L2-009), novelty MEDIUM, streak 0/3; fixes not yet done.
+
+**Files touched (Dim-1):** 23 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, the two review files adv-local-pass-5.md and adv-local-pass-2.md, S-25.02 hash-only refresh; specialist-authored files already in the working tree and registered here: ARCH-INDEX, ADR-052 v1.26, STORY-INDEX, S-25.08 v1.8, S-25.06, S-25.09, S-25.10, S-25.11, S-25.12, S-12.16, S-26.06, E-25, E-26; hook-written telemetry: regression-state.json, sidecar-learning.md).
+
+- STATE.md (v10.89→v10.90)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1256)
+- cycles/v1.0-brownfield-backfill/lessons.md (3 D-1256 lessons)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.89 archived; hash refreshed)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- code-delivery/S-25.08/adv-local-pass-5.md (NEW)
+- code-delivery/S-25.09/adv-local-pass-2.md (NEW)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.26)
+- specs/architecture/ARCH-INDEX.md (v4.56)
+- stories/STORY-INDEX.md (v4.491)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.8)
+- stories/S-25.02 (hash-only refresh)
+- stories/S-25.06 (hash cascade)
+- stories/S-25.09 (hash cascade)
+- stories/S-25.10 (hash cascade)
+- stories/S-25.11 (hash cascade)
+- stories/S-25.12 (hash cascade)
+- stories/S-12.16 (hash cascade)
+- stories/S-26.06 (hash cascade)
+- stories/epics/E-25-validation-integrity.md (hash cascade)
+- stories/epics/E-26-post-rc25-hook-hardening.md (hash cascade)
+- regression-state.json (hook-written telemetry)
+- sidecar-learning.md (hook-written telemetry)
+
+**Codifications:** D-1256 (a)-(i) in decision-log.md; three lessons (partial agent work at wrap; CHANGELOG pins; closure claims need a code check).
+
+**Dim-2 Attestations (literal shell, captured stdout; D-449(a)):** the literal gate invocations and captured output (compute-input-hash --check, last-amended-migrate migrate --check, BC corpus version-sync test, `wc -l .factory/STATE.md`) are reported in the burst hand-back; this cycle is not in F5 (no D-444(a)/D-446(a)/D-448(a) diff gates apply to a wrap burst).
+
+**Dim-5:** Count-propagation: BC count 2,007, VP count 147, ADR count 54 and the STORY-INDEX registered total (254) unchanged. Version propagation: STATE.md v10.90 records ARCH-INDEX v4.56, STORY-INDEX v4.491, ADR-052 v1.26, S-25.08 v1.8; BC-INDEX v5.110 unchanged (BC wording owed, not written).
+
+**Dim-6:** No new adversary findings authored here; no tech-debt-register entries. OWED (routed, not performed): BC wording for ADR-052 v1.26 (product-owner), S-25.09 pass-2 fixes, [D-1256-ADR052-V126-EXTENSIONS] human confirmation.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` mutations (compute-input-hash and last-amended-migrate are the sanctioned tools).
+
+**Closes:** F-S2508-L5-004 persistence owed by S-25.08 T-47 (adv-local-pass-5.md). **Opens:** [D-1255-CHANGELOG-PINS], [D-1256-ADR052-V126-EXTENSIONS], [D-1256-S2509-PASS2-OWED], [D-1256-S2510-UNVERIFIED]. **Unchanged OPEN:** [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-ADV-DEFERRED].
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `81b44098`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Persisted S-25.08 pass 5 and S-25.09 pass 2 verbatim, registered ADR-052 v1.26 / ARCH-INDEX v4.56 / STORY-INDEX v4.491 / S-25.08 v1.8 and the hash cascade, recorded the pushed WIP branches and the uncommittable partial test file, archived the v10.89 checkpoint, and PAUSED the pipeline.

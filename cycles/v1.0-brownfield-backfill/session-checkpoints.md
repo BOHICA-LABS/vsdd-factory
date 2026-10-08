@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "a0a1bfe"
+input-hash: "a053525"
 traces_to: STATE.md
 ---
 
@@ -2411,4 +2411,8 @@ Full verbatim text recoverable via `git -C .factory show b5c8fd2c:STATE.md` (sec
 
 Archived by the D-1255 burst (v10.88→v10.89). Position at v10.88: E-25; S-25.08 v1.6 (8 pts) on local `feature/S-25.08` @ `d1df7d10` (pass-3 fixes done; failpoints 39/39; CI runs `--features failpoints`); S-25.09 v1.1 (15 pts, 13-pt rule waived one-time) on local `feature/S-25.09` @ `5632964d` (rebased x3); NEW ADR-054 v1.0 + ADR-052 v1.24 (hardened intent log, fixed move plan); NEW S-25.10 (8) / S-25.11 (7) / S-25.12 (3) `ready`, branches created locally at `5632964d`; chain S-25.09 -> S-25.10 -> S-25.11 -> S-25.12 -> S-25.06. Spec: BC-INDEX v5.109, VP-INDEX v3.33 (147), ARCH-INDEX v4.54 (54 ADRs), STORY-INDEX v4.488 (254), error-taxonomy v1.41, E-25 v1.7. S-25.08 pass 3 persisted as a RECONSTRUCTED record (superseded at D-1255 by the verbatim file). OPEN human decisions: [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT] (recommendation). NEXT was LOCAL adversary pass 4 (S-25.08) + pass 1 (S-25.09) in parallel, then S-25.10 -> S-25.11 -> S-25.12, then S-25.06 rebase onto S-25.12.
 
-**See STATE.md v10.89 for the current checkpoint.**
+## Session Resume Checkpoint v10.89 (2026-10-08 — ADV-REVIEWS-PERSISTED-VERBATIM-ADR052-V125-ADR054-V11-BC-INDEX-SYNC-REGISTRATION; D-1255) — condensed; verbatim via `git -C .factory show 81b44098:STATE.md`
+
+Archived by the D-1256 burst (v10.89→v10.90). Position at v10.89: E-25; S-25.08 v1.7 (8 pts) on local `feature/S-25.08` @ `a7fc5930` (pass-4 fixes done; cargo test 3386/0, failpoints 1166/0 both modes, bats ok, Kani 10/10, CI crash-injection floor 39); S-25.09 v1.2 (15 pts, waived) on local `feature/S-25.09` @ `f5e603b3` (rebased x5; factory-dispatcher default 1242/0, failpoints 1305/0); `feature/S-25.10` @ `9329f75e` (2 red-test commits), S-25.11/S-25.12 @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`. Spec: ADR-052 v1.25, ADR-054 v1.1, ARCH-INDEX v4.55, BC-INDEX v5.110, VP-INDEX v3.33, STORY-INDEX v4.490, error-taxonomy v1.42. Adversary reviews persisted verbatim (S-25.08 pass 3 + pass 4, S-25.09 pass 1); streaks 0/3 on both. OPEN human decisions [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT]; OPEN items [D-1255-ADV-DEFERRED], [D-1255-RUNBOOK-PG]. NEXT was LOCAL adversary pass 5 (S-25.08) + pass 2 (S-25.09) in parallel, then the S-25.10 implementation.
+
+**See STATE.md v10.90 for the current checkpoint.**

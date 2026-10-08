@@ -2110,3 +2110,21 @@ the file.
 **What happened:** Two implementer completion reports carried test counts that the orchestrator's re-run did not reproduce; the registered numbers (S-25.08 3386/0 and failpoints 1166/0; S-25.09 1242/0 and 1305/0) are the orchestrator's re-run values.
 **Lesson (D-1255):** Re-run every gate the registration will cite; never copy an agent's self-reported count (POLICY 22, subagent_report_fidelity_literal_shell).
 `[process-gap][D-1255][policy-22][verify-before-register]`
+
+## LESSON (D-1256) — Stopping running code agents at session wrap leaves partial, ungated work
+
+**What happened:** At wrap the S-25.10 implementer was stopped after four commits (mid-task at the INTENT batch writer and `execute_canonical_path_moves`, no gates run) and the S-25.09 pass-2 test-writer was stopped, leaving an untracked 518-line partial test file in `.worktrees/S-25.09`. The spec agents were allowed to finish and their work is committed.
+**Lesson (D-1256):** Let code agents reach a task boundary (a green or a clean red commit) before wrapping, or checkpoint them explicitly; otherwise record the branch as UNVERIFIED and the untracked file as uncommittable, and make the first resume step a review-or-delete decision by the owning specialist.
+`[process-gap][D-1256][wrap][partial-agent-work]`
+
+## LESSON (D-1256) — CHANGELOG version pins go stale in the same burst (S-25.08 L4-005 then L5-002)
+
+**What happened:** Two consecutive pass-N fixes to the CHANGELOG were made stale by spec bumps in the same burst; the CHANGELOG also absorbed S-25.09-only tokens (S-25.09 L2-005).
+**Lesson (D-1256):** Ban "current versions" pins in CHANGELOG entries (cite by section anchor, POLICY 19 style) and keep each story's entry free of the stacked story's deliverables. Open item [D-1255-CHANGELOG-PINS]; the orchestrator codifies.
+`[process-gap][D-1256][changelog-pins][policy-19]`
+
+## LESSON (D-1256) — Story-level closure claims need a code check (S-25.09 L2-001, L2-003)
+
+**What happened:** AC-022(d) ("Io variants render sanitize_diagnostic(subject, 256)") and the AC-021 recorded grep ("module-private") were recorded as closed without checking the code; both were false.
+**Lesson (D-1256):** A closure claim of the form "X is sanitized" or "Y is module-private" is accepted only with the literal grep or test that proves it, per POLICY 22.
+`[process-gap][D-1256][closure-claims][policy-22]`

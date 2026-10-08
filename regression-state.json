@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-10-08T21:25:55Z","command":"(cargo test -p validate-cross-site-correspondence test_BC_corpus_version_sync_all_indexed_bcs_match_frontmatter 2>&1 | tail -25)"}
+{"status":"pass","timestamp":"2026-10-08T22:23:00Z","command":"(cargo test -q -p validate-cross-site-correspondence corpus_version_sync 2>&1 | tail -12)"}
