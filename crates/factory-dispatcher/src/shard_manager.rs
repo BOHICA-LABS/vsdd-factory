@@ -12632,6 +12632,52 @@ pub enum BcIndexMigrationReadState {
     Completed,
 }
 
+/// The `completed.json` marker classification shared by the coordinator's under-lock read
+/// ([`read_completed_under_lock`]) and the reader ([`detect_migration_read_state`])
+/// (ADR-052 v1.25 item 11(c) rulings 1-2 and 5). Four verdicts:
+///
+/// - `Ok(None)` -- the directory entry is ABSENT: `symlink_metadata` returned `NotFound`
+///   (and only that);
+/// - `Ok(Some(record))` -- a regular file, or a symlink whose target reads and validates as a
+///   [`CompletedMigrationRecord`] (unknown extra keys are ignored);
+/// - `Err(io)` for every other outcome: any other lstat error, a read error (including a
+///   dangling symlink, whose lstat sees an entry but whose read reports `NotFound` of the
+///   TARGET, and a directory), and content that is not a record (`InvalidData`).
+fn read_completed_marker(
+    fs: &impl Fs,
+    path: &Path,
+) -> Result<Option<CompletedMigrationRecord>, io::Error> {
+    fn unwrap_io(e: BcIndexMigrationError) -> io::Error {
+        match e {
+            BcIndexMigrationError::Io { source, .. } => source,
+            other => io::Error::other(other.to_string()),
+        }
+    }
+    if fs.symlink_metadata(path).map_err(unwrap_io)?.is_none() {
+        return Ok(None);
+    }
+    let bytes = fs.read(path).map_err(unwrap_io)?.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "the directory entry exists but its target cannot be read (dangling symlink)",
+        )
+    })?;
+    serde_json::from_slice::<CompletedMigrationRecord>(&bytes)
+        .map(Some)
+        .map_err(|source| io::Error::new(io::ErrorKind::InvalidData, source))
+}
+
+/// ADR-052 v1.25 item 11(c): the under-lock `completed.json` read. See
+/// [`read_completed_marker`] for the four verdicts; every `Err` is
+/// `Io { path: completed.json, source }` (exit 2), never "absent", never exit 0.
+fn read_completed_under_lock(
+    fs: &impl Fs,
+    migration_state_dir: &Path,
+) -> Result<Option<CompletedMigrationRecord>, BcIndexMigrationError> {
+    let path = migration_state_dir.join("completed.json");
+    read_completed_marker(fs, &path).map_err(|source| BcIndexMigrationError::Io { path, source })
+}
+
 /// Steps 1-2 of the §Reader Integration protocol: probe
 /// `completed.json`/`CURRENT.json` and classify the current read state.
 /// Effectful (filesystem reads of two small marker files).
@@ -12639,19 +12685,11 @@ pub fn detect_migration_read_state(
     _migration_state_dir: &Path,
 ) -> Result<BcIndexMigrationReadState, BcIndexAddressingError> {
     let completed_path = _migration_state_dir.join("completed.json");
-    match std::fs::read_to_string(&completed_path) {
-        Ok(content) => {
-            // "a well-formed completed.json must parse" — validate it is
-            // genuine JSON, not merely that the file exists.
-            serde_json::from_str::<serde_json::Value>(&content).map_err(|source| {
-                BcIndexAddressingError::Io {
-                    path: completed_path.clone(),
-                    source: io::Error::new(io::ErrorKind::InvalidData, source),
-                }
-            })?;
-            return Ok(BcIndexMigrationReadState::Completed);
-        }
-        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+    // ADR-052 v1.25 item 11(c) ruling 5: the SAME lstat-first classification and
+    // record-shape validation the coordinator uses (`read_completed_marker`).
+    match read_completed_marker(&StdFs, &completed_path) {
+        Ok(Some(_)) => return Ok(BcIndexMigrationReadState::Completed),
+        Ok(None) => {}
         Err(source) => {
             return Err(BcIndexAddressingError::Io {
                 path: completed_path,
@@ -16602,18 +16640,14 @@ fn run_bc_index_migration_core(
     #[cfg(feature = "failpoints")]
     fail::fail_point!("bc_index_migration_core::after_lock_before_state_read");
 
-    // `completed.json` is read UNDER the lock and that read -- not a hard-coded `None`
-    // -- is what `recover()` receives below. Presence (the sufficient fact, ADR-052
-    // §7c step 8) selects the interim short-circuit; its content is not parsed here
-    // (the file is never modified).
-    let completed_present = fs.exists(&migration_state_dir.join("completed.json"));
-    if completed_present {
+    // `completed.json` is read UNDER the lock (ADR-052 v1.25 item 11(c)) and that read --
+    // not a hard-coded `None` -- is what `recover()` receives below. The probe is an
+    // lstat-class call: only `NotFound` means absent; any other outcome that is not a
+    // readable, schema-valid record is `Io` (exit 2) and nothing is written.
+    let completed_under_lock = read_completed_under_lock(&fs, &migration_state_dir)?;
+    if completed_under_lock.is_some() {
         return completed_json_interim_short_circuit(&migration_state_dir);
     }
-    // Absent under the lock: the value `recover()` receives for `completed`. It is
-    // derived from the SAME under-lock read that selected this branch (a present
-    // `completed.json` never reaches `recover()`), never a literal supplied by hand.
-    let completed_under_lock: Option<CompletedMigrationRecord> = None;
 
     // Resume path: `recover()` (OBL-1 §2) is the SINGLE recovery-decision
     // authority -- no parallel ad hoc `match txn.state { .. }` discriminator

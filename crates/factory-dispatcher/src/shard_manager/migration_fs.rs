@@ -149,6 +149,28 @@ pub trait Fs {
     /// Existence check without reading content.
     fn exists(&self, path: &Path) -> bool;
 
+    /// lstat-class probe of a DIRECTORY ENTRY (`std::fs::symlink_metadata`):
+    /// the link itself is inspected, its target never followed. `Ok(None)`
+    /// is `NotFound` ONLY -- the one error that means "no such entry"; every
+    /// other error (EACCES, ELOOP in a parent component, ENOTDIR, EIO,
+    /// EMFILE, ...) leaves existence UNKNOWN and is returned as `Io`
+    /// (ADR-052 v1.25 item 11(c) ruling 1). Provided so fixed-model
+    /// implementors need no change; [`StdFs`] overrides it with the
+    /// `migration_fs::symlink_metadata` failpoint.
+    fn symlink_metadata(
+        &self,
+        path: &Path,
+    ) -> Result<Option<std::fs::Metadata>, BcIndexMigrationError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(md) => Ok(Some(md)),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            }),
+        }
+    }
+
     /// Atomic pointer swap — the SOLE commit-point for the whole
     /// multi-file migration (ADR-052 §Decision 7c step 6). Kept distinct
     /// from [`Fs::rename`] so a Kani harness can assert the commit
@@ -258,6 +280,13 @@ fn migration_failpoint_error(
         Some("write_zero") => std::io::ErrorKind::WriteZero,
         Some("unexpected_eof") => std::io::ErrorKind::UnexpectedEof,
         Some("storage_full") => std::io::ErrorKind::StorageFull,
+        // EIO (5): a real OS error, so `raw_os_error()` is observable by the caller.
+        Some("io_error") => {
+            return BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source: std::io::Error::from_raw_os_error(5),
+            };
+        }
         None => std::io::ErrorKind::Other,
         Some(other) => {
             return BcIndexMigrationError::Io {
@@ -265,7 +294,7 @@ fn migration_failpoint_error(
                 source: std::io::Error::other(format!(
                     "migration_failpoint {name}: unrecognized return() tag {other:?} -- expected \
                      one of not_found/permission_denied/already_exists/interrupted/\
-                     out_of_memory/write_zero/unexpected_eof/storage_full"
+                     out_of_memory/write_zero/unexpected_eof/storage_full/io_error"
                 )),
             };
         }
@@ -360,6 +389,7 @@ impl Fs for StdFs {
     }
 
     fn read(&self, path: &Path) -> Result<Option<Vec<u8>>, BcIndexMigrationError> {
+        migration_failpoint!("migration_fs::read", path);
         match std::fs::read(path) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -372,6 +402,21 @@ impl Fs for StdFs {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn symlink_metadata(
+        &self,
+        path: &Path,
+    ) -> Result<Option<std::fs::Metadata>, BcIndexMigrationError> {
+        migration_failpoint!("migration_fs::symlink_metadata", path);
+        match std::fs::symlink_metadata(path) {
+            Ok(md) => Ok(Some(md)),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            }),
+        }
     }
 
     fn pointer_swap(&self, tmp: &Path, target: &Path) -> Result<(), BcIndexMigrationError> {
