@@ -13003,6 +13003,44 @@ pub enum BcIndexMigrationError {
     )]
     ContentPreservationAbort { detail: String },
 
+    /// ADR-052 v1.23 item 9 / error-taxonomy `FOREIGN_MIGRATION_REFUSED` (exit 2): a
+    /// single LIVE txn record whose `migration_id` is the other known migration's
+    /// or not in K. Raised after the Tier 0 loader and the one-live-txn check,
+    /// before `recover()`, with no Tier 1 field read and nothing mutated. The id
+    /// is stored RAW and rendered at `Display` by the SAME function as the
+    /// admission diagnostic ([`admission::sanitize_diagnostic_id`]: control
+    /// characters escaped, capped at 64 characters) so a hostile id cannot forge
+    /// terminal output.
+    #[error(
+        "BC-INDEX migration: refused: a live migration transaction owned by migration_id \
+         \"{}\" is in progress (FOREIGN_MIGRATION_REFUSED, exit 2); this subcommand never \
+         recovers, finalizes or aborts another migration's record; nothing was changed",
+        admission::sanitize_diagnostic_id(.live_migration_id)
+    )]
+    ForeignMigrationRefused { live_migration_id: String },
+
+    /// ADR-052 v1.23 item 9 sibling / error-taxonomy `MIGRATION_LOCK_CONTENTION`
+    /// (exit 1, a non-error sentinel): `flock(exclusive.lock, LOCK_EX|LOCK_NB)`
+    /// returned EWOULDBLOCK on a coordinator run. Replaces the digest-coded
+    /// `BinaryIntegrityFailure` lock text. Checked BEFORE the Tier 0 loader.
+    #[error(
+        "BC-INDEX migration: another migration coordinator holds the exclusive migration lock \
+         (MIGRATION_LOCK_CONTENTION, exit 1); nothing was changed; retry after it exits"
+    )]
+    MigrationLockContention,
+
+    /// ADR-052 v1.23 item 11(b) INTERIM / error-taxonomy
+    /// `COMPLETION_RECORD_MISMATCH_ABORT` (exit 2): a LIVE record of this
+    /// migration beside `completed.json`. No verifier exists in this build
+    /// (S-25.06 AC-031 owns verify-then-finalize), so the record is never
+    /// finalized and the gate is never flipped.
+    #[error(
+        "BC-INDEX migration: the terminal record completed.json cannot be proven to describe \
+         the live txn (COMPLETION_RECORD_MISMATCH_ABORT, exit 2); no verification was \
+         performed in this build; txn and gate unchanged; operator investigation required"
+    )]
+    CompletionRecordMismatchInterim,
+
     #[error("BC-INDEX migration: I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -13145,6 +13183,9 @@ impl BcIndexMigrationError {
             | BcIndexMigrationError::CensusMismatchAbort { .. }
             | BcIndexMigrationError::ContentPreservationAbort { .. }
             | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::ForeignMigrationRefused { .. }
+            | BcIndexMigrationError::MigrationLockContention
+            | BcIndexMigrationError::CompletionRecordMismatchInterim
             | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
                 AdmissionFailureCause::StateIntegrity
             }
@@ -13152,12 +13193,13 @@ impl BcIndexMigrationError {
     }
 
     /// Map this error to the migration-binary process exit code ADR-052
-    /// §Error Code Semantics assigns it. `ExpiryAbort` alone is exit 1
-    /// ("no harm done, but re-activation required"); every other error
-    /// variant here is exit 2.
+    /// §Error Code Semantics assigns it. `ExpiryAbort` ("no harm done, but
+    /// re-activation required") and `MigrationLockContention` ("nothing changed,
+    /// retry later") are exit 1; every other error variant here is exit 2.
     pub fn process_exit_code(&self) -> i32 {
         match self {
-            BcIndexMigrationError::ExpiryAbort { .. } => 1,
+            BcIndexMigrationError::ExpiryAbort { .. }
+            | BcIndexMigrationError::MigrationLockContention => 1,
             _ => 2,
         }
     }
@@ -13844,6 +13886,33 @@ fn decode_txn_record_strict(
             &format!("required key(s) absent: {}", missing.join(", ")),
         ));
     }
+    // ADR-052 v1.23 item 10: any OTHER top-level key on a LIVE known record (a newer
+    // schema's field) is `txn_record_malformed`. The typed rewrite cannot preserve a
+    // field it does not model, and silently dropping it would fabricate state. The
+    // Tier 0 discriminator `migration_id` is the one permitted extra key (preserved
+    // verbatim by [`write_txn_record`]). Terminal records are never rewritten by
+    // recovery, so they are exempt (an ABORTED record legitimately carries
+    // `abort_reason`).
+    if file.is_live() {
+        let unknown: Vec<&str> = object
+            .keys()
+            .map(String::as_str)
+            .filter(|k| *k != "migration_id" && !TXN_RECORD_REQUIRED_KEYS.contains(k))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(txn_record_malformed(
+                &file.path,
+                &format!(
+                    "unknown top-level key(s) on a live record: {}",
+                    unknown
+                        .iter()
+                        .map(|k| admission::sanitize_diagnostic(k, 64))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
+    }
     serde_json::from_value(file.raw.clone()).map_err(|e| {
         txn_record_malformed(
             &file.path,
@@ -13958,13 +14027,53 @@ pub fn write_txn_record(
     _record: &BcIndexMigrationTxnRecord,
 ) -> Result<(), BcIndexMigrationError> {
     let path = _migration_state_dir.join(format!("txn-{}.json", _record.activation_id));
-    let json = serde_json::to_string_pretty(_record).map_err(|e| {
+    let mut value = serde_json::to_value(_record).map_err(|e| {
+        BcIndexMigrationError::BinaryIntegrityFailure {
+            message: format!("failed to serialize txn record: {e}"),
+        }
+    })?;
+    // ADR-052 v1.23 item 10 / BC-1.18.011 Precondition 6(f)(iii): a PRESENT
+    // `migration_id` (the Tier 0 discriminator the typed record does not model) is
+    // preserved VERBATIM on rewrite, taken from the record being replaced. The
+    // typed struct gains no field and no serde default; an absent key stays absent.
+    if let Some(migration_id) = existing_migration_id(&path)?
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("migration_id".to_string(), migration_id);
+    }
+    let json = serde_json::to_string_pretty(&value).map_err(|e| {
         BcIndexMigrationError::BinaryIntegrityFailure {
             message: format!("failed to serialize txn record: {e}"),
         }
     })?;
     fs.write_temp(&path, json.as_bytes())?;
     fs.fsync_file(&path)
+}
+
+/// The `migration_id` value PRESENT in the txn file about to be replaced at `path`,
+/// verbatim, or `None` when the file or the key is absent. An unreadable file is
+/// `Io`; an unparseable one is `txn_record_malformed` (nothing is written).
+fn existing_migration_id(path: &Path) -> Result<Option<serde_json::Value>, BcIndexMigrationError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(BcIndexMigrationError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let existing: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+        txn_record_malformed(
+            path,
+            &format!(
+                "existing record is not valid JSON ({:?} error)",
+                e.classify()
+            ),
+        )
+    })?;
+    Ok(existing.get("migration_id").cloned())
 }
 
 /// The native admission-gate check the OPEN/DRAINING gate performs: is a
@@ -16088,6 +16197,35 @@ pub(crate) fn run_bc_index_migration_with_ttl(
     run_bc_index_migration_core(project_root, None, max_reservation_ttl)
 }
 
+/// ADR-052 v1.23 item 11: the `completed.json` short-circuit, narrowed to the
+/// fail-closed subset of the §5c Branch 2 table until S-25.06 AC-031 supplies the
+/// verify-then-finalize. The caller holds the exclusive flock. (a) the Tier 0
+/// loader's errors propagate (never swallowed); (b) a LIVE record beside
+/// `completed.json` is never finalized and the gate never flipped: foreign =>
+/// `ForeignMigrationRefused`, this migration's own => the interim
+/// `CompletionRecordMismatchInterim`; (c) with NO live record the gate is
+/// reconciled to OPEN only when it is not already OPEN (an absent gate file reads
+/// as OPEN), so the clean steady state performs zero filesystem writes. Terminal
+/// records are never modified.
+fn completed_json_interim_short_circuit(
+    migration_state_dir: &Path,
+) -> Result<BcIndexMigrationOutcome, BcIndexMigrationError> {
+    let txn_files = admission::read_txn_files(migration_state_dir)?;
+    if let Some(live) = admission::select_live_txn(&txn_files)? {
+        return Err(if live.migration_id() == admission::MIGRATION_ID_B2 {
+            BcIndexMigrationError::CompletionRecordMismatchInterim
+        } else {
+            BcIndexMigrationError::ForeignMigrationRefused {
+                live_migration_id: live.migration_id().to_string(),
+            }
+        });
+    }
+    if read_admission_gate_state(migration_state_dir)? != BcIndexAdmissionGateState::Open {
+        write_admission_gate_state(migration_state_dir, BcIndexAdmissionGateState::Open)?;
+    }
+    Ok(BcIndexMigrationOutcome::AlreadyMigrated)
+}
+
 fn run_bc_index_migration_core(
     project_root: &Path,
     root_source: Option<ProjectRootSource>,
@@ -16119,63 +16257,19 @@ fn run_bc_index_migration_core(
     let fs = StdFs;
     let migration_state_dir = factory_root.migration_state_dir();
 
-    // Branch 2 (EC-006/EC-061): completed.json is the permanent terminal
-    // record — its mere presence is sufficient, no other file consulted.
-    //
-    // OBL-1 FINDING 3 fix: a crash between `write_completed_record`
-    // durably landing and `finish_committing_migration`'s own
-    // state=Completed txn-record write + gate-reset-to-OPEN calls leaves
-    // BOTH artifacts stuck forever — the txn record at COMMITTING and the
-    // writer-admission gate at LOCKED/DRAINING — because every subsequent
-    // invocation hits THIS short-circuit (completed.json already exists)
-    // and returns before ever reaching `recover()`'s dispatch or
-    // `finish_committing_migration`'s own state/gate writes again, and
-    // `reconcile_stale_admission_gate`'s Branch A cannot self-heal the
-    // gate either (its precondition is `active_txn == None`, but a live
-    // COMMITTING txn record still exists on disk in exactly this
-    // scenario). Give this short-circuit its OWN best-effort convergence
-    // of both: mirroring `finish_committing_migration`'s existing
-    // state=Completed write and gate-reset, idempotent and safe to run
-    // even when both are already converged (the common case), so every
-    // future writer is correctly admitted again AND the txn record itself
-    // reaches its genuine terminal state once the migration has
-    // genuinely, durably completed.
-    if fs.exists(&migration_state_dir.join("completed.json")) {
-        if let Ok(Some(mut txn)) = read_active_txn_record(&fs, &migration_state_dir)
-            && txn.state != BcIndexMigrationTxnState::Completed
-        {
-            txn.state = BcIndexMigrationTxnState::Completed;
-            txn.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            if let Err(e) = write_txn_record(&fs, &migration_state_dir, &txn) {
-                tracing::warn!(
-                    target: "bc_1_18_011_migration",
-                    error = %e,
-                    "run_bc_index_migration: best-effort txn-record convergence to COMPLETED at \
-                     the completed.json short-circuit failed (non-fatal -- this outcome is \
-                     already AlreadyMigrated regardless; a future invocation retries this same \
-                     write)"
-                );
+    // Precedence (ADR-052 v1.23 items 3, 9, 11; BC-1.18.011 Precondition 6(f)(ii)):
+    // flock -> Tier 0 loader -> one-live-txn -> foreign refusal -> recover(). The
+    // flock is acquired FIRST on every path, including the `completed.json`
+    // short-circuit: the records cannot be read safely without it.
+    let completed_present = fs.exists(&migration_state_dir.join("completed.json"));
+    if !completed_present {
+        std::fs::create_dir_all(&migration_state_dir).map_err(|source| {
+            BcIndexMigrationError::Io {
+                path: migration_state_dir.clone(),
+                source,
             }
-        }
-        if let Err(e) =
-            write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open)
-        {
-            tracing::warn!(
-                target: "bc_1_18_011_migration",
-                error = %e,
-                "run_bc_index_migration: best-effort gate-state reset to OPEN at the \
-                 completed.json short-circuit failed (non-fatal -- this outcome is already \
-                 AlreadyMigrated regardless; a future invocation retries this same reset)"
-            );
-        }
-        return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
+        })?;
     }
-
-    std::fs::create_dir_all(&migration_state_dir).map_err(|source| BcIndexMigrationError::Io {
-        path: migration_state_dir.clone(),
-        source,
-    })?;
-
     let lock_path = migration_state_dir.join("exclusive.lock");
     if !lock_path.exists() {
         std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
@@ -16183,12 +16277,18 @@ fn run_bc_index_migration_core(
             source,
         })?;
     }
-    let _lock_guard = try_acquire_migration_lock(&lock_path)?.ok_or_else(|| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: "another migration coordinator already holds the exclusive migration lock"
-                .to_string(),
-        }
-    })?;
+    let lock_guard = try_acquire_migration_lock(&lock_path)?;
+
+    if completed_present {
+        // ADR-052 v1.23 item 11(c): another holder => the gate of a live
+        // coordinator must not be touched; skip, exit 0, zero writes.
+        let Some(_lock_guard) = lock_guard else {
+            return Ok(BcIndexMigrationOutcome::AlreadyMigrated);
+        };
+        return completed_json_interim_short_circuit(&migration_state_dir);
+    }
+
+    let _lock_guard = lock_guard.ok_or(BcIndexMigrationError::MigrationLockContention)?;
 
     // Resume path: `recover()` (OBL-1 §2) is the SINGLE recovery-decision
     // authority -- no parallel ad hoc `match txn.state { .. }` discriminator
@@ -16200,14 +16300,13 @@ fn run_bc_index_migration_core(
     let txn_files = admission::read_txn_files(&migration_state_dir)?;
     let live_file = admission::select_live_txn(&txn_files)?;
     // A live record of another migration (`backfill-append-logs`) or with
-    // `migration_id` not in K keeps foreign precedence: refused, no Tier 1 field
-    // read, nothing mutated.
+    // `migration_id` not in K is refused (item 9): no Tier 1 field read, nothing
+    // mutated, `recover()` not run.
     if let Some(live) = live_file
         && live.migration_id() != admission::MIGRATION_ID_B2
     {
-        return Err(BcIndexMigrationError::BinaryIntegrityFailure {
-            message: "another migration coordinator already holds the exclusive migration lock"
-                .to_string(),
+        return Err(BcIndexMigrationError::ForeignMigrationRefused {
+            live_migration_id: live.migration_id().to_string(),
         });
     }
     // Tier 1 `generation_id` tri-state, resolved here in the shell BEFORE the

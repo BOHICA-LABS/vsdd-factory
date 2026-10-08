@@ -335,6 +335,9 @@ fn expected_cause(e: &BcIndexMigrationError) -> AdmissionFailureCause {
         | BcIndexMigrationError::CensusMismatchAbort { .. }
         | BcIndexMigrationError::ContentPreservationAbort { .. }
         | BcIndexMigrationError::WriterAdmissionRefused { .. }
+        | BcIndexMigrationError::ForeignMigrationRefused { .. }
+        | BcIndexMigrationError::MigrationLockContention
+        | BcIndexMigrationError::CompletionRecordMismatchInterim
         | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => {
             AdmissionFailureCause::StateIntegrity
         }
