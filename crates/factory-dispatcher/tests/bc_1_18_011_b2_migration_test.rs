@@ -1,19 +1,19 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! BC-1.18.011 (S-25.02 cluster-5 "shard-b2", T-11, AC-018) RED-Gate
+//! BC-1.18.011 (S-25.02 cluster-5 "shard-b2", T-11, AC-018) Red-Gate-authored
 //! coverage for the B2 governed one-time migration surface in
 //! `shard_manager.rs`, plus the `executor.rs` native admission-gate
 //! precedence tests the architect's Ruling 1/2/3 (task-level, this burst)
 //! require.
 //!
-//! # BC-5.38.001 Red Gate discipline — RED (every function under test is
-//! `todo!()` as of stub-architect's cluster-5 commit `adbc795a`)
+//! # BC-5.38.001 Red Gate discipline
 //!
-//! Every function this file exercises panics today via `todo!()`. Each test
-//! asserts the REAL post-implementation expected outcome, mirroring
+//! At authoring time every function this file exercises was a `todo!()` stub
+//! (stub-architect's cluster-5 commit `adbc795a`); all are now implemented.
+//! Each test asserts the REAL post-implementation expected outcome, mirroring
 //! `bc_1_18_006_roll_test.rs`'s own established methodology: the same
-//! assertion shape is correct both during Red Gate (fails against the stub)
-//! and once BC-1.18.011 is implemented (should pass unchanged).
+//! assertion shape was correct during Red Gate (failing against the stub) and
+//! passes unchanged now that BC-1.18.011 is implemented.
 //!
 //! VP classification (BC-1.18.011 §Verification Properties): VP-132
 //! (proptest; content-preservation structured-row-equivalence — this file's
@@ -42,27 +42,21 @@
 //!    tests Edit/Write/MultiEdit admission only, plus one negative control
 //!    confirming Bash is correctly out of THIS function's scope.
 //!
-//! # Genuine ambiguity flagged for implementer/architect (not guessed at)
+//! # Ambiguities flagged at authoring time (both resolved by the implementation)
 //!
-//! `resume_from_staging(_txn_record, _migration_state_dir)`'s signature
-//! carries neither a canonical `BC-INDEX.md` path/body nor an explicit
-//! "original census" parameter, and `BcIndexMigrationTxnRecord` has no
-//! field that stores the pre-split census ID set itself (only
-//! `source_sha256`/`source_body_row_sha256`, both hashes, not the set). It
-//! is therefore unclear whether the EC-060 mandatory census re-run
-//! re-derives its baseline by re-reading the (pre-pivot, still-untouched)
-//! canonical `BC-INDEX.md` at a well-known path relative to
-//! `_migration_state_dir`'s parent, or from a txn-record field not yet
-//! specified. This file's EC-060 tests assert only the OBSERVABLE contract
-//! (a staged generation corrupted with a duplicate row must fail on resume;
-//! a still-valid one must pass) without assuming the internal data source —
-//! flagging this for confirmation once T-11 is implemented.
+//! `resume_from_staging(_txn_record, _migration_state_dir)`'s signature carries
+//! neither a canonical `BC-INDEX.md` path/body nor an explicit "original
+//! census" parameter, so it was unclear where the EC-060 mandatory census
+//! re-run derives its baseline. The implementation re-reads the staged
+//! generation's own shard bodies under `gen-<generation_id>/shards/` (never
+//! re-splitting) and re-checks them against the txn record's
+//! `source_body_row_sha256` when present. This file's EC-060 tests assert only
+//! the OBSERVABLE contract (a staged generation corrupted with a duplicate row
+//! must fail on resume; a still-valid one must pass) without assuming the
+//! internal data source.
 //!
-//! Separately: `pre_commit_fingerprint_recheck`'s hash encoding (lowercase
-//! hex vs. another encoding) is not pinned by the stub; this file assumes
-//! lowercase-hex SHA-256 (`{:x}` via the `sha2` crate), consistent with the
-//! rest of this crate's `sha2`-based hashing convention — flagging as an
-//! inferred, not confirmed, convention.
+//! `pre_commit_fingerprint_recheck`'s hash encoding is lowercase-hex SHA-256
+//! (the crate's `sha256_hex` convention), as these tests assumed.
 //!
 //! **RESOLVED (F-C5-P1-006; superseded by S-25.08 / ADR-052 v1.20 §Downstream
 //! item 22):** the `shard_cap_precheck`-after-migration-gate ordering is now
@@ -1442,8 +1436,9 @@ fn test_BC_1_18_011_PRECOND6_admit_or_block_bc_index_writer_creates_reservation_
 // ---------------------------------------------------------------------------
 // S-25.08 (T-2, AC-009) -- B2 entry point delegates to the SHARED admission
 // core: reserve-then-verify, step-3.5 reconciliation wired, release-on-block.
-// RED at the Red Gate (the merged B2 entry point is check-then-reserve and
-// never calls `reconcile_stale_admission_gate`). These are the IN-PROCESS B2
+// These were red at the Red Gate (the merged B2 entry point was
+// check-then-reserve and never called `reconcile_stale_admission_gate`); the
+// entry point now delegates to the shared core. These are the IN-PROCESS B2
 // entry-point facets; the real-binary facets are in
 // `s2508_admission_blackbox_test.rs`.
 // ---------------------------------------------------------------------------

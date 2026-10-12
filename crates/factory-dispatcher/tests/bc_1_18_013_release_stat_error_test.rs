@@ -10,9 +10,11 @@
 //! no-op ENOENT path (the sibling of F-S2508-L3-009's `.factory` fix). It is now
 //! fixed by `probe_release_migration_state_dir`, which the release leg branches on.
 //!
-//! OBSERVABILITY: S-25.08 has no event channel (S-25.09 adds the
-//! `migration.release_failed` advisory), and `reservation_release` returns `()`
-//! and only logs through `tracing`. The warn-vs-silent distinction is NOT
+//! OBSERVABILITY: S-25.08 has no event channel (S-25.09 adds the release-side
+//! `migration.admission_advisory` event with `reason=reservation_release_failed`;
+//! ADR-052 §5a "Factory-root lookup mapping" release row, BC-1.18.013 EC-042),
+//! and `bc_index_migration_reservation_release` returns `()` and only logs
+//! through `tracing`. The warn-vs-silent distinction is NOT
 //! observable through the real binary's exit code or filesystem effects -- the
 //! black-box vector (`s2508_admission_blackbox_test.rs`, ELOOP `migration-state`
 //! symlink) pins only that externally visible half (exit 0, nothing deleted).

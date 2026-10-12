@@ -3,19 +3,19 @@
 //! S-25.08 RED-GATE: registry-error exit-code mapping (BC-7.06.001 v1.13
 //! §Fail-Closed Symmetry; BC-1.08.001 v1.4 Invariants 1/2).
 //!
-//! Merged `main.rs::run` maps a registry load error with an inline `match` that
-//! ends in `_ => 0`, so a FUTURE `RegistryError` variant would silently fail
-//! OPEN. The testable seam is the pure `registry_error_exit_code(&RegistryError)
-//! -> i32` (test-writer added it as a `todo!()` stub in `registry.rs`; the
-//! implementer must make `main.rs::run` delegate to it).
+//! The former inline `match` in `main.rs::run` ended in `_ => 0`, so a FUTURE
+//! `RegistryError` variant would have silently failed OPEN. The testable seam is
+//! the pure `registry_error_exit_code(&RegistryError) -> i32` in `registry.rs`,
+//! which is implemented, and `main.rs::run` delegates to it
+//! (`factory_dispatcher::registry::registry_error_exit_code(&e)`).
 //!
 //! "Unknown variant => non-zero" cannot be exercised for a variant that does not
 //! exist, so it is pinned STRUCTURALLY: `expected_exit` below matches EVERY
 //! current `RegistryError` variant explicitly with NO wildcard arm. Adding a
 //! variant to `RegistryError` breaks THIS test's build until the author decides
 //! (here, and in `registry_error_exit_code`) whether it fails open or closed.
-//! The implementer must keep `registry_error_exit_code`'s fail-open arm an
-//! explicit variant list (no `_`).
+//! `registry_error_exit_code` keeps its fail-open arm an explicit variant list
+//! (no `_`).
 
 use std::io::Write as _;
 use std::path::PathBuf;

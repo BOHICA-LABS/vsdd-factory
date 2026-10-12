@@ -1,13 +1,14 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! S-25.08 (T-1 / T-2) RED-GATE tests for the PURE decision cores and the
-//! reservation TTL (AC-007 pure core, AC-008, AC-010 core semantics).
+//! S-25.08 (T-1 / T-2) tests for the PURE decision cores and the reservation
+//! TTL (AC-007 pure core, AC-008, AC-010 core semantics).
 //!
-//! # BC-5.38.001 Red Gate -- STUB SURFACE this file compiles against
+//! # BC-5.38.001 Red Gate -- SURFACE this file compiles against
 //!
-//! All four symbols below were added by the test-writer to
-//! `shard_manager.rs` as minimal compilable stubs with `todo!()` bodies (names
-//! and shapes are pinned by VP-146 v1.2 / VP-147 v1.1 / ADR-052 v1.18 §5a):
+//! All four symbols below were first added to `shard_manager.rs` as minimal
+//! compilable `todo!()` stubs (so this file was red-first); all four are now
+//! implemented in `shard_manager.rs`. Names and shapes are pinned by VP-146 /
+//! VP-147 / ADR-052 §5a:
 //!
 //! * `decide_terminal_record_reconciliation(&TerminalReconcileInputs) -> TerminalReconcileDecision`
 //! * `reservation_is_stale(created_at: Option<u64>, mtime: Option<u64>, now: u64, ttl: u64) -> bool`
@@ -16,13 +17,12 @@
 //! * `validate_production_reservation_ttl(Duration) -> Result<Duration, BcIndexMigrationError>`
 //!   and `MIN_PRODUCTION_RESERVATION_TTL` (1,800 s) -- the PRODUCTION entry
 //!   point's TTL floor (the injectable test seam `drain_bc_index_writers` is
-//!   NOT bound by the floor). The validator's NAME is the test-writer's
-//!   proposal (the spec names the behavior, not the symbol); the implementer
-//!   may rename it IF the production entry point is kept a distinct, testable
-//!   function.
+//!   NOT bound by the floor). The validator's name is the test-writer's
+//!   choice (the spec names the behavior, not the symbol); it is a distinct,
+//!   testable function.
 //!
-//! `DEFAULT_MAX_RESERVATION_TTL` is asserted to be 3,600 s (the merged 120 s
-//! value was defect B2-3, now corrected).
+//! `DEFAULT_MAX_RESERVATION_TTL` is asserted to be 3,600 s (the formerly merged
+//! 120 s value was defect B2-3, since corrected).
 //!
 //! # Traceability
 //!
@@ -86,7 +86,7 @@ fn test_BC_1_18_011_EC009_production_ttl_constant_floor_and_created_at_judgment(
     }
 
     // (b) production entry point rejects < 1,800 s as a configuration error and
-    // accepts >= 1,800 s unchanged. (todo!() panics are caught per vector so every
+    // accepts >= 1,800 s unchanged. (Panics are caught per vector so every
     // vector is reported.)
     for secs in [0u64, 1, 120, 1799] {
         let r = std::panic::catch_unwind(|| {
@@ -227,7 +227,7 @@ fn test_BC_1_18_011_EC009_reservation_is_stale_created_at_first_mtime_fallback()
         "age == ttl + 1 is stale"
     );
     // Spec change (BC-1.18.011 v1.16 EC-020 / BC-1.18.013 v1.8 EC-025 / ADR-052
-    // v1.20 timestamp rule (2)): a `created_at` beyond now + 300 s is UNUSABLE
+    // timestamp rule (2)): a `created_at` beyond now + 300 s is UNUSABLE
     // (clock-skew untrusted) and the mtime is the basis. The v1.18 expectation
     // "any future created_at is never stale" is superseded. Intent kept: a
     // future-but-within-skew created_at is retained (age 0, never underflows),

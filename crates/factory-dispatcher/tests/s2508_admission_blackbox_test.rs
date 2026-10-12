@@ -1,6 +1,6 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! S-25.08 (T-1) RED-GATE black-box suite for the SHARED ADMISSION CORE wired
+//! S-25.08 (T-1) black-box suite (written red-first at the Red Gate; green now) for the SHARED ADMISSION CORE wired
 //! on the dispatcher's REAL PreToolUse/PostToolUse path.
 //!
 //! Every test in this file SPAWNS THE REAL `factory-dispatcher` BINARY
@@ -28,15 +28,16 @@
 //! AC-009's in-process B2 entry-point tests and the T-2 fixture updates live in
 //! `bc_1_18_011_b2_migration_test.rs`.)
 //!
-//! # TEST-ONLY SEAM the implementer MUST provide (Red-Gate note, BC-5.38.001)
+//! # TEST-ONLY SEAM provided by `shard_manager::admission` (BC-5.38.001)
 //!
 //! Reserve-then-verify (D5) is an ORDERING property INSIDE one dispatcher
 //! process (W1 = create reservation, then W2 = read gate/scan txn). A
 //! black-box test can only observe/interleave it through an injectable seam.
 //! BC-1.18.013 Precondition 6(c) already mandates injectable timing seams; this
-//! file defines the admission-core seam it needs. No production code reads it
-//! yet (so these tests are RED for the right reason: the seam and the core
-//! behavior do not exist). The seam is active ONLY in
+//! file defines the admission-core seam it needs. `shard_manager::admission`
+//! implements it (its private `mod seam` reads `VSDD_TEST_ADMISSION_SEAM_DIR`);
+//! at the Red Gate the seam and the core behavior did not yet exist, so these
+//! tests were red for the right reason. The seam is active ONLY in
 //! `#[cfg(any(debug_assertions, feature = "test-support"))]` builds (same gate
 //! as `VSDD_FORCE_ENGINE_BUILD_FAILURE` in `main.rs`) and is keyed on ONE env
 //! var:

@@ -12,11 +12,14 @@
 //! * F-S2508-L2-010 (BC-1.18.013 Pre 6(b)(i) spelling (ii)): the as-given
 //!   `CLAUDE_PROJECT_DIR` lexical alias is ignored when empty or not absolute.
 //!
-//! # Stub surface (BC-5.38.001)
-//! `as_given_factory_root_spelling` is added to `shard_manager::admission` as a
-//! `todo!()` stub: the merged `executor.rs` inlines the `CLAUDE_PROJECT_DIR`
-//! alias derivation (filtering only the EMPTY case), so the "not absolute"
-//! rule is not unit-observable without extracting it.
+//! # Extracted seam (BC-5.38.001)
+//! `shard_manager::admission::as_given_factory_root_spelling` is implemented: it
+//! rejects an EMPTY value and a NOT-ABSOLUTE value (returning `None`), and
+//! otherwise returns the lexically normalized `<value>/.factory`. It was
+//! extracted from the formerly inlined `executor.rs` alias derivation (which
+//! filtered only the empty case) so the "not absolute" rule is unit-observable;
+//! `executor::bc_index_migration_admission` now calls it. These tests were
+//! written red-first and now run green against the delivered code.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
