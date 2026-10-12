@@ -4,24 +4,25 @@
 //!
 //! BC-1.18.013 EC-021 / AC-011: the writer-reservation release is best-effort;
 //! a NON-ENOENT release error is a NON-FATAL `tracing::warn!` (never a verdict).
-//! `bc_index_migration_reservation_release` currently guards with
+//! Before the fix, `bc_index_migration_reservation_release` guarded with
 //! `if !migration_state_dir.exists() { return; }`; `Path::exists()` is false on
-//! EACCES / EIO / ELOOP too, so a stat error is silently treated as the
-//! no-op ENOENT path (the sibling of F-S2508-L3-009's `.factory` fix).
+//! EACCES / EIO / ELOOP too, so a stat error was silently treated as the
+//! no-op ENOENT path (the sibling of F-S2508-L3-009's `.factory` fix). It is now
+//! fixed by `probe_release_migration_state_dir`, which the release leg branches on.
 //!
 //! OBSERVABILITY: S-25.08 has no event channel (S-25.09 adds the
 //! `migration.release_failed` advisory), and `reservation_release` returns `()`
 //! and only logs through `tracing`. The warn-vs-silent distinction is NOT
 //! observable through the real binary's exit code or filesystem effects -- the
 //! black-box vector (`s2508_admission_blackbox_test.rs`, ELOOP `migration-state`
-//! symlink) pins only that externally visible half (exit 0, nothing deleted),
-//! which passes today. It IS observable in-process: `s2508_diagnostics_test.rs`
+//! symlink) pins only that externally visible half (exit 0, nothing deleted).
+//! It IS observable in-process: `s2508_diagnostics_test.rs`
 //! (F-S2508-L5-001) installs a capturing `tracing` subscriber around the `pub`
 //! `bc_index_migration_reservation_release` and asserts exactly one WARN
 //! (`error_kind` != NotFound, `path` naming migration-state) for a stat error and
 //! none for ENOENT.
-//! The error-path classification is pinned HERE against the factored helper the
-//! implementer must introduce in `executor.rs`:
+//! The error-path classification is pinned HERE against the factored helper in
+//! `executor.rs`:
 //!
 //! ```ignore
 //! /// Ok(true)  -- stat succeeded (the release proceeds);
@@ -33,9 +34,10 @@
 //! ) -> Result<bool, std::io::Error>;
 //! ```
 //!
-//! and `bc_index_migration_reservation_release` must branch on it
+//! and `bc_index_migration_reservation_release` branches on it
 //! (`Ok(false)` => return; `Err(e)` => `tracing::warn!` + return).
-//! RED at authoring time = compile failure (the helper does not exist yet).
+//! At authoring time these tests were RED by compile failure (the helper did not
+//! yet exist); the helper has since landed.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 

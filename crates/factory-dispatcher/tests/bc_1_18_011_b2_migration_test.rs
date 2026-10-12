@@ -1589,12 +1589,13 @@ fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created
 // ORIGINAL YAML frontmatter (`total_bcs` et al.), the real `## Summary`
 // subsystem-registry table, and any cross-cutting invariants — it inserts
 // `## Subsystem Shard Manifest` and removes ONLY the per-subsystem
-// `### SS-NN` BC tables. `run_bc_index_migration`'s `staged_bc_index_body`
-// is currently a hardcoded literal (`"## Summary\n\n## Subsystem Shard
-// Manifest\n\nSee \`shards/BC-INDEX.shard-manifest.toml\`.\n"`) that
-// discards EVERYTHING before the first `### SS-NN` heading wholesale —
-// frontmatter, the real §Summary table, and any cross-cutting invariants —
-// replacing it with a 4-line stub.
+// `### SS-NN` BC tables. Before the fix, `run_bc_index_migration`'s
+// `staged_bc_index_body` was a hardcoded literal (`"## Summary\n\n## Subsystem
+// Shard Manifest\n\nSee \`shards/BC-INDEX.shard-manifest.toml\`.\n"`) that
+// discarded EVERYTHING before the first `### SS-NN` heading wholesale --
+// frontmatter, the real Summary table, and any cross-cutting invariants --
+// replacing it with a 4-line stub. It is now derived via
+// `extract_bc_index_preamble`.
 //
 // This is a fresh-run END-TO-END test against a realistic fixture, driving
 // `run_bc_index_migration` for real — NOT the PC1/PC2 unit helpers in
@@ -1777,8 +1778,9 @@ fn test_BC_1_18_010_PC1_FC5P1001_run_bc_index_migration_preserves_frontmatter_su
 // first uncompleted move" and "never partially applied"; Postcondition 5
 // idempotency; EC-002 "the partial staged output is discarded ... restarts
 // cleanly"; EC-003 "resume ... MUST re-run the full census") against the
-// CURRENT implementation, which does not yet honor it. All three MUST FAIL
-// against HEAD `893719bf`.
+// implementation. At authoring time (HEAD `893719bf`) the implementation did
+// not yet honor it and all three failed; they are the regression pins for the
+// subsequent fixes.
 // ---------------------------------------------------------------------------
 
 fn sha256_hex_of_bytes(bytes: &[u8]) -> String {
