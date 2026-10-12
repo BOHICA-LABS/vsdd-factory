@@ -7,7 +7,7 @@
 //! (`CARGO_BIN_EXE_factory-dispatcher`), writes a Claude-Code-shaped hook
 //! envelope to its stdin (then closes stdin), and observes only process
 //! outcomes and the on-disk `.factory/migration-state/` tree of a tempdir
-//! project. No internal function is called (Claim boundary, ADR-052 v1.18 /
+//! project. No internal function is called (Claim boundary, ADR-052 /
 //! story S-25.08: a unit test cannot see a missing call site).
 //!
 //! # Traceability
@@ -1881,7 +1881,7 @@ fn test_BC_1_18_013_EC020_unwritable_namespace_fails_closed_no_reservation_black
 }
 
 // ===========================================================================
-// ADR-052 v1.20 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
+// ADR-052 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
 // red tests (F-001 .. F-009), real spawned binary
 // ===========================================================================
 
@@ -1996,7 +1996,7 @@ fn count_w1(seam: &Path) -> usize {
 // F-001 / EC-021 -- PostToolUseFailure releases the reservation
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-021 / ADR-052 v1.20 §5a F-001: a `PostToolUseFailure`
+/// BC-1.18.013 v1.8 EC-021 / ADR-052 §5a F-001: a `PostToolUseFailure`
 /// envelope `{tool_name, tool_input, tool_use_id, error, is_interrupt}` for an id
 /// whose PreToolUse was admitted releases exactly that reservation, regardless of
 /// `is_interrupt` and of `tool_name` (absent / differently shaped). An
@@ -2132,7 +2132,7 @@ fn set_registry(p: &Project, r: Registry) {
     }
 }
 
-/// BC-1.18.013 v1.8 EC-022 / ADR-052 v1.20 §5a "Evaluation position" O1-O4. Gate
+/// BC-1.18.013 v1.8 EC-022 / ADR-052 §5a "Evaluation position" O1-O4. Gate
 /// BEHAVIOR only (registry exit-code wording is being reconciled separately).
 #[test]
 fn test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox() {
@@ -2285,7 +2285,7 @@ fn test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox() {
 // F-002 / EC-023 -- admission scope anchored to the session's factory_root
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-023 / ADR-052 v1.20 "Admission scope anchoring".
+/// BC-1.18.013 v1.8 EC-023 / ADR-052 "Admission scope anchoring".
 #[test]
 fn test_BC_1_18_013_EC023_out_of_root_factory_paths_are_out_of_scope_blackbox() {
     let mut failures: Vec<String> = Vec::new();
@@ -2456,7 +2456,7 @@ struct AliasCase {
     expect: Option<&'static str>, // Some(scope) = blocked; None = admitted
 }
 
-/// BC-1.18.013 v1.8 EC-024 / ADR-052 v1.20 "Target path resolution": in-scope
+/// BC-1.18.013 v1.8 EC-024 / ADR-052 "Target path resolution": in-scope
 /// aliases are BLOCKED with the path-family message while a txn is live;
 /// out-of-scope inputs are admitted.
 #[test]
@@ -3051,7 +3051,7 @@ fn test_BC_1_18_013_PC6c_exclusive_lock_stat_error_is_io_never_treated_as_absent
 // F-009 / EC-026 -- tool_use_id validity
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-026 / ADR-052 v1.20 "tool_use_id validity".
+/// BC-1.18.013 v1.8 EC-026 / ADR-052 "tool_use_id validity".
 #[test]
 fn test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox() {
     let mut failures: Vec<String> = Vec::new();
@@ -3725,7 +3725,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
 }
 
 // ---------------------------------------------------------------------------
-// ADR-052 v1.20 §Downstream item 21 -- lexical root spellings
+// ADR-052 §Downstream item 21 -- lexical root spellings
 // (BC-1.18.013 v1.9 EC-023(g), EC-024(k)/(l); BC-1.18.011 v1.17 EC-018(g), EC-019)
 // ---------------------------------------------------------------------------
 
@@ -4051,7 +4051,7 @@ fn test_BC_1_18_013_EC024l_lookalike_and_sibling_paths_out_of_scope_no_over_matc
 }
 
 // ---------------------------------------------------------------------------
-// ADR-052 v1.20 §Downstream item 22 -- replacement for the deleted
+// ADR-052 §Downstream item 22 -- replacement for the deleted
 // `resolve_shard_gate_precedence` tests: real-binary structural early return
 // ---------------------------------------------------------------------------
 
@@ -4067,7 +4067,7 @@ shard_cap_bytes = 100
 shape = \"flat\"
 ";
 
-/// BC-1.18.011 Architect Ruling 1 re-anchored (ADR-052 v1.20 item 22; BC-1.18.013
+/// BC-1.18.011 Architect Ruling 1 re-anchored (ADR-052 §Downstream item 22; BC-1.18.013
 /// Precondition 6(b) O3): with a live txn, a protected `Write` to a path that
 /// `shard_cap_precheck` WOULD roll (over-cap canonical + matching `[[shard]]`)
 /// exits 2 `E-MAINTENANCE-001`, leaves the canonical byte-identical and publishes no
@@ -4637,7 +4637,7 @@ fn test_BC_1_18_013_EC021c_posttooluse_non_string_tool_name_still_releases_black
 }
 
 // ===========================================================================
-// ADR-052 v1.23 -- adversary pass-3 rulings, real spawned binary
+// ADR-052 -- adversary pass-3 rulings, real spawned binary
 //
 //  * F-S2508-L3-009: section 5a "Factory-root lookup mapping" (the `.factory`
 //    stat is classified Found / Absent / Unstatable; admission leg + release leg).
@@ -4732,7 +4732,7 @@ fn reason_of(err: &str) -> String {
         .to_string()
 }
 
-/// F-S2508-L3-009, ADR-052 v1.23 section 5a "Factory-root lookup mapping" (b)
+/// F-S2508-L3-009, ADR-052 section 5a "Factory-root lookup mapping" (b)
 /// (BC-1.18.013 EC-035 for the regular-file row). `<project_root>/.factory` ABSENT
 /// is the CLOSED set {stat succeeds on a non-directory (regular file); ENOENT
 /// (dangling symlink); ENOTDIR (a path-prefix component, incl. the project root
@@ -4860,7 +4860,7 @@ fn assert_unstatable_admission_fails_closed(
     }
 }
 
-/// F-S2508-L3-009, ADR-052 v1.23 section 5a "Factory-root lookup mapping" (c) +
+/// F-S2508-L3-009, ADR-052 section 5a "Factory-root lookup mapping" (c) +
 /// section "Error Code Semantics" "Factory-root stat failure". A self-referential
 /// symlink `.factory` makes the one `stat` fail with ELOOP (for EVERY uid, so this
 /// row runs under root): existence is UNKNOWN => the admission leg FAILS CLOSED,
@@ -4940,7 +4940,7 @@ fn test_BC_1_18_013_ADR052_v123_unstatable_factory_eacces_fails_closed_io_blackb
     );
 }
 
-/// F-S2508-L3-009, ADR-052 v1.23 section 5a: the `.factory` stat is evaluated
+/// F-S2508-L3-009, ADR-052 section 5a: the `.factory` stat is evaluated
 /// "after the input guards" and only for Edit/Write/MultiEdit with a valid
 /// `file_path`. With an UNSTATABLE `.factory`, a Bash dispatch, a Read, and an
 /// Edit with an absent / empty / non-string `file_path` are NOT gated (exit 0):
@@ -5016,7 +5016,7 @@ fn test_BC_1_18_013_ADR052_v123_unstatable_factory_input_guards_precede_stat_bla
     );
 }
 
-/// F-S2508-L3-009, ADR-052 v1.23 section 5a mapping table, release row: with an
+/// F-S2508-L3-009, ADR-052 section 5a mapping table, release row: with an
 /// UNSTATABLE `.factory` a PostToolUse / PostToolUseFailure yields NO verdict
 /// (exit 0, no E-MAINTENANCE-*; "release is never a verdict"), creates and
 /// deletes nothing; the reservation admitted BEFORE the fault was injected is
@@ -5135,7 +5135,7 @@ fn test_BC_1_18_013_ADR052_v123_unstatable_factory_release_leg_no_verdict_reserv
 }
 
 // ---------------------------------------------------------------------------
-// F-S2508-L3-001 -- ADR-052 v1.23 "Txn-record interpretation -- tiers"
+// F-S2508-L3-001 -- ADR-052 "Txn-record interpretation -- tiers"
 // ---------------------------------------------------------------------------
 
 /// (migration_id as written, protected path family, own terminal-record name).
@@ -5232,7 +5232,7 @@ fn run_rows(test: &str, rows: &[Row]) {
     assert_no_failures(test, failures);
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch B row: STAGING, lock
+/// F-S2508-L3-001, ADR-052 Tier 1 table, Branch B row: STAGING, lock
 /// acquirable, own terminal record ABSENT => `generation_id` is read; an ABSENT
 /// key is NOT null and any non-null/non-string type is unusable => `E-MAINTENANCE-002
 /// (state_integrity)` with NO txn or gate write (tree byte-identical). Covers the
@@ -5290,7 +5290,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_branch_b_absent_or_ill_typed_generation_id
     );
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch B row: key PRESENT with JSON
+/// F-S2508-L3-001, ADR-052 Tier 1 table, Branch B row: key PRESENT with JSON
 /// `null` => the null generation => DISCARD. The discard "rewrites the raw object
 /// and needs no other field": a MINIMAL record (state + migration_id + null
 /// generation_id) is discarded to `state=ABORTED` + `abort_reason=null_generation`
@@ -5374,7 +5374,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_branch_b_null_generation_minimal_record_di
     );
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, "Live block" row + Branch B row
+/// F-S2508-L3-001, ADR-052 Tier 1 table, "Live block" row + Branch B row
 /// ("PRESENT string => not Branch B => live block"): a shape-valid live known
 /// record that no consuming branch decides on blocks with PLAIN
 /// `E-MAINTENANCE-001`. Rows: STAGING with a string `generation_id`; COMMITTING
@@ -5439,7 +5439,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_live_block_is_plain_and_reads_no_field() {
     );
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, Branch C row (S-25.08 build: "none
+/// F-S2508-L3-001, ADR-052 Tier 1 table, Branch C row (S-25.08 build: "none
 /// ... every check reports unverified => `FailClosedMismatch`"; "`staging_with_
 /// terminal_record` reads none"): a live known record WITH its own terminal record
 /// is the keyed block + the exact completion-record-mismatch suffix, whatever its
@@ -5490,7 +5490,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_branch_c_seam_reads_no_field_mismatch_bloc
     );
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23 Tier 1 table, "Foreign refusal" row: a live
+/// F-S2508-L3-001, ADR-052 Tier 1 table, "Foreign refusal" row: a live
 /// record whose `migration_id` is not known is refused PLAIN with no field beyond
 /// Tier 0 read, "precedence over every other record check" -- even with poisoned
 /// Tier 1 fields and even when a B2 terminal record exists.
@@ -5549,7 +5549,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_foreign_live_with_poisoned_fields_is_plain
     );
 }
 
-/// F-S2508-L3-001, ADR-052 v1.23: "Non-live records with a valid Tier 0 shape are
+/// F-S2508-L3-001, ADR-052: "Non-live records with a valid Tier 0 shape are
 /// admitted in all cases ... the 'more than one live txn' `state_integrity` counts
 /// live records only, foreign included." One live + N non-live (COMPLETED /
 /// ABORTED, minimal, known / foreign / B2, any filename order) is ONE live txn:
@@ -5664,7 +5664,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_one_live_plus_non_live_counts_as_one_live(
     );
 }
 
-/// BC-1.18.013 v1.12 EC-045 CONTROL (S-25.08 v1.6 AC-029 gap), ADR-052 v1.23
+/// BC-1.18.013 v1.12 EC-045 CONTROL (S-25.08 v1.6 AC-029 gap), ADR-052
 /// "Txn-record interpretation -- tiers", Branch B row: the `generation_id` rule
 /// applies ONLY when the migration is known, the txn is STAGING, the lock is
 /// ACQUIRED and the own terminal record is ABSENT. With `exclusive.lock` HELD by
@@ -5790,7 +5790,7 @@ fn test_BC_1_18_013_L4_001_release_with_eloop_migration_state_exits_0_deletes_no
 }
 
 // ---------------------------------------------------------------------------
-// F-S2508-L4-002 -- ADR-052 v1.24 "E-MAINTENANCE-002 <cause> -- total decision rule"
+// F-S2508-L4-002 -- ADR-052 "E-MAINTENANCE-002 <cause> -- total decision rule"
 // (regression pin of the ruled order: input guards -> .factory stat -> target
 // classification -> tool_use_id check, the last only for an in-scope protected
 // write). The code already complies; these are green on arrival.

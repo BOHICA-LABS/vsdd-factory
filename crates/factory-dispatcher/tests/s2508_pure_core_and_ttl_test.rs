@@ -13,7 +13,7 @@
 //! * `decide_terminal_record_reconciliation(&TerminalReconcileInputs) -> TerminalReconcileDecision`
 //! * `reservation_is_stale(created_at: Option<u64>, mtime: Option<u64>, now: u64, ttl: u64) -> bool`
 //!   (epoch seconds; `created_at = None` models absent/unparseable/untrusted,
-//!   `mtime = None` models unavailable; ADR-052 v1.20 timestamp rules)
+//!   `mtime = None` models unavailable; ADR-052 timestamp rules)
 //! * `validate_production_reservation_ttl(Duration) -> Result<Duration, BcIndexMigrationError>`
 //!   and `MIN_PRODUCTION_RESERVATION_TTL` (1,800 s) -- the PRODUCTION entry
 //!   point's TTL floor (the injectable test seam `drain_bc_index_writers` is
@@ -625,7 +625,7 @@ fn test_BC_1_18_011_PC6c_drain_fails_closed_on_reservations_read_error() {
 }
 
 // ===========================================================================
-// ADR-052 v1.20 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
+// ADR-052 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
 // red tests (pure functions)
 // ===========================================================================
 
@@ -659,7 +659,7 @@ fn test_BC_1_18_013_EC021_is_tool_completion_event_exact_match_only() {
 }
 
 /// F-003 / EC-024: `resolve_target_path` returns `(T_real, T_lex)` as specified
-/// (ADR-052 v1.20 "Target path resolution").
+/// (ADR-052 "Target path resolution").
 #[test]
 fn test_BC_1_18_013_EC024_resolve_target_path_real_and_lexical_forms() {
     use factory_dispatcher::shard_manager::resolve_target_path;

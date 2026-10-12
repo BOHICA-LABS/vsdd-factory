@@ -10,7 +10,14 @@
 //!   the foreign `migration_id` diagnostic is truncated to 64 chars with control
 //!   characters escaped;
 //! * F-S2508-L2-010 (BC-1.18.013 Pre 6(b)(i) spelling (ii)): the as-given
-//!   `CLAUDE_PROJECT_DIR` lexical alias is ignored when empty or not absolute.
+//!   `CLAUDE_PROJECT_DIR` lexical alias is ignored when empty or not absolute;
+//! * F-S2508-L5-001 (BC-1.18.013 EC-021): the release leg's
+//!   `.factory/migration-state` stat error emits exactly one non-fatal WARN
+//!   (and an ENOENT emits none);
+//! * F-S2508-L6-004 (BC-1.18.013 EC-021 / EC-042, ADR-052 §5a "Release-leg
+//!   evaluation order"): an absent / non-string / grammar-invalid
+//!   `tool_use_id` exits the release leg silently BEFORE any stat, each test
+//!   carrying an in-function valid-id control under the same fixture.
 //!
 //! # Extracted seam (BC-5.38.001)
 //! `shard_manager::admission::as_given_factory_root_spelling` is implemented: it
@@ -92,7 +99,7 @@ fn write_reservation(dir: &Path, body: &str, mtime: filetime::FileTime) {
     filetime::set_file_mtime(&path, mtime).unwrap();
 }
 
-/// BC-1.18.013 Precondition 6(c) rule (5) / ADR-052 v1.20 F-008: each fallback or
+/// BC-1.18.013 Precondition 6(c) rule (5) / ADR-052 F-008: each fallback or
 /// unknown-age outcome of the production drain GC emits a `tracing::warn!` whose
 /// `reason` is exactly one of the five tokens.
 #[test]
@@ -427,7 +434,7 @@ fn test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn() {
 }
 
 // ---------------------------------------------------------------------------
-// F-S2508-L6-004 / T-49 -- release-leg evaluation order (ADR-052 v1.27 5a
+// F-S2508-L6-004 / T-49 -- release-leg evaluation order (ADR-052 §5a
 // "Release-leg evaluation order"; BC-1.18.013 EC-021 / EC-042; BC-1.18.011
 // EC-016; story AC-011 / AC-031).
 //
@@ -444,7 +451,8 @@ fn test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn() {
 // leg stats before checking the id it warns (L5-001 control); a silent leg
 // proves the id check came first. The valid-id + ELOOP control (exactly one
 // WARN) is `test_BC_1_18_013_L5_001_release_stat_error_emits_exactly_one_warn`
-// above and is referenced rather than duplicated.
+// above; in addition each L6-004 test below runs an in-function valid-id
+// CONTROL (`assert_release_valid_id_control`) under its own fixture.
 // ---------------------------------------------------------------------------
 
 fn completion_payload_with_id(
@@ -502,6 +510,32 @@ fn assert_release_silent(label: &str, project: &tempfile::TempDir, id: Option<se
     }
 }
 
+/// In-function CONTROL for the L6-004 zero-WARN vectors: a VALID `tool_use_id`
+/// under the SAME fixture (same ELOOP / unstatable setup) must emit EXACTLY ONE
+/// WARN on the release target, for both completion events. Each zero-WARN test
+/// runs it so that the silent assertions cannot pass vacuously: it proves the
+/// capturing subscriber is live and that the rigged filesystem really does
+/// produce a stat error on the release leg.
+#[cfg(unix)]
+fn assert_release_valid_id_control(label: &str, project: &tempfile::TempDir) {
+    for event in ["PostToolUse", "PostToolUseFailure"] {
+        let payload = completion_payload(event);
+        let ((), events) = captured(|| {
+            factory_dispatcher::executor::bc_index_migration_reservation_release(
+                &payload,
+                project.path(),
+            );
+        });
+        let warns = release_warns(&events);
+        assert_eq!(
+            warns.len(),
+            1,
+            "{label} / {event}: CONTROL -- a VALID tool_use_id under the same fixture must emit \
+             exactly one WARN (so the zero-WARN assertions are not vacuous), got {events:?}"
+        );
+    }
+}
+
 /// Vector (1): id ABSENT + ELOOP `migration-state` => zero WARN.
 #[cfg(unix)]
 #[test]
@@ -510,6 +544,7 @@ fn test_BC_1_18_013_L6_004_release_absent_id_is_silent_before_any_stat() {
     assert_release_silent("absent id", &project, None);
     // JSON null is also "absent" for release purposes (no usable id).
     assert_release_silent("null id", &project, Some(serde_json::Value::Null));
+    assert_release_valid_id_control("absent/null id vector", &project);
 }
 
 /// Vector (2): id "../x" (grammar-invalid) + ELOOP `migration-state` => zero WARN.
@@ -518,6 +553,7 @@ fn test_BC_1_18_013_L6_004_release_absent_id_is_silent_before_any_stat() {
 fn test_BC_1_18_013_L6_004_release_traversal_id_is_silent_before_any_stat() {
     let project = eloop_migration_state_project();
     assert_release_silent("id ../x", &project, Some(serde_json::json!("../x")));
+    assert_release_valid_id_control("id ../x vector", &project);
 }
 
 /// Vector (3): empty id, over-length id (129 bytes), and non-string id types
@@ -534,6 +570,7 @@ fn test_BC_1_18_013_L6_004_release_empty_overlong_nonstring_id_is_silent_before_
     );
     assert_release_silent("numeric id", &project, Some(serde_json::json!(42)));
     assert_release_silent("object id", &project, Some(serde_json::json!({"k": "v"})));
+    assert_release_valid_id_control("empty/overlong/non-string id vector", &project);
 }
 
 /// Vector (4): absent and invalid ids with an UNSTATABLE `.factory`
@@ -555,4 +592,5 @@ fn test_BC_1_18_013_L6_004_release_absent_or_invalid_id_with_unstatable_dot_fact
         &project,
         Some(serde_json::json!("")),
     );
+    assert_release_valid_id_control("unstatable .factory vector", &project);
 }

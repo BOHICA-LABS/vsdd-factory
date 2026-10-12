@@ -58,7 +58,7 @@
 //! `pre_commit_fingerprint_recheck`'s hash encoding is lowercase-hex SHA-256
 //! (the crate's `sha256_hex` convention), as these tests assumed.
 //!
-//! **RESOLVED (F-C5-P1-006; superseded by S-25.08 / ADR-052 v1.20 §Downstream
+//! **RESOLVED (F-C5-P1-006; superseded by S-25.08 / ADR-052 §Downstream
 //! item 22):** the `shard_cap_precheck`-after-migration-gate ordering is now
 //! structural in `main::run` (a blocked admission returns before
 //! `shard_cap_precheck` is ever evaluated), pinned by the real-binary
@@ -1196,7 +1196,7 @@ fn write_migration_txn(cwd: &Path, state: &str) {
     .unwrap();
 }
 
-/// S-25.08 T-2 (AC-009; ADR-052 v1.18 §Files-to-Change): a fixture that models a
+/// S-25.08 T-2 (AC-009; ADR-052 §Files-to-Change): a fixture that models a
 /// STAGING txn must ALSO hold `exclusive.lock`, i.e. model a LIVE coordinator.
 /// Without it, the PreToolUse step-3.5 reconciliation (Branch B: STAGING with
 /// `generation_id = null`, no live coordinator) legitimately self-heals the
