@@ -422,3 +422,134 @@ fn test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// F-S2508-L6-004 / T-49 -- release-leg evaluation order (ADR-052 v1.27 5a
+// "Release-leg evaluation order"; BC-1.18.013 EC-021 / EC-042; BC-1.18.011
+// EC-016; story AC-011 / AC-031).
+//
+// Order on the release leg: completion-event check -> tool_use_id presence +
+// grammar (payload only) -> resolve_factory_root -> migration-state probe ->
+// unlink. An absent / non-string / invalid id is FULLY SILENT: no filesystem
+// access and no WARN.
+//
+// OBSERVABILITY NOTE: "no filesystem access" cannot be observed directly from
+// the process. The observable proxy used here is ZERO WARN on target
+// `bc_1_18_011_migration` while the filesystem is rigged so that ANY stat of
+// the probed path would produce a non-ENOENT error (a self-looping
+// `migration-state` or `.factory` symlink => ELOOP for every uid). If the
+// leg stats before checking the id it warns (L5-001 control); a silent leg
+// proves the id check came first. The valid-id + ELOOP control (exactly one
+// WARN) is `test_BC_1_18_013_L5_001_release_stat_error_emits_exactly_one_warn`
+// above and is referenced rather than duplicated.
+// ---------------------------------------------------------------------------
+
+fn completion_payload_with_id(
+    event: &str,
+    id: Option<serde_json::Value>,
+) -> factory_dispatcher::payload::HookPayload {
+    let mut value = serde_json::json!({
+        "hook_event_name": event,
+        "tool_name": "Edit",
+        "session_id": "sess-l6-004",
+        "tool_input": {},
+    });
+    if let Some(id) = id {
+        value["tool_use_id"] = id;
+    }
+    serde_json::from_value(value).expect("completion envelope must deserialize")
+}
+
+/// A project dir whose `.factory/migration-state` is a self-looping symlink
+/// (stat => ELOOP).
+#[cfg(unix)]
+fn eloop_migration_state_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let factory = dir.path().join(".factory");
+    std::fs::create_dir_all(&factory).unwrap();
+    std::os::unix::fs::symlink("migration-state", factory.join("migration-state")).unwrap();
+    dir
+}
+
+/// A project dir whose `.factory` is itself a self-looping symlink (stat of
+/// `.factory` => ELOOP, a non-ENOENT/ENOTDIR error for every uid, including root).
+#[cfg(unix)]
+fn eloop_dot_factory_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(".factory", dir.path().join(".factory")).unwrap();
+    dir
+}
+
+#[cfg(unix)]
+fn assert_release_silent(label: &str, project: &tempfile::TempDir, id: Option<serde_json::Value>) {
+    for event in ["PostToolUse", "PostToolUseFailure"] {
+        let payload = completion_payload_with_id(event, id.clone());
+        let ((), events) = captured(|| {
+            factory_dispatcher::executor::bc_index_migration_reservation_release(
+                &payload,
+                project.path(),
+            );
+        });
+        let warns = release_warns(&events);
+        assert!(
+            warns.is_empty(),
+            "{label} / {event}: an absent/invalid tool_use_id must be fully silent (id check \
+             precedes any stat), got WARN events {warns:?}"
+        );
+    }
+}
+
+/// Vector (1): id ABSENT + ELOOP `migration-state` => zero WARN.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L6_004_release_absent_id_is_silent_before_any_stat() {
+    let project = eloop_migration_state_project();
+    assert_release_silent("absent id", &project, None);
+    // JSON null is also "absent" for release purposes (no usable id).
+    assert_release_silent("null id", &project, Some(serde_json::Value::Null));
+}
+
+/// Vector (2): id "../x" (grammar-invalid) + ELOOP `migration-state` => zero WARN.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L6_004_release_traversal_id_is_silent_before_any_stat() {
+    let project = eloop_migration_state_project();
+    assert_release_silent("id ../x", &project, Some(serde_json::json!("../x")));
+}
+
+/// Vector (3): empty id, over-length id (129 bytes), and non-string id types
+/// + ELOOP `migration-state` => zero WARN.
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L6_004_release_empty_overlong_nonstring_id_is_silent_before_any_stat() {
+    let project = eloop_migration_state_project();
+    assert_release_silent("empty id", &project, Some(serde_json::json!("")));
+    assert_release_silent(
+        "129-byte id",
+        &project,
+        Some(serde_json::json!("a".repeat(129))),
+    );
+    assert_release_silent("numeric id", &project, Some(serde_json::json!(42)));
+    assert_release_silent("object id", &project, Some(serde_json::json!({"k": "v"})));
+}
+
+/// Vector (4): absent and invalid ids with an UNSTATABLE `.factory`
+/// (self-looping symlink => ELOOP, not ENOENT/ENOTDIR; reliable on macOS and
+/// Linux and for root, unlike a mode-000 parent) => zero WARN (no
+/// `.factory is unstatable` WARN from `resolve_factory_root`).
+#[cfg(unix)]
+#[test]
+fn test_BC_1_18_013_L6_004_release_absent_or_invalid_id_with_unstatable_dot_factory_is_silent() {
+    let project = eloop_dot_factory_project();
+    assert_release_silent("absent id, ELOOP .factory", &project, None);
+    assert_release_silent(
+        "invalid id, ELOOP .factory",
+        &project,
+        Some(serde_json::json!("../x")),
+    );
+    assert_release_silent(
+        "empty id, ELOOP .factory",
+        &project,
+        Some(serde_json::json!("")),
+    );
+}
