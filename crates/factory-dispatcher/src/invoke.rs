@@ -3035,7 +3035,7 @@ mod git_context_prereq_tests {
     }
 }
 
-/// ADR-052 v1.20 §5a F-001: true iff `event_name` is exactly `"PostToolUse"` or
+/// ADR-052 §5a F-001: true iff `event_name` is exactly `"PostToolUse"` or
 /// `"PostToolUseFailure"` — the tool-completion events whose `tool_use_id`
 /// releases a writer reservation. Claude Code delivers a FAILED tool call only as
 /// `PostToolUseFailure` (never `PostToolUse`), so releasing on `PostToolUse`

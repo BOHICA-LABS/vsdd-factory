@@ -12926,7 +12926,7 @@ pub enum BcIndexMigrationError {
     )]
     DrainTimeoutAbort,
 
-    /// ADR-052 v1.20 §5a "`tool_use_id` presence and validity" (F-009): the
+    /// ADR-052 §5a "`tool_use_id` presence and validity" (F-009): the
     /// PreToolUse payload carries a `tool_use_id` key that is PRESENT but is not
     /// a string, is empty, or violates the grammar `[A-Za-z0-9_.-]{1,128}` (no
     /// leading `.`). The admission FAILS CLOSED (`E-MAINTENANCE-002`
@@ -13914,7 +13914,7 @@ pub const DEFAULT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// PID-liveness, per [`drain_bc_index_writers`]'s own doc comment / v1.9
 /// H1 correction).
 ///
-/// 3,600 s (ADR-052 v1.18 §5a; BC-1.18.011 / BC-1.18.013 Precondition 6(c)):
+/// 3,600 s (ADR-052 §5a; BC-1.18.011 / BC-1.18.013 Precondition 6(c)):
 /// longer than the worst-case legitimate tool-call duration (a human
 /// permission-prompt delay or a long `MultiEdit`), so the drain's step-1 GC
 /// can never reclaim a LIVE writer's reservation. The production entry point
@@ -13924,10 +13924,10 @@ pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration
 
 // ---------------------------------------------------------------------------
 // Reservation TTL policy and the terminal-record reconciliation input/decision
-// types (S-25.08; VP-146 v1.2 / VP-147 v1.1; ADR-052 v1.18 §Decision 5a).
+// types (S-25.08; VP-146 v1.2 / VP-147 v1.1; ADR-052 §Decision 5a).
 // ---------------------------------------------------------------------------
 
-/// ADR-052 v1.18 §5a / BC-1.18.011 Precondition 6(c): the PRODUCTION entry
+/// ADR-052 §5a / BC-1.18.011 Precondition 6(c): the PRODUCTION entry
 /// point MUST reject any configured reservation TTL below this floor.
 pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
     std::time::Duration::from_secs(1800);
@@ -13938,7 +13938,7 @@ pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
 // configurable source, not the only line of defence.
 const _: () = assert!(
     DEFAULT_MAX_RESERVATION_TTL.as_secs() >= MIN_PRODUCTION_RESERVATION_TTL.as_secs(),
-    "DEFAULT_MAX_RESERVATION_TTL must be >= MIN_PRODUCTION_RESERVATION_TTL (ADR-052 v1.18 §5a)"
+    "DEFAULT_MAX_RESERVATION_TTL must be >= MIN_PRODUCTION_RESERVATION_TTL (ADR-052 §5a)"
 );
 
 /// Production-entry-point TTL validation (S-25.08 AC-008). Returns the TTL
@@ -13957,7 +13957,7 @@ pub fn validate_production_reservation_ttl(
     Ok(ttl)
 }
 
-/// The single pure staleness predicate (S-25.08 AC-008; ADR-052 v1.20 §5a
+/// The single pure staleness predicate (S-25.08 AC-008; ADR-052 §5a
 /// "Reservation timestamp rules", F-008). No PID input, no ambient time.
 ///
 /// Rules, in order:
@@ -14017,7 +14017,7 @@ pub enum TerminalReconcileDecision {
     RefuseForeignMigration,
 }
 
-/// The ONE shared pure terminal-record reconciliation core (ADR-052 v1.18 §5a
+/// The ONE shared pure terminal-record reconciliation core (ADR-052 §5a
 /// Branch C; BC-1.18.011 Precondition 6(d) decision table / Postcondition 9;
 /// BC-1.18.013 Postcondition 5a). Total over its input space; first match
 /// wins:
@@ -14154,7 +14154,7 @@ pub fn plan_stale_gate_reconciliation(
 
 /// Seconds since the Unix epoch of `t`; `None` for a pre-epoch instant (the
 /// age is then UNKNOWN — never clamped to 0, which would make the reservation
-/// maximally old and reclaimable; ADR-052 v1.20 F-008).
+/// maximally old and reclaimable; ADR-052 §5a "Reservation timestamp rules" (F-008)).
 fn epoch_secs_checked(t: std::time::SystemTime) -> Option<u64> {
     t.duration_since(std::time::UNIX_EPOCH)
         .ok()
@@ -14229,7 +14229,7 @@ fn log_reservation_timestamp_fallback(
             target: "bc_1_18_011_migration",
             path = sanitize_diagnostic(&path.display().to_string(), 256),
             reason,
-            "reservation timestamp fallback (ADR-052 v1.20 F-008): ambiguous timestamps resolve \
+            "reservation timestamp fallback (ADR-052 §5a, Reservation timestamp rules, F-008): ambiguous timestamps resolve \
              toward retention"
         );
     }

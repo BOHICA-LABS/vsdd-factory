@@ -8,7 +8,7 @@
 //! research report §5a items 1-6 (item 3 — state-machine totality +
 //! inductive invariant — is split into an inductive-step proof and a
 //! bounded-sequence proof), mapped onto the OBL-1 refactor design §6.2. The
-//! ADR-052 v1.18 re-baseline (S-25.08 AC-010) adds three over the SHARED
+//! ADR-052 §5a re-baseline (S-25.08 AC-010) adds three over the SHARED
 //! admission/reconciliation pure cores —
 //! `proof_obl1_h1_terminal_reconcile_totality`
 //! ([`decide_terminal_record_reconciliation`](super::decide_terminal_record_reconciliation)),
@@ -376,7 +376,7 @@ fn proof_obl1_h1_recover_totality() {
 // ===========================================================================
 // Harness 1b (VP-147 v1.18 extension) — TERMINAL-RECORD RECONCILIATION
 // TOTALITY over the REAL shared pure core
-// `decide_terminal_record_reconciliation` (ADR-052 v1.18 §5a step 3.5
+// `decide_terminal_record_reconciliation` (ADR-052 §5a step 3.5
 // Branch C; BC-1.18.011 v1.13 Precondition 6(d) five-row decision table,
 // Precondition 6(e), Postcondition 9; EC-010..EC-014).
 //
@@ -953,7 +953,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 
 // ===========================================================================
 // Harness 4b (VP-147 v1.18 extension) — RESERVATION QUIESCENCE + SELF-HEAL
-// (ADR-052 v1.18 §5a step 0 reserve-then-verify, drain steps 1-6, step 3.5
+// (ADR-052 §5a step 0 reserve-then-verify, drain steps 1-6, step 3.5
 // Branches A/B/C, release-on-block; BC-1.18.011 Precondition 6(b)/(c)/(d)/
 // (e), EC-007..EC-014)
 //
@@ -1033,7 +1033,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      decides and the mtime is ignored; with created_at absent the mtime
 //      is judged exactly as a created_at of that value; the drain GC never
 //      reclaims a live writer's reservation.
-//   S10 (VP-147 v1.4; ADR-052 v1.20 "Reservation timestamp rules", the REAL
+//   S10 (VP-147 v1.4; ADR-052 §5a "Reservation timestamp rules", the REAL
 //      `reservation_is_stale` with the shipped 300 s skew) staleness
 //      retention: a reservation of UNKNOWN age (no usable created_at and no
 //      mtime) is never reclaimed; a created_at beyond now + 300 s is
@@ -1061,7 +1061,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 /// constant, not a toy value.
 const H4X_TTL_SECS: u64 = DEFAULT_MAX_RESERVATION_TTL.as_secs();
 
-/// The SHIPPED clock-skew tolerance (300 s; ADR-052 v1.20 §5a "Reservation
+/// The SHIPPED clock-skew tolerance (300 s; ADR-052 §5a "Reservation
 /// timestamp rules").
 const H4X_SKEW_SECS: u64 = RESERVATION_CLOCK_SKEW_TOLERANCE_SECS;
 

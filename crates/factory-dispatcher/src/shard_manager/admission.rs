@@ -1,4 +1,4 @@
-//! S-25.08 — the ONE shared native admission core (ADR-052 v1.18 §Decision 5a
+//! S-25.08 — the ONE shared native admission core (ADR-052 §Decision 5a
 //! "Shared protected-path union and shared admission state"; BC-1.18.013
 //! Precondition 6(b)/(c); BC-1.18.011 Precondition 6(c)/(d)).
 //!
@@ -86,7 +86,7 @@ pub enum ProtectedPathFamily {
 
 impl ProtectedPathFamily {
     /// Classify one write target against the protected-path union, anchored to
-    /// the session's own `factory_root` (ADR-052 v1.20 §5a "Admission scope
+    /// the session's own `factory_root` (ADR-052 §5a "Admission scope
     /// anchoring" / "Target path resolution").
     ///
     /// Classification is COMPONENT-WISE and CASE-INSENSITIVE: the target is
@@ -149,7 +149,7 @@ impl ProtectedPathFamily {
     }
 }
 
-/// Case-insensitive path-component equality (ADR-052 v1.20 "Target path
+/// Case-insensitive path-component equality (ADR-052 §5a "Target path
 /// resolution" (e)): ASCII case-fold for ASCII, `str::to_lowercase` equality for
 /// other UTF-8, bytewise ASCII-fold for non-UTF-8. ALWAYS folds — no filesystem
 /// case-sensitivity probe (sensitivity is a per-volume property, a probe is
@@ -168,7 +168,7 @@ fn components_fold_eq(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
 /// real form unavailable (POSIX `MAXSYMLINKS` is 40 on Linux, 32 on macOS).
 const MAX_SYMLINK_HOPS: usize = 40;
 
-/// ADR-052 v1.20 §5a "Target path resolution" (F-003): the shared function that
+/// ADR-052 §5a "Target path resolution" (F-003): the shared function that
 /// returns `(T_real, T_lex)` for one path.
 ///
 /// * `T_lex` — lexical form: collapse `//`, drop `.`, apply `..` lexically (never
@@ -297,7 +297,7 @@ fn resolve_real(path: &Path) -> Option<PathBuf> {
 }
 
 /// The session's own factory root: where its governed-migration namespace
-/// (`<factory_root>/migration-state`) lives (ADR-052 v1.20 §5a "Admission scope
+/// (`<factory_root>/migration-state`) lives (ADR-052 §5a "Admission scope
 /// anchoring"). `real` is the symlink-free form (`None` when it could not be
 /// resolved), `lex` the lexical form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -391,7 +391,7 @@ pub fn sanitize_diagnostic_id(input: &str) -> String {
 }
 
 /// Resolve the session's `factory_root` = `resolve_target_path(project_root/.factory)`
-/// (ADR-052 v1.23 §5a "Factory-root lookup mapping"). ONE symlink-following
+/// (ADR-052 §5a "Factory-root lookup mapping"). ONE symlink-following
 /// `stat` is classified three ways and an OS failure is never collapsed into
 /// "absent":
 ///
@@ -437,7 +437,7 @@ fn is_factory_root_absent_error(e: &std::io::Error) -> bool {
     )
 }
 
-/// ADR-052 v1.20 §5a "`tool_use_id` presence and validity": an ABSENT key or JSON
+/// ADR-052 §5a "`tool_use_id` presence and validity": an ABSENT key or JSON
 /// `null` degrades to check-only admission (`Ok(None)`); a PRESENT value that is
 /// not a string, is empty, or violates the grammar is
 /// [`BcIndexMigrationError::InvalidToolUseId`] (the admission FAILS CLOSED —
@@ -712,7 +712,7 @@ pub fn reconcile_stale_admission_gate(
         txn_migration_known: terminal_record_name.is_some(),
     };
 
-    // Tier 1 (ADR-052 v1.23 "Txn-record interpretation — tiers"): `generation_id`
+    // Tier 1 (ADR-052 §Error Code Semantics "Txn-record interpretation — tiers"): `generation_id`
     // is read, from the raw object, ONLY under the exact Branch B execution
     // conditions (known migration + STAGING + lock acquired — see above — +
     // terminal record ABSENT). The tri-state is resolved here, in the shell,
@@ -811,7 +811,7 @@ fn branch_b_generation_id_is_null(txn: &TxnFile) -> Result<bool, BcIndexMigratio
 
 /// Branch B effect: txn ABORTED + `abort_reason`, THEN gate OPEN.
 ///
-/// The ONE shared raw-object null-generation discard (ADR-052 v1.23): takes the
+/// The ONE shared raw-object null-generation discard (ADR-052 §4e): takes the
 /// txn file path and its raw JSON object (no typed record), so both the
 /// admission Branch B and the migration coordinator discard the same record
 /// identically.
@@ -858,7 +858,7 @@ fn terminal_record_file_name(migration_id: &str) -> Option<&'static str> {
     }
 }
 
-/// One `txn-*.json` file after the Tier 0 shape check (ADR-052 v1.23): the raw
+/// One `txn-*.json` file after the Tier 0 shape check (ADR-052 §Error Code Semantics "Txn-record interpretation — tiers"): the raw
 /// JSON object (so a rewrite preserves every field, including ones this build
 /// does not model), its parsed `state`, and the effective `migration_id`.
 /// Every other field is Tier 1 and is read lazily from `raw` by the consuming

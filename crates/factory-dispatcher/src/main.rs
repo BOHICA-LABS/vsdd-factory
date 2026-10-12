@@ -144,7 +144,7 @@ async fn main() {
             0
         }
     };
-    // Release-on-block (ADR-052 v1.18 §5a "Release-on-block"; BC-1.18.013
+    // Release-on-block (ADR-052 §5a "Release-on-block"; BC-1.18.013
     // Precondition 6(c); BC-1.18.011 Precondition 6(c)): admission created the
     // reservation, but a LATER stage of this same dispatch (`shard_cap_precheck`
     // or a registry plugin) may have blocked/errored, in which case the tool
@@ -167,7 +167,7 @@ async fn run(
     let trace_id = new_trace_id();
     let payload = HookPayload::from_reader(std::io::stdin().lock())?;
 
-    // S-25.08 / ADR-052 v1.20 §5a "Evaluation position" (F-004): the native
+    // S-25.08 / ADR-052 §5a "Evaluation position" (F-004): the native
     // writer-admission gate and the reservation release are REGISTRY-INDEPENDENT.
     // They run immediately after the stdin payload parse (O4: an unparseable
     // payload cannot be classified — the `?` above is the unchanged parse-error

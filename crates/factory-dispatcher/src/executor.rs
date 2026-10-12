@@ -424,14 +424,14 @@ pub struct MigrationAdmission {
     /// The reservation file this admission created and left standing (admitted
     /// event carrying a `tool_use_id`). The dispatcher removes it before exiting
     /// if a LATER stage of the same dispatch blocks or errors (release-on-block,
-    /// ADR-052 v1.18 §5a); otherwise PostToolUse removes it.
+    /// ADR-052 §5a); otherwise PostToolUse removes it.
     pub reservation: Option<std::path::PathBuf>,
 }
 
 /// BC-1.18.011 Precondition 6(b)/(c)/(d) + BC-1.18.013 Precondition 6(b)/(c) —
 /// the dispatcher's native OPEN/DRAINING writer-admission gate, evaluated by
 /// `main.rs` EXACTLY ONCE per PreToolUse event, structurally AHEAD of
-/// [`shard_cap_precheck`] and every registry plugin (ADR-052 v1.18 §5a "Shared
+/// [`shard_cap_precheck`] and every registry plugin (ADR-052 §5a "Shared
 /// protected-path union and shared admission state").
 ///
 /// This is a thin, non-WASM native entry point: every decision lives in the
@@ -481,7 +481,7 @@ pub fn bc_index_migration_admission(
     if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
         return out_of_scope();
     }
-    // Input guards (ADR-052 v1.20 "Target path resolution" (a)): a missing,
+    // Input guards (ADR-052 §5a "Target path resolution" (a)): a missing,
     // non-string, empty or NUL-containing `file_path` is out of scope (the tool
     // itself cannot write it) — not an error.
     let Some(file_path) = payload
@@ -506,7 +506,7 @@ pub fn bc_index_migration_admission(
             );
             return out_of_scope();
         }
-        // Unstatable `<project_root>/.factory` (ADR-052 v1.23 §5a): whether the
+        // Unstatable `<project_root>/.factory` (ADR-052 §5a): whether the
         // directory exists is UNKNOWN -> fail closed `E-MAINTENANCE-002 (io)`; no
         // reservation exists yet and none is created.
         Err(e) => return admission_error(&e),
@@ -620,7 +620,7 @@ pub fn bc_index_migration_reservation_release(
     // Release on BOTH `PostToolUse` and `PostToolUseFailure`, keyed ONLY on the
     // `tool_use_id` shared with the PreToolUse admission (no `tool_name` filter:
     // a `PostToolUseFailure` envelope may omit or reshape it, and an id that was
-    // never reserved is a no-op anyway — ADR-052 v1.20 §5a F-001).
+    // never reserved is a no-op anyway — ADR-052 §5a F-001).
     if !crate::invoke::is_tool_completion_event(&payload.event_name) {
         return;
     }
@@ -639,7 +639,7 @@ pub fn bc_index_migration_reservation_release(
     let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
         Ok(Some(root)) => root,
         Ok(None) => return,
-        // Unstatable `.factory`: release is never a verdict (ADR-052 v1.23 §5a);
+        // Unstatable `.factory`: release is never a verdict (ADR-052 §5a);
         // no-op, and the reservation, if any, is reclaimed by the drain-start TTL GC.
         Err(e) => {
             tracing::warn!(
