@@ -12906,7 +12906,7 @@ pub enum BcIndexMigrationError {
     )]
     FingerprintMismatchAbort,
 
-    /// BC-1.18.011 v1.16 EC-031 / error-taxonomy `RESERVATION_TTL_BELOW_FLOOR`:
+    /// BC-1.18.011 EC-031 / error-taxonomy `RESERVATION_TTL_BELOW_FLOOR`:
     /// the PRODUCTION drain entry point is configured with a
     /// `MAX_RESERVATION_TTL` below the 1,800 s floor. Raised BEFORE any gate or
     /// drain action (nothing mutated). Deliberately NOT
@@ -13006,7 +13006,7 @@ pub enum BcIndexMigrationError {
 impl BcIndexMigrationError {
     /// The `<cause>` token of the `E-MAINTENANCE-002` single-line message
     /// `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
-    /// (error-taxonomy v1.37): `invalid_tool_use_id`, `io` (cannot create
+    /// (error-taxonomy `E-MAINTENANCE-002` row): `invalid_tool_use_id`, `io` (cannot create
     /// `reservations/` / the reservation, or cannot read gate/txn state), or
     /// `state_integrity` (malformed gate/txn record, non-string `migration_id`,
     /// more than one live txn, any other integrity failure). The underlying
@@ -13825,7 +13825,7 @@ pub(crate) fn read_admission_gate_state(
     // `Io` (E-MAINTENANCE-002 `io`), while a decode/parse failure — invalid
     // UTF-8, empty, truncated, wrong schema/casing — is a malformed record
     // (`state_integrity`). `read_to_string` would conflate invalid UTF-8 into
-    // an `io::Error` (BC-1.18.013 v1.9 EC-032).
+    // an `io::Error` (BC-1.18.013 EC-032).
     match std::fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::BinaryIntegrityFailure {
@@ -13924,7 +13924,7 @@ pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration
 
 // ---------------------------------------------------------------------------
 // Reservation TTL policy and the terminal-record reconciliation input/decision
-// types (S-25.08; VP-146 v1.2 / VP-147 v1.1; ADR-052 §Decision 5a).
+// types (S-25.08; VP-146 / VP-147; ADR-052 §Decision 5a).
 // ---------------------------------------------------------------------------
 
 /// ADR-052 §5a / BC-1.18.011 Precondition 6(c): the PRODUCTION entry
@@ -13989,11 +13989,11 @@ pub fn reservation_is_stale(
 
 /// Accepted clock skew (seconds) between a reservation's `created_at` and the
 /// coordinator's `now` before `created_at` is treated as untrusted
-/// (BC-1.18.011 v1.16 EC-025).
+/// (BC-1.18.011 EC-025).
 pub const RESERVATION_CLOCK_SKEW_TOLERANCE_SECS: u64 = 300;
 
 /// Canonical input record of the pure terminal-record reconciliation core
-/// ([`decide_terminal_record_reconciliation`]; VP-146 v1.2 / VP-147 v1.1).
+/// ([`decide_terminal_record_reconciliation`]; VP-146 / VP-147).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalReconcileInputs {
     pub lock_acquired: bool,
@@ -14007,8 +14007,8 @@ pub struct TerminalReconcileInputs {
     pub txn_migration_known: bool,
 }
 
-/// Decision of the pure terminal-record reconciliation core (VP-146 v1.2 /
-/// VP-147 v1.1).
+/// Decision of the pure terminal-record reconciliation core (VP-146 /
+/// VP-147).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalReconcileDecision {
     NoOp,
@@ -14106,7 +14106,7 @@ pub enum StaleGateReconciliationPlan {
 /// 2. no live txn -> Branch A when the gate is not OPEN, else nothing;
 /// 3. otherwise the Branch C core [`decide_terminal_record_reconciliation`]
 ///    decides; its `NoOp` falls through to Branch B (own live txn STAGING with
-///    a null generation; NO gate condition — BC-1.18.011 v1.13 Precondition
+///    a null generation; NO gate condition — BC-1.18.011 Precondition
 ///    6(d) row-3 caller contract; safe because planning runs only under an
 ///    acquired `exclusive.lock`) or else nothing.
 ///
@@ -15882,7 +15882,7 @@ pub fn run_bc_index_migration(
     // injected at the top of this call graph rather than threaded through
     // the public API, matching the OBL-1 design's own "production call
     // sites pass &StdFs" framing.
-    // BC-1.18.011 v1.16 EC-031: validate the production reservation TTL BEFORE
+    // BC-1.18.011 EC-031: validate the production reservation TTL BEFORE
     // any gate or drain action — nothing is mutated on a configuration error (no
     // `exclusive.lock`, no `create_dir_all`, no gate write, no GC).
     let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;

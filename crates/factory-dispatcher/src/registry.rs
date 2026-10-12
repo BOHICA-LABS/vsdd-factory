@@ -80,8 +80,8 @@ pub enum RegistryError {
     },
 }
 
-/// The dispatcher exit code for a registry load error (BC-7.06.001 v1.13
-/// §Fail-Closed Symmetry; BC-1.08.001 v1.4 Invariants 1/2).
+/// The dispatcher exit code for a registry load error (BC-7.06.001
+/// §Fail-Closed Symmetry; BC-1.08.001 Invariants 1/2).
 ///
 /// `SchemaVersion`, `AsyncBlockConflict` and `DuplicateEntry` fail CLOSED
 /// (exit 2, ADR-019 Decision 2); `NotFound`, `Io`, `Toml` and `ToolRegex` fail

@@ -567,7 +567,7 @@ pub fn bc_index_migration_admission(
     }
 }
 
-/// The fail-closed `E-MAINTENANCE-002` verdict (error-taxonomy v1.37): the
+/// The fail-closed `E-MAINTENANCE-002` verdict (error-taxonomy): the
 /// single-line message carries only the `<cause>` token; the underlying detail
 /// (path, `io::Error`, byte length — never a raw `tool_use_id` or record
 /// content) goes to `tracing::warn!`.

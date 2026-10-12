@@ -266,7 +266,7 @@ async fn run(
                 // per BC-1.08.001 (only schema-version mismatch and invariant violation are
                 // the named fail-closed exceptions per ADR-019 §Decision 2 and BC-1.14.001 EC-006/EC-008).
                 // The exit code is decided by the ONE pure, wildcard-free mapping
-                // `registry_error_exit_code` (BC-7.06.001 v1.13 Fail-Closed
+                // `registry_error_exit_code` (BC-7.06.001 Fail-Closed
                 // Symmetry); this match performs only each variant's own
                 // diagnostics, and its fail-open arm is an explicit variant list.
                 let exit_code = factory_dispatcher::registry::registry_error_exit_code(&e);

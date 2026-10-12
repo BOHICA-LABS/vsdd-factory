@@ -140,7 +140,7 @@ fn any_optional_txn_state() -> Option<BcIndexMigrationTxnState> {
 }
 
 /// A fully nondeterministic [`TerminalReconcileInputs`] — every field of the
-/// shared pure core's canonical input record (VP-146 v1.2 / VP-147 v1.1) is
+/// shared pure core's canonical input record (VP-146 / VP-147) is
 /// free, so a proof over it covers the core's ENTIRE input space (2^13 x 5
 /// points; no field is left fixed).
 fn any_terminal_reconcile_inputs() -> TerminalReconcileInputs {
@@ -374,10 +374,10 @@ fn proof_obl1_h1_recover_totality() {
 }
 
 // ===========================================================================
-// Harness 1b (VP-147 v1.18 extension) — TERMINAL-RECORD RECONCILIATION
+// Harness 1b (ADR-052 §5a re-baseline, S-25.08 AC-010) — TERMINAL-RECORD RECONCILIATION
 // TOTALITY over the REAL shared pure core
 // `decide_terminal_record_reconciliation` (ADR-052 §5a step 3.5
-// Branch C; BC-1.18.011 v1.13 Precondition 6(d) five-row decision table,
+// Branch C; BC-1.18.011 Precondition 6(d) five-row decision table,
 // Precondition 6(e), Postcondition 9; EC-010..EC-014).
 //
 // Every one of the core's inputs is free (`any_terminal_reconcile_inputs`),
@@ -386,8 +386,8 @@ fn proof_obl1_h1_recover_totality() {
 // table, row by row (they are a specification, not a copy of the
 // implementation's control flow: each outcome is pinned to the exact input
 // region the BC assigns it), and the named row assertions restate the
-// normative cells verbatim. Row numbers are BC-1.18.011 v1.17 /
-// BC-1.18.013 v1.9 Precondition 6(d) numbering: 1 NoOp (lock not acquired /
+// normative cells verbatim. Row numbers are BC-1.18.011 /
+// BC-1.18.013 Precondition 6(d) numbering: 1 NoOp (lock not acquired /
 // no live txn), 2 RefuseForeignMigration (`migration_id ∉ K`), 3 NoOp (known
 // migration, its terminal record ABSENT), 4 FinalizeThenOpenGate, 5
 // FailClosedMismatch. K = {`migrate-bc-index`, `backfill-append-logs`} (an
@@ -619,7 +619,7 @@ enum TxnEvent {
     BeginCommitting,
     Complete,
     Abort,
-    /// VP-147 v1.18 extension (BC-1.18.011 Postcondition 9; ADR-052 §5a
+    /// ADR-052 §5a re-baseline (S-25.08 AC-010; BC-1.18.011 Postcondition 9;
     /// Branch C): finalize from a present terminal record. The event carries
     /// the Branch C facts; whether it fires is decided by the REAL pure core
     /// [`decide_terminal_record_reconciliation`] evaluated against the
@@ -764,7 +764,7 @@ fn proof_obl1_h3_transition_inductive_step() {
             "H3: a terminal txn state is absorbing under every event",
         );
     }
-    // (3) VP-147 v1.18: the FinalizeFromTerminalRecord event.
+    // (3) ADR-052 §5a re-baseline (S-25.08 AC-010): the FinalizeFromTerminalRecord event.
     let finalized = assert_finalize_event_safety(s, e, next);
     kani::cover!(
         finalized,
@@ -952,7 +952,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 }
 
 // ===========================================================================
-// Harness 4b (VP-147 v1.18 extension) — RESERVATION QUIESCENCE + SELF-HEAL
+// Harness 4b (ADR-052 §5a re-baseline, S-25.08 AC-010) — RESERVATION QUIESCENCE + SELF-HEAL
 // (ADR-052 §5a step 0 reserve-then-verify, drain steps 1-6, step 3.5
 // Branches A/B/C, release-on-block; BC-1.18.011 Precondition 6(b)/(c)/(d)/
 // (e), EC-007..EC-014)
@@ -1026,14 +1026,14 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      lock never leaves the gate closed with no live txn, nor a
 //      null-generation known-migration STAGING txn stuck without its
 //      terminal record.
-//   S7 (VP-147 v1.4) a live txn whose `migration_id ∉ K` (unknown to this
+//   S7 (VP-147) a live txn whose `migration_id ∉ K` (unknown to this
 //      build; `txn_migration_known = false`) is never finalized, aborted or
 //      reconciled over.
 //   S8 created_at-first staleness: a TRUSTED created_at (<= now + 300 s)
 //      decides and the mtime is ignored; with created_at absent the mtime
 //      is judged exactly as a created_at of that value; the drain GC never
 //      reclaims a live writer's reservation.
-//   S10 (VP-147 v1.4; ADR-052 §5a "Reservation timestamp rules", the REAL
+//   S10 (VP-147; ADR-052 §5a "Reservation timestamp rules", the REAL
 //      `reservation_is_stale` with the shipped 300 s skew) staleness
 //      retention: a reservation of UNKNOWN age (no usable created_at and no
 //      mtime) is never reclaimed; a created_at beyond now + 300 s is
@@ -1043,7 +1043,7 @@ fn proof_obl1_h4_admission_gate_invariant() {
 //      possibly absent stamps. RFC 3339 parsing / pre-epoch / u64-overflow
 //      classification (all mapping to `None`) and the `tracing::warn!`
 //      reasons are string/IO concerns outside Kani (VP-133 facet 7(c)).
-//   S9 (VP-147 v1.2) the reservation namespace exists from the first
+//   S9 (VP-147) the reservation namespace exists from the first
 //      protected write: the initial state may be the never-migrated project
 //      (no `.factory/migration-state/`); the admitter creates the namespace
 //      before its reservation; every admitted writer has a reservation
@@ -1193,7 +1193,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
             },
         },
     ];
-    // S9 (VP-147 v1.2): `.factory/migration-state/` (and so `reservations/`)
+    // S9 (VP-147): `.factory/migration-state/` (and so `reservations/`)
     // may not exist yet — the never-migrated project. Then nothing under it
     // exists either: no reservation, no txn, no terminal record, and the
     // absent gate file reads OPEN.
@@ -1518,7 +1518,7 @@ fn proof_obl1_h4_reservation_quiescence_and_selfheal() {
                         }
                         let stale =
                             reservation_is_stale(slot.created_at, slot.mtime, now, H4X_TTL_SECS);
-                        // Spec regions (BC-1.18.011 v1.17 / BC-1.18.013 v1.9
+                        // Spec regions (BC-1.18.011 / BC-1.18.013
                         // Precondition 6(c) "Reservation timestamp rules").
                         let skew_bound = now + H4X_SKEW_SECS;
                         let created_at_trusted = slot.created_at.filter(|c| *c <= skew_bound);
@@ -2113,7 +2113,7 @@ fn proof_obl1_h6_recovery_idempotence() {
 }
 
 // ===========================================================================
-// Harness 6b (VP-147 v1.18 extension) — TERMINAL-RECORD RECONCILIATION
+// Harness 6b (ADR-052 §5a re-baseline, S-25.08 AC-010) — TERMINAL-RECORD RECONCILIATION
 // IDEMPOTENCE over the REAL pure cores (`decide_terminal_record_reconciliation`
 // and the step-3.5 planner `plan_stale_gate_reconciliation` built on it).
 //
@@ -2173,7 +2173,7 @@ fn proof_obl1_h6_terminal_reconcile_idempotence() {
             "H6b: a txn-bearing plan is produced only for a live txn under the lock (shell contract)",
         );
     }
-    // BC-1.18.011 v1.17 Precondition 6(d) row-3 caller contract: Branch B
+    // BC-1.18.011 Precondition 6(d) row-3 caller contract: Branch B
     // applies IF AND ONLY IF the lock is held and the live txn is a known
     // migration's (`migration_id ∈ K`) STAGING with `generation_id = null`
     // and its own terminal record absent — with NO gate condition (an absent

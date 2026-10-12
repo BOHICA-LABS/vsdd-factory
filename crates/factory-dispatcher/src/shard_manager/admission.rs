@@ -335,7 +335,7 @@ impl FactoryRoot {
     }
 }
 
-/// The lexical alias `<CLAUDE_PROJECT_DIR as given>/.factory` (BC-1.18.013 v1.9
+/// The lexical alias `<CLAUDE_PROJECT_DIR as given>/.factory` (BC-1.18.013
 /// Pre 6(b)(i) spelling (ii)), or `None` when the raw value is EMPTY or NOT an
 /// absolute path (a relative or `~`-style value names no fixed location, so it
 /// cannot be a stable lexical alias of the root). Lexical normalization only
@@ -462,7 +462,7 @@ pub fn classify_tool_use_id(
 }
 
 /// The exact `E-MAINTENANCE-001` message for a written path family
-/// (error-taxonomy v1.35; BC-1.18.013 Precondition 6(b)). With
+/// (error-taxonomy; BC-1.18.013 Precondition 6(b)). With
 /// `completion_record_mismatch` (a PreToolUse Branch C verification failure)
 /// the message carries the em-dash (U+2014) mismatch suffix; the foreign
 /// migration refusal and the live-coordinator (EWOULDBLOCK) block never do.
@@ -962,7 +962,7 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
     let mut files = Vec::with_capacity(paths.len());
     for path in paths {
         // Raw bytes, then decode: an OS read failure is `Io`; invalid UTF-8 or
-        // malformed JSON is `state_integrity` (BC-1.18.013 v1.9 EC-032).
+        // malformed JSON is `state_integrity` (BC-1.18.013 EC-032).
         let bytes = std::fs::read(&path).map_err(|source| BcIndexMigrationError::Io {
             path: path.clone(),
             source,
@@ -986,7 +986,7 @@ fn read_txn_files(migration_state_dir: &Path) -> Result<Vec<TxnFile>, BcIndexMig
             .ok_or_else(|| malformed("state is absent or not a known txn state"))?;
         // ... and, if PRESENT, a string `migration_id` (a present non-string,
         // including JSON `null`, is MALFORMED — never "foreign"; BC-1.18.013
-        // v1.8 EC-030). An ABSENT key reads as B2.
+        // EC-030). An ABSENT key reads as B2.
         let migration_id = match object.get("migration_id") {
             None => MIGRATION_ID_B2.to_string(),
             Some(serde_json::Value::String(id)) => id.clone(),
