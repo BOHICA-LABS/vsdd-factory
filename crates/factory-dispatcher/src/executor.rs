@@ -624,6 +624,17 @@ pub fn bc_index_migration_reservation_release(
     if !crate::invoke::is_tool_completion_event(&payload.event_name) {
         return;
     }
+    // ADR-052 §5a "Release-leg evaluation order" step 2 (F-S2508-L6-004): an absent,
+    // non-string, or grammar-invalid `tool_use_id` can never name a reservation, so
+    // return silently BEFORE any filesystem access or log.
+    let Some(tool_use_id) = payload
+        .extra
+        .get("tool_use_id")
+        .and_then(|v| v.as_str())
+        .filter(|id| crate::shard_manager::is_valid_tool_use_id(id))
+    else {
+        return;
+    };
     // Anchored on the SAME session factory root as admission (never created).
     let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
         Ok(Some(root)) => root,
@@ -660,9 +671,6 @@ pub fn bc_index_migration_reservation_release(
             return;
         }
     }
-    let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
-        return;
-    };
     if let Err(e) =
         crate::shard_manager::release_bc_index_writer_reservation(&migration_state_dir, tool_use_id)
     {
