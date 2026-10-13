@@ -2861,3 +2861,76 @@ NOT staged (scope control): S-25.06, S-25.10, S-25.11, S-25.12 (another story-wr
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `73c24e9e`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Persisted S-25.08 pass 13 with the v1.14 class-level status rule, registered S-25.08 v1.14, recorded the fourth stale-status recurrence with the sweep script as the proposed S-14.10 (f) gate, and advanced STATE.md to v10.96.
+
+## Burst: HUMAN-DECISIONS-S2508-ACCEPTED-S1410-SPLIT-S2508-P14-PERSISTED-FORMAL-EVIDENCE-SPEC-STORY-HASH-REGISTRATION (2026-10-13)
+
+**Parent-commit:** the D-1262 burst commit (`dc786c61`). **Agent:** state-manager (single-commit TD-VSDD-053; D-1263; STATE.md v10.96→v10.97).
+
+**Adversary verdict:** `code-delivery/S-25.08/adv-local-pass-14.md` (reviewed `9e936d4c`): NOT CLEAN 0C/0H/0M/1L, novelty LOW, streak 0/3; F-S2508-L14-001 (the convergence paragraph's closed persistence-task range T-55..T-63 left out T-64; story-only, fixed in S-25.08 v1.15 by an open-ended pointer); F-S2508-L13-001 verified CLOSED; no defect in code, CI, error paths or test strength; one [process-gap] (closed task ranges in story prose go stale when a task is appended; fifth recurrence of the stale-pointer class). HUMAN DECISION 2026-10-13: S-25.08 accepted as converged (D-386 Option C), closes [D-1257-S2508-ASYMPTOTE].
+
+**Files touched (Dim-1): 47 unique files** (`git -C .factory status --porcelain` before this burst listed 33 modified and 2 untracked files; the burst added S-25.02, S-25.09 and the two code-delivery files, the cycle logs and the index edits)
+- code-delivery/S-25.08/adv-local-pass-14.md (new, verbatim review file)
+- code-delivery/S-25.08/formal-verification-pre-merge.md (new, verbatim formal-verifier evidence with a provenance frontmatter)
+- STATE.md (v10.96 to v10.97)
+- stories/STORY-INDEX.md (v4.497 to v4.498)
+- specs/architecture/ARCH-INDEX.md (v4.59 to v4.60)
+- specs/behavioral-contracts/BC-INDEX.md (v5.112 to v5.113)
+- specs/verification-properties/VP-INDEX.md (v3.33 to v3.34)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.30, committed as authored)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.17, committed as authored)
+- specs/behavioral-contracts/ss-03/BC-3.08.001.md (v1.39, committed as authored)
+- specs/verification-properties/VP-079.md (v1.27, committed as authored)
+- specs/verification-properties/VP-133.md (v1.10, committed as authored)
+- specs/verification-properties/VP-143.md (v1.9, committed as authored)
+- specs/verification-properties/VP-146.md (v1.6, committed as authored)
+- specs/verification-properties/VP-147.md (v1.6, committed as authored)
+- specs/architecture/verification-architecture.md (v1.47, committed as authored; input-hash recomputed by this burst)
+- specs/architecture/verification-coverage-matrix.md (v1.45, committed as authored; input-hash recomputed by this burst)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.15, committed as authored; T-65 ticked and input-hash by this burst)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.16, committed as authored; input-hash by this burst)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (v1.4, committed as authored; input-hash by this burst)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (v1.4, committed as authored; input-hash by this burst)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (v1.3, committed as authored; input-hash by this burst)
+- stories/S-25.02-artifact-sharding-layer2.md (hash-only by this burst)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (hash-only by this burst)
+- stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (hash-only; committed as authored)
+- stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md (hash-only; committed as authored)
+- stories/S-25.15-branch-3-activation-manifest-guard-block.md (hash-only; committed as authored)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (hash-only by this burst)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (hash-only by this burst)
+- stories/S-26.07-class-e2-modified-monotonicity-parses-dates-from-both-entry-forms.md (NEW v1.0 full story, committed as authored)
+- stories/S-14.10-per-story-delivery-process-gap-codification.md (v1.2, committed as authored; input-hash by this burst)
+- stories/S-14.11-per-story-delivery-lint-gates-changelog-version-pins-sha-labels-convergence-prose.md (NEW v1.0, committed as authored)
+- stories/S-14.01-bootstrap-convergence-state-backfill.md (hash-only)
+- stories/S-14.02-f5-dispatch-state-manager-persist.md (hash-only)
+- stories/S-14.03-pre-f5-placeholder-lint.md (hash-only)
+- stories/S-14.04-adversary-policy-rubric-injection.md (hash-only)
+- stories/S-14.05-pr-manager-step-completion-discipline.md (hash-only)
+- stories/S-14.06-bc-4-12-001-invariant-numbering-cleanup.md (hash-only)
+- stories/S-14.08-resolver-loaded-plugin-log-observability.md (hash-only)
+- stories/S-14.09-forensic-marker-cleanup.md (hash-only)
+- stories/epics/E-14-engine-discipline-pass-2.md (v1.5, committed as authored; input-hash by this burst)
+- stories/epics/E-25-validation-integrity.md (v1.11, hash-only by this burst)
+- stories/epics/E-26-post-rc25-hook-hardening.md (v1.4, committed as authored; input-hash by this burst)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1263)
+- cycles/v1.0-brownfield-backfill/lessons.md (1 D-1263 lesson)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.96 checkpoint archived)
+
+NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (hook-written telemetry that belongs to none of the items). Not touched: S-14.07 (input `docs/HOST_ABI.md` missing, cannot compute; defect recorded).
+
+**Codifications:** D-1263 (two human decisions; pass 14 and formal evidence persisted; ADR-052 v1.30 / BC v1.17 / v1.39 / VP-INDEX v3.34 registered; story and hash cascade; defects [D-1263-S1407-INPUT-MISSING] and [D-1263-BC-V117-CITES-OWED]); 1 lesson ([test-class] seam waits are condition waits with a generous hang bound).
+
+**Dim-2 (literal shell, captured output):**
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 5.90s` (it failed before the BC-INDEX v5.113 sync).
+- `cargo test -q -p validate-cross-site-correspondence test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s` (after the blockquote pairs were written in the `S-XX.YY=hash` form the parser reads; the first attempt failed with 13 catalog/blockquote mismatches because the new line used `S-XX.YY vN=hash`).
+- Final stored == computed check over 33 touched stories, epics, BCs and VPs (`compute-input-hash`, literal): 32 stored == computed (S-25.08 7cc6b0d, S-25.02 bcc78be, S-25.09 501988b, S-25.10 f3c98a2, S-25.11 c007add, S-25.12 3a78b0d, S-25.13 f55e35a, S-25.15 735f7a6, S-25.06 c422e79, S-25.14 2990eff, S-12.16 4b5d1d1, S-26.06 15381c4, S-26.07 ef42391, E-26 b8a22ca, E-25 f519e92, S-14.10 39a9305, S-14.11 bbce72c, E-14 eae9e5d, S-14.01 ce7f6ef, S-14.02 40aedbd, S-14.03 40aedbd, S-14.04 dcc2a63, S-14.05 40aedbd, S-14.06 b0d5a1e, S-14.08 67601b8, S-14.09 c9da306, BC-1.18.013 1c26dbf, BC-3.08.001 8d4ced9, ADR-052 4637aa0, verification-architecture 66e8eac, verification-coverage-matrix 66e8eac, VP-079 70310e0), VP-133/143/146/147 carry no `inputs:` (stored 0000000, not computable by design); S-14.07 NOT computable (missing input), recorded as a defect. Order discipline: S-25.02 was re-run after VP-INDEX/ARCH-INDEX landed (it lists both as inputs) and S-25.06, S-25.14 and E-25 after it, because an artifact's hash includes each input's own `input-hash` line.
+- Namespace check: `grep -rlE "D-126[3-9]" cycles STATE.md stories specs code-delivery` returned only forward references (story files, this burst's index writes) before the decision-log write; D-1263 free.
+
+**Dim-5:** Count-propagation sweep: 2,007 BCs, 147 VPs, 54 ADRs unchanged; STORY-INDEX draft 118→119 (+S-14.11), Total (active) 238→239, registered 258→259; the only count literals in STORY-INDEX are the Status Summary table, the v4.498 changelog entry and the blockquote (all updated). E-14 delivery blockquote 10→11 stories. **Dim-6:** `last_amended` overwritten with the current entry only on STORY-INDEX, BC-INDEX, ARCH-INDEX, VP-INDEX and STATE.md (BC-5.45.001); one new `changelog:` item prepended to each of the four indexes; STATE.md has no `changelog:`; `cargo run -p last-amended-migrate -- migrate --check` was run before the edits and reported CurrentEntryOnly for all five files (re-run before push). The VP-INDEX `last_amended` previously carried a "Prior:" chain of v3.28..v3.33 entries; it was replaced by the single v3.34 entry, and every displaced entry is preserved in the VP-INDEX `changelog:` (v3.28..v3.33). **Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits (the only scripted writes are `compute-input-hash --update`, the sanctioned frontmatter tool); files staged explicitly by path, never `git add -A`; the large index and ADR edits ran under the known FUEL_EXHAUSTED PostToolUse advisories ([D-1254-ADR052-SPLIT] class, writes landed).
+
+**Closes:** S-25.08 T-65; [D-1257-S2508-ASYMPTOTE]; [D-1262-HASH-DRIFT-OWED]; [D-1261-STORY-CITES-OWED]. **Opens:** [D-1263-S1407-INPUT-MISSING], [D-1263-BC-V117-CITES-OWED]. **OPEN carried unchanged:** [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1244-REVERIFY] (VP-146 leg, S-25.06), PR #769, the S-26.07 / S-14.10 / S-14.11 product-owner gaps.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `dc786c61`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Recorded the two human decisions (S-25.08 accepted as converged, S-14.10 split), persisted S-25.08 pass 14 and the formal evidence, registered ADR-052 v1.30, BC-1.18.013 v1.17, BC-3.08.001 v1.39 and the five VPs, registered the story cascade with the topological hash refresh, and advanced STATE.md to v10.97.
