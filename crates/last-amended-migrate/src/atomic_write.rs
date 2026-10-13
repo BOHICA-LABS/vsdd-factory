@@ -20,7 +20,7 @@
 //!
 //! Two gaps in the original write-then-rename implementation, closed here:
 //!
-//! 1. **Permission preservation.** `File::create` on a brand-new temp file
+//! 1. **Permission preservation.** Creating a brand-new temp file
 //!    gets the platform/umask default mode, NOT the pre-existing target
 //!    file's own mode — a target deliberately `chmod`'d to something
 //!    non-default (e.g. `0o600` for a sensitive file) would silently have
@@ -354,7 +354,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     // `write_and_sync_temp` already closed via `Drop` before returning).
     rename_with_retry(&tmp_path, path).map_err(|source| {
         // Best-effort cleanup of the orphaned temp file — the rename failure
-        // itself is still reported; a leftover `.tmp-<pid>` here is a
+        // itself is still reported; a leftover `.tmp-<pid>-<nonce>` here is a
         // secondary symptom, not the primary error, and this tool has no
         // other path that can safely remove it on the caller's behalf later.
         let _ = std::fs::remove_file(&tmp_path);

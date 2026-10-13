@@ -12978,11 +12978,13 @@ pub enum BcIndexMigrationError {
     },
 
     /// BC-1.18.011 Precondition 6(b)/(c) — the native OPEN/DRAINING
-    /// writer-admission gate refused this dispatch (an active txn record
-    /// in STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-
-    /// binary process-exit-code path — this variant is constructed only by
-    /// `admit_or_block_bc_index_writer`, whose caller (`executor.rs`'s
-    /// `bc_index_migration_admission`) translates it into
+    /// writer-admission gate refused a writer (an active txn record in
+    /// STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-binary
+    /// process-exit-code path — this variant is constructed only by
+    /// `admit_or_block_bc_index_writer`, the B2 in-process entry point. The
+    /// dispatcher's PreToolUse path does NOT go through this variant:
+    /// `executor::bc_index_migration_admission` calls `admit_protected_write`
+    /// directly and turns `AdmissionOutcome::Blocked` into
     /// `HookResult::Block` (E-MAINTENANCE-001), never `HookResult::Error`
     /// (BC-1.18.011 Architect Ruling 2).
     #[error("BC-INDEX writer admission refused: {reason}")]
