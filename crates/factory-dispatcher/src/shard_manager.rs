@@ -12982,7 +12982,7 @@ pub enum BcIndexMigrationError {
     /// in STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-
     /// binary process-exit-code path — this variant is constructed only by
     /// `admit_or_block_bc_index_writer`, whose caller (`executor.rs`'s
-    /// `bc_index_migration_admission_precheck`) translates it into
+    /// `bc_index_migration_admission`) translates it into
     /// `HookResult::Block` (E-MAINTENANCE-001), never `HookResult::Error`
     /// (BC-1.18.011 Architect Ruling 2).
     #[error("BC-INDEX writer admission refused: {reason}")]

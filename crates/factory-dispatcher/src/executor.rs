@@ -589,19 +589,8 @@ fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> Migration
     }
 }
 
-/// Verdict-only form of [`bc_index_migration_admission`] — the named
-/// `bc_index_migration_admission_precheck` entry point (BC-1.18.011 Precondition
-/// 6; BC-1.18.013 Precondition 6(b) "or their successor"). It delegates to the
-/// SAME shared core; it carries no reserve/verify logic of its own.
-pub fn bc_index_migration_admission_precheck(
-    payload: &crate::payload::HookPayload,
-    cwd: &std::path::Path,
-) -> Option<vsdd_hook_sdk::HookResult> {
-    bc_index_migration_admission(payload, cwd).verdict
-}
-
 /// OBL-1 §5 (O-5 fold-in) — PostToolUse counterpart to
-/// [`bc_index_migration_admission_precheck`]: releases the writer
+/// [`bc_index_migration_admission`]: releases the writer
 /// reservation the SAME `tool_use_id`'s PreToolUse admission created (if
 /// any), so [`crate::shard_manager::drain_bc_index_writers`]'s quiescence
 /// poll sees this dispatch as complete.
