@@ -83,6 +83,20 @@ use std::time::{Duration, Instant};
 
 use factory_dispatcher::shard_manager::{MigrationLockGuard, try_acquire_migration_lock};
 
+/// Content bytes for a snapshot entry. `exclusive.lock` is the migration
+/// lock file held by `hold_lock()` / `try_acquire_migration_lock`; on Windows
+/// that is a mandatory byte-range lock, so READING its content fails with
+/// ERROR_LOCK_VIOLATION (os error 33) while unix advisory locks allow it. The
+/// lock file carries no payload (it is only ever locked, never written), so
+/// its presence is recorded with empty content; every other file is still
+/// captured byte-for-byte.
+fn snapshot_file_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    if path.file_name().is_some_and(|n| n == "exclusive.lock") {
+        return Ok(Vec::new());
+    }
+    std::fs::read(path)
+}
+
 const SEAM_ENV: &str = "VSDD_TEST_ADMISSION_SEAM_DIR";
 const MISMATCH_SUFFIX: &str =
     " (completion-record mismatch \u{2014} operator investigation required)";
@@ -179,7 +193,7 @@ impl Project {
                     out.insert(format!("{rel}/"), Vec::new());
                     walk(base, &p, out);
                 } else {
-                    out.insert(rel, std::fs::read(&p).unwrap());
+                    out.insert(rel, snapshot_file_bytes(&p).unwrap());
                 }
             }
         }
@@ -3006,7 +3020,7 @@ fn test_BC_1_18_013_PC6c_exclusive_lock_stat_error_is_io_never_treated_as_absent
                     out.insert(format!("{rel}/"), Vec::new());
                     walk(base, &path, out);
                 } else {
-                    out.insert(rel, std::fs::read(&path).unwrap());
+                    out.insert(rel, snapshot_file_bytes(&path).unwrap());
                 }
             }
         }
@@ -3229,7 +3243,7 @@ fn lenient_snapshot(p: &Project) -> BTreeMap<String, Vec<u8>> {
             } else {
                 out.insert(
                     rel,
-                    std::fs::read(&path).unwrap_or_else(|_| b"<unreadable>".to_vec()),
+                    snapshot_file_bytes(&path).unwrap_or_else(|_| b"<unreadable>".to_vec()),
                 );
             }
         }
