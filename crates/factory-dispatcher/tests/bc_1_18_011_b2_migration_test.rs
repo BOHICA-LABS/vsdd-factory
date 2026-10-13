@@ -1569,7 +1569,7 @@ fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created
     assert!(
         !res_dir.join("T5.reservation").exists(),
         "reserve-then-verify: the admitter's own reservation (T5) was created FIRST and must be \
-         removed on failed verification -- a surviving T5 file means the merged check-then-reserve \
+         removed on failed verification -- a surviving T5 file means the former (pre-S-25.08) check-then-reserve \
          ordering is still in force"
     );
     assert!(

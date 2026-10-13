@@ -74,7 +74,7 @@ fn test_BC_1_18_011_EC009_production_ttl_constant_floor_and_created_at_judgment(
     // (a) static production constants.
     if DEFAULT_MAX_RESERVATION_TTL != Duration::from_secs(3600) {
         failures.push(format!(
-            "DEFAULT_MAX_RESERVATION_TTL must be 3,600 s (merged value 120 s violates the \
+            "DEFAULT_MAX_RESERVATION_TTL must be 3,600 s (the former 120 s value violates the \
              1,800 s floor), got {:?}",
             DEFAULT_MAX_RESERVATION_TTL
         ));
@@ -242,7 +242,7 @@ fn test_BC_1_18_011_EC009_reservation_is_stale_created_at_first_mtime_fallback()
     );
     assert!(
         reservation_is_stale(Some(now + 500), Some(0), now, ttl),
-        "far-future created_at falls back to mtime 0 => stale (v1.20 EC-025)"
+        "far-future created_at falls back to mtime 0 => stale (EC-025)"
     );
     assert!(
         !reservation_is_stale(None, Some(now + 500), now, ttl),

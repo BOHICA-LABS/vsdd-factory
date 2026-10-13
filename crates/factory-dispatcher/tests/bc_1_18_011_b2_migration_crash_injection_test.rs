@@ -842,7 +842,7 @@ fn test_BC_1_18_011_obl1_crash_write_temp_occ2_generation_id_not_yet_persisted_d
         "the on-disk record must still show no generation_id (the crash landed before the SECOND \
          write persisted it), even though stage_new_generation's gen-dir already durably exists \
          on disk -- admission's Branch B reconciliation (BC-1.18.011 Pre 6(d)) is keyed on the \
-         RECORD (STAGING + generation_id null), not the physical gen-dir, per the v1.13 LOW-1 \
+         RECORD (STAGING + generation_id null), not the physical gen-dir, per the BC-1.18.011 LOW-1 ruling \
          ordering invariant. It has already moved the record to ABORTED"
     );
 

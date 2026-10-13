@@ -411,7 +411,7 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
             let want = plain_msg(".factory/cycles/");
             if !err.contains(&want) {
                 failures.push(format!(
-                    "{tool}/{state}: block message lacks `{want}` (error-taxonomy v1.35 \
+                    "{tool}/{state}: block message lacks `{want}` (error-taxonomy E-MAINTENANCE-001 row \
                      E-MAINTENANCE-001 format); stderr: {err}"
                 ));
             }
