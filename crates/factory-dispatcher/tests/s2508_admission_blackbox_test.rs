@@ -305,6 +305,14 @@ fn spawn(project: &Project, payload: &str, seam_dir: Option<&Path>) -> Child {
     child
 }
 
+/// Generous UPPER BOUNDS on condition waits (never fixed sleeps): every wait below
+/// returns the instant its condition holds (child exit / seam marker / quiescence),
+/// so these only bound a genuine hang. They are sized far above worst-case
+/// process-spawn latency on a saturated host (load average > 100 under a Kani
+/// solve), where the previous 5 s / 10 s / 30 s bounds were exceeded.
+const EVENT_BOUND: Duration = Duration::from_secs(180);
+const EXIT_BOUND: Duration = Duration::from_secs(180);
+
 /// Wait for exit with a hard per-command timeout (kills + panics on expiry).
 fn finish(mut child: Child, timeout: Duration) -> Output {
     let start = Instant::now();
@@ -322,11 +330,11 @@ fn finish(mut child: Child, timeout: Duration) -> Output {
 }
 
 fn run(project: &Project, payload: &str) -> Output {
-    finish(spawn(project, payload, None), Duration::from_secs(30))
+    finish(spawn(project, payload, None), EXIT_BOUND)
 }
 
 fn run_with_seam(project: &Project, payload: &str, seam: &Path) -> Output {
-    finish(spawn(project, payload, Some(seam)), Duration::from_secs(30))
+    finish(spawn(project, payload, Some(seam)), EXIT_BOUND)
 }
 
 fn stderr_of(o: &Output) -> String {
@@ -928,13 +936,13 @@ fn drive_ordering(
         match step {
             Step::W1 => {
                 let mut c = spawn(&p, &payload, Some(seam.path()));
-                wait_for_w1(&mut c, seam.path(), Duration::from_secs(5))?;
+                wait_for_w1(&mut c, seam.path(), EVENT_BOUND)?;
                 child = Some(c);
             }
             Step::W2 => {
                 std::fs::write(seam.path().join("resume"), b"").unwrap();
                 let c = child.take().ok_or("W2 before W1")?;
-                output = Some(finish(c, Duration::from_secs(30)));
+                output = Some(finish(c, EXIT_BOUND));
             }
             Step::C1 => {
                 // coordinator: take the lock, durable DRAINING flip, then txn
@@ -1475,7 +1483,7 @@ fn test_BC_1_18_011_PC6c_b2_delegates_to_shared_core_no_check_then_reserve_race(
             &envelope("PreToolUse", "Edit", Some("TB2"), edit_input(&target)),
             Some(seam.path()),
         );
-        match wait_for_w1(&mut child, seam.path(), Duration::from_secs(5)) {
+        match wait_for_w1(&mut child, seam.path(), EVENT_BOUND) {
             Err(e) => failures.push(format!("B2 W1 pause: {e}")),
             Ok(()) => {
                 if !p.reservation("TB2").exists() {
@@ -1491,7 +1499,7 @@ fn test_BC_1_18_011_PC6c_b2_delegates_to_shared_core_no_check_then_reserve_race(
                     );
                 }
                 std::fs::write(seam.path().join("resume"), b"").unwrap();
-                let out = finish(child, Duration::from_secs(30));
+                let out = finish(child, EXIT_BOUND);
                 if out.status.code() != Some(0) {
                     failures.push(format!(
                         "B2: gate OPEN must admit, got {:?}",
@@ -1757,14 +1765,15 @@ fn test_BC_1_18_013_EC020_pre_directory_writer_is_seen_by_coordinator_drain_blac
             let had_reservation = p.reservation("T1").exists();
             let releaser = std::thread::scope(|sc| {
                 let h = sc.spawn(|| {
+                    // Best-effort head start so the release lands mid-poll. Correctness
+                    // does not depend on it: the drain returns Ok whether the release
+                    // lands before or during polling, and EVENT_BOUND is only a hang
+                    // bound, so no outcome is decided by this delay.
                     std::thread::sleep(Duration::from_millis(100));
                     run(&p, &post)
                 });
-                let r = drain_bc_index_writers(
-                    &reservations,
-                    Duration::from_secs(10),
-                    Duration::from_secs(3600),
-                );
+                let r =
+                    drain_bc_index_writers(&reservations, EVENT_BOUND, Duration::from_secs(3600));
                 (r, h.join().unwrap())
             });
             let (r, post_out) = releaser;
@@ -1810,7 +1819,7 @@ fn test_BC_1_18_013_EC020_concurrent_first_ever_admissions_all_succeed_blackbox(
             })
             .collect();
         for (id, child) in ids.iter().zip(children) {
-            let out = finish(child, Duration::from_secs(30));
+            let out = finish(child, EXIT_BOUND);
             if out.status.code() != Some(0) {
                 failures.push(format!(
                     "round {round}: concurrent first-ever admission {id} must succeed, got {:?}: {}",
@@ -1954,10 +1963,7 @@ fn spawn_env(project: &Project, payload: &str, seam: Option<&Path>, root: RootEn
 }
 
 fn run_env(project: &Project, payload: &str, seam: Option<&Path>, root: RootEnv) -> Output {
-    finish(
-        spawn_env(project, payload, seam, root),
-        Duration::from_secs(30),
-    )
+    finish(spawn_env(project, payload, seam, root), EXIT_BOUND)
 }
 
 fn migration_state_dirs_under(root: &Path) -> Vec<PathBuf> {
@@ -3745,7 +3751,7 @@ fn run_as_given(p: &Project, proj_dir: &Path, payload: &str) -> Output {
     let mut stdin = child.stdin.take().expect("child stdin");
     stdin.write_all(payload.as_bytes()).expect("write payload");
     drop(stdin);
-    finish(child, Duration::from_secs(30))
+    finish(child, EXIT_BOUND)
 }
 
 /// `scratch/alias -> <project real dir>`; returns `(scratch, alias_path)`.
@@ -4262,7 +4268,7 @@ fn test_BC_1_18_013_PC6b_relative_claude_project_dir_spot_check_blackbox() {
             .write_all(envelope("PreToolUse", "Edit", Some(id), edit_input(target)).as_bytes())
             .unwrap();
         drop(stdin);
-        finish(child, Duration::from_secs(30))
+        finish(child, EXIT_BOUND)
     };
 
     let inside = run_rel(&proj.join(".factory/cycles/c1/x.md"), "Tr1");
@@ -4681,7 +4687,7 @@ fn run_at(p: &Project, proj_dir: &Path, log_dir: &Path, payload: &str) -> Output
     let mut stdin = child.stdin.take().expect("child stdin");
     stdin.write_all(payload.as_bytes()).expect("write payload");
     drop(stdin);
-    finish(child, Duration::from_secs(30))
+    finish(child, EXIT_BOUND)
 }
 
 /// lstat-based snapshot of a whole tree (symlinks are recorded, never followed).
