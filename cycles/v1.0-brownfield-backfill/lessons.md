@@ -2201,3 +2201,15 @@ the file.
 **What happened:** The story-writer writes the convergence paragraph before the state-manager burst ticks the persist task, and nobody re-reads the paragraph afterwards, so it kept saying the review file was OPEN and eight files were persisted (the same class as L5-004 and L8-004).
 **Lesson (D-1259):** The state-manager's persist burst re-syncs the convergence paragraph whenever it ticks a review-persist task (done in this burst for T-61: ten review files persisted, pass 11 next). Codification target: S-14.10.
 `[process-gap][D-1259][convergence-paragraph-resync][S-14.10]`
+
+## LESSON (D-1260) — L-BB-D1245 recurrence x11: an inline python3 script edited an E-25 epic file (S-25.13 story-writer)
+
+**What happened:** The story-writer working on S-25.13 made its first E-25 epic edit through an inline `python3` script instead of the Edit/Write tools. It self-disclosed; the resulting content is correct; the dispatcher hook chain did not block it (the bypass class is not detected for `python3`-mediated `.factory/` writes).
+**Lesson (D-1260):** Eleventh recurrence of the L-BB-D1245 class (TD-FACTORY-HOOK-BYPASS-001 P0: Edit/Write only for `.factory/` mutations). Content correctness does not cure the bypass; the orchestrator re-states the Edit/Write-only rule in every story-writer dispatch brief.
+`[L-BB-D1245][recurrence-11][D-1260][story-writer]`
+
+## LESSON (D-1260) — [process-gap] the SHA-label check verified that a label is present, not that it is true (S-25.08 F-S2508-L11-001)
+
+**What happened:** Pass 11 found three S-25.09-native commits (`37df1ebd`, `da52d067`, `6c0fb5a4`) labelled "pre-split" in T-31/T-34 and the v1.11 `last_amended` item (1), although they were created after the split. The pass-10 reachability gate (`git merge-base --is-ancestor` on every UNLABELLED SHA) let any wrong label through; the orchestrator's own mapping instruction caused the mislabels.
+**Lesson (D-1260):** Codify per label type, with literal shell output captured: "pre-split" implies the SHA is in `git rev-list 5091f88f..39e89c59`; "pre-rebase" implies a later `rebase (pick)` reflog entry with the same subject. The orchestrator verified all 8 pre-split labels in S-25.08 v1.12 this way (8 SHAs, all OK). Codification target: S-14.10 scope (story-writer follow-up).
+`[process-gap][D-1260][sha-label-truth-check][S-14.10]`

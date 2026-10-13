@@ -2754,3 +2754,38 @@ Summary: Persisted S-25.08 pass 9 and S-25.09 pass 3 verbatim, registered the st
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `de6ef674`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Recorded the human decision for S-25.13, persisted S-25.08 pass 10, registered ADR-052 v1.28, four BCs, error-taxonomy v1.43 and S-25.08 v1.11, and advanced STATE.md to v10.93.
+
+## Burst: HUMAN-DECISIONS-S2513-SPLIT-GAP15-S2508-P11-PERSISTED-ADR052-V129-REGISTRATION (2026-10-13)
+
+**Parent-commit:** the D-1259 burst commit (`7cc527d0`). **Agent:** state-manager (single-commit TD-VSDD-053; D-1260; STATE.md v10.93→v10.94).
+
+**Adversary verdict:** `code-delivery/S-25.08/adv-local-pass-11.md` (reviewed `9e936d4c`): NOT CLEAN 0C/0H/0M/1L, novelty LOW, streak 0/3; F-S2508-L11-001 (three S-25.09-native commits mislabelled "pre-split"; story-only, fixed in S-25.08 v1.12); no defect in code, CI, CHANGELOG, error paths or test strength; one [process-gap] (label truth check).
+
+**Files touched (Dim-1): 12 unique files**
+- code-delivery/S-25.08/adv-local-pass-11.md (new, verbatim review file)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.12 by story-writer, committed as authored; T-62 ticked by this burst)
+- stories/STORY-INDEX.md (v4.494 to v4.495)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.29 by architect, committed as authored)
+- specs/architecture/ARCH-INDEX.md (v4.58 to v4.59)
+- STATE.md (v10.93 to v10.94)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1260)
+- cycles/v1.0-brownfield-backfill/lessons.md (2 D-1260 lessons)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.93 checkpoint archived)
+- regression-state.json (hook byproduct)
+- sidecar-learning.md (hook byproduct)
+
+NOT staged (scope control): stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md, stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md, stories/S-25.15-branch-3-activation-manifest-guard-block.md (untracked, story-writer splitting) and stories/epics/E-25-validation-integrity.md (story-writer editing).
+
+
+**Codifications:** D-1260 (human split S-25.13/14/15; GAP-15 manual arming; orchestrator decisions `#[doc(hidden)] pub` and GAP-14); 2 lessons (L-BB-D1245 recurrence x11; [process-gap] SHA-label truth check, S-14.10 scope).
+
+**Dim-2 (literal shell, captured output):** hash check: `grep -m1 '^input-hash:' S-25.08 story` printed `input-hash: "9440335"`; `plugins/vsdd-factory/bin/compute-input-hash` on the same file printed `9440335`; stored == computed. STORY-INDEX row carries `input-hash 9440335 (v1.12 ...` (1 match). Namespace check: `grep -rlE "D-126[0-9]" cycles STATE.md` returned no file before this burst's writes (D-1260 free).
+
+**Dim-5:** Count-propagation sweep: no count changed (2,007 BCs, 147 VPs, 54 ADRs, 254 stories; Total (active) 234); no old-count sweep applicable. **Dim-6:** ARCH-INDEX v4.59 and STORY-INDEX v4.495 `last_amended` overwritten with the current entry only (BC-5.45.001); the displaced v4.58/v4.494 entries already live in each `changelog:`; one new `changelog:` item prepended per index; STATE.md has no `changelog:`. BC-INDEX and VP-INDEX unchanged (no BC change). **Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits; files staged explicitly by path, never `git add -A`; ADR-052 v1.29 edits ran under FUEL_EXHAUSTED advisories so the validators did not run on it; the PostToolUse FUEL_EXHAUSTED advisories on the large index edits are the known [D-1254-ADR052-SPLIT] class (writes landed).
+
+**Closes:** S-25.08 T-62; registers ADR-052 v1.29 and S-25.08 v1.12. **Opens:** none. **OPEN carried unchanged:** [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE] (11 passes; passes 6-11 docs/bookkeeping only; passes 10-11 story-file only), [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT] (9 more FUEL_EXHAUSTED edits at v1.29), [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1259-HASH-CASCADE-OWED], PR #769. OWED (routed): S-25.13/S-25.14/S-25.15 and the E-25 epic edit registration next burst; story hash propagation; S-14.10 follow-up (label truth check).
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `7cc527d0`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Recorded the S-25.13 split and GAP-15 human decisions, persisted S-25.08 pass 11, registered ADR-052 v1.29 and S-25.08 v1.12, and advanced STATE.md to v10.94.
