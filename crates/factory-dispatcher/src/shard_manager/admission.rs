@@ -1074,7 +1074,13 @@ mod seam {
     use std::time::{Duration, Instant};
 
     const ENV_ADMISSION_SEAM_DIR: &str = "VSDD_TEST_ADMISSION_SEAM_DIR";
-    const PAUSE_MAX: Duration = Duration::from_secs(30);
+    /// HANG BOUND ONLY, not a timing assumption: the pause is a condition
+    /// wait on the test's `resume` file. This cap exists solely so a test
+    /// that never writes `resume` (crashed/deadlocked) cannot hang the suite
+    /// forever. It matches the 180 s hang bounds in the black-box tests so a
+    /// starved test thread cannot expire it before the test legitimately
+    /// resumes. Expiry is a failure (see `pause_after_w1`), never a pass.
+    const PAUSE_HANG_BOUND: Duration = Duration::from_secs(180);
     const PAUSE_POLL: Duration = Duration::from_millis(10);
 
     fn dir() -> Option<PathBuf> {
@@ -1099,9 +1105,13 @@ mod seam {
         }
     }
 
-    /// If `<dir>/pause-after-w1` exists, poll (<= 30 s, 10 ms interval) until
+    /// If `<dir>/pause-after-w1` exists, wait (10 ms poll) until
     /// `<dir>/resume` exists, so a test can place coordinator steps BETWEEN W1
-    /// and W2.
+    /// and W2. The wait is a condition wait bounded only by
+    /// [`PAUSE_HANG_BOUND`]. If the bound expires the seam records
+    /// `PAUSE_HANG_BOUND_EXPIRED` and panics: continuing to W2 would let the
+    /// interleaving the test pins silently not happen, so a timeout must fail
+    /// the test loudly rather than produce a passing one.
     pub(super) fn pause_after_w1() {
         let Some(dir) = dir() else {
             return;
@@ -1110,7 +1120,14 @@ mod seam {
             return;
         }
         let start = Instant::now();
-        while !dir.join("resume").exists() && start.elapsed() < PAUSE_MAX {
+        while !dir.join("resume").exists() {
+            if start.elapsed() >= PAUSE_HANG_BOUND {
+                record("PAUSE_HANG_BOUND_EXPIRED");
+                panic!(
+                    "admission test seam: `resume` not observed within the {}s hang bound",
+                    PAUSE_HANG_BOUND.as_secs()
+                );
+            }
             std::thread::sleep(PAUSE_POLL);
         }
     }
