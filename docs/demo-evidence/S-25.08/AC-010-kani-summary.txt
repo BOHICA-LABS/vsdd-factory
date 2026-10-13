@@ -1,0 +1,38 @@
+# S-25.08 AC-010 -- Kani OBL-1 run (VP-147 v1.4) -- verbatim CI gate commands from .github/workflows/kani.yml
+
+# Kani Rust Verifier 0.68.0 (cargo plugin), CBMC 6.11.0; HEAD 9e936d4c; date 2026-10-13T19:34:33Z; full raw log: AC-010-kani-output.log.gz (3.5 MB uncompressed)
+
+## harnesses run (cargo kani -p factory-dispatcher --exact --harness <10 pinned names>)
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h6_terminal_reconcile_idempotence...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h6_recovery_idempotence...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h5_pointer_swap_crash_atomicity...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h4_admission_gate_invariant...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_bounded_sequence...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h3_transition_inductive_step...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h2_recovery_safety_predicate...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h1_terminal_reconcile_totality...
+Checking harness shard_manager::obl1_kani_proofs::proof_obl1_h1_recover_totality...
+
+## per-harness verdicts
+  10 VERIFICATION:- SUCCESSFUL
+
+## cover summaries (vacuity gate 1: satisfied == total for every harness)
+ ** 8 of 8 cover properties satisfied
+ ** 1 of 1 cover properties satisfied
+ ** 2 of 2 cover properties satisfied
+ ** 20 of 20 cover properties satisfied
+ ** 2 of 2 cover properties satisfied
+ ** 2 of 2 cover properties satisfied
+ ** 3 of 3 cover properties satisfied
+ ** 2 of 2 cover properties satisfied
+ ** 6 of 6 cover properties satisfied
+ ** 2 of 2 cover properties satisfied
+UNSAT_COVERS=0  COVER_SUMMARIES=10
+
+## vacuity gate 2: UNREACHABLE checks located in crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs
+UNREACHABLE_IN_PROOFS=0
+SUCCESS_COUNT=10  BAD_COUNT=0  DECLARED=10
+
+Complete - 10 successfully verified harnesses, 0 failures, 10 total.
+cargo kani exit code: 0

@@ -1,0 +1,12 @@
+# HEAD 9e936d4c  2026-10-13T19:34:48Z  (cargo test -p factory-dispatcher --test <name>)
+running 9 tests
+test test_BC_1_18_013_PC6b_as_given_spelling_ignored_when_empty_or_not_absolute ... ok
+test test_BC_1_18_013_L6_004_release_absent_or_invalid_id_with_unstatable_dot_factory_is_silent ... ok
+test test_BC_1_18_013_L6_004_release_empty_overlong_nonstring_id_is_silent_before_any_stat ... ok
+test test_BC_1_18_013_L6_004_release_absent_id_is_silent_before_any_stat ... ok
+test test_BC_1_18_013_L6_004_release_traversal_id_is_silent_before_any_stat ... ok
+test test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn ... ok
+test test_BC_1_18_013_L5_001_release_stat_error_emits_exactly_one_warn ... ok
+test test_BC_1_18_013_EC029_foreign_migration_id_diagnostic_truncated_and_escaped ... ok
+test test_BC_1_18_013_PC6c_timestamp_fallback_warn_reason_tokens_captured ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s

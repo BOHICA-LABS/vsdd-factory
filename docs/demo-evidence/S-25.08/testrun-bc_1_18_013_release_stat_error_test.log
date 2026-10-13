@@ -1,0 +1,7 @@
+# HEAD 9e936d4c  2026-10-13T19:34:48Z  (cargo test -p factory-dispatcher --test <name>)
+running 4 tests
+test test_BC_1_18_013_L4_001_probe_absent_dir_is_ok_false ... ok
+test test_BC_1_18_013_L4_001_probe_eloop_is_err_not_absent ... ok
+test test_BC_1_18_013_L4_001_probe_present_dir_is_ok_true ... ok
+test test_BC_1_18_013_L4_001_probe_eacces_is_err_not_absent ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

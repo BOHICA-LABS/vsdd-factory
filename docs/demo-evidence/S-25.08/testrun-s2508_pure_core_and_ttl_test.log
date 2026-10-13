@@ -1,0 +1,19 @@
+# HEAD 9e936d4c  2026-10-13T19:34:48Z  (cargo test -p factory-dispatcher --test <name>)
+running 16 tests
+test test_BC_1_18_011_EC025_reservation_is_stale_v120_timestamp_table ... ok
+test test_BC_1_18_011_EC009_reservation_is_stale_created_at_first_mtime_fallback ... ok
+test test_BC_1_18_011_PC9_terminal_reconcile_record_absent_is_noop_for_staging_and_committing ... ok
+test test_BC_1_18_011_PC6d_plan_branch_b_applies_with_gate_open ... ok
+test test_BC_1_18_011_EC028_known_migration_with_verifying_record_finalizes_regression_pin ... ok
+test test_BC_1_18_011_PC9_terminal_reconcile_staging_plus_record_always_fail_closed ... ok
+test test_BC_1_18_011_PC9_terminal_reconcile_finalize_only_on_full_verification ... ok
+test test_BC_1_18_013_EC021_is_tool_completion_event_exact_match_only ... ok
+test test_BC_1_18_011_PC9_terminal_reconcile_foreign_txn_is_refused_never_finalized_or_mismatch ... ok
+test test_BC_1_18_011_PC9_terminal_reconcile_core_total_and_matches_decision_table ... ok
+test test_BC_1_18_011_EC031_ttl_below_floor_is_reservation_ttl_below_floor_variant ... ok
+test test_BC_1_18_011_PC6c_drain_fails_closed_on_reservations_read_error ... ok
+test test_BC_1_18_013_EC024_resolve_target_path_real_and_lexical_forms ... ok
+test test_BC_1_18_011_EC009_production_ttl_constant_floor_and_created_at_judgment ... ok
+test test_BC_1_18_011_EC025_drain_gc_reservation_timestamp_vectors ... ok
+test test_BC_1_18_011_EC025_never_clamped_unusable_created_at_with_fresh_mtime_is_retained ... ok
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s

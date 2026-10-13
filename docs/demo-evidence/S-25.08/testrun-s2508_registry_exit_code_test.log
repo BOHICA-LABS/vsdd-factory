@@ -1,0 +1,8 @@
+# HEAD 9e936d4c  2026-10-13T19:34:48Z  (cargo test -p factory-dispatcher --test <name>)
+running 5 tests
+test test_BC_7_06_001_registry_error_exit_code_fail_closed_variants_exit_2 ... ok
+test test_BC_7_06_001_registry_error_exit_code_fail_open_variants_exit_0 ... ok
+test test_BC_7_06_001_registry_error_exit_code_covers_every_variant_explicitly ... ok
+test test_BC_7_06_001_real_binary_schema_mismatch_fails_closed_exit_2_regression_pin ... ok
+test test_BC_1_08_001_real_binary_missing_registry_fails_open_exit_0_regression_pin ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s
