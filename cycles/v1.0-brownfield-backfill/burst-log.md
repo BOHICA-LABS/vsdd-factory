@@ -2831,3 +2831,33 @@ NOT staged (scope control): regression-state.json and sidecar-learning.md (hook-
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `f2b6739c`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Persisted S-25.08 pass 12 with the structural v1.13 fix, registered the story cascade, S-25.13/14/15, E-25 v1.11 and the S-26.07 stub, recorded the Class E2 hook defect, and advanced STATE.md to v10.95.
+
+## Burst: S2508-P13-PERSISTED-V114-CROSS-TASK-STATUS-SWEEP-REGISTRATION (2026-10-13)
+
+**Parent-commit:** the D-1261 burst commit (`73c24e9e`). **Agent:** state-manager (single-commit TD-VSDD-053; D-1262; STATE.md v10.95→v10.96).
+
+**Adversary verdict:** `code-delivery/S-25.08/adv-local-pass-13.md` (reviewed `9e936d4c`): NOT CLEAN 0C/0H/0M/1L, novelty LOW, streak 0/3; F-S2508-L13-001 (unticked T-6 said T-9/T-10 not done; pass-2 Status cells said "T-27 open" and "verify"; minor T-14 "pass-1 streak"; story-only, fixed in S-25.08 v1.14 with a class-level rule); F-S2508-L12-001 verified CLOSED; no defect in code, CI, error paths or test strength; one [process-gap] (stale-status class, fourth recurrence).
+
+**Files touched (Dim-1): 8 unique files**
+- code-delivery/S-25.08/adv-local-pass-13.md (new, verbatim review file)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.14 by story-writer, committed as authored; T-64 ticked by this burst)
+- stories/STORY-INDEX.md (v4.496 to v4.497)
+- STATE.md (v10.95 to v10.96)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1262)
+- cycles/v1.0-brownfield-backfill/lessons.md (1 D-1262 lesson)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.95 checkpoint archived)
+
+NOT staged (scope control): S-25.06, S-25.10, S-25.11, S-25.12 (another story-writer is editing them), S-14.10, S-26.07, the E-26 epic, regression-state.json and sidecar-learning.md (hook-written telemetry).
+
+**Codifications:** D-1262 (pass 13 persisted; v1.14 class-level rule; S-25.08 v1.14 registered; downstream hash drift owed); 1 lesson ([process-gap] stale-status class recurrence 4 to S-14.10 (f), sweep script recorded verbatim).
+
+**Dim-2 (literal shell, captured output):** `compute-input-hash stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md` printed `9440335`; stored `input-hash: "9440335"`; stored == computed after the T-64 tick. Downstream computed values, NOT registered (OWED): S-25.09 dccce6d (stored aa22897), S-25.06 4d9164d (8b2d414), S-12.16 487463f (1448567), S-26.06 626c771 (93fda0e), S-25.11 3d52f78 (64694de), S-25.12 1cf2cb0 (d1b1d29), S-25.13 5f29e11 (e196b18), S-25.14 4d96b1e (c5c6534), E-25 97b5735 (a28df4d); S-25.10 7450971, S-25.15 36c1685, S-25.02 3dd2ac9 match. Namespace check: `grep -rlE "D-126[2-9]" cycles STATE.md stories` returned only STORY-INDEX.md and the S-25.08 story file (story-writer forward references) before this burst's cycle-log writes; D-1262 free.
+
+**Dim-5:** Count-propagation sweep: no count changed (258 registered stories, draft 118, Total (active) 238; 2,007 BCs, 147 VPs, 54 ADRs); S-25.08 row version v1.13→v1.14 only. **Dim-6:** STORY-INDEX v4.497 and STATE.md `last_amended` overwritten with the current entry only (BC-5.45.001); one new `changelog:` item prepended to STORY-INDEX; STATE.md has no `changelog:`. BC-INDEX, VP-INDEX and ARCH-INDEX unchanged. **Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits; files staged explicitly by path, never `git add -A`; the large index edits ran under the known FUEL_EXHAUSTED PostToolUse advisories ([D-1254-ADR052-SPLIT] class, writes landed).
+
+**Closes:** S-25.08 T-64. **Opens:** [D-1262-HASH-DRIFT-OWED] (downstream story and E-25 hash drift after the S-25.08 edit; story-writer propagation once the concurrent story edits land). **OPEN carried unchanged:** [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE] (13 passes; code correct since pass 5; passes 10-13 single LOW story-file findings), [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1261-STORY-CITES-OWED] (in progress), PR #769.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `73c24e9e`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Persisted S-25.08 pass 13 with the v1.14 class-level status rule, registered S-25.08 v1.14, recorded the fourth stale-status recurrence with the sweep script as the proposed S-14.10 (f) gate, and advanced STATE.md to v10.96.
