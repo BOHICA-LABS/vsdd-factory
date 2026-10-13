@@ -24,6 +24,26 @@ Reference file for the orchestrator. Load during Phase 3 implementation.
       - Loop until passes_clean >= 3 AND last_classification == "NITPICK_ONLY"
       - State file: .factory/cycles/<cycle-id>/<story-id>/adversary-convergence-state.json
       - Step 5 MUST NOT begin while convergence criterion is not met
+      - Context WALL: adversary MUST NOT see .factory/holdout-scenarios/story-scenarios/**
+   c3. Run story-level holdout gate (BC-5.39.003):
+      - Spawn holdout-evaluator with ONLY: .factory/holdout-scenarios/story-scenarios/STORY-NNN/
+        + .factory/specs/product-brief.md + running binary (built in .worktrees/STORY-NNN/)
+      - Evaluator exercises the story's public surface via wire-level output assertions;
+        scope is bounded to the story's TOUCHED surface — minutes, not hours
+      - Scenarios: 2–4 per story; SINGLE-USE; authored by product-owner at story-materialization
+        time (Phase 2); test-writer and implementer have NEVER read them (strict asymmetry wall)
+      - Gate threshold: every scenario score >= 0.80 (mean >= 0.80 across 2–4 scenarios)
+      - BLOCKING: any unsatisfied scenario → holdout-evaluator reports OBSERVED_BEHAVIOR_ONLY
+        to orchestrator (never scenario text — contamination control prevents scenario leakage
+        to implementer) → orchestrator dispatches implementer with observed-behavior description
+        → implementer fixes → adversary convergence streak RESETS to 0/3 → re-gate from c2
+      - PASS: all scenarios satisfied → mark each scenario lifecycle_status: consumed and
+        move to .factory/holdout-scenarios/evaluations/story-STORY-NNN/ (scenarios are
+        single-use: consumed at first evaluation, never re-run for this story)
+      - Three-tier separation: story scenarios (here), wave scenarios (Step 3f wave gate),
+        and end-of-pipeline scenarios (Phase 4) are independent pools — consuming story
+        scenarios does NOT affect the wave or final evaluation pools
+      - Step 5 (demo recording) MUST NOT begin until holdout gate passes
    d. Spawn demo-recorder: "Record per-AC demos in .worktrees/STORY-NNN/.
       Output to docs/demo-evidence/<STORY-ID>/ (committed to feature branch).
       The <STORY-ID> subfolder prevents evidence-report.md and AC-*.md collisions across stories.

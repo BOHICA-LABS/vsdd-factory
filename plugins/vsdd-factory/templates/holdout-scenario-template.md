@@ -15,13 +15,23 @@ must_pass: "true | false"
 priority: "must-pass | should-pass"
 epic_id: "EPIC-NNN"
 behavioral_contracts: []
+# Tier and reuse fields (DF-038)
+# scope: story | wave | final
+#   story — per-story holdout gate (BC-5.39.003); 2-4 per story; single-use;
+#            stored under .factory/holdout-scenarios/story-scenarios/STORY-NNN/
+#   wave  — wave integration holdout pool; cycle-scoped; stored under wave-scenarios/<wave>/
+#   final — end-of-pipeline HS-NNN lifecycle pool; rotated 80%; stored at root level
+scope: final                    # default; set to "story" or "wave" when applicable
+story_id: null                  # STORY-NNN when scope == story (required)
+single_use: false               # true when scope == story (consumed after first evaluation)
 # Lifecycle fields (DF-030)
-lifecycle_status: active        # active | stale | retired
+lifecycle_status: active        # active | stale | retired | consumed (story-scope only)
 introduced: vX.Y.Z             # cycle that created this scenario
 last_evaluated: null            # last cycle where this scenario was evaluated
 staleness_check: null           # last time maintenance sweep checked (YYYY-MM-DD)
 stale_reason: null              # why stale (e.g., "Scenario tests feature removed in v1.2.0")
 retired: null                   # cycle that retired (null if active)
+consumed: null                  # ISO timestamp when consumed by state-manager (story-scope only)
 # ASM/R source traceability (optional)
 assumption_source: null         # ASM-NNN if this scenario tests an assumption
 risk_source: null               # R-NNN if this scenario tests a risk
