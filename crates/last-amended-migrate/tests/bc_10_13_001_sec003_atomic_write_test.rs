@@ -75,51 +75,43 @@ fn test_BC_10_13_001_SEC003_write_atomic_target_is_never_truncated_or_mixed() {
 }
 
 /// `write_atomic` never touches the real target at all when the temp-file
-/// write itself fails — the original content survives untouched, proving the
-/// temp-then-rename ordering (never "truncate target, then write") is what
-/// actually runs.
+/// creation/write itself fails — the original content survives untouched,
+/// proving the temp-then-rename ordering (never "truncate target, then
+/// write") is what actually runs.
 ///
-/// # S-15.03 Windows-CI portability fix
-///
-/// This test previously forced the temp-file write to fail by marking the
-/// target's parent DIRECTORY read-only via `Permissions::set_readonly(true)`.
-/// That construction is Unix-only in practice: Windows' `FILE_ATTRIBUTE_READONLY`
-/// bit on a *directory* does not block creating files inside it (it is a
-/// legacy Explorer "customized folder" flag, not an access-control
-/// restriction — only the read-only bit on a *file* is enforced by Windows
-/// I/O) — so on Windows this write would silently SUCCEED, `result.is_err()`
-/// would fail, and the whole test would fail there, unrelated to any bug in
-/// `write_atomic` itself.
-///
-/// Replaced with a construction that is deterministic and enforced
-/// identically by every OS's filesystem API: pre-create a DIRECTORY at
-/// exactly the path `write_atomic` will itself compute for its sibling temp
-/// file (`.{basename}.tmp-{pid}`, in the same parent directory as `path`).
-/// The test and `write_atomic` run in the same process, so `std::process::id()`
-/// is identical between them, making this path fully deterministic to
-/// reproduce here without reaching into `write_atomic`'s internals. Opening a
-/// path that already exists as a directory for writing as a plain file
-/// deterministically fails everywhere (Unix: `EISDIR`; Windows:
-/// `ERROR_ACCESS_DENIED`), so `File::create(&tmp_path)` inside
-/// `write_atomic` is guaranteed to fail on every platform, exercising the
-/// exact "temp-file write itself fails" branch this test targets.
+/// S-25.08 PR #848 SEC-002: the temp name is now exclusive-create with an
+/// unpredictable suffix, so the earlier construction (pre-create a directory
+/// at the deterministic `.{basename}.tmp-{pid}` name) can no longer force a
+/// failure. The failure is instead forced by making the parent directory
+/// non-writable (Unix permission bits; Windows' directory read-only
+/// attribute does not block file creation, so this test is Unix-only and
+/// returns early when the process bypasses directory permissions, e.g. root).
+#[cfg(unix)]
 #[test]
 fn test_BC_10_13_001_SEC003_write_atomic_leaves_target_untouched_on_temp_write_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
     let dir = tempfile::tempdir().expect("tempdir");
     let path = common::write_file(dir.path(), "target.md", "original\n");
 
-    let blocking_tmp_dir = dir
-        .path()
-        .join(format!(".target.md.tmp-{}", std::process::id()));
-    std::fs::create_dir(&blocking_tmp_dir)
-        .expect("pre-create a directory at write_atomic's own deterministic temp-file path");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555))
+        .expect("make parent dir non-writable");
+    let probe = dir.path().join(".probe");
+    if std::fs::File::create(&probe).is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).ok();
+        return;
+    }
 
     let result = write_atomic(&path, "attempted overwrite\n");
 
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755))
+        .expect("restore parent dir permissions");
+
     assert!(
         result.is_err(),
-        "write_atomic must fail when its own sibling temp-file path is \
-         already occupied by a directory, not silently succeed: {result:?}"
+        "write_atomic must fail when its sibling temp file cannot be created, \
+         not silently succeed: {result:?}"
     );
     assert_eq!(
         common::read_file(&path),

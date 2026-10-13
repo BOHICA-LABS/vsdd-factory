@@ -62,9 +62,9 @@
 //! persistent permission failure unchanged.
 
 use crate::error::MigrateError;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Bounded attempt count for [`rename_with_retry`]'s Windows-transient-lock
@@ -249,8 +249,74 @@ fn is_retryable_rename_error(err: &std::io::Error) -> bool {
     }
 }
 
-/// Write `content` to `path` atomically: write to a sibling `<basename>.tmp-<pid>`
-/// file in the same directory (preserving `path`'s pre-existing permission
+/// Bounded number of fresh-suffix attempts [`create_exclusive_temp`] makes
+/// when `create_new` reports the candidate name already exists, before it
+/// fails closed with `ErrorKind::AlreadyExists`.
+const TEMP_CREATE_MAX_ATTEMPTS: u32 = 16;
+
+/// Unpredictable 64-bit suffix for a temp-file name (S-25.08 PR #848
+/// SEC-002, CWE-377).
+///
+/// Source choice: `std::hash::RandomState`. Its SipHash keys are seeded
+/// from the OS CSPRNG at first use (per thread), so a same-uid attacker
+/// who can read the pid and the clock still cannot predict the output;
+/// the hasher additionally mixes the pid, the wall-clock nanoseconds and
+/// a process-wide counter so successive calls within one thread never
+/// repeat. This avoids adding a direct `getrandom`/`rand`/`uuid`
+/// dependency to this standalone CLI crate for one 64-bit nonce. The
+/// security property does NOT rest on unpredictability alone: the file
+/// is opened with `create_new` (`O_EXCL`), so a pre-planted file or
+/// symlink at a guessed name is refused rather than followed.
+fn unpredictable_suffix() -> u64 {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u32(std::process::id());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    hasher.write_u64(nanos);
+    hasher.finish()
+}
+
+/// Exclusively create (`create_new`, i.e. `O_EXCL` on Unix and
+/// `CREATE_NEW` on Windows) a fresh sibling temp file
+/// `.<basename>.<kind>-<pid>-<nonce:016x>` in `parent`, returning the open
+/// handle and its path. A name collision (`AlreadyExists`, including a
+/// planted file or symlink, dangling or not) is retried with a new
+/// suffix, bounded by [`TEMP_CREATE_MAX_ATTEMPTS`]; exhaustion or any
+/// other error is returned as-is (fail closed, nothing is written
+/// through a pre-existing path).
+fn create_exclusive_temp(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+) -> std::io::Result<(File, PathBuf)> {
+    let mut last_err = None;
+    for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
+        let candidate = parent.join(format!(
+            ".{basename}.{kind}-{}-{:016x}",
+            std::process::id(),
+            unpredictable_suffix()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((file, candidate)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last_err = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
+}
+
+/// Write `content` to `path` atomically: write to an exclusively-created
+/// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory (preserving `path`'s pre-existing permission
 /// bits, if any, and `fsync`ing the data before rename — S-15.03 N2), then
 /// `rename` it into place. On success, no `.tmp-*` sibling survives — the
 /// rename consumes it. On failure to write or fsync the temp file, no
@@ -262,9 +328,13 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-output".to_string());
-    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+    let (file, tmp_path) =
+        create_exclusive_temp(parent, &basename, "tmp").map_err(|source| MigrateError::Io {
+            path: parent.join(format!(".{basename}.tmp-*")),
+            source,
+        })?;
 
-    if let Err(e) = write_and_sync_temp(&tmp_path, content) {
+    if let Err(e) = write_and_sync_temp(file, &tmp_path, content) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
@@ -309,14 +379,11 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     Ok(())
 }
 
-/// Write `content` to `tmp_path` (creating or truncating it) and `fsync` it
-/// before returning, so the caller's subsequent `rename` never lands ahead
-/// of the data actually being durable on disk (S-15.03 N2).
-fn write_and_sync_temp(tmp_path: &Path, content: &str) -> Result<(), MigrateError> {
-    let mut file = File::create(tmp_path).map_err(|source| MigrateError::Io {
-        path: tmp_path.to_path_buf(),
-        source,
-    })?;
+/// Write `content` through `file` (the exclusively-created handle for
+/// `tmp_path`, consumed so it is dropped at return) and `fsync` it before
+/// returning, so the caller's subsequent `rename` never lands ahead of the
+/// data actually being durable on disk (S-15.03 N2).
+fn write_and_sync_temp(mut file: File, tmp_path: &Path, content: &str) -> Result<(), MigrateError> {
     file.write_all(content.as_bytes())
         .map_err(|source| MigrateError::Io {
             path: tmp_path.to_path_buf(),
@@ -480,9 +547,15 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
-    let tmp_path = parent.join(format!(".{basename}.strict-tmp-{}", std::process::id()));
+    let (file, tmp_path) =
+        create_exclusive_temp(parent, &basename, "strict-tmp").map_err(|source| {
+            MigrateError::Io {
+                path: parent.join(format!(".{basename}.strict-tmp-*")),
+                source,
+            }
+        })?;
 
-    if let Err(source) = write_and_sync_temp_strict(&tmp_path, content) {
+    if let Err(source) = write_and_sync_temp_strict(file, content) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
@@ -513,13 +586,13 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
     })
 }
 
-/// Write `content` to `tmp_path` (creating or truncating it) and durably
-/// sync it — `F_FULLFSYNC` on macOS, plain `fsync` elsewhere, via
+/// Write `content` through `file` (the exclusively-created handle for the
+/// temp file) and durably sync it — `F_FULLFSYNC` on macOS, plain `fsync` elsewhere, via
 /// [`sync_file_durable`] — before returning, so the caller's subsequent
 /// rename never lands ahead of the data actually being durable on disk
 /// (D-1232-OBL-2(a)).
 ///
-/// `file` is a binding local to THIS function's own stack frame, never
+/// `file` is moved into THIS function's own stack frame and never
 /// returned or exposed to the caller: it is dropped (its OS handle closed
 /// via `Drop`) at this function's return, strictly BEFORE
 /// [`write_atomic_strict_durable`]'s subsequent `rename_with_retry` call —
@@ -527,8 +600,7 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
 /// shape for [`write_atomic`]) rather than an inline closure specifically
 /// so this scoping is unambiguous on inspection (PR #842 Windows-CI
 /// investigation).
-fn write_and_sync_temp_strict(tmp_path: &Path, content: &str) -> std::io::Result<()> {
-    let mut file = File::create(tmp_path)?;
+fn write_and_sync_temp_strict(mut file: File, content: &str) -> std::io::Result<()> {
     file.write_all(content.as_bytes())?;
     sync_file_durable(&file)
 }
