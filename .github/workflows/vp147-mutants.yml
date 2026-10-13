@@ -1,0 +1,85 @@
+name: vp147-mutants
+
+# VP-147 mutation evidence (S-25.08 T-12, D-1252-OWED): re-runs the checked-in
+# mutants (crates/vp147-mutants/mutants.toml) against isolated git worktrees
+# and requires every one to be KILLED by its Kani harness(es) / black-box
+# tests. workflow_dispatch ONLY: each Kani mutant costs ~20 min of CBMC solve
+# time, so this is deliberately NOT part of the per-PR gate (the per-PR gate
+# is kani.yml, which proves the unmutated harnesses). Run it at the formal-
+# hardening re-verification gate (T-6/T-12) or after editing the OBL-1 proofs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated mutant ids to run (empty = all), e.g. M3,M5"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vp147-mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mutants:
+    name: vp147 mutants (KILLED required)
+    runs-on: ubuntu-latest
+    # 4 Kani mutants (~20 min each) + the M4-production test build + install.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache Kani toolchain + solver bundle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.kani
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+          key: kani-verifier-0.68.0-${{ runner.os }}
+
+      - name: Install Kani
+        run: |
+          set -euo pipefail
+          if ! cargo kani --version 2>/dev/null | grep -q '0.68.0'; then
+            cargo install --locked kani-verifier@0.68.0
+          fi
+          cargo kani setup
+          cargo kani --version
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+        with:
+          key: vp147-mutants
+
+      - name: Validate mutant spec (each find text matches exactly once)
+        run: |
+          set -euo pipefail
+          cargo run --release -p vp147-mutants -- --check-spec
+
+      - name: Run VP-147 mutants
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          IFS=',' read -r -a IDS <<< "${ONLY}"
+          for id in "${IDS[@]}"; do
+            id="${id// /}"
+            if [ -n "${id}" ]; then ARGS+=(--only "${id}"); fi
+          done
+          cargo build --release -p vp147-mutants
+          ./target/release/vp147-mutants "${ARGS[@]}" 2>&1 | tee vp147-mutants.log
+
+      - name: Upload mutant logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vp147-mutants-logs
+          path: |
+            vp147-mutants.log
+            target/vp147-mutants/logs/*.log
+          if-no-files-found: warn

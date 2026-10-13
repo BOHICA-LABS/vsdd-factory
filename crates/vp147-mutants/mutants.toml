@@ -1,0 +1,116 @@
+# VP-147 mutant list (S-25.08 T-12, D-1252-OWED). Consumed by `vp147-mutants`.
+#
+# Each [[mutant]] is ONE source edit applied to a scratch git worktree at the
+# base revision. `find` must occur EXACTLY once in `file` (multi-line literal
+# strings below are byte-exact, including indentation and the trailing
+# newline); `replace` is substituted for it. `expected` is always KILLED: the
+# killer (named Kani harnesses, or cargo test targets) must fail against the
+# mutated tree. Validate matches without building: `vp147-mutants --check-spec`.
+
+[[mutant]]
+id = "M1"
+description = "foreign-migration check removed from the pure terminal-reconciliation core"
+file = "crates/factory-dispatcher/src/shard_manager.rs"
+find = '''
+    if !inputs.txn_migration_known {
+        return TerminalReconcileDecision::RefuseForeignMigration;
+    }
+'''
+replace = '''
+    // MUTANT M1: foreign-migration check removed
+'''
+expected = "KILLED"
+killer = { kind = "kani", package = "factory-dispatcher", harnesses = [
+  "shard_manager::obl1_kani_proofs::proof_obl1_h1_terminal_reconcile_totality",
+  "shard_manager::obl1_kani_proofs::proof_obl1_h6_terminal_reconcile_idempotence",
+] }
+
+[[mutant]]
+id = "M2"
+description = "mtime takes precedence over created_at in the reservation staleness predicate"
+file = "crates/factory-dispatcher/src/shard_manager.rs"
+find = "match trusted_created_at.or(mtime_epoch_secs)"
+replace = "match mtime_epoch_secs.or(trusted_created_at)"
+expected = "KILLED"
+killer = { kind = "kani", package = "factory-dispatcher", harnesses = [
+  "shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal",
+] }
+
+[[mutant]]
+id = "M3"
+description = "the REAL admission predicate admits a STAGING migration txn"
+file = "crates/factory-dispatcher/src/shard_manager.rs"
+find = '''
+            txn.state,
+            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted
+        ),
+'''
+replace = '''
+            txn.state,
+            BcIndexMigrationTxnState::Completed | BcIndexMigrationTxnState::Aborted | BcIndexMigrationTxnState::Staging
+        ),
+'''
+expected = "KILLED"
+killer = { kind = "kani", package = "factory-dispatcher", harnesses = [
+  "shard_manager::obl1_kani_proofs::proof_obl1_h4_admission_gate_invariant",
+  "shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal",
+] }
+
+[[mutant]]
+id = "M4-model"
+description = "h4b model: W1 admits the writer onward without creating its reservation"
+file = "crates/factory-dispatcher/src/shard_manager/obl1_kani_proofs.rs"
+find = '''
+                    res[w] = H4xReservation {
+                        present: true,
+'''
+replace = '''
+                    res[w] = H4xReservation {
+                        present: false, // MUTANT M4-model
+'''
+expected = "KILLED"
+killer = { kind = "kani", package = "factory-dispatcher", harnesses = [
+  "shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal",
+] }
+
+[[mutant]]
+id = "M4-production"
+description = "production admission core skips W1 (admits without creating the writer reservation); killed by the VP-133 7(d) black-box suites, not by Kani"
+file = "crates/factory-dispatcher/src/shard_manager/admission.rs"
+find = '''
+            let path = create_writer_reservation(migration_state_dir, id)?;
+            seam::record(&format!("W1_RESERVE:{id}"));
+            seam::pause_after_w1();
+            Some(path)
+'''
+replace = '''
+            let _ = create_writer_reservation; /* MUTANT M4-production */
+            seam::record(&format!("W1_RESERVE:{id}"));
+            seam::pause_after_w1();
+            None::<std::path::PathBuf>
+'''
+expected = "KILLED"
+killer = { kind = "test", args = [
+  "-p", "factory-dispatcher",
+  "--test", "s2508_admission_blackbox_test",
+  "--test", "s2508_pure_core_and_ttl_test",
+  "--test", "bc_1_18_011_b2_migration_test",
+  "--no-fail-fast",
+] }
+
+[[mutant]]
+id = "M5"
+description = "unknown reservation age (no usable created_at, no mtime) is treated as stale"
+file = "crates/factory-dispatcher/src/shard_manager.rs"
+find = '''
+        Some(basis) => now_epoch_secs.saturating_sub(basis) > ttl_secs,
+        None => false,
+'''
+replace = '''
+        Some(basis) => now_epoch_secs.saturating_sub(basis) > ttl_secs,
+        None => true, // MUTANT M5
+'''
+expected = "KILLED"
+killer = { kind = "kani", package = "factory-dispatcher", harnesses = [
+  "shard_manager::obl1_kani_proofs::proof_obl1_h4_reservation_quiescence_and_selfheal",
+] }
