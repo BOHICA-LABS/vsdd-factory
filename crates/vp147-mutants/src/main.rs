@@ -4,7 +4,8 @@ use clap::Parser;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
-use vp147_mutants::runner::{self, RunConfig, tracked_tree_dirty};
+use std::time::Duration;
+use vp147_mutants::runner::{self, DEFAULT_MUTANT_TIMEOUT, RunConfig, tracked_tree_dirty};
 use vp147_mutants::spec::{DEFAULT_SPEC_PATH, Spec};
 
 #[derive(Parser, Debug)]
@@ -35,6 +36,12 @@ struct Cli {
     /// Only verify that every `find` text matches exactly once at --base; build nothing.
     #[arg(long)]
     check_spec: bool,
+    /// Wall-clock budget in seconds for ONE mutant's killer (default 2700 =
+    /// 45 min; Kani mutants take ~20 min). On expiry the killer's process
+    /// group is killed and the mutant is INVALID, so a hung solver cannot
+    /// stall the whole run.
+    #[arg(long, default_value_t = DEFAULT_MUTANT_TIMEOUT.as_secs(), value_parser = clap::value_parser!(u64).range(1..))]
+    timeout_secs: u64,
     /// Allow running when tracked files differ from HEAD (the mutants are
     /// applied to the committed --base, not to working-tree edits).
     #[arg(long)]
@@ -73,6 +80,7 @@ fn real_main() -> Result<bool, String> {
         base_rev: cli.base,
         target_dir,
         log_dir,
+        mutant_timeout: Duration::from_secs(cli.timeout_secs),
     };
 
     let stdout = std::io::stdout();

@@ -30,10 +30,10 @@ jobs:
     # 4 Kani mutants (~20 min each) + the M4-production test build + install.
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cache Kani toolchain + solver bundle
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: |
             ~/.kani
@@ -72,11 +72,14 @@ jobs:
             if [ -n "${id}" ]; then ARGS+=(--only "${id}"); fi
           done
           cargo build --release -p vp147-mutants
-          ./target/release/vp147-mutants "${ARGS[@]}" 2>&1 | tee vp147-mutants.log
+          # Per-mutant wall-clock budget (CR-012c): a Kani mutant is ~20 min, so
+          # 2700 s (45 min) kills a hung solver's whole process group and
+          # reports that mutant INVALID instead of burning the job timeout.
+          ./target/release/vp147-mutants --timeout-secs 2700 "${ARGS[@]}" 2>&1 | tee vp147-mutants.log
 
       - name: Upload mutant logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: vp147-mutants-logs
           path: |

@@ -4,10 +4,15 @@
 use crate::spec::{Killer, Mutant};
 use crate::subst::apply_single;
 use crate::verdict::{Verdict, classify_kani, classify_test};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Default per-mutant killer wall-clock budget. A Kani mutant takes ~20 min
+/// of CBMC solve time, so 45 min is a >2x margin that still bounds a hung
+/// solver far below the workflow's job-level timeout.
+pub const DEFAULT_MUTANT_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 
 #[derive(Debug, thiserror::Error)]
 pub enum RunError {
@@ -28,6 +33,10 @@ pub struct RunConfig {
     pub target_dir: PathBuf,
     /// Per-mutant full killer logs are written here as `<id>.log`.
     pub log_dir: PathBuf,
+    /// Wall-clock budget for ONE mutant's killer. On expiry the killer's whole
+    /// process group is killed and the mutant is INVALID (a timeout is not
+    /// evidence that the mutant was killed).
+    pub mutant_timeout: Duration,
 }
 
 /// Outcome of one mutant.
@@ -197,6 +206,99 @@ pub fn check_spec(
     Ok(bad)
 }
 
+/// Captured result of a killer process.
+#[derive(Debug)]
+pub struct Captured {
+    /// Exit code (`None` if terminated by a signal or killed on timeout).
+    pub code: Option<i32>,
+    /// stdout followed by stderr.
+    pub combined: String,
+    /// True if the wall-clock budget expired and the process group was killed.
+    pub timed_out: bool,
+}
+
+fn drain<R: Read + Send + 'static>(mut r: R) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = r.read_to_end(&mut buf);
+        buf
+    })
+}
+
+/// Run `prog args` in `cwd` with `envs`, capturing stdout+stderr, killing the
+/// whole process group (cargo -> kani -> cbmc/solver children) if it exceeds
+/// `timeout`.
+pub fn run_with_timeout(
+    prog: &str,
+    args: &[String],
+    cwd: &Path,
+    envs: &[(&str, &Path)],
+    timeout: Duration,
+) -> Result<Captured, RunError> {
+    let mut cmd = Command::new(prog);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    // Own process group so a timeout can reap the solver grandchildren too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().map(drain);
+    let stderr = child.stderr.take().map(drain);
+
+    let deadline = Instant::now() + timeout;
+    let (status, timed_out) = loop {
+        if let Some(st) = child.try_wait()? {
+            break (Some(st), false);
+        }
+        if Instant::now() >= deadline {
+            kill_group(&mut child);
+            let _ = child.wait();
+            break (None, true);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let join = |h: Option<std::thread::JoinHandle<Vec<u8>>>| {
+        h.and_then(|h| h.join().ok()).unwrap_or_default()
+    };
+    let mut combined = String::from_utf8_lossy(&join(stdout)).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&join(stderr)));
+    Ok(Captured {
+        code: status.and_then(|s| s.code()),
+        combined,
+        timed_out,
+    })
+}
+
+#[cfg(unix)]
+fn kill_group(child: &mut std::process::Child) {
+    // `kill -KILL -- -<pgid>`: the child is its own group leader
+    // (process_group(0)), so pgid == pid. Falls back to killing just the child.
+    let group = format!("-{}", child.id());
+    let ok = Command::new("kill")
+        .args(["-KILL", "--", &group])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_group(child: &mut std::process::Child) {
+    let _ = child.kill();
+}
+
 fn run_one(
     cfg: &RunConfig,
     sha: &str,
@@ -239,18 +341,36 @@ fn run_one(
         args.join(" ")
     )?;
     out.flush()?;
-    let output = Command::new(prog)
-        .args(&args)
-        .current_dir(&wt.path)
-        .envs([("CARGO_TARGET_DIR", &cfg.target_dir)])
-        .output()?;
-    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    let captured = run_with_timeout(
+        prog,
+        &args,
+        &wt.path,
+        &[("CARGO_TARGET_DIR", cfg.target_dir.as_path())],
+        cfg.mutant_timeout,
+    )?;
+    let combined = captured.combined;
     std::fs::create_dir_all(&cfg.log_dir)?;
     let log = cfg.log_dir.join(format!("{}.log", m.id));
     std::fs::write(&log, &combined)?;
 
-    let code = output.status.code();
+    if captured.timed_out {
+        writeln!(
+            out,
+            "VP147-MUTANT {} killer-TIMEOUT after {}s (budget {}s) log={}",
+            m.id,
+            started.elapsed().as_secs(),
+            cfg.mutant_timeout.as_secs(),
+            log.display()
+        )?;
+        return Ok(Verdict::Invalid {
+            reason: format!(
+                "killer timed out after {}s (per-mutant budget)",
+                cfg.mutant_timeout.as_secs()
+            ),
+        });
+    }
+
+    let code = captured.code;
     let verdict = match &m.killer {
         Killer::Kani { harnesses, .. } => classify_kani(code, &combined, harnesses.len()),
         Killer::Test { .. } => classify_test(code, &combined),
@@ -327,6 +447,32 @@ mod tests {
         t.record(&Verdict::Invalid { reason: "x".into() });
         assert!(!t.passed());
         assert_eq!(t.invalid, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_timeout_captures_output_and_exit_code() {
+        let args = vec!["-c".to_string(), "echo out; echo err >&2; exit 3".into()];
+        let c =
+            run_with_timeout("sh", &args, Path::new("."), &[], Duration::from_secs(30)).unwrap();
+        assert!(!c.timed_out);
+        assert_eq!(c.code, Some(3));
+        assert!(c.combined.contains("out") && c.combined.contains("err"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_with_timeout_kills_a_hung_killer_and_its_children() {
+        let args = vec!["-c".to_string(), "sleep 60 & sleep 60".into()];
+        let started = Instant::now();
+        let c =
+            run_with_timeout("sh", &args, Path::new("."), &[], Duration::from_millis(300)).unwrap();
+        assert!(c.timed_out, "must report the timeout");
+        assert_eq!(c.code, None);
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "must not wait for the hung killer"
+        );
     }
 
     #[test]
