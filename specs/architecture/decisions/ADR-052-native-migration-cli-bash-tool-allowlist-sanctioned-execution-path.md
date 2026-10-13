@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.26"
+version: "1.27"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -140,6 +140,17 @@ consumers, the reader `detect_migration_read_state` and the coordinator's resume
 256 rule, including an `InvalidData` source and `CleanupWriteFailure`'s two substrings; a serde error is never
 carried as its message (item 11(g)(2); closes F-S2509-L2-001). Both CURRENT.json and Display rulings are recorded
 under the v1.26 changelog row.
+**v1.27 (S-25.08 local adversary pass 6, F-S2508-L6-004; architect ruling; no state-machine, taxonomy-code, exit-code,
+`<cause>` or VP-count change):** the PostToolUse/PostToolUseFailure release leg evaluates `tool_use_id` presence and
+grammar FIRST, before any filesystem access; an absent or grammar-failing id is a fully silent no-op (no `.factory`
+stat, no migration-state probe, no advisory or WARN). Recorded in §5a "Factory-root lookup mapping" and the §5a release
+ruling, and under the v1.27 changelog row. **Also folded into v1.27 (S-25.09 local adversary pass 2, F-S2509-L2-003,
+architect half):** §Decision 11(g)(3)(i) is restated to match BC-1.18.013 v1.15 "Helper visibility" exactly (emitting
+helpers module-private; pure data-returning functions may be `pub` and must never print or log), with the explicit
+ruling that `pub fn chunk_subsystem_rows_into_sub_shards` (and `oversized_row_advisories`) may stay `pub` because a
+hook-process caller such as a future full-rebuild path writes nothing to stderr; and the §Downstream owed list for
+BC-1.18.010 now also carries the `BcIndexAddressingError` sanitization sibling paragraph (human-confirmed extension,
+D-1257).
 
 ## Context
 
@@ -956,8 +967,21 @@ Mapping by leg (identical classification, leg-appropriate verdict):
 | Leg | Absent | Unstatable (Err) |
 |---|---|---|
 | PreToolUse admission (Edit/Write/MultiEdit with a valid `file_path`, after the input guards) | OUT OF SCOPE: admitted, no reservation, nothing created (`tracing::debug!` breadcrumb stays a non-obligation) | `E-MAINTENANCE-002 (io)`, FAIL CLOSED: one `migration.admission_failed` (`cause=io`; `detail` = sanitized path + `ErrorKind` + message), no `_blocked`, no reservation, nothing created, the write is NOT admitted |
-| PostToolUse / PostToolUseFailure release | silent no-op (no reservation can exist) | NO verdict (release is never a verdict, §5a F-001): one `migration.admission_advisory` (`reason=reservation_release_failed`, `detail` as above), nothing created or deleted; the reservation, if one exists, is reclaimed by the drain-start TTL GC |
+| PostToolUse / PostToolUseFailure release (envelope carries a grammar-valid `tool_use_id`; an absent or invalid id exits silently BEFORE the lookup, see "Release-leg evaluation order" below) | silent no-op (no reservation can exist) | NO verdict (release is never a verdict, §5a F-001): one `migration.admission_advisory` (`reason=reservation_release_failed`, `detail` as above), nothing created or deleted; the reservation, if one exists, is reclaimed by the drain-start TTL GC |
 | Coordinators (`migrate-bc-index`, `backfill-append-logs`) | exit 2 `FACTORY_ROOT_NOT_FOUND` (unchanged, normative line unchanged) | exit 2 with the EXISTING `BcIndexMigrationError::Io { path: <project_root>/.factory, source }` (its existing Display and exit mapping); NOT `FACTORY_ROOT_NOT_FOUND`; nothing created or mutated; raised before any lock or write |
+
+**Release-leg evaluation order (v1.27 ruling — closes F-S2508-L6-004).** The release leg evaluates, in this
+order: (1) `is_tool_completion_event(event_name)`; (2) `tool_use_id` presence (a JSON string) and the
+§Error-Code-Semantics grammar (`is_valid_tool_use_id`) — a pure payload decision that reads no filesystem state;
+(3) `resolve_factory_root` (the one `.factory` stat); (4) the `migration-state` presence probe; (5) the
+reservation `unlink`. An envelope whose id is absent, non-string or grammar-failing exits at step 2 as a SILENT
+no-op: it can never have created a reservation (admission fail-closes an invalid id before reserving), so the
+leg touches no filesystem entry and emits no advisory or WARN, even when `.factory` or `migration-state` is
+unstatable (e.g. a self-looping `migration-state` ELOOP). The admission leg's opposite order (L4-002: `.factory`
+stat before id validity) is deliberate and unchanged: admission must fail closed on an unknown scope, whereas
+release has no verdict to protect. `release_bc_index_writer_reservation` keeps its own grammar guard as
+defense-in-depth for other callers; it is not the leg's primary gate. The mapping table's release-row
+"silent no-op" and "one advisory" cells apply only to envelopes that pass step 2.
 
 *Rationale, from the existing rules:* (1) fail-closed — the gate's whole safety argument (Dekker
 interlock) is that a protected write is either admitted with a visible reservation or refused; admitting
@@ -1292,8 +1316,9 @@ silent no-op (it cannot have created a reservation).
   failure envelope whose `tool_name` were absent or differently shaped must still release; the
   `tool_use_id` is globally unique, the unlink is idempotent, and a non-protected tool's id has no
   reservation file, so the cost is one `unlink` returning ENOENT; this also pre-wires the future
-  Bash leg). A `tool_use_id` that fails the §Error-Code-Semantics grammar can never have created
-  a reservation and is a silent no-op on release; release errors other than ENOENT are
+  Bash leg). A `tool_use_id` that is absent or fails the §Error-Code-Semantics grammar can never have created
+  a reservation and is a silent no-op on release (v1.27: decided FIRST, before any filesystem access or
+  diagnostic; see §5a "Release-leg evaluation order"); release errors other than ENOENT are
   a non-fatal `migration.admission_advisory` InternalLog event (never a verdict). Release runs at the registry-independent
   position (§5a "Evaluation position").
   **If neither Post event arrives** (harness crash, session killed, hook timeout, a user denial
@@ -3687,11 +3712,41 @@ how the verdict is delivered.
       (`oversized_row_advisories`, and the pure chunker, which returns none) is not an emitting helper, may be
       `pub`, and MUST NOT print, log or touch stderr — that is what keeps the `pub` chunker "pure"
       (deterministic, no I/O, no logging). No function in the call tree of `chunk_subsystem_rows_into_sub_shards`
-      may call an emitting helper; (ii) no function reachable from
+      may call an emitting helper. **(v1.27 ruling, closes F-S2509-L2-003; identical to BC-1.18.013 v1.15 "Helper
+      visibility")**: the rule is "EMITTING helpers are module-private; pure DATA-RETURNING functions MAY be `pub`
+      and MUST NEVER print, log or touch stderr", not "every helper is private". Accordingly
+      `pub fn chunk_subsystem_rows_into_sub_shards` and `pub fn oversized_row_advisories` MAY stay `pub`: they are
+      pure, so a hook process that calls them (the doc's "future steady-state full-rebuild path" caller) writes
+      nothing to stderr and can never produce a `migrate-bc-index:`-prefixed line; only the coordinator prints, via the
+      module-private `emit_oversized_row_advisories`, on a fresh-run `Completed`. The `pub` visibility is therefore NOT
+      a defect; the enforcing check is the call-tree rule above plus a test that calls the chunker and
+      `oversized_row_advisories` over an oversized row and asserts empty stderr and no `tracing` event. A future
+      change that makes either function emit, or makes it call an emitting helper, violates this rule and MUST
+      instead return the fact as data; (ii) no function reachable from
       `migration_writer_admission`, `migration_writer_release` or `read_active_txn_record` may call them (the
       implementer records the grep of callers in the burst evidence and adds a unit test that drives the
       admission entry points over a state that WOULD trip each advisory and asserts nothing is written to
-      stderr); (iii) a future advisory condition reachable from a dispatcher entry point MUST be an Event 13
+      stderr); **read_active_txn_record contract (v1.27 ruling, closes F-S2509-L2-007).** `read_active_txn_record`
+      is an admission entry point (it is named in rule (ii)), so it is a TYPED B2 observation and MUST NOT
+      fabricate. It considers ONLY records whose `migration_id` is the B2 id (an absent `migration_id` reads as B2,
+      Precondition 6(f)(ii)); a record of any other migration (e.g. `backfill-append-logs`) is never returned typed
+      as B2. Per case: (1) a live B2 record: the strict-presence typed decode (v1.23 items 3-4), `Ok(Some(record))`,
+      or the existing `AdmissionStateIntegrity` fail-closed error if a Tier 1 field is absent or mistyped (a live
+      record is the writer-exclusion subject, so it fails closed); (2) no live B2 record and a COMPLETE terminal B2
+      record (the same strict-presence decode succeeds): `Ok(Some(record))` carrying exactly the on-disk values
+      (a terminal record is returned only as a read-only observation; it never gates admission, and the admission
+      core classifies terminal records through `read_txn_files` and the pure core, not through this function);
+      (3) no live B2 record and an INCOMPLETE terminal B2 record (any Tier 1 key absent or undecodable): `Ok(None)`.
+      It is never `Err` (a terminal record is never rejected, modified or diagnosed for a missing Tier 1 field,
+      ADR v1.24 item 3 and Precondition 6(f)(ii); F-014 neutral-name/no-verdict) and never a record with placeholder
+      values (the typed record cannot express "absent"; `schema_version` 1, empty ids, fencing 0 and `None` hashes are
+      all valid-looking values). Ruled against `AdmissionStateIntegrity` for (3): admission fail-closes on the LIVE
+      record only, and the terminal-integrity of an incomplete terminal record is observed, not enforced, by the
+      reconcile/archive path; (4) only other-migration records (live or terminal): `Ok(None)` here (a foreign LIVE
+      record is Branch C, decided by the admission core on `read_txn_files`, not by this typed B2 reader); (5) no
+      records: `Ok(None)`. If several complete terminal B2 records exist, the first in the reader's deterministic
+      file-name order is returned. `planner_view` MUST NOT be used to project a terminal record whose Tier 1 fields
+      are absent. (iii) a future advisory condition reachable from a dispatcher entry point MUST be an Event 13
       (`migration.admission_advisory`) instead, or the shared helper MUST return the advisory as data for the
       coordinator caller to print. A structural data-returning refactor of the four existing sites is NOT
       required **except the `OVERSIZED_ROW_SUBSHARD` site (v1.26)**, which is the one site that is not a
@@ -5194,7 +5249,13 @@ committed files.
   `CurrentGenerationPointer` (string `generation_id`/`status`/`txn_id`), a `status` other than `"committing"`, or an
   empty / multi-component `generation_id` ⇒ `BcIndexAddressingError::Io`, never "migration not started"; the
   shared helper is `read_current_pointer_marker`; the coordinator's resume probe uses the same helper. Story
-  Anchor: S-25.09 also delivers step 2 classification. No Precondition/Postcondition/Invariant change.
+  Anchor: S-25.09 also delivers step 2 classification. **Also owed (v1.27, human-confirmed extension,
+  D-1257; mirror of BC-1.18.013 Display sanitization):** the `BcIndexAddressingError` sibling
+  sweep in §Reader Integration: `BcIndexAddressingError::{Io, Toml, MalformedBcId}` render their data-derived
+  substrings (`Io` `path` and `source` as two separately escaped 256-capped substrings) through the same
+  sanitization, and serde / TOML messages are never carried (category / line / column built at the source of the
+  `io::Error`), per ADR-052 §Decision 11(g)(2) item (e). No Precondition/Postcondition/Invariant change beyond
+  these two Reader Integration texts.
 - **BC-1.18.011 v1.22→v1.23:** (a) Postcondition 9(e)(a0) / reader-parity text gains the `CURRENT.json` clause
   (mirror of BC-1.18.010 step 2); new vectors **EC-078..EC-083** next to EC-070..EC-075: `CURRENT.json` as (EC-078)
   a dangling symlink during COMMITTING with `completed.json` absent ⇒ reader `Io`, NOT `NotStarted`; (EC-079) a
@@ -5330,6 +5391,7 @@ committed files.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.27 | 2026-10-11 | architect | **One ruling from S-25.08 local adversary pass 6, F-S2508-L6-004 (LOW); no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.26 treated as immutable, so a NEW version.** The release leg now evaluates `tool_use_id` presence + grammar BEFORE `resolve_factory_root` and the `migration-state` probe; an absent or invalid id is a fully silent no-op (no stat, no advisory/WARN), resolving the conflict between the §5a mapping table ("unstatable `.factory` ⇒ one advisory", id-unqualified) and the §5a release ruling / BC-1.18.013 EC-021 / Precondition 6(c) / story AC-011 ("invalid id ⇒ silent no-op"). Amended: §5a "Factory-root lookup mapping" release row + new "Release-leg evaluation order" paragraph; §5a release ruling sentence. Admission order (v1.24 L4-002) unchanged. **Code owed (S-25.08):** in `bc_index_migration_reservation_release`, move the `tool_use_id` extraction plus `is_valid_tool_use_id` check ahead of `resolve_factory_root`; keep the guard inside `release_bc_index_writer_reservation`. **S-25.09:** the `reservation_release_failed` InternalLog conversion inherits the order (an invalid/absent id emits no event). **Test vectors owed:** absent id, `"../x"`, empty and over-length id, each with `migration-state` a self-looping symlink (ELOOP) and, separately, `.factory` unstatable, asserting zero WARN/advisory and no filesystem access; plus a valid-id + ELOOP control still emitting exactly one WARN/advisory. **Also folded into v1.27 (F-S2509-L2-003, architect half; S-25.09 local adversary pass 2):** §Decision 11(g)(3)(i) restated to match BC-1.18.013 v1.15 "Helper visibility" (emitting helpers module-private; pure data-returning functions may be `pub` and must never print or log), with the explicit ruling that `pub` `chunk_subsystem_rows_into_sub_shards` and `oversized_row_advisories` may stay `pub` (pure; a hook-process caller such as a future full-rebuild path writes nothing to stderr); the BC-1.18.010 owed list gains the `BcIndexAddressingError` sanitization sibling paragraph (human-confirmed extension, D-1257). **Also folded into v1.27 (F-S2509-L2-007, S-25.09 local adversary pass 2):** §Decision 11(g)(3) gains the "read_active_txn_record contract" ruling: B2-only selection by `migration_id` (absent reads as B2); live B2 record strict-decoded (fail-closed on malformed); complete terminal B2 record returned with on-disk values; incomplete terminal B2 record, other-migration-only and empty all `Ok(None)`, never `Err`, never placeholder values. |
 | 1.26 | 2026-10-08 | architect | **Four rulings from the S-25.09 local adversary pass 2; no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.25 is committed (`.factory` 81b44098) and immutable, so these are a NEW version.** (1) F-S2509-L2-002/003 — item 11(f)(2) "Collection and emission rule" and 11(g)(3)(i): `OVERSIZED_ROW_SUBSHARD` is no longer emitted from `close_sub_shard_chunk` at STAGING time (its clause "and the migration completed" was false when a later census / fingerprint / intent-append / pointer-swap / canonical-move step failed); the `pub` chunker is pure (no stderr, no `tracing`), a pure `oversized_row_advisories(chunks, cap)` derives the advisories as data, `run_bc_index_migration_core` collects them and prints them only when the fresh run returns `Completed` (discarded on any `Err`); resumed STAGING / COMMITTING runs neither re-derive nor persist (no txn-schema change; documented rationale). (2) F-S2509-L2-006 — item 11(d)/11(f)(2): the fresh-run `abort_staging` closure's `let _ = fs.remove(gen_dir)` is replaced by the helper `discard_incomplete_staging` uses and reports `STAGING_DIR_REMOVE_FAILED` after its ABORTED write succeeded, before the gate-OPEN write. (3) F-S2509-L2-009 — item 11(c) point 6: `CURRENT.json` gets the lstat-first four-verdict classification with record-shape validation in BOTH consumers (reader `detect_migration_read_state` → `BcIndexAddressingError::Io`; coordinator resume probe → `Io` exit 2, protecting Invariant 3) through a shared `read_current_pointer_marker`; `status != "committing"` and an empty / multi-component `generation_id` are `InvalidData`, not `NotStarted` / `Committing { "" }`. (4) F-S2509-L2-001 — item 11(g)(2): confirmed and made explicit that `Io` `path` AND `source` are two separately escaped, 256-capped data-derived substrings; serde messages are never carried (category/line/column via `parse_failure_message` at the source); `CleanupWriteFailure`'s `cause` and `while_handling` are two independent 256 substrings and `Io` special-cases it so the "while handling" tail is not truncated; `BcIndexAddressingError` siblings follow. §Downstream v1.26 carries the BC (BC-1.18.013 v1.15, BC-1.18.010 v1.12, BC-1.18.011 v1.23), code and test deltas (S-25.09). VP-INDEX / verification-architecture / verification-coverage-matrix UNCHANGED. |
 | 1.25 | 2026-10-08 | architect | **Two interpretive rulings from the S-25.09 local adversary pass 1; no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.24 is committed (`.factory` 61709b2d) and immutable, so these are recorded as a NEW version.** (1) Item 11(c) clarification (closes F-S2509-L1-004): the under-lock `completed.json` read has FOUR verdicts — a dangling symlink, a non-`NotFound` stat or read error, and non-record content are `Io` exit 2 (never absent, never exit 0); presence-only semantics are kept for branch selection; what `recover()` receives; reader parity. (2) NEW item 11(f) (closes F-S2509-L1-006): the "Coordinators" clause of BC-1.18.013 Postcondition 10 is an OPEN set (bounds: `warn!`/`error!` conditions that change what the operator must know; not `debug!`/`info!`, not conditions already carried by an exit-2 line); failures keep the existing form; non-fatal advisories use `<subcommand>: <TOKEN> (advisory): <path>: <os error>; <clause>` with a CLOSED coordinator-advisory token domain (`GATE_OPEN_RESET_FAILED`, `TERMINAL_TXN_ARCHIVE_FAILED`, `STAGING_DIR_REMOVE_FAILED`, and `OVERSIZED_ROW_SUBSHARD` only if reachable from a coordinator process; these are NOT taxonomy codes and have no exit status of their own); the v1.23 exit-0 silence ruling is amended so advisory lines are permitted on an exit-0 run (stdout stays empty); canonical-move halt reasons are NOT an S-25.09 deliverable — S-25.09 emits no interim halt line — and belong to S-25.11 (ADR-054 AC-015 = S-25.11 story AC-008), where ADR-054 v1.1 widens the `CANONICAL_MOVE_HALTED` reason domain to all six halt sites. The same-version extension text previously placed in the v1.24 §Status preamble is moved here; v1.24 was NOT extended. **Consistency extension (same uncommitted v1.25, 2026-10-08):** item 11(g) scope widened to ALL operator stderr lines — item 9 `FOREIGN_MIGRATION_REFUSED` `<id>` changes from "truncated to 64" to 256 per data-derived substring (reusing the one parametrized sanitizer), and the ADR-054 §3.1 stderr placeholders follow the same rule (ADR-054 v1.1 extension 2); 64 is the InternalLog-event cap only. No taxonomy-code, exit-code, kind or VP-count change. Code: S-25.09 (item 9 renderer); S-25.10/S-25.11 not yet implemented. PO mirrors: BC-1.18.011, BC-1.18.013, error-taxonomy. |
 | 1.24 | 2026-10-08 | architect | **Human-authorized amendment (CLAUDE.md rule 12; 2026-10-08) of §Decision 7a/7b/7c/7d after independent research (`.factory/research/adr-052-intent-log-format-and-move-list-semantics.md`); no §Decision 1/2/3/4 mechanism change, no OPEN/DRAINING/LOCKED state-machine change, no VP added or retired.** (1) NEW companion **ADR-054**; §Decision 7b MOVED there (this ADR keeps the exact `#### 7b` heading as a pointer table so every citation resolves) and rewritten as the HARDENED format: code tokens + `V1` kept; ABNF grammar; fixed key order; strict value grammar enforced at plan-build and write time; SHA-256 over the exact first nine record lines (golden vector, `sed`+`shasum` operator recipe); byte-level line-anchored reader (torn tail absent; corruption followed by a valid record fails closed); torn-tail truncation under the flock before append; `F_FULLFSYNC` + directory sync on creation (§7d gains the append-barrier paragraph); ONE shared module for both migrations. (2) FIXED-PLAN model: `pending_canonical_moves` RENAMED `canonical_move_plan` (§7a field, §3a, §7c steps 3/6/7/8, §Error Code Semantics Tier 1 / Branch C hash source / rulings (ii) and (iv) / item 10 strict-presence [still TWELVE keys] and 10(a) nested strictness / item 11(e) steps 2-3 / MIGRATION_STATE_INTEGRITY_FAILURE row); §7c step 7 sub-step d DELETED (the txn record is not rewritten per move); DONE records are the completion record. (3) B-1 (`TreatDone` appends DONE), B-2 (DONE bound to `txn_id`/`fencing_generation`, copied from and compared with the INTENT's `expected_post_hash`, truthful `expected_pre_state`), B-3 (a COMMITTING txn needs a non-empty plan equal to the INTENT target set, else `txn_record_malformed`) specified normatively in ADR-054 Decision 3; three NEW exit-2 codes `INTENT_LOG_CORRUPT`, `INTENT_LOG_VALUE_REJECTED`, `CANONICAL_MOVE_HALTED` (§Error Code Semantics table). (4) Both v1.23 open items (byte-encoding "human gate", `pending_canonical_moves` "open item for the human") marked RESOLVED. (5) §Downstream gets only a pointer block; the S-25.10 block (AC-001..AC-019, red tests T1-T17, code changes per story, BC/taxonomy/VP wording owed) is in ADR-054 because ADR-052 exhausts the hook fuel budget. NEW story S-25.10 (stacked on S-25.09; blocks S-25.06 and any `migrate-bc-index` release); S-25.09 keeps only the txn_id / intent_log_path / DONE-binding plumbing. **Recommendation to the orchestrator (not a deferral of this amendment):** ADR-052 remains ~4.9k lines and still exhausts hook fuel; a further split (§Decision 5a, §Error Code Semantics, the v1.18-v1.23 Downstream history) needs its own architect decision with a stable-anchor map. |

@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "a053525"
+input-hash: "5459b58"
 traces_to: STATE.md
 ---
 
@@ -2606,3 +2606,49 @@ D-1256, v10.89→v10.90 (pre_pause_version 10.89; one bump). Single-commit TD-VS
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `81b44098`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Persisted S-25.08 pass 5 and S-25.09 pass 2 verbatim, registered ADR-052 v1.26 / ARCH-INDEX v4.56 / STORY-INDEX v4.491 / S-25.08 v1.8 and the hash cascade, recorded the pushed WIP branches and the uncommittable partial test file, archived the v10.89 checkpoint, and PAUSED the pipeline.
+
+## Burst: HUMAN-DECISIONS-RESUME-ADR052-V127-BC-WORDING-REGISTRATION (2026-10-11)
+
+D-1257, v10.90→v10.91 (one bump). Single-commit TD-VSDD-053 resume registration burst (state-manager). Pipeline RESUMED (`pipeline: in_progress`). Registers the specialist work done in the working tree after the D-1256 commit and the human decisions of 2026-10-11.
+
+**Parent-commit:** `d39048b6` (factory-artifacts HEAD immediately prior, v10.90 / D-1256). Code positions are orchestrator-stated (`feature/S-25.08` @ `ee9b2741`, `feature/S-25.09` @ `634dc3dc`); `git for-each-ref` at commit time showed `1bdd86fc` and `9ea0a8c6` because test-writers kept committing. Test and gate results are orchestrator-reported; none were re-run by the state-manager except the BC version-sync test and the hash and YAML checks below.
+
+**Adversary verdict:** none run in this burst; three prior verdicts persisted VERBATIM. S-25.08 pass 6 (reviewed `169df502`): NOT CLEAN, 0C/0H/1M/4L (L6-001 CHANGELOG mis-anchored EC/AC citations; L6-002 stale story status; L6-003 stale test module doc; L6-004 unruled release-leg evaluation order; L6-005 CI failpoints floor on one of two targets), novelty LOW-MEDIUM. Pass 7 (reviewed `4adeaee6`): NOT CLEAN, 0C/0H/1M/2L (L7-001 four stale test-module docs; L7-002 non-existent event name; L7-003 story out of date), novelty LOW-MEDIUM. Pass 8 (reviewed `2d1fb0c0`): NOT CLEAN, 0C/0H/1M/4L (L8-001 two stale test comments; L8-002 non-existent "VP-147 v1.18"; L8-003 BC/VP/taxonomy version pins, pending intent; L8-004 [process-gap] review files not persisted; L8-005 paraphrased commit subjects), novelty LOW to moderate. Streak 0/3; no new deferred items.
+
+**Files touched (Dim-1):** 20 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, the three review files, the 16-line sentinel replacement across five spec files, STORY-INDEX, BC-INDEX, ARCH-INDEX register legs, policies.yaml escape repair, S-25.08 task ticks; specialist-authored files registered as found in the working tree).
+- STATE.md (v10.90→v10.91)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1257)
+- cycles/v1.0-brownfield-backfill/lessons.md (6 D-1257 lessons)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.90 archived)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- code-delivery/S-25.08/adv-local-pass-6.md (NEW)
+- code-delivery/S-25.08/adv-local-pass-7.md (NEW)
+- code-delivery/S-25.08/adv-local-pass-8.md (NEW)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.27; sentinel replaced)
+- specs/architecture/ARCH-INDEX.md (v4.57)
+- specs/behavioral-contracts/ss-01/BC-1.18.010.md (v1.12; sentinel replaced; input-hash cascade)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.23; sentinel replaced; input-hash cascade)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.15; sentinel replaced; input-hash cascade)
+- specs/behavioral-contracts/BC-INDEX.md (v5.111)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.9; T-55/T-56/T-57 ticked; hash)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (v1.4; sentinel replaced; hash)
+- stories/STORY-INDEX.md (v4.492; index-only stub S-14.10)
+- policies.yaml (POLICY 19 enforcement entry: escape-only fix)
+- regression-state.json (hook-written telemetry)
+- sidecar-learning.md (hook-written telemetry)
+
+**Codifications:** D-1257 (a)-(h) in decision-log.md; six lessons (L-BB-D1245 x10; story-status lag; review persistence; CHANGELOG EC/AC owner-qualification; hook false-positive recurrence; sibling-sweep).
+
+**Dim-2 Attestations (literal shell, captured stdout; D-449(a)):** `grep -rn 'D-{TBD-resume-2026-10-11}' .factory --exclude-dir=.git | wc -l` → `0` (before the burst: 16 lines across BC-1.18.010 (2), BC-1.18.011 (3), BC-1.18.013 (4), ADR-052 (3), S-25.09 story (4)). `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` → `test result: ok. 1 passed; 0 failed` (and the `corpus_version_sync` filter: `2 passed; 0 failed`). `cargo run -q -p last-amended-migrate -- migrate --check` → exit 0 (all five governed files `eligibility=CurrentEntryOnly`, `mutated=false`). `python3 -c "import yaml; list(yaml.safe_load_all(open('.factory/policies.yaml')))"` → no error, `policies.yaml OK` (before: `found unknown escape character '|'` at line 425 column 653, then `'.'` at column 663). `compute-input-hash` stored vs computed MATCH for ARCH-INDEX 86ceb95, BC-INDEX 4435342, BC-1.18.010 b6f90eb, BC-1.18.011 a181b55, BC-1.18.013 f93472c, S-25.08 f5a109b, S-25.09 7158d62, STORY-INDEX 4dfc15c, ADR-052 4637aa0. `wc -l .factory/STATE.md` → `248`.
+
+**Dim-5:** Count-propagation: BC count 2,007, VP count 147 and ADR count 54 unchanged; STORY-INDEX Status Summary draft 113→114 and Total (active) 233→234 (S-14.10 index-only stub). Version propagation: STATE.md v10.91 records ARCH-INDEX v4.57, BC-INDEX v5.111, STORY-INDEX v4.492, ADR-052 v1.27, BC-1.18.010 v1.12, BC-1.18.011 v1.23, BC-1.18.013 v1.15, S-25.08 v1.9, S-25.09 v1.4; VP-INDEX v3.33 unchanged.
+
+**Dim-6:** No new adversary findings authored here; no tech-debt-register entries. OWED (routed, not performed): story-writer cite propagation and hash refresh for S-25.02/S-25.06/S-25.10/S-25.11/S-25.12/S-12.16/S-26.06 and the E-25/E-26 epics ([D-1257-HASH-CASCADE], left unrefreshed on purpose so the drift signals the owed POLICY 8 propagation) and the S-14.10 story file plus the E-14 story_count (9→10); S-25.08 L8-001 and S-25.09 stale-test fixes in progress; ADR-052 v1.27 was edited under FUEL_EXHAUSTED advisories, so no validator ran on it.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` mutations (compute-input-hash and last-amended-migrate are the sanctioned tools). PostToolUse advisories seen and not blocking writes: FUEL_EXHAUSTED on large files; transient POLICY 18 parity and input-hash drift messages during intermediate edits, all resolved before commit.
+
+**Closes:** [D-1256-ADR052-V126-EXTENSIONS] (human confirmed); F-S2508-L8-004 persistence owed by S-25.08 T-55/T-56/T-57; the S-25.09 sentinel obligation; the policies.yaml parse defect. **Opens:** [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE], [D-1257-HASH-CASCADE], [D-1257-S14-10]. **Unchanged OPEN:** [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], PR #769.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `d39048b6`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Registered the 2026-10-11 human decisions, persisted S-25.08 passes 6/7/8 verbatim, registered ADR-052 v1.27 / BC wording / story versions in the three indexes, replaced the 16 decision-cite sentinels with D-1257, repaired the policies.yaml YAML escapes, opened the S-14.10 follow-up stub, archived the v10.90 checkpoint, and set the pipeline to in_progress.

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.11"
+version: "1.12"
 status: active
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -13,16 +13,16 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.009.md
   - .factory/specs/verification-properties/VP-INDEX.md
-input-hash: "3ddc377"
+input-hash: "b6f90eb"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
 subsystem: "SS-01"
 capability: "CAP-043"
 lifecycle_status: active
-last_amended: "2026-10-08 (v1.11) — ADR-052 v1.25 item 11(c) clarification point 5 (reader parity; closes F-S2509-L1-004 sibling sweep, TD-VSDD-060): §Reader Integration step 1 (`detect_migration_read_state`) probes `completed.json` lstat-first with the same four verdicts and record-shape validation as the coordinator, through a shared `read_completed_marker` helper. Prior: 2026-09-22 (v1.10) — ADR-051 §Decision 18 addendum (Postcondition 4 chunk-boundary rule)."
+last_amended: "2026-10-11 (v1.12) — ADR-052 §Decision 11(c) point 6 (closes F-S2509-L2-009): §Reader Integration step 2 (`CURRENT.json`) is classified lstat-first with record-shape validation (absent ⇒ continue; dangling symlink / other lstat-read error / non-pointer content / `status` other than `committing` / empty or multi-component `generation_id` ⇒ `BcIndexAddressingError::Io`, never `NotStarted`) through the shared `read_current_pointer_marker` helper; plus the human-confirmed (D-1257; closes D-1256-ADR052-V126-EXTENSIONS) per-substring 256 diagnostic sanitization of `BcIndexAddressingError::{Io, Toml, MalformedBcId}` with serde/TOML messages never carried (ADR-052 §Decision 11(g)(2)). Prior: 2026-10-08 (v1.11) — ADR-052 v1.25 item 11(c) clarification point 5 (reader parity; closes F-S2509-L1-004 sibling sweep, TD-VSDD-060): §Reader Integration step 1 (`detect_migration_read_state`) probes `completed.json` lstat-first with the same four verdicts and record-shape validation as the coordinator, through a shared `read_completed_marker` helper. Prior: 2026-09-22 (v1.10) — ADR-051 §Decision 18 addendum (Postcondition 4 chunk-boundary rule)."
 introduced: v1.0-brownfield-backfill
-modified: ["2026-09-22 (v1.10)", "2026-10-08 (v1.11)"]
+modified: ["2026-09-22 (v1.10)", "2026-10-08 (v1.11)", "2026-10-11 (v1.12)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -247,7 +247,26 @@ written), readers accessing BC-INDEX paths MUST use the following protocol:
    compared with any other file by the reader (presence selects the branch). Vectors: BC-1.18.011
    EC-070..EC-075.
 2. Check `.factory/migration-state/CURRENT.json` — if `status: committing`: for each required
-   file, open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. Rationale (C-1,
+   file, open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. **The probe is
+   lstat-first with record-shape validation, the same classification as step 1 (v1.12; ADR-052 §Decision
+   11(c) point 6; `detect_migration_read_state` and the coordinator's STAGING-resume probe
+   `read_current_generation_pointer_if_present` both call one shared `read_current_pointer_marker`
+   helper, sibling of `read_completed_marker`):** the existence probe is `symlink_metadata` (lstat-class)
+   and ONLY `NotFound` from that call means ABSENT (a fact about the directory entry, never about a link
+   target) ⇒ continue with step 3. A dangling symlink (lstat sees an entry; the read returns `NotFound`,
+   the ENOENT of the TARGET), any other lstat or read error (EACCES, ELOOP, EIO, ENOTDIR, EISDIR, ...),
+   content that reads but is not a `CurrentGenerationPointer` (not UTF-8, empty, truncated, unparseable
+   JSON, not an object, or an object whose `generation_id`, `status` or `txn_id` is not a string; unknown
+   extra keys ignored), a `status` other than exactly `"committing"` (the writer never produces another
+   value while the file exists; "any other status ⇒ migration not started" is superseded), and a
+   `generation_id` that is empty or is not a single path component (contains `/`, `\`, NUL, or equals `.`
+   or `..`) ⇒ `BcIndexAddressingError::Io`, NEVER "migration not started" (step 3) and NEVER
+   `Committing { generation_id: "" }`: an absent entry authorizes reading the PRE-migration legacy file,
+   so an unreadable or uninterpretable pointer must fail closed. `completed.json` precedence is unchanged
+   (step 1 is decided first; an `Err` there is returned before `CURRENT.json` is touched; a valid
+   `completed.json` wins and `CURRENT.json` is not read). An `InvalidData` source is built from the
+   category form of the parse failure (category, line, column), never from the parser's message (the
+   sanitization rule below). Vectors: BC-1.18.011 EC-078..EC-083. Rationale (C-1,
    ADR-052 §Decision 7c): the canonical path holds STALE old content for in-place-overwrite
    targets (e.g. BC-INDEX.md) until step 7's specific rename for that file — OPEN-based with
    ENOENT fallback ensures new content is always returned for BOTH net-new shard files AND
@@ -256,7 +275,20 @@ written), readers accessing BC-INDEX paths MUST use the following protocol:
    (new content at canonical) — open the canonical path instead. `rename(2)` atomicity makes
    this protocol race-free: the canonical path is guaranteed to hold new content the moment
    ENOENT is observable on the gen-path (the rename completed before ENOENT was visible).
-3. If neither exists: legacy BC-INDEX.md path is current (migration not started).
+3. If neither exists: legacy BC-INDEX.md path is current (migration not started). "Neither exists"
+   means `completed.json` AND `CURRENT.json` were each classified ABSENT by the lstat-first rule above;
+   an `Io` verdict at step 1 or step 2 never reaches this step.
+
+**Diagnostic sanitization of the reader's error variants (v1.12; ADR-052 §Decision 11(g)(2)(e), human-confirmed
+extension).** `BcIndexAddressingError::{Io, Toml, MalformedBcId}` are rendered into a hook result, so each
+data-derived substring of their Display (the `path` of `Io`, its `source` text, the candidate text of
+`MalformedBcId`) is control-character-escaped and capped at 256 characters, EACH substring separately (a
+long path never starves the source of its cap; the two are never joined and then capped as one string).
+The `Toml` message is replaced by its error category and span and never carries the offending source
+line. A serde or TOML parser message is never carried as an error text (it echoes on-disk content); the
+category form is built at the source of the error. The 64-character cap is not involved: no `InternalLog`
+event renders these variants. Normative vectors and the coordinator-side twin: BC-1.18.013 Postcondition 10
+"Coordinators" clause and BC-1.18.011 EC-084.
 In steady state (completed.json present), canonical paths are always authoritative. The
 'COMMITTED absent → read legacy BC-INDEX.md' heuristic from v1.2 is eliminated: completed.json
 is permanent and its presence is unambiguous in all states including after cleanup.
@@ -297,6 +329,7 @@ native gate as BC-1.18.006/009) is bound by.
 
 - S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Artifacts (Postconditions 1-6, Invariants 1-4, Reader Integration steps 2-3; mechanism B2 end-state addressing)
 - S-25.09 — Reader Integration step 1 (v1.11): the lstat-first `completed.json` classification and record-shape validation in `detect_migration_read_state`, delivered through the `read_completed_marker` helper shared with the coordinator's `read_completed_under_lock` (ADR-052 v1.25 item 11(c) clarification point 5; closes F-S2509-L1-004). Reader-parity vectors BC-1.18.011 EC-070..EC-075; tests in `tests/s2509_pass1_l1_findings_test.rs`.
+- S-25.09 — Reader Integration step 2 (v1.12): the lstat-first `CURRENT.json` classification and record-shape validation in `detect_migration_read_state`, delivered through the `read_current_pointer_marker` helper shared with the coordinator's STAGING-resume probe (ADR-052 §Decision 11(c) point 6; closes F-S2509-L2-009), and the §Reader Integration diagnostic-sanitization paragraph for `BcIndexAddressingError::{Io, Toml, MalformedBcId}` (ADR-052 §Decision 11(g)(2); closes F-S2509-L2-001 sibling sweep). Vectors BC-1.18.011 EC-078..EC-084.
 
 Note: the sibling lstat-first rule for `completed-backfill-append-logs.json` is the mechanism-A backfill mirror and is NOT covered by this BC (it governs only B2's `completed.json`); that obligation is S-25.06's and is anchored on the BC that specifies the mechanism-A backfill marker, not here.
 
@@ -313,7 +346,7 @@ Note: the sibling lstat-first rule for `completed-backfill-append-logs.json` is 
 | Capability Anchor Justification | CAP-043 ("Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Append-Logs and BC-INDEX Structured-Catalog Sharding") per capabilities.md §CAP-043 — this BC specifies mechanism B2 exactly as CAP-043 describes it: "B2 splits the file's ten already-existing `### SS-NN` per-subsystem body sections into individually-addressable shard files, keyed by the already-authoritative BC-S-prefix→SS-NN mapping... for zero-lookup first-level addressing." |
 | L2 Domain Invariants | none (dispatcher runtime architectural invariant, not an L2 domain-spec DI-NNN) |
 | Architecture Module | SS-01 (Hook Dispatcher Core — `shard_manager.rs` B2 artifact-shape handler) |
-| ADR | ADR-051 §Decision 7 (B2 per-subsystem sharding design); §Decision 8 (shard-manifest schema, reader/writer migration surface); §Decision 10 (governed one-time migration, BC-1.18.011); §Rationale ("Why the per-subsystem BC-INDEX partition is not a new invention") |
+| ADR | ADR-051 §Decision 7 (B2 per-subsystem sharding design); §Decision 8 (shard-manifest schema, reader/writer migration surface); §Decision 10 (governed one-time migration, BC-1.18.011); §Rationale ("Why the per-subsystem BC-INDEX partition is not a new invention"); ADR-052 §Decision 11(c) (lstat-first marker classification, points 5 and 6); ADR-052 §Decision 11(g)(2) (per-substring diagnostic sanitization) |
 | Stories | S-25.02, S-25.09 |
 | Cycle | v1.0-brownfield-backfill (F2 — product-owner spec-evolution burst) |
 | Feature | E-25 — Validation Integrity and Large-Artifact Resilience |
@@ -322,6 +355,7 @@ Note: the sibling lstat-first rule for `completed-backfill-append-logs.json` is 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.12 | 2026-10-11 | product-owner | Application of ADR-052 §Decision 11 rulings from S-25.09 local adversary pass 2 (the architect's ADR-052 v1.26; the committed v1.25 is immutable). (A) F-S2509-L2-009 (§Decision 11(c) point 6): §Reader Integration step 2 replaces "Check `CURRENT.json` — if `status: committing`" by the lstat-first classification shared with step 1 through a `read_current_pointer_marker` helper (called by `detect_migration_read_state` and by the coordinator's STAGING-resume probe): lstat `NotFound` ⇒ absent, continue to step 3; a dangling symlink, any other lstat/read error, a directory, content that is not a `CurrentGenerationPointer` (string `generation_id`/`status`/`txn_id`), a `status` other than `"committing"`, or an empty / multi-component `generation_id` ⇒ `BcIndexAddressingError::Io`, never "migration not started" and never `Committing { generation_id: "" }`; `completed.json` precedence unchanged; step 3 clarified ("neither exists" = both ABSENT; an `Io` verdict never reaches it). (B) Human-confirmed architect extension (2026-10-11; decision cite D-1257, state-manager to allocate; closes D-1256-ADR052-V126-EXTENSIONS) — ADR-052 §Decision 11(g)(2): new §Reader Integration paragraph making per-substring escape-and-256-cap of `BcIndexAddressingError::{Io, Toml, MalformedBcId}` normative (path, source/candidate text each separately; `Toml` message replaced by category and span; serde/TOML messages never carried). No Precondition/Postcondition/Invariant change; no VP-count change; status UNCHANGED; H1 UNCHANGED. Story Anchor / Traceability ADR row extended. **Stories affected by BC changes:** S-25.09 (already anchored; story-writer to confirm its BC-1.18.010 row/AC trace covers step 2 and the sanitization paragraph under bc_array_changes_propagate_to_body_and_acs). **VP citations changed in:** none. |
 | 1.11 | 2026-10-08 | product-owner | Reader-parity sibling sweep for ADR-052 v1.25 item 11(c) clarification point 5 (closes F-S2509-L1-004's `detect_migration_read_state` leg; TD-VSDD-060). §Reader Integration step 1 now specifies the lstat-first classification and record-shape validation: the probe of `.factory/migration-state/completed.json` is `symlink_metadata` (lstat-class) and ONLY `NotFound` is absent (fall through to step 2/3); a dangling symlink (the ENOENT its read returns is the ENOENT of the TARGET), any non-`NotFound` lstat or read error (EACCES, ELOOP, EIO, ENOTDIR, EISDIR, ...) and content that reads but is not a `CompletedMigrationRecord` (not UTF-8, empty, truncated, unparseable, not an object, or wrong schema: string `generation_id`/`txn_id`/`completed_at`, non-negative integer `canonical_paths_count` fitting `u64`; unknown extra keys ignored) yield `BcIndexAddressingError::Io` (never "not migrated", never a silent fall-through to `CURRENT.json` / the legacy `BC-INDEX.md`); a valid record means canonical paths are current. The reader and the coordinator share one `read_completed_marker` helper so a reader never says "not migrated" beside a coordinator that says "unknown". Other `fs.exists(..)` uses are not changed (the generation-directory probe fails CLOSED on a stat error). Normative vectors: BC-1.18.011 EC-070..EC-075. No Precondition/Postcondition/Invariant change; no VP-count change; status UNCHANGED. Story Anchor / Traceability Stories re-attributed: S-25.09 delivers the §Reader Integration step-1 obligation (`read_completed_marker`, shared with the coordinator; tests `tests/s2509_pass1_l1_findings_test.rs`, reader-parity vectors); S-25.02 retains all other obligations; the `completed-backfill-append-logs.json` mirror (S-25.06) is not covered by this BC, so S-25.06 is not attributed. **Stories affected by BC changes:** S-25.09 (owner of the shared helper per ADR-052 v1.25). **VP citations changed in:** none. |
 | 1.10 | 2026-09-22 | product-owner | ADR-051 §Decision 18 addendum encoding (spec-closure chain step 2 of 2: architect → product-owner; human-approved 2026-09-22 design proposal). Postcondition 4 amended: replaced the worked-example-only "growth-based (e.g., ... covering `BC-5.01.001`..`BC-5.30.099`)" boundary text with the actual deterministic chunk-boundary rule — sub-shard boundaries are computed by ADR-051 §Decision 18's `chunk_subsystem_rows_into_sub_shards` algorithm (canonical-BC-ID-sorted via `extract_and_sort_bc_rows`, greedy-pack-until-cap, single left-to-right pass), reusing the SAME `shard_cap_bytes` value as first-level splitting per Invariant 4 (no separately-calibrated migration-time cap), with a fixed preamble replicated verbatim into every sub-shard and counted against cap as that sub-shard's starting size. Determinism (same row set + preamble + cap always yields identical boundaries) and chunk-boundary correctness now cited to **VP-142** (proptest; hosted on BC-1.18.011 Postcondition 6, cross-referenced here since the property holds identically for migration-time and the steady-state rebuild path). VP Anchors section updated with the VP-142 cross-reference. No change to Postcondition 4's SS-05/SS-06 measured-size facts or its migration-coverage claim (still covered by BC-1.18.011). input-hash recompute owed to state-manager. |
 | 1.9 | 2026-09-13 | product-owner | ADR-052 v1.11 pass-8 reader-protocol mirror (MED-1). §Reader Integration step 2: replaced existence-check-then-read form ("try gen path FIRST; if absent, fall back to the canonical path") with the OPEN-based with ENOENT fallback form per the canonical reader protocol (ADR-052 §Decision 7c): open `gen-<generation_id>/<file>`; on ENOENT, open the canonical path. Updated "ENOENT is impossible" rationale to reference the open-with-fallback implementation: ENOENT on the gen-path signals the file was already renamed to canonical; `rename(2)` atomicity makes the protocol race-free (the canonical path is guaranteed to hold new content the moment ENOENT is observable on the gen-path). "generation-first ensures new content is always returned" rationale rephrased to "OPEN-based with ENOENT fallback ensures new content is always returned." input-hash recompute owed to state-manager. |

@@ -1,1 +1,1 @@
-{"status":"pass","timestamp":"2026-10-08T22:23:00Z","command":"(cargo test -q -p validate-cross-site-correspondence corpus_version_sync 2>&1 | tail -12)"}
+{"status":"pass","timestamp":"2026-10-13T14:27:19Z","command":"cd /Users/zious/Documents/GITHUB/vsdd-factory/.worktrees/S-25.08 && cargo test --workspace --all-targets --no-fail-fast > $TMPDIR/t4.log 2>&1; echo EXIT=$?; grep -E \"^test result:\" $TMPDIR/t4.log | awk '{p+=$4;f+=$6;i+=$8} END{print \"passed\",p,\"failed\",f,\"ignored\",i}'; grep -E \"FAILED|^failures:|panicked|error:\" $TMPDIR/t4.log | head -30"}

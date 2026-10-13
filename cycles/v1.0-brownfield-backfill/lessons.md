@@ -2128,3 +2128,40 @@ the file.
 **What happened:** AC-022(d) ("Io variants render sanitize_diagnostic(subject, 256)") and the AC-021 recorded grep ("module-private") were recorded as closed without checking the code; both were false.
 **Lesson (D-1256):** A closure claim of the form "X is sanitized" or "Y is module-private" is accepted only with the literal grep or test that proves it, per POLICY 22.
 `[process-gap][D-1256][closure-claims][policy-22]`
+
+## LESSON (D-1257) — L-BB-D1245 recurrence x10: an architect dispatch edited ADR-052 through a Python script via Bash
+
+**What happened (2026-10-11):** The architect dispatch that produced ADR-052 v1.27 edited the ADR through a Python script run in Bash, bypassing the Edit/Write PostToolUse validators (TD-FACTORY-HOOK-BYPASS-001, POL-3). The orchestrator verified the content with `git diff` and kept it. Cumulative recurrence count rises from x9 to **x10**. The ADR-052 edits also ran under FUEL_EXHAUSTED PostToolUse advisories, so no validator checked v1.27 either way.
+**Root cause:** Unchanged from L-BB-D1245 / D-1254: the PreToolUse guard for Bash-mediated writes to governed `.factory/` artifacts (S-12.16) is not delivered, and ADR-052 is large enough that the Edit/Write validators exhaust their fuel (see [D-1254-ADR052-SPLIT]).
+**Lesson (D-1257):** Orchestrator diff review remains the only interim control; the ADR-052 split ([D-1254-ADR052-SPLIT]) is now more urgent because each Edit/Write of it is unvalidated anyway, which removes the cost of using the correct tools but also the benefit.
+`[process-gap][D-1245][D-1257][x10][architect][S-12.16]`
+
+## LESSON (D-1257) — [process-gap] Story status lags behind fix commits (S-25.08 L5-004, L6-002, L7-003)
+
+**What happened:** Three consecutive S-25.08 passes found story task and status lines that were not reconciled after implementer fix commits landed (L5-004, L6-002, L7-003). Three occurrences meet the codification threshold.
+**Lesson (D-1257):** The orchestrator now dispatches a story-writer reconciliation after every fix batch and before the next adversary pass. Per the cycle-closing checklist, the follow-up story S-14.10 (E-14, draft, index-only stub) is opened to codify this in the `per-story-delivery` workflow; the story file is owed to the story-writer.
+`[process-gap][D-1257][story-status-lag][S-14.10]`
+
+## LESSON (D-1257) — [process-gap] Adversary reviews were not persisted before the next pass (S-25.08 passes 4-7, F-S2508-L8-004)
+
+**What happened:** The S-25.08 pass-6 and pass-7 reviews existed only in orchestrator context until the D-1257 burst (pass 8 likewise), and no story task tracked their persistence; passes 4 and 5 had the same lag earlier (T-42, T-47).
+**Lesson (D-1257):** A pass review file must be persisted verbatim by the state-manager before the next pass is dispatched; the story carries a persistence task for each pass. Codified by S-14.10 together with the story-status reconciliation.
+`[process-gap][D-1257][review-persistence][S-14.10]`
+
+## LESSON (D-1257) — [process-gap] CHANGELOG EC/AC citations must name the owning BC or story (F-S2508-L6-001)
+
+**What happened:** The §-anchor replacement that closed the version-pin finding (L5-002) introduced unqualified or mis-qualified EC/AC tokens: "BC-1.18.013 AC-011" (BCs have no ACs; AC-011 is a story AC) and a BC-1.18.011 EC-045 that belongs to S-25.09 scope. This extends [D-1255-CHANGELOG-PINS].
+**Lesson (D-1257):** Every EC/AC token in a CHANGELOG entry must be qualified by its owning BC or story and must resolve to a row there. Codified with S-14.10.
+`[process-gap][D-1257][changelog-citations][S-14.10]`
+
+## LESSON (D-1257) — Possible hook false positive: validate-factory-path-staging named branch `develop` for an S-25.08 worktree commit
+
+**What happened:** `validate-factory-path-staging` blocked a test-writer `git add -A ... && git commit` run in the S-25.08 worktree and named branch `develop`, while the session cwd was the S-25.09 worktree. The branch the hook reported does not match the worktree the command ran in.
+**Lesson (D-1257):** This is a recurrence of the already-open real defect [D-1254-HOOK-FP-003] (branch resolved from the hook CWD, not the Bash call's worktree; attached to S-26.02 / BC-4.16.001 v1.10 Invariant 7). Recorded as an open diagnostic item for the hook owner with this extra occurrence; no hook code was changed in this burst. Diagnose with the trace UUID from the dispatcher stderr summary line when it recurs.
+`[open-diagnostic][D-1257][validate-factory-path-staging][hook-owner]`
+
+## LESSON (D-1257) — Stale mechanical-docs sweeps keep missing siblings (S-25.08 L5-001 to L8-001)
+
+**What happened:** Four consecutive passes (L6-003, L7-001, L8-001, L8-002/L8-003) found stale present-tense or version-pinned text in sibling test and source comments after a fix touched only the named file; a regex limited to `ADR-NNN vX.Y` could not match the BC/VP/taxonomy pins (L8-003).
+**Lesson (D-1257):** A sibling sweep must grep the whole story file set for the defect CLASS (for example `RED-GATE`, `GREEN today`, `not observable`, `todo!()`, `v[0-9]+\.[0-9]+` next to any contract ID), not only the finding's anchor files (TD-VSDD-060). Open for the human: [D-1257-POLICY19-SCOPE] whether POLICY 19 covers BC/VP/taxonomy pins in code comments.
+`[process-gap][D-1257][sibling-sweep][td-vsdd-060]`

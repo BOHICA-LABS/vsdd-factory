@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "a053525"
+input-hash: "5459b58"
 traces_to: STATE.md
 ---
 
@@ -2415,4 +2415,8 @@ Archived by the D-1255 burst (v10.88→v10.89). Position at v10.88: E-25; S-25.0
 
 Archived by the D-1256 burst (v10.89→v10.90). Position at v10.89: E-25; S-25.08 v1.7 (8 pts) on local `feature/S-25.08` @ `a7fc5930` (pass-4 fixes done; cargo test 3386/0, failpoints 1166/0 both modes, bats ok, Kani 10/10, CI crash-injection floor 39); S-25.09 v1.2 (15 pts, waived) on local `feature/S-25.09` @ `f5e603b3` (rebased x5; factory-dispatcher default 1242/0, failpoints 1305/0); `feature/S-25.10` @ `9329f75e` (2 red-test commits), S-25.11/S-25.12 @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`. Spec: ADR-052 v1.25, ADR-054 v1.1, ARCH-INDEX v4.55, BC-INDEX v5.110, VP-INDEX v3.33, STORY-INDEX v4.490, error-taxonomy v1.42. Adversary reviews persisted verbatim (S-25.08 pass 3 + pass 4, S-25.09 pass 1); streaks 0/3 on both. OPEN human decisions [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT]; OPEN items [D-1255-ADV-DEFERRED], [D-1255-RUNBOOK-PG]. NEXT was LOCAL adversary pass 5 (S-25.08) + pass 2 (S-25.09) in parallel, then the S-25.10 implementation.
 
-**See STATE.md v10.90 for the current checkpoint.**
+## Session Resume Checkpoint v10.90 (2026-10-08 — SESSION-WRAP-PAUSE-2026-10-08; D-1256) — condensed; verbatim via `git -C .factory show d39048b6:STATE.md`
+
+Archived by the D-1257 burst (v10.90→v10.91). Position at v10.90 (PAUSED): E-25; S-25.08 v1.8 on `feature/S-25.08` @ `169df502` (pass 5 NOT CLEAN 1M/3L, all four fixed; pass 6 next; streak 0/3); S-25.09 v1.2 (15 pts, waived) on `feature/S-25.09` @ `f5e603b3` (pass 2 NOT CLEAN 5M/4L; ADR-052 v1.26 ruled; fixes NOT done; untracked partial test file `s2509_pass2_l2_findings_test.rs`); `feature/S-25.10` @ `19c683a9` (partial, UNVERIFIED, ungated); S-25.11/S-25.12 @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`. Spec: ADR-052 v1.26, ARCH-INDEX v4.56, BC-INDEX v5.110 (BC wording for v1.26 owed: BC-1.18.013 v1.15, BC-1.18.010 v1.12, BC-1.18.011 v1.23), VP-INDEX v3.33, STORY-INDEX v4.491. WIP branches pushed to origin. OPEN: [D-1256-ADR052-V126-EXTENSIONS] (human), [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED]. NEXT was the product-owner BC wording, S-25.09 pass-2 tests and fixes, S-25.08 pass 6, then S-25.10 finish + gates.
+
+**See STATE.md v10.91 for the current checkpoint.**
