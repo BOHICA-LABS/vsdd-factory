@@ -14251,7 +14251,7 @@ pub fn drain_bc_index_writers(
     // already exited by the time any drain step runs). Staleness is the
     // single pure predicate [`reservation_is_stale`]: judged by the
     // reservation's `created_at` field, falling back to file mtime ONLY when
-    // the field is absent or unparseable (v1.18 B2-3).
+    // the field is absent or unparseable (ADR-052 §5a "Reservation timestamp rules"; defect B2-3).
     if let Ok(entries) = std::fs::read_dir(_reservations_dir) {
         let now_secs = epoch_secs_checked(std::time::SystemTime::now()).unwrap_or(0);
         for entry in entries.flatten() {

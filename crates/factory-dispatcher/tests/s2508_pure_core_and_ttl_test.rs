@@ -97,9 +97,7 @@ fn test_BC_1_18_011_EC009_production_ttl_constant_floor_and_created_at_judgment(
             Ok(Ok(v)) => failures.push(format!(
                 "production TTL {secs}s must be REJECTED, accepted as {v:?}"
             )),
-            Err(_) => failures.push(format!(
-                "production TTL validator panicked (unimplemented) for {secs}s"
-            )),
+            Err(_) => failures.push(format!("production TTL validator panicked for {secs}s")),
         }
     }
     for secs in [1800u64, 3600, 86_400] {
@@ -111,9 +109,7 @@ fn test_BC_1_18_011_EC009_production_ttl_constant_floor_and_created_at_judgment(
             Ok(other) => failures.push(format!(
                 "production TTL {secs}s must be accepted unchanged, got {other:?}"
             )),
-            Err(_) => failures.push(format!(
-                "production TTL validator panicked (unimplemented) for {secs}s"
-            )),
+            Err(_) => failures.push(format!("production TTL validator panicked for {secs}s")),
         }
     }
 

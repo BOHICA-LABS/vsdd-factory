@@ -26,7 +26,7 @@ jobs:
   kani:
     name: kani (OBL-1 crash-recovery proofs)
     runs-on: ubuntu-latest
-    # The ten OBL-1 harnesses (VP-147 v1.18 re-baseline, S-25.08 AC-010).
+    # The ten OBL-1 harnesses (ADR-052 §5a re-baseline, S-25.08 AC-010).
     # Solve times are recorded in the S-25.08 T-5 report; the recover-based
     # ones mem::forget their String-heavy records to skip CBMC's drop-glue
     # modeling (see obl1_kani_proofs.rs's "Solve-time note"). This budget is
@@ -96,9 +96,9 @@ jobs:
             shard_manager::obl1_kani_proofs::proof_obl1_h6_terminal_reconcile_idempotence
           )
           # SIX logical obligations (h1..h6), TEN harnesses: h3 is split into
-          # an inductive-step and a bounded-sequence proof, and the v1.18
-          # re-baseline adds h1/h4/h6 harnesses over the shared admission and
-          # terminal-reconciliation pure cores.
+          # an inductive-step and a bounded-sequence proof, and the ADR-052 §5a
+          # re-baseline (S-25.08 AC-010) adds h1/h4/h6 harnesses over the
+          # shared admission and terminal-reconciliation pure cores.
           EXPECTED_PROOFS=10
           if [ "${#HARNESSES[@]}" -ne "${EXPECTED_PROOFS}" ]; then
             echo "FAIL: ${#HARNESSES[@]} harnesses pinned but EXPECTED_PROOFS=${EXPECTED_PROOFS}."
