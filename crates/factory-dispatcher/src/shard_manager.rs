@@ -13016,7 +13016,22 @@ impl BcIndexMigrationError {
         match self {
             BcIndexMigrationError::InvalidToolUseId { .. } => "invalid_tool_use_id",
             BcIndexMigrationError::Io { .. } => "io",
-            _ => "state_integrity",
+            // Every remaining variant is listed explicitly (no `_` arm) so a
+            // new `BcIndexMigrationError` variant fails to compile here and
+            // forces a deliberate `<cause>` token choice (S-25.08 PR #848
+            // CR-005). All of these map to `state_integrity`.
+            BcIndexMigrationError::BinaryIntegrityFailure { .. }
+            | BcIndexMigrationError::RecoveryRequiresReauthorization
+            | BcIndexMigrationError::ExpiryAbort
+            | BcIndexMigrationError::FingerprintMismatchAbort
+            | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
+            | BcIndexMigrationError::DrainTimeoutAbort
+            | BcIndexMigrationError::ArchIndexParityAbort { .. }
+            | BcIndexMigrationError::CompletionManifestRejection { .. }
+            | BcIndexMigrationError::CensusMismatchAbort { .. }
+            | BcIndexMigrationError::ContentPreservationAbort { .. }
+            | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => "state_integrity",
         }
     }
 
