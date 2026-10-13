@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "5459b58"
+input-hash: "3981b1b"
 traces_to: STATE.md
 ---
 
@@ -2652,3 +2652,55 @@ D-1257, v10.90→v10.91 (one bump). Single-commit TD-VSDD-053 resume registratio
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `d39048b6`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Registered the 2026-10-11 human decisions, persisted S-25.08 passes 6/7/8 verbatim, registered ADR-052 v1.27 / BC wording / story versions in the three indexes, replaced the 16 decision-cite sentinels with D-1257, repaired the policies.yaml YAML escapes, opened the S-14.10 follow-up stub, archived the v10.90 checkpoint, and set the pipeline to in_progress.
+
+## Burst: ADV-REVIEWS-S2508-P9-S2509-P3-PERSISTED-STORY-CASCADE-REGISTRATION (2026-10-13)
+
+D-1258, v10.91→v10.92 (one bump). Single-commit TD-VSDD-053 registration burst (state-manager). Pipeline stays `in_progress`. Persists two adversary reviews verbatim and registers the story/epic cascade; deliberately does NOT register the files the product-owner and architect were still editing.
+
+**Parent-commit:** `8706d524` (factory-artifacts HEAD immediately prior, v10.91 / D-1257). Code positions are orchestrator-stated (`feature/S-25.08` @ `9e936d4c`, `feature/S-25.09` @ `df03ecbe`); the state-manager ran no git command in the worktrees and re-ran no test.
+
+**Adversary verdict:** none run in this burst; two verdicts persisted VERBATIM. S-25.08 pass 9 (reviewed `1bdd86fc`): NOT CLEAN, 0C/0H/1M/3L (L9-001 the "VP-147 v1.18" mis-anchor surviving in `.github/workflows/kani.yml`; L9-002 a bare "(v1.18 B2-3)" anchor in `shard_manager.rs`; L9-003 red-gate wording in two assertion messages; L9-004 two commit-subject quotes that do not match the commits), novelty LOW to moderate, streak 0/3, one [process-gap] (the version-pin gate was too narrow). S-25.09 pass 3 (reviewed `df03ecbe`): NOT CLEAN, 0C/0H/2M/3L (L3-001 every-variant Display sanitization incomplete, a TOML parser message still reaches coordinator stderr; L3-002 the txn record `generation_id` never checked to be a single path component, a real path-escape defect; L3-003 generic `admission_error` arm caps fixed text at 64; L3-004 oversized-row emitter dropped the retained `tracing::warn!`; L3-005 stale doc comments), novelty MEDIUM, streak 0/3, two [process-gap]; all nine pass-2 findings verified closed.
+
+**Files touched (Dim-1):** 23 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, the two review files, the S-25.08 T-59 and S-25.09 T-58 ticks, STORY-INDEX v4.493 register legs, input-hash updates; story-writer-authored story/epic files registered as found; hook-generated regression-state.json and sidecar-learning.md). NOT touched or committed: BC-1.18.005/006/009/010/011/012/013, ADR-052 (v1.28), BC-INDEX, ARCH-INDEX.
+- STATE.md (v10.91→v10.92)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1258)
+- cycles/v1.0-brownfield-backfill/lessons.md (4 D-1258 lessons)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.91 archived)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- code-delivery/S-25.08/adv-local-pass-9.md (NEW)
+- code-delivery/S-25.09/adv-local-pass-3.md (NEW)
+- stories/STORY-INDEX.md (v4.493)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.10; T-59 ticked; hash)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (v1.5; T-58 ticked; hash)
+- stories/S-25.02-artifact-sharding-layer2.md (v5.5; hash)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.14; hash)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (v1.2; hash)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (v1.2; hash)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (v1.2; hash)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (v1.3; hash)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (v1.2; hash)
+- stories/S-14.10-per-story-delivery-process-gap-codification.md (v1.0; NEW file)
+- stories/epics/E-25-validation-integrity.md (v1.9; hash)
+- stories/epics/E-26-post-rc25-hook-hardening.md (v1.3; hash)
+- stories/epics/E-14-engine-discipline-pass-2.md (v1.4; hash)
+- regression-state.json (hook-generated)
+- sidecar-learning.md (hook-generated)
+
+**Codifications:** D-1258 (decision-log.md); four lessons (3 [process-gap] + the [D-1254-HOOK-FP-003] recurrence); the S-14.10 AC-013 version-pin gate is the codification of the pass-9 process gap (authored by the story-writer; registered here).
+
+**Dim-2 (literal shell, captured output):**
+Topological hash update, `compute-input-hash <file> --update`, in order S-25.08, S-25.09, S-25.10, S-25.11, S-25.12, S-25.02, S-25.06, S-12.16, S-26.06, S-14.10, E-25, E-26, E-14:
+`S-25.08 → fc2ddb2`, `S-25.09 → 55186bb`, `S-25.10 → 396515e`, `S-25.11 → c020f60`, `S-25.12 → 805f699`, `S-25.02 → eaa572e`, `S-25.06 → d9b1fc6`, `S-12.16 → afd9c59`, `S-26.06 → 050a7c3`, `S-14.10 → 1c5c379`, `E-25 → fa66769`, `E-26 → 8910945`, `E-14 → a0c342e`.
+Verification (`stored` = frontmatter `input-hash`, `computed` = `compute-input-hash <file>`, read-only): S-25.08 stored=fc2ddb2 computed=fc2ddb2 MATCH; S-25.09 55186bb/55186bb MATCH; S-25.10 396515e/396515e MATCH; S-25.11 c020f60/c020f60 MATCH; S-25.12 805f699/805f699 MATCH; S-25.02 eaa572e/eaa572e MATCH; S-25.06 d9b1fc6/d9b1fc6 MATCH; S-12.16 afd9c59/afd9c59 MATCH; S-26.06 050a7c3/050a7c3 MATCH; S-14.10 1c5c379/1c5c379 MATCH; E-25 fa66769/fa66769 MATCH; E-26 8910945/8910945 MATCH; E-14 a0c342e/a0c342e MATCH. STORY-INDEX stored=4dfc15c computed=4dfc15c MATCH. An earlier pass in this burst (adf818f ... 9b9f3be) drifted within minutes because BC-1.18.005/006/009/010/011/012/013 and ADR-052 were edited in the working tree by the product-owner/architect during the burst, and because S-14.10/E-14 inputs include the lessons.md this burst edits; the hashes above were recomputed after the last state-manager edit to those inputs. POLICY 18 parity: the STORY-INDEX catalog rows (first `input-hash` token per row) and the v4.493 / E-25 blockquote entries carry the same values. `cargo run -q -p last-amended-migrate -- migrate --check` → exit 0, all five governed files `mutated=false` (STORY-INDEX `eligibility=CurrentEntryOnly changelog=AlreadyPresent`). `wc -l .factory/STATE.md` → `254`.
+
+**Dim-5:** Count-propagation: BC count 2,007, VP count 147, ADR count 54 and story registered total 254 unchanged; STORY-INDEX Status Summary unchanged (draft 114, Total (active) 234; S-14.10 stays draft). Version propagation: STATE.md v10.92 records STORY-INDEX v4.493, S-25.08 v1.10, S-25.09 v1.5, S-25.02 v5.5, S-25.06 v1.14, S-25.10/11/12 v1.2, S-12.16 v1.3, S-26.06 v1.2, E-25 v1.9, E-26 v1.3, E-14 v1.4; BC-INDEX v5.111, ARCH-INDEX v4.57, VP-INDEX v3.33 unchanged.
+
+**Dim-6:** No new adversary findings authored here; no tech-debt-register entries. OWED (routed, not performed): product-owner finishes BC-1.18.010/011/013 wording; architect commits ADR-052 v1.28; next state-manager burst registers them with BC-INDEX and ARCH-INDEX and refreshes the story hashes; story-writer reviews the BC-1.18.005/006/009/012 working-tree changes for S-25.02 cite sync; S-25.09 pass-3 fixes (implementer, test-writer).
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits (compute-input-hash and last-amended-migrate are the sanctioned tools); files staged explicitly by path, never `git add -A`. PostToolUse advisories seen and not blocking writes: FUEL_EXHAUSTED on large files (STORY-INDEX, ADR-052-class); transient POLICY 18 parity, input-hash drift and D-chain-cite messages during intermediate edits, all resolved before commit.
+
+**Closes:** [D-1257-HASH-CASCADE] (against working-tree inputs), [D-1257-S14-10] registration, [D-1256-S2509-PASS2-OWED], S-25.08 T-59, S-25.09 T-58. **Opens:** [D-1258-S2509-PASS3-OWED]. **Unchanged OPEN:** [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE], PR #769.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `8706d524`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Persisted S-25.08 pass 9 and S-25.09 pass 3 verbatim, registered the story/epic cascade with mirrored input-hashes in STORY-INDEX v4.493, promoted S-14.10 to a story file, left BC-1.18.010/011/013, ADR-052 v1.28, BC-INDEX and ARCH-INDEX for the next burst, and advanced STATE.md to v10.92.

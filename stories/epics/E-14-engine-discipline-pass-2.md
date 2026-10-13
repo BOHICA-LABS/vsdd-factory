@@ -1,7 +1,7 @@
 ---
 document_type: epic
 epic_id: "E-14"
-version: "1.3"
+version: "1.4"
 title: "Engine Discipline Pass-2 — Process-Gap Remediation"
 status: draft
 prd_capabilities: [CAP-016, CAP-026]
@@ -9,7 +9,7 @@ prd_frs: []
 anchor_strategy: greenfield-discipline-gap-codification
 priority: P1
 target_release: "v1.0-feature-engine-discipline-pass-2"
-story_count: 9
+story_count: 10
 subsystems_affected: [SS-04, SS-05, SS-06]
 producer: product-owner
 timestamp: 2026-05-07T00:00:00Z
@@ -17,15 +17,19 @@ phase: 2
 level: L3
 traces_to: .factory/cycles/v1.0-feature-engine-discipline-pass-1/adv-cycle-pass-1.md
 depends_on: ["E-12", "E-13"]
-last_amended: "2026-08-30 (v1.3) — frontmatter normalization: add level: L3 (story-writer spec-hygiene sweep)"
+last_amended: "2026-10-13 (v1.4) — S-14.10 story file authored and registered (story-writer; D-1257 follow-up opened index-only in this epic): story_count 9 -> 10; Stories Planned row, Process-Gap Source Mapping row, SS-05/SS-06 subsystem-anchor bullets, Stories section range S-14.01..S-14.10, inputs += S-14.10 and the D-1257 lessons file. | (v1.3) — 2026-08-30 frontmatter normalization: add level: L3 (story-writer spec-hygiene sweep)"
 inputs:
   - .factory/cycles/v1.0-feature-engine-discipline-pass-1/adv-cycle-pass-1.md
   - .factory/cycles/v1.0-feature-engine-discipline-pass-1/F5-pass-1-fix-plan.md
   - .factory/stories/epics/E-12-engine-governance.md
   - .factory/stories/epics/E-13-artifact-integrity.md
-input-hash: "5a7e554"
+  - .factory/stories/S-14.10-per-story-delivery-process-gap-codification.md
+  - .factory/cycles/v1.0-brownfield-backfill/lessons.md
+input-hash: "a0c342e"
 modified:
   - "v1.2 2026-05-11: F-P8-002 fix burst — forward-ref note corrected"
+  - "v1.3 2026-08-30: frontmatter normalization — level: L3 added"
+  - "v1.4 2026-10-13: S-14.10 registered (D-1257 follow-up); story_count 9->10"
 ---
 <!-- [process-gap] Frontmatter fields anchor_strategy, depends_on extend the canonical epic-template baseline. Template update tracked separately. -->
 
@@ -77,11 +81,13 @@ is well-formed before reaching the gate.
 - **SS-05 (Pipeline Orchestration):** S-14.01 (convergence state file authoring),
   S-14.02 (F5 phase skill / lobster step automation), S-14.04 (adversary dispatch
   pre-injection step), S-14.05 (pr-manager step discipline — per-story-delivery.md
-  and orchestrator AGENT.md changes). All touch pipeline workflow files under
+  and orchestrator AGENT.md changes), S-14.10 (Step 4.5 reconcile / persist / gate
+  steps in both per-story-delivery workflow documents and the story-writer prompt). All touch pipeline workflow files under
   `plugins/vsdd-factory/workflows/phases/` or `plugins/vsdd-factory/agents/`.
 - **SS-04 (Plugin Ecosystem):** S-14.03 (pre-F5 lint hook or WASM validation).
 - **SS-06 (Skill Catalog):** S-14.02 (updates F5 adversarial-refinement skill or
-  adds an orchestration wrapper), S-14.04 (updates adversary dispatch skill step).
+  adds an orchestration wrapper), S-14.04 (updates adversary dispatch skill step),
+  S-14.10 (create-story skill CHANGELOG clause).
 
 ## Stories Planned
 
@@ -96,6 +102,7 @@ is well-formed before reaching the gate.
 | S-14.07 | [F-P6-002 deferred MEDIUM #2 — filed in F-P6 fix burst] | S | TBD | P2 | Seventh |
 | S-14.08 | [F-P6-002 deferred MEDIUM #3 — filed in F-P6 fix burst] | S | TBD | P2 | Eighth |
 | S-14.09 | Forensic marker cleanup (F-P6-004) | M | SS-04, SS-07 | P2 | Ninth |
+| S-14.10 | Per-story-delivery process-gap codification: story-status reconciliation, adversary-review persistence, CHANGELOG citation discipline (D-1257; S-25.08 L5-004/L6-002/L7-003, F-S2508-L8-004, F-S2508-L6-001) | L (8 pts) | SS-05, SS-06 | P1 | Tenth (independent; blocked from `ready` until three BC clauses are authored) |
 
 > **Forward-reference note (F-P7-004, amended F-P8-002):** All E-14 stories EXCEPT S-14.01 carry `cycle: v1.0-feature-engine-discipline-pass-2` in their frontmatter. S-14.01 carries `cycle: v1.0-feature-engine-discipline-pass-1` because it MUST close before F7 close-out of the current cycle (per D-355-AMEND and D-359). The forward-reference pattern applies to S-14.02 through S-14.09; the pass-2 cycle directory will be opened by the state-manager when E-14 work begins. This is accepted planning-tier convention: stories are assigned to their delivery cycle at authoring time, before the cycle directory is opened. The forward reference for S-14.02–S-14.09 is not a broken reference or a data-entry error.
 
@@ -137,14 +144,15 @@ impact on convergence evidence quality).
 | S-14.03 | F-LOW-4 + F-LOW-5 (OBS-5/6) | Pre-F5 placeholder lint check missing; input-hash drift not enforced |
 | S-14.04 | F-MED-9 | Policy-rubric injection into adversary dispatch is manual |
 | S-14.05 | PG-6 (orchestrator-observed) | pr-manager exits mid-flow after Step 4 or Step 5 |
+| S-14.10 | D-1257 [process-gap] lessons (S-25.08 local-adversary cycle) | Story status lags fix commits (3x); adversary reviews not persisted before the next pass; CHANGELOG EC/AC tokens not owner-qualified |
 
 ## Acceptance Criteria
 
-> Acceptance criteria are defined per-story in each story file. See S-14.01 through S-14.09.
+> Acceptance criteria are defined per-story in each story file. See S-14.01 through S-14.10.
 
 ## Stories
 
-See Stories Planned table above (S-14.01..S-14.09).
+See Stories Planned table above (S-14.01..S-14.10).
 
 ## Dependencies (External)
 
@@ -165,6 +173,7 @@ See Stories Planned table above (S-14.01..S-14.09).
 
 | Version | Date | Change |
 |---------|------|--------|
+| v1.4 | 2026-10-13 | S-14.10 story file authored and registered (story-writer; D-1257 follow-up, opened index-only in this epic by the state-manager): story_count 9 -> 10; Stories Planned row (8 pts, P1, SS-05/SS-06), Process-Gap Source Mapping row, Stories range S-14.01..S-14.10, inputs += S-14.10 and the D-1257 lessons file; modified[] gains the missing v1.3 entry. SS-05 anchor bullet extended below (S-14.10 workflow documents); SS-06 anchor bullet extended (create-story skill). |
 | v1.3 | 2026-08-30 | Frontmatter normalization: add level: L3 (story-writer spec-hygiene sweep). |
 | v1.2 | 2026-05-11 | F-P8-002 fix burst: forward-ref note corrected — S-14.01 carries `cycle: v1.0-feature-engine-discipline-pass-1` (not pass-2) per D-355-AMEND and D-359. The note now correctly identifies S-14.02–S-14.09 as the pass-2 forward references. |
 | v1.1 | 2026-05-11 | F-P7-002 fix burst: story_count 5→9 (S-14.06/07/08 filed in F-P6-002 fix burst; S-14.09 filed in F-P6-004 fix burst). Stories Planned table updated with all 9 stories. Forward-reference note added for `cycle: v1.0-feature-engine-discipline-pass-2` per F-P7-004. |

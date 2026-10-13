@@ -2165,3 +2165,27 @@ the file.
 **What happened:** Four consecutive passes (L6-003, L7-001, L8-001, L8-002/L8-003) found stale present-tense or version-pinned text in sibling test and source comments after a fix touched only the named file; a regex limited to `ADR-NNN vX.Y` could not match the BC/VP/taxonomy pins (L8-003).
 **Lesson (D-1257):** A sibling sweep must grep the whole story file set for the defect CLASS (for example `RED-GATE`, `GREEN today`, `not observable`, `todo!()`, `v[0-9]+\.[0-9]+` next to any contract ID), not only the finding's anchor files (TD-VSDD-060). Open for the human: [D-1257-POLICY19-SCOPE] whether POLICY 19 covers BC/VP/taxonomy pins in code comments.
 `[process-gap][D-1257][sibling-sweep][td-vsdd-060]`
+
+## LESSON (D-1258) — [process-gap] "every variant" sanitization was checked against an AC enumeration, not the BC's scope sentence (S-25.09 L2-001, L3-001)
+
+**What happened:** For two consecutive adversary passes a sanitization closure was verified against the variants an AC named rather than the BC's "every variant that quotes data" scope sentence. Pass 2 (L2-001) found the `Io` / `BcIndexAddressingError` variants; pass 3 (L3-001) found `ShardCapConfigUnavailable { detail }` carrying a raw `toml::de::Error` Display (which echoes the offending source line), the `Quarantine` Debug message with uncapped `activation_id` / `generation_id`, and the raw `gen-{generation_id}` interpolation in `recompute_pending_canonical_moves_from_staged_generation`. AC-026 even asked for the grep of every `#[error("...{source}")]` that embeds a parser message, and the TOML variant was missed anyway.
+**Lesson (D-1258):** A BC "every X" scope sentence must be turned into a MECHANICAL enumeration: a source gate or test that iterates every `BcIndexMigrationError` constructor reachable from `run_migrate_bc_index_cli` and asserts the single-line, per-substring-capped form (with a positive and a negative control). A mechanical every-variant source gate is being added with the S-25.09 pass-3 fixes.
+`[process-gap][D-1258][every-variant-gate][S-25.09]`
+
+## LESSON (D-1258) — [process-gap] sibling-rule sweeps covered absence semantics only, not value validation (S-25.09 L3-002)
+
+**What happened:** EC-082 added a single-component check for the `generation_id` in `CURRENT.json` (an empty, `.`, `..`, `/`, `\` or NUL value is rejected so a path never escapes `migration-state/`), but the txn record's `generation_id`, the other on-disk source of the same identifier, got no such check. A live STAGING record with `generation_id: "x/../../specs"` and a matching `intent_log_path` makes `gen_dir_exists` resolve outside `migration-state/`, and the abort path then calls `remove_dir_all` over `.factory/specs`. The AC-023 sibling-sweep instruction covered absence semantics (NotFound handling) only.
+**Lesson (D-1258):** When a value-validation rule is added for an identifier read from one file, sweep every other on-disk source of the same identifier and apply the same rule at the same layer, before any path join (TD-VSDD-060 applies to validation rules, not only to signatures and constants).
+`[process-gap][D-1258][sibling-sweep-validation][S-25.09]`
+
+## LESSON (D-1258) — [process-gap] the version-pin gate was too narrow, so it was declared closed twice while pins survived (S-25.08 F-S2508-L9)
+
+**What happened:** The L8-003 gate ("zero version pins on S-25.08-added lines") required a document prefix in its regex (`(BC-…|VP-…|error-taxonomy|ADR-…) vX.Y`) and was run only over `crates/`. Bare tokens ("(v1.18 B2-3)", "the v1.18 re-baseline") and the S-25.08-touched paths outside `crates/` (`.github/workflows/kani.yml`, `ci.yml`, `CHANGELOG.md`) escaped it, so the claim was declared closed at passes 7 and 8 while pins survived (pass 9 L9-001, L9-002).
+**Lesson (D-1258):** The pin gate must run over EVERY path in `git diff --name-only <base>..HEAD`, using both the prefixed regex and a bare `\bv[0-9]+\.[0-9]+\b` sweep restricted to `^\+` lines, with literal shell output captured (D-449(a) / POLICY 22). The orchestrator ran this all-path sweep literally after `9e936d4c` and it is clean. Codified as S-14.10 AC-013. Whether POLICY 19 also covers test-function identifiers carrying version tokens stays with the human ([D-1257-POLICY19-SCOPE]).
+`[process-gap][D-1258][version-pin-gate][S-14.10]`
+
+## LESSON (D-1258) — Hook false positive [D-1254-HOOK-FP-003]: two more recurrences
+
+**What happened:** `validate-factory-path-staging` named branch `develop` for `git add -A` run in `.worktrees/S-25.08` (two further occurrences). This is the same defect as [D-1254-HOOK-FP-003]: the branch is resolved from the hook CWD, not the Bash call's worktree (attached to S-26.02 / BC-4.16.001 v1.10 Invariant 7).
+**Lesson (D-1258):** Occurrences logged; no hook code changed in this burst. Diagnose with the trace UUID from the dispatcher stderr summary line when it recurs.
+`[open-diagnostic][D-1258][validate-factory-path-staging][hook-owner]`
