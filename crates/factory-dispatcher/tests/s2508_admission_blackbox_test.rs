@@ -61,10 +61,10 @@
 //!   (`try_acquire_migration_lock`) for the test's duration (T-2 principle: a
 //!   fixture that models STAGING must hold the lock, otherwise Branch B
 //!   legitimately self-heals it).
-//! * Txn fixtures carry the v1.11 `migration_id` field
+//! * Txn fixtures carry the `migration_id` field
 //!   (`"migrate-bc-index"` | `"backfill-append-logs"` | absent = B2).
 //!
-//! # Message format (BC-1.18.013 v1.6 Pre 6(b); error-taxonomy v1.35)
+//! # Message format (BC-1.18.013 Pre 6(b); error-taxonomy E-MAINTENANCE-001)
 //!
 //! `<scope> write blocked: migration window active (txn record in STAGING or
 //! COMMITTING state); retry after migration completes or aborts`, where
@@ -217,7 +217,7 @@ fn write_gate(ms: &Path, state: &str) {
     std::fs::rename(tmp, ms.join("gate-state.json")).unwrap();
 }
 
-/// Write a txn record. `migration_id = None` models a pre-v1.11 record (read as
+/// Write a txn record. `migration_id = None` models a legacy record without the field (read as
 /// `migrate-bc-index`).
 fn write_txn(ms: &Path, state: &str, generation_id: Option<&str>, migration_id: Option<&str>) {
     std::fs::create_dir_all(ms).unwrap();
@@ -343,7 +343,7 @@ fn events(seam: &Path) -> Vec<String> {
 }
 
 /// Poll until `events.log` contains a `W1_RESERVE:*` line. Returns `Err` as soon
-/// as the child exits without ever producing it (seam/core absent => RED) or
+/// as the child exits without ever producing it (seam/core absent => the caller reports the failure) or
 /// after `deadline`.
 fn wait_for_w1(child: &mut Child, seam: &Path, deadline: Duration) -> Result<(), String> {
     let start = Instant::now();
@@ -407,7 +407,7 @@ fn test_BC_1_18_013_PC6b_gate_wired_on_production_path_blackbox() {
                     "{tool}/{state}: stderr lacks E-MAINTENANCE-001: {err}"
                 ));
             }
-            // Taxonomy v1.35 exact message, <scope> = `.factory/cycles/`.
+            // Taxonomy E-MAINTENANCE-001 exact message, <scope> = `.factory/cycles/`.
             let want = plain_msg(".factory/cycles/");
             if !err.contains(&want) {
                 failures.push(format!(
@@ -781,10 +781,10 @@ fn test_BC_1_18_013_PC6c_reservation_created_on_pretooluse_removed_on_posttoolus
 
 /// AC-004 (BC-1.18.013 Precondition 6(b) "Which events / tools" + "Exemption", EC-014).
 ///
-/// Bash is ALREADY unprocessed in the merged code, so a Bash-only assertion
-/// would be GREEN at the Red Gate (a pure regression lock). To keep this test
-/// meaningful AND red-for-the-right-reason, it asserts the DIFFERENTIAL that
-/// matters for the implementer who wires the shared core: in the SAME fixture,
+/// Bash was already unprocessed before S-25.08, so a Bash-only assertion
+/// would be a pure regression lock (it could not tell a wired core from an
+/// unwired one). To keep this test meaningful it asserts the DIFFERENTIAL that
+/// matters once the shared core is wired: in the SAME fixture,
 /// an `Edit` control IS processed by the core (W1_RESERVE recorded) while the
 /// `Bash` envelopes are NOT (no reservation, no event, migration-state
 /// byte-identical).
@@ -1409,7 +1409,7 @@ fn test_BC_1_18_011_PC6d_reconciliation_branches_ABC_wired_on_production_path_bl
         }
     }
 
-    // NoOp cell (BC-1.18.011 v1.13 vector): own live txn (STAGING gen-1, and
+    // NoOp cell (BC-1.18.011 vector): own live txn (STAGING gen-1, and
     // COMMITTING), lock FREE (reconciler acquires it), terminal record ABSENT =>
     // the core decides NoOp (no txn/gate write); ordinary admission blocks with the
     // PLAIN path-family message, no mismatch suffix, migration-state byte-identical.
@@ -1668,7 +1668,7 @@ fn test_BC_1_18_011_PC6d_branch_b_applies_with_absent_or_open_gate_blackbox() {
 }
 
 // ---------------------------------------------------------------------------
-// BC-1.18.013 v1.7 EC-020 / BC-1.18.011 v1.15 EC-015 -- UNCONDITIONAL
+// BC-1.18.013 EC-020 / BC-1.18.011 EC-015 -- UNCONDITIONAL
 // reservation namespace (first-activation race), real binary
 // ---------------------------------------------------------------------------
 
@@ -1881,8 +1881,8 @@ fn test_BC_1_18_013_EC020_unwritable_namespace_fails_closed_no_reservation_black
 }
 
 // ===========================================================================
-// ADR-052 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
-// red tests (F-001 .. F-009), real spawned binary
+// ADR-052 / BC-1.18.013 / BC-1.18.011 -- adversary pass-1
+// tests (F-001 .. F-009), real spawned binary
 // ===========================================================================
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1996,7 +1996,7 @@ fn count_w1(seam: &Path) -> usize {
 // F-001 / EC-021 -- PostToolUseFailure releases the reservation
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-021 / ADR-052 §5a F-001: a `PostToolUseFailure`
+/// BC-1.18.013 EC-021 / ADR-052 §5a F-001: a `PostToolUseFailure`
 /// envelope `{tool_name, tool_input, tool_use_id, error, is_interrupt}` for an id
 /// whose PreToolUse was admitted releases exactly that reservation, regardless of
 /// `is_interrupt` and of `tool_name` (absent / differently shaped). An
@@ -2132,8 +2132,9 @@ fn set_registry(p: &Project, r: Registry) {
     }
 }
 
-/// BC-1.18.013 v1.8 EC-022 / ADR-052 §5a "Evaluation position" O1-O4. Gate
-/// BEHAVIOR only (registry exit-code wording is being reconciled separately).
+/// BC-1.18.013 EC-022 / ADR-052 §5a "Evaluation position" O1-O4. Gate
+/// BEHAVIOR only (the registry exit-code mapping is pinned in
+/// `s2508_registry_exit_code_test.rs`).
 #[test]
 fn test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox() {
     let mut failures: Vec<String> = Vec::new();
@@ -2285,7 +2286,7 @@ fn test_BC_1_18_013_EC022_gate_is_registry_independent_blackbox() {
 // F-002 / EC-023 -- admission scope anchored to the session's factory_root
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-023 / ADR-052 "Admission scope anchoring".
+/// BC-1.18.013 EC-023 / ADR-052 "Admission scope anchoring".
 #[test]
 fn test_BC_1_18_013_EC023_out_of_root_factory_paths_are_out_of_scope_blackbox() {
     let mut failures: Vec<String> = Vec::new();
@@ -2456,7 +2457,7 @@ struct AliasCase {
     expect: Option<&'static str>, // Some(scope) = blocked; None = admitted
 }
 
-/// BC-1.18.013 v1.8 EC-024 / ADR-052 "Target path resolution": in-scope
+/// BC-1.18.013 EC-024 / ADR-052 "Target path resolution": in-scope
 /// aliases are BLOCKED with the path-family message while a txn is live;
 /// out-of-scope inputs are admitted.
 #[test]
@@ -2767,7 +2768,7 @@ fn write_txn_with_raw_migration_id(
     std::fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
 }
 
-/// BC-1.18.013 v1.8 EC-027 / EC-029 / EC-030; BC-1.18.011 v1.16 (F-006).
+/// BC-1.18.013 EC-027 / EC-029 / EC-030; BC-1.18.011 (F-006).
 /// (EC-028's finalize-on-verifying-record path needs the S-25.06 effectful
 /// verification seam to be fixturable; its pure decision is pinned in
 /// `s2508_pure_core_and_ttl_test.rs`.)
@@ -3051,7 +3052,7 @@ fn test_BC_1_18_013_PC6c_exclusive_lock_stat_error_is_io_never_treated_as_absent
 // F-009 / EC-026 -- tool_use_id validity
 // ---------------------------------------------------------------------------
 
-/// BC-1.18.013 v1.8 EC-026 / ADR-052 "tool_use_id validity".
+/// BC-1.18.013 EC-026 / ADR-052 "tool_use_id validity".
 #[test]
 fn test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox() {
     let mut failures: Vec<String> = Vec::new();
@@ -3164,7 +3165,7 @@ fn test_BC_1_18_013_EC026_invalid_tool_use_id_fails_closed_blackbox() {
 
 // ---------------------------------------------------------------------------
 // EC-032 -- `E-MAINTENANCE-002 <cause>` classification fixture matrix
-// (BC-1.18.013 v1.8 EC-032 + canonical test vector row; Precondition 6(c))
+// (BC-1.18.013 EC-032 + canonical test vector row; Precondition 6(c))
 // ---------------------------------------------------------------------------
 
 #[cfg(unix)]
@@ -3242,7 +3243,7 @@ enum Expect {
     PlainBlock,
     /// exit 2 `E-MAINTENANCE-001` keyed message followed by the EXACT
     /// ` (completion-record mismatch -- operator investigation required)` suffix
-    /// (em dash U+2014); txn not finalized; tree byte-identical (v1.9 ruling)
+    /// (em dash U+2014); txn not finalized; tree byte-identical
     MismatchBlock,
     /// exit 2 `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
     Cause(&'static str),
@@ -3374,7 +3375,7 @@ fn txn_row(label: &'static str, bytes: &'static [u8], expect: Expect) -> Row {
     }
 }
 
-/// BC-1.18.013 v1.8 EC-032 (canonical TV row): gate-state rows (a)-(o), the
+/// BC-1.18.013 EC-032 (canonical TV row): gate-state rows (a)-(o), the
 /// txn-record rows, first-failure-wins precedence, and the terminal-record rows.
 #[cfg(unix)]
 #[test]
@@ -3601,7 +3602,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
     });
 
     // ---- terminal record (Branch C): live txn of its OWN migration, lock FREE so
-    // the reconciler reaches the record. BC-1.18.013 v1.9 EC-032 TV row (a)-(h),
+    // the reconciler reaches the record. BC-1.18.013 EC-032 TV row (a)-(h),
     // STAGING gen-1 and separately COMMITTING, both migrations / path families. ----
     type RecordBytes = Box<dyn Fn() -> Vec<u8>>;
     let mk = |txn_id: &'static str, gen_id: &'static str, count: u64| -> RecordBytes {
@@ -3726,7 +3727,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
 
 // ---------------------------------------------------------------------------
 // ADR-052 §Downstream item 21 -- lexical root spellings
-// (BC-1.18.013 v1.9 EC-023(g), EC-024(k)/(l); BC-1.18.011 v1.17 EC-018(g), EC-019)
+// (BC-1.18.013 EC-023(g), EC-024(k)/(l); BC-1.18.011 EC-018(g), EC-019)
 // ---------------------------------------------------------------------------
 
 /// Run the real binary with `CLAUDE_PROJECT_DIR` set to `proj_dir` EXACTLY AS GIVEN
@@ -4319,7 +4320,7 @@ fn raw_txn_row(
     }
 }
 
-/// F-S2508-L3-001. BC-1.18.013 v1.11 Precondition 6(c) rule 3: "a txn record must
+/// F-S2508-L3-001. BC-1.18.013 Precondition 6(c) rule 3: "a txn record must
 /// be a JSON object whose `state` is a known txn state and whose PRESENT
 /// `migration_id` is a JSON string"; Precondition 6 (foreign): "A live txn whose
 /// `migration_id` is a string NOT in K ... is FOREIGN: `RefuseForeignMigration`
@@ -4418,7 +4419,7 @@ fn test_BC_1_18_013_EC029_minimal_shape_foreign_txn_is_foreign_not_state_integri
 // Pass-3 F-S2508-L3-002 -- non-string tool_name must still release
 // ---------------------------------------------------------------------------
 
-/// F-S2508-L3-002. BC-1.18.013 v1.11 EC-021: a `PostToolUseFailure` for an admitted
+/// F-S2508-L3-002. BC-1.18.013 EC-021: a `PostToolUseFailure` for an admitted
 /// `tool_use_id` REMOVES the reservation "keyed only on `tool_use_id`, no
 /// `tool_name` filter", "including ... (b) an envelope with NO `tool_name`, (c) an
 /// envelope with a differently-shaped `tool_name`"; ADR-052 §5a F-001. A `null`,
@@ -4514,7 +4515,7 @@ fn test_BC_1_18_013_EC021c_posttoolusefailure_non_string_tool_name_still_release
 // Pass-3 F-S2508-L3-007 -- EISDIR (a directory at the path) is io, root-safe
 // ---------------------------------------------------------------------------
 
-/// F-S2508-L3-007. BC-1.18.013 v1.11 Precondition 6(c) rule 2 (`io`): a failed
+/// F-S2508-L3-007. BC-1.18.013 Precondition 6(c) rule 2 (`io`): a failed
 /// read CALL of a txn record or a terminal record is `E-MAINTENANCE-002 (io)`.
 /// A DIRECTORY at the file's path makes `read` fail with EISDIR for EVERY uid
 /// (unlike chmod 000, which root bypasses), so these rows run under root too.
@@ -4579,7 +4580,7 @@ fn test_BC_1_18_013_EC032_eisdir_directory_at_record_path_is_io_root_safe_blackb
     );
 }
 
-/// BC-1.18.013 v1.11 EC-021 / ADR-052 §5a F-001: release is keyed only on
+/// BC-1.18.013 EC-021 / ADR-052 §5a F-001: release is keyed only on
 /// `tool_use_id` for BOTH completion events (`is_tool_completion_event` is true for
 /// `PostToolUse` and `PostToolUseFailure`), so a `PostToolUse` whose `tool_name`
 /// is null / numeric / boolean / an array / an object must still release.
@@ -4646,9 +4647,9 @@ fn test_BC_1_18_013_EC021c_posttooluse_non_string_tool_name_still_releases_black
 //    interpretation -- tiers" (Tier 0 shape at read; Tier 1 fields read lazily
 //    by the consuming branch only).
 //
-// The BC mirror (BC-1.18.013 v1.12) is being written in parallel; the ADR is
-// authoritative, so these tests cite ADR sections. Only BC ECs that already
-// exist (EC-029, EC-035) are cited.
+// The ADR is the authority for these rulings, so these tests cite ADR
+// sections; the BC ECs cited alongside (EC-029, EC-035) are the ones that
+// mirror them.
 // ===========================================================================
 
 #[cfg(unix)]
@@ -4865,7 +4866,7 @@ fn assert_unstatable_admission_fails_closed(
 /// symlink `.factory` makes the one `stat` fail with ELOOP (for EVERY uid, so this
 /// row runs under root): existence is UNKNOWN => the admission leg FAILS CLOSED,
 /// `E-MAINTENANCE-002 (io)`, exit 2, no reservation, tree unchanged. NOT admitted
-/// (the pre-v1.23 `is_ok_and(is_dir)` collapse admitted it).
+/// (the former `is_ok_and(is_dir)` collapse admitted it).
 #[cfg(unix)]
 #[test]
 fn test_BC_1_18_013_ADR052_v123_unstatable_factory_eloop_fails_closed_io_blackbox() {
@@ -5139,7 +5140,7 @@ fn test_BC_1_18_013_ADR052_v123_unstatable_factory_release_leg_no_verdict_reserv
 // ---------------------------------------------------------------------------
 
 /// (migration_id as written, protected path family, own terminal-record name).
-/// `None` = the pre-v1.11 B2 record (migration_id ABSENT).
+/// `None` = the legacy B2 record (migration_id ABSENT).
 #[cfg(unix)]
 const TIER_FAMILIES: [(Option<&str>, &str, &str); 3] = [
     (Some("migrate-bc-index"), BC_PATH, "completed.json"),
@@ -5664,7 +5665,7 @@ fn test_BC_1_18_013_ADR052_v123_tier1_one_live_plus_non_live_counts_as_one_live(
     );
 }
 
-/// BC-1.18.013 v1.12 EC-045 CONTROL (S-25.08 v1.6 AC-029 gap), ADR-052
+/// BC-1.18.013 EC-045 CONTROL (story AC-029 gap), ADR-052
 /// "Txn-record interpretation -- tiers", Branch B row: the `generation_id` rule
 /// applies ONLY when the migration is known, the txn is STAGING, the lock is
 /// ACQUIRED and the own terminal record is ABSENT. With `exclusive.lock` HELD by
@@ -5740,13 +5741,15 @@ fn test_BC_1_18_013_EC045_lock_held_minimal_staging_without_generation_id_is_pla
 // F-S2508-L4-001 -- release leg, unstatable `migration-state` (black-box half)
 // ---------------------------------------------------------------------------
 
-/// F-S2508-L4-001 (externally visible half only; the warn-vs-silent distinction
-/// is not observable in S-25.08 -- see `bc_1_18_013_release_stat_error_test.rs`
-/// for the error-path classification pin against the factored helper). A
+/// F-S2508-L4-001 (externally visible half only; the real binary cannot show
+/// warn-vs-silent -- that distinction is observed in-process by the two
+/// `test_BC_1_18_013_L5_001_*` tests in `s2508_diagnostics_test.rs`, and the
+/// error-path classification is pinned against the factored helper in
+/// `bc_1_18_013_release_stat_error_test.rs`). A
 /// self-referential `migration-state` symlink makes the release's stat fail
 /// ELOOP (every uid, root-safe). BC-1.18.013 EC-021 / AC-011: release is
 /// best-effort, NEVER a verdict => exit 0, no `E-MAINTENANCE`, nothing deleted
-/// or created. Green today; guards the fix against turning the stat error into a
+/// or created. Guards the delivered fix against regressing the stat error into a
 /// verdict or a destructive action.
 #[cfg(unix)]
 #[test]
@@ -5793,7 +5796,7 @@ fn test_BC_1_18_013_L4_001_release_with_eloop_migration_state_exits_0_deletes_no
 // F-S2508-L4-002 -- ADR-052 "E-MAINTENANCE-002 <cause> -- total decision rule"
 // (regression pin of the ruled order: input guards -> .factory stat -> target
 // classification -> tool_use_id check, the last only for an in-scope protected
-// write). The code already complies; these are green on arrival.
+// write). The code complies; these are regression pins.
 // ---------------------------------------------------------------------------
 
 /// (1) unstatable `.factory` (ELOOP) + invalid id on a protected path: the

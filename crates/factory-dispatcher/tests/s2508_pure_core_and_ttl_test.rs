@@ -226,9 +226,9 @@ fn test_BC_1_18_011_EC009_reservation_is_stale_created_at_first_mtime_fallback()
         reservation_is_stale(Some(now - ttl - 1), Some(now), now, ttl),
         "age == ttl + 1 is stale"
     );
-    // Spec change (BC-1.18.011 v1.16 EC-020 / BC-1.18.013 v1.8 EC-025 / ADR-052
+    // Spec change (BC-1.18.011 EC-020 / BC-1.18.013 EC-025 / ADR-052
     // timestamp rule (2)): a `created_at` beyond now + 300 s is UNUSABLE
-    // (clock-skew untrusted) and the mtime is the basis. The v1.18 expectation
+    // (clock-skew untrusted) and the mtime is the basis. The former expectation
     // "any future created_at is never stale" is superseded. Intent kept: a
     // future-but-within-skew created_at is retained (age 0, never underflows),
     // and a far-future created_at with a RECENT mtime is retained too.
@@ -302,7 +302,7 @@ fn live(s: Option<BcIndexMigrationTxnState>) -> bool {
     )
 }
 
-/// The decision table from VP-146 v1.2 a1 / VP-147 v1.1 h1, stated independently
+/// The decision table from VP-146 a1 / VP-147 h1, stated independently
 /// of any implementation (the oracle).
 fn oracle(i: &TerminalReconcileInputs) -> TerminalReconcileDecision {
     use TerminalReconcileDecision::*;
@@ -313,7 +313,7 @@ fn oracle(i: &TerminalReconcileInputs) -> TerminalReconcileDecision {
         return RefuseForeignMigration; // precedence over every record check
     }
     if !i.record_present {
-        return NoOp; // record ABSENT => nothing to reconcile (BC-1.18.011 v1.13 Pre 6(d) table row 3)
+        return NoOp; // record ABSENT => nothing to reconcile (BC-1.18.011 Pre 6(d) table row 3)
     }
     let all_ok = i.record_parses
         && i.txn_id_eq
@@ -375,7 +375,7 @@ fn test_BC_1_18_011_PC9_terminal_reconcile_foreign_txn_is_refused_never_finalize
 
 /// STAGING + terminal record is ALWAYS fail-closed (no verification attempted),
 /// even when every record check is true (BC-1.18.011 Precondition 6(d)/Postcondition
-/// 9(d); BC-1.18.013 Postcondition 5a; taxonomy v1.34 clause (c)).
+/// 9(d); BC-1.18.013 Postcondition 5a; taxonomy E-MAINTENANCE-001 clause (c)).
 #[test]
 fn test_BC_1_18_011_PC9_terminal_reconcile_staging_plus_record_always_fail_closed() {
     let i = TerminalReconcileInputs {
@@ -480,7 +480,7 @@ fn test_BC_1_18_011_PC9_terminal_reconcile_finalize_only_on_full_verification() 
     );
 }
 
-/// BC-1.18.011 v1.13 NoOp cell: own-migration live txn (STAGING and, separately,
+/// BC-1.18.011 NoOp cell: own-migration live txn (STAGING and, separately,
 /// COMMITTING), lock acquired, terminal record ABSENT => `NoOp` (no txn write, no
 /// gate write).
 #[test]
@@ -511,7 +511,7 @@ fn test_BC_1_18_011_PC9_terminal_reconcile_record_absent_is_noop_for_staging_and
     }
 }
 
-/// BC-1.18.011 v1.13 Pre 6(d) row 3: Branch B has NO gate condition. With the
+/// BC-1.18.011 Pre 6(d) row 3: Branch B has NO gate condition. With the
 /// gate OPEN (an absent gate-state.json reads as OPEN), an own live
 /// null-generation STAGING txn, lock acquired and terminal record absent must
 /// still plan the Branch B abort-then-reopen; a lock-held (live coordinator)
@@ -560,7 +560,7 @@ fn test_BC_1_18_011_PC6d_plan_branch_b_applies_with_gate_open() {
 }
 
 /// F-S2508-L1-005 (BC-1.18.011 Precondition 6(c): the coordinator waits for ALL
-/// in-flight admitted writers; since v1.7 `reservations/` exists before draining,
+/// in-flight admitted writers; `reservations/` exists before draining,
 /// so every read error is genuine): an UNREADABLE `reservations/` holding a live
 /// writer reservation must NOT be treated as quiescent. The drain must fail
 /// closed (not `Ok`), so the coordinator never proceeds to LOCKED/snapshot.
@@ -625,8 +625,8 @@ fn test_BC_1_18_011_PC6c_drain_fails_closed_on_reservations_read_error() {
 }
 
 // ===========================================================================
-// ADR-052 / BC-1.18.013 v1.8 / BC-1.18.011 v1.16 -- adversary pass-1
-// red tests (pure functions)
+// ADR-052 / BC-1.18.013 / BC-1.18.011 -- adversary pass-1
+// tests (pure functions)
 // ===========================================================================
 
 /// F-001 / EC-021: `is_tool_completion_event` is true ONLY for exactly
@@ -736,7 +736,7 @@ fn test_BC_1_18_013_EC024_resolve_target_path_real_and_lexical_forms() {
     }
 }
 
-/// F-008 / EC-025: the v1.20 `reservation_is_stale` timestamp table, signature
+/// F-008 / EC-025: the ADR-052 timestamp-rule `reservation_is_stale` table, signature
 /// `(Option<u64>, Option<u64>, u64, u64) -> bool`.
 #[test]
 fn test_BC_1_18_011_EC025_reservation_is_stale_v120_timestamp_table() {
@@ -770,7 +770,7 @@ fn test_BC_1_18_011_EC025_reservation_is_stale_v120_timestamp_table() {
         !reservation_is_stale(None, Some(now + 5000), now, ttl),
         "(h) future mtime retained"
     );
-    // (i) both unusable => age UNKNOWN => NOT stale (the merged pre-epoch=0 reclaim is removed).
+    // (i) both unusable => age UNKNOWN => NOT stale (the former pre-epoch=0 reclaim is removed).
     assert!(
         !reservation_is_stale(None, None, now, ttl),
         "(i) both unusable => not stale"
@@ -942,7 +942,7 @@ fn test_BC_1_18_011_EC025_drain_gc_reservation_timestamp_vectors() {
     );
 }
 
-/// F-S2508-L3-003 ("never clamped"). BC-1.18.013 v1.11 EC-019/EC-025: a
+/// F-S2508-L3-003 ("never clamped"). BC-1.18.013 EC-019/EC-025: a
 /// `created_at` that is pre-epoch (case (c)) or does not fit u64 is NOT a usable
 /// instant, so staleness falls back to the file mtime. With a FRESH mtime the
 /// reservation is therefore NOT stale and the drain RETAINS it

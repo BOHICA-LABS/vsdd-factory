@@ -1,7 +1,7 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 //! BC-1.18.011 (S-25.02 cluster-5 "shard-b2", T-11, AC-018) Red-Gate-authored
-//! coverage for the B2 governed one-time migration surface in
+//! (now green) coverage for the B2 governed one-time migration surface in
 //! `shard_manager.rs`, plus the `executor.rs` native admission-gate
 //! precedence tests the architect's Ruling 1/2/3 (task-level, this burst)
 //! require.
@@ -1326,8 +1326,8 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_with_e
 
 #[test]
 fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migration_state_dir() {
-    // BC-1.18.011 v1.15 Precondition 6(c) "Unconditional reservation namespace"
-    // / EC-015 (replaces the pre-v1.15 "no migration-state/ => zero-cost no-op
+    // BC-1.18.011 Precondition 6(c) "Unconditional reservation namespace"
+    // / EC-015 (replaces the former "no migration-state/ => zero-cost no-op
     // with nothing created" expectation): a protected write admitted before
     // `.factory/migration-state/` ever existed STILL reserves, so a coordinator
     // that activates mid-flight sees it.
@@ -1535,10 +1535,10 @@ fn test_BC_1_18_011_PC6d_b2_entry_point_branch_b_aborts_null_generation_staging_
 /// AC-009 (BC-1.18.011 Precondition 6(c) reserve-then-verify + release-on-block,
 /// EC-007, EC-008): on FAILED verification (live coordinator holds the lock, txn
 /// STAGING) the admitter has created ITS OWN reservation FIRST and then removes it
-/// before returning the `E-MAINTENANCE-001` Block. Discriminator vs the merged
-/// check-then-reserve ordering: a stale file already sitting at the SAME
+/// before returning the `E-MAINTENANCE-001` Block. Discriminator vs the former
+/// (pre-S-25.08) check-then-reserve ordering: a stale file already sitting at the SAME
 /// `tool_use_id` path is overwritten by the admitter's own reservation and then
-/// removed (merged code refuses BEFORE creating, so the planted file survives).
+/// removed (the former ordering refused BEFORE creating, so the planted file would survive).
 /// An unrelated writer's reservation is never touched.
 #[test]
 fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created_first() {

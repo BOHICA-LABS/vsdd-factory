@@ -1,7 +1,7 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! S-25.08 RED-GATE: registry-error exit-code mapping (BC-7.06.001 v1.13
-//! §Fail-Closed Symmetry; BC-1.08.001 v1.4 Invariants 1/2).
+//! S-25.08: registry-error exit-code mapping (BC-7.06.001
+//! §Fail-Closed Symmetry; BC-1.08.001 Invariants 1/2).
 //!
 //! The former inline `match` in `main.rs::run` ended in `_ => 0`, so a FUTURE
 //! `RegistryError` variant would have silently failed OPEN. The testable seam is
@@ -106,8 +106,8 @@ fn test_BC_7_06_001_registry_error_exit_code_covers_every_variant_explicitly() {
     }
 }
 
-// ---- real-binary pins (GREEN today; they lock the wired behavior the new
-// function must preserve) ----
+// ---- real-binary pins (they lock the wired behavior that
+// `registry_error_exit_code` preserves) ----
 
 fn run_binary(registry_body: Option<&str>) -> i32 {
     let root = tempfile::tempdir().unwrap();
