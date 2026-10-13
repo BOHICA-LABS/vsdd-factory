@@ -48,6 +48,12 @@ setup() {
   INTERNAL_LOG_RS="$REPO_ROOT/crates/factory-dispatcher/src/internal_log.rs"
   EXECUTOR_RS="$REPO_ROOT/crates/factory-dispatcher/src/executor.rs"
   VSDD_SINK_RS="$REPO_ROOT/crates/factory-dispatcher/src/vsdd_sink.rs"
+  TEST_TMP="$(mktemp -d "${BATS_TMPDIR}/host-abi-hygiene-XXXXXX")"
+}
+
+teardown() {
+  [ -n "${TEST_TMP:-}" ] && rm -rf "${TEST_TMP}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -204,14 +210,12 @@ setup() {
 
   # Mutation-liveness: verify the grep pattern matches the expected declaration form.
   local mut_file
-  mut_file=$(mktemp /tmp/t009_mutant_XXXXXX.rs)
+  mut_file="${TEST_TMP}/mutant.rs"
   printf 'pub const INTERNAL_FILE_NOT_FOUND: &str = "internal.file_not_found";\n' > "$mut_file"
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+INTERNAL_FILE_NOT_FOUND' "$mut_file"; then
-    rm -f "$mut_file"
     echo "FAIL: mutation-liveness — grep pattern did not match injected INTERNAL_FILE_NOT_FOUND declaration."
     false
   fi
-  rm -f "$mut_file"
   echo "PASS mutation-liveness: pattern correctly identifies INTERNAL_FILE_NOT_FOUND declaration."
 
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+INTERNAL_FILE_NOT_FOUND' "$INTERNAL_LOG_RS"; then
@@ -244,14 +248,12 @@ setup() {
 
   # Mutation-liveness: verify the grep pattern matches the expected declaration form.
   local mut_file
-  mut_file=$(mktemp /tmp/t010_mutant_XXXXXX.rs)
+  mut_file="${TEST_TMP}/mutant.rs"
   printf 'pub const PLUGIN_ABANDONED: &str = "plugin.abandoned";\n' > "$mut_file"
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+PLUGIN_ABANDONED' "$mut_file"; then
-    rm -f "$mut_file"
     echo "FAIL: mutation-liveness — grep pattern did not match injected PLUGIN_ABANDONED declaration."
     false
   fi
-  rm -f "$mut_file"
   echo "PASS mutation-liveness: pattern correctly identifies PLUGIN_ABANDONED declaration."
 
   if ! grep -qE 'pub[[:space:]]+const[[:space:]]+PLUGIN_ABANDONED' "$INTERNAL_LOG_RS"; then
@@ -350,7 +352,7 @@ _scan_bare_literals() {
   # Mutation-liveness check: inject a bare literal into a temp copy of
   # read_file.rs's production region and assert the gate fires.
   local mut_file
-  mut_file=$(mktemp /tmp/t011_mutant_XXXXXX.rs)
+  mut_file="${TEST_TMP}/mutant.rs"
   # Insert the mutation line immediately before the #[cfg(test)] boundary.
   awk '{
     if (/^#\[cfg\(test\)\]/) {
@@ -361,7 +363,6 @@ _scan_bare_literals() {
 
   local mutant_output
   mutant_output=$(_scan_bare_literals "$mut_file")
-  rm -f "$mut_file"
 
   if [ -z "$mutant_output" ]; then
     echo "FAIL: mutation-liveness (a) — gate did NOT fire on a temp copy of read_file.rs"
@@ -376,7 +377,7 @@ _scan_bare_literals() {
   # Inject "plugin.completed" (one of the two new D22 classes) immediately
   # before the #[cfg(test)] boundary and assert the gate fires on it.
   local mut_file2
-  mut_file2=$(mktemp /tmp/t011_mutant2_XXXXXX.rs)
+  mut_file2="${TEST_TMP}/mutant2.rs"
   awk '{
     if (/^#\[cfg\(test\)\]/) {
       print "    let _ = \"plugin.completed\"; // mutation-liveness injection (D22 extension)"
@@ -386,7 +387,6 @@ _scan_bare_literals() {
 
   local mutant_output2
   mutant_output2=$(_scan_bare_literals "$mut_file2")
-  rm -f "$mut_file2"
 
   if [ -z "$mutant_output2" ]; then
     echo "FAIL: mutation-liveness (b) — gate did NOT fire on a temp copy of read_file.rs"
@@ -402,7 +402,7 @@ _scan_bare_literals() {
   # and assert the 4-stage scan fires — proves the widened perimeter detects
   # a future bare literal in executor.rs production code (F-P2-001).
   local mut_file3
-  mut_file3=$(mktemp /tmp/t011_mutant3_XXXXXX.rs)
+  mut_file3="${TEST_TMP}/mutant3.rs"
   awk '{
     if (/^#\[cfg\(test\)\]/) {
       print "    let _ = \"plugin.completed\"; // mutation-liveness injection (executor.rs extension)"
@@ -412,7 +412,6 @@ _scan_bare_literals() {
 
   local mutant_output3
   mutant_output3=$(_scan_bare_literals "$mut_file3")
-  rm -f "$mut_file3"
 
   if [ -z "$mutant_output3" ]; then
     echo "FAIL: mutation-liveness (c) — gate did NOT fire on a temp copy of executor.rs"

@@ -53,6 +53,7 @@ PLUGIN_ROOT=""
 BIN_DIR=""
 FIXTURES_DIR=""
 MOCK_BIN=""
+SCRATCH_DIR=""
 
 # Darwin-leg suite preflight (AC-004 mechanism gate, F-S1901-P1-003).
 # On macOS: verifies /bin/bash --version contains "version 3.2" before any test runs.
@@ -74,6 +75,16 @@ setup_file() {
         mkdir -p "$wasm_dir"
         cp "${repo_root}/target/wasm32-wasip1/release/pr-manager-completion-guard.wasm" "$wasm"
     fi
+    # Dispatcher provenance: record which binary T-001 and similar tests will use.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    # Resolve the dispatcher ONCE (debug preferred, then release); tests reuse it.
+    DISPATCHER="${repo_root}/target/debug/factory-dispatcher"
+    if [[ ! -x "${DISPATCHER}" ]]; then
+        DISPATCHER="${repo_root}/target/release/factory-dispatcher"
+    fi
+    export DISPATCHER
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance "${DISPATCHER}"
     # Darwin-leg /bin/bash 3.2 preflight — macOS only.
     if [[ "$(uname)" != "Darwin" ]]; then
         return 0
@@ -92,18 +103,16 @@ setup() {
     BIN_DIR="${PLUGIN_ROOT}/bin"
     FIXTURES_DIR="${BATS_TEST_DIRNAME}/fixtures/pr-manager"
     MOCK_BIN="$(mktemp -d "${BATS_TMPDIR}/mock-bin-XXXXXX")"
+    SCRATCH_DIR="$(mktemp -d "${BATS_TMPDIR}/scratch-XXXXXX")"
 
     # Locate factory-dispatcher binary (needed for T-001 WASM hook test)
     REPO_ROOT="$(cd "${PLUGIN_ROOT}/../.." && pwd)"
-    DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
-    if [[ ! -x "${DISPATCHER}" ]]; then
-        DISPATCHER="${REPO_ROOT}/target/release/factory-dispatcher"
-    fi
-    export PLUGIN_ROOT BIN_DIR FIXTURES_DIR MOCK_BIN REPO_ROOT DISPATCHER
+    # DISPATCHER is resolved once in setup_file (provenance names this binary).
+    export PLUGIN_ROOT BIN_DIR FIXTURES_DIR MOCK_BIN SCRATCH_DIR REPO_ROOT DISPATCHER
 }
 
 teardown() {
-    rm -rf "${MOCK_BIN}"
+    rm -rf "${MOCK_BIN}" "${SCRATCH_DIR}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,7 +131,7 @@ teardown() {
     fi
 
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/T001-sink-XXXXXX.jsonl")"
+    sink_file="${SCRATCH_DIR}/sink.jsonl"
 
     # SubagentStop payload: pr-manager agent emits READY verdict WITHOUT covered_sha field
     local payload
@@ -562,7 +571,7 @@ GHEOF
     local pr_number="10"
     local release_branch="release/v1.0.0-rc.23"
     local merge_flag_file
-    merge_flag_file="$(mktemp "${BATS_TMPDIR}/merge-flag-T012-XXXXXX.txt")"
+    merge_flag_file="${SCRATCH_DIR}/merge-flag.txt"
     rm -f "${merge_flag_file}"
 
     cat > "${MOCK_BIN}/gh" <<GHEOF
@@ -1134,7 +1143,7 @@ GHEOF
 @test "T-023: enforce-merge-strategy.sh forwards --delete-branch residual arg to gh (F-P7-001 pass-through)" {
     local pr_number="55"
     local argv_log
-    argv_log="$(mktemp "${BATS_TMPDIR}/gh-argv-T023-XXXXXX.txt")"
+    argv_log="${SCRATCH_DIR}/gh-argv.txt"
 
     cp "${FIXTURES_DIR}/stub-gh.sh" "${MOCK_BIN}/gh"
     chmod +x "${MOCK_BIN}/gh"
@@ -1260,7 +1269,7 @@ GHEOF
 @test "T-027: enforce-merge-strategy.sh: --merge --delete-branch allowed + forwarded (F-P7-001 deny-list positive)" {
     local pr_number="63"
     local argv_log
-    argv_log="$(mktemp "${BATS_TMPDIR}/gh-argv-T027-XXXXXX.txt")"
+    argv_log="${SCRATCH_DIR}/gh-argv.txt"
 
     cp "${FIXTURES_DIR}/stub-gh.sh" "${MOCK_BIN}/gh"
     chmod +x "${MOCK_BIN}/gh"
@@ -1301,7 +1310,7 @@ GHEOF
     local pr_number="64"
     local release_branch="release/v1.0.0-rc.23"
     local argv_log
-    argv_log="$(mktemp "${BATS_TMPDIR}/gh-argv-T028-XXXXXX.txt")"
+    argv_log="${SCRATCH_DIR}/gh-argv.txt"
 
     cp "${FIXTURES_DIR}/stub-gh.sh" "${MOCK_BIN}/gh"
     chmod +x "${MOCK_BIN}/gh"
@@ -1344,7 +1353,7 @@ GHEOF
 @test "T-029: enforce-merge-strategy.sh: --admin as \$2 (primary strategy slot) → exit 1 + non-empty stderr + gh pr merge NOT called (F-P8-003)" {
     local pr_number="10"
     local argv_log
-    argv_log="$(mktemp "${BATS_TMPDIR}/gh-argv-T029-XXXXXX.txt")"
+    argv_log="${SCRATCH_DIR}/gh-argv.txt"
     # Remove so we can detect whether gh pr merge was called at all.
     rm -f "${argv_log}"
 
@@ -1393,7 +1402,7 @@ GHEOF
 @test "T-030: enforce-merge-strategy.sh: -A as \$2 (short admin flag in strategy slot) → exit 1 + non-empty stderr + gh pr merge NOT called (F-P8-003)" {
     local pr_number="10"
     local argv_log
-    argv_log="$(mktemp "${BATS_TMPDIR}/gh-argv-T030-XXXXXX.txt")"
+    argv_log="${SCRATCH_DIR}/gh-argv.txt"
     rm -f "${argv_log}"
 
     cp "${FIXTURES_DIR}/stub-gh.sh" "${MOCK_BIN}/gh"

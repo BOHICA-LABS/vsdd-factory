@@ -35,10 +35,19 @@
 # setup / teardown
 # ---------------------------------------------------------------------------
 
+setup_file() {
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    # Resolve once (release build — the binary every test exercises) and pass explicitly.
+    DISPATCHER="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)/target/release/factory-dispatcher"
+    export DISPATCHER
+    emit_dispatcher_provenance "${DISPATCHER}"
+}
+
 setup() {
   REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   PLUGIN_ROOT="$REPO_ROOT/plugins/vsdd-factory"
-  DISPATCHER="$REPO_ROOT/target/release/factory-dispatcher"
   GUARD_WASM="$PLUGIN_ROOT/hook-plugins/verify-factory-lock.wasm"
   LIB_RS="$REPO_ROOT/crates/hook-plugins/verify-factory-lock/src/lib.rs"
   REGISTRY_TOML="$REPO_ROOT/plugins/vsdd-factory/hooks-registry.toml"
@@ -140,7 +149,7 @@ _require_artifacts() {
   # (with sed block-comment strip) must NOT find them (output empty). If it does
   # find them, the sed chain is not stripping block comments → gate is broken.
   local mut_file
-  mut_file=$(mktemp /tmp/t001b_mutant_XXXXXX.rs)
+  mut_file="${WORK}/mutant.rs"
   printf 'fn read_data() -> i32 { /* host::read_file(path, STATE_MD_MAX_BYTES) TooLarge check */ 0 }\n' \
     > "$mut_file"
 

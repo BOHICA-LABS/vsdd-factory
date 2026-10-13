@@ -52,6 +52,12 @@ setup() {
   READ_PREFIX_RS="$REPO_ROOT/crates/factory-dispatcher/src/host/read_prefix.rs"
   CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
   RELEASE_YML="$REPO_ROOT/.github/workflows/release.yml"
+  TEST_TMP="$(mktemp -d "${BATS_TMPDIR}/read-prefix-wasm-XXXXXX")"
+}
+
+teardown() {
+  [ -n "${TEST_TMP:-}" ] && rm -rf "${TEST_TMP}"
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -291,7 +297,7 @@ setup() {
   # production region of a temp copy and assert the gate fires.
   # The injection appears BEFORE // so sed stage 3 does NOT strip it.
   local mut_file
-  mut_file=$(mktemp /tmp/t009g_mutant_XXXXXX.rs)
+  mut_file="${TEST_TMP}/mutant.rs"
 
   # Insert the mutation line immediately before the #[cfg(test)] boundary so
   # stage-1 awk includes it in the production region it processes.
@@ -309,7 +315,6 @@ setup() {
       | sed 's://.*::' \
       | grep -oE 'OUTPUT_TOO_LARGE' || true
   )
-  rm -f "$mut_file"
 
   if [ -z "$mutant_output" ]; then
     echo "FAIL: mutation-liveness check — gate did NOT fire on mutant containing"
@@ -455,12 +460,11 @@ setup() {
   # After deletion the exclusion count drops below the workspace count, proving
   # the coupled assertion (b) would fire on any --exclude removal.
   local mut_ci_del
-  mut_ci_del=$(mktemp /tmp/t009h_ci_del_XXXXXX.yml)
+  mut_ci_del="${TEST_TMP}/ci-del.yml"
   awk 'seen==0 && /--exclude read-prefix-fixture/{seen=1;next}{print}' \
     "$CI_YML" > "$mut_ci_del"
   local mut_del_excl_count
   mut_del_excl_count=$(grep -c '\-\-exclude read-prefix-fixture' "$mut_ci_del" || true)
-  rm -f "$mut_ci_del"
   if [ "$mut_del_excl_count" -eq "$ci_workspace_count" ]; then
     echo "FAIL: mutation-liveness (deletion) — deleting one '--exclude read-prefix-fixture' line"
     echo "  still gives excl count ($mut_del_excl_count) == workspace count ($ci_workspace_count)."
@@ -474,7 +478,7 @@ setup() {
   # The workspace count increases by 1 but the exclusion count stays the same,
   # proving assertion (b) fires when a new workspace build lacks the exclusion.
   local mut_ci_add
-  mut_ci_add=$(mktemp /tmp/t009h_ci_add_XXXXXX.yml)
+  mut_ci_add="${TEST_TMP}/ci-add.yml"
   {
     cat "$CI_YML"
     printf '          cargo build --release --target wasm32-wasip1 \\\n'
@@ -488,7 +492,6 @@ setup() {
   ' "$mut_ci_add")
   local mut_add_excl_count
   mut_add_excl_count=$(grep -c '\-\-exclude read-prefix-fixture' "$mut_ci_add" || true)
-  rm -f "$mut_ci_add"
   if [ "$mut_add_excl_count" -eq "$mut_add_workspace_count" ]; then
     echo "FAIL: mutation-liveness (new-build-without-exclusion) — appending a workspace build"
     echo "  without '--exclude read-prefix-fixture' still gives excl ($mut_add_excl_count) == workspace ($mut_add_workspace_count)."
