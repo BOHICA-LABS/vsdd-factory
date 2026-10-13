@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "3981b1b"
+input-hash: "feff835"
 traces_to: STATE.md
 ---
 
@@ -2704,3 +2704,53 @@ Verification (`stored` = frontmatter `input-hash`, `computed` = `compute-input-h
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `8706d524`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Persisted S-25.08 pass 9 and S-25.09 pass 3 verbatim, registered the story/epic cascade with mirrored input-hashes in STORY-INDEX v4.493, promoted S-14.10 to a story file, left BC-1.18.010/011/013, ADR-052 v1.28, BC-INDEX and ARCH-INDEX for the next burst, and advanced STATE.md to v10.92.
+
+## Burst: HUMAN-DECISION-S2513-S2508-P10-PERSISTED-ADR052-V128-BC-REGISTRATION (2026-10-13)
+
+**Parent-commit:** the D-1258 burst commit (`de6ef674`). **Agent:** state-manager (single-commit TD-VSDD-053; D-1259; STATE.md v10.92→v10.93).
+
+**Adversary verdict:** S-25.08 pass 10 at `9e936d4c`: NOT CLEAN 0C/0H/0M/2L, novelty LOW, streak 0/3 (F-S2508-L10-001 unreachable cited SHAs; F-S2508-L10-002 stale convergence paragraph; both story-only, fixed in v1.11; production code correct since pass 5). Persisted verbatim at `code-delivery/S-25.08/adv-local-pass-10.md`.
+
+**Files touched (Dim-1):** 22 unique files (state-manager-authored: STATE.md, decision-log.md, lessons.md, burst-log.md, session-checkpoints.md, the review file, STORY-INDEX v4.494, ARCH-INDEX v4.58, BC-INDEX v5.112 and the S-25.08 T-61 tick; architect/product-owner-authored specs committed as authored: ADR-052 v1.28, four BCs, four hash-only BCs, error-taxonomy v1.43; story-writer-authored S-25.08 v1.11; hook byproducts regression-state.json and sidecar-learning.md). NOT staged: stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (untracked, story-writer drafting) and stories/epics/E-25-validation-integrity.md (story-writer editing).
+- STATE.md (v10.92→v10.93)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1259)
+- cycles/v1.0-brownfield-backfill/lessons.md (2 D-1259 lessons)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.92 checkpoint archived)
+- code-delivery/S-25.08/adv-local-pass-10.md (NEW)
+- stories/STORY-INDEX.md (v4.494)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.11; T-61 ticked; convergence paragraph re-synced)
+- specs/architecture/ARCH-INDEX.md (v4.58)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.28)
+- specs/behavioral-contracts/BC-INDEX.md (v5.112)
+- specs/behavioral-contracts/ss-01/BC-1.18.005.md (v1.16)
+- specs/behavioral-contracts/ss-01/BC-1.18.010.md (v1.13)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.24)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.16)
+- specs/behavioral-contracts/ss-01/BC-1.18.006.md (hash-only)
+- specs/behavioral-contracts/ss-01/BC-1.18.009.md (hash-only)
+- specs/behavioral-contracts/ss-01/BC-1.18.012.md (hash-only)
+- specs/behavioral-contracts/ss-07/BC-7.08.001.md (hash-only)
+- specs/prd-supplements/error-taxonomy.md (v1.43)
+- regression-state.json (hook-generated)
+- sidecar-learning.md (hook-generated)
+
+**Codifications:** D-1259 (human decision: NEW story S-25.13 after S-25.12 builds the armed-activation manifest; EC-087..EC-090 / `ACTIVATION_MANIFEST_INVALID` anchored to S-25.13); two [process-gap] lessons (SHA reachability in the reconciliation gate, added to S-14.10 scope; convergence-paragraph re-sync).
+
+**Dim-2 (literal shell, captured output):**
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` (also with `CI_REQUIRE_ARTIFACTS=1`) -> `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out`.
+- `plugins/vsdd-factory/bin/compute-input-hash .factory/stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md` -> `1319371`; `grep -m1 '^input-hash'` on the same file -> `input-hash: "1319371"` (stored == computed, run again after the T-61 tick).
+- `compute-input-hash .factory/stories/S-14.10-*.md` -> `1c5c379`; stored `1c5c379`; catalog row `1c5c379`; the stale STORY-INDEX blockquote value `6911736` corrected.
+- `cargo run -q -p last-amended-migrate -- migrate --check` -> all five governed files (STORY-INDEX, BC-INDEX, ARCH-INDEX, VP-INDEX, STATE.md) `eligibility=CurrentEntryOnly ... mutated=false`.
+
+**Dim-5:** Count-propagation: BC count 2,007, VP count 147, ADR count 54 and story registered total 254 unchanged; no count changed, so no old-count sweep applies; STORY-INDEX Status Summary unchanged (draft 114, Total (active) 234).
+
+**Dim-6:** No new adversary findings authored here; no tech-debt-register entries. OWED (routed, not performed): story-writer story-hash propagation burst ([D-1259-HASH-CASCADE-OWED]; S-25.09, S-25.06, S-25.10, S-25.11, S-25.02, S-12.16-class not recomputed here), S-25.13 and E-25 registration next burst, S-14.10 follow-up scope (SHA reachability gate).
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits; files staged explicitly by path, never `git add -A`; ADR-052 v1.28 edits ran under FUEL_EXHAUSTED advisories so the validators did not run on it; the PostToolUse FUEL_EXHAUSTED advisories on the large index edits are the known [D-1254-ADR052-SPLIT] class (writes landed).
+
+**Closes:** S-25.08 T-61; registers the D-1258 NOT-registered set (BC-1.18.010/011/013, ADR-052 v1.28, BC-INDEX, ARCH-INDEX). **Opens:** [D-1259-HASH-CASCADE-OWED]. **Unchanged OPEN:** [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE], [D-1258-S2509-PASS3-OWED], PR #769.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `de6ef674`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Recorded the human decision for S-25.13, persisted S-25.08 pass 10, registered ADR-052 v1.28, four BCs, error-taxonomy v1.43 and S-25.08 v1.11, and advanced STATE.md to v10.93.

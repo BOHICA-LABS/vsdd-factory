@@ -2189,3 +2189,15 @@ the file.
 **What happened:** `validate-factory-path-staging` named branch `develop` for `git add -A` run in `.worktrees/S-25.08` (two further occurrences). This is the same defect as [D-1254-HOOK-FP-003]: the branch is resolved from the hook CWD, not the Bash call's worktree (attached to S-26.02 / BC-4.16.001 v1.10 Invariant 7).
 **Lesson (D-1258):** Occurrences logged; no hook code changed in this burst. Diagnose with the trace UUID from the dispatcher stderr summary line when it recurs.
 `[open-diagnostic][D-1258][validate-factory-path-staging][hook-owner]`
+
+## LESSON (D-1259) — [process-gap] the story-reconciliation step checks commit subjects but not SHA reachability (S-25.08 F-S2508-L10-001)
+
+**What happened:** The v1.10 verbatim sweep (T-60) compared `git log -1 --format=%s <sha>` for every quoted commit. That proves the subject, not that the SHA belongs to the branch. Pass 10 found 24 cited SHAs not on `feature/S-25.08` (pre-rebase SHAs, or commits that moved to `feature/S-25.09` at the split); T-1 and T-2 named red-gate commits that vanish when the reflog expires. The orchestrator mapped every one of them.
+**Lesson (D-1259):** The reconciliation gate must run `git merge-base --is-ancestor <sha> feature/<story>` for every cited SHA not labelled pre-rebase / pre-split / on another branch, with literal shell output captured (D-449(a) / POLICY 22). Added to the S-14.10 scope as a follow-up for the story-writer (a reachability check in the reconciliation gate); the S-14.10 story file is not edited by this burst.
+`[process-gap][D-1259][sha-reachability][S-14.10]`
+
+## LESSON (D-1259) — [process-gap] the convergence paragraph is not re-synced after the persist burst ticks its task (S-25.08 F-S2508-L10-002)
+
+**What happened:** The story-writer writes the convergence paragraph before the state-manager burst ticks the persist task, and nobody re-reads the paragraph afterwards, so it kept saying the review file was OPEN and eight files were persisted (the same class as L5-004 and L8-004).
+**Lesson (D-1259):** The state-manager's persist burst re-syncs the convergence paragraph whenever it ticks a review-persist task (done in this burst for T-61: ten review files persisted, pass 11 next). Codification target: S-14.10.
+`[process-gap][D-1259][convergence-paragraph-resync][S-14.10]`

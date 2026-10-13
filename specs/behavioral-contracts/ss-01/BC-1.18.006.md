@@ -11,7 +11,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.005.md
   - crates/hook-sdk/src/result.rs
   - .factory/cycles/v1.0-brownfield-backfill/S-25.02-f2-architecture-delta.md
-input-hash: "6c41c0d"
+input-hash: "cd637ec"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null

@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md
   - plugins/vsdd-factory/hooks-registry.toml
-input-hash: "3427627"
+input-hash: "7c73862"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null

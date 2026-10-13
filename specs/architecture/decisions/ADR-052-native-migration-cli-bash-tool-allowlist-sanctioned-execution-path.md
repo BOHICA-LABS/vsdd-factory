@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.27"
+version: "1.28"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -151,6 +151,25 @@ ruling that `pub fn chunk_subsystem_rows_into_sub_shards` (and `oversized_row_ad
 hook-process caller such as a future full-rebuild path writes nothing to stderr; and the §Downstream owed list for
 BC-1.18.010 now also carries the `BcIndexAddressingError` sanitization sibling paragraph (human-confirmed extension,
 D-1257).
+**v1.28 (S-25.09 local adversary pass 3; architect rulings; no state-machine, exit-code-class, `<cause>` or
+VP-count change; v1.27 is committed and registered at D-1257 and is immutable, so these are a NEW version):** (1)
+F-S2509-L3-002 (MEDIUM, path-escape): every on-disk identifier that becomes a filesystem path component is validated
+by ONE shared pure predicate `is_safe_path_component` (the `tool_use_id` grammar `[A-Za-z0-9_.-]{1,128}`, no leading
+`.`; a strict superset of the EC-082 rejection set) at DECODE time, as a `GenerationId` newtype whose only constructor
+is that predicate, so no path join is reachable from an unvalidated string; a txn record whose `generation_id` string
+fails it is `txn_record_malformed` (admission: `E-MAINTENANCE-002 (state_integrity)`; coordinator:
+`AdmissionStateIntegrity { TxnRecordMalformed }` = `MIGRATION_STATE_INTEGRITY_FAILURE`, exit 2), nothing mutated;
+`CURRENT.json` switches to the same function; the identifier sweep covers `generation_id`, `activation_id`/`txn_id`,
+`migration_id`, `intent_log_path`, `tool_use_id`, plan paths and the `backfill-append-logs` mirror (item 11(c) point 7).
+(2) F-S2509-L3-003 (LOW): option (a): `admission_error` has NO generic `other =>` arm; the event `detail` is rendered
+per slot by the same `render_with_cap(cap)` source as Display, the fixed text never truncated, each data-derived
+substring capped at 64 (item 11(g)(4)). (3) Ruling A (bad manifest `activation_id`): the §5c Branch 3 / §4b manifest-validation failure had NO taxonomy code
+("REJECT with descriptive error"); it is now the NEW code `ACTIVATION_MANIFEST_INVALID`, exit **2**, nothing created,
+the offending value never echoed (item 11(c) point 7(f)); this is the one taxonomy-code addition in v1.28. (4)
+Ruling B (`ShardConfigError`): item 11(g)(2) extends to `ShardConfigError` on EVERY surface (dispatcher
+`block_reason`, coordinator stderr, any log/event): per-slot escape and cap (256 stderr/Display, 64 event), `Toml`
+as closed category plus line/column only (item 11(g)(2)(f)). All four rulings are recorded under the v1.28 changelog
+row.
 
 ## Context
 
@@ -1779,7 +1798,8 @@ operates in four distinct branches:
 - Full validation: exact command string match; metacharacter rejection; alternate-path rejection;
   manifest content validation (parseable, `migration_id` matches, not expired, `activation_id`
   is valid UUID); executable digest verification (§Decision 11)
-- If any check fails: REJECT with descriptive error
+- If any check fails: REJECT with descriptive error (v1.28: a manifest-CONTENT failure is rejected with the taxonomy
+  code `ACTIVATION_MANIFEST_INVALID`, exit 2, §Decision 11(c) point 7(f))
 
 **Branch 4 — Recovery:**
 - Trigger: CURRENT.json `status: committing` exists
@@ -2823,6 +2843,7 @@ subcommands; these are OS process exit codes, not HookResult values):
 | `CENSUS_MISMATCH_ABORT` | Pre-pivot census (step 3b PC2): any `BC-X.YY.NNN` ID from the original-census set appears in zero or more than one staged shard file (ID-set exactly-one-shard violation; detects EC-001 dup+drop even when total count is equal); OR shard-boundary capacity violation (step 3b internal check — distinct from `E-SHD-005`, which is a `HookResult` of the steady-state admission gate in BC-1.18.006/BC-1.18.010, NOT a process exit code of the migration binary). Process exit code. | BLOCKED — abort before pointer swap; txn → ABORTED; gate → OPEN | exit 2 |
 | `CONTENT_PRESERVATION_ABORT` | Pre-pivot checks (step 3b): staging-file integrity failure (sha256(staged_file) != expected_post_hash for any staged file, indicating modification after staging sync); OR PC1 structured-equivalence failure (SHA-256 of staged per-BC-row content in canonical BC-ID sort order does not match `source_body_row_sha256` from txn record, indicating row bytes were altered, dropped, or reordered during the split). NOTE: `source_sha256` (whole-file hash) is used ONLY by step 5 fingerprint recheck; PC1 uses the dedicated `source_body_row_sha256` field. Process exit code. | BLOCKED — abort before pointer swap; txn → ABORTED; gate → OPEN | exit 2 |
 | `ALREADY_MIGRATED` | the invoking migration's own terminal record exists (`.factory/migration-state/completed.json` for `migrate-bc-index`; `.factory/migration-state/completed-backfill-append-logs.json` for `backfill-append-logs`, §Decision 7e) AND (clean steady state OR the §4e verify-then-finalize reconciliation succeeded) | NON-ERROR sentinel — migration previously completed; no action in the clean state; a stale COMMITTING txn/non-OPEN gate is first reconciled (txn→COMPLETED, THEN gate→OPEN) | exit 0 |
+| `ACTIVATION_MANIFEST_INVALID` — `BcIndexMigrationError::ActivationManifestInvalid { manifest_path, reason }` (v1.28 §Decision 11(c) point 7(f); mirrored by `AppendLogMigrationError`) | migration binary (both coordinators, before the flock for the §4b conditions and before the `txn-<activation_uuid>.json` path is derived for `activation_id`) AND the Branch 3 guard (`validate-factory-path-staging`, a `HookResult` block carrying the same token) | the activation manifest fails Branch 3 / §4b content validation; `reason` is the CLOSED token set `activation_id_unsafe_component` (fails `is_safe_path_component`), `activation_id_not_uuid`, `migration_id_mismatch`, `unparseable`, `absent`. The offending value is NEVER echoed on any surface | BLOCKED — nothing created or mutated (no txn record, no intent log, no gate write, no flock); NOT exit 1 (a re-run without a corrected manifest cannot succeed) | exit 2 |
 | `COMPLETION_RECORD_MISMATCH_ABORT` (v1.18 D3) | the terminal record is present but cannot be proven to describe the same finished migration as the non-terminal txn record: unparseable; `txn_id`/`generation_id` ≠ the txn's; `canonical_paths_count` ≠ N; any canonical file `sha256` ≠ `expected_post_hash`; txn STAGING alongside a terminal record; or COMMITTING with a different `activation_id` | BLOCKED — fail-closed integrity anomaly; NO txn finalization, NO gate flip; human investigation. The PreToolUse analogue (§5a Branch C failure) is an E-MAINTENANCE-001 block with the mismatch reason logged | exit 2 |
 
 **Guard-layer admission code** (emitted by the native admission gate in `executor.rs`,
@@ -3049,7 +3070,7 @@ how the verdict is delivered.
    the strictness rejects only hand-edited, truncated-but-parseable or foreign-schema records.
 5. *`generation_id`, the one field with a distinct null meaning.* Same tri-state as Branch B: key PRESENT
    and JSON `null` on a STAGING record ⇒ the null-generation discard (exit and abort semantics unchanged:
-   ADR §4e `EXPIRY_ABORT` third arm); PRESENT string ⇒ resume/clean-abort per the existing planner; ABSENT
+   ADR §4e `EXPIRY_ABORT` third arm); PRESENT string that is a safe single path component (item 11(c) point 7; a string that is not ⇒ item 1) ⇒ resume/clean-abort per the existing planner; ABSENT
    key or non-string/non-null ⇒ item 1 with NO mutation. On a COMMITTING record `generation_id` MUST be a
    string: absent, null or ill-typed ⇒ item 1 (this supersedes the coordinator's former
    `Quarantine { CommittingWithoutGenerationId }` → `BinaryIntegrityFailure`, which labelled a record-field
@@ -3431,6 +3452,91 @@ how the verdict is delivered.
       `CURRENT.json` (no `CURRENT.json` read at all). (d) BC-1.18.010 §Reader Integration step 2 is the owed
       wording; `backfill-append-logs` applies the identical rule to its own pointer
       (`CURRENT-backfill-append-logs.json`) wherever S-25.06 reads it.
+   7. *On-disk identifiers that become path components are VALUE-validated at decode, by one shared predicate
+      (v1.28; closes F-S2509-L3-002; TD-VSDD-060 sibling sweep).* The v1.26 sweep covered the ABSENCE semantics of
+      the markers; it did not validate VALUES. A live STAGING txn record carrying `generation_id:
+      "x/../../specs"` with a matching `intent_log_path` and an existing `gen-x` directory passed
+      `resolve_live_generation_id` (which accepted any string) and the `intent_log_path ==
+      intent_log_path_for_generation(gid)` pair check (a string comparison); the coordinator then joined
+      `migration-state/gen-{gid}` for the existence probe, the resume reads, `discard_incomplete_staging`'s
+      `remove_dir_all` and `intent_log_path_for_generation`: the probe resolved to `.factory/specs`, the census
+      failed, and the discard recursively deleted it. Rulings: (a) *One predicate.* A single pure function
+      `is_safe_path_component(&str) -> bool` (the `tool_use_id` grammar of §Error Code Semantics: `[A-Za-z0-9_.-]{1,128}`,
+      no leading `.`) is the ONLY definition of "a value that may be one path component". It rejects everything the
+      EC-082 `CURRENT.json` rule rejects (empty, `.`, `..`, `/`, `\`, NUL) AND any other byte outside the grammar
+      (control characters, newline, `:`, whitespace, non-ASCII) and any value over 128 characters; every UUID the
+      tool writes (36 characters, hyphenated) satisfies it. It is a strict superset of the v1.26 reject set, so every
+      EC-078..EC-083 verdict is unchanged and `read_current_pointer_marker` is changed only to CALL it (the
+      hand-written `/`, `\`, NUL, `.`, `..` test is deleted, not kept beside it). (b) *Parse, do not validate-and-
+      forget.* The value is decoded into `GenerationId(String)` whose ONLY constructor is `GenerationId::parse`,
+      which calls the predicate; `gen_dir_for(&GenerationId)`, `intent_log_path_for_generation(&GenerationId)`,
+      the existence probe, the resume reads and `discard_incomplete_staging` accept ONLY that type, so no path join
+      is reachable from an unvalidated `String` (the `format!("gen-..` and `format!("intent-..` sites exist in
+      exactly those two helpers; the implementer greps `gen-{`, `intent-{` and `.join(` for any record-derived
+      operand and records the list). The coordinator's freshly minted UUID goes through the same constructor.
+      (c) *When it runs.* At DECODE / tri-state time, before any planner use or path join: it is part of reading the
+      `generation_id` field as a string, in every reader of it: the admission Branch B tri-state (item 5), Branch C
+      at the `generation_id` check's position, the coordinator's Tier 1 strict typed decode at arm entry,
+      `resolve_live_generation_id`, and the `backfill-append-logs` verifier/finalize. A STAGING record with
+      `generation_id: null` is unaffected (the null discard acts on no filesystem object). (d) *Verdict.* A string
+      that fails the predicate is item 1 `txn_record_malformed`: admission `E-MAINTENANCE-002 (state_integrity)`
+      with the `migration.admission_failed` event `kind` `txn_record_malformed`; the coordinators and the verifier
+      `BcIndexMigrationError::AdmissionStateIntegrity { kind: TxnRecordMalformed, .. }` (`AppendLogMigrationError`
+      mirror), taxonomy `MIGRATION_STATE_INTEGRITY_FAILURE`, process exit **2**; nothing mutated (no gate flip,
+      no `gen-*` access, no discard, no write; the Branch C rule that an EARLIER check's mismatch wins over a later
+      field's malformation is unchanged, the predicate firing at the `generation_id` read). The `detail` carries
+      the record path and the fixed message "generation_id is not a single safe path component"; the offending
+      VALUE is never echoed (on-disk content). It is NOT `Io`, NOT `ExpiryAbort`, NOT `BinaryIntegrityFailure`.
+      The `CURRENT.json` verdict stays `Io` (item 6: exit 2, nothing mutated, no discard): that file is a pointer,
+      not a txn record, and its class is unchanged; only its predicate becomes the shared one. (e) *The sweep (every
+      on-disk or record-derived identifier, with its rule).* (1) txn `generation_id`: (a)-(d). (2) `CURRENT.json`
+      `generation_id` (and `CURRENT-backfill-append-logs.json`): the shared predicate, `Io`. (3) `completed.json`
+      / `completed-backfill-append-logs.json` `generation_id`: never joined (the reader uses canonical paths; the
+      verifier compares it for string EQUALITY with the txn's already-validated `GenerationId`); no new check, and a
+      value that differs from the txn's is the existing mismatch class. (4) txn `activation_id` and `txn_id`: never
+      used to build a path; the txn file name is the directory-enumerated `txn-*.json` entry and every archive /
+      rename derives from THAT path (item 3). The manifest `activation_id`, which the coordinator DOES use to build
+      `txn-<activation_uuid>.json`, is already required "a valid UUID" (Branch 3 manifest validation): that check IS
+      `is_safe_path_component` plus the UUID shape, evaluated before the txn path is built, rejected as `ACTIVATION_MANIFEST_INVALID` (point 7(f); formerly the uncoded
+      "descriptive error"); a hostile value creates no file. `txn_id == activation_id` equality stays a
+      string comparison. (5) txn `migration_id`: never a path component; compared against the closed set K and
+      rendered only through the 256 sanitizer (item 9). (6) txn `intent_log_path`: never opened or joined; compared
+      for equality with the path DERIVED from the validated `GenerationId` (the v1.24 rule), a mismatch is
+      `txn_record_malformed` as before. (7) `tool_use_id` (reservation file name): the same grammar and the same
+      function (no rule change; it was the model for the predicate). (8) `canonical_move_plan` /
+      `pending_canonical_moves[]` paths: owned by ADR-054 Decision 1.2 (`INTENT_LOG_VALUE_REJECTED`, 4096 bytes,
+      anchored under the project root); unchanged, and they are projects-relative paths, not single components.
+      (f) *A manifest `activation_id` that fails the check: code `ACTIVATION_MANIFEST_INVALID`, exit 2, value never
+      echoed (v1.28; architect ruling A; closes the uncoded "descriptive error" of §Decision 5c Branch 3 and the
+      uncoded "fails CLOSED" of §Decision 4b).* Finding: the error taxonomy had no code for a Branch 3 manifest-
+      validation failure and no existing code fits: `MIGRATION_STATE_INTEGRITY_FAILURE` is the coordinator reading
+      gate/txn STATE (a manifest is neither); `COMPLETION_MANIFEST_REJECTION` is scoped to completion-only recovery
+      manifests (§4d); `EXPIRY_ABORT` (exit 1) is expiry/absence at STAGING resume; `E-MAINTENANCE-001/002` are the
+      native writer-admission verdicts; `E-BINARY-INTEGRITY-FAILURE` is digest/TOCTOU. Rulings: (i) *Code and exit.* A
+      NEW taxonomy code `ACTIVATION_MANIFEST_INVALID` — `BcIndexMigrationError::ActivationManifestInvalid {
+      manifest_path: String, reason: ActivationManifestInvalidReason }` (mirrored by `AppendLogMigrationError`),
+      process exit **2** (named in the exhaustive `process_exit_code` match, item 7(e); NOT exit 1, because a re-run
+      without a corrected manifest cannot succeed). `reason` is a CLOSED token set: `activation_id_unsafe_component`
+      (fails `is_safe_path_component`), `activation_id_not_uuid` (safe component but not the UUID shape),
+      `migration_id_mismatch`, `unparseable`, `absent`; the last three are the other §4b/Branch 3 conditions that
+      were equally uncoded and are folded into the same variant so no sibling stays uncoded (TD-VSDD-060). (ii)
+      *Surfaces.* Coordinator: `<subcommand>: ` + the variant Display (fixed text, the reason token, `manifest_path`),
+      exit 2; the check runs before the flock for the §4b conditions and before `txn-<activation_uuid>.json` is
+      derived for `activation_id`, so nothing is created or mutated (no txn record, intent log, gate write or lock
+      file). Guard layer (Branch 3 REJECT in `validate-factory-path-staging`): a `HookResult` block whose reason
+      carries the same code and reason token; it is NOT an `E-MAINTENANCE-001/002` verdict (those codes belong to the
+      native writer-admission gate, §Decision 5a). (iii) *Echo.* The offending VALUE is NEVER echoed on any surface
+      (it is on-disk content; same rule as the txn `generation_id` verdict, point 7(d)); the `reason` token names
+      WHICH check failed, so nothing needs escaping and no log-injection surface exists for the value. The only
+      data-derived slot is `manifest_path` (a path assembled from the subcommand and the date, but treated as
+      data): rendered per item 11(g), 256 on stderr/Display, 64 in an InternalLog event, via `render_with_cap`.
+      (iv) *Taxonomy.* Row added to the §Error Code Semantics migration-binary table above and (owed) to
+      error-taxonomy.md; a red table test row for `process_exit_code` (adding the variant without a row fails the
+      build) and a red test per `reason` asserting no file under `migration-state/` and a byte-identical directory.
+      (9) Shard / generation file names `BC-INDEX-SS-NN.md`: built from the BC-ID grammar (`MalformedBcId`), never from
+      free record text; unchanged. (10) `fencing_generation`, `schema_version`: integers, never a path. The rule for
+      any future identifier: a value read from disk that becomes a path component MUST be a parsed newtype whose
+      constructor is `is_safe_path_component` (or a stricter grammar), never a bare `String`.
 
    (d) *The build MUST NOT create the blocked state itself and report success — COMPLETED-write errors
    propagate.* `finish_committing_migration` writes `completed.json` (the commit point) and then rewrites the
@@ -3680,6 +3786,57 @@ how the verdict is delivered.
    the offending source line). The 64-character cap is not involved: no `InternalLog` event renders these.
    Hence: BC-1.18.013 Postcondition 10 "Coordinators" clause states the 256 operator cap; BC-3.08.001 Event 12
    (`detail`) and Invariant 7 keep 64 and add "event only".
+   (f) *`ShardConfigError` is in scope of 11(g)(2) on EVERY surface (v1.28; architect ruling B; closes the S-25.09
+   test-writer black-box finding).* The phrase "every `BcIndexMigrationError` variant" is operative for every error
+   type whose rendering reaches an operator, hook-result or log surface and quotes config- or record-derived data,
+   and is hereby stated explicitly for `ShardConfigError` (owner: BC-1.18.005, shard-config and the shard-cap gate).
+   Finding: a `[[shard]]` entry with no `shape` yields `MissingShape { artifact_stem }` whose Display interpolates
+   `{artifact_stem}` raw; the dispatcher's PreToolUse shard-cap gate puts that Display in `block_reason`
+   (`HookResult::Error`, exit 2, `blocking_plugins=shard-cap-gate`), so a hostile stem reaches it with a raw ESC;
+   eleven variants interpolate `{artifact_stem}`/`{artifact_path}` raw; `Toml(#[from] toml::de::Error)` interpolates
+   the parser's multi-line message, which echoes the offending source line of `shard-config.toml` (a secret can be
+   on it); and `BcIndexMigrationError::ShardCapConfigUnavailable { detail }` carries that text to the
+   `migrate-bc-index` stderr. Rulings: (1) *Per slot.* Every config-derived string slot of every `ShardConfigError`
+   variant (`artifact_stem`, `artifact_path`, any other string read from the file; variant-exhaustive, present and
+   future) is rendered `sanitize_diagnostic(slot, cap)`, each slot independently: control characters (ESC, LF, CR,
+   NUL, other C0/C1) escaped so the rendering is ONE line, fixed message text and numeric values verbatim and never
+   truncated, escaped and capped at RENDER time (the raw value stays available to matching logic). (2) *`Toml`.* The
+   variant carries and renders a closed fixed category token plus the 1-based line and column ONLY (the
+   `parse_failure_message` form); never the parser message, the source line, the key's value or a wrong-typed value
+   (`shard_cap_bytes = "sk-live-SECRET"` must not appear anywhere). The `#[from] toml::de::Error` conversion becomes
+   a constructor that stores only (category, line, column), so the message cannot be rendered by accident. (3)
+   *Surfaces and caps.* The rule holds for: the shard-cap gate `block_reason` and the `PluginOutcome` it synthesises
+   (256); the `migrate-bc-index` / `backfill-append-logs` stderr via `ShardCapConfigUnavailable` (256), whose `detail`
+   is built from the already-rendered `ShardConfigError` text and never from a raw error (the sanitizer is idempotent,
+   so no double escape); and any InternalLog/tracing field (64 per data slot, item 11(g)(1)). `ShardConfigError` adopts
+   the item 11(g)(4) mechanism: one `render_with_cap(cap)` source, `Display` = 256, an exhaustive match with no
+   wildcard arm. (4) *Sweep.* The implementer greps the `#[error(` attributes of `ShardConfigError` for `{artifact_stem}`,
+   `{artifact_path}` and any other string interpolation and records the list; red tests are BC-1.18.005 EC-023
+   (hostile ESC+LF stem with no shape through the gate; 400-character stem capped at 256 with intact fixed text;
+   secret-bearing wrong-typed value; the same through `migrate-bc-index`; benign stem byte-identical).
+   4. *The event `detail` is rendered PER SLOT for EVERY variant that can reach `admission_error`; the fixed text is
+      never truncated (v1.28; closes F-S2509-L3-003; option (a)).* `admission_error`'s generic arm
+      `other => sanitize_diagnostic(&other.to_string(), 64)` capped the WHOLE Display at 64, which is the
+      re-truncation of an already-composed string that 11(g)(1) forbids ("each data-derived substring ... capped at
+      64"; the fixed message is not data-derived): for a variant with no string slot (e.g.
+      `ReservationTtlBelowFloor { configured_secs, floor_secs }`) the fixed text, and with it the code token, was
+      cut mid-word. Rulings: (a) *No wildcard arm.* `admission_error` is an EXHAUSTIVE `match` over
+      `BcIndexMigrationError` (and `BcIndexAddressingError` where it reaches the hook): no `other =>` /
+      `_ =>`; a new variant fails to compile until its slots are declared (the same discipline as
+      `process_exit_code`, item 7(e)). (b) *One source, two caps.* Each variant declares its rendering once as an
+      ordered list of parts, each either `Fixed(&'static str)` / a numeric value rendered in decimal, or
+      `Data(&str)`; a single `render_with_cap(&self, cap: usize) -> String` joins them. `Display` calls it with 256,
+      `admission_error`'s event `detail` with 64: `Fixed` and numeric parts are emitted VERBATIM at both caps; only
+      each `Data` part is `sanitize_diagnostic(part, cap)`, individually, never the joined result. The v1.25
+      `AdmissionStateIntegrity` rule (`subject` + `message`) is the same mechanism, now applied to every variant
+      rather than to one. (c) *Bounded by construction.* Because fixed text is never capped, the `detail` length is
+      `Σ fixed + Σ numeric + 64 × (data slots)`; a unit test asserts that every variant's fixed text is at most 256
+      characters and that no `detail` exceeds that sum, so the InternalLog field stays bounded without truncating
+      the code token. The event `kind` / `<cause>` are separate closed-domain tokens and are not derived from
+      `detail`. (d) *Why not a different rule.* A whole-string cap with a protected prefix (e.g. "never cut inside the
+      first token") still re-truncates the composed text and leaves the second fixed clause exposed; a larger
+      whole-string cap re-opens the log-injection bound for data slots. Per-slot rendering is the only rule that
+      satisfies 11(g)(1) without exception, and it already exists for `AdmissionStateIntegrity`.
    **Scope of the rule (v1.25 consistency extension): EVERY operator stderr line, not only the
    `AdmissionStateIntegrity` / `Io` lines.** One rule, no per-code exceptions: the 64-character cap applies to
    `InternalLog` events and to nothing else. The operator-stderr lines that render a data-derived value are, in
@@ -5256,6 +5413,66 @@ committed files.
   sanitization, and serde / TOML messages are never carried (category / line / column built at the source of the
   `io::Error`), per ADR-052 §Decision 11(g)(2) item (e). No Precondition/Postcondition/Invariant change beyond
   these two Reader Integration texts.
+- **Owed (v1.28; S-25.09 local adversary pass 3; POLICY 8/9 same burst; POLICY 19: cite the ADR by section only, no
+  version token, inside the BCs):**
+  - **BC-1.18.010 §Reader Integration step 2:** the `CURRENT.json` `generation_id` clause ("empty or not a single
+    path component") now reads "does not satisfy `is_safe_path_component` (ADR-052 §Decision 11(c) point 7)":
+    wording-only, verdict (`BcIndexAddressingError::Io`) unchanged.
+  - **BC-1.18.011 Precondition 6(f) (txn `generation_id` tri-state), new sentence:** "A PRESENT string
+    `generation_id` is further required to be a single safe path component, i.e. to satisfy `is_safe_path_component`
+    (the `tool_use_id` grammar `[A-Za-z0-9_.-]{1,128}`, no leading `.`); the check runs when the field is read, before
+    any planner use or path join. A string that fails it is `txn_record_malformed`: admission returns
+    `E-MAINTENANCE-002` with `<cause>` `state_integrity` and one `migration.admission_failed` event whose `kind` is
+    `txn_record_malformed`; nothing is mutated. `generation_id: null` on a STAGING record is unaffected." Also:
+    the `CURRENT.json` clause of Postcondition 9(e)(a0) cites the same predicate; EC-082 is extended by a pointer to
+    it (verdicts unchanged); and a NEW EC (next free number after the highest EC in the file at edit time; observed
+    highest EC-085): "STAGING or COMMITTING txn record whose `generation_id` is `x/../../specs` (also `..`, `.`, empty,
+    `a/b`, `a\b`, NUL, `.hidden`, a 129-character id, a value containing a newline, `C:`) with a matching
+    `intent_log_path` and an existing `gen-x` directory ⇒ admission `E-MAINTENANCE-002 (state_integrity)`, event `kind`
+    `txn_record_malformed`; coordinator and verifier `MIGRATION_STATE_INTEGRITY_FAILURE` exit 2; `.factory/specs/**`,
+    the txn record, the gate and `gen-x/` byte-identical; control: a hyphenated UUID is admitted/resumed exactly as
+    before."
+  - **BC-1.18.013 Precondition 6(f) mirror (the `backfill-append-logs` leg) and Postcondition 10 "Coordinators"
+    clause:** the mirror sentence above for the verifier/finalize and the coordinator; AND, because 11(g) changes,
+    Postcondition 10 gains: "the event `detail` is rendered per slot for every variant: fixed text and numeric
+    values are emitted verbatim and never truncated; each data-derived substring is escaped and capped at 64
+    (InternalLog events) or 256 (operator stderr / Display); no whole-string cap is applied to either rendering
+    (ADR-052 §Decision 11(g)(4))." New EC (next free): "`ReservationTtlBelowFloor{1799,1800}` through
+    `admission_error` ⇒ event `detail` equals the full fixed text with both numbers (its code token intact,
+    fixed text longer than 64 characters), not a 64-character prefix; a variant with a 200-character `Io` path ⇒
+    `path` capped at 64 inside an intact fixed clause."
+  - **BC-3.08.001 Event 12 (`detail`):** no change (the 64 per data-derived substring rule is already stated; add
+    nothing). **error-taxonomy.md:** ONE new row, `ACTIVATION_MANIFEST_INVALID` (migration binary exit codes, blocked,
+    exit 2; the §Error Code Semantics row is the source; reason tokens `activation_id_unsafe_component`,
+    `activation_id_not_uuid`, `migration_id_mismatch`, `unparseable`, `absent`; value never echoed); no other row change.
+  - **Stories / code (S-25.09, `crates/factory-dispatcher/src/shard_manager.rs`, `shard_manager/admission.rs`):**
+    add `pub(crate) fn is_safe_path_component(&str) -> bool` and `struct GenerationId` (`parse` = the predicate);
+    change `resolve_live_generation_id`, `intent_log_path_for_generation`, the coordinator's gen-directory
+    probe/resume/discard, `read_current_pointer_marker`, the Branch B/C and typed-decode `generation_id` reads, and
+    the manifest `activation_id` check to use them; replace `admission_error`'s `other =>` arm by an exhaustive
+    match over `render_with_cap`; `Display` calls the same function with 256. **(Rulings A/B)** add
+    `ActivationManifestInvalid { manifest_path, reason }` to `BcIndexMigrationError` and `AppendLogMigrationError`
+    (exit 2 by name in `process_exit_code`; the manifest check precedes the flock and the txn-path derivation);
+    make `ShardConfigError` render through `render_with_cap` (256/64, exhaustive, no wildcard) and replace its
+    `Toml(#[from] toml::de::Error)` by a (category, line, column) constructor.
+  - **BC-1.18.011 Precondition 5 manifest-`activation_id` sentence and EC-087 (Ruling A; BC-1.18.013 mirrors in its
+    own text, v1.16 sentence at the manifest check):** replace "rejected as the existing Branch 3 manifest-validation
+    failure" by: "rejected with `ACTIVATION_MANIFEST_INVALID` (taxonomy exit 2; reason `activation_id_unsafe_component`
+    when it fails `is_safe_path_component`, else `activation_id_not_uuid`) BEFORE any txn path is derived and before
+    any file is created; the offending value is never echoed on stderr, in a hook reason or in a log, and the guard
+    layer (Branch 3 REJECT) carries the same code and reason token as a block, not an `E-MAINTENANCE-001/002`
+    verdict (ADR-052 §Decision 11(c) point 7(f))." EC-087 expected-outcome cell: "`ACTIVATION_MANIFEST_INVALID`, exit 2,
+    stderr/hook reason contains the reason token and NOT the value (`../x`, `a/b`, `not-a-uuid`, the empty string are
+    asserted absent from stderr), `migration-state/` byte-identical for each of the four values; control: a hyphenated
+    UUID proceeds as before." Also the Branch 3 `unparseable`/`migration_id_mismatch`/`absent` cases take the same
+    code (add one EC row per reason, next free numbers).
+  - **BC-1.18.005 (owner of `.factory/shard-config.toml` and the shard-cap gate; Postcondition 10 and EC-023 are
+    the owed text; Ruling B):** the working-copy v1.16 Postcondition 10 and EC-023 already state the per-slot
+    escape/256 cap, `Toml` as category plus line/column only, the surface list and the vectors; owed additions:
+    (a) the 64-per-data-slot rule for any InternalLog/tracing field and "`Display` and the event rendering are ONE
+    `render_with_cap` source with an exhaustive match (no wildcard)"; (b) "the `Toml` variant stores a closed
+    category token plus line and column, never the toml error object"; (c) "`ShardCapConfigUnavailable.detail` is
+    built from the sanitized rendering"; cite ADR-052 §Decision 11(g)(2)(f) by section only (POLICY 19).
 - **BC-1.18.011 v1.22→v1.23:** (a) Postcondition 9(e)(a0) / reader-parity text gains the `CURRENT.json` clause
   (mirror of BC-1.18.010 step 2); new vectors **EC-078..EC-083** next to EC-070..EC-075: `CURRENT.json` as (EC-078)
   a dangling symlink during COMMITTING with `completed.json` absent ⇒ reader `Io`, NOT `NotStarted`; (EC-079) a
@@ -5391,6 +5608,7 @@ committed files.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.28 | 2026-10-13 | architect | **Four rulings from the S-25.09 local adversary pass 3 and its black-box test-writer follow-up; no state-machine, exit-code-class, `<cause>` or VP-count change; ONE new taxonomy code (`ACTIVATION_MANIFEST_INVALID`, ruling A); v1.27 is committed and registered at D-1257 and immutable.** **F-S2509-L3-002 (MEDIUM, path-escape; item 11(c) point 7):** txn `generation_id` was never checked to be a single path component, so `x/../../specs` + a matching `intent_log_path` + an existing `gen-x` made the coordinator probe, read and `remove_dir_all` `.factory/specs`. Ruling: one shared pure predicate `is_safe_path_component` (the `tool_use_id` grammar; strict superset of the EC-082 set, EC-078..EC-083 verdicts unchanged), `GenerationId` newtype as the only way to build a `gen-`/`intent-` path, validation at decode/tri-state time before any planner use or join, in every reader of the field; violation = `txn_record_malformed` (admission `E-MAINTENANCE-002 (state_integrity)`; coordinator/verifier `MIGRATION_STATE_INTEGRITY_FAILURE` exit 2), nothing mutated, value never echoed; `CURRENT.json` calls the same function (still `Io`); identifier sweep for `activation_id`/`txn_id`, `migration_id`, `intent_log_path`, `completed.json` `generation_id`, `tool_use_id`, plan paths, shard names. **F-S2509-L3-003 (LOW; item 11(g)(4)):** option (a), per-slot rendering for every variant reaching `admission_error`: exhaustive match (no `other =>`), one `render_with_cap(cap)` source shared with Display, fixed text and numerics verbatim, each data substring capped at 64 (event) / 256 (stderr), fixed text bounded by a unit test. **Ruling A (item 11(c) point 7(f)):** a manifest `activation_id` failing `is_safe_path_component`/UUID shape (and the other uncoded §4b/Branch 3 manifest failures) is the NEW taxonomy code `ACTIVATION_MANIFEST_INVALID`, exit 2 (the one taxonomy-code addition in v1.28), reason tokens `activation_id_unsafe_component`/`activation_id_not_uuid`/`migration_id_mismatch`/`unparseable`/`absent`, nothing created, the value never echoed, guard layer a plain block not `E-MAINTENANCE-00x`. **Ruling B (item 11(g)(2)(f)):** 11(g)(2) extends to `ShardConfigError` on every surface (shard-cap-gate `block_reason`, coordinator stderr via `ShardCapConfigUnavailable`, logs): per-slot escape and cap 256 (event 64), `Toml` as closed category plus line/column only, one `render_with_cap` source, exhaustive match; owner BC-1.18.005 (Postcondition 10, EC-023). §Downstream owed (v1.28 list extended by both rulings, incl. error-taxonomy.md one new row): BC-1.18.010 step 2 wording, BC-1.18.011 Precondition 6(f) + EC-082 pointer + new EC, BC-1.18.013 mirror + Postcondition 10 + new EC. Rationale: fail-closed, parse-don't-validate, TD-VSDD-060 value-validation sibling sweep. |
 | 1.27 | 2026-10-11 | architect | **One ruling from S-25.08 local adversary pass 6, F-S2508-L6-004 (LOW); no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.26 treated as immutable, so a NEW version.** The release leg now evaluates `tool_use_id` presence + grammar BEFORE `resolve_factory_root` and the `migration-state` probe; an absent or invalid id is a fully silent no-op (no stat, no advisory/WARN), resolving the conflict between the §5a mapping table ("unstatable `.factory` ⇒ one advisory", id-unqualified) and the §5a release ruling / BC-1.18.013 EC-021 / Precondition 6(c) / story AC-011 ("invalid id ⇒ silent no-op"). Amended: §5a "Factory-root lookup mapping" release row + new "Release-leg evaluation order" paragraph; §5a release ruling sentence. Admission order (v1.24 L4-002) unchanged. **Code owed (S-25.08):** in `bc_index_migration_reservation_release`, move the `tool_use_id` extraction plus `is_valid_tool_use_id` check ahead of `resolve_factory_root`; keep the guard inside `release_bc_index_writer_reservation`. **S-25.09:** the `reservation_release_failed` InternalLog conversion inherits the order (an invalid/absent id emits no event). **Test vectors owed:** absent id, `"../x"`, empty and over-length id, each with `migration-state` a self-looping symlink (ELOOP) and, separately, `.factory` unstatable, asserting zero WARN/advisory and no filesystem access; plus a valid-id + ELOOP control still emitting exactly one WARN/advisory. **Also folded into v1.27 (F-S2509-L2-003, architect half; S-25.09 local adversary pass 2):** §Decision 11(g)(3)(i) restated to match BC-1.18.013 v1.15 "Helper visibility" (emitting helpers module-private; pure data-returning functions may be `pub` and must never print or log), with the explicit ruling that `pub` `chunk_subsystem_rows_into_sub_shards` and `oversized_row_advisories` may stay `pub` (pure; a hook-process caller such as a future full-rebuild path writes nothing to stderr); the BC-1.18.010 owed list gains the `BcIndexAddressingError` sanitization sibling paragraph (human-confirmed extension, D-1257). **Also folded into v1.27 (F-S2509-L2-007, S-25.09 local adversary pass 2):** §Decision 11(g)(3) gains the "read_active_txn_record contract" ruling: B2-only selection by `migration_id` (absent reads as B2); live B2 record strict-decoded (fail-closed on malformed); complete terminal B2 record returned with on-disk values; incomplete terminal B2 record, other-migration-only and empty all `Ok(None)`, never `Err`, never placeholder values. |
 | 1.26 | 2026-10-08 | architect | **Four rulings from the S-25.09 local adversary pass 2; no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.25 is committed (`.factory` 81b44098) and immutable, so these are a NEW version.** (1) F-S2509-L2-002/003 — item 11(f)(2) "Collection and emission rule" and 11(g)(3)(i): `OVERSIZED_ROW_SUBSHARD` is no longer emitted from `close_sub_shard_chunk` at STAGING time (its clause "and the migration completed" was false when a later census / fingerprint / intent-append / pointer-swap / canonical-move step failed); the `pub` chunker is pure (no stderr, no `tracing`), a pure `oversized_row_advisories(chunks, cap)` derives the advisories as data, `run_bc_index_migration_core` collects them and prints them only when the fresh run returns `Completed` (discarded on any `Err`); resumed STAGING / COMMITTING runs neither re-derive nor persist (no txn-schema change; documented rationale). (2) F-S2509-L2-006 — item 11(d)/11(f)(2): the fresh-run `abort_staging` closure's `let _ = fs.remove(gen_dir)` is replaced by the helper `discard_incomplete_staging` uses and reports `STAGING_DIR_REMOVE_FAILED` after its ABORTED write succeeded, before the gate-OPEN write. (3) F-S2509-L2-009 — item 11(c) point 6: `CURRENT.json` gets the lstat-first four-verdict classification with record-shape validation in BOTH consumers (reader `detect_migration_read_state` → `BcIndexAddressingError::Io`; coordinator resume probe → `Io` exit 2, protecting Invariant 3) through a shared `read_current_pointer_marker`; `status != "committing"` and an empty / multi-component `generation_id` are `InvalidData`, not `NotStarted` / `Committing { "" }`. (4) F-S2509-L2-001 — item 11(g)(2): confirmed and made explicit that `Io` `path` AND `source` are two separately escaped, 256-capped data-derived substrings; serde messages are never carried (category/line/column via `parse_failure_message` at the source); `CleanupWriteFailure`'s `cause` and `while_handling` are two independent 256 substrings and `Io` special-cases it so the "while handling" tail is not truncated; `BcIndexAddressingError` siblings follow. §Downstream v1.26 carries the BC (BC-1.18.013 v1.15, BC-1.18.010 v1.12, BC-1.18.011 v1.23), code and test deltas (S-25.09). VP-INDEX / verification-architecture / verification-coverage-matrix UNCHANGED. |
 | 1.25 | 2026-10-08 | architect | **Two interpretive rulings from the S-25.09 local adversary pass 1; no state-machine, taxonomy-code, exit-code, `<cause>` or VP-count change; v1.24 is committed (`.factory` 61709b2d) and immutable, so these are recorded as a NEW version.** (1) Item 11(c) clarification (closes F-S2509-L1-004): the under-lock `completed.json` read has FOUR verdicts — a dangling symlink, a non-`NotFound` stat or read error, and non-record content are `Io` exit 2 (never absent, never exit 0); presence-only semantics are kept for branch selection; what `recover()` receives; reader parity. (2) NEW item 11(f) (closes F-S2509-L1-006): the "Coordinators" clause of BC-1.18.013 Postcondition 10 is an OPEN set (bounds: `warn!`/`error!` conditions that change what the operator must know; not `debug!`/`info!`, not conditions already carried by an exit-2 line); failures keep the existing form; non-fatal advisories use `<subcommand>: <TOKEN> (advisory): <path>: <os error>; <clause>` with a CLOSED coordinator-advisory token domain (`GATE_OPEN_RESET_FAILED`, `TERMINAL_TXN_ARCHIVE_FAILED`, `STAGING_DIR_REMOVE_FAILED`, and `OVERSIZED_ROW_SUBSHARD` only if reachable from a coordinator process; these are NOT taxonomy codes and have no exit status of their own); the v1.23 exit-0 silence ruling is amended so advisory lines are permitted on an exit-0 run (stdout stays empty); canonical-move halt reasons are NOT an S-25.09 deliverable — S-25.09 emits no interim halt line — and belong to S-25.11 (ADR-054 AC-015 = S-25.11 story AC-008), where ADR-054 v1.1 widens the `CANONICAL_MOVE_HALTED` reason domain to all six halt sites. The same-version extension text previously placed in the v1.24 §Status preamble is moved here; v1.24 was NOT extended. **Consistency extension (same uncommitted v1.25, 2026-10-08):** item 11(g) scope widened to ALL operator stderr lines — item 9 `FOREIGN_MIGRATION_REFUSED` `<id>` changes from "truncated to 64" to 256 per data-derived substring (reusing the one parametrized sanitizer), and the ADR-054 §3.1 stderr placeholders follow the same rule (ADR-054 v1.1 extension 2); 64 is the InternalLog-event cap only. No taxonomy-code, exit-code, kind or VP-count change. Code: S-25.09 (item 9 renderer); S-25.10/S-25.11 not yet implemented. PO mirrors: BC-1.18.011, BC-1.18.013, error-taxonomy. |

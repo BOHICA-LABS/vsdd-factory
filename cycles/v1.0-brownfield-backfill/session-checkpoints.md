@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "3981b1b"
+input-hash: "feff835"
 traces_to: STATE.md
 ---
 
@@ -2423,4 +2423,8 @@ Archived by the D-1257 burst (v10.90→v10.91). Position at v10.90 (PAUSED): E-2
 
 Archived by the D-1258 burst (v10.91→v10.92). Position at v10.91 (RESUMED): E-25; S-25.08 v1.9 on `feature/S-25.08` (passes 6/7/8 NOT CLEAN, fixes through `ee9b2741` orchestrator-stated, observed `1bdd86fc`; L8-001 test-writer in progress; pass 9 next; streak 0/3); S-25.09 v1.4 (15 pts) on `feature/S-25.09` @ `634dc3dc` orchestrator-stated, observed `9ea0a8c6` (pass-2 code fixes green except 3 stale tests; runbook L2-004 and CHANGELOG L2-005 pending; then pass 3); `feature/S-25.10` @ `19c683a9` (partial, UNVERIFIED, ungated); S-25.11/S-25.12 @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`. Spec: ADR-052 v1.27, ARCH-INDEX v4.57, BC-1.18.010 v1.12 / BC-1.18.011 v1.23 / BC-1.18.013 v1.15, BC-INDEX v5.111, VP-INDEX v3.33, STORY-INDEX v4.492 (index-only stub S-14.10). OPEN: [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE], [D-1257-HASH-CASCADE], [D-1257-S14-10]. NEXT was S-25.08 L8-001 then pass 9, S-25.09 finish then pass 3, story-writer cite propagation, S-25.10 finish + gates.
 
-**See STATE.md v10.92 for the current checkpoint.**
+## Session Resume Checkpoint v10.92 (2026-10-13 — ADV-REVIEWS-S2508-P9-S2509-P3-PERSISTED-STORY-CASCADE-REGISTRATION; D-1258) — condensed; verbatim via `git -C .factory show de6ef674:STATE.md`
+
+Archived by the D-1259 burst (v10.92→v10.93). Position at v10.92 (RESUMED): E-25; S-25.08 v1.10 on `feature/S-25.08` @ `9e936d4c` (passes 1-9 NOT CLEAN, passes 6-9 docs and bookkeeping only, all pass-9 findings fixed, pass 10 next; streak 0/3); S-25.09 v1.5 (15 pts) on `feature/S-25.09` @ `df03ecbe` (pass 3 NOT CLEAN 2M/3L; L3-002 real path-escape defect; ADR-052 v1.28 ruled but uncommitted; BC wording and L3-001/L3-004 red tests in progress); `feature/S-25.10` @ `19c683a9` (partial, UNVERIFIED, ungated); S-25.11/S-25.12 @ `9329f75e`; `feature/S-25.06` @ `9886cbc1`. Spec: ARCH-INDEX v4.57 (ADR-052 v1.27), BC-INDEX v5.111, error-taxonomy v1.42, STORY-INDEX v4.493 (S-25.08 v1.10, S-25.09 v1.5, S-14.10 story file). NEXT at v10.92: S-25.08 pass 10; S-25.09 pass-3 fixes then pass 4; the next state-manager burst registers BC-1.18.010/011/013, ADR-052 v1.28, BC-INDEX, ARCH-INDEX and refreshes the story hashes. OPEN: [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE] (9 passes), [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], PR #769.
+
+**See STATE.md v10.93 for the current checkpoint.**
