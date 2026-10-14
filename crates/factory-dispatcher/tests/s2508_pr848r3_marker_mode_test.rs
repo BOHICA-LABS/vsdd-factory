@@ -18,7 +18,9 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use factory_dispatcher::indeterminate_marker::{MarkerFields, write_indeterminate_marker};
+use factory_dispatcher::indeterminate_marker::{
+    MarkerFields, write_indeterminate_marker, write_indeterminate_marker_with_perms_fn,
+};
 
 fn fields() -> MarkerFields {
     MarkerFields {
@@ -76,4 +78,37 @@ fn test_S_25_08_PR848R3_B1_overwritten_marker_keeps_previous_mode_0o640() {
         0o640,
         "an overwritten marker must keep its previous 0o640 mode"
     );
+}
+
+/// NB-B propagation (marker writer): a failing perms closure returns the
+/// `io::Error`, removes the temp (directory holds only the marker) and leaves
+/// the pre-existing marker content and mode untouched. The closure ignores its
+/// arguments, so it is valid for the current and the redesigned seam shape.
+#[test]
+fn test_S_25_08_NB_B_marker_perms_failure_errs_removes_temp_leaves_marker() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let marker = dir.path().join("unvalidated-mutation.marker");
+    write_indeterminate_marker(&fields(), &marker).expect("seed marker");
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let before = std::fs::read_to_string(&marker).unwrap();
+
+    let mut newer = fields();
+    newer.trace_id = "trace-newer".to_string();
+    let err = write_indeterminate_marker_with_perms_fn(&newer, &marker, |_, _| {
+        Err(std::io::Error::other("injected fchmod failure"))
+    })
+    .expect_err("a perms failure must fail the marker write");
+    assert!(err.to_string().contains("injected fchmod failure"), "{err}");
+
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["unvalidated-mutation.marker".to_string()],
+        "temp must be removed"
+    );
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), before);
+    assert_eq!(mode_of(&marker), 0o640);
 }
