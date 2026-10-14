@@ -178,13 +178,15 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
     // here); on a write failure, best-effort remove the temp file we just created.
     if let Err(e) = tmp_file.write_all(content.as_bytes()) {
         drop(tmp_file);
-        // The temp is born 0o600; the marker itself keeps the default creation mode
-        // (or the existing marker's mode on overwrite), as it did before.
-        last_amended_migrate::atomic_write::apply_final_permissions(&tmp_path, marker_path);
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
     drop(tmp_file);
+
+    // BLOCKING-1: the temp is born 0o600; apply the marker's FINAL permissions on the
+    // SUCCESS path, before the rename (a new marker gets the default creation mode, an
+    // overwritten marker keeps its previous mode).
+    last_amended_migrate::atomic_write::apply_final_permissions(&tmp_path, marker_path);
 
     // Atomic rename temp → final path (single-marker policy: overwrites existing).
     // F-P3-004: a failed rename must not orphan the uniquely-named temp file it
