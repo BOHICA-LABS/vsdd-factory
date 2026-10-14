@@ -242,7 +242,10 @@ jobs:
           )
 
           # Coverage guard (CR-012b): every top-level integration-test file
-          # that carries a failpoints cfg gate MUST appear in FLOOR_TARGETS, and
+          # that carries a failpoints cfg gate MUST appear in FLOOR_TARGETS (the
+          # gate regex tolerates any whitespace around `=` and matches the feature
+          # predicate wherever it nests: cfg(feature = ..), cfg(all(.., feature =
+          # ..)), cfg(any(..)), cfg_attr(..), so it does not depend on rustfmt), and
           # every FLOOR_TARGETS entry must still be a gated test file. A new
           # gated target therefore cannot go silently uncovered, and a stale
           # floor line (renamed/deleted/ungated file) cannot linger.
@@ -261,7 +264,7 @@ jobs:
                 exit 1
                 ;;
             esac
-          done < <(grep -lF 'feature = "failpoints"' crates/*/tests/*.rs | LC_ALL=C sort)
+          done < <(grep -lE 'feature[[:space:]]*=[[:space:]]*"failpoints"' crates/*/tests/*.rs | LC_ALL=C sort)
           for entry in "${FLOOR_TARGETS[@]}"; do
             t="${entry%% *}"
             case "$gated_names" in

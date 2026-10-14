@@ -27,8 +27,18 @@ jobs:
   mutants:
     name: vp147 mutants (KILLED required)
     runs-on: ubuntu-latest
-    # 4 Kani mutants (~20 min each) + the M4-production test build + install.
-    timeout-minutes: 180
+    # Timeout budget (NB-5/N-5). mutants.toml carries 6 mutants (M1, M2, M3,
+    # M4-model, M4-production, M5) and the runner gives each its own wall-clock
+    # cap (--timeout-secs 2700 below), so the worst case is
+    #   6 x 2700 s = 16200 s = 270 min of mutants
+    # plus ~30 min for toolchain/Kani install, cache restore and the release
+    # builds = 300 min. The job timeout MUST exceed that, otherwise GitHub
+    # kills the job before the runner can classify a slow mutant INVALID and
+    # print its summary (the old 180 min was below 270). The per-mutant cap is
+    # kept at 2700 s (>2x the ~20 min Kani solve) so a hung solver is still
+    # reported per-mutant rather than burning the whole job; typical runs
+    # finish in ~2 h. 300 min is under GitHub's 360 min hosted-runner ceiling.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
@@ -75,6 +85,7 @@ jobs:
           # Per-mutant wall-clock budget (CR-012c): a Kani mutant is ~20 min, so
           # 2700 s (45 min) kills a hung solver's whole process group and
           # reports that mutant INVALID instead of burning the job timeout.
+          # Keep 6 x 2700 s + ~30 min overhead < timeout-minutes (see above).
           ./target/release/vp147-mutants --timeout-secs 2700 "${ARGS[@]}" 2>&1 | tee vp147-mutants.log
 
       - name: Upload mutant logs

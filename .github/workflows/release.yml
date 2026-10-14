@@ -17,7 +17,7 @@ jobs:
     name: Pre-release Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Mount factory artifacts
         run: |
@@ -127,11 +127,12 @@ jobs:
             use_cross: false
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
           targets: ${{ matrix.target }}, wasm32-wasip1
 
@@ -273,7 +274,7 @@ jobs:
           echo "Registry-vs-staged: all ${#declared[@]} hooks-registry plugins present in artifact/. OK"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: factory-dispatcher-${{ matrix.platform }}
           path: artifact/
@@ -298,7 +299,7 @@ jobs:
     needs: build-binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           # Fetch full history so the commit graph is available for
           # the tag move.
@@ -311,7 +312,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           path: /tmp/artifacts
           pattern: factory-dispatcher-*
@@ -583,7 +584,7 @@ jobs:
     needs: commit-binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           # Check out the (possibly retagged) commit so the GH Release
           # is anchored at the binaries-included version.
@@ -639,7 +640,7 @@ jobs:
           mv /tmp/release-notes.final.md /tmp/release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           body_path: /tmp/release-notes.md
           # `contains(ref_name, '-')` flags prerelease (semver §9 hyphen marker).
@@ -687,7 +688,7 @@ jobs:
 
       - name: Check out claude-mp
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: drbothen/claude-mp
           token: ${{ secrets.CLAUDE_MP_PAT }}
@@ -777,7 +778,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           # Full history needed to merge main into develop without
           # spurious unrelated-histories errors.
