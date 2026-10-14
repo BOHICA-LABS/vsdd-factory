@@ -287,7 +287,7 @@ fn unpredictable_suffix() -> u64 {
 /// `.<basename>.<kind>-<pid>-<nonce:016x>` in `parent`, returning the open
 /// handle and its path. A name collision (`AlreadyExists`, including a
 /// planted file or symlink, dangling or not) is retried with a new
-/// suffix, bounded by [`TEMP_CREATE_MAX_ATTEMPTS`]; exhaustion or any
+/// suffix, bounded by `TEMP_CREATE_MAX_ATTEMPTS` (16); exhaustion or any
 /// other error is returned as-is (fail closed, nothing is written
 /// through a pre-existing path). On Unix the file is created with mode
 /// `0o600`, so it is never briefly readable by others before the caller
