@@ -100,6 +100,13 @@ fn test_BC_10_13_001_SEC003_write_atomic_leaves_target_untouched_on_temp_write_f
     if std::fs::File::create(&probe).is_ok() {
         let _ = std::fs::remove_file(&probe);
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).ok();
+        eprintln!(
+            "SKIPPED (NOT PASSED): test_BC_10_13_001_SEC003_write_atomic_leaves_target_untouched_\
+             on_temp_write_failure — the process bypasses directory permission bits (root / \
+             CAP_DAC_OVERRIDE), so a non-writable parent cannot force a temp-creation failure. \
+             The cross-platform equivalent runs in atomic_write::tests::\
+             test_S_25_08_SEC002_create_exclusive_temp_directory_at_candidate_fails_and_target_untouched."
+        );
         return;
     }
 

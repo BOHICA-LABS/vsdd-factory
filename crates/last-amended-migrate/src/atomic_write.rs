@@ -829,4 +829,230 @@ mod tests {
             "an unrelated raw OS error must not be retried"
         );
     }
+
+    // -----------------------------------------------------------------
+    // S-25.08 PR #848 round-2 B-1 (TD-VSDD-059): the SEC-002 integration
+    // tests plant a symlink at the OLD predictable temp name, which the fix
+    // no longer uses, so they pass even if `create_new(true)` is reverted.
+    // These unit tests drive the crate-private suffix-injection seam
+    // `create_exclusive_temp_with(parent, basename, kind, suffix_fn)` so a
+    // collision is planted at the EXACT candidate name the function will try
+    // first, exercising the `AlreadyExists` retry branch and the bounded
+    // fail-closed exit. They live in this src-level module (not an
+    // integration file) because the seam is crate-private.
+    // -----------------------------------------------------------------
+
+    /// The exact candidate name `create_exclusive_temp_with` must build for
+    /// a given suffix (documented format `.<basename>.<kind>-<pid>-<suffix:016x>`).
+    fn candidate_for(parent: &Path, basename: &str, kind: &str, suffix: u64) -> PathBuf {
+        parent.join(format!(
+            ".{basename}.{kind}-{}-{suffix:016x}",
+            std::process::id()
+        ))
+    }
+
+    /// A deterministic suffix source yielding `values` in order, then
+    /// panicking if over-consumed; the shared counter records how many
+    /// suffixes were requested (== attempts made).
+    fn scripted_suffixes(values: Vec<u64>) -> (impl FnMut() -> u64, Rc<RefCell<usize>>) {
+        let calls = Rc::new(RefCell::new(0usize));
+        let calls_in = Rc::clone(&calls);
+        let f = move || {
+            let mut n = calls_in.borrow_mut();
+            let v = *values
+                .get(*n)
+                .unwrap_or_else(|| panic!("suffix_fn over-consumed: asked for call #{}", *n + 1));
+            *n += 1;
+            v
+        };
+        (f, calls)
+    }
+
+    const VICTIM_ORIGINAL: &str = "VICTIM-ORIGINAL-CONTENT\n";
+
+    /// Shared body for (a): plant a symlink at the FIRST candidate; the
+    /// second candidate must be used and the victim left untouched.
+    #[cfg(unix)]
+    fn assert_first_candidate_symlink_retries_to_second(dangling: bool) {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let victim_dir = tempfile::tempdir().unwrap();
+        let victim = victim_dir.path().join("victim.txt");
+        if !dangling {
+            std::fs::write(&victim, VICTIM_ORIGINAL).unwrap();
+        }
+        let first = candidate_for(dir.path(), "reservation.json", "tmp", 1);
+        let second = candidate_for(dir.path(), "reservation.json", "tmp", 2);
+        symlink(&victim, &first).unwrap();
+
+        let (suffix_fn, calls) = scripted_suffixes(vec![1, 2]);
+        let (mut file, path) =
+            create_exclusive_temp_with(dir.path(), "reservation.json", "tmp", suffix_fn)
+                .expect("a symlink at the first candidate must be refused and the retry succeed");
+        file.write_all(b"NEW-CONTENT\n").unwrap();
+        drop(file);
+
+        assert_eq!(
+            path, second,
+            "retry must proceed to the second candidate name"
+        );
+        assert_eq!(*calls.borrow(), 2, "exactly two suffixes consumed");
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "NEW-CONTENT\n");
+        assert!(
+            std::fs::symlink_metadata(&first)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the planted symlink must be left in place, not replaced or removed"
+        );
+        if dangling {
+            assert!(
+                !victim.exists(),
+                "create_new must not create the victim through a dangling symlink (CWE-59)"
+            );
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&victim).unwrap(),
+                VICTIM_ORIGINAL,
+                "create_new must not follow the symlink and truncate the victim (CWE-59/CWE-377)"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_retries_past_symlink_to_existing_victim() {
+        assert_first_candidate_symlink_retries_to_second(false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_retries_past_dangling_symlink() {
+        assert_first_candidate_symlink_retries_to_second(true);
+    }
+
+    /// (b): every one of the 16 candidates collides (a symlink planted at
+    /// each) -> typed `AlreadyExists`, exactly 16 attempts, nothing written
+    /// through any symlink, the target untouched, no new files created.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_all_16_candidates_collide_fails_closed() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let victim_dir = tempfile::tempdir().unwrap();
+        let victim = victim_dir.path().join("victim.txt");
+        std::fs::write(&victim, VICTIM_ORIGINAL).unwrap();
+        let target = dir.path().join("reservation.json");
+        std::fs::write(&target, "TARGET-ORIGINAL\n").unwrap();
+
+        assert_eq!(TEMP_CREATE_MAX_ATTEMPTS, 16, "documented attempt bound");
+        let suffixes: Vec<u64> = (100..100 + u64::from(TEMP_CREATE_MAX_ATTEMPTS)).collect();
+        for s in &suffixes {
+            symlink(
+                &victim,
+                candidate_for(dir.path(), "reservation.json", "tmp", *s),
+            )
+            .unwrap();
+        }
+        let entries_before = std::fs::read_dir(dir.path()).unwrap().count();
+
+        let (suffix_fn, calls) = scripted_suffixes(suffixes);
+        let err = create_exclusive_temp_with(dir.path(), "reservation.json", "tmp", suffix_fn)
+            .expect_err("all candidates colliding must fail closed");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            *calls.borrow(),
+            16,
+            "must try exactly 16 candidates, then stop"
+        );
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM_ORIGINAL);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "TARGET-ORIGINAL\n"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            entries_before,
+            "fail-closed must create nothing"
+        );
+    }
+
+    /// (b) cross-platform: all 16 candidates collide via a pre-created
+    /// regular file at each name (no symlink needed) -> AlreadyExists after
+    /// exactly 16 attempts; the pre-existing files keep their content.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_all_16_regular_file_collisions_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let suffixes: Vec<u64> = (200..216).collect();
+        for s in &suffixes {
+            std::fs::write(
+                candidate_for(dir.path(), "t.md", "strict-tmp", *s),
+                "OCCUPIED\n",
+            )
+            .unwrap();
+        }
+        let (suffix_fn, calls) = scripted_suffixes(suffixes.clone());
+        let err = create_exclusive_temp_with(dir.path(), "t.md", "strict-tmp", suffix_fn)
+            .expect_err("must fail closed");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(*calls.borrow(), 16);
+        for s in suffixes {
+            assert_eq!(
+                std::fs::read_to_string(candidate_for(dir.path(), "t.md", "strict-tmp", s))
+                    .unwrap(),
+                "OCCUPIED\n",
+                "an occupied candidate must never be truncated"
+            );
+        }
+    }
+
+    /// N-1 (cross-platform replacement for the unix-only, root-skipping
+    /// permission test): force a creation failure by pre-creating a
+    /// DIRECTORY at every injected candidate path. `create_new` refuses a
+    /// directory on every platform and as any uid (including root), so the
+    /// failure is deterministic. The target must be untouched.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_directory_at_candidate_fails_and_target_untouched()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.md");
+        std::fs::write(&target, "original\n").unwrap();
+        // Same suffix every call -> the one (directory) path is hit 16 times.
+        std::fs::create_dir(candidate_for(dir.path(), "target.md", "tmp", 7)).unwrap();
+
+        let (suffix_fn, calls) = scripted_suffixes(vec![7; 16]);
+        let result = create_exclusive_temp_with(dir.path(), "target.md", "tmp", suffix_fn);
+
+        let err = result.expect_err("a directory at the candidate path must force a failure");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(*calls.borrow(), 16);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original\n");
+    }
+
+    /// A non-`AlreadyExists` creation error is NOT retried: it is returned
+    /// after the first attempt (a missing parent directory yields NotFound
+    /// on every platform).
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_non_collision_error_is_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing_parent = dir.path().join("no-such-dir");
+        let (suffix_fn, calls) = scripted_suffixes(vec![1, 2, 3]);
+        let err = create_exclusive_temp_with(&missing_parent, "t.md", "tmp", suffix_fn)
+            .expect_err("missing parent must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(*calls.borrow(), 1, "only AlreadyExists is retried");
+    }
+
+    /// Positive control: with no collision the first candidate is used and
+    /// has the documented `.<basename>.<kind>-<pid>-<suffix:016x>` shape.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_first_candidate_name_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let (suffix_fn, calls) = scripted_suffixes(vec![0xABCD]);
+        let (_file, path) = create_exclusive_temp_with(dir.path(), "x.json", "tmp", suffix_fn)
+            .expect("clean directory must create on first attempt");
+        assert_eq!(path, candidate_for(dir.path(), "x.json", "tmp", 0xABCD));
+        assert_eq!(*calls.borrow(), 1);
+    }
 }
