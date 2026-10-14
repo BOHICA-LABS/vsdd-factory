@@ -376,6 +376,21 @@ pub fn create_exclusive_temp_for_target_with<F: FnMut() -> u64>(
     create_temp_with_mode(parent, basename, kind, mode, suffix_fn)
 }
 
+/// SEC-R3-004: `basename` and `kind` are interpolated into a sibling file
+/// name, so each must be a single plain name component: non-empty, no `/`
+/// (nor `\` on Windows), not `.` or `..`, no NUL. Rejected with
+/// `InvalidInput` before anything is created.
+fn validate_temp_name_component(what: &str, value: &str) -> std::io::Result<()> {
+    let has_separator = value.contains('/') || (cfg!(windows) && value.contains('\\'));
+    if value.is_empty() || value == "." || value == ".." || value.contains('\0') || has_separator {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unsafe temp-file {what} {value:?}: must be a single plain name component"),
+        ));
+    }
+    Ok(())
+}
+
 fn create_temp_with_mode<F: FnMut() -> u64>(
     parent: &Path,
     basename: &str,
@@ -383,6 +398,8 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
     #[cfg_attr(not(unix), allow(unused_variables))] mode: u32,
     mut suffix_fn: F,
 ) -> std::io::Result<(File, PathBuf)> {
+    validate_temp_name_component("basename", basename)?;
+    validate_temp_name_component("kind", kind)?;
     let mut last_err = None;
     for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
         let candidate = parent.join(format!(
@@ -418,7 +435,6 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
 ///   `0o600` for a target that has since vanished is moved to that same
 ///   default (see `apply_vanished_target_default`).
 /// - Any other metadata error is returned.
-///
 ///
 /// A failed `fchmod` is RETURNED (never swallowed): the caller removes the
 /// temp and fails the write, so a file never lands with permissions other
