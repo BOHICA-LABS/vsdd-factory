@@ -217,12 +217,51 @@ pub struct Captured {
     pub timed_out: bool,
 }
 
-fn drain<R: Read + Send + 'static>(mut r: R) -> std::thread::JoinHandle<Vec<u8>> {
+/// Upper bound on how long [`run_with_timeout`] waits for a pipe reader to
+/// reach EOF after the child has exited or been killed. A descendant that
+/// escaped the killed process group (own session, or a failed/absent group
+/// kill on non-unix) can hold the pipe's write end open indefinitely; the
+/// output captured up to that point is kept and the reader is detached.
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Spawn a reader thread that streams the pipe into a shared buffer and
+/// signals completion on a channel, so the caller can wait with a deadline
+/// (a plain `JoinHandle::join` has no timeout) and still keep the partial
+/// output read so far.
+struct Drain {
+    buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    done: std::sync::mpsc::Receiver<()>,
+}
+
+fn drain<R: Read + Send + 'static>(mut r: R) -> Drain {
+    let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (tx, done) = std::sync::mpsc::channel();
+    let shared = std::sync::Arc::clone(&buf);
     std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = r.read_to_end(&mut buf);
-        buf
-    })
+        let mut chunk = [0u8; 8192];
+        loop {
+            match r.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if let Ok(mut g) = shared.lock() {
+                        g.extend_from_slice(&chunk[..n]);
+                    }
+                }
+            }
+        }
+        let _ = tx.send(());
+    });
+    Drain { buf, done }
+}
+
+impl Drain {
+    /// Wait up to `grace` (shared deadline) for EOF, then return whatever
+    /// was captured; never blocks past the deadline.
+    fn collect(self, deadline: Instant) -> Vec<u8> {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        let _ = self.done.recv_timeout(wait);
+        self.buf.lock().map(|g| g.clone()).unwrap_or_default()
+    }
 }
 
 /// Run `prog args` in `cwd` with `envs`, capturing stdout+stderr, killing the
@@ -267,11 +306,15 @@ pub fn run_with_timeout(
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    let join = |h: Option<std::thread::JoinHandle<Vec<u8>>>| {
-        h.and_then(|h| h.join().ok()).unwrap_or_default()
-    };
-    let mut combined = String::from_utf8_lossy(&join(stdout)).into_owned();
-    combined.push_str(&String::from_utf8_lossy(&join(stderr)));
+    let drain_deadline = Instant::now() + DRAIN_GRACE;
+    let out_bytes = stdout
+        .map(|d| d.collect(drain_deadline))
+        .unwrap_or_default();
+    let err_bytes = stderr
+        .map(|d| d.collect(drain_deadline))
+        .unwrap_or_default();
+    let mut combined = String::from_utf8_lossy(&out_bytes).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&err_bytes));
     Ok(Captured {
         code: status.and_then(|s| s.code()),
         combined,
@@ -472,6 +515,32 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(20),
             "must not wait for the hung killer"
+        );
+    }
+
+    /// NB-4: a descendant that escaped the killed process group (own session)
+    /// keeps the stdout/stderr pipe write-end open; the drain-thread joins
+    /// must be bounded so a timeout always returns.
+    #[cfg(unix)]
+    #[test]
+    fn run_with_timeout_returns_even_if_an_escaped_child_holds_the_pipe_open() {
+        let script = "import subprocess,time; \
+            subprocess.Popen(['sleep','60'], start_new_session=True); time.sleep(60)";
+        let args = vec!["-c".to_string(), script.to_string()];
+        let started = Instant::now();
+        let c = run_with_timeout(
+            "python3",
+            &args,
+            Path::new("."),
+            &[],
+            Duration::from_millis(500),
+        )
+        .unwrap();
+        assert!(c.timed_out, "must report the timeout");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "drain joins must be bounded, took {:?}",
+            started.elapsed()
         );
     }
 
