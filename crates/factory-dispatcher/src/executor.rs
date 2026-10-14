@@ -416,6 +416,7 @@ pub fn shard_cap_precheck(
 /// The result of evaluating the shared admission core once for a PreToolUse
 /// event ([`bc_index_migration_admission`]).
 #[derive(Debug)]
+#[must_use = "dropping a MigrationAdmission silently discards its admission reservation; bind it for the dispatch duration or consume it explicitly"]
 pub struct MigrationAdmission {
     /// The native gate's verdict: `None` = admitted / out of scope; `Some(Block)`
     /// = `E-MAINTENANCE-001`; `Some(Error)` = the admission check itself failed
