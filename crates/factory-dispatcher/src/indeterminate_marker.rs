@@ -78,7 +78,7 @@ pub struct MarkerFields {
 ///
 /// Algorithm (BC-1.18.001 postcondition 4 + invariant 3):
 /// 1. Exclusively create (`create_new`) a uniquely-named sibling temp file in the same directory as `marker_path`.
-/// 2. Serialize the six required TOML fields to the temp file 
+/// 2. Serialize the six required TOML fields to the temp file.
 /// 3. Atomically rename the temp file to `marker_path`.
 ///
 /// Single-marker policy: if a marker already exists, the rename overwrites it (last-writer-wins).
