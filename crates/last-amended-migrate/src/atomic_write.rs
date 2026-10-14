@@ -347,9 +347,15 @@ const TEMP_MODE_DEFAULT_CREATE: u32 = 0o666;
 /// The `0o600` birth mode closes the window in which a temp holding the
 /// content of a restrictive target (e.g. a `0o600` file) would be briefly
 /// readable at the umask default. For a NEW target the temp is born
-/// `0o666 & !umask`, which is by construction the very mode the final file
-/// is going to have, so the temp is never more permissive than its result
-/// and no window beyond the result's own exposure exists.
+/// `0o666 & !umask`, the very mode `File::create` gives the final file, so
+/// the temp is never more permissive than that result for as long as this
+/// writer is the file's only creator. Caveat: if another process creates
+/// the target between the existence check and the rename, the temp (holding
+/// this writer's content) was born at the umask default while the file it
+/// replaces may be more restrictive; the exposure is bounded by the umask
+/// default, i.e. what a plain `File::create` of the same content would
+/// have exposed, and closing it would need a lock or `O_TMPFILE`/`linkat`,
+/// which this crate does not use.
 ///
 /// # Trust boundary (SEC-002-N1)
 ///
