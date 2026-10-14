@@ -518,79 +518,83 @@ mod tests {
         );
     }
 
-    /// NB-4: a descendant that escaped the killed process group (own session)
-    /// keeps the stdout/stderr pipe write-end open; the drain-thread joins
-    /// must be bounded so a timeout always returns.
+    /// NB-4: a descendant that escaped the killed process group keeps the
+    /// stdout/stderr pipe write-end open; the drain-thread joins must be
+    /// bounded so a timeout always returns.
+    ///
+    /// No dependency beyond POSIX `sh`: `set -m` (monitor mode) gives the
+    /// background `sleep` its OWN process group, so `run_with_timeout`'s
+    /// process-group kill cannot reach it, while it still inherits the pipe.
+    /// The shell itself blocks in the `wait` builtin (a foreground `sleep` would
+    /// also get its own group under `set -m` and leak past the group kill).
+    /// The scenario precondition is ASSERTED (pid file present, escaped child
+    /// alive after the kill), never skipped, so the test cannot pass without
+    /// exercising the escape.
     #[cfg(unix)]
     #[test]
     fn run_with_timeout_returns_even_if_an_escaped_child_holds_the_pipe_open() {
-        // This scenario needs python3 to spawn a session-escaped grandchild.
-        // Skip LOUDLY (never silently pass) when it is absent.
-        let python_ok = Command::new("python3")
-            .arg("--version")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !python_ok {
-            eprintln!(
-                "SKIPPED (NOT PASSED): run_with_timeout_returns_even_if_an_escaped_child_holds_the_pipe_open \
-                 requires `python3` on PATH and it is absent; the NB-4 bounded-drain-join \
-                 behaviour was NOT exercised in this environment"
-            );
-            return;
+        fn signal(pid: u32, sig: &str) -> bool {
+            Command::new("kill")
+                .args([sig, &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
         }
-
-        // The escaped `sleep 60` is in its own session, so run_with_timeout's
-        // process-group kill cannot reach it. It records its pid so this test
-        // can reap it at the end (RAII guard: runs even if an assert panics).
+        // RAII: reaps the escaped child even if an assert panics.
         struct ReapGuard(PathBuf);
         impl Drop for ReapGuard {
             fn drop(&mut self) {
                 if let Ok(txt) = std::fs::read_to_string(&self.0)
                     && let Ok(pid) = txt.trim().parse::<u32>()
                 {
-                    let _ = Command::new("kill")
-                        .args(["-KILL", &pid.to_string()])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status();
+                    let _ = signal(pid, "-KILL");
                 }
-                let _ = std::fs::remove_file(&self.0);
             }
         }
-        let pid_file = std::env::temp_dir().join(format!(
-            "vp147-escaped-child-{}-{:?}.pid",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_file(&pid_file);
-        let _reap = ReapGuard(pid_file.clone());
 
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("escaped.pid");
+        let _reap = ReapGuard(pid_file.clone());
+        // Write to a temp name then rename, so a poller never reads a
+        // half-written pid.
         let script = format!(
-            "import subprocess,time; \
-             p=subprocess.Popen(['sleep','60'], start_new_session=True); \
-             open({:?},'w').write(str(p.pid)); time.sleep(60)",
-            pid_file.to_string_lossy()
+            "set -m; sleep 60 & echo $! > '{pf}.tmp' && mv '{pf}.tmp' '{pf}'; wait",
+            pf = pid_file.display()
         );
         let args = vec!["-c".to_string(), script];
         let started = Instant::now();
-        let c = run_with_timeout(
-            "python3",
-            &args,
-            Path::new("."),
-            &[],
-            Duration::from_millis(500),
-        )
-        .unwrap();
+        let c =
+            run_with_timeout("sh", &args, Path::new("."), &[], Duration::from_millis(500)).unwrap();
+        let elapsed = started.elapsed();
         assert!(c.timed_out, "must report the timeout");
         assert!(
-            started.elapsed() < Duration::from_secs(20),
-            "drain joins must be bounded, took {:?}",
-            started.elapsed()
+            elapsed < Duration::from_secs(20),
+            "drain joins must be bounded, took {elapsed:?}"
+        );
+
+        // Precondition: the escaped child really existed (poll, do not sleep a
+        // fixed interval) and survived the group kill still holding the pipe.
+        let poll_deadline = Instant::now() + Duration::from_secs(10);
+        let pid = loop {
+            if let Ok(txt) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = txt.trim().parse::<u32>()
+            {
+                break pid;
+            }
+            assert!(
+                Instant::now() < poll_deadline,
+                "precondition missing: the escaped child never wrote its pid; \
+                 the NB-4 scenario was NOT exercised"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(
+            signal(pid, "-0"),
+            "precondition missing: escaped child {pid} is not alive after the group kill; \
+             it did not escape, so the bounded drain was NOT exercised"
         );
     }
 
