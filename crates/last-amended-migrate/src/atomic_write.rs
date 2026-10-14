@@ -301,18 +301,24 @@ pub fn create_exclusive_temp(
     basename: &str,
     kind: &str,
 ) -> std::io::Result<(File, PathBuf)> {
-    create_exclusive_temp_with(parent, basename, kind, unpredictable_suffix)
+    create_temp_with_mode(
+        parent,
+        basename,
+        kind,
+        TEMP_MODE_OWNER_ONLY,
+        unpredictable_suffix,
+    )
 }
 
-/// Suffix-injectable core of [`create_exclusive_temp`]: `suffix_fn` is
-/// called exactly once per attempt (at most [`TEMP_CREATE_MAX_ATTEMPTS`]).
-/// Only `AlreadyExists` is retried; any other error is returned
-/// immediately, and exhaustion returns the last `AlreadyExists` error.
-///
-/// Test seam (S-25.08 PR #848 CR-R2-004): `#[doc(hidden)] pub` so the
-/// dispatcher marker writer's suffix-injectable entry point can drive it.
-#[doc(hidden)]
-pub fn create_exclusive_temp_with<F: FnMut() -> u64>(
+/// Suffix-injectable core of [`create_exclusive_temp`] for this crate's unit
+/// tests only: `suffix_fn` is called exactly once per attempt (at most
+/// `TEMP_CREATE_MAX_ATTEMPTS`). Only `AlreadyExists` is retried; any other
+/// error is returned immediately, and exhaustion returns the last
+/// `AlreadyExists` error. No cross-crate caller needs it (the dispatcher
+/// marker writer drives `create_exclusive_temp_for_target_with`), so it is
+/// not part of the public surface.
+#[cfg(test)]
+pub(crate) fn create_exclusive_temp_with<F: FnMut() -> u64>(
     parent: &Path,
     basename: &str,
     kind: &str,
