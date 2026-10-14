@@ -10,14 +10,15 @@
 //! (`.<marker>.<plugin>.tmp-<pid>-<suffix:016x>`) via an injectable suffix
 //! source, so they FAIL if the marker writer stops using exclusive create.
 //!
-//! REQUIRED TEST SEAM (implementer must expose, doc(hidden), no behaviour change):
-//!   1. `last_amended_migrate::atomic_write::create_exclusive_temp_with`
-//!      (currently private `fn`) -> `#[doc(hidden)] pub fn`;
+//! TEST SEAMS EXERCISED (both exist; `#[doc(hidden)] pub`, no behaviour change):
+//!   1. `last_amended_migrate::atomic_write::create_exclusive_temp_for_target_with`
+//!      (suffix-injectable core the marker writer calls; the temp is created
+//!      exclusively, `0o600` when the marker already exists, `File::create`
+//!      semantics otherwise);
 //!   2. `factory_dispatcher::indeterminate_marker::write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
 //!          fields: &MarkerFields, marker_path: &Path, suffix_fn: F) -> io::Result<()>`
 //!      with `write_indeterminate_marker` delegating to it using the default
-//!      (unpredictable) suffix source, i.e. `create_exclusive_temp_with(...)` is
-//!      what the writer calls.
+//!      (unpredictable) suffix source.
 
 #![cfg(unix)]
 
