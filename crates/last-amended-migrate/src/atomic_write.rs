@@ -1580,35 +1580,147 @@ mod tests {
         eprintln!("setgid/sticky cases exercised: {exercised}");
     }
 
-    /// SEC-R3-001: the target vanished after the exists-check (temp born
-    /// `0o600`): `apply_target_permissions` must fall back to the `File::create`
-    /// umask default, not leave the final file stuck at `0o600`.
+    /// SEC-R3-001 (single-capture contract): the target is stat'ed ONCE, before
+    /// the temp is created; the captured mode is what the final file gets. A
+    /// target that is removed or replaced between capture and apply does NOT
+    /// change the outcome: no second stat, no umask discovery, no `0o600`
+    /// leftover. The hook runs inside the perms seam (after capture + temp
+    /// creation, before apply) and then delegates to the production apply fn.
+    ///
+    /// SEAM NOTE for the implementer: the closure below uses today's
+    /// `(&File, &Path)` seam and calls `apply_target_permissions`. With the
+    /// redesign the seam becomes `FnOnce(&File, Option<u32>)` (captured mode)
+    /// and the delegate becomes the captured-mode apply fn; adapt the two
+    /// marked lines only. Red today: a vanished target takes the umask default
+    /// (0o644), not the captured 0o640.
     #[cfg(unix)]
     #[test]
-    #[allow(clippy::unit_arg)] // `()` today, `io::Result<()>` after NB-B
-    fn test_S_25_08_SEC_R3_001_vanished_target_falls_back_to_umask_default_mode() {
+    fn test_S_25_08_SEC_R3_001_captured_mode_survives_target_vanishing_before_apply() {
+        use std::os::unix::fs::PermissionsExt;
+        for (label, replace_with_0o600) in [("vanished", false), ("replaced", true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("cap.md");
+            std::fs::write(&target, "old\n").unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+            let umask_default = file_create_probe_mode(dir.path());
+            assert!(
+                umask_default != 0o640 && umask_default != 0o600,
+                "precondition: umask default {umask_default:o} must differ from 0o640 and 0o600"
+            );
+
+            let victim = target.clone();
+            write_atomic_with_perms_fn(&target, "new\n", move |file, path| {
+                // hook: between capture and apply
+                std::fs::remove_file(&victim).unwrap();
+                if replace_with_0o600 {
+                    std::fs::write(&victim, "intruder\n").unwrap();
+                    std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o600))
+                        .unwrap();
+                }
+                apply_target_permissions(file, path) // <- seam-specific delegate
+            })
+            .unwrap();
+
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o640,
+                "[{label}] final mode must be the CAPTURED 0o640 (not umask default \
+                 {umask_default:o}, not 0o600), got {mode:o}"
+            );
+        }
+    }
+
+    /// Same single-capture contract for the strict-durable writer.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_001_strict_captured_mode_survives_target_vanishing_before_apply() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let expected = file_create_probe_mode(dir.path());
-        assert_ne!(
-            expected, 0o600,
-            "precondition: umask default must differ from 0o600 for this test to discriminate"
-        );
-        let (file, _tmp) = create_exclusive_temp(dir.path(), "v.md", "tmp").unwrap();
+        let target = dir.path().join("cap-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let victim = target.clone();
+        write_atomic_strict_durable_with_perms_fn(&target, "new\n", move |file, path| {
+            std::fs::remove_file(&victim).unwrap();
+            apply_target_permissions(file, path) // <- seam-specific delegate
+        })
+        .unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
         assert_eq!(
-            file.metadata().unwrap().permissions().mode() & 0o777,
-            0o600,
-            "precondition: temp born 0o600"
+            mode, 0o640,
+            "captured mode must survive a vanished target, got {mode:o}"
         );
-        let gone = dir.path().join("vanished-target.md");
+    }
 
-        // Return type is `()` today, `io::Result<()>` after NB-B; only the
-        // resulting handle mode is asserted here.
-        let _ = debug_of(apply_target_permissions(&file, &gone));
-        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+    /// Temp files and sibling names left in `dir` besides `keep`.
+    #[cfg(unix)]
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// NB-B propagation (write_atomic): a failing perms closure returns
+    /// `MigrateError::Io`, removes the temp, and leaves the pre-existing target
+    /// (content AND mode) untouched. Closure ignores its args, so it is valid
+    /// for both the current and the redesigned seam shape.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_NB_B_write_atomic_perms_failure_errs_removes_temp_leaves_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let err = write_atomic_with_perms_fn(&target, "new\n", |_, _| {
+            Err(std::io::Error::other("injected fchmod failure"))
+        })
+        .expect_err("a perms failure must fail the write");
+        assert!(matches!(err, MigrateError::Io { .. }), "got {err:?}");
+        assert!(err.to_string().contains("injected fchmod failure"), "{err}");
         assert_eq!(
-            mode, expected,
-            "vanished target must fall back to the umask default ({expected:o}), got {mode:o}"
+            names_in(dir.path()),
+            vec!["t.md".to_string()],
+            "temp must be removed"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old\n");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    /// NB-B propagation (write_atomic_strict_durable).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_NB_B_write_atomic_strict_durable_perms_failure_errs_removes_temp_leaves_target()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let err = write_atomic_strict_durable_with_perms_fn(&target, "new\n", |_, _| {
+            Err(std::io::Error::other("injected fchmod failure"))
+        })
+        .expect_err("a perms failure must fail the write");
+        assert!(matches!(err, MigrateError::Io { .. }), "got {err:?}");
+        assert!(err.to_string().contains("injected fchmod failure"), "{err}");
+        assert_eq!(
+            names_in(dir.path()),
+            vec!["t.md".to_string()],
+            "temp must be removed"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old\n");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
         );
     }
 
