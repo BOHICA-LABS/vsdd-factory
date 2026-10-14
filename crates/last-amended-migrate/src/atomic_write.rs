@@ -1194,4 +1194,48 @@ mod tests {
             "strict: new file must have the default creation mode"
         );
     }
+
+    /// CR-R2-003 (PR #848 round 3): an OVERWRITE keeps the target's existing
+    /// mode through `write_atomic` (the temp is born 0o600; the pre-existing
+    /// 0o640 must survive the rename). The earlier tests only covered the
+    /// new-file case.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_CR_R2_003_write_atomic_overwrite_preserves_existing_mode_0o640() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("existing.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic(&target, "new\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o640,
+            "write_atomic overwrite must preserve the existing 0o640 mode"
+        );
+    }
+
+    /// CR-R2-003: same overwrite contract for `write_atomic_strict_durable`.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_CR_R2_003_write_atomic_strict_durable_overwrite_preserves_existing_mode_0o640()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("existing-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic_strict_durable(&target, "new\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o640,
+            "write_atomic_strict_durable overwrite must preserve the existing 0o640 mode"
+        );
+    }
 }
