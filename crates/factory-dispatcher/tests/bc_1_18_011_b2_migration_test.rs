@@ -1327,7 +1327,7 @@ fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_with_e
 }
 
 #[test]
-fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migration_state_dir() {
+fn test_BC_1_18_011_PRECOND6_admission_admits_and_reserves_when_no_migration_state_dir() {
     // BC-1.18.011 Precondition 6(c) "Unconditional reservation namespace"
     // / EC-015 (replaces the former "no migration-state/ => zero-cost no-op
     // with nothing created" expectation): a protected write admitted before
@@ -1365,7 +1365,6 @@ fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migr
         .count();
     assert_eq!(txn_files, 0, "the admitter writes no txn record");
 
-    // No `tool_use_id` => check-only: NO directory and NO reservation (EC-015).
     // EC-015: no `tool_use_id` => check-only: NO directory and NO reservation.
     let dir2 = tempfile::tempdir().unwrap();
     let target2 = bc_index_target(dir2.path());
@@ -1381,7 +1380,7 @@ fn test_BC_1_18_011_PRECOND6_admission_precheck_admits_and_reserves_when_no_migr
 }
 
 #[test]
-fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of_scope() {
+fn test_BC_1_18_011_RULING3_admission_returns_none_for_bash_tool_out_of_scope() {
     // Ruling 3: the ^Bash$ full-command pre-shell classifier (ADR-052
     // §Decision 5c) is a SEPARATE guard, not implemented by this function.
     // This function's own tool-kind guard covers Edit/Write/MultiEdit ONLY
@@ -1402,7 +1401,7 @@ fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of
 }
 
 #[test]
-fn test_BC_1_18_011_admission_precheck_returns_none_for_post_tool_use_event() {
+fn test_BC_1_18_011_admission_returns_none_for_post_tool_use_event() {
     // Negative control — real (already-implemented) event-type guard,
     // mirroring shard_cap_precheck's own PreToolUse-only scoping.
     let dir = tempfile::tempdir().unwrap();
