@@ -315,11 +315,17 @@ fn create_exclusive_temp_with<F: FnMut() -> u64>(
             std::process::id(),
             suffix_fn()
         ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        // SEC-002-N3 / NB-7: owner-only from the first instant the temp file
+        // exists, so there is no window at the umask default (often 0o644)
+        // before the target's own permissions are copied on afterwards.
+        #[cfg(unix)]
         {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        match opts.open(&candidate) {
             Ok(file) => return Ok((file, candidate)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last_err = Some(e),
             Err(e) => return Err(e),
@@ -1067,5 +1073,17 @@ mod tests {
             .expect("clean directory must create on first attempt");
         assert_eq!(path, candidate_for(dir.path(), "x.json", "tmp", 0xABCD));
         assert_eq!(*calls.borrow(), 1);
+    }
+
+    /// SEC-002-N3 / NB-7: the temp file is born `0o600`, never wider.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_N3_create_exclusive_temp_is_owner_only_0o600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (file, path) = create_exclusive_temp(dir.path(), "t.md", "tmp").unwrap();
+        drop(file);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "temp file must be created owner-only");
     }
 }
