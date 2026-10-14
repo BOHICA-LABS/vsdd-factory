@@ -332,30 +332,74 @@ const TEMP_MODE_OWNER_ONLY: u32 = 0o600;
 /// `File::create`'s requested mode; the process umask narrows it.
 const TEMP_MODE_DEFAULT_CREATE: u32 = 0o666;
 
-/// Like [`create_exclusive_temp`], with the creation mode chosen from
-/// `target` (the file the temp will be renamed over):
+/// Single-capture step of the permission contract: ONE `metadata` call on
+/// `target`, made BEFORE the temp is created, returning the target's
+/// permission bits (`& 0o777`, so setuid/setgid/sticky are never carried)
+/// as `Some(mode)`, or `None` when the target does not exist (`NotFound`).
+/// Any other metadata error (`EACCES`, ...) is returned: fail closed rather
+/// than guess a mode.
 ///
-/// - `target` EXISTS: the temp is created `0o600`. Pair with
-///   [`apply_target_permissions`] on the open handle before closing it, so
-///   the temp is owner-only until it takes the target's mode.
-/// - `target` does NOT exist: the temp is created with `0o666` so the
-///   process umask applies, exactly the semantics of `File::create`. No
-///   `umask(2)` call, probe file or fixed fallback is involved.
+/// On non-Unix platforms the value is synthesized from the read-only flag
+/// (`0o444` read-only, `0o666` otherwise) so the same `Option<u32>` flows
+/// through the same seams.
+///
+/// The result is passed to [`create_exclusive_temp_for_target`] and then to
+/// [`apply_captured_mode`]; the target is never stat'ed again.
+pub fn capture_target_mode(target: &Path) -> std::io::Result<Option<u32>> {
+    match std::fs::metadata(target) {
+        Ok(meta) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                Ok(Some(meta.permissions().mode() & 0o777))
+            }
+            #[cfg(not(unix))]
+            {
+                Ok(Some(if meta.permissions().readonly() {
+                    0o444
+                } else {
+                    0o666
+                }))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Like [`create_exclusive_temp`], with the creation mode chosen from
+/// `captured_mode`, the value [`capture_target_mode`] returned for the file
+/// the temp will be renamed over:
+///
+/// - `Some(_)` (target existed at capture): the temp is created `0o600`.
+///   Pair with [`apply_captured_mode`] on the open handle before closing it,
+///   so the temp is owner-only until it takes the captured mode.
+/// - `None` (target absent at capture): the temp is created `0o666` so the
+///   process umask applies, exactly the semantics of `File::create`, and
+///   [`apply_captured_mode`] leaves it alone.
+///
+/// No umask is read or changed, no probe file is made and nothing is
+/// spawned: the umask is applied by the kernel at `open(2)`.
 ///
 /// # Creation-mode trust analysis (SEC-002-N3)
 ///
 /// The `0o600` birth mode closes the window in which a temp holding the
 /// content of a restrictive target (e.g. a `0o600` file) would be briefly
-/// readable at the umask default. For a NEW target the temp is born
+/// readable at the umask default. For an absent target the temp is born
 /// `0o666 & !umask`, the very mode `File::create` gives the final file, so
 /// the temp is never more permissive than that result for as long as this
-/// writer is the file's only creator. Caveat: if another process creates
-/// the target between the existence check and the rename, the temp (holding
-/// this writer's content) was born at the umask default while the file it
-/// replaces may be more restrictive; the exposure is bounded by the umask
-/// default, i.e. what a plain `File::create` of the same content would
-/// have exposed, and closing it would need a lock or `O_TMPFILE`/`linkat`,
-/// which this crate does not use.
+/// writer is the file's only creator.
+///
+/// Concurrent-creator caveat: the capture is a single point-in-time
+/// observation and the contract is "the final file gets the mode captured
+/// at that instant". If another process creates the target after an absent
+/// capture, the temp (holding this writer's content) was born at the umask
+/// default while the file it replaces may be more restrictive; if the target
+/// is removed or replaced after a `Some` capture, the captured mode is still
+/// the one applied. The exposure is bounded by the umask default, i.e. what
+/// a plain `File::create` of the same content would have exposed. Closing it
+/// entirely would need a lock or `O_TMPFILE`/`linkat`, which this crate does
+/// not use.
 ///
 /// # Trust boundary (SEC-002-N1)
 ///
@@ -366,9 +410,15 @@ pub fn create_exclusive_temp_for_target(
     parent: &Path,
     basename: &str,
     kind: &str,
-    target: &Path,
+    captured_mode: Option<u32>,
 ) -> std::io::Result<(File, PathBuf)> {
-    create_exclusive_temp_for_target_with(parent, basename, kind, target, unpredictable_suffix)
+    create_exclusive_temp_for_target_with(
+        parent,
+        basename,
+        kind,
+        captured_mode,
+        unpredictable_suffix,
+    )
 }
 
 /// Suffix-injectable core of [`create_exclusive_temp_for_target`].
@@ -377,10 +427,10 @@ pub fn create_exclusive_temp_for_target_with<F: FnMut() -> u64>(
     parent: &Path,
     basename: &str,
     kind: &str,
-    target: &Path,
+    captured_mode: Option<u32>,
     suffix_fn: F,
 ) -> std::io::Result<(File, PathBuf)> {
-    let mode = if target.exists() {
+    let mode = if captured_mode.is_some() {
         TEMP_MODE_OWNER_ONLY
     } else {
         TEMP_MODE_DEFAULT_CREATE
@@ -439,95 +489,31 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
 /// on Unix, no path-based `chmod`, so no path race), before the handle is
 /// closed and the temp renamed.
 ///
-/// - `target` exists: the handle takes the target's permission bits
-///   (`& 0o777`; setuid/setgid/sticky are never copied) (S-15.03 N2: a
-///   rename must not change a file's permission bits).
-/// - `target` does not exist: the temp already carries the `File::create`
-///   default from [`create_exclusive_temp_for_target`]; a temp born
-///   `0o600` for a target that has since vanished is moved to that same
-///   default (see `apply_vanished_target_default`).
-/// - Any other metadata error is returned.
+/// - `Some(mode)`: the handle takes the mode captured by
+///   [`capture_target_mode`] (S-15.03 N2: a rename must not change a file's
+///   permission bits).
+/// - `None`: nothing to do; the temp was born with the `File::create`
+///   default by [`create_exclusive_temp_for_target`].
 ///
-/// A failed `fchmod` is RETURNED (never swallowed): the caller removes the
-/// temp and fails the write, so a file never lands with permissions other
-/// than the ones this function was asked to apply (NB-B).
-pub fn apply_target_permissions(file: &File, target: &Path) -> std::io::Result<()> {
-    match std::fs::metadata(target) {
-        Ok(existing_meta) => {
-            #[cfg(unix)]
-            {
-                // SEC-R3-002: copy the permission bits only. setuid/setgid/
-                // sticky (`0o7000`) are never inherited from the target.
-                use std::os::unix::fs::PermissionsExt;
-                let mode = existing_meta.permissions().mode() & 0o777;
-                file.set_permissions(std::fs::Permissions::from_mode(mode))?;
-            }
-            #[cfg(not(unix))]
-            file.set_permissions(existing_meta.permissions())?;
-            Ok(())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            #[cfg(unix)]
-            apply_vanished_target_default(file)?;
-            Ok(())
-        }
-        // Any other failure to read the target's metadata (EACCES, ...):
-        // fail closed rather than guess the mode.
-        Err(e) => Err(e),
+/// The target is not consulted here. A failed `fchmod` is RETURNED (never
+/// swallowed): the caller removes the temp and fails the write, so a file
+/// never lands with permissions other than the ones this function was asked
+/// to apply (NB-B).
+pub fn apply_captured_mode(file: &File, captured_mode: Option<u32>) -> std::io::Result<()> {
+    let Some(mode) = captured_mode else {
+        return Ok(());
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))
     }
-}
-
-/// SEC-R3-001: the target does not exist at apply time. A temp born for a
-/// NEW target already carries the `File::create` default and is left alone.
-/// A temp born `0o600` because the target existed at creation (which has
-/// since vanished) must not stay stuck at `0o600`: it takes the umask
-/// default `0o666 & !umask`, the mode `File::create` would have produced.
-///
-/// The umask is READ, never changed: [`process_umask`] uses
-/// `/proc/self/status` on Linux and otherwise a child `sh` that inherits
-/// it. No `umask(2)` call (process-global, racy against other threads) and
-/// no probe file. If the umask cannot be determined the temp is left at
-/// owner-only `0o600`, the restrictive direction (fail-safe).
-#[cfg(unix)]
-fn apply_vanished_target_default(file: &File) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let current = file.metadata()?.permissions().mode() & 0o777;
-    if current != TEMP_MODE_OWNER_ONLY {
-        return Ok(()); // born with the File::create default already
+    #[cfg(not(unix))]
+    {
+        let mut perms = file.metadata()?.permissions();
+        perms.set_readonly(mode & 0o200 == 0);
+        file.set_permissions(perms)
     }
-    if let Some(umask) = process_umask() {
-        let default = TEMP_MODE_DEFAULT_CREATE & !umask;
-        if default != current {
-            file.set_permissions(std::fs::Permissions::from_mode(default))?;
-        }
-    }
-    Ok(())
-}
-
-/// The process umask, read without `umask(2)` and without a probe file.
-#[cfg(unix)]
-fn process_umask() -> Option<u32> {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-        if let Some(v) = status.lines().find_map(|l| l.strip_prefix("Umask:")) {
-            if let Ok(mask) = u32::from_str_radix(v.trim(), 8) {
-                return Some(mask & 0o777);
-            }
-        }
-    }
-    // POSIX: a child process inherits the parent's umask; `sh`'s `umask`
-    // builtin prints it in octal.
-    let out = std::process::Command::new("/bin/sh")
-        .args(["-c", "umask"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(out.stdout).ok()?;
-    u32::from_str_radix(text.trim(), 8).ok().map(|m| m & 0o777)
 }
 
 /// Write `content` to `path` atomically: write to an exclusively-created
@@ -558,12 +544,12 @@ fn process_umask() -> Option<u32> {
 /// removes them; an orphan is only removed by the best-effort cleanup on a
 /// handled write/rename error, or manually.
 pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
-    write_atomic_with_perms_fn(path, content, apply_target_permissions)
+    write_atomic_with_perms_fn(path, content, apply_captured_mode)
 }
 
 /// Permission-apply-injectable core of [`write_atomic`] (S-25.08 PR #848
 /// NB-B test seam): `perms_fn` is called once on the open temp handle with
-/// the final `path`. Production always passes [`apply_target_permissions`];
+/// the captured mode of `path`. Production always passes [`apply_captured_mode`];
 /// tests inject a failing closure to prove an `fchmod` error removes the
 /// temp, fails the write and leaves `path` untouched.
 #[doc(hidden)]
@@ -573,24 +559,30 @@ pub fn write_atomic_with_perms_fn<P>(
     perms_fn: P,
 ) -> Result<(), MigrateError>
 where
-    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
 {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-output".to_string());
-    let (file, tmp_path) = create_exclusive_temp_for_target(parent, &basename, "tmp", path)
-        .map_err(|source| MigrateError::Io {
-            // N-3: the candidate name is not known when creation fails (it is
-            // random and may have exhausted all attempts), so report the one
-            // concrete path that is: the directory the temp file could not be
-            // created in — never a non-existent glob.
-            path: parent.to_path_buf(),
-            source,
-        })?;
+    let captured_mode = capture_target_mode(path).map_err(|source| MigrateError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let (file, tmp_path) =
+        create_exclusive_temp_for_target(parent, &basename, "tmp", captured_mode).map_err(
+            |source| MigrateError::Io {
+                // N-3: the candidate name is not known when creation fails (it is
+                // random and may have exhausted all attempts), so report the one
+                // concrete path that is: the directory the temp file could not be
+                // created in — never a non-existent glob.
+                path: parent.to_path_buf(),
+                source,
+            },
+        )?;
 
-    if let Err(e) = write_and_sync_temp(file, &tmp_path, path, content, perms_fn) {
+    if let Err(e) = write_and_sync_temp(file, &tmp_path, captured_mode, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
@@ -633,19 +625,19 @@ where
 fn write_and_sync_temp<P>(
     mut file: File,
     tmp_path: &Path,
-    target: &Path,
+    captured_mode: Option<u32>,
     content: &str,
     perms_fn: P,
 ) -> Result<(), MigrateError>
 where
-    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
 {
     file.write_all(content.as_bytes())
         .map_err(|source| MigrateError::Io {
             path: tmp_path.to_path_buf(),
             source,
         })?;
-    perms_fn(&file, target).map_err(|source| MigrateError::Io {
+    perms_fn(&file, captured_mode).map_err(|source| MigrateError::Io {
         path: tmp_path.to_path_buf(),
         source,
     })?;
@@ -806,7 +798,7 @@ pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
 /// crash behaviour (a crash can orphan a `.<basename>.strict-tmp-<pid>-<nonce>`
 /// file, which no sweep removes, N-4) documented on [`write_atomic`] apply.
 pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), MigrateError> {
-    write_atomic_strict_durable_with_perms_fn(path, content, apply_target_permissions)
+    write_atomic_strict_durable_with_perms_fn(path, content, apply_captured_mode)
 }
 
 /// Permission-apply-injectable core of [`write_atomic_strict_durable`]
@@ -818,23 +810,29 @@ pub fn write_atomic_strict_durable_with_perms_fn<P>(
     perms_fn: P,
 ) -> Result<(), MigrateError>
 where
-    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
 {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
-    let (file, tmp_path) = create_exclusive_temp_for_target(parent, &basename, "strict-tmp", path)
-        .map_err(|source| {
-            MigrateError::Io {
-                // N-3: concrete directory, not a glob (see `write_atomic`).
-                path: parent.to_path_buf(),
-                source,
-            }
-        })?;
+    let captured_mode = capture_target_mode(path).map_err(|source| MigrateError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let (file, tmp_path) =
+        create_exclusive_temp_for_target(parent, &basename, "strict-tmp", captured_mode).map_err(
+            |source| {
+                MigrateError::Io {
+                    // N-3: concrete directory, not a glob (see `write_atomic`).
+                    path: parent.to_path_buf(),
+                    source,
+                }
+            },
+        )?;
 
-    if let Err(source) = write_and_sync_temp_strict(file, path, content, perms_fn) {
+    if let Err(source) = write_and_sync_temp_strict(file, captured_mode, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
@@ -877,15 +875,15 @@ where
 /// investigation).
 fn write_and_sync_temp_strict<P>(
     mut file: File,
-    target: &Path,
+    captured_mode: Option<u32>,
     content: &str,
     perms_fn: P,
 ) -> std::io::Result<()>
 where
-    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
 {
     file.write_all(content.as_bytes())?;
-    perms_fn(&file, target)?;
+    perms_fn(&file, captured_mode)?;
     sync_file_durable(&file)
 }
 
@@ -1448,7 +1446,7 @@ mod tests {
     }
 
     /// R3-B1(a): a temp for an EXISTING target is born `0o600`, observed on the
-    /// handle BEFORE any `fchmod` (`apply_target_permissions`). Kills mutation
+    /// handle BEFORE any `fchmod` (`apply_captured_mode`). Kills mutation
     /// M4 (existing-target branch uses the default creation mode).
     #[cfg(unix)]
     #[test]
@@ -1459,9 +1457,14 @@ mod tests {
         std::fs::write(&target, "old\n").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        let (file, tmp) =
-            create_exclusive_temp_for_target_with(dir.path(), "t.md", "tmp", &target, || 1)
-                .unwrap();
+        let (file, tmp) = create_exclusive_temp_for_target_with(
+            dir.path(),
+            "t.md",
+            "tmp",
+            capture_target_mode(&target).unwrap(),
+            || 1,
+        )
+        .unwrap();
         let mode = file.metadata().unwrap().permissions().mode() & 0o777;
         assert_eq!(
             mode, 0o600,
@@ -1480,9 +1483,14 @@ mod tests {
         let target = dir.path().join("absent.md");
         let expected = file_create_probe_mode(dir.path());
 
-        let (file, _tmp) =
-            create_exclusive_temp_for_target_with(dir.path(), "absent.md", "tmp", &target, || 2)
-                .unwrap();
+        let (file, _tmp) = create_exclusive_temp_for_target_with(
+            dir.path(),
+            "absent.md",
+            "tmp",
+            capture_target_mode(&target).unwrap(),
+            || 2,
+        )
+        .unwrap();
         let mode = file.metadata().unwrap().permissions().mode() & 0o777;
         assert_eq!(
             mode, expected,
@@ -1490,7 +1498,7 @@ mod tests {
         );
     }
 
-    /// NB-B: `apply_target_permissions` must SURFACE a failed fchmod instead of
+    /// NB-B: `apply_captured_mode` must SURFACE a failed fchmod instead of
     /// swallowing it. Failure injection: a read-only handle to `/dev/null`
     /// (owned by root, so fchmod by an unprivileged user fails EPERM). The
     /// result is inspected through its `Debug` form so this compiles against
@@ -1513,7 +1521,10 @@ mod tests {
             "precondition: fchmod on /dev/null must be refused (uid {me}, /dev/null owner {owner})"
         );
 
-        let shown = debug_of(apply_target_permissions(&dev_null, &target));
+        let shown = debug_of(apply_captured_mode(
+            &dev_null,
+            capture_target_mode(&target).unwrap(),
+        ));
         assert!(
             shown.starts_with("Err("),
             "a failed fchmod must be returned as Err, got {shown}"
@@ -1587,12 +1598,8 @@ mod tests {
     /// leftover. The hook runs inside the perms seam (after capture + temp
     /// creation, before apply) and then delegates to the production apply fn.
     ///
-    /// SEAM NOTE for the implementer: the closure below uses today's
-    /// `(&File, &Path)` seam and calls `apply_target_permissions`. With the
-    /// redesign the seam becomes `FnOnce(&File, Option<u32>)` (captured mode)
-    /// and the delegate becomes the captured-mode apply fn; adapt the two
-    /// marked lines only. Red today: a vanished target takes the umask default
-    /// (0o644), not the captured 0o640.
+    /// The seam is `FnOnce(&File, Option<u32>)` (captured mode); the closure
+    /// delegates to [`apply_captured_mode`].
     #[cfg(unix)]
     #[test]
     fn test_S_25_08_SEC_R3_001_captured_mode_survives_target_vanishing_before_apply() {
@@ -1609,7 +1616,7 @@ mod tests {
             );
 
             let victim = target.clone();
-            write_atomic_with_perms_fn(&target, "new\n", move |file, path| {
+            write_atomic_with_perms_fn(&target, "new\n", move |file, mode| {
                 // hook: between capture and apply
                 std::fs::remove_file(&victim).unwrap();
                 if replace_with_0o600 {
@@ -1617,7 +1624,7 @@ mod tests {
                     std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o600))
                         .unwrap();
                 }
-                apply_target_permissions(file, path) // <- seam-specific delegate
+                apply_captured_mode(file, mode) // <- seam-specific delegate
             })
             .unwrap();
 
@@ -1641,9 +1648,9 @@ mod tests {
         std::fs::write(&target, "old\n").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
         let victim = target.clone();
-        write_atomic_strict_durable_with_perms_fn(&target, "new\n", move |file, path| {
+        write_atomic_strict_durable_with_perms_fn(&target, "new\n", move |file, mode| {
             std::fs::remove_file(&victim).unwrap();
-            apply_target_permissions(file, path) // <- seam-specific delegate
+            apply_captured_mode(file, mode) // <- seam-specific delegate
         })
         .unwrap();
         let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
@@ -1736,7 +1743,6 @@ mod tests {
         for value in bad {
             for (basename, kind) in [(value, "tmp"), ("ok.md", value)] {
                 let dir = tempfile::tempdir().unwrap();
-                let target = dir.path().join("t.md");
                 let results = [
                     (
                         "create_exclusive_temp",
@@ -1748,7 +1754,7 @@ mod tests {
                     ),
                     (
                         "create_exclusive_temp_for_target",
-                        create_exclusive_temp_for_target(dir.path(), basename, kind, &target),
+                        create_exclusive_temp_for_target(dir.path(), basename, kind, None),
                     ),
                     (
                         "create_exclusive_temp_for_target_with",
@@ -1756,7 +1762,7 @@ mod tests {
                             dir.path(),
                             basename,
                             kind,
-                            &target,
+                            None,
                             || 7,
                         ),
                     ),

@@ -113,13 +113,13 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
         fields,
         marker_path,
         suffix_fn,
-        last_amended_migrate::atomic_write::apply_target_permissions,
+        last_amended_migrate::atomic_write::apply_captured_mode,
     )
 }
 
 /// Permission-apply-injectable variant of [`write_indeterminate_marker`]
 /// (S-25.08 PR #848 NB-B test seam): `perms_fn` is called once on the open
-/// temp handle with the marker's final path. A failure removes the temp and
+/// temp handle with the mode captured from the marker's final path (`None` when it did not exist). A failure removes the temp and
 /// is returned, leaving any existing marker untouched.
 #[doc(hidden)]
 pub fn write_indeterminate_marker_with_perms_fn<P>(
@@ -128,7 +128,7 @@ pub fn write_indeterminate_marker_with_perms_fn<P>(
     perms_fn: P,
 ) -> io::Result<()>
 where
-    P: FnOnce(&std::fs::File, &Path) -> io::Result<()>,
+    P: FnOnce(&std::fs::File, Option<u32>) -> io::Result<()>,
 {
     write_indeterminate_marker_core(
         fields,
@@ -146,7 +146,7 @@ fn write_indeterminate_marker_core<F, P>(
 ) -> io::Result<()>
 where
     F: FnMut() -> u64,
-    P: FnOnce(&std::fs::File, &Path) -> io::Result<()>,
+    P: FnOnce(&std::fs::File, Option<u32>) -> io::Result<()>,
 {
     // Serialize 6 mandatory TOML fields via the `toml` crate (Library table mandate).
     // toml::to_string correctly escapes all control characters including \n, \r, \t, etc.
@@ -207,12 +207,14 @@ where
             }
         })
         .collect();
+    // Single capture: ONE metadata call on the marker path, before the temp exists.
+    let captured_mode = last_amended_migrate::atomic_write::capture_target_mode(marker_path)?;
     let (mut tmp_file, tmp_path) =
         last_amended_migrate::atomic_write::create_exclusive_temp_for_target_with(
             parent,
             &format!("{file_name}.{safe_plugin}"),
             "tmp",
-            marker_path,
+            captured_mode,
             suffix_fn,
         )?;
     // Existing semantics preserved: plain write then rename (no fsync was ever performed
@@ -224,8 +226,9 @@ where
     }
     // BLOCKING-1: apply the marker's FINAL permissions on the SUCCESS path, through the
     // open handle, before the rename. A new marker keeps the default creation mode it was
-    // born with; an overwritten marker takes its previous mode (the temp is born 0o600).
-    if let Err(e) = perms_fn(&tmp_file, marker_path) {
+    // born with; an overwritten marker takes the mode captured before temp creation (the
+    // temp is born 0o600). The marker path is never stat'ed again.
+    if let Err(e) = perms_fn(&tmp_file, captured_mode) {
         drop(tmp_file);
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
