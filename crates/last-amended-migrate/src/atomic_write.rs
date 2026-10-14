@@ -595,11 +595,6 @@ where
         return Err(e);
     }
 
-    // N2: preserve the pre-existing target's permission bits across the
-    // rename. Best-effort — a target that doesn't exist yet (first write)
-    // or a permissions API that fails for an unrelated reason must not
-    // block the substantive content write, which `std::fs::write` never
-    // guarded against either.
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
     // comment for the verified Windows CI root cause (transient AV/indexer
     // handle, never this function's own write handle, which
