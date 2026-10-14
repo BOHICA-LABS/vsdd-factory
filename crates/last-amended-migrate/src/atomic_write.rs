@@ -20,16 +20,24 @@
 //!
 //! Two gaps in the original write-then-rename implementation, closed here:
 //!
-//! 1. **Permission preservation.** Creating a brand-new temp file
-//!    gets the platform/umask default mode, NOT the pre-existing target
-//!    file's own mode — a target deliberately `chmod`'d to something
-//!    non-default (e.g. `0o600` for a sensitive file) would silently have
-//!    its permission bits reset to the default on every write. This module
-//!    now reads the pre-existing target's `Permissions` (mode on Unix,
-//!    read-only flag on Windows) and applies them to the temp file before
-//!    the rename, so a rename never changes a file's permission bits as a
-//!    side effect. A target that does not exist yet (first-ever write) has
-//!    nothing to preserve, and is left at the platform default.
+//! 1. **Permission preservation (single-capture contract).** A brand-new
+//!    temp file gets the platform/umask default mode, NOT the pre-existing
+//!    target's own mode, so a target deliberately `chmod`'d to something
+//!    non-default (e.g. `0o600`) would have its permission bits reset on
+//!    every write. The writers therefore make exactly ONE `metadata` call on
+//!    the target, BEFORE the temp is created ([`capture_target_mode`]),
+//!    capturing `Option<u32>` (the mode `& 0o777`; setuid/setgid/sticky are
+//!    never carried). `NotFound` captures `None`; any other metadata error
+//!    is returned. With `Some(_)` the temp is created `0o600` and the open
+//!    handle is `fchmod`ed to the captured mode after the write
+//!    ([`apply_captured_mode`]); with `None` the temp is created `0o666`
+//!    (the kernel applies the process umask, exactly `File::create`
+//!    semantics) and nothing is applied. There is no second stat, no umask
+//!    discovery and no process spawn. The captured mode is the contract: a
+//!    target removed or replaced after the capture does not change the
+//!    final mode. Concurrent-creator caveat: a process that creates the
+//!    target after an absent capture is not observed, so the temp stays at
+//!    the umask default; see [`create_exclusive_temp_for_target`].
 //! 2. **fsync durability.** A `rename` that lands before the temp file's
 //!    written bytes are actually durable on disk (still sitting in a
 //!    filesystem write-back cache) leaves a crash window where `path` could
