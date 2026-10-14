@@ -109,6 +109,45 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
     marker_path: &Path,
     suffix_fn: F,
 ) -> io::Result<()> {
+    write_indeterminate_marker_core(
+        fields,
+        marker_path,
+        suffix_fn,
+        last_amended_migrate::atomic_write::apply_target_permissions,
+    )
+}
+
+/// Permission-apply-injectable variant of [`write_indeterminate_marker`]
+/// (S-25.08 PR #848 NB-B test seam): `perms_fn` is called once on the open
+/// temp handle with the marker's final path. A failure removes the temp and
+/// is returned, leaving any existing marker untouched.
+#[doc(hidden)]
+pub fn write_indeterminate_marker_with_perms_fn<P>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    perms_fn: P,
+) -> io::Result<()>
+where
+    P: FnOnce(&std::fs::File, &Path) -> io::Result<()>,
+{
+    write_indeterminate_marker_core(
+        fields,
+        marker_path,
+        last_amended_migrate::atomic_write::unpredictable_suffix,
+        perms_fn,
+    )
+}
+
+fn write_indeterminate_marker_core<F, P>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    suffix_fn: F,
+    perms_fn: P,
+) -> io::Result<()>
+where
+    F: FnMut() -> u64,
+    P: FnOnce(&std::fs::File, &Path) -> io::Result<()>,
+{
     // Serialize 6 mandatory TOML fields via the `toml` crate (Library table mandate).
     // toml::to_string correctly escapes all control characters including \n, \r, \t, etc.
     // Field insertion order preserved via BTreeMap (deterministic output).
@@ -186,7 +225,11 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
     // BLOCKING-1: apply the marker's FINAL permissions on the SUCCESS path, through the
     // open handle, before the rename. A new marker keeps the default creation mode it was
     // born with; an overwritten marker takes its previous mode (the temp is born 0o600).
-    last_amended_migrate::atomic_write::apply_target_permissions(&tmp_file, marker_path);
+    if let Err(e) = perms_fn(&tmp_file, marker_path) {
+        drop(tmp_file);
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
     drop(tmp_file);
 
     // Atomic rename temp → final path (single-marker policy: overwrites existing).

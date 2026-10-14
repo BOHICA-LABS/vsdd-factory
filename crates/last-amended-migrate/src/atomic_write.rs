@@ -415,13 +415,14 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
 /// - `target` does not exist: nothing to do; the temp already carries the
 ///   `File::create` default from [`create_exclusive_temp_for_target`].
 ///
-/// Best-effort: a failure leaves the temp at its owner-only `0o600` birth
-/// mode, which is the restrictive direction, and must not block the
-/// substantive content write (`std::fs::write` never guarded it either).
-pub fn apply_target_permissions(file: &File, target: &Path) {
+/// A failed `fchmod` is RETURNED (never swallowed): the caller removes the
+/// temp and fails the write, so a file never lands with permissions other
+/// than the ones this function was asked to apply (NB-B).
+pub fn apply_target_permissions(file: &File, target: &Path) -> std::io::Result<()> {
     if let Ok(existing_meta) = std::fs::metadata(target) {
-        let _ = file.set_permissions(existing_meta.permissions());
+        file.set_permissions(existing_meta.permissions())?;
     }
+    Ok(())
 }
 
 /// Write `content` to `path` atomically: write to an exclusively-created
@@ -452,6 +453,23 @@ pub fn apply_target_permissions(file: &File, target: &Path) {
 /// removes them; an orphan is only removed by the best-effort cleanup on a
 /// handled write/rename error, or manually.
 pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
+    write_atomic_with_perms_fn(path, content, apply_target_permissions)
+}
+
+/// Permission-apply-injectable core of [`write_atomic`] (S-25.08 PR #848
+/// NB-B test seam): `perms_fn` is called once on the open temp handle with
+/// the final `path`. Production always passes [`apply_target_permissions`];
+/// tests inject a failing closure to prove an `fchmod` error removes the
+/// temp, fails the write and leaves `path` untouched.
+#[doc(hidden)]
+pub fn write_atomic_with_perms_fn<P>(
+    path: &Path,
+    content: &str,
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+{
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
@@ -467,7 +485,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
             source,
         })?;
 
-    if let Err(e) = write_and_sync_temp(file, &tmp_path, path, content) {
+    if let Err(e) = write_and_sync_temp(file, &tmp_path, path, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
@@ -512,18 +530,25 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
 /// `tmp_path`, consumed so it is dropped at return) and `fsync` it before
 /// returning, so the caller's subsequent `rename` never lands ahead of the
 /// data actually being durable on disk (S-15.03 N2).
-fn write_and_sync_temp(
+fn write_and_sync_temp<P>(
     mut file: File,
     tmp_path: &Path,
     target: &Path,
     content: &str,
-) -> Result<(), MigrateError> {
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+{
     file.write_all(content.as_bytes())
         .map_err(|source| MigrateError::Io {
             path: tmp_path.to_path_buf(),
             source,
         })?;
-    apply_target_permissions(&file, target);
+    perms_fn(&file, target).map_err(|source| MigrateError::Io {
+        path: tmp_path.to_path_buf(),
+        source,
+    })?;
     file.sync_all().map_err(|source| MigrateError::Io {
         path: tmp_path.to_path_buf(),
         source,
@@ -681,6 +706,20 @@ pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
 /// crash behaviour (a crash can orphan a `.<basename>.strict-tmp-<pid>-<nonce>`
 /// file, which no sweep removes, N-4) documented on [`write_atomic`] apply.
 pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), MigrateError> {
+    write_atomic_strict_durable_with_perms_fn(path, content, apply_target_permissions)
+}
+
+/// Permission-apply-injectable core of [`write_atomic_strict_durable`]
+/// (NB-B test seam; see [`write_atomic_with_perms_fn`]).
+#[doc(hidden)]
+pub fn write_atomic_strict_durable_with_perms_fn<P>(
+    path: &Path,
+    content: &str,
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+{
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
@@ -695,7 +734,7 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
             }
         })?;
 
-    if let Err(source) = write_and_sync_temp_strict(file, path, content) {
+    if let Err(source) = write_and_sync_temp_strict(file, path, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
@@ -736,9 +775,17 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
 /// shape for [`write_atomic`]) rather than an inline closure specifically
 /// so this scoping is unambiguous on inspection (PR #842 Windows-CI
 /// investigation).
-fn write_and_sync_temp_strict(mut file: File, target: &Path, content: &str) -> std::io::Result<()> {
+fn write_and_sync_temp_strict<P>(
+    mut file: File,
+    target: &Path,
+    content: &str,
+    perms_fn: P,
+) -> std::io::Result<()>
+where
+    P: FnOnce(&File, &Path) -> std::io::Result<()>,
+{
     file.write_all(content.as_bytes())?;
-    apply_target_permissions(&file, target);
+    perms_fn(&file, target)?;
     sync_file_durable(&file)
 }
 
