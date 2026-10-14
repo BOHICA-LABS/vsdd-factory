@@ -3219,7 +3219,7 @@ fn test_BC_1_18_008_FC3P6001_PC3_run_backfill_split_publishes_backfill_recovery_
 // thread busy-polls for that temp file's appearance and overwrites its
 // on-disk content with corrupt bytes for as long as it exists before
 // `write_atomic`'s own atomic `rename` consumes it. Because
-// `write_and_sync_temp` (`File::create` + `write_all` + `sync_all`) is real
+// `write_and_sync_temp` (exclusive `create_new` temp handle + `write_all` + `sync_all`) is real
 // disk I/O -- the `sync_all` fsync durability step in particular
 // (S-15.03 N2) -- against a tight, syscall-driven polling loop with no
 // deliberate sleep, this reliably lands the corrupting write on the temp

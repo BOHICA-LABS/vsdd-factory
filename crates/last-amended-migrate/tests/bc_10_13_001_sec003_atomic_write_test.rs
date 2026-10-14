@@ -22,7 +22,7 @@ use last_amended_migrate::{migrate_file, parse_frontmatter};
 
 /// Direct unit proof of the primitive itself: after a successful
 /// `write_atomic`, the target holds exactly the new content, and no
-/// `.tmp-<pid>` sibling file is left behind in the directory.
+/// `.tmp-<pid>-<nonce>` sibling file is left behind in the directory.
 #[test]
 fn test_BC_10_13_001_SEC003_write_atomic_leaves_no_tmp_sibling_on_success() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -39,7 +39,7 @@ fn test_BC_10_13_001_SEC003_write_atomic_leaves_no_tmp_sibling_on_success() {
         .collect();
     assert!(
         leftover_tmp.is_empty(),
-        "no .tmp-<pid> sibling must survive a successful write_atomic call: {leftover_tmp:?}"
+        "no .tmp-<pid>-<nonce> sibling must survive a successful write_atomic call: {leftover_tmp:?}"
     );
 }
 
@@ -51,7 +51,7 @@ fn test_BC_10_13_001_SEC003_write_atomic_leaves_no_tmp_sibling_on_success() {
 /// true concurrent-writer race is impractical to construct deterministically
 /// in a unit test; this test instead proves the mechanism (temp-then-rename,
 /// never a direct in-place write) is what actually executes, by asserting a
-/// `.tmp-<pid>` file DOES briefly exist as a real filesystem object (i.e.
+/// `.tmp-<pid>-<nonce>` file DOES briefly exist as a real filesystem object (i.e.
 /// the write genuinely goes through a separate file, not the target
 /// in-place) before the call returns — read via the returned content check
 /// above — and that after the call there is exactly one file with the
@@ -123,7 +123,7 @@ fn test_BC_10_13_001_SEC003_write_atomic_leaves_target_untouched_on_temp_write_f
 
 /// S-15.03 pr-reviewer N2: `write_atomic` preserves the pre-existing
 /// target's non-default permission bits (`0o600`) across the write —
-/// `File::create`'s own default mode must never silently reset them.
+/// a freshly created temp file's own default mode must never silently reset them.
 /// Unix-only: `std::fs::Permissions`'s mode bits are a Unix-specific
 /// concept (`PermissionsExt`); Windows only carries a read-only flag, which
 /// this test does not attempt to exercise precisely.
@@ -180,7 +180,7 @@ fn test_BC_10_13_001_SEC003_migrate_file_write_leaves_no_tmp_sibling() {
     assert!(
         leftover_tmp.is_empty(),
         "migrate_file's write must go through write_atomic and leave no \
-         .tmp-<pid> sibling: {leftover_tmp:?}"
+         .tmp-<pid>-<nonce> sibling: {leftover_tmp:?}"
     );
     assert!(
         parse_frontmatter(&path).is_ok(),
@@ -224,7 +224,7 @@ fn test_BC_10_13_001_SEC003_rotate_changelog_writes_leave_no_tmp_siblings() {
             .collect();
         assert!(
             leftover_tmp.is_empty(),
-            "rotate_changelog's writes must leave no .tmp-<pid> sibling in \
+            "rotate_changelog's writes must leave no .tmp-<pid>-<nonce> sibling in \
              {check_dir:?}: {leftover_tmp:?}"
         );
     }
@@ -250,7 +250,7 @@ fn test_BC_10_13_001_SEC003_register_artifact_paths_write_leaves_no_tmp_sibling(
         .collect();
     assert!(
         leftover_tmp.is_empty(),
-        "register_artifact_paths's write must leave no .tmp-<pid> sibling: {leftover_tmp:?}"
+        "register_artifact_paths's write must leave no .tmp-<pid>-<nonce> sibling: {leftover_tmp:?}"
     );
     assert!(
         common::read_file(&registry_path).contains("artifacts:"),
