@@ -2,12 +2,17 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 //! S-25.08 PR #848 round-3 BLOCKING-1 (TD-VSDD-059 paper fix).
 //!
-//! `write_indeterminate_marker` calls `apply_final_permissions` only on the
-//! `write_all` ERROR branch. On the success path the marker is renamed into
-//! place still carrying the exclusive temp's `0o600` birth mode, so (a) a NEW
-//! marker lands `0o600` instead of the platform default creation mode a plain
-//! `File::create` would give, and (b) an OVERWRITTEN marker loses its
-//! pre-existing mode. Both tests drive the real public writer.
+//! Pins the final permissions of the marker written by
+//! `write_indeterminate_marker` on the SUCCESS path:
+//!
+//! - a NEW marker gets the platform default creation mode a plain
+//!   `File::create` would give (not the exclusive temp's `0o600` birth mode);
+//! - an OVERWRITTEN marker keeps the mode it had before.
+//!
+//! The writer picks the temp's creation mode from the target (existing mode
+//! when the target exists, default creation mode otherwise) and applies the
+//! target permissions on the open fd before the rename. Both tests drive the
+//! real public writer.
 
 #![cfg(unix)]
 
