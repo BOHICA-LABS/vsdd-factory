@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "feff835"
+input-hash: "70ceb92"
 traces_to: STATE.md
 ---
 
@@ -3057,3 +3057,32 @@ NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (h
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `14e246e6`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053). Correction of record for the parent: `14e246e6` has the wrong subject (the D-1262 subject, from a reused stale `msg.txt`); its content is the correct D-1264 registration; it is on origin and was NOT rewritten (a force-push would need human approval).
 
 Summary: Registered ADR-052 v1.31 (the human-approved CR-003 precheck removal), BC-1.18.011 v1.25, BC-1.18.013 v1.18 and VP-146 v1.7 (the BC version-sync test passes again), registered NEW S-25.16, S-25.17, S-25.18 and S-26.08 with E-25 v1.13 and E-26 v1.5, re-pinned the topological hash cascade (33 of 33 stored == computed), closed [D-1264-PR848-ANCHORS-OWED] with the finding to story map, recorded the PR #848 round-2 status and the correction of the wrong D-1264 commit subject, and advanced STATE.md to v10.99.
+
+## Burst: STATE-BANNER-WC-L-CORRECTION-PR848-CI-D1266 (2026-10-14)
+
+**Parent-commit:** `61c75450` (the D-1265 burst). **Agent:** state-manager (single-commit TD-VSDD-053; D-1266; STATE.md v10.99→v10.100).
+
+**Adversary verdict:** none dispatched (small corrective burst). Trigger: PR #848 CI cargo-host, both legs, `validate-state-structure` real-STATE banner tests failed ("banner claims 287 lines but actual count is 292").
+
+**Files touched (Dim-1): 4 unique files**
+- STATE.md (banner wc-l and dual-margin; Decisions Log row D-1266; version v10.99 to v10.100; last_amended)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1266)
+- cycles/v1.0-brownfield-backfill/lessons.md (L-BB-D1266)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+
+NOT staged (scope control): story files (story-writer editing concurrently), `regression-state.json`, `sidecar-learning.md`.
+
+**Codifications:** D-1266; L-BB-D1266 [process-gap]; OPEN [D-1266-PR-CI-FACTORY-TIP-COUPLING] (human).
+
+**Dim-2 (literal shell, captured output):**
+- `wc -l .factory/STATE.md` (run LAST, after all STATE.md edits) printed `293 .factory/STATE.md`; the banner reads 293 and 500 - 293 = 207.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_f_p1_001_real_state_md_banner_wc_passes` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.00s`.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_full_validation_against_real_state_md` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.00s`.
+
+**Dim-5:** no count change (BCs/VPs/ADRs/stories unchanged). **Dim-6:** `last_amended` overwritten with the single current entry (no `[Prior:` chain). **Dim-7:** single commit; no --no-verify; no AI attribution; Edit tool only for `.factory/` edits.
+
+**Closes:** the stale-banner CI failure on PR #848. **Opens:** [D-1266-PR-CI-FACTORY-TIP-COUPLING] (human decision; candidate anchor S-26.08 or a new E-26 story).
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `61c75450`); run `git -C .factory log -1` for the SHA.
+
+Summary: Corrected the STATE.md banner wc-l and dual-margin to the literal final count after PR #848 CI failed on both cargo-host legs; recorded D-1266, a process-gap lesson, and the open human observation that PR CI depends on the moving factory-artifacts tip.
