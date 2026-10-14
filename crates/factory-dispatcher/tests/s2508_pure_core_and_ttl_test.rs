@@ -1060,10 +1060,10 @@ fn simplified_canonical(p: &std::path::Path) -> std::path::PathBuf {
     #[cfg(windows)]
     {
         let s = c.to_string_lossy().into_owned();
-        if let Some(rest) = s.strip_prefix(r"\\?\") {
-            if !rest.starts_with("UNC\\") {
-                return std::path::PathBuf::from(rest);
-            }
+        if let Some(rest) = s.strip_prefix(r"\\?\")
+            && !rest.starts_with("UNC\\")
+        {
+            return std::path::PathBuf::from(rest);
         }
     }
     c

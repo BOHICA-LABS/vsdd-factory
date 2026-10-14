@@ -549,15 +549,15 @@ mod tests {
         struct ReapGuard(PathBuf);
         impl Drop for ReapGuard {
             fn drop(&mut self) {
-                if let Ok(txt) = std::fs::read_to_string(&self.0) {
-                    if let Ok(pid) = txt.trim().parse::<u32>() {
-                        let _ = Command::new("kill")
-                            .args(["-KILL", &pid.to_string()])
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .status();
-                    }
+                if let Ok(txt) = std::fs::read_to_string(&self.0)
+                    && let Ok(pid) = txt.trim().parse::<u32>()
+                {
+                    let _ = Command::new("kill")
+                        .args(["-KILL", &pid.to_string()])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
                 }
                 let _ = std::fs::remove_file(&self.0);
             }
