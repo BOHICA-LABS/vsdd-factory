@@ -420,6 +420,15 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
 /// than the ones this function was asked to apply (NB-B).
 pub fn apply_target_permissions(file: &File, target: &Path) -> std::io::Result<()> {
     if let Ok(existing_meta) = std::fs::metadata(target) {
+        #[cfg(unix)]
+        {
+            // SEC-R3-002: copy the permission bits only. setuid/setgid/sticky
+            // (`0o7000`) are never inherited from the target.
+            use std::os::unix::fs::PermissionsExt;
+            let mode = existing_meta.permissions().mode() & 0o777;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+        #[cfg(not(unix))]
         file.set_permissions(existing_meta.permissions())?;
     }
     Ok(())
