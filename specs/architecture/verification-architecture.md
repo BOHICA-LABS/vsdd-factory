@@ -52,7 +52,7 @@ modified:
   - "2026-06-16 (v1.0 initial creation)"
 phase: 1b
 inputs: [verification-properties/VP-INDEX.md]
-input-hash: "66e8eac"
+input-hash: "ebf7121"
 traces_to: VP-INDEX.md
 subsystems_affected:
   - SS-01

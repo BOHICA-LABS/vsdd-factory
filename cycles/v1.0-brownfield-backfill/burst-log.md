@@ -2995,3 +2995,65 @@ NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (h
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `70832499`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Recorded the two human decisions on PR #848 and the permission-denied GitHub writes, persisted the pr-reviewer's review, registered S-25.08 v1.16 (B1 corrected) and S-25.09 v1.8 with the BC v1.17 / v1.39 cite re-pins, the S-14.07 input fix and the topological hash refresh (27 of 27 stored == computed), and advanced STATE.md to v10.98.
+
+## Burst: ADR052-V131-CR003-BC-V125-V118-VP146-V17-S2516-S2517-S2518-S2608-REGISTRATION-PR848-ANCHORS-CLOSED (2026-10-14)
+
+**Parent-commit:** the D-1264 burst commit (`14e246e6`; its subject wrongly reads the D-1262 subject, see the correction below). **Agent:** state-manager (single-commit TD-VSDD-053; D-1265; STATE.md v10.98→v10.99).
+
+**Adversary verdict:** none dispatched by this burst (no cycle-level or LOCAL adversary pass). Review input registered: the PR #848 findings (code-reviewer CR-001..CR-012, security-reviewer SEC-001..SEC-006, pr-reviewer N1..N9) as mapped to stories by D-1265(e); round-2 code fixes are in PR #848 (not a persisted review file).
+
+**Files touched (Dim-1): 32 unique files** (`git -C .factory status --porcelain` before this burst: 9 modified, 4 untracked; the specialist spec, story and epic files were already in the working tree, authored by the architect, product-owner and story-writer under FUEL_EXHAUSTED advisories; this burst added the four INDEX registrations, the hash cascade, STATE.md and the cycle logs)
+- specs/architecture/ARCH-INDEX.md (v4.60 to v4.61; ADR-052 row v1.31 clause)
+- specs/architecture/decisions/ADR-052-native-migration-cli-bash-tool-allowlist-sanctioned-execution-path.md (v1.31, committed as authored)
+- specs/architecture/verification-architecture.md (input-hash only, 66e8eac to ebf7121)
+- specs/architecture/verification-coverage-matrix.md (input-hash only, 66e8eac to ebf7121)
+- specs/behavioral-contracts/BC-INDEX.md (v5.113 to v5.114)
+- specs/behavioral-contracts/ss-01/BC-1.18.011.md (v1.25, committed as authored)
+- specs/behavioral-contracts/ss-01/BC-1.18.013.md (v1.18, committed as authored)
+- specs/verification-properties/VP-INDEX.md (v3.34 to v3.35)
+- specs/verification-properties/VP-146.md (v1.7, committed as authored)
+- stories/STORY-INDEX.md (v4.499 to v4.500)
+- stories/S-25.16-windows-path-and-name-hardening-reserved-names-and-case-collisions.md (new, v1.0; input-hash by this burst, 2a876fd)
+- stories/S-25.17-pr848-admission-gate-dispatcher-leg-hardening-trust-anchor-release-cost-reservation-durability-block-header.md (new, v1.0; input-hash by this burst, 6479c4f)
+- stories/S-25.18-reservation-lifecycle-leak-hygiene-drain-stall-diagnostics-lock-grace-and-root-skip-test-convention.md (new, v1.0; input-hash by this burst, d5a1e31)
+- stories/S-26.08-ci-release-supply-chain-hardening-least-privilege-digest-pin-and-release-path-validation.md (new, v1.0; input-hash by this burst, a5b5009)
+- stories/epics/E-25-validation-integrity.md (v1.13 as authored; input-hash by this burst, 3253335)
+- stories/epics/E-26-post-rc25-hook-hardening.md (v1.5 as authored; input-hash by this burst, f8bfbe3)
+- stories/S-25.02-artifact-sharding-layer2.md (hash-only, d6d9134)
+- stories/S-25.06-append-log-backfill-split-executor.md (hash-only, 9161516)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (hash-only, 335978a)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (hash-only, 2490c73)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (hash-only, e501ffd)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (hash-only, 3f10e0d)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (hash-only, cc23843)
+- stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (hash-only, befd0dc)
+- stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md (hash-only, 45e6752)
+- stories/S-25.15-branch-3-activation-manifest-guard-block.md (hash-only, 50d7186)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (hash-only, 067d564)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (hash-only, a5bbd43)
+- STATE.md (v10.98 to v10.99)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1265)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.98 checkpoint archived)
+
+NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (hook-written telemetry that belongs to none of the items). `lessons.md` is NOT touched, so the E-14 chain (S-14.01..S-14.11, E-14) did not drift and was not re-hashed. Not touched by this burst: S-26.07, S-14.07 (stored == computed, unchanged).
+
+**Codifications:** D-1265 (ADR-052 v1.31 / BC v1.25 / v1.18 / VP-146 v1.7 registered; four stories registered; closes [D-1264-PR848-ANCHORS-OWED] with the finding to story map; human decision on release.yml / semgrep.yml action pinning recorded; PR #848 round 2 status; S-25.09 must drop the precheck on rebase; opens [D-1265-STORY-V125-CITES-OWED]; correction of record for the wrong subject on `14e246e6`). No new lesson (the stale-message near-miss is a process correction recorded in D-1265(i); `lessons.md` is deliberately untouched to avoid an E-14 chain re-hash).
+
+**Dim-2 (literal shell, captured output):**
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` BEFORE the BC-INDEX edit printed `BC-1.18.011: BC frontmatter version="1.25" (normalized="1.25") does not match BC-INDEX last-chain-entry version="1.24"` and `BC-1.18.013: BC frontmatter version="1.18" (normalized="1.18") does not match BC-INDEX last-chain-entry version="1.17"` (`Mismatches (2 total)`, `test result: FAILED. 0 passed; 1 failed`); AFTER it printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 6.33s` (final run after all writes).
+- `cargo test -q -p validate-cross-site-correspondence test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s`.
+- Final stored == computed check over every touched story, epic and the two verification documents (literal loop: stored `input-hash:` against `compute-input-hash <file>` per file, run after all story, index and log writes): `stored==computed: 33 ok, 0 bad` (S-25.02 d6d9134, S-25.06 9161516, S-25.08 335978a, S-25.09 2490c73, S-25.10 e501ffd, S-25.11 3f10e0d, S-25.12 cc23843, S-25.13 befd0dc, S-25.14 45e6752, S-25.15 50d7186, S-25.16 2a876fd, S-25.17 6479c4f, S-25.18 d5a1e31, S-12.16 067d564, S-26.06 a5bbd43, S-26.07 ef42391, S-26.08 a5b5009, S-14.01 80885ae, S-14.02 be39655, S-14.03 be39655, S-14.04 c6a2c58, S-14.05 be39655, S-14.06 d46aa88, S-14.07 a85a7f2, S-14.08 ca450e8, S-14.09 0f466a2, S-14.10 6085287, S-14.11 a155ea3, E-14 7471771, E-25 3253335, E-26 f8bfbe3, verification-architecture ebf7121, verification-coverage-matrix ebf7121). The cascade drifted on 20 artifacts in round 1 and on 4 more in round 2 (S-25.06, S-25.14, S-25.18, E-25), then a third round found 0.
+- Namespace check: `grep -rlE "D-126[5-9]" cycles STATE.md stories specs code-delivery` returned only STORY-INDEX.md, VP-INDEX.md, BC-INDEX.md and ARCH-INDEX.md (this burst's own writes) before the decision-log write; `git grep -lE "D-126[5-9]" HEAD` returned nothing; D-1265 free.
+- `cargo run -q -p last-amended-migrate -- migrate --check` printed `eligibility=CurrentEntryOnly ... mutated=false` for all five files (STORY-INDEX, BC-INDEX, ARCH-INDEX, VP-INDEX, STATE.md; STATE.md with `changelog=SkippedStateFile`).
+- `git -C .factory log -3 --format='%h %s'` before the burst printed `14e246e6 factory(state): S2508-P13-PERSISTED-V114-CROSS-TASK-STATUS-SWEEP-REGISTRATION v10.95->v10.96 D-1262` as HEAD (the wrong subject on the D-1264 commit) and `git -C .factory status -sb` showed factory-artifacts level with `origin/factory-artifacts` (the wrong-subject commit is already pushed; not rewritten).
+
+**Dim-5:** Count-propagation sweep: 2,007 BCs, 147 VPs, 54 ADRs unchanged; STORY-INDEX draft 119→123, Total (active) 239→243, registered 259→263; E-25 story_count 15→18, E-26 story_count 7→8. **Dim-6:** `last_amended` overwritten with the current entry only on ARCH-INDEX, BC-INDEX, VP-INDEX, STORY-INDEX and STATE.md (BC-5.45.001); one new `changelog:` item prepended to each of the four INDEX files; STATE.md has no `changelog:`.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits (the only scripted writes are `compute-input-hash --update`, the sanctioned frontmatter tool); files staged explicitly by path, never `git add -A`; commit message written to a FRESH `mktemp` file in the scratchpad, its subject printed and compared against the intended subject before `git commit -F`, and the resulting subject verified with `git log -1 --format=%s` after (the correction for the stale-`msg.txt` defect on `14e246e6`); no force-push; no GitHub write attempted; the large index edits ran under the known FUEL_EXHAUSTED PostToolUse advisories ([D-1254-ADR052-SPLIT] class, writes landed).
+
+**Closes:** [D-1264-PR848-ANCHORS-OWED]. **Opens:** [D-1265-STORY-V125-CITES-OWED]. **OPEN carried unchanged:** [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED] (pass 4 next), [D-1244-REVERIFY] (VP-146 leg, S-25.06), [D-1264-S1407-TEMPLATE-DRIFT-OWED], PR #769, the S-26.07 / S-14.10 / S-14.11 product-owner gaps.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `14e246e6`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053). Correction of record for the parent: `14e246e6` has the wrong subject (the D-1262 subject, from a reused stale `msg.txt`); its content is the correct D-1264 registration; it is on origin and was NOT rewritten (a force-push would need human approval).
+
+Summary: Registered ADR-052 v1.31 (the human-approved CR-003 precheck removal), BC-1.18.011 v1.25, BC-1.18.013 v1.18 and VP-146 v1.7 (the BC version-sync test passes again), registered NEW S-25.16, S-25.17, S-25.18 and S-26.08 with E-25 v1.13 and E-26 v1.5, re-pinned the topological hash cascade (33 of 33 stored == computed), closed [D-1264-PR848-ANCHORS-OWED] with the finding to story map, recorded the PR #848 round-2 status and the correction of the wrong D-1264 commit subject, and advanced STATE.md to v10.99.

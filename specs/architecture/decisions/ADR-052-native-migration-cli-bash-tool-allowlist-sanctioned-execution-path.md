@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.30"
+version: "1.31"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -191,6 +191,13 @@ admission detail and no separate `error_kind` event field. The two legs differ i
 the `Io` variant and renders per slot, while the release/advisory leg (`reservation_release_failed`) is not an `Io`
 variant and keeps `<path>: <kind>: <msg>` with a closed-vocabulary fixed `<kind>` token and path and msg as data
 slots capped at 64 each; that leg's wording is unchanged. Recorded under the v1.30 changelog row.
+**v1.31 (spec-to-code alignment with the human-approved CR-003 removal, PR #848, commit `245a437a`; no state-machine,
+exit-code, taxonomy-code, `<cause>` or VP-count change; v1.30 is committed and immutable, so this is a NEW version):**
+The verdict-only admission precheck (`bc_index_migration_admission_precheck` in S-25.08; v1.21 neutral name
+`migration_writer_admission_precheck`) had no production caller and discarded the reservation, so it is removed and
+§5a "Entry-point naming" now lists exactly two entry points, `migration_writer_admission` (callers read `.verdict`)
+and `migration_reservation_release`. S-25.08 ships the `bc_index_migration_*` names; S-25.09 renames them and must
+not re-add the precheck. Recorded under the v1.31 changelog row.
 
 ## Context
 
@@ -794,17 +801,19 @@ is the UNION `.factory/specs/behavioral-contracts/` ∪ `.factory/cycles/` (as t
 always stated); a live (STAGING/COMMITTING) txn of EITHER migration blocks mutations under BOTH
 families, and at most ONE live txn may exist across both migrations at a time. Admission is
 implemented ONCE in a shared core in `shard_manager.rs` that the migration-neutral executor entry
-points (`executor::migration_writer_admission` / `migration_writer_admission_precheck` /
-`migration_reservation_release`, v1.21 — formerly `bc_index_migration_*`) delegate to; `main.rs` evaluates that core
+points (`executor::migration_writer_admission` / `migration_reservation_release`, v1.21 — formerly
+`bc_index_migration_*`; v1.31: exactly TWO entry points, the verdict-only precheck form having been removed, see
+"Entry-point naming") delegate to; `main.rs` evaluates that core
 exactly ONCE per PreToolUse event, at the REGISTRY-INDEPENDENT position specified in "Evaluation
 position (v1.20)" below — before `Registry::load`, hence structurally before `shard_cap_precheck`
 (whose fired branch performs a destructive seal-and-truncate and must never run for a blocked
 protected-path write) and before every registry plugin tier. (v1.20 supersedes the v1.18 wording
 "at the position and fire-before-any-registry-plugin ordering `bc_index_migration_admission_precheck`
-already holds": that position is AFTER `Registry::load` in the merged code and so inherits its
+already holds" [historical v1.18 wording quoted for supersession; that function no longer exists, v1.31]: that position is AFTER `Registry::load` in the merged code and so inherits its
 fail-open arms.) It MUST NOT be evaluated twice (a second evaluation would re-create the
 reservation and re-run reconciliation). Which of the two named entry points `main.rs` invokes is
-an implementation detail ("or its successor", BC-1.18.013 Precondition 6(b)); the observable
+an implementation detail ("and their successors", BC-1.18.013 v1.18 Precondition 6(b)); in the merged code
+it is the reservation-returning `migration_writer_admission`, whose `.verdict` the caller reads; the observable
 obligation is the black-box test through the real dispatcher PreToolUse entry. The tool set of
 the Rust gate is `Edit`/`Write`/`MultiEdit` only; the `Bash` write-effect leg remains the
 separately-tracked [D-1232-OBL-4] §5c classifier (devops-engineer, F4 activation) exactly as
@@ -841,7 +850,7 @@ prompt, or a block by a hook process other than this dispatcher — still leak u
 or the TTL; that residual is exactly what the TTL and the operator remediation below cover.)
 
 **Evaluation position (v1.20 — closes F-004; replaces the v1.18 "position
-`bc_index_migration_admission_precheck` already holds" wording).** The native admission (PreToolUse)
+`bc_index_migration_admission_precheck` already holds" wording; that function was removed in v1.31).** The native admission (PreToolUse)
 and the reservation release (PostToolUse / PostToolUseFailure) are REGISTRY-INDEPENDENT. In
 `main.rs::run` they execute immediately after the stdin payload parse and `resolve_project_cwd()`
 and BEFORE the `CLAUDE_PLUGIN_ROOT` tiering, `resolve_registry_path()` and `Registry::load`. Why:
@@ -879,11 +888,26 @@ leaves the reservation for the matching Post event, which is itself registry-ind
 **Entry-point naming (v1.21 — closes F-014; supersedes the v1.20 sentence naming two per-migration delegates).**
 The shared core serves BOTH governed migrations over ONE protected-path union, so its executor entry
 points are migration-NEUTRAL and exist exactly once: `executor::migration_writer_admission(payload, cwd)
--> MigrationAdmission` (the reservation-returning form `main.rs` calls),
-`executor::migration_writer_admission_precheck(payload, cwd) -> Option<HookResult>` (verdict-only form
-over the same core) and `executor::migration_reservation_release(payload, cwd)`. These are renames of
-`bc_index_migration_admission` / `bc_index_migration_admission_precheck` /
-`bc_index_migration_reservation_release` (no behavior change). NO per-migration delegates are created:
+-> MigrationAdmission` (the reservation-returning form `main.rs` calls; callers read its `.verdict` field, and
+the reservation stays owned by the caller via `MigrationAdmission`, released on completion) and
+`executor::migration_reservation_release(payload, cwd)`.
+**v1.31 amendment (CR-003; human-approved 2026-10-13; PR #848, commit `245a437a` on `feature/S-25.08`) — exactly
+TWO entry points, not three.** The v1.21 text listed a third, verdict-only form
+`executor::migration_writer_admission_precheck(payload, cwd) -> Option<HookResult>`. It had no production
+caller and discarded the writer reservation it created, so any caller adopting it would leak a reservation
+(TTL-only reclaim) — a footgun, removed from the code. It is NOT an entry point and MUST NOT be reintroduced
+(neither under that name, its S-25.08 name `bc_index_migration_admission_precheck`, nor any other
+verdict-only wrapper over the shared core). A caller that needs only the verdict calls
+`migration_writer_admission` and reads `.verdict`, then owns and releases the reservation. This matches
+BC-1.18.011 v1.25 Precondition 6(d) and BC-1.18.013 v1.18 Precondition 6(b) ("`migration_writer_admission` and
+`migration_reservation_release`, and their successors"). **Naming by story:** S-25.08 ships the code under the
+`bc_index_migration_*` names (`bc_index_migration_admission`, `bc_index_migration_reservation_release`; the
+precheck already removed there); S-25.09 performs the rename to the neutral names above and MUST NOT re-add the
+precheck. The v1.21 rename mapping applies to the surviving two:
+`bc_index_migration_admission` -> `migration_writer_admission` and
+`bc_index_migration_reservation_release` -> `migration_reservation_release` (no behavior change). The
+v1.21 rename of `bc_index_migration_admission_precheck` -> `migration_writer_admission_precheck` is VOID
+(superseded by this removal). NO per-migration delegates are created:
 `append_log_backfill_admission_precheck` / `append_log_backfill_reservation_release` never existed in
 the code and must not be added — a second name for the same function with no distinct behavior is false
 surface and invites a second implementation, the exact drift the shared core exists to prevent. This is
@@ -1855,7 +1879,9 @@ ratified §Status block as "[D-1232-OBL-4] devops-engineer implements the 4 disp
 amendments specified in §Decision 5b/5c against this ADR's frozen spec text" — a post-ratification
 activation-boundary obligation, distinct from and NOT gating cluster-5 TDD completion (contrast
 [D-1232-OBL-1], the impl-phase Kani obligation, which explicitly DOES block cluster-5 TDD
-completion). Cluster-5's `bc_index_migration_admission_precheck` native gate (`executor.rs`/
+completion). Cluster-5's native admission gate (`bc_index_migration_admission` in S-25.08, neutral name
+`migration_writer_admission` from S-25.09; the verdict-only `bc_index_migration_admission_precheck` named here
+before v1.31 was removed, CR-003) (`executor.rs`/
 `shard_manager.rs`, T-10/T-11, implementer-owned) covers only the `Edit`/`Write`/`MultiEdit`
 admission path per BC-1.18.011 Precondition 6(b) — it does not implement this §5c `^Bash$`
 full-command classifier. The stale "(cluster-5 TDD scope)" label below predates the D-1232
@@ -4666,7 +4692,10 @@ are RATIFIED with the amendments below; the exact required deltas are:
 2. **BC-1.18.013 Precondition 6(b) "Where" bullet:** replace "added alongside them, never in
    place of either" with: the gate is a single shared admission core evaluated exactly once per
    PreToolUse event at the position `bc_index_migration_admission_precheck` already holds; both
-   named precheck entry points delegate to it (§5a "Shared protected-path union").
+   named precheck entry points delegate to it (§5a "Shared protected-path union"). [Historical v1.x
+   downstream instruction, kept as the record of what was asked; superseded by v1.20 (position) and v1.31
+   (the verdict-only precheck was removed: the entry points are `migration_writer_admission` and
+   `migration_reservation_release`, both delegating to the shared core).]
 3. **BC-1.18.013 Precondition 6(c):** replace "atomically under `LOCK_SH` on the gate-state file,
    creates …reservation" with the reserve-then-verify order (§5a step 0); add release-on-block;
    state the TTL by `created_at` (mtime fallback); keep 30 s / 3,600 s / 1,800 s floor / no PID
@@ -4759,7 +4788,7 @@ VP-133, VP-143, VP-147 amended by the architect in the same burst (below; VP cat
 VP-INDEX / verification-architecture / verification-coverage-matrix counts untouched, POLICY 9).
 Apply to BOTH BCs (shared-core sibling sweep) unless a delta names one.
 
-14. **Precondition 6(b) "Where" bullet (both BCs):** replace "at the position
+14. **Precondition 6(b) "Where" bullet (both BCs):** [historical instruction; the quoted function was removed in v1.31] replace "at the position
     `bc_index_migration_admission_precheck` already holds on the production PreToolUse dispatch
     path — structurally AHEAD of `shard_cap_precheck` … and before any registry plugin" with the
     §5a "Evaluation position (v1.20)" obligations O1–O4: exactly once; BEFORE `Registry::load` /
@@ -4938,7 +4967,8 @@ unless a delta names one. Numbering continues the v1.20 list.
 29. **F-014 (both BCs):** BC-1.18.013 Precondition 6(b) "Where" (the sentence naming
     `bc_index_migration_admission_precheck` and `append_log_backfill_admission_precheck`) and
     BC-1.18.011 Precondition 6: name the single shared entry points `migration_writer_admission` /
-    `migration_writer_admission_precheck` / `migration_reservation_release`; delete the "or its
+    `migration_reservation_release` (v1.31: the third name `migration_writer_admission_precheck` listed here at
+    v1.21 was removed with the verdict-only form, CR-003; exactly two entry points); delete the "or its
     successor" hedge; no per-migration delegates.
 30. **error-taxonomy v1.39:** (a) `E-MAINTENANCE-002` row: `state_integrity` names the variant and the
     five kinds (replaces "any other integrity failure"); replace "goes to `tracing::warn!`" (2
@@ -5646,6 +5676,7 @@ committed files.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.31 | 2026-10-14 | architect | **Spec-to-code alignment with the human-approved CR-003 removal (PR #848, commit `245a437a` on `feature/S-25.08`; CLAUDE.md rule 12); no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.30 is committed and immutable, so this is a NEW version.** The verdict-only admission precheck (S-25.08 `bc_index_migration_admission_precheck`; v1.21 neutral name `migration_writer_admission_precheck`) had no production caller and discarded the writer reservation, a leak hazard, and was removed. §5a "Shared protected-path union" and "Entry-point naming (v1.21)": exactly TWO migration-neutral entry points, `migration_writer_admission` (callers read `.verdict`; reservation owned by the caller via `MigrationAdmission`, released on completion) and `migration_reservation_release`, "and their successors" per BC-1.18.011 v1.25 Precondition 6(d) / BC-1.18.013 v1.18 Precondition 6(b); the precheck form is NOT an entry point and MUST NOT be reintroduced. Naming by story stated: S-25.08 ships the `bc_index_migration_*` names, S-25.09 renames them to the neutral names and MUST NOT re-add the precheck. §5c status paragraph and §Downstream item 29 corrected; §Downstream items 14 and the v1.x "position ... already holds" quotes annotated as historical (unchanged otherwise). TD-VSDD-060 sweep: remaining `admission_precheck` mentions are changelog/history rows or `append_log_backfill_*` never-existing-name instructions, all intentionally unchanged. |
 | 1.30 | 2026-10-13 | architect | **Stale admission-detail wording corrected after BC-1.18.013 v1.17 (ruling (a)); no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.29 is committed and immutable, so this is a NEW version.** §5a "Factory-root lookup mapping" PreToolUse-admission row: the `io` `migration.admission_failed` `detail` is the per-slot rendering of `BcIndexMigrationError::Io` under item 11(g)(4) (`BC-INDEX migration: I/O error at ` + `<path>` escaped/capped 64 + `: ` + `<OS message>` escaped/capped 64, errno suffix retained so EACCES and ELOOP stay distinguishable), with no `ErrorKind` token and no `error_kind` event field, replacing "sanitized path + `ErrorKind` + message". The release/advisory leg (§5a row and §Downstream "Release leg") is unchanged: it is not an `Io` variant and keeps `<path>: <kind>: <msg>` with a closed-vocabulary fixed kind token and path/msg capped at 64 each. TD-VSDD-060 sweep: no other `ErrorKind`/`error_kind` mention describes the admission detail. |
 | 1.29 | 2026-10-13 | architect | **Two corrections after D-1259; no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.28 is committed (factory-artifacts 7cc527d0) and immutable.** **(1) Fixed-text bound (item 11(g)(4)(c)):** the v1.28 bound of 256 characters per variant's fixed text conflicted with the verbatim `ExpiryAbort::NullGeneration` Display text (286 characters; 304 with the `migrate-bc-index: ` prefix, 308 with `backfill-append-logs: `) pinned by BC-1.18.011 EC-047 (`ManifestExpiredOrAbsent` is 241). Ruling: the BC wording is kept (no product-owner edit owed); the bound is now the uniform named constant `FIXED_TEXT_MAX_CHARS = 512` counted in `chars()`, with no allowlist or per-variant exemption; fixed text is still never truncated and the per-data-slot caps (256 stderr/Display, 64 event) are unchanged. Test assertion: for every variant `fixed_chars <= FIXED_TEXT_MAX_CHARS`; each `ExpiryAbort` arm's full stderr line equals the item-8 text verbatim and is at most 512 + 22 characters; the `detail <= Σ fixed + Σ numeric + 64 × slots` check is unchanged. **(2) GAP-14 ownership correction:** `BcIndexMigrationError::ActivationManifestInvalid` and its raiser (the armed-activation manifest reader, which does not exist in code) are delivered by the new story S-25.13 (human decision D-1259), the `AppendLogMigrationError` mirror by S-25.14 (split from S-25.13). Corrected: the v1.28 §Downstream owed "Stories / code" bullet (S-25.09 no longer adds the variant), the BC-1.18.011 Precondition 5 / EC-087 owed bullet (implementation ownership sentence), §Decision 11(c) point 7(f) and the §Error Code Semantics row (ownership notes). The taxonomy code, exit 2 and reason tokens are unchanged. |
 | 1.28 | 2026-10-13 | architect | **Four rulings from the S-25.09 local adversary pass 3 and its black-box test-writer follow-up; no state-machine, exit-code-class, `<cause>` or VP-count change; ONE new taxonomy code (`ACTIVATION_MANIFEST_INVALID`, ruling A); v1.27 is committed and registered at D-1257 and immutable.** **F-S2509-L3-002 (MEDIUM, path-escape; item 11(c) point 7):** txn `generation_id` was never checked to be a single path component, so `x/../../specs` + a matching `intent_log_path` + an existing `gen-x` made the coordinator probe, read and `remove_dir_all` `.factory/specs`. Ruling: one shared pure predicate `is_safe_path_component` (the `tool_use_id` grammar; strict superset of the EC-082 set, EC-078..EC-083 verdicts unchanged), `GenerationId` newtype as the only way to build a `gen-`/`intent-` path, validation at decode/tri-state time before any planner use or join, in every reader of the field; violation = `txn_record_malformed` (admission `E-MAINTENANCE-002 (state_integrity)`; coordinator/verifier `MIGRATION_STATE_INTEGRITY_FAILURE` exit 2), nothing mutated, value never echoed; `CURRENT.json` calls the same function (still `Io`); identifier sweep for `activation_id`/`txn_id`, `migration_id`, `intent_log_path`, `completed.json` `generation_id`, `tool_use_id`, plan paths, shard names. **F-S2509-L3-003 (LOW; item 11(g)(4)):** option (a), per-slot rendering for every variant reaching `admission_error`: exhaustive match (no `other =>`), one `render_with_cap(cap)` source shared with Display, fixed text and numerics verbatim, each data substring capped at 64 (event) / 256 (stderr), fixed text bounded by a unit test. **Ruling A (item 11(c) point 7(f)):** a manifest `activation_id` failing `is_safe_path_component`/UUID shape (and the other uncoded §4b/Branch 3 manifest failures) is the NEW taxonomy code `ACTIVATION_MANIFEST_INVALID`, exit 2 (the one taxonomy-code addition in v1.28), reason tokens `activation_id_unsafe_component`/`activation_id_not_uuid`/`migration_id_mismatch`/`unparseable`/`absent`, nothing created, the value never echoed, guard layer a plain block not `E-MAINTENANCE-00x`. **Ruling B (item 11(g)(2)(f)):** 11(g)(2) extends to `ShardConfigError` on every surface (shard-cap-gate `block_reason`, coordinator stderr via `ShardCapConfigUnavailable`, logs): per-slot escape and cap 256 (event 64), `Toml` as closed category plus line/column only, one `render_with_cap` source, exhaustive match; owner BC-1.18.005 (Postcondition 10, EC-023). §Downstream owed (v1.28 list extended by both rulings, incl. error-taxonomy.md one new row): BC-1.18.010 step 2 wording, BC-1.18.011 Precondition 6(f) + EC-082 pointer + new EC, BC-1.18.013 mirror + Postcondition 10 + new EC. Rationale: fail-closed, parse-don't-validate, TD-VSDD-060 value-validation sibling sweep. |
