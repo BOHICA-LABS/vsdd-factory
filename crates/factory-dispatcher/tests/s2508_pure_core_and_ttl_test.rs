@@ -32,6 +32,8 @@
 //! | `test_BC_1_18_011_EC009_reservation_is_stale_*` | AC-008 | same | VP-133 f7, VP-146 a4 / VP-147 h4 (S8) |
 //! | `test_BC_1_18_011_PC9_terminal_reconcile_*` | AC-007 / AC-010 | BC-1.18.011 Postcondition 9, EC-011..EC-013; BC-1.18.013 Post 5a, EC-009/010/016 | VP-147 h1 totality, VP-146 a1 |
 
+mod common;
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -662,7 +664,7 @@ fn test_BC_1_18_013_EC024_resolve_target_path_real_and_lexical_forms() {
     let tmp = tempfile::tempdir().unwrap();
     // Simplified canonicalization: a Windows `\\?\` verbatim root would make the
     // `//`, `.`, `..` spellings below literal names (TD-VSDD-060 sweep).
-    let root = simplified_canonical(tmp.path());
+    let root = common::simplified_canonical(tmp.path());
     std::fs::create_dir_all(root.join("a/b")).unwrap();
     std::fs::create_dir_all(root.join("elsewhere/deep")).unwrap();
 
@@ -1051,20 +1053,4 @@ fn test_BC_1_18_011_EC028_known_migration_with_verifying_record_finalizes_regres
         decide_terminal_record_reconciliation(&i),
         TerminalReconcileDecision::FinalizeThenOpenGate
     );
-}
-
-/// `canonicalize` minus the Windows `\\?\` verbatim prefix (dunce-style; no new
-/// dependency). Identity of `canonicalize` on non-Windows.
-fn simplified_canonical(p: &std::path::Path) -> std::path::PathBuf {
-    let c = p.canonicalize().unwrap();
-    #[cfg(windows)]
-    {
-        let s = c.to_string_lossy().into_owned();
-        if let Some(rest) = s.strip_prefix(r"\\?\")
-            && !rest.starts_with("UNC\\")
-        {
-            return std::path::PathBuf::from(rest);
-        }
-    }
-    c
 }

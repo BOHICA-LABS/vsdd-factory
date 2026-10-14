@@ -75,6 +75,8 @@
 //! required)` (em dash U+2014); foreign-migration and EWOULDBLOCK blocks are the
 //! plain message.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -2477,25 +2479,6 @@ struct AliasCase {
     expect: Option<&'static str>, // Some(scope) = blocked; None = admitted
 }
 
-/// Simplified canonicalization (dunce-style, no new dependency): on Windows
-/// `Path::canonicalize` returns a `\\?\C:\...` verbatim path, in which `/` is
-/// NOT a separator and `.`/`..` are NOT normalized, so a `format!("{}/x", ..)`
-/// built from it never exercises the alias/traversal it claims to (PR #848
-/// round-3 BLOCKING-2, run 38485890751). Strip the verbatim prefix for drive
-/// paths (leave `\\?\UNC\...` alone); identity on every other platform.
-fn simplified(p: PathBuf) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let s = p.to_string_lossy().into_owned();
-        if let Some(rest) = s.strip_prefix(r"\\?\")
-            && !rest.starts_with("UNC\\")
-        {
-            return PathBuf::from(rest);
-        }
-    }
-    p
-}
-
 /// BC-1.18.013 EC-024 / ADR-052 "Target path resolution": in-scope
 /// aliases are BLOCKED with the path-family message while a txn is live;
 /// out-of-scope inputs are admitted.
@@ -2504,7 +2487,7 @@ fn test_BC_1_18_013_EC024_target_path_aliases_classified_blackbox() {
     let mut failures: Vec<String> = Vec::new();
     let scratch = tempfile::tempdir().unwrap();
     #[cfg_attr(not(unix), allow(unused_variables))]
-    let scratch_real = simplified(scratch.path().canonicalize().unwrap());
+    let scratch_real = common::simplified_canonical(scratch.path());
     // Only consumed by the unix-only symlink cases (d)/(e) below.
     #[cfg(unix)]
     let sr1 = scratch_real.clone();
