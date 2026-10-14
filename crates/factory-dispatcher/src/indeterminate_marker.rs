@@ -90,6 +90,25 @@ pub struct MarkerFields {
 /// Returns `io::Error` if the temp-file write or rename fails (EC-008).
 /// The caller emits the `plugin.indeterminate` event regardless of whether this write succeeds.
 pub fn write_indeterminate_marker(fields: &MarkerFields, marker_path: &Path) -> io::Result<()> {
+    write_indeterminate_marker_with_suffix_fn(
+        fields,
+        marker_path,
+        last_amended_migrate::atomic_write::unpredictable_suffix,
+    )
+}
+
+/// Suffix-injectable core of [`write_indeterminate_marker`] (S-25.08 PR #848
+/// CR-R2-004 test seam): `suffix_fn` supplies the temp-name nonce, called once
+/// per exclusive-create attempt. Production always passes the unpredictable
+/// source; tests pass a deterministic one to plant symlinks at the exact
+/// candidate names. The temp name stays
+/// `.<file>.<plugin>.tmp-<pid>-<suffix:016x>`.
+#[doc(hidden)]
+pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    suffix_fn: F,
+) -> io::Result<()> {
     // Serialize 6 mandatory TOML fields via the `toml` crate (Library table mandate).
     // toml::to_string correctly escapes all control characters including \n, \r, \t, etc.
     // Field insertion order preserved via BTreeMap (deterministic output).
@@ -149,10 +168,11 @@ pub fn write_indeterminate_marker(fields: &MarkerFields, marker_path: &Path) -> 
             }
         })
         .collect();
-    let (mut tmp_file, tmp_path) = last_amended_migrate::atomic_write::create_exclusive_temp(
+    let (mut tmp_file, tmp_path) = last_amended_migrate::atomic_write::create_exclusive_temp_with(
         parent,
         &format!("{file_name}.{safe_plugin}"),
         "tmp",
+        suffix_fn,
     )?;
     // Existing semantics preserved: plain write then rename (no fsync was ever performed
     // here); on a write failure, best-effort remove the temp file we just created.

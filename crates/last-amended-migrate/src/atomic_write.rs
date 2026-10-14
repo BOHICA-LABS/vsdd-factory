@@ -267,7 +267,8 @@ const TEMP_CREATE_MAX_ATTEMPTS: u32 = 16;
 /// security property does NOT rest on unpredictability alone: the file
 /// is opened with `create_new` (`O_EXCL`), so a pre-planted file or
 /// symlink at a guessed name is refused rather than followed.
-fn unpredictable_suffix() -> u64 {
+#[doc(hidden)]
+pub fn unpredictable_suffix() -> u64 {
     use std::hash::{BuildHasher, Hasher, RandomState};
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -304,7 +305,11 @@ pub fn create_exclusive_temp(
 /// called exactly once per attempt (at most [`TEMP_CREATE_MAX_ATTEMPTS`]).
 /// Only `AlreadyExists` is retried; any other error is returned
 /// immediately, and exhaustion returns the last `AlreadyExists` error.
-fn create_exclusive_temp_with<F: FnMut() -> u64>(
+///
+/// Test seam (S-25.08 PR #848 CR-R2-004): `#[doc(hidden)] pub` so the
+/// dispatcher marker writer's suffix-injectable entry point can drive it.
+#[doc(hidden)]
+pub fn create_exclusive_temp_with<F: FnMut() -> u64>(
     parent: &Path,
     basename: &str,
     kind: &str,
