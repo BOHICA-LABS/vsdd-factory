@@ -290,17 +290,30 @@ fn unpredictable_suffix() -> u64 {
 /// suffix, bounded by [`TEMP_CREATE_MAX_ATTEMPTS`]; exhaustion or any
 /// other error is returned as-is (fail closed, nothing is written
 /// through a pre-existing path).
-fn create_exclusive_temp(
+pub fn create_exclusive_temp(
     parent: &Path,
     basename: &str,
     kind: &str,
+) -> std::io::Result<(File, PathBuf)> {
+    create_exclusive_temp_with(parent, basename, kind, unpredictable_suffix)
+}
+
+/// Suffix-injectable core of [`create_exclusive_temp`]: `suffix_fn` is
+/// called exactly once per attempt (at most [`TEMP_CREATE_MAX_ATTEMPTS`]).
+/// Only `AlreadyExists` is retried; any other error is returned
+/// immediately, and exhaustion returns the last `AlreadyExists` error.
+fn create_exclusive_temp_with<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    mut suffix_fn: F,
 ) -> std::io::Result<(File, PathBuf)> {
     let mut last_err = None;
     for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
         let candidate = parent.join(format!(
             ".{basename}.{kind}-{}-{:016x}",
             std::process::id(),
-            unpredictable_suffix()
+            suffix_fn()
         ));
         match OpenOptions::new()
             .write(true)
