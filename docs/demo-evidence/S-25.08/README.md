@@ -56,5 +56,5 @@ The warn is a `tracing` event and the production dispatcher installs no subscrib
 
 ## Notes
 
-- A run of `test_BC_1_18_011_PC6c_b2_delegates_to_shared_core_no_check_then_reserve_race` failed once (18 s) while a Kani solve was saturating the machine (load average > 120); it passes in isolation (1.9 s) and in the full-suite re-run at idle-ish load recorded in `testrun-s2508_admission_blackbox_test.log` (48 passed). Treated as load-induced timing, not a code defect; flagged for the orchestrator.
+- `test_BC_1_18_011_PC6c_b2_delegates_to_shared_core_no_check_then_reserve_race` failed once (18 s) while a Kani solve was saturating the machine. That failure was a wall-time dependency in the test, not a code defect, and it is resolved: the race test now synchronizes on the admission seam's markers instead of wall time, and the seam's wait on resume has a hang bound instead of a fixed 30 s cap. The run recorded in `testrun-s2508_admission_blackbox_test.log` (48 passed) is the evidence for the admission suite.
 - `bc_1_18_011_b2_migration_crash_injection_test` compiles to 0 tests without its feature gate and is not cited as evidence.
