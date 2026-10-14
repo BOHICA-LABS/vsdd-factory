@@ -157,3 +157,68 @@ fn test_S_25_08_CR003_control_shared_admission_core_still_exposed_with_reservati
     assert!(code.contains("pub fn bc_index_migration_admission("));
     assert!(code.contains("pub reservation: Option<std::path::PathBuf>"));
 }
+
+// ---------------------------------------------------------------------------
+// SEC-R3-001 source gate: the temp-mode path must not discover the umask via a
+// process spawn or /proc (no process spawn inside a dispatcher hook). The
+// single-capture design needs none of it.
+// ---------------------------------------------------------------------------
+
+const UMASK_DISCOVERY_TOKENS: [&str; 5] = [
+    "/proc/self/status",
+    "Command::new",
+    "/bin/sh",
+    "umask",
+    "process_umask",
+];
+
+/// Production code only: drop the `mod tests` tail and all `//` comments.
+fn production_code(src: &str) -> String {
+    let cut = src.find("mod tests {").unwrap_or(src.len());
+    strip_line_comments(&src[..cut])
+}
+
+fn umask_discovery_hits(code: &str) -> Vec<&'static str> {
+    UMASK_DISCOVERY_TOKENS
+        .iter()
+        .copied()
+        .filter(|t| code.contains(t))
+        .collect()
+}
+
+#[test]
+fn test_S_25_08_SEC_R3_001_no_umask_discovery_in_atomic_write_or_marker_writer() {
+    let atomic = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../last-amended-migrate/src/atomic_write.rs"),
+    )
+    .expect("read atomic_write.rs");
+    let marker = read_src("indeterminate_marker.rs");
+    let mut failures = Vec::new();
+    for (name, src) in [
+        ("atomic_write.rs", atomic),
+        ("indeterminate_marker.rs", marker),
+    ] {
+        let hits = umask_discovery_hits(&production_code(&src));
+        if !hits.is_empty() {
+            failures.push(format!(
+                "{name}: forbidden umask-discovery token(s) {hits:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn test_S_25_08_SEC_R3_001_control_umask_gate_detector_flags_planted_tokens() {
+    let planted = "fn f() { let _ = std::process::Command::new(\"/bin/sh\"); }\n\
+                   fn process_umask() { read(\"/proc/self/status\"); }\n\
+                   mod tests { fn t() { Command::new(\"x\"); } }";
+    let hits = umask_discovery_hits(&production_code(planted));
+    assert!(
+        hits.contains(&"Command::new") && hits.contains(&"/bin/sh"),
+        "{hits:?}"
+    );
+    assert!(hits.contains(&"process_umask") && hits.contains(&"/proc/self/status"));
+    let clean = "fn g() {}\n// umask is discussed only in a comment\nmod tests { fn t() { Command::new(\"x\"); } }";
+    assert!(umask_discovery_hits(&production_code(clean)).is_empty());
+}
