@@ -660,7 +660,9 @@ fn test_BC_1_18_013_EC021_is_tool_completion_event_exact_match_only() {
 fn test_BC_1_18_013_EC024_resolve_target_path_real_and_lexical_forms() {
     use factory_dispatcher::shard_manager::resolve_target_path;
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
+    // Simplified canonicalization: a Windows `\\?\` verbatim root would make the
+    // `//`, `.`, `..` spellings below literal names (TD-VSDD-060 sweep).
+    let root = simplified_canonical(tmp.path());
     std::fs::create_dir_all(root.join("a/b")).unwrap();
     std::fs::create_dir_all(root.join("elsewhere/deep")).unwrap();
 
@@ -1049,4 +1051,20 @@ fn test_BC_1_18_011_EC028_known_migration_with_verifying_record_finalizes_regres
         decide_terminal_record_reconciliation(&i),
         TerminalReconcileDecision::FinalizeThenOpenGate
     );
+}
+
+/// `canonicalize` minus the Windows `\\?\` verbatim prefix (dunce-style; no new
+/// dependency). Identity of `canonicalize` on non-Windows.
+fn simplified_canonical(p: &std::path::Path) -> std::path::PathBuf {
+    let c = p.canonicalize().unwrap();
+    #[cfg(windows)]
+    {
+        let s = c.to_string_lossy().into_owned();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if !rest.starts_with("UNC\\") {
+                return std::path::PathBuf::from(rest);
+            }
+        }
+    }
+    c
 }

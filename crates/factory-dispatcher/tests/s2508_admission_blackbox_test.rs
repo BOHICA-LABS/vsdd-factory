@@ -2477,6 +2477,25 @@ struct AliasCase {
     expect: Option<&'static str>, // Some(scope) = blocked; None = admitted
 }
 
+/// Simplified canonicalization (dunce-style, no new dependency): on Windows
+/// `Path::canonicalize` returns a `\\?\C:\...` verbatim path, in which `/` is
+/// NOT a separator and `.`/`..` are NOT normalized, so a `format!("{}/x", ..)`
+/// built from it never exercises the alias/traversal it claims to (PR #848
+/// round-3 BLOCKING-2, run 38485890751). Strip the verbatim prefix for drive
+/// paths (leave `\\?\UNC\...` alone); identity on every other platform.
+fn simplified(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy().into_owned();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            if !rest.starts_with("UNC\\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    p
+}
+
 /// BC-1.18.013 EC-024 / ADR-052 "Target path resolution": in-scope
 /// aliases are BLOCKED with the path-family message while a txn is live;
 /// out-of-scope inputs are admitted.
@@ -2484,8 +2503,12 @@ struct AliasCase {
 fn test_BC_1_18_013_EC024_target_path_aliases_classified_blackbox() {
     let mut failures: Vec<String> = Vec::new();
     let scratch = tempfile::tempdir().unwrap();
-    let scratch_real = scratch.path().canonicalize().unwrap();
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    let scratch_real = simplified(scratch.path().canonicalize().unwrap());
+    // Only consumed by the unix-only symlink cases (d)/(e) below.
+    #[cfg(unix)]
     let sr1 = scratch_real.clone();
+    #[cfg(unix)]
     let sr2 = scratch_real.clone();
 
     let cases: Vec<AliasCase> = vec![
@@ -2566,15 +2589,21 @@ fn test_BC_1_18_013_EC024_target_path_aliases_classified_blackbox() {
             cwd_field: false,
             expect: None,
         },
+        // (d)/(e) need the symlinks planted in the unix-only block below; on
+        // Windows no alias exists, so the cases would assert nothing true.
+        #[cfg(unix)]
         AliasCase {
             label: "(d) symlink alias to .factory/cycles",
-            file_path: Box::new(move |_| format!("{}/alias/x", sr1.display())),
+            file_path: Box::new(move |_| sr1.join("alias").join("x").display().to_string()),
             cwd_field: false,
             expect: Some(".factory/cycles/"),
         },
+        #[cfg(unix)]
         AliasCase {
             label: "(e) link/../ resolves link FIRST (real form in scope)",
-            file_path: Box::new(move |_| format!("{}/link/../x", sr2.display())),
+            file_path: Box::new(move |_| {
+                sr2.join("link").join("..").join("x").display().to_string()
+            }),
             cwd_field: false,
             expect: Some(".factory/cycles/"),
         },
