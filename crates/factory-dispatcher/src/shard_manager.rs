@@ -10248,9 +10248,10 @@ mod bc_1_18_006_roll_tests {
     ///   via the ALREADY-COVERED EC-024 arm (see the sibling test above),
     ///   never reaching `remove_file` at all.
     /// - A read-only PARENT directory: `write_exclusive`'s FIRST attempt
-    ///   creates its own `.tmp-<pid>` file in that SAME parent directory
+    ///   creates its own `.{basename}.tmp-{pid}-{nonce:016x}`
+    ///   file (exclusive `create_new`) in that SAME parent directory
     ///   BEFORE ever touching the destination path — a read-only parent
-    ///   makes THAT `File::create` fail with `PermissionDenied` (verified
+    ///   makes THAT exclusive create fail with `PermissionDenied` (verified
     ///   empirically), so `first_err.kind() != AlreadyExists` and the call
     ///   fails via the UNRELATED `SealWriteFailed` (E-SHD-001) path instead,
     ///   never reaching the 0-byte-reclaim logic at all.

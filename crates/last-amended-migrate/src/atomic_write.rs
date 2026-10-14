@@ -289,7 +289,9 @@ fn unpredictable_suffix() -> u64 {
 /// planted file or symlink, dangling or not) is retried with a new
 /// suffix, bounded by [`TEMP_CREATE_MAX_ATTEMPTS`]; exhaustion or any
 /// other error is returned as-is (fail closed, nothing is written
-/// through a pre-existing path).
+/// through a pre-existing path). On Unix the file is created with mode
+/// `0o600`, so it is never briefly readable by others before the caller
+/// applies the final permissions.
 pub fn create_exclusive_temp(
     parent: &Path,
     basename: &str,
@@ -335,12 +337,30 @@ fn create_exclusive_temp_with<F: FnMut() -> u64>(
 }
 
 /// Write `content` to `path` atomically: write to an exclusively-created
-/// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory (preserving `path`'s pre-existing permission
-/// bits, if any, and `fsync`ing the data before rename — S-15.03 N2), then
-/// `rename` it into place. On success, no `.tmp-*` sibling survives — the
-/// rename consumes it. On failure to write or fsync the temp file, no
+/// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory
+/// (created owner-only `0o600` on Unix, then given `path`'s pre-existing
+/// permission bits, if any, and `fsync`ed before rename — S-15.03 N2), then
+/// `rename` it into place. On success, no `.<basename>.tmp-*` sibling
+/// survives — the rename consumes it. On failure to write or fsync the temp file, no
 /// attempt is made to write `path` at all, so `path` is left completely
 /// untouched, and the temp file is best-effort removed.
+///
+/// # Trust boundary (SEC-002-N1)
+///
+/// The PARENT directory of `path` is trusted. The temp-file protection
+/// (`create_new`/`O_EXCL`, unpredictable suffix) covers the temp LEAF only:
+/// it refuses a planted file or symlink at the temp name, but it does not
+/// and cannot defend against a symlinked or attacker-writable parent
+/// directory, which redirects every path beneath it. Callers must only
+/// pass governed paths under directories they control.
+///
+/// # Crash behaviour (N-4)
+///
+/// A crash (SIGKILL, power loss) between temp creation and the rename can
+/// orphan a `.<basename>.tmp-<pid>-<nonce>` file in the parent directory.
+/// Orphans are inert (never read as `path`) and no sweep in this crate
+/// removes them; an orphan is only removed by the best-effort cleanup on a
+/// handled write/rename error, or manually.
 pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
@@ -349,7 +369,11 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
         .unwrap_or_else(|| "last-amended-migrate-output".to_string());
     let (file, tmp_path) =
         create_exclusive_temp(parent, &basename, "tmp").map_err(|source| MigrateError::Io {
-            path: parent.join(format!(".{basename}.tmp-*")),
+            // N-3: the candidate name is not known when creation fails (it is
+            // random and may have exhausted all attempts), so report the one
+            // concrete path that is: the directory the temp file could not be
+            // created in — never a non-existent glob.
+            path: parent.to_path_buf(),
             source,
         })?;
 
@@ -560,6 +584,10 @@ pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
 /// are UNAFFECTED — this is a separate, additive, stronger-guarantee
 /// entry point for a governance-integrity-critical writer (BC-1.18.011's
 /// B2 BC-INDEX migration).
+///
+/// The same trust boundary (parent directory trusted, SEC-002-N1) and
+/// crash behaviour (a crash can orphan a `.<basename>.strict-tmp-<pid>-<nonce>`
+/// file, which no sweep removes, N-4) documented on [`write_atomic`] apply.
 pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), MigrateError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
@@ -569,7 +597,8 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
     let (file, tmp_path) =
         create_exclusive_temp(parent, &basename, "strict-tmp").map_err(|source| {
             MigrateError::Io {
-                path: parent.join(format!(".{basename}.strict-tmp-*")),
+                // N-3: concrete directory, not a glob (see `write_atomic`).
+                path: parent.to_path_buf(),
                 source,
             }
         })?;
