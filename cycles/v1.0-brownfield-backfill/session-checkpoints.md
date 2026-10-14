@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "feff835"
+input-hash: "7973640"
 traces_to: STATE.md
 ---
 
@@ -2443,4 +2443,6 @@ Archived by the D-1264 burst (v10.97→v10.98). Position at v10.97 (RESUMED): E-
 
 Archived by the D-1265 burst (v10.98→v10.99). Position at v10.98 (RESUMED): E-25; S-25.08 v1.16 on `feature/S-25.08`, PR #848 OPEN at head `72eedc5f` (security + correctness set fixed in the PR; pr-manager re-reviewing and watching CI; MERGE awaits the human); S-25.09 v1.8 @ `a3923ee0`, NEXT LOCAL pass 4; PR #848 story anchors owed ([D-1264-PR848-ANCHORS-OWED]); STORY-INDEX v4.499, ARCH-INDEX v4.60, BC-INDEX v5.113, VP-INDEX v3.34. Verbatim via `git -C .factory show 14e246e6:STATE.md` (the D-1264 commit; its subject wrongly reads the D-1262 subject, content correct). OPEN: [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1264-PR848-ANCHORS-OWED], [D-1264-S1407-TEMPLATE-DRIFT-OWED], [D-1244-REVERIFY], PR #769.
 
-**See STATE.md v10.99 for the current checkpoint.**
+Archived by the D-1267 burst (v10.100→v10.101). Position at v10.100 (RESUMED; the checkpoint header still read the D-1265 burst, the D-1266 burst only corrected the banner): E-25; S-25.08 v1.16 on `feature/S-25.08`, PR #848 OPEN, round 2 in progress (orchestrator-stated: code `a6319f2b`, a new-file-mode follow-up, devops-engineer `release.yml` / `semgrep.yml` action pins next; MERGE awaits CI green and the human); S-25.09 v1.8 @ `a3923ee0`, NEXT LOCAL pass 4 (it DROPS `migration_writer_admission_precheck` on rebase onto S-25.08); ADR-052 v1.31, BC-1.18.011 v1.25, BC-1.18.013 v1.18, VP-146 v1.7 registered; NEW S-25.16 / S-25.17 / S-25.18 / S-26.08; STORY-INDEX v4.500, ARCH-INDEX v4.61, BC-INDEX v5.114, VP-INDEX v3.35. Verbatim via `git -C .factory show 2bc1bbfd:STATE.md` (the D-1266 commit). OPEN: [D-1265-STORY-V125-CITES-OWED], [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1264-S1407-TEMPLATE-DRIFT-OWED], [D-1244-REVERIFY], [D-1266-PR-CI-FACTORY-TIP-COUPLING] (human), PR #769.
+
+**See STATE.md v10.101 for the current checkpoint.**

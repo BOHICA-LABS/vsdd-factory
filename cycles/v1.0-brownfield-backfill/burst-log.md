@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "70ceb92"
+input-hash: "7973640"
 traces_to: STATE.md
 ---
 
@@ -3086,3 +3086,57 @@ NOT staged (scope control): story files (story-writer editing concurrently), `re
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `61c75450`); run `git -C .factory log -1` for the SHA.
 
 Summary: Corrected the STATE.md banner wc-l and dual-margin to the literal final count after PR #848 CI failed on both cargo-host legs; recorded D-1266, a process-gap lesson, and the open human observation that PR CI depends on the moving factory-artifacts tip.
+
+## Burst: S2509-P4-PERSISTED-NOT-CLEAN-STORY-V125-CITES-REGISTERED-STORY-INDEX-V4501-HASH-CASCADE-D1267 (2026-10-14)
+
+**Parent-commit:** `2bc1bbfd` (the D-1266 burst). **Agent:** state-manager (single-commit TD-VSDD-053; D-1267; STATE.md v10.100→v10.101).
+
+**Adversary verdict:** S-25.09 LOCAL adversary pass 4 (reviewed HEAD `a3923ee0`, base `a7fc5930`; persisted verbatim to `code-delivery/S-25.09/adv-local-pass-4.md`): NOT CLEAN, 0 CRITICAL / 0 HIGH / 2 MEDIUM / 4 LOW, novelty MEDIUM, streak 0/3. Pass-3 fixes L3-001..L3-005 verified CLOSED. F-S2509-L4-001 MEDIUM (txn `activation_id` builds a path), F-S2509-L4-002 MEDIUM (`ShardConfigError` log surfaces), F-S2509-L4-003..L4-006 LOW.
+
+**Files touched (Dim-1): 25 unique files** (story and epic files below are story-writer edits registered by this burst; the state-manager's own edit to each marked "hash line" is the `input-hash:` line only)
+- code-delivery/S-25.09/adv-local-pass-4.md (NEW, verbatim)
+- stories/STORY-INDEX.md (v4.500 to v4.501: 16 catalog rows, blocks columns of S-25.06 / S-25.08 / S-25.09, `> v4.501` blockquote line, last_amended, changelog item)
+- stories/epics/E-25-validation-integrity.md (v1.14; hash line)
+- stories/epics/E-26-post-rc25-hook-hardening.md (v1.6; hash line)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (v1.5; hash line)
+- stories/S-25.02-artifact-sharding-layer2.md (v5.7)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.18; hash line)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.17)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (v1.10)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (v1.6; hash line)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (v1.6; hash line)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (v1.4; hash line)
+- stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (v1.3; hash line)
+- stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md (v1.2; hash line)
+- stories/S-25.15-branch-3-activation-manifest-guard-block.md (v1.1; hash line)
+- stories/S-25.16-windows-path-and-name-hardening-reserved-names-and-case-collisions.md (v1.0; story-writer hash-only)
+- stories/S-25.17-pr848-admission-gate-dispatcher-leg-hardening-trust-anchor-release-cost-reservation-durability-block-header.md (v1.0; hash line)
+- stories/S-25.18-reservation-lifecycle-leak-hygiene-drain-stall-diagnostics-lock-grace-and-root-skip-test-convention.md (v1.0; hash line)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (v1.4; hash line)
+- stories/S-26.08-ci-release-supply-chain-hardening-least-privilege-digest-pin-and-release-path-validation.md (v1.0; story-writer hash-only)
+- STATE.md (v10.100 to v10.101; banner 297; Decisions Log row D-1267; checkpoint)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1267)
+- cycles/v1.0-brownfield-backfill/lessons.md (L-BB-D1267)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.100 archive)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+
+NOT staged (scope control): `regression-state.json`, `sidecar-learning.md`.
+
+**Codifications:** D-1267; L-BB-D1267 [process-gap]; NEW OPEN [D-1267-S2508-ROUND2-SHA-OWED]; CLOSED [D-1265-STORY-V125-CITES-OWED].
+
+**Dim-2 (literal shell, captured output):**
+- `wc -l .factory/STATE.md` (run LAST, after every STATE.md edit; the burst-log, hash and index edits came after and do not touch STATE.md) printed `297 .factory/STATE.md`; the banner reads 297 and 500 - 297 = 203.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_f_p1_001_real_state_md_banner_wc_passes` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.00s`.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_full_validation_against_real_state_md` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.01s`.
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 6.09s`.
+- `cargo test -q -p validate-cross-site-correspondence test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s` (it FAILED on 10 stories before the `> v4.501` blockquote line was added: catalog hash != blockquote hash).
+- `compute-input-hash <file> --check` on 16 stories and 2 epics printed rc 0 for all 18 (stored == computed); 13 were rc 2 at burst start and were re-mirrored in topological order.
+- `cargo run -q -p last-amended-migrate -- migrate --check` printed `mutated=false` for STORY-INDEX.md, BC-INDEX.md, ARCH-INDEX.md, VP-INDEX.md and STATE.md (eligibility=CurrentEntryOnly; no chain).
+
+**Dim-5:** no count change (draft 123, Total (active) 243, registered 263; BCs/VPs/ADRs unchanged), so no count-propagation sweep target. **Dim-6:** `last_amended` overwritten with the single current entry on STORY-INDEX.md and STATE.md (no `[Prior:` chain); the displaced STORY-INDEX entry is already in `changelog:` and one new item was prepended. **Dim-7:** single commit; no --no-verify; no AI attribution; Edit/Write tools only for `.factory/` edits; compute-input-hash used read-only.
+
+**Closes:** [D-1265-STORY-V125-CITES-OWED]. **Opens:** [D-1267-S2508-ROUND2-SHA-OWED] (story-writer, round 3). PostToolUse advisories (all writes landed): FUEL_EXHAUSTED on large-file edits; Class A Arm2 on historical S-25.06 table rows; Class E2 on the E-25 `modified[]` v1.10 vs v1.9 ordering (see decision-log D-1267(h)).
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `2bc1bbfd`); run `git -C .factory log -1` for the SHA.
+
+Summary: Persisted S-25.09 LOCAL pass 4 verbatim (NOT CLEAN 0C/0H/2M/4L, streak 0/3, T-67..T-71 open), registered the story-writer cite-sync set (STORY-INDEX v4.501, E-25 v1.14, E-26 v1.6) with an 18 of 18 stored == computed hash cascade, closed [D-1265-STORY-V125-CITES-OWED], opened [D-1267-S2508-ROUND2-SHA-OWED], recorded the provenance-keyed-gates lesson, and advanced STATE.md to v10.101.
