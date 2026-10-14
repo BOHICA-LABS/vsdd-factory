@@ -1276,4 +1276,253 @@ mod tests {
             "write_atomic_strict_durable overwrite must preserve the existing 0o640 mode"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // S-25.08 PR #848 round-3 hardening tests (R3-B1, NB-B, SEC-R3-001/002/004).
+    // -----------------------------------------------------------------------
+
+    /// `Debug` rendering of any value; lets a test inspect a result whose type
+    /// changes from `()` to `io::Result<()>` without a compile break.
+    #[cfg(unix)]
+    fn debug_of<T: std::fmt::Debug>(value: T) -> String {
+        format!("{value:?}")
+    }
+
+    /// `File::create` probe mode in `dir` (umask-aware default).
+    #[cfg(unix)]
+    fn file_create_probe_mode(dir: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        let probe = dir.join("mode-probe");
+        let f = File::create(&probe).unwrap();
+        let mode = f.metadata().unwrap().permissions().mode() & 0o777;
+        drop(f);
+        std::fs::remove_file(&probe).unwrap();
+        mode
+    }
+
+    /// R3-B1(a): a temp for an EXISTING target is born `0o600`, observed on the
+    /// handle BEFORE any `fchmod` (`apply_target_permissions`). Kills mutation
+    /// M4 (existing-target branch uses the default creation mode).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_R3_B1_temp_for_existing_target_is_born_0o600_before_any_fchmod() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let (file, tmp) =
+            create_exclusive_temp_for_target_with(dir.path(), "t.md", "tmp", &target, || 1)
+                .unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "temp for an existing 0o644 target must be born owner-only (0o600), pre-fchmod"
+        );
+        assert!(tmp.exists());
+    }
+
+    /// R3-B1(b): a temp for an ABSENT target is born with `File::create`
+    /// semantics (umask default), equal to a same-dir probe.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_R3_B1_temp_for_absent_target_is_born_with_file_create_default_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("absent.md");
+        let expected = file_create_probe_mode(dir.path());
+
+        let (file, _tmp) =
+            create_exclusive_temp_for_target_with(dir.path(), "absent.md", "tmp", &target, || 2)
+                .unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "temp for an absent target must match the File::create probe mode"
+        );
+    }
+
+    /// NB-B: `apply_target_permissions` must SURFACE a failed fchmod instead of
+    /// swallowing it. Failure injection: a read-only handle to `/dev/null`
+    /// (owned by root, so fchmod by an unprivileged user fails EPERM). The
+    /// result is inspected through its `Debug` form so this compiles against
+    /// both the current `()` return (red: prints `()`) and the required
+    /// `io::Result<()>` (green: prints `Err(..)`). Skips only when running as
+    /// a user permitted to chmod `/dev/null` (root).
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::unit_arg)] // `()` today, `io::Result<()>` after NB-B
+    fn test_S_25_08_R3_NB_B_apply_target_permissions_surfaces_fchmod_error() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "x\n").unwrap();
+        let dev_null = File::open("/dev/null").unwrap();
+        let me = std::fs::metadata(dir.path()).unwrap().uid();
+        let owner = dev_null.metadata().unwrap().uid();
+        assert!(
+            me != 0 && owner != me,
+            "precondition: fchmod on /dev/null must be refused (uid {me}, /dev/null owner {owner})"
+        );
+
+        let shown = debug_of(apply_target_permissions(&dev_null, &target));
+        assert!(
+            shown.starts_with("Err("),
+            "a failed fchmod must be returned as Err, got {shown}"
+        );
+    }
+
+    /// SEC-R3-002: setuid is NOT inherited from the target; final mode is the
+    /// permission bits only.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_masks_setuid_from_target_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("suid.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+        let pre = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(pre, 0o4755, "precondition: setuid set on own file");
+
+        write_atomic(&target, "new\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o755, "special bits must be masked, got {mode:o}");
+    }
+
+    /// SEC-R3-002 (strict-durable writer): same masking.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_strict_durable_masks_setuid_from_target_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("suid-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+
+        write_atomic_strict_durable(&target, "new\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o755, "special bits must be masked, got {mode:o}");
+    }
+
+    /// SEC-R3-002: setgid/sticky are masked too where the platform lets an
+    /// unprivileged owner set them (cases the OS refuses are skipped; setuid
+    /// above is the mandatory case).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_masks_setgid_and_sticky_where_settable() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut exercised = 0;
+        for (special, expected) in [(0o2755u32, 0o755u32), (0o1777, 0o777)] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("sp.md");
+            std::fs::write(&target, "old\n").unwrap();
+            let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(special));
+            let got = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+            if got != special {
+                continue; // platform refused the special bit for this user
+            }
+            exercised += 1;
+            write_atomic(&target, "new\n").unwrap();
+            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+            assert_eq!(mode, expected, "{special:o} must mask to {expected:o}");
+        }
+        // setuid is covered by the mandatory tests; do not pass vacuously on
+        // a platform where neither optional bit is settable without saying so.
+        eprintln!("setgid/sticky cases exercised: {exercised}");
+    }
+
+    /// SEC-R3-001: the target vanished after the exists-check (temp born
+    /// `0o600`): `apply_target_permissions` must fall back to the `File::create`
+    /// umask default, not leave the final file stuck at `0o600`.
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::unit_arg)] // `()` today, `io::Result<()>` after NB-B
+    fn test_S_25_08_SEC_R3_001_vanished_target_falls_back_to_umask_default_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let expected = file_create_probe_mode(dir.path());
+        assert_ne!(
+            expected, 0o600,
+            "precondition: umask default must differ from 0o600 for this test to discriminate"
+        );
+        let (file, _tmp) = create_exclusive_temp(dir.path(), "v.md", "tmp").unwrap();
+        assert_eq!(
+            file.metadata().unwrap().permissions().mode() & 0o777,
+            0o600,
+            "precondition: temp born 0o600"
+        );
+        let gone = dir.path().join("vanished-target.md");
+
+        // Return type is `()` today, `io::Result<()>` after NB-B; only the
+        // resulting handle mode is asserted here.
+        let _ = debug_of(apply_target_permissions(&file, &gone));
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "vanished target must fall back to the umask default ({expected:o}), got {mode:o}"
+        );
+    }
+
+    /// SEC-R3-004: public `create_exclusive_temp*` reject an unvalidated
+    /// basename/kind (separator, `..`, NUL, empty) with `InvalidInput` and
+    /// create nothing.
+    #[test]
+    fn test_S_25_08_SEC_R3_004_create_exclusive_temp_rejects_unsafe_basename_and_kind() {
+        let mut bad: Vec<&str> = vec!["a/b", "/abs", "..", "", "a\0b"];
+        if cfg!(windows) {
+            bad.push("a\\b");
+        }
+        for value in bad {
+            for (basename, kind) in [(value, "tmp"), ("ok.md", value)] {
+                let dir = tempfile::tempdir().unwrap();
+                let target = dir.path().join("t.md");
+                let results = [
+                    (
+                        "create_exclusive_temp",
+                        create_exclusive_temp(dir.path(), basename, kind),
+                    ),
+                    (
+                        "create_exclusive_temp_with",
+                        create_exclusive_temp_with(dir.path(), basename, kind, || 7),
+                    ),
+                    (
+                        "create_exclusive_temp_for_target",
+                        create_exclusive_temp_for_target(dir.path(), basename, kind, &target),
+                    ),
+                    (
+                        "create_exclusive_temp_for_target_with",
+                        create_exclusive_temp_for_target_with(
+                            dir.path(),
+                            basename,
+                            kind,
+                            &target,
+                            || 7,
+                        ),
+                    ),
+                ];
+                for (name, res) in results {
+                    match res {
+                        Ok((_, p)) => {
+                            panic!("{name}({basename:?}, {kind:?}) must be rejected, created {p:?}")
+                        }
+                        Err(e) => assert_eq!(
+                            e.kind(),
+                            std::io::ErrorKind::InvalidInput,
+                            "{name}({basename:?}, {kind:?}) must fail InvalidInput, got {e:?}"
+                        ),
+                    }
+                }
+                let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+                    .unwrap()
+                    .map(|e| e.unwrap().path())
+                    .collect();
+                assert!(
+                    leftovers.is_empty(),
+                    "rejected ({basename:?}, {kind:?}) must create nothing, found {leftovers:?}"
+                );
+            }
+        }
+    }
 }
