@@ -2934,3 +2934,64 @@ NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (h
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `dc786c61`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
 
 Summary: Recorded the two human decisions (S-25.08 accepted as converged, S-14.10 split), persisted S-25.08 pass 14 and the formal evidence, registered ADR-052 v1.30, BC-1.18.013 v1.17, BC-3.08.001 v1.39 and the five VPs, registered the story cascade with the topological hash refresh, and advanced STATE.md to v10.97.
+
+## Burst: HUMAN-DECISIONS-PR848-FIX-SET-ANCHORS-S2508-V116-S2509-V108-STORY-HASH-REGISTRATION (2026-10-13)
+
+**Parent-commit:** the D-1263 burst commit (`70832499`). **Agent:** state-manager (single-commit TD-VSDD-053; D-1264; STATE.md v10.97→v10.98).
+
+**Adversary verdict:** none dispatched by this burst (no cycle-level or LOCAL adversary pass). Review input registered: the pr-reviewer's PR #848 review of `0387b33b` (`code-delivery/S-25.08/pr-review.md`): REQUEST_CHANGES, 1 BLOCKING (B1, PR description only: "no code-level findings since pass 5" is wrong, pass 6 F-S2508-L6-004 produced the production fix `f34e349c`), N1..N9 non-blocking; code-reviewer (CR-001..CR-012) and security-reviewer (SEC-001..SEC-006) findings are mapped in S-25.08 v1.16 "PR #848 review". Fixed in the PR: SEC-002, SEC-006, CR-005, CR-003, CR-012, CR-004, N7, N8.
+
+**Files touched (Dim-1): 32 unique files** (`git -C .factory status --porcelain` before this burst: 16 modified, 1 untracked, the 14 story and epic files being the story-writer's uncommitted edits; the burst added the E-14 chain below because the D-1264 lesson changed their shared input `lessons.md`)
+- code-delivery/S-25.08/pr-review.md (new; verbatim body, provenance frontmatter added)
+- STATE.md (v10.97 to v10.98)
+- stories/STORY-INDEX.md (v4.498 to v4.499)
+- stories/S-25.08-shared-admission-core-b2-conformance-vp147-rebaseline.md (v1.16, committed as authored)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (v1.8, committed as authored)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.17, committed as authored; input-hash by this burst)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (v1.5, committed as authored)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (v1.5, committed as authored)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (hash-only; committed as authored)
+- stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (v1.2, committed as authored)
+- stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md (v1.1, committed as authored; input-hash by this burst)
+- stories/S-25.15-branch-3-activation-manifest-guard-block.md (hash-only; committed as authored)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (hash-only; committed as authored)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (hash-only; committed as authored)
+- stories/S-14.07-host-abi-resolver-input-error-response-field.md (v1.1, committed as authored)
+- stories/epics/E-25-validation-integrity.md (v1.12, committed as authored; input-hash by this burst)
+- stories/epics/E-26-post-rc25-hook-hardening.md (input-hash by this burst)
+- stories/epics/E-14-engine-discipline-pass-2.md (hash-only by this burst)
+- stories/S-14.01-bootstrap-convergence-state-backfill.md (hash-only by this burst)
+- stories/S-14.02-f5-dispatch-state-manager-persist.md (hash-only by this burst)
+- stories/S-14.03-pre-f5-placeholder-lint.md (hash-only by this burst)
+- stories/S-14.04-adversary-policy-rubric-injection.md (hash-only by this burst)
+- stories/S-14.05-pr-manager-step-completion-discipline.md (hash-only by this burst)
+- stories/S-14.06-bc-4-12-001-invariant-numbering-cleanup.md (hash-only by this burst)
+- stories/S-14.08-resolver-loaded-plugin-log-observability.md (hash-only by this burst)
+- stories/S-14.09-forensic-marker-cleanup.md (hash-only by this burst)
+- stories/S-14.10-per-story-delivery-process-gap-codification.md (hash-only by this burst)
+- stories/S-14.11-per-story-delivery-lint-gates-changelog-version-pins-sha-labels-convergence-prose.md (hash-only by this burst)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1264)
+- cycles/v1.0-brownfield-backfill/lessons.md (1 D-1264 lesson)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.97 checkpoint archived)
+
+NOT staged (scope control): `regression-state.json` and `sidecar-learning.md` (hook-written telemetry that belongs to none of the items). Not touched by this burst: S-25.02, S-26.07 (stored == computed, unchanged).
+
+**Codifications:** D-1264 (two human decisions on PR #848; permission-denied GitHub writes recorded and not worked around; fix batch and local gates recorded; B1 correction; story and hash cascade registered; closes [D-1263-BC-V117-CITES-OWED] and [D-1263-S1407-INPUT-MISSING]; opens [D-1264-PR848-ANCHORS-OWED] and [D-1264-S1407-TEMPLATE-DRIFT-OWED]); 1 lesson ([test-class] snapshot helpers must not read a held lock file's content).
+
+**Dim-2 (literal shell, captured output):**
+- `cargo test -q -p validate-cross-site-correspondence test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s`.
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 5.69s`.
+- Final stored == computed check over every touched story and epic (`compute-input-hash`, literal, stored vs computed per file): `stored==computed: 27 ok, 0 bad` (S-25.08 7cc6b0d, S-25.02 bcc78be, S-25.09 0f85d8c, S-25.10 7ffcb43, S-25.11 be1097c, S-25.12 6bbfc7c, S-25.13 dc5ce97, S-25.14 6809c6f, S-25.15 541a24b, S-25.06 580c676, S-12.16 cc63952, S-26.06 3128cef, S-26.07 ef42391, S-14.07 a85a7f2, S-14.10 6085287, S-14.11 a155ea3, S-14.01 80885ae, S-14.02 be39655, S-14.03 be39655, S-14.04 c6a2c58, S-14.05 be39655, S-14.06 d46aa88, S-14.08 ca450e8, S-14.09 0f466a2, E-14 7471771, E-25 bfdd3d8, E-26 beaa6b0). The cascade first drifted on S-25.06, S-25.14, E-26 and then E-25 (four `--update` runs); after the lesson and burst-log writes `lessons.md` (an input of S-14.10 / S-14.11 / E-14 and through E-14 of S-14.01..S-14.09) changed, so the E-14 chain was re-run to a fixed point (22 more `--update` runs in 3 rounds). The counts above are from the final run after all writes.
+- Namespace check: `grep -rlE "D-126[4-9]" cycles STATE.md stories specs code-delivery` returned only STORY-INDEX.md and pr-review.md (this burst's own writes) before the decision-log write; D-1264 free.
+- `grep -c "since pass 5" stories/STORY-INDEX.md` printed `0` after the B1 fix.
+
+**Dim-5:** Count-propagation sweep: 2,007 BCs, 147 VPs, 54 ADRs unchanged; STORY-INDEX draft 119, Total (active) 239, registered 259 unchanged (no story added or removed). **Dim-6:** `last_amended` overwritten with the current entry only on STORY-INDEX and STATE.md (BC-5.45.001); one new `changelog:` item prepended to STORY-INDEX; BC-INDEX, ARCH-INDEX and VP-INDEX not edited; STATE.md has no `changelog:`; `cargo run -q -p last-amended-migrate -- migrate --check` printed `eligibility=CurrentEntryOnly ... mutated=false` for all five files.
+
+**Dim-7:** Single-commit TD-VSDD-053; no backfill/Stage commits; no --no-verify; no AI attribution; Edit/Write only for `.factory/` content edits (the only scripted writes are `compute-input-hash --update`, the sanctioned frontmatter tool); files staged explicitly by path, never `git add -A`; no GitHub write attempted or worked around by this burst; the large index edits ran under the known FUEL_EXHAUSTED PostToolUse advisories ([D-1254-ADR052-SPLIT] class, writes landed).
+
+**Closes:** [D-1263-BC-V117-CITES-OWED]; [D-1263-S1407-INPUT-MISSING]; S-25.08 T-12 (story-writer tick, registered). **Opens:** [D-1264-PR848-ANCHORS-OWED], [D-1264-S1407-TEMPLATE-DRIFT-OWED]. **OPEN carried unchanged:** [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED] (pass 4 next), [D-1244-REVERIFY] (VP-146 leg, S-25.06), PR #769, the S-26.07 / S-14.10 / S-14.11 product-owner gaps.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `70832499`); run `git -C .factory log -1` for the SHA (not self-cited per TD-VSDD-053).
+
+Summary: Recorded the two human decisions on PR #848 and the permission-denied GitHub writes, persisted the pr-reviewer's review, registered S-25.08 v1.16 (B1 corrected) and S-25.09 v1.8 with the BC v1.17 / v1.39 cite re-pins, the S-14.07 input fix and the topological hash refresh (27 of 27 stored == computed), and advanced STATE.md to v10.98.

@@ -2439,4 +2439,6 @@ Archived by the D-1262 burst (v10.95→v10.96). Position at v10.95 (RESUMED): E-
 
 Archived by the D-1263 burst (v10.96→v10.97). Position at v10.96 (RESUMED): E-25; S-25.08 v1.14 on `feature/S-25.08` @ `9e936d4c` (passes 1-13 NOT CLEAN, streak 0/3; pass 13 0M/1L story-only cross-task status prose fixed in v1.14; pass 14 next); S-25.09 v1.6, implementer fixing L3-001..L3-005 (in progress), then gates, then pass 4; S-25.13 v1.1 / S-25.14 / S-25.15 and E-25 v1.11 registered (draft); STORY-INDEX v4.497, ARCH-INDEX v4.59, BC-INDEX v5.112, VP-INDEX v3.33. Verbatim via `git -C .factory show dc786c61:STATE.md`. OPEN: [D-1257-POLICY19-SCOPE], [D-1257-S2508-ASYMPTOTE] (13 passes), [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1261-STORY-CITES-OWED], [D-1262-HASH-DRIFT-OWED], PR #769.
 
-**See STATE.md v10.97 for the current checkpoint.**
+Archived by the D-1264 burst (v10.97→v10.98). Position at v10.97 (RESUMED): E-25; S-25.08 v1.15 on `feature/S-25.08` @ `b89cbb6d` ACCEPTED AS CONVERGED by the human (D-386 Option C; pass 14 0M/1L story-only; streak 0/3); formal re-verification passed (Kani 10/10, M1-M5 KILLED, workspace 3393/0, failpoints 1173/0); NEXT push and pr-manager; S-25.09 v1.6 @ `9e1e5b7e` (pass-3 fixes done), story reconcile then LOCAL pass 4; S-14.10 split into S-14.10 / S-14.11; STORY-INDEX v4.498, ARCH-INDEX v4.60, BC-INDEX v5.113, VP-INDEX v3.34. Verbatim via `git -C .factory show 70832499:STATE.md`.
+
+**See STATE.md v10.98 for the current checkpoint.**

@@ -26,7 +26,7 @@ inputs:
   - .factory/stories/S-14.10-per-story-delivery-process-gap-codification.md
   - .factory/stories/S-14.11-per-story-delivery-lint-gates-changelog-version-pins-sha-labels-convergence-prose.md
   - .factory/cycles/v1.0-brownfield-backfill/lessons.md
-input-hash: "eae9e5d"
+input-hash: "7471771"
 modified:
   - "v1.2 2026-05-11: F-P8-002 fix burst — forward-ref note corrected"
   - "v1.3 2026-08-30: frontmatter normalization — level: L3 added"
