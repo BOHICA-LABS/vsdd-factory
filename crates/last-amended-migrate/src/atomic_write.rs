@@ -336,6 +336,61 @@ fn create_exclusive_temp_with<F: FnMut() -> u64>(
     Err(last_err.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
 }
 
+/// Give the freshly written temp file its FINAL permissions before the
+/// rename. The temp is created `0o600` (see [`create_exclusive_temp`]) to close
+/// the creation-time window; that must not leak into the final file.
+///
+/// - Target exists: copy its permissions (S-15.03 N2).
+/// - Target does not exist: apply the platform default creation mode, i.e.
+///   what `File::create` would have produced (`0o666 & !umask` on Unix).
+///   The umask is learned race-free WITHOUT calling `umask(2)` (which is
+///   process-global): a throwaway probe file is created exclusively in the
+///   same directory with no explicit mode, its resulting mode is read, and
+///   it is removed. If the probe cannot be made, falls back to `0o644`.
+///
+/// Best-effort, like the permission copy it replaces. Public so the
+/// dispatcher's marker writer (always an overwrite-or-create) can reuse it.
+pub fn apply_final_permissions(tmp_path: &Path, target: &Path) {
+    if let Ok(existing_meta) = std::fs::metadata(target) {
+        let _ = std::fs::set_permissions(tmp_path, existing_meta.permissions());
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = tmp_path.parent().unwrap_or_else(|| Path::new("."));
+        let mode = default_creation_mode(parent).unwrap_or(0o644);
+        let _ = std::fs::set_permissions(tmp_path, std::fs::Permissions::from_mode(mode));
+    }
+}
+
+/// Mode a plain `File::create` would give a new file in `parent` (umask
+/// applied), measured via an exclusive probe file instead of `umask(2)`.
+#[cfg(unix)]
+fn default_creation_mode(parent: &Path) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    // `create_exclusive_temp` forces 0o600, so build the probe directly
+    // with the default mode (no `.mode()` call).
+    for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
+        let probe = parent.join(format!(
+            ".mode-probe-{}-{:016x}",
+            std::process::id(),
+            unpredictable_suffix()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&probe) {
+            Ok(f) => {
+                let mode = f.metadata().ok().map(|m| m.permissions().mode() & 0o777);
+                drop(f);
+                let _ = std::fs::remove_file(&probe);
+                return mode;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 /// Write `content` to `path` atomically: write to an exclusively-created
 /// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory
 /// (created owner-only `0o600` on Unix, then given `path`'s pre-existing
@@ -387,9 +442,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     // or a permissions API that fails for an unrelated reason must not
     // block the substantive content write, which `std::fs::write` never
     // guarded against either.
-    if let Ok(existing_meta) = std::fs::metadata(path) {
-        let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
-    }
+    apply_final_permissions(&tmp_path, path);
 
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
     // comment for the verified Windows CI root cause (transient AV/indexer
@@ -611,9 +664,7 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         });
     }
 
-    if let Ok(existing_meta) = std::fs::metadata(path) {
-        let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
-    }
+    apply_final_permissions(&tmp_path, path);
 
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
     // comment for the verified Windows CI root cause (transient AV/indexer
@@ -1114,5 +1165,33 @@ mod tests {
         drop(file);
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "temp file must be created owner-only");
+    }
+
+    /// SEC-002-N3 follow-up: a NEW file keeps the platform default creation
+    /// mode (what `File::create` yields); only the temp is owner-only.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_N3_new_file_via_write_atomic_has_default_creation_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let probe = dir.path().join("probe");
+        File::create(&probe).unwrap();
+        let expected = std::fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
+
+        let target = dir.path().join("new.md");
+        write_atomic(&target, "x\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "new file must have the default creation mode"
+        );
+
+        let strict = dir.path().join("new-strict.md");
+        write_atomic_strict_durable(&strict, "x\n").unwrap();
+        let mode = std::fs::metadata(&strict).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "strict: new file must have the default creation mode"
+        );
     }
 }
