@@ -524,9 +524,59 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_with_timeout_returns_even_if_an_escaped_child_holds_the_pipe_open() {
-        let script = "import subprocess,time; \
-            subprocess.Popen(['sleep','60'], start_new_session=True); time.sleep(60)";
-        let args = vec!["-c".to_string(), script.to_string()];
+        // This scenario needs python3 to spawn a session-escaped grandchild.
+        // Skip LOUDLY (never silently pass) when it is absent.
+        let python_ok = Command::new("python3")
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !python_ok {
+            eprintln!(
+                "SKIPPED (NOT PASSED): run_with_timeout_returns_even_if_an_escaped_child_holds_the_pipe_open \
+                 requires `python3` on PATH and it is absent; the NB-4 bounded-drain-join \
+                 behaviour was NOT exercised in this environment"
+            );
+            return;
+        }
+
+        // The escaped `sleep 60` is in its own session, so run_with_timeout's
+        // process-group kill cannot reach it. It records its pid so this test
+        // can reap it at the end (RAII guard: runs even if an assert panics).
+        struct ReapGuard(PathBuf);
+        impl Drop for ReapGuard {
+            fn drop(&mut self) {
+                if let Ok(txt) = std::fs::read_to_string(&self.0) {
+                    if let Ok(pid) = txt.trim().parse::<u32>() {
+                        let _ = Command::new("kill")
+                            .args(["-KILL", &pid.to_string()])
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status();
+                    }
+                }
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let pid_file = std::env::temp_dir().join(format!(
+            "vp147-escaped-child-{}-{:?}.pid",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&pid_file);
+        let _reap = ReapGuard(pid_file.clone());
+
+        let script = format!(
+            "import subprocess,time; \
+             p=subprocess.Popen(['sleep','60'], start_new_session=True); \
+             open({:?},'w').write(str(p.pid)); time.sleep(60)",
+            pid_file.to_string_lossy()
+        );
+        let args = vec!["-c".to_string(), script];
         let started = Instant::now();
         let c = run_with_timeout(
             "python3",
