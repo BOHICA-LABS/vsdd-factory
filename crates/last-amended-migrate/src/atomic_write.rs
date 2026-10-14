@@ -410,28 +410,96 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
 /// on Unix, no path-based `chmod`, so no path race), before the handle is
 /// closed and the temp renamed.
 ///
-/// - `target` exists: the handle takes the target's permissions (S-15.03
-///   N2: a rename must not change a file's permission bits).
-/// - `target` does not exist: nothing to do; the temp already carries the
-///   `File::create` default from [`create_exclusive_temp_for_target`].
+/// - `target` exists: the handle takes the target's permission bits
+///   (`& 0o777`; setuid/setgid/sticky are never copied) (S-15.03 N2: a
+///   rename must not change a file's permission bits).
+/// - `target` does not exist: the temp already carries the `File::create`
+///   default from [`create_exclusive_temp_for_target`]; a temp born
+///   `0o600` for a target that has since vanished is moved to that same
+///   default (see `apply_vanished_target_default`).
+/// - Any other metadata error is returned.
+///
 ///
 /// A failed `fchmod` is RETURNED (never swallowed): the caller removes the
 /// temp and fails the write, so a file never lands with permissions other
 /// than the ones this function was asked to apply (NB-B).
 pub fn apply_target_permissions(file: &File, target: &Path) -> std::io::Result<()> {
-    if let Ok(existing_meta) = std::fs::metadata(target) {
-        #[cfg(unix)]
-        {
-            // SEC-R3-002: copy the permission bits only. setuid/setgid/sticky
-            // (`0o7000`) are never inherited from the target.
-            use std::os::unix::fs::PermissionsExt;
-            let mode = existing_meta.permissions().mode() & 0o777;
-            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    match std::fs::metadata(target) {
+        Ok(existing_meta) => {
+            #[cfg(unix)]
+            {
+                // SEC-R3-002: copy the permission bits only. setuid/setgid/
+                // sticky (`0o7000`) are never inherited from the target.
+                use std::os::unix::fs::PermissionsExt;
+                let mode = existing_meta.permissions().mode() & 0o777;
+                file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+            }
+            #[cfg(not(unix))]
+            file.set_permissions(existing_meta.permissions())?;
+            Ok(())
         }
-        #[cfg(not(unix))]
-        file.set_permissions(existing_meta.permissions())?;
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            #[cfg(unix)]
+            apply_vanished_target_default(file)?;
+            Ok(())
+        }
+        // Any other failure to read the target's metadata (EACCES, ...):
+        // fail closed rather than guess the mode.
+        Err(e) => Err(e),
+    }
+}
+
+/// SEC-R3-001: the target does not exist at apply time. A temp born for a
+/// NEW target already carries the `File::create` default and is left alone.
+/// A temp born `0o600` because the target existed at creation (which has
+/// since vanished) must not stay stuck at `0o600`: it takes the umask
+/// default `0o666 & !umask`, the mode `File::create` would have produced.
+///
+/// The umask is READ, never changed: [`process_umask`] uses
+/// `/proc/self/status` on Linux and otherwise a child `sh` that inherits
+/// it. No `umask(2)` call (process-global, racy against other threads) and
+/// no probe file. If the umask cannot be determined the temp is left at
+/// owner-only `0o600`, the restrictive direction (fail-safe).
+#[cfg(unix)]
+fn apply_vanished_target_default(file: &File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let current = file.metadata()?.permissions().mode() & 0o777;
+    if current != TEMP_MODE_OWNER_ONLY {
+        return Ok(()); // born with the File::create default already
+    }
+    if let Some(umask) = process_umask() {
+        let default = TEMP_MODE_DEFAULT_CREATE & !umask;
+        if default != current {
+            file.set_permissions(std::fs::Permissions::from_mode(default))?;
+        }
     }
     Ok(())
+}
+
+/// The process umask, read without `umask(2)` and without a probe file.
+#[cfg(unix)]
+fn process_umask() -> Option<u32> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        if let Some(v) = status.lines().find_map(|l| l.strip_prefix("Umask:")) {
+            if let Ok(mask) = u32::from_str_radix(v.trim(), 8) {
+                return Some(mask & 0o777);
+            }
+        }
+    }
+    // POSIX: a child process inherits the parent's umask; `sh`'s `umask`
+    // builtin prints it in octal.
+    let out = std::process::Command::new("/bin/sh")
+        .args(["-c", "umask"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    u32::from_str_radix(text.trim(), 8).ok().map(|m| m & 0o777)
 }
 
 /// Write `content` to `path` atomically: write to an exclusively-created
