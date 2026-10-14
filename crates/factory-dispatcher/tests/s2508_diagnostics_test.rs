@@ -329,16 +329,36 @@ fn test_BC_1_18_013_PC6b_as_given_spelling_ignored_when_empty_or_not_absolute() 
             "raw CLAUDE_PROJECT_DIR {raw:?} (empty / not absolute) must add NO lexical alias"
         );
     }
-    // accepted: absolute, lexically normalised, `/.factory` appended
-    assert_eq!(
-        as_given_factory_root_spelling(OsStr::new("/abs/proj")),
-        Some(PathBuf::from("/abs/proj/.factory"))
-    );
-    assert_eq!(
-        as_given_factory_root_spelling(OsStr::new("/abs//proj/./sub/../p2/")),
-        Some(PathBuf::from("/abs/proj/p2/.factory")),
-        "lexical normalization only (collapse //, ., ..), no symlink resolution"
-    );
+    // Windows: rooted-but-driveless spellings are NOT absolute (`Path::is_absolute`
+    // needs a drive/UNC prefix), so they add no lexical alias either.
+    #[cfg(windows)]
+    for raw in [r"\abs\proj", "/abs/proj"] {
+        assert_eq!(
+            as_given_factory_root_spelling(OsStr::new(raw)),
+            None,
+            "raw CLAUDE_PROJECT_DIR {raw:?} (rooted but driveless, not absolute) must add NO lexical alias"
+        );
+    }
+    // accepted: absolute (platform-absolute spelling), lexically normalised,
+    // `.factory` appended
+    #[cfg(unix)]
+    let cases: [(&str, &str); 2] = [
+        ("/abs/proj", "/abs/proj/.factory"),
+        ("/abs//proj/./sub/../p2/", "/abs/proj/p2/.factory"),
+    ];
+    #[cfg(windows)]
+    let cases: [(&str, &str); 3] = [
+        (r"C:\abs\proj", r"C:\abs\proj\.factory"),
+        (r"C:\abs\\proj\.\sub\..\p2\", r"C:\abs\proj\p2\.factory"),
+        ("C:/abs//proj/./sub/../p2/", r"C:\abs\proj\p2\.factory"),
+    ];
+    for (raw, expected) in cases {
+        assert_eq!(
+            as_given_factory_root_spelling(OsStr::new(raw)),
+            Some(PathBuf::from(expected)),
+            "lexical normalization only (collapse //, ., ..), no symlink resolution: {raw:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +475,7 @@ fn test_BC_1_18_013_L5_001_release_enoent_migration_state_emits_no_warn() {
 // CONTROL (`assert_release_valid_id_control`) under its own fixture.
 // ---------------------------------------------------------------------------
 
+#[cfg(unix)]
 fn completion_payload_with_id(
     event: &str,
     id: Option<serde_json::Value>,

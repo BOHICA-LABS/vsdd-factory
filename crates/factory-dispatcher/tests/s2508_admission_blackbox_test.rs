@@ -3781,6 +3781,7 @@ fn test_BC_1_18_013_EC032_gate_state_fixture_matrix_cause_classification_blackbo
 
 /// Run the real binary with `CLAUDE_PROJECT_DIR` set to `proj_dir` EXACTLY AS GIVEN
 /// (possibly a symlink spelling of the real project directory).
+#[cfg(unix)]
 fn run_as_given(p: &Project, proj_dir: &Path, payload: &str) -> Output {
     let mut cmd = Command::new(binary_path());
     cmd.env("CLAUDE_PLUGIN_ROOT", p.plugin_root.path())
