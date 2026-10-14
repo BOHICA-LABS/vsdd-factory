@@ -60,7 +60,7 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets --no-fail-fast
 
       - name: Run test suite
         run: cd plugins/vsdd-factory/tests && ./run-all.sh

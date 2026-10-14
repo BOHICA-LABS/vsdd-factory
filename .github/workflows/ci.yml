@@ -199,7 +199,7 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets --no-fail-fast
 
       - name: cargo test (factory-dispatcher, failpoints feature)
         # The `failpoints` cargo feature is off in every other step, so every
@@ -220,7 +220,7 @@ jobs:
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
         run: |
           set -euo pipefail
-          cargo test -p factory-dispatcher --features failpoints --all-targets
+          cargo test -p factory-dispatcher --features failpoints --all-targets --no-fail-fast
 
           # Positive-coverage assertion: the exit code alone cannot tell "all
           # passed" from "a target compiled to nothing / matched zero tests"
@@ -591,7 +591,7 @@ jobs:
         # crate IS the controls job." The 16 `#[test]` functions ARE the non-vacuity controls
         # for the gate's four-outcome verdict (FAIL / PASS-N-activations /
         # PASS-zero-activations / EMPTY-or-UNREACHABLE).
-        run: cargo test -p policy15-attestation-gate
+        run: cargo test -p policy15-attestation-gate --no-fail-fast
 
   platforms-drift:
     # Single source of truth: ci/platforms.yaml. The build-dispatcher
@@ -754,7 +754,7 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test --release --features factory-dispatcher/test-support --target ${{ matrix.target }} --workspace
+        run: cargo test --release --features factory-dispatcher/test-support --target ${{ matrix.target }} --workspace --no-fail-fast
 
       - name: Build all native WASM plugins (release)
         # Build all hook-plugin crates on every matrix entry —
