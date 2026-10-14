@@ -168,12 +168,14 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
             }
         })
         .collect();
-    let (mut tmp_file, tmp_path) = last_amended_migrate::atomic_write::create_exclusive_temp_with(
-        parent,
-        &format!("{file_name}.{safe_plugin}"),
-        "tmp",
-        suffix_fn,
-    )?;
+    let (mut tmp_file, tmp_path) =
+        last_amended_migrate::atomic_write::create_exclusive_temp_for_target_with(
+            parent,
+            &format!("{file_name}.{safe_plugin}"),
+            "tmp",
+            marker_path,
+            suffix_fn,
+        )?;
     // Existing semantics preserved: plain write then rename (no fsync was ever performed
     // here); on a write failure, best-effort remove the temp file we just created.
     if let Err(e) = tmp_file.write_all(content.as_bytes()) {
@@ -181,12 +183,11 @@ pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
+    // BLOCKING-1: apply the marker's FINAL permissions on the SUCCESS path, through the
+    // open handle, before the rename. A new marker keeps the default creation mode it was
+    // born with; an overwritten marker takes its previous mode (the temp is born 0o600).
+    last_amended_migrate::atomic_write::apply_target_permissions(&tmp_file, marker_path);
     drop(tmp_file);
-
-    // BLOCKING-1: the temp is born 0o600; apply the marker's FINAL permissions on the
-    // SUCCESS path, before the rename (a new marker gets the default creation mode, an
-    // overwritten marker keeps its previous mode).
-    last_amended_migrate::atomic_write::apply_final_permissions(&tmp_path, marker_path);
 
     // Atomic rename temp → final path (single-marker policy: overwrites existing).
     // F-P3-004: a failed rename must not orphan the uniquely-named temp file it

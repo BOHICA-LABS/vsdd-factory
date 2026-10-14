@@ -291,8 +291,11 @@ pub fn unpredictable_suffix() -> u64 {
 /// suffix, bounded by `TEMP_CREATE_MAX_ATTEMPTS` (16); exhaustion or any
 /// other error is returned as-is (fail closed, nothing is written
 /// through a pre-existing path). On Unix the file is created with mode
-/// `0o600`, so it is never briefly readable by others before the caller
-/// applies the final permissions.
+/// `0o600`, so it is never briefly readable by others.
+///
+/// Writers that replace a governed target should use
+/// [`create_exclusive_temp_for_target`], which also picks the correct
+/// creation mode for a target that does not exist yet.
 pub fn create_exclusive_temp(
     parent: &Path,
     basename: &str,
@@ -313,6 +316,71 @@ pub fn create_exclusive_temp_with<F: FnMut() -> u64>(
     parent: &Path,
     basename: &str,
     kind: &str,
+    suffix_fn: F,
+) -> std::io::Result<(File, PathBuf)> {
+    create_temp_with_mode(parent, basename, kind, TEMP_MODE_OWNER_ONLY, suffix_fn)
+}
+
+/// Owner-only creation mode for a temp that will replace an existing target.
+const TEMP_MODE_OWNER_ONLY: u32 = 0o600;
+/// `File::create`'s requested mode; the process umask narrows it.
+const TEMP_MODE_DEFAULT_CREATE: u32 = 0o666;
+
+/// Like [`create_exclusive_temp`], with the creation mode chosen from
+/// `target` (the file the temp will be renamed over):
+///
+/// - `target` EXISTS: the temp is created `0o600`. Pair with
+///   [`apply_target_permissions`] on the open handle before closing it, so
+///   the temp is owner-only until it takes the target's mode.
+/// - `target` does NOT exist: the temp is created with `0o666` so the
+///   process umask applies, exactly the semantics of `File::create`. No
+///   `umask(2)` call, probe file or fixed fallback is involved.
+///
+/// # Creation-mode trust analysis (SEC-002-N3)
+///
+/// The `0o600` birth mode closes the window in which a temp holding the
+/// content of a restrictive target (e.g. a `0o600` file) would be briefly
+/// readable at the umask default. For a NEW target the temp is born
+/// `0o666 & !umask`, which is by construction the very mode the final file
+/// is going to have, so the temp is never more permissive than its result
+/// and no window beyond the result's own exposure exists.
+///
+/// # Trust boundary (SEC-002-N1)
+///
+/// Only the temp LEAF is protected (`O_EXCL`, unpredictable suffix). The
+/// parent directory of `target` is trusted: a symlinked or attacker-writable
+/// parent redirects every path beneath it and is out of scope.
+pub fn create_exclusive_temp_for_target(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    target: &Path,
+) -> std::io::Result<(File, PathBuf)> {
+    create_exclusive_temp_for_target_with(parent, basename, kind, target, unpredictable_suffix)
+}
+
+/// Suffix-injectable core of [`create_exclusive_temp_for_target`].
+#[doc(hidden)]
+pub fn create_exclusive_temp_for_target_with<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    target: &Path,
+    suffix_fn: F,
+) -> std::io::Result<(File, PathBuf)> {
+    let mode = if target.exists() {
+        TEMP_MODE_OWNER_ONLY
+    } else {
+        TEMP_MODE_DEFAULT_CREATE
+    };
+    create_temp_with_mode(parent, basename, kind, mode, suffix_fn)
+}
+
+fn create_temp_with_mode<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    #[cfg_attr(not(unix), allow(unused_variables))] mode: u32,
     mut suffix_fn: F,
 ) -> std::io::Result<(File, PathBuf)> {
     let mut last_err = None;
@@ -324,13 +392,10 @@ pub fn create_exclusive_temp_with<F: FnMut() -> u64>(
         ));
         let mut opts = OpenOptions::new();
         opts.write(true).create_new(true);
-        // SEC-002-N3 / NB-7: owner-only from the first instant the temp file
-        // exists, so there is no window at the umask default (often 0o644)
-        // before the target's own permissions are copied on afterwards.
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
+            opts.mode(mode);
         }
         match opts.open(&candidate) {
             Ok(file) => return Ok((file, candidate)),
@@ -341,65 +406,30 @@ pub fn create_exclusive_temp_with<F: FnMut() -> u64>(
     Err(last_err.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
 }
 
-/// Give the freshly written temp file its FINAL permissions before the
-/// rename. The temp is created `0o600` (see [`create_exclusive_temp`]) to close
-/// the creation-time window; that must not leak into the final file.
+/// Give the temp its FINAL permissions through the OPEN handle (`fchmod`
+/// on Unix, no path-based `chmod`, so no path race), before the handle is
+/// closed and the temp renamed.
 ///
-/// - Target exists: copy its permissions (S-15.03 N2).
-/// - Target does not exist: apply the platform default creation mode, i.e.
-///   what `File::create` would have produced (`0o666 & !umask` on Unix).
-///   The umask is learned race-free WITHOUT calling `umask(2)` (which is
-///   process-global): a throwaway probe file is created exclusively in the
-///   same directory with no explicit mode, its resulting mode is read, and
-///   it is removed. If the probe cannot be made, falls back to `0o644`.
+/// - `target` exists: the handle takes the target's permissions (S-15.03
+///   N2: a rename must not change a file's permission bits).
+/// - `target` does not exist: nothing to do; the temp already carries the
+///   `File::create` default from [`create_exclusive_temp_for_target`].
 ///
-/// Best-effort, like the permission copy it replaces. Public so the
-/// dispatcher's marker writer (always an overwrite-or-create) can reuse it.
-pub fn apply_final_permissions(tmp_path: &Path, target: &Path) {
+/// Best-effort: a failure leaves the temp at its owner-only `0o600` birth
+/// mode, which is the restrictive direction, and must not block the
+/// substantive content write (`std::fs::write` never guarded it either).
+pub fn apply_target_permissions(file: &File, target: &Path) {
     if let Ok(existing_meta) = std::fs::metadata(target) {
-        let _ = std::fs::set_permissions(tmp_path, existing_meta.permissions());
-        return;
+        let _ = file.set_permissions(existing_meta.permissions());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let parent = tmp_path.parent().unwrap_or_else(|| Path::new("."));
-        let mode = default_creation_mode(parent).unwrap_or(0o644);
-        let _ = std::fs::set_permissions(tmp_path, std::fs::Permissions::from_mode(mode));
-    }
-}
-
-/// Mode a plain `File::create` would give a new file in `parent` (umask
-/// applied), measured via an exclusive probe file instead of `umask(2)`.
-#[cfg(unix)]
-fn default_creation_mode(parent: &Path) -> Option<u32> {
-    use std::os::unix::fs::PermissionsExt;
-    // `create_exclusive_temp` forces 0o600, so build the probe directly
-    // with the default mode (no `.mode()` call).
-    for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
-        let probe = parent.join(format!(
-            ".mode-probe-{}-{:016x}",
-            std::process::id(),
-            unpredictable_suffix()
-        ));
-        match OpenOptions::new().write(true).create_new(true).open(&probe) {
-            Ok(f) => {
-                let mode = f.metadata().ok().map(|m| m.permissions().mode() & 0o777);
-                drop(f);
-                let _ = std::fs::remove_file(&probe);
-                return mode;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return None,
-        }
-    }
-    None
 }
 
 /// Write `content` to `path` atomically: write to an exclusively-created
 /// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory
-/// (created owner-only `0o600` on Unix, then given `path`'s pre-existing
-/// permission bits, if any, and `fsync`ed before rename — S-15.03 N2), then
+/// (on Unix created `0o600` when `path` already exists, then `fchmod`ed to
+/// `path`'s mode on the open handle; created `0o666 & !umask`, i.e.
+/// `File::create` semantics, when `path` is new; `fsync`ed before rename —
+/// S-15.03 N2; see [`create_exclusive_temp_for_target`]), then
 /// `rename` it into place. On success, no `.<basename>.tmp-*` sibling
 /// survives — the rename consumes it. On failure to write or fsync the temp file, no
 /// attempt is made to write `path` at all, so `path` is left completely
@@ -427,8 +457,8 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-output".to_string());
-    let (file, tmp_path) =
-        create_exclusive_temp(parent, &basename, "tmp").map_err(|source| MigrateError::Io {
+    let (file, tmp_path) = create_exclusive_temp_for_target(parent, &basename, "tmp", path)
+        .map_err(|source| MigrateError::Io {
             // N-3: the candidate name is not known when creation fails (it is
             // random and may have exhausted all attempts), so report the one
             // concrete path that is: the directory the temp file could not be
@@ -437,7 +467,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
             source,
         })?;
 
-    if let Err(e) = write_and_sync_temp(file, &tmp_path, content) {
+    if let Err(e) = write_and_sync_temp(file, &tmp_path, path, content) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
     }
@@ -447,8 +477,6 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     // or a permissions API that fails for an unrelated reason must not
     // block the substantive content write, which `std::fs::write` never
     // guarded against either.
-    apply_final_permissions(&tmp_path, path);
-
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
     // comment for the verified Windows CI root cause (transient AV/indexer
     // handle, never this function's own write handle, which
@@ -484,12 +512,18 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
 /// `tmp_path`, consumed so it is dropped at return) and `fsync` it before
 /// returning, so the caller's subsequent `rename` never lands ahead of the
 /// data actually being durable on disk (S-15.03 N2).
-fn write_and_sync_temp(mut file: File, tmp_path: &Path, content: &str) -> Result<(), MigrateError> {
+fn write_and_sync_temp(
+    mut file: File,
+    tmp_path: &Path,
+    target: &Path,
+    content: &str,
+) -> Result<(), MigrateError> {
     file.write_all(content.as_bytes())
         .map_err(|source| MigrateError::Io {
             path: tmp_path.to_path_buf(),
             source,
         })?;
+    apply_target_permissions(&file, target);
     file.sync_all().map_err(|source| MigrateError::Io {
         path: tmp_path.to_path_buf(),
         source,
@@ -652,8 +686,8 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
-    let (file, tmp_path) =
-        create_exclusive_temp(parent, &basename, "strict-tmp").map_err(|source| {
+    let (file, tmp_path) = create_exclusive_temp_for_target(parent, &basename, "strict-tmp", path)
+        .map_err(|source| {
             MigrateError::Io {
                 // N-3: concrete directory, not a glob (see `write_atomic`).
                 path: parent.to_path_buf(),
@@ -661,15 +695,13 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
             }
         })?;
 
-    if let Err(source) = write_and_sync_temp_strict(file, content) {
+    if let Err(source) = write_and_sync_temp_strict(file, path, content) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
             source,
         });
     }
-
-    apply_final_permissions(&tmp_path, path);
 
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
     // comment for the verified Windows CI root cause (transient AV/indexer
@@ -704,8 +736,9 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
 /// shape for [`write_atomic`]) rather than an inline closure specifically
 /// so this scoping is unambiguous on inspection (PR #842 Windows-CI
 /// investigation).
-fn write_and_sync_temp_strict(mut file: File, content: &str) -> std::io::Result<()> {
+fn write_and_sync_temp_strict(mut file: File, target: &Path, content: &str) -> std::io::Result<()> {
     file.write_all(content.as_bytes())?;
+    apply_target_permissions(&file, target);
     sync_file_durable(&file)
 }
 
