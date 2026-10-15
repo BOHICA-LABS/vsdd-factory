@@ -2,7 +2,7 @@
 # s21-12-version-and-deny-gate.bats — Red Gate bats tests for S-21.12.
 #
 # Story:  S-21.12 (E-21 Wave 4)
-# Title:  wasmtime major-version move >= 48.0.4: clear RUSTSEC-2026-0188/0222/0204 + 0316/0314/0321/0322/0323/0324/0327 (ADR-035 v1.2 Decision 6)
+# Title:  wasmtime major-version move >= 48.0.6: clear RUSTSEC-2026-0188/0222/0204 + 0316/0314/0321/0322/0323/0324/0327 (ADR-035 v1.2 Decision 6)
 #         + add cargo-deny advisories CI job
 #
 # These tests FAIL at the pre-story state:
@@ -16,7 +16,7 @@
 # |-------------------------------------------------------------------|------------|
 # | AC-001: Cargo.toml wasmtime dep does not contain 44.0 pin        | AC-001     |
 # | AC-002: Cargo.toml wasmtime-wasi dep does not contain 44.0 pin   | AC-002     |
-# | AC-003: cargo metadata resolves wasmtime+wasmtime-wasi to 48.0.4..<49 lockstep | AC-003     |
+# | AC-003: cargo metadata resolves wasmtime+wasmtime-wasi to 48.0.6..<49 lockstep | AC-003     |
 # | AC-004/AC-009: cargo deny exits 0, five RUSTSEC IDs absent       | AC-004/009 |
 # | AC-007-T1: a workflow file contains cargo deny check advisories   | AC-007     |
 # | AC-007-T2: deny workflow has no paths: on workflow-level trigger  | AC-007     |
@@ -28,12 +28,12 @@ setup() {
 }
 
 # ---------------------------------------------------------------------------
-# AC-001: Cargo.toml workspace pins wasmtime >= 48.0.4
+# AC-001: Cargo.toml workspace pins wasmtime >= 48.0.6
 # Traces to: RUSTSEC-2026-0188/0222 (implied) + RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327; ADR-035 v1.2 Decision 6
 # RED-before: wasmtime = "44.0" in Cargo.toml  → test FAILS
-# GREEN-after: wasmtime = "48.0.4" (or higher 48.x) in Cargo.toml → test PASSES
+# GREEN-after: wasmtime = "48.0.6" (or higher 48.x) in Cargo.toml → test PASSES
 # ---------------------------------------------------------------------------
-@test "AC-001: Cargo.toml wasmtime workspace dep floored at 48.0.4 (not 44.0)" {
+@test "AC-001: Cargo.toml wasmtime workspace dep floored at 48.0.6 (not 44.0)" {
   local cargo_toml="$REPO_ROOT/Cargo.toml"
   [ -f "$cargo_toml" ] || { echo "FAIL: Cargo.toml not found at $cargo_toml"; return 1; }
 
@@ -47,25 +47,25 @@ setup() {
   # The old "44.0" pin MUST NOT be present.
   if echo "$wasmtime_line" | grep -qF '"44.0"'; then
     echo "FAIL: wasmtime still carries the 44.0 pin: $wasmtime_line"
-    echo "Expected: wasmtime = \"48.0.4\" (or equivalent >= 48.0.4 floor)"
+    echo "Expected: wasmtime = \"48.0.6\" (or equivalent >= 48.0.6 floor)"
     return 1
   fi
 
   # The new floor MUST be at 48.x (RUSTSEC-2026-0316 et al.; 46.x no longer passes cargo deny).
   if ! echo "$wasmtime_line" | grep -qE '"48\.'; then
     echo "FAIL: wasmtime not pinned at 48.x: $wasmtime_line"
-    echo "Expected: wasmtime = \"48.0.4\""
+    echo "Expected: wasmtime = \"48.0.6\""
     return 1
   fi
 }
 
 # ---------------------------------------------------------------------------
-# AC-002: Cargo.toml workspace pins wasmtime-wasi >= 48.0.4
+# AC-002: Cargo.toml workspace pins wasmtime-wasi >= 48.0.6
 # Traces to: RUSTSEC-2026-0188/0222 (implied) + RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327; ADR-035 v1.2 Decision 6
 # RED-before: wasmtime-wasi = "44.0" in Cargo.toml → test FAILS
-# GREEN-after: wasmtime-wasi = "48.0.4" (or higher 48.x) in Cargo.toml → test PASSES
+# GREEN-after: wasmtime-wasi = "48.0.6" (or higher 48.x) in Cargo.toml → test PASSES
 # ---------------------------------------------------------------------------
-@test "AC-002: Cargo.toml wasmtime-wasi workspace dep floored at 48.0.4 (not 44.0)" {
+@test "AC-002: Cargo.toml wasmtime-wasi workspace dep floored at 48.0.6 (not 44.0)" {
   local cargo_toml="$REPO_ROOT/Cargo.toml"
   [ -f "$cargo_toml" ] || { echo "FAIL: Cargo.toml not found at $cargo_toml"; return 1; }
 
@@ -79,25 +79,25 @@ setup() {
   # The old "44.0" pin MUST NOT be present.
   if echo "$wasi_line" | grep -qF '"44.0"'; then
     echo "FAIL: wasmtime-wasi still carries the 44.0 pin: $wasi_line"
-    echo "Expected: wasmtime-wasi = \"48.0.4\" (or equivalent >= 48.0.4 floor)"
+    echo "Expected: wasmtime-wasi = \"48.0.6\" (or equivalent >= 48.0.6 floor)"
     return 1
   fi
 
   # The new floor MUST be at 48.x.
   if ! echo "$wasi_line" | grep -qE '"48\.'; then
     echo "FAIL: wasmtime-wasi not pinned at 48.x: $wasi_line"
-    echo "Expected: wasmtime-wasi = \"48.0.4\""
+    echo "Expected: wasmtime-wasi = \"48.0.6\""
     return 1
   fi
 }
 
 # ---------------------------------------------------------------------------
-# AC-003: cargo metadata --locked resolves wasmtime AND wasmtime-wasi to 48.0.4 <= v < 49.0.0 (lockstep, identical)
+# AC-003: cargo metadata --locked resolves wasmtime AND wasmtime-wasi to 48.0.6 <= v < 49.0.0 (lockstep, identical)
 # Traces to: cargo lockfile correctness
 # RED-before: wasmtime-wasi resolves to 44.0.3 → version comparison fails
-# GREEN-after: both resolve to the same 48.x >= 48.0.4 → version comparison passes
+# GREEN-after: both resolve to the same 48.x >= 48.0.6 → version comparison passes
 # ---------------------------------------------------------------------------
-@test "AC-003: cargo metadata --locked resolves wasmtime and wasmtime-wasi to lockstep >= 48.0.4 and < 49.0.0" {
+@test "AC-003: cargo metadata --locked resolves wasmtime and wasmtime-wasi to lockstep >= 48.0.6 and < 49.0.0" {
   command -v jq >/dev/null 2>&1 || skip "jq required for cargo metadata JSON parsing"
 
   # Capture stdout and exit status separately from stderr — merging stderr into
@@ -148,12 +148,12 @@ setup() {
     minor=$(echo "$resolved_version" | cut -d. -f2)
     patch=$(echo "$resolved_version" | cut -d. -f3)
 
-    # Assert 48.0.4 <= version < 49.0.0
-    if [ "$major" -eq 48 ] && { [ "$minor" -gt 0 ] || [ "$patch" -ge 4 ]; }; then
+    # Assert 48.0.6 <= version < 49.0.0
+    if [ "$major" -eq 48 ] && { [ "$minor" -gt 0 ] || [ "$patch" -ge 6 ]; }; then
       :
     else
-      echo "FAIL: $pkg resolved to $resolved_version, expected >= 48.0.4 and < 49.0.0"
-      echo "(ADR-035 v1.2 Decision 6: RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 are not patched below 48.0.4)"
+      echo "FAIL: $pkg resolved to $resolved_version, expected >= 48.0.6 and < 49.0.0"
+      echo "(ADR-035 v1.2 Decision 6: RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 and RUSTSEC-2026-0352..0364 are not patched below 48.0.6)"
       return 1
     fi
     versions="$versions $resolved_version"
@@ -207,7 +207,8 @@ setup() {
 
   local failed=0
   for advisory in RUSTSEC-2026-0188 RUSTSEC-2026-0222 RUSTSEC-2026-0204 RUSTSEC-2026-0190 RUSTSEC-2025-0052 \
-    RUSTSEC-2026-0316 RUSTSEC-2026-0314 RUSTSEC-2026-0321 RUSTSEC-2026-0322 RUSTSEC-2026-0323 RUSTSEC-2026-0324 RUSTSEC-2026-0327; do
+    RUSTSEC-2026-0316 RUSTSEC-2026-0314 RUSTSEC-2026-0321 RUSTSEC-2026-0322 RUSTSEC-2026-0323 RUSTSEC-2026-0324 RUSTSEC-2026-0327 \
+    RUSTSEC-2026-0352 RUSTSEC-2026-0353 RUSTSEC-2026-0354 RUSTSEC-2026-0355 RUSTSEC-2026-0356 RUSTSEC-2026-0357 RUSTSEC-2026-0358 RUSTSEC-2026-0359 RUSTSEC-2026-0361 RUSTSEC-2026-0362 RUSTSEC-2026-0363 RUSTSEC-2026-0364; do
     if echo "$output" | grep -qF "$advisory"; then
       echo "FAIL: $advisory still present in cargo deny output"
       failed=1

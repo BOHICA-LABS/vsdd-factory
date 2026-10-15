@@ -119,7 +119,7 @@ fn semver_lt(version: &str, max_exclusive: (u64, u64, u64)) -> bool {
 }
 
 /// ADR-035 v1.2 §Decision 6 floor: wasmtime and wasmtime-wasi MUST be in
-/// lockstep (identical version), >= 48.0.4 and < 49.0.0. Pure function over
+/// lockstep (identical version), >= 48.0.6 and < 49.0.0. Pure function over
 /// Cargo.lock content so the guard itself can be exercised against fixtures.
 fn check_wasmtime_lockstep_floor(lock_content: &str) -> Result<String, String> {
     // Require EXACTLY ONE entry per package: a first-match parse over a lock
@@ -139,9 +139,9 @@ fn check_wasmtime_lockstep_floor(lock_content: &str) -> Result<String, String> {
     let wasmtime = single("wasmtime")?;
     let wasi = single("wasmtime-wasi")?;
     for (name, v) in [("wasmtime", &wasmtime), ("wasmtime-wasi", &wasi)] {
-        if !semver_ge(v, (48, 0, 4)) || !semver_lt(v, (49, 0, 0)) {
+        if !semver_ge(v, (48, 0, 6)) || !semver_lt(v, (49, 0, 0)) {
             return Err(format!(
-                "{name} resolved to {v}, expected >= 48.0.4 and < 49.0.0"
+                "{name} resolved to {v}, expected >= 48.0.6 and < 49.0.0"
             ));
         }
     }
@@ -193,13 +193,13 @@ fn test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range() {
 }
 
 // ---------------------------------------------------------------------------
-// ADR-035 v1.2 §Decision 6: wasmtime + wasmtime-wasi lockstep, >= 48.0.4, < 49
+// ADR-035 v1.2 §Decision 6: wasmtime + wasmtime-wasi lockstep, >= 48.0.6, < 49
 // ---------------------------------------------------------------------------
 
 /// Version-floor regression guard for RUSTSEC-2026-0316, -0314, -0321, -0322,
-/// -0323, -0324 and -0327 (all patched in wasmtime >= 48.0.4), per ADR-035
-/// v1.2 §Decision 6. Both `wasmtime` and `wasmtime-wasi` in Cargo.lock MUST be
-/// the same version, >= 48.0.4 and < 49.0.0. The floor implies the earlier
+/// -0323, -0324, -0327 (patched in wasmtime >= 48.0.4) and RUSTSEC-2026-0352
+/// through -0364 (patched in wasmtime >= 48.0.6), per ADR-035 v1.2 §Decision 6. Both `wasmtime` and `wasmtime-wasi` in Cargo.lock MUST be
+/// the same version, >= 48.0.6 and < 49.0.0. The floor implies the earlier
 /// RUSTSEC-2026-0188/0222 range (>= 46.0.2), which stays asserted separately
 /// by `test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range`.
 #[test]
@@ -210,7 +210,7 @@ fn test_wasmtime_lockstep_satisfies_rustsec_2026_0316_set_floor() {
     if let Err(msg) = check_wasmtime_lockstep_floor(&content) {
         panic!(
             "ADR-035 v1.2 D6 floor gate FAILED: {msg} \
-             (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 are unpatched below 48.0.4)"
+             (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 and RUSTSEC-2026-0352..0364 are unpatched below 48.0.6)"
         );
     }
 }
@@ -226,13 +226,14 @@ fn test_wasmtime_lockstep_guard_rejects_vulnerable_fixtures() {
         )
     };
     assert!(check_wasmtime_lockstep_floor(&lock("48.0.3", "48.0.3")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.5", "48.0.5")).is_err());
     assert!(check_wasmtime_lockstep_floor(&lock("46.0.3", "46.0.3")).is_err());
     assert!(check_wasmtime_lockstep_floor(&lock("49.0.0", "49.0.0")).is_err());
-    assert!(check_wasmtime_lockstep_floor(&lock("48.0.5", "48.0.4")).is_err());
-    assert!(check_wasmtime_lockstep_floor(&lock("48.0.5", "46.0.3")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.6", "48.0.5")).is_err());
+    assert!(check_wasmtime_lockstep_floor(&lock("48.0.6", "46.0.3")).is_err());
     assert_eq!(
-        check_wasmtime_lockstep_floor(&lock("48.0.4", "48.0.4")),
-        Ok("48.0.4".to_string())
+        check_wasmtime_lockstep_floor(&lock("48.0.6", "48.0.6")),
+        Ok("48.0.6".to_string())
     );
     assert_eq!(
         check_wasmtime_lockstep_floor(&lock("48.1.0", "48.1.0")),
@@ -247,8 +248,8 @@ fn test_wasmtime_lockstep_guard_rejects_vulnerable_fixtures() {
 fn test_wasmtime_lockstep_guard_rejects_duplicate_entries() {
     let pkg =
         |name: &str, v: &str| format!("[[package]]\nname = \"{name}\"\nversion = \"{v}\"\n\n");
-    let wasi = pkg("wasmtime-wasi", "48.0.5");
-    let wt_wasi = pkg("wasmtime", "48.0.5");
+    let wasi = pkg("wasmtime-wasi", "48.0.6");
+    let wt_wasi = pkg("wasmtime", "48.0.6");
 
     // wasmtime duplicated, healthy entry first.
     let lock = format!("{wt_wasi}{}{wasi}", pkg("wasmtime", "46.0.3"));
@@ -256,7 +257,7 @@ fn test_wasmtime_lockstep_guard_rejects_duplicate_entries() {
         check_wasmtime_lockstep_floor(&lock).expect_err("duplicate wasmtime must be rejected");
     assert!(err.contains("exactly one"), "unclear message: {err}");
     assert!(
-        err.contains("48.0.5") && err.contains("46.0.3"),
+        err.contains("48.0.6") && err.contains("46.0.3"),
         "must list all versions: {err}"
     );
 
@@ -266,12 +267,12 @@ fn test_wasmtime_lockstep_guard_rejects_duplicate_entries() {
         check_wasmtime_lockstep_floor(&lock).expect_err("duplicate wasmtime must be rejected");
     assert!(err.contains("exactly one"), "unclear message: {err}");
     assert!(
-        err.contains("48.0.5") && err.contains("46.0.3"),
+        err.contains("48.0.6") && err.contains("46.0.3"),
         "must list all versions: {err}"
     );
 
     // wasmtime-wasi duplicated, both orders.
-    for (a, b) in [("48.0.5", "46.0.3"), ("46.0.3", "48.0.5")] {
+    for (a, b) in [("48.0.6", "46.0.3"), ("46.0.3", "48.0.6")] {
         let lock = format!(
             "{wt_wasi}{}{}",
             pkg("wasmtime-wasi", a),
@@ -282,7 +283,7 @@ fn test_wasmtime_lockstep_guard_rejects_duplicate_entries() {
         assert!(err.contains("exactly one"), "unclear message: {err}");
         assert!(err.contains("wasmtime-wasi"), "must name package: {err}");
         assert!(
-            err.contains("48.0.5") && err.contains("46.0.3"),
+            err.contains("48.0.6") && err.contains("46.0.3"),
             "must list all versions: {err}"
         );
     }
