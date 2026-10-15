@@ -222,3 +222,46 @@ fn test_S_25_08_SEC_R3_001_control_umask_gate_detector_flags_planted_tokens() {
     let clean = "fn g() {}\n// umask is discussed only in a comment\nmod tests { fn t() { Command::new(\"x\"); } }";
     assert!(umask_discovery_hits(&production_code(clean)).is_empty());
 }
+
+/// Body of `fn <name>` in `src` (from the signature to the next top-level
+/// `\n}\n`), comments stripped.
+fn named_fn_body(src: &str, name: &str) -> String {
+    let start = src
+        .find(&format!("fn {name}"))
+        .unwrap_or_else(|| panic!("fn {name} not found"));
+    let rest = &src[start..];
+    let end = rest.find("\n}\n").map_or(rest.len(), |i| i + 3);
+    strip_line_comments(&rest[..end])
+}
+
+/// R4-WIN-ADS: on Windows `:` introduces an NTFS alternate data stream
+/// (`name:stream`), so `validate_temp_name_component` must reject it. The
+/// behavioural test is `cfg(windows)`; this Unix-runnable source gate makes
+/// CI on every OS verify the code path exists: the validator body must
+/// mention `':'` AND gate it on Windows (`cfg!(windows)` or `#[cfg(windows)]`).
+#[test]
+fn test_S_25_08_R4_WIN_ADS_validator_handles_colon_under_cfg_windows() {
+    let atomic = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../last-amended-migrate/src/atomic_write.rs"),
+    )
+    .expect("read atomic_write.rs");
+    let body = named_fn_body(&atomic, "validate_temp_name_component");
+    assert!(
+        body.contains("':'"),
+        "validate_temp_name_component must reject ':' (NTFS alternate data stream)"
+    );
+    assert!(
+        body.contains("cfg!(windows)") || body.contains("#[cfg(windows)]"),
+        "the ':' rejection must be gated on Windows (':' is a legal Unix filename byte)"
+    );
+}
+
+#[test]
+fn test_S_25_08_R4_WIN_ADS_control_named_fn_body_extractor_sees_planted_colon() {
+    let planted = "fn v(x: &str) -> bool {\n    // ':' only in a comment\n    cfg!(windows) && x.contains(':')\n}\n";
+    let body = named_fn_body(planted, "v");
+    assert!(body.contains("':'") && body.contains("cfg!(windows)"));
+    let only_comment =
+        "fn v(x: &str) -> bool {\n    // ':' only in a comment\n    x.is_empty()\n}\n";
+    assert!(!named_fn_body(only_comment, "v").contains("':'"));
+}

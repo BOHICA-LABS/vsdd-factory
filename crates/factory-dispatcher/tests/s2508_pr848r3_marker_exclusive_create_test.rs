@@ -22,7 +22,7 @@
 
 #![cfg(unix)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
@@ -148,4 +148,51 @@ fn test_S_25_08_PR848R3_CR_R2_004_marker_writer_fails_closed_when_all_current_ca
         "nothing may be written through any planted link"
     );
     assert!(!marker.exists(), "no marker on fail-closed");
+}
+
+/// R4-LEN: a very long `plugin_name` is interpolated into the marker's sibling
+/// temp name; the marker write must still succeed (today the temp create fails
+/// with ENAMETOOLONG, so the fail-closed INDETERMINATE marker could never be
+/// written for such a plugin). Required scheme (shared with
+/// `atomic_write::create_exclusive_temp_for_target_with`): when
+/// `.<marker>.<plugin>.tmp-<pid>-<nonce:016x>` would exceed 255 bytes the
+/// `<marker>.<plugin>` stem is truncated at a char boundary and suffixed with
+/// `-<fnv/siphash-of-full-stem:016x>`; the `<pid>-<nonce>` tail is untouched so
+/// the name stays unique and unpredictable. No leftover temp may remain.
+#[test]
+fn test_S_25_08_R4_LEN_marker_writer_succeeds_for_very_long_plugin_name() {
+    for plugin_name in ["p".repeat(300), "é".repeat(300), "a-b_c".repeat(120)] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("unvalidated-mutation.marker");
+        let mut f = fields();
+        f.plugin_name = plugin_name.clone();
+        let observed = RefCell::new(Vec::new());
+        let result = write_indeterminate_marker_with_suffix_fn(&f, &marker, || {
+            observed.borrow_mut().push(());
+            0xABCD
+        });
+        result.unwrap_or_else(|e| {
+            panic!(
+                "marker write must succeed for a {}-byte plugin name: {e:?}",
+                plugin_name.len()
+            )
+        });
+        assert!(
+            marker.exists(),
+            "marker must exist after a successful write"
+        );
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .expect("read_dir")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["unvalidated-mutation.marker".to_string()],
+            "no temp file may be left behind"
+        );
+        assert!(
+            !observed.borrow().is_empty(),
+            "suffix source must be consulted"
+        );
+    }
 }

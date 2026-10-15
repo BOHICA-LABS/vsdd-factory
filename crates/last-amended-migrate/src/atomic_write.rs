@@ -1799,4 +1799,157 @@ mod tests {
             }
         }
     }
+    // -----------------------------------------------------------------------
+    // S-25.08 PR #848 round-4 red tests (implementer contract).
+    // -----------------------------------------------------------------------
+
+    /// R4-WIN-ADS: on Windows, `:` in a name component introduces an NTFS
+    /// alternate data stream (`file:stream`), so the validator must reject any
+    /// `basename` or `kind` containing `:` with `InvalidInput`, before
+    /// anything is created. Required change: in `validate_temp_name_component`
+    /// treat `:` like a separator under `cfg!(windows)`. (On Unix `:` is a
+    /// legal filename byte and stays allowed; the Unix-side source gate
+    /// `test_S_25_08_R4_WIN_ADS_validator_handles_colon_under_cfg_windows` in
+    /// the factory-dispatcher crate checks the code path on every CI OS.)
+    #[cfg(windows)]
+    #[test]
+    fn test_S_25_08_R4_WIN_ADS_create_exclusive_temp_rejects_colon_in_basename_or_kind() {
+        for (basename, kind) in [
+            ("a:stream", "tmp"),
+            ("a.md", "t:mp"),
+            (":", "tmp"),
+            ("C:evil", "tmp"),
+            ("a.md::$DATA", "tmp"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let results = [
+                (
+                    "create_exclusive_temp",
+                    create_exclusive_temp(dir.path(), basename, kind),
+                ),
+                (
+                    "create_exclusive_temp_for_target",
+                    create_exclusive_temp_for_target(dir.path(), basename, kind, None),
+                ),
+                (
+                    "create_exclusive_temp_for_target_with",
+                    create_exclusive_temp_for_target_with(dir.path(), basename, kind, None, || 1),
+                ),
+            ];
+            for (name, res) in results {
+                match res {
+                    Ok((_, p)) => {
+                        panic!("{name}({basename:?}, {kind:?}) must reject ':', created {p:?}")
+                    }
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        std::io::ErrorKind::InvalidInput,
+                        "{name}({basename:?}, {kind:?}) must fail InvalidInput, got {e:?}"
+                    ),
+                }
+            }
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        }
+    }
+
+    /// Filesystem filename length bound enforced for generated temp names:
+    /// ext4/xfs/btrfs/APFS(UTF-8)/NTFS(UTF-16 units, but bytes is stricter)
+    /// all cap a single component at 255 bytes.
+    const R4_MAX_TEMP_NAME_BYTES: usize = 255;
+
+    fn r4_file_name_of(path: &Path) -> String {
+        path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    /// R4-LEN: for a very long `basename` the generated temp name must still
+    /// fit in `R4_MAX_TEMP_NAME_BYTES` (today the create fails with
+    /// ENAMETOOLONG). Required scheme (implementer):
+    ///
+    /// * the name keeps the documented shape
+    ///   `.<stem>.<kind>-<pid>-<nonce:016x>`; only `<stem>` changes;
+    /// * if the full documented name would exceed 255 bytes, `<stem>` becomes
+    ///   `<prefix>-<h:016x>` where `<h>` is a STABLE (fixed-key, NOT
+    ///   `RandomState`) 64-bit hash (e.g. FNV-1a 64 or `SipHasher13` with
+    ///   zero keys) of the FULL original basename, and `<prefix>` is the
+    ///   original basename truncated at a UTF-8 CHAR BOUNDARY to whatever
+    ///   length makes the total name exactly fit (<= 255 bytes);
+    /// * short names are left byte-for-byte unchanged (no hash);
+    /// * the `<pid>-<nonce>` tail is untouched, so the name stays unique per
+    ///   writer and unpredictable (the nonce still comes from `suffix_fn` /
+    ///   `unpredictable_suffix`); the stem hash only keeps different long
+    ///   basenames with a common prefix from colliding.
+    #[test]
+    fn test_S_25_08_R4_LEN_long_basename_temp_name_fits_filename_bound() {
+        for basename in [
+            "p".repeat(300),
+            "p".repeat(255),
+            "é".repeat(200), // 400 bytes, multi-byte: truncation must hit a char boundary
+            format!("{}.md", "x".repeat(250)),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (file, path) =
+                create_exclusive_temp_for_target_with(dir.path(), &basename, "tmp", None, || 7)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "basename of {} bytes must yield a valid temp: {e:?}",
+                            basename.len()
+                        )
+                    });
+            drop(file);
+            let name = r4_file_name_of(&path);
+            assert!(
+                name.len() <= R4_MAX_TEMP_NAME_BYTES,
+                "temp name is {} bytes (> {R4_MAX_TEMP_NAME_BYTES}): {name}",
+                name.len()
+            );
+            assert!(name.starts_with('.'), "{name}");
+            assert!(
+                name.ends_with(&format!("-{}-{:016x}", std::process::id(), 7u64)),
+                "pid/nonce tail must be preserved verbatim: {name}"
+            );
+            assert!(name.contains(".tmp-"), "kind must be preserved: {name}");
+        }
+    }
+
+    /// R4-LEN: two DIFFERENT long basenames sharing a >255-byte common prefix,
+    /// created with an identical pid and nonce, must still get DISTINCT temp
+    /// names (the stable full-basename hash disambiguates), and an identical
+    /// basename must map to an identical stem (hash is deterministic).
+    #[test]
+    fn test_S_25_08_R4_LEN_distinct_long_basenames_keep_distinct_temp_names() {
+        let common = "q".repeat(280);
+        let a = format!("{common}A");
+        let b = format!("{common}B");
+        let dir = tempfile::tempdir().unwrap();
+        let (fa, pa) = create_exclusive_temp_for_target_with(dir.path(), &a, "tmp", None, || 1)
+            .expect("first long basename");
+        let (fb, pb) = create_exclusive_temp_for_target_with(dir.path(), &b, "tmp", None, || 1)
+            .expect("second long basename, same pid + nonce");
+        drop((fa, fb));
+        assert_ne!(
+            pa, pb,
+            "distinct long basenames must not collide on one temp name"
+        );
+
+        let other = tempfile::tempdir().unwrap();
+        let (fa2, pa2) = create_exclusive_temp_for_target_with(other.path(), &a, "tmp", None, || 1)
+            .expect("same long basename again");
+        drop(fa2);
+        assert_eq!(
+            r4_file_name_of(&pa),
+            r4_file_name_of(&pa2),
+            "stem derivation must be deterministic (stable hash, not RandomState)"
+        );
+    }
+
+    /// R4-LEN: a short name is left exactly as documented (no hash, no
+    /// truncation).
+    #[test]
+    fn test_S_25_08_R4_LEN_short_basename_name_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, path) =
+            create_exclusive_temp_for_target_with(dir.path(), "t.md", "tmp", None, || 3).unwrap();
+        drop(file);
+        assert_eq!(path, candidate_for(dir.path(), "t.md", "tmp", 3));
+    }
 }
