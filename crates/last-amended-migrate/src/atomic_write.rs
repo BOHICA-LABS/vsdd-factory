@@ -38,6 +38,31 @@
 //!    final mode. Concurrent-creator caveat: a process that creates the
 //!    target after an absent capture is not observed, so the temp stays at
 //!    the umask default; see [`create_exclusive_temp_for_target`].
+//!
+//!    **Documented non-guarantees of the permission contract:**
+//!
+//!    - *Mode only; ownership is not preserved.* Only the permission bits
+//!      (`& 0o777`) of an overwritten target are carried over. The owner
+//!      (uid) and group (gid) of the replacement file are those of the
+//!      writing process (and the parent directory's group semantics), NOT
+//!      those of the file it replaces. No `fchown` is attempted.
+//!    - *`metadata()` follows symlinks.* The mode is captured with
+//!      `std::fs::metadata`, which follows a symlink at `path`, so the
+//!      captured mode is the symlink TARGET's mode. This is documented,
+//!      intentional behaviour. The final rename then replaces the symlink
+//!      entry itself with a regular file.
+//!    - *Windows ACLs/DACLs are not preserved.* On Windows the mode is
+//!      synthesized from the read-only flag only. A rewritten file is a new
+//!      NTFS file that inherits the PARENT directory's ACL; custom
+//!      ACEs/DACLs, owner and alternate data streams on the old file are
+//!      lost.
+//!    - *Windows read-only target.* If the target carries the read-only
+//!      attribute, the final rename onto it can fail (access denied). The
+//!      error is returned and the target is untouched; the failure path
+//!      removes the temp file best-effort, but if that removal also fails
+//!      (or the process dies) an orphaned `.<basename>.tmp-*` sibling can
+//!      remain. Orphans are inert; see "Crash behaviour" on
+//!      [`write_atomic`].
 //! 2. **fsync durability.** A `rename` that lands before the temp file's
 //!    written bytes are actually durable on disk (still sitting in a
 //!    filesystem write-back cache) leaves a crash window where `path` could

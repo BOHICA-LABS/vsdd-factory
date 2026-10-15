@@ -162,6 +162,12 @@ fn test_S_25_08_CR003_control_shared_admission_core_still_exposed_with_reservati
 // SEC-R3-001 source gate: the temp-mode path must not discover the umask via a
 // process spawn or /proc (no process spawn inside a dispatcher hook). The
 // single-capture design needs none of it.
+//
+// This gate is a REGRESSION TRIPWIRE, not a proof: it is a lexical scan for a
+// fixed token list over comment-stripped production source. It catches the
+// reintroduction of the known umask-discovery idioms; it cannot prove the
+// absence of every other way to read or probe the umask (renamed helpers,
+// FFI, string concatenation, other crates).
 // ---------------------------------------------------------------------------
 
 const UMASK_DISCOVERY_TOKENS: [&str; 5] = [
