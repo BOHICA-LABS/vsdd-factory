@@ -522,11 +522,15 @@ mod tests {
     /// stdout/stderr pipe write-end open; the drain-thread joins must be
     /// bounded so a timeout always returns.
     ///
-    /// No dependency beyond POSIX `sh`: `set -m` (monitor mode) gives the
-    /// background `sleep` its OWN process group, so `run_with_timeout`'s
+    /// Escape mechanism: the background child is `perl -e 'setpgrp(0,0); exec
+    /// @ARGV' sleep 60`, which moves itself into its OWN process group (then
+    /// execs `sleep`, keeping the same pid) so `run_with_timeout`'s
     /// process-group kill cannot reach it, while it still inherits the pipe.
-    /// The shell itself blocks in the `wait` builtin (a foreground `sleep` would
-    /// also get its own group under `set -m` and leak past the group kill).
+    /// This deliberately does NOT rely on shell job control (`set -m`): on
+    /// Debian/Ubuntu `/bin/sh` is dash, where `set -m` prints "can't access
+    /// tty; job control turned off" and the child stays in the shell's group.
+    /// `perl` is preinstalled on ubuntu-latest and macos-latest runners.
+    /// The shell blocks in the `wait` builtin.
     /// The scenario precondition is ASSERTED (pid file present, escaped child
     /// alive after the kill), never skipped, so the test cannot pass without
     /// exercising the escape.
@@ -561,7 +565,7 @@ mod tests {
         // Write to a temp name then rename, so a poller never reads a
         // half-written pid.
         let script = format!(
-            "set -m; sleep 60 & echo $! > '{pf}.tmp' && mv '{pf}.tmp' '{pf}'; wait",
+            "perl -e 'setpgrp(0,0); exec @ARGV' sleep 60 & echo $! > '{pf}.tmp' && mv '{pf}.tmp' '{pf}'; wait",
             pf = pid_file.display()
         );
         let args = vec!["-c".to_string(), script];
