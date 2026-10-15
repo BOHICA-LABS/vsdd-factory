@@ -198,7 +198,8 @@ fn test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range() {
 
 /// Version-floor regression guard for RUSTSEC-2026-0316, -0314, -0321, -0322,
 /// -0323, -0324, -0327 (patched in wasmtime >= 48.0.4) and RUSTSEC-2026-0352
-/// through -0364 (patched in wasmtime >= 48.0.6), per ADR-035 v1.2 §Decision 6. Both `wasmtime` and `wasmtime-wasi` in Cargo.lock MUST be
+/// through -0364 (patched in wasmtime >= 48.0.6), per ADR-035 v1.2
+/// §Decision 6. Both `wasmtime` and `wasmtime-wasi` in Cargo.lock MUST be
 /// the same version, >= 48.0.6 and < 49.0.0. The floor implies the earlier
 /// RUSTSEC-2026-0188/0222 range (>= 46.0.2), which stays asserted separately
 /// by `test_wasmtime_version_satisfies_rustsec_2026_0188_patched_range`.
@@ -210,7 +211,8 @@ fn test_wasmtime_lockstep_satisfies_rustsec_2026_0316_set_floor() {
     if let Err(msg) = check_wasmtime_lockstep_floor(&content) {
         panic!(
             "ADR-035 v1.2 D6 floor gate FAILED: {msg} \
-             (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 and RUSTSEC-2026-0352..0364 are unpatched below 48.0.6)"
+             (RUSTSEC-2026-0316/0314/0321/0322/0323/0324/0327 and \
+             RUSTSEC-2026-0352..0359/0361..0364 are unpatched below 48.0.6)"
         );
     }
 }
