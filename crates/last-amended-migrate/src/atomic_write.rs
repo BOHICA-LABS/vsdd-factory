@@ -448,10 +448,15 @@ pub fn create_exclusive_temp_for_target_with<F: FnMut() -> u64>(
 
 /// SEC-R3-004: `basename` and `kind` are interpolated into a sibling file
 /// name, so each must be a single plain name component: non-empty, no `/`
-/// (nor `\` on Windows), not `.` or `..`, no NUL. Rejected with
+/// (nor `\` or `:` on Windows), not `.` or `..`, no NUL. Rejected with
 /// `InvalidInput` before anything is created.
 fn validate_temp_name_component(what: &str, value: &str) -> std::io::Result<()> {
-    let has_separator = value.contains('/') || (cfg!(windows) && value.contains('\\'));
+    // R4-WIN-ADS: on Windows `:` introduces an NTFS alternate data stream
+    // (`name:stream`), so it is rejected there. On Unix `:` is a legal
+    // filename byte and stays allowed.
+    let has_separator = value.contains('/')
+        || (cfg!(windows) && value.contains('\\'))
+        || (cfg!(windows) && value.contains(':'));
     if value.is_empty() || value == "." || value == ".." || value.contains('\0') || has_separator {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -459,6 +464,58 @@ fn validate_temp_name_component(what: &str, value: &str) -> std::io::Result<()> 
         ));
     }
     Ok(())
+}
+
+/// Maximum length in bytes of a single generated temp file name (ext4, xfs,
+/// btrfs, APFS and NTFS all cap a path component at 255 bytes; bytes is the
+/// stricter measure).
+const TEMP_NAME_MAX_BYTES: usize = 255;
+
+/// Width of the `-<h:016x>` hash suffix appended to a truncated stem.
+const TEMP_STEM_HASH_SUFFIX_BYTES: usize = 17;
+
+/// FNV-1a 64-bit hash with the fixed standard offset basis and prime. Stable
+/// across processes and platforms (deliberately NOT `RandomState`), so equal
+/// basenames always derive equal stems.
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Build the temp file name `.<stem>.<kind>-<pid>-<nonce:016x>`. A name that
+/// fits in [`TEMP_NAME_MAX_BYTES`] is byte-identical to the documented shape.
+/// Otherwise `<stem>` becomes `<prefix>-<h:016x>` where `<h>` is the stable
+/// FNV-1a 64 hash of the FULL original `basename` and `<prefix>` is the
+/// basename truncated at a UTF-8 char boundary so the name exactly fits (as
+/// closely as char boundaries allow). The `<pid>-<nonce>` tail is untouched.
+fn build_temp_name(basename: &str, kind: &str, pid: u32, nonce: u64) -> std::io::Result<String> {
+    let tail = format!(".{kind}-{pid}-{nonce:016x}");
+    // Leading '.' + stem + tail.
+    let stem_budget = TEMP_NAME_MAX_BYTES.saturating_sub(1 + tail.len());
+    if basename.len() <= stem_budget {
+        return Ok(format!(".{basename}{tail}"));
+    }
+    if stem_budget <= TEMP_STEM_HASH_SUFFIX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "temp-file kind {kind:?} is too long to form a name within {TEMP_NAME_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    let mut cut = stem_budget - TEMP_STEM_HASH_SUFFIX_BYTES;
+    while !basename.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    Ok(format!(
+        ".{}-{:016x}{tail}",
+        &basename[..cut],
+        fnv1a_64(basename.as_bytes())
+    ))
 }
 
 fn create_temp_with_mode<F: FnMut() -> u64>(
@@ -472,11 +529,12 @@ fn create_temp_with_mode<F: FnMut() -> u64>(
     validate_temp_name_component("kind", kind)?;
     let mut last_err = None;
     for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
-        let candidate = parent.join(format!(
-            ".{basename}.{kind}-{}-{:016x}",
+        let candidate = parent.join(build_temp_name(
+            basename,
+            kind,
             std::process::id(),
-            suffix_fn()
-        ));
+            suffix_fn(),
+        )?);
         let mut opts = OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
