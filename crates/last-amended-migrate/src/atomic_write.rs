@@ -1158,6 +1158,7 @@ mod tests {
         (f, calls)
     }
 
+    #[cfg(unix)]
     const VICTIM_ORIGINAL: &str = "VICTIM-ORIGINAL-CONTENT\n";
 
     /// Shared body for (a): plant a symlink at the FIRST candidate; the
@@ -1434,13 +1435,6 @@ mod tests {
     // S-25.08 PR #848 round-3 hardening tests (R3-B1, NB-B, SEC-R3-001/002/004).
     // -----------------------------------------------------------------------
 
-    /// `Debug` rendering of any value; lets a test inspect a result whose type
-    /// changes from `()` to `io::Result<()>` without a compile break.
-    #[cfg(unix)]
-    fn debug_of<T: std::fmt::Debug>(value: T) -> String {
-        format!("{value:?}")
-    }
-
     /// `File::create` probe mode in `dir` (umask-aware default).
     #[cfg(unix)]
     fn file_create_probe_mode(dir: &Path) -> u32 {
@@ -1508,15 +1502,12 @@ mod tests {
 
     /// NB-B: `apply_captured_mode` must SURFACE a failed fchmod instead of
     /// swallowing it. Failure injection: a read-only handle to `/dev/null`
-    /// (owned by root, so fchmod by an unprivileged user fails EPERM). The
-    /// result is inspected through its `Debug` form so this compiles against
-    /// both the current `()` return (red: prints `()`) and the required
-    /// `io::Result<()>` (green: prints `Err(..)`). Skips only when running as
-    /// a user permitted to chmod `/dev/null` (root).
+    /// (owned by root, so fchmod by an unprivileged user fails EPERM). Loudly
+    /// skipped (message on stderr, no assertion) when the effective uid may
+    /// chmod `/dev/null` (root), because then the injection cannot fail.
     #[cfg(unix)]
     #[test]
-    #[allow(clippy::unit_arg)] // `()` today, `io::Result<()>` after NB-B
-    fn test_S_25_08_R3_NB_B_apply_target_permissions_surfaces_fchmod_error() {
+    fn test_S_25_08_R3_NB_B_apply_captured_mode_surfaces_fchmod_error() {
         use std::os::unix::fs::MetadataExt;
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("t.md");
@@ -1524,18 +1515,17 @@ mod tests {
         let dev_null = File::open("/dev/null").unwrap();
         let me = std::fs::metadata(dir.path()).unwrap().uid();
         let owner = dev_null.metadata().unwrap().uid();
-        assert!(
-            me != 0 && owner != me,
-            "precondition: fchmod on /dev/null must be refused (uid {me}, /dev/null owner {owner})"
-        );
+        if me == 0 || owner == me {
+            eprintln!(
+                "SKIPPED test_S_25_08_R3_NB_B_apply_captured_mode_surfaces_fchmod_error: \
+                 uid {me} may fchmod /dev/null (owner {owner}); failure injection impossible"
+            );
+            return;
+        }
 
-        let shown = debug_of(apply_captured_mode(
-            &dev_null,
-            capture_target_mode(&target).unwrap(),
-        ));
         assert!(
-            shown.starts_with("Err("),
-            "a failed fchmod must be returned as Err, got {shown}"
+            apply_captured_mode(&dev_null, capture_target_mode(&target).unwrap()).is_err(),
+            "a failed fchmod must be returned as Err"
         );
     }
 
@@ -1594,9 +1584,15 @@ mod tests {
             let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
             assert_eq!(mode, expected, "{special:o} must mask to {expected:o}");
         }
-        // setuid is covered by the mandatory tests; do not pass vacuously on
-        // a platform where neither optional bit is settable without saying so.
+        // setuid is covered by the mandatory tests above; here at least ONE of
+        // setgid/sticky must have been settable (Linux: sticky; macOS: setgid),
+        // otherwise nothing was exercised and the test would pass vacuously.
         eprintln!("setgid/sticky cases exercised: {exercised}");
+        assert!(
+            exercised >= 1,
+            "no setgid/sticky case was exercised (exercised={exercised}); \
+             the special-bit masking was NOT verified"
+        );
     }
 
     /// SEC-R3-001 (single-capture contract): the target is stat'ed ONCE, before
@@ -1616,11 +1612,16 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let target = dir.path().join("cap.md");
             std::fs::write(&target, "old\n").unwrap();
-            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+            // 0o750 carries execute bits, so it can never equal the
+            // `File::create` default `0o666 & !umask` for ANY umask, and it
+            // differs from the 0o600 temp birth mode: the assertion is
+            // umask-independent.
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o750)).unwrap();
             let umask_default = file_create_probe_mode(dir.path());
-            assert!(
-                umask_default != 0o640 && umask_default != 0o600,
-                "precondition: umask default {umask_default:o} must differ from 0o640 and 0o600"
+            assert_eq!(
+                umask_default & 0o111,
+                0,
+                "File::create never sets exec bits"
             );
 
             let victim = target.clone();
@@ -1639,8 +1640,8 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
             let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
             assert_eq!(
-                mode, 0o640,
-                "[{label}] final mode must be the CAPTURED 0o640 (not umask default \
+                mode, 0o750,
+                "[{label}] final mode must be the CAPTURED 0o750 (not umask default \
                  {umask_default:o}, not 0o600), got {mode:o}"
             );
         }
@@ -1654,7 +1655,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("cap-strict.md");
         std::fs::write(&target, "old\n").unwrap();
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o750)).unwrap();
         let victim = target.clone();
         write_atomic_strict_durable_with_perms_fn(&target, "new\n", move |file, mode| {
             std::fs::remove_file(&victim).unwrap();
@@ -1663,7 +1664,7 @@ mod tests {
         .unwrap();
         let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
         assert_eq!(
-            mode, 0o640,
+            mode, 0o750,
             "captured mode must survive a vanished target, got {mode:o}"
         );
     }
