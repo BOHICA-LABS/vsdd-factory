@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-05-20T00:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "f1f857d"
+input-hash: "bdb8777"
 traces_to: STATE.md
 ---
 
@@ -3221,3 +3221,61 @@ NOT staged (scope control): `regression-state.json`, `sidecar-learning.md`.
 **Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `3fa646ed`); run `git -C .factory log -1` for the SHA.
 
 Summary: Registered the human-decided split of S-25.02 T-12 into NEW S-25.19 with ADR-052 v1.32/v1.33, 7 BCs, error-taxonomy v1.45, the VP set and the story / epic set (ARCH-INDEX v4.62, BC-INDEX v5.115, VP-INDEX v3.36, STORY-INDEX v4.502, E-25 v1.15, E-26 v1.7; 24 hash changes stored == computed), persisted S-25.09 LOCAL pass 5 verbatim (NOT CLEAN 0C/0H/2M/4L, streak 0/3, T-73..T-81 open), re-validated the two hook-chain bypasses, recorded L-BB-D1245 x13 and the expected-mid-edit-block lesson, and advanced STATE.md to v10.102.
+
+## Burst: STORY-CITE-SYNC-SET-S2501-S2504-S2505-S2506-S2513-S2519-BC7081-V13-BC3081-V141-REGISTRATION-BC-CITES-OWED-CLOSED-INVARIANT8-TRUTH-GAP-LESSON-PR848-R4-D1269 (2026-10-15)
+
+**Parent-commit:** `de625494` (the D-1268 burst). **Agent:** state-manager (single-commit TD-VSDD-053; D-1269; STATE.md v10.102→v10.103).
+
+**Adversary verdict:** none this burst (no adversary pass ran). Cascade state unchanged: S-25.09 LOCAL streak 0/3 after pass 5, fix round T-73..T-81 open; S-25.08 cascade CLOSED by human acceptance (D-1263).
+
+**Files touched (Dim-1): 29 unique files** (BC-3.08.001 and BC-7.08.001 are product-owner edits and the six stories are story-writer edits, registered by this burst; the state-manager's own edit to the BC / story files is the `input-hash:` line only; BC-INDEX, STORY-INDEX, STATE.md and the cycle files are state-manager edits)
+- specs/behavioral-contracts/ss-03/BC-3.08.001.md (v1.41)
+- specs/behavioral-contracts/ss-07/BC-7.08.001.md (v1.3)
+- specs/behavioral-contracts/BC-INDEX.md (v5.115 to v5.116: rows for BC-3.08.001 and BC-7.08.001, last_amended, changelog item)
+- stories/STORY-INDEX.md (v4.502 to v4.503: 6 cite-sync rows, 12 hash-only rows, `> v4.503` blockquote line with the S-XX.YY=hash parity tokens, last_amended, changelog item)
+- stories/S-25.01-dispatcher-indeterminate-outcome-layer1.md (v1.23)
+- stories/S-25.04-close-validate-factory-path-staging-zero-enforcement-gap.md (v2.1)
+- stories/S-25.05-rotate-changelog-crash-atomicity.md (v1.2)
+- stories/S-25.06-append-log-backfill-split-executor.md (v1.22)
+- stories/S-25.13-armed-activation-manifest-reader-writer-and-authorization-gate.md (v1.4)
+- stories/S-25.19-cohort-b-fail-closed-flip-calibrated-registry-entries-gated-on-live-append-log-backfill.md (v1.2)
+- stories/S-25.02-artifact-sharding-layer2.md (hash line only)
+- stories/S-25.03-bounded-validator-windows-layer3.md (hash line only)
+- stories/S-25.09-admission-v121-anchoring-diagnostics-and-neutral-entry-points.md (hash line only)
+- stories/S-25.10-hardened-intent-log-fixed-move-plan-and-completion-evidence.md (hash line only)
+- stories/S-25.11-fixed-canonical-move-plan-rename-and-completion-evidence.md (hash line only)
+- stories/S-25.12-decide-recovery-kani-h1b-runbook-and-sweep-closure.md (hash line only)
+- stories/S-25.14-completion-only-recovery-manifest-and-append-log-mirror.md (hash line only)
+- stories/S-25.15-branch-3-activation-manifest-guard-block.md (hash line only)
+- stories/S-25.17-pr848-admission-gate-dispatcher-leg-hardening-trust-anchor-release-cost-reservation-durability-block-header.md (hash line only)
+- stories/S-25.18-reservation-lifecycle-leak-hygiene-drain-stall-diagnostics-lock-grace-and-root-skip-test-convention.md (hash line only)
+- stories/S-26.06-route-dispatcher-diagnostics-through-internallog.md (hash line only)
+- stories/S-12.16-block-bash-mediated-writes-to-governed-factory-artifacts.md (hash line only)
+- stories/epics/E-25-validation-integrity.md (hash line only)
+- stories/epics/E-26-post-rc25-hook-hardening.md (hash line only)
+- STATE.md (v10.102 to v10.103; banner 302; Decisions Log row D-1269; Phase Progress row; checkpoint)
+- cycles/v1.0-brownfield-backfill/decision-log.md (D-1269)
+- cycles/v1.0-brownfield-backfill/lessons.md (two D-1269 lessons)
+- cycles/v1.0-brownfield-backfill/session-checkpoints.md (v10.102 archive)
+- cycles/v1.0-brownfield-backfill/burst-log.md (this entry)
+
+NOT staged (scope control): `regression-state.json`, `sidecar-learning.md`. Current Phase Steps archive: the D-1263 row (v10.96→v10.97) is evicted by the keep-last-5 window; its content lives in decision-log.md D-1263 and burst-log.md.
+
+**Codifications:** D-1269; lessons `[process-gap]` BC-3.08.001 Invariant 8 truth gap, and the three hook false-positive classes routed to S-26.07. CLOSED [D-1268-S2513-S2519-BC-CITES-OWED], [D-1268-BC7081-ANCHOR-WORDING-OWED]. NEW OPEN [D-1269-S2501-BC3081-V141-CITE-OWED] (story-writer; S-25.01 pins BC-3.08.001 v1.40, live v1.41), [D-1269-S2607-HOOK-DEFECTS-SCOPE-OWED] (story-writer; S-26.07 NOT edited by this burst).
+
+**Dim-2 (literal shell, captured output):**
+- `wc -l .factory/STATE.md` (run last, after the final STATE.md edit; the banner reads 302 and 500 - 302 = 198) printed the line recorded in the commit report, `302 .factory/STATE.md`.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_f_p1_001_real_state_md_banner_wc_passes` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.00s`.
+- `cargo test -q -p validate-state-structure test_BC_5_39_005_full_validation_against_real_state_md` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 64 filtered out; finished in 0.01s`.
+- `cargo test -q -p validate-cross-site-correspondence test_BC_corpus_version_sync` printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 6.27s`.
+- `cargo test -q -p validate-cross-site-correspondence test_BC_5_39_010_corpus_arm_b2_live_story_index_no_violations` first FAILED (18 catalog-versus-blockquote hash mismatches after the STORY-INDEX row edits: the Arm B2 parser takes the FIRST `S-XX.YY=hash` token in file order, which was the v4.502 line); fixed by the `S-XX.YY=hash` parity tokens on the new `> v4.503` line; then printed `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.00s`.
+- `compute-input-hash <file> --check` rc 0 (stored == computed) for BC-3.08.001, BC-7.08.001, BC-INDEX, STORY-INDEX, the six register stories, the 12 hash-only stories, E-25, E-26 and session-checkpoints.md. The story set needed a 3-round fixpoint with `compute-input-hash <file> --update` (18, 8, 0 changes).
+- `cargo run -q -p last-amended-migrate -- migrate --check` printed `mutated=false` for STORY-INDEX.md, BC-INDEX.md, ARCH-INDEX.md, VP-INDEX.md and STATE.md (eligibility=CurrentEntryOnly; no chain).
+
+**Dim-5:** counts UNCHANGED: draft 124, Total (active) 244, registered 264, BCs 2007, VPs 147, ADRs 54; no old-count propagation required. **Dim-6:** `last_amended` overwritten with the single current entry on BC-INDEX.md, STORY-INDEX.md and STATE.md (no `[Prior:` chain); the displaced v5.115 / v4.502 entries already exist in each `changelog:`; a new `changelog:` item prepended on BC-INDEX.md and STORY-INDEX.md. **Dim-7:** single commit; no --no-verify; no AI attribution; Edit/Write tools only for `.factory/` edits; `compute-input-hash --update` and read-only checks only.
+
+**Closes:** [D-1268-S2513-S2519-BC-CITES-OWED], [D-1268-BC7081-ANCHOR-WORDING-OWED]. **Opens:** [D-1269-S2501-BC3081-V141-CITE-OWED], [D-1269-S2607-HOOK-DEFECTS-SCOPE-OWED]. PostToolUse advisories (all writes landed): `validate-count-propagation` false positive on BC-INDEX edits ("'13 stories' in BC-INDEX.md but '19 stories' in STATE.md" with no literal "13 stories" in the file); FUEL_EXHAUSTED on large-file edits (STORY-INDEX.md, decision-log.md); expected mid-edit `validate-dispatch-advance` block on STATE.md until current_step cited D-1269, `validate-input-hash` on session-checkpoints.md until `--update`; all cured by finishing the Edit sequence.
+
+**Factory-artifacts commits:** this burst = one commit on `factory-artifacts` (parent `de625494`); run `git -C .factory log -1` for the SHA.
+
+Summary: Registered BC-3.08.001 v1.41 (Invariant 8 split 8a / 8b) and BC-7.08.001 v1.3 (BC-INDEX v5.116) and the story-writer cite-sync set (S-25.01 v1.23, S-25.04 v2.1, S-25.05 v1.2, S-25.06 v1.22, S-25.13 v1.4, S-25.19 v1.2; STORY-INDEX v4.503) with a hash fixpoint stored == computed, closed [D-1268-S2513-S2519-BC-CITES-OWED] and [D-1268-BC7081-ANCHOR-WORDING-OWED], recorded the Invariant 8 truth-gap lesson and the S-26.07 hook-defect scope items, recorded PR #848 round 4 status (orchestrator-stated), and advanced STATE.md to v10.103.

@@ -7,7 +7,7 @@ producer: state-manager
 timestamp: 2026-04-26T12:00:00Z
 cycle: v1.0-brownfield-backfill
 inputs: [STATE.md]
-input-hash: "f1f857d"
+input-hash: "bdb8777"
 traces_to: STATE.md
 ---
 
@@ -2447,4 +2447,6 @@ Archived by the D-1267 burst (v10.100→v10.101). Position at v10.100 (RESUMED; 
 
 Archived by the D-1268 burst (v10.101→v10.102). Position at v10.101 (RESUMED): E-25; S-25.08 v1.17 on `feature/S-25.08`, PR #848 OPEN, round 3 in progress (orchestrator-stated: test commits `f2a24e06..258d58fc`, implementer running; MERGE awaits CI green and the human); S-25.09 v1.10 @ `a3923ee0` LOCAL pass 4 NOT CLEAN (0C/0H/2M/4L, streak 0/3; T-67..T-71 open); the story-writer cite-sync set registered (STORY-INDEX v4.501, E-25 v1.14, E-26 v1.6); ARCH-INDEX v4.61, BC-INDEX v5.114, VP-INDEX v3.35. Verbatim via `git -C .factory show 3fa646ed:STATE.md` (the D-1267 commit). OPEN: [D-1267-S2508-ROUND2-SHA-OWED], [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1264-S1407-TEMPLATE-DRIFT-OWED], [D-1244-REVERIFY], [D-1266-PR-CI-FACTORY-TIP-COUPLING] (human), PR #769.
 
-**See STATE.md v10.102 for the current checkpoint.**
+Archived by the D-1269 burst (v10.102→v10.103). Position at v10.102 (RESUMED): E-25; S-25.08 v1.18 on `feature/S-25.08`, PR #848 OPEN, round 3 in progress (orchestrator-stated: local fix commits through `2bb0ab8e`, devops push in progress, CI no-fail-fast `73b6ae84`; MERGE awaits CI green and the human); S-25.09 v1.13 @ `1edac860` LOCAL pass 5 NOT CLEAN (0C/0H/2M/4L, streak 0/3; fix round T-73..T-81 open); the human-decided S-25.02 T-12 split into NEW S-25.19 registered; ARCH-INDEX v4.62, BC-INDEX v5.115, VP-INDEX v3.36, STORY-INDEX v4.502. Verbatim via `git -C .factory show de625494:STATE.md` (the D-1268 commit). OPEN: [D-1268-S2513-S2519-BC-CITES-OWED], [D-1268-BC7081-ANCHOR-WORDING-OWED], [D-1257-POLICY19-SCOPE], [D-1254-RELEASE-GATING], [D-1254-ADR052-SPLIT], [D-1255-CHANGELOG-PINS], [D-1255-ADV-DEFERRED], [D-1258-S2509-PASS3-OWED], [D-1264-S1407-TEMPLATE-DRIFT-OWED], [D-1244-REVERIFY], [D-1266-PR-CI-FACTORY-TIP-COUPLING] (human), PR #769.
+
+**See STATE.md v10.103 for the current checkpoint.**
