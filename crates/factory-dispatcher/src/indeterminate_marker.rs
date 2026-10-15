@@ -22,9 +22,8 @@
 //!
 //! All non-trivial function bodies use `todo!()`. Implementer fills in real logic.
 
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 
@@ -78,8 +77,8 @@ pub struct MarkerFields {
 /// Atomically write the unvalidated-mutation marker file via write-to-temp + rename.
 ///
 /// Algorithm (BC-1.18.001 postcondition 4 + invariant 3):
-/// 1. Compute temp path: `<marker_path>.tmp` in the same directory as `marker_path`.
-/// 2. Serialize the six required TOML fields to the temp file (O_CREAT | O_WRONLY | O_TRUNC).
+/// 1. Exclusively create (`create_new`) a uniquely-named sibling temp file in the same directory as `marker_path`.
+/// 2. Serialize the six required TOML fields to the temp file.
 /// 3. Atomically rename the temp file to `marker_path`.
 ///
 /// Single-marker policy: if a marker already exists, the rename overwrites it (last-writer-wins).
@@ -91,37 +90,64 @@ pub struct MarkerFields {
 /// Returns `io::Error` if the temp-file write or rename fails (EC-008).
 /// The caller emits the `plugin.indeterminate` event regardless of whether this write succeeds.
 pub fn write_indeterminate_marker(fields: &MarkerFields, marker_path: &Path) -> io::Result<()> {
-    // Compute the temp path in the same directory (atomic rename invariant).
-    // L-1 fix (S-25.01 adversary): use a unique suffix so concurrent writers from
-    // same-tier plugins do not collide on a shared `.tmp` name (ENOENT race on rename).
-    // Uniqueness: plugin_name + process_id + monotonic nonce → last-writer-wins still holds
-    // because each writer renames ITS OWN temp file to the shared final path; the final
-    // rename is still atomic (BC-1.18.001 INV3 preserved).
-    static WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
-    let nonce = WRITE_NONCE.fetch_add(1, Ordering::Relaxed);
-    let pid = std::process::id();
-    // Sanitize plugin_name for filename safety: keep alphanumeric, hyphen, underscore.
-    let safe_plugin: String = fields
-        .plugin_name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let file_name = marker_path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("unvalidated-mutation.marker");
-    let tmp_name = format!("{file_name}.{safe_plugin}.{pid}.{nonce}.tmp");
-    let tmp_path = marker_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join(&tmp_name);
+    write_indeterminate_marker_with_suffix_fn(
+        fields,
+        marker_path,
+        last_amended_migrate::atomic_write::unpredictable_suffix,
+    )
+}
 
+/// Suffix-injectable core of [`write_indeterminate_marker`] (S-25.08 PR #848
+/// CR-R2-004 test seam): `suffix_fn` supplies the temp-name nonce, called once
+/// per exclusive-create attempt. Production always passes the unpredictable
+/// source; tests pass a deterministic one to plant symlinks at the exact
+/// candidate names. The temp name stays
+/// `.<file>.<plugin>.tmp-<pid>-<suffix:016x>`.
+#[doc(hidden)]
+pub fn write_indeterminate_marker_with_suffix_fn<F: FnMut() -> u64>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    suffix_fn: F,
+) -> io::Result<()> {
+    write_indeterminate_marker_core(
+        fields,
+        marker_path,
+        suffix_fn,
+        last_amended_migrate::atomic_write::apply_captured_mode,
+    )
+}
+
+/// Permission-apply-injectable variant of [`write_indeterminate_marker`]
+/// (S-25.08 PR #848 NB-B test seam): `perms_fn` is called once on the open
+/// temp handle with the mode captured from the marker's final path (`None` when it did not exist). A failure removes the temp and
+/// is returned, leaving any existing marker untouched.
+#[doc(hidden)]
+pub fn write_indeterminate_marker_with_perms_fn<P>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    perms_fn: P,
+) -> io::Result<()>
+where
+    P: FnOnce(&std::fs::File, Option<u32>) -> io::Result<()>,
+{
+    write_indeterminate_marker_core(
+        fields,
+        marker_path,
+        last_amended_migrate::atomic_write::unpredictable_suffix,
+        perms_fn,
+    )
+}
+
+fn write_indeterminate_marker_core<F, P>(
+    fields: &MarkerFields,
+    marker_path: &Path,
+    suffix_fn: F,
+    perms_fn: P,
+) -> io::Result<()>
+where
+    F: FnMut() -> u64,
+    P: FnOnce(&std::fs::File, Option<u32>) -> io::Result<()>,
+{
     // Serialize 6 mandatory TOML fields via the `toml` crate (Library table mandate).
     // toml::to_string correctly escapes all control characters including \n, \r, \t, etc.
     // Field insertion order preserved via BTreeMap (deterministic output).
@@ -155,13 +181,64 @@ pub fn write_indeterminate_marker(fields: &MarkerFields, marker_path: &Path) -> 
     let content = toml::to_string(&table)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
-    // Write to temp file (O_CREAT | O_WRONLY | O_TRUNC semantics via fs::write).
-    std::fs::write(&tmp_path, content.as_bytes())?;
+    // S-25.08 PR #848 SEC-002-N4 (CWE-59/CWE-377): stage the marker through the shared
+    // exclusive-create helper (`create_new`/`O_EXCL`, unpredictable suffix, bounded retry
+    // on AlreadyExists, then fail closed) instead of `std::fs::write`, which follows a
+    // symlink planted at a predictable temp name. The temp name is unique per writer
+    // (`.<marker>.<plugin>.tmp-<pid>-<nonce>`), so last-writer-wins on the final rename
+    // still holds (BC-1.18.001 INV3) and removal below can never race a different
+    // writer's temp file.
+    let parent = marker_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = marker_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("unvalidated-mutation.marker");
+    // Sanitize plugin_name for filename safety: keep alphanumeric, hyphen, underscore.
+    let safe_plugin: String = fields
+        .plugin_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // Single capture: ONE metadata call on the marker path, before the temp exists.
+    let captured_mode = last_amended_migrate::atomic_write::capture_target_mode(marker_path)?;
+    let (mut tmp_file, tmp_path) =
+        last_amended_migrate::atomic_write::create_exclusive_temp_for_target_with(
+            parent,
+            &format!("{file_name}.{safe_plugin}"),
+            "tmp",
+            captured_mode,
+            suffix_fn,
+        )?;
+    // Existing semantics preserved: plain write then rename (no fsync was ever performed
+    // here); on a write failure, best-effort remove the temp file we just created.
+    if let Err(e) = tmp_file.write_all(content.as_bytes()) {
+        drop(tmp_file);
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    // BLOCKING-1: apply the marker's FINAL permissions on the SUCCESS path, through the
+    // open handle, before the rename. A new marker keeps the default creation mode it was
+    // born with; an overwritten marker takes the mode captured before temp creation (the
+    // temp is born 0o600). The marker path is never stat'ed again.
+    if let Err(e) = perms_fn(&tmp_file, captured_mode) {
+        drop(tmp_file);
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    drop(tmp_file);
 
     // Atomic rename temp → final path (single-marker policy: overwrites existing).
     // F-P3-004: a failed rename must not orphan the uniquely-named temp file it
     // just wrote — best-effort cleanup before propagating the rename error. The
-    // temp path is unique per writer (plugin_name + pid + nonce), so removal here
+    // temp path is unique per writer (plugin_name + pid + unpredictable nonce), so removal here
     // can never race a DIFFERENT writer's own temp file.
     //
     // `rename_with_retry` (not a bare `std::fs::rename`) — TD-VSDD-060

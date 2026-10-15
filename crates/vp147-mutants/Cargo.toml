@@ -1,0 +1,35 @@
+[package]
+name = "vp147-mutants"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Durable VP-147 mutation runner: applies each checked-in mutant to an isolated git worktree, runs its killing Kani harness(es) or cargo test targets, and classifies KILLED / SURVIVED / INVALID from exit status and parsed result lines (S-25.08 T-12, D-1252-OWED; POLICY 21-compliant Rust, no shell)"
+publish = false
+
+# Standalone native CLI binary -- NOT a WASM hook plugin. Like
+# crates/last-amended-migrate it has no vsdd-hook-sdk dependency, is not built
+# for wasm32-wasip1, and is invoked directly by an operator, an
+# orchestrator-dispatched formal-verifier, or the workflow_dispatch-only
+# `.github/workflows/vp147-mutants.yml`. [lib] carries the testable pure logic
+# (spec parsing, single-match substitution, verdict classification); [[bin]]
+# is the entry point.
+[lib]
+name = "vp147_mutants"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vp147-mutants"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

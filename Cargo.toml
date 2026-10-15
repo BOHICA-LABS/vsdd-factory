@@ -55,6 +55,7 @@ members = [
     "crates/sink-honeycomb",
     "crates/sink-http",
     "crates/sink-otel-grpc",
+    "crates/vp147-mutants",
     "crates/vsdd-context-resolvers",
 ]
 

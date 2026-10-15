@@ -3214,12 +3214,12 @@ fn test_BC_1_18_008_FC3P6001_PC3_run_backfill_split_publishes_backfill_recovery_
 //
 // The two tests below drive it via a REAL, non-simulated disk race against
 // `write_atomic`'s own sibling temp file (`last-amended-migrate/src/
-// atomic_write.rs`'s documented `.{basename}.tmp-{pid}` naming convention,
-// `pid` deterministically known via `std::process::id()`): a background
+// atomic_write.rs`'s `.{basename}.tmp-{pid}-{nonce}` naming convention,
+// matched by a directory scan on the `.{basename}.tmp-{pid}-` prefix): a background
 // thread busy-polls for that temp file's appearance and overwrites its
 // on-disk content with corrupt bytes for as long as it exists before
 // `write_atomic`'s own atomic `rename` consumes it. Because
-// `write_and_sync_temp` (`File::create` + `write_all` + `sync_all`) is real
+// `write_and_sync_temp` (exclusive `create_new` temp handle + `write_all` + `sync_all`) is real
 // disk I/O -- the `sync_all` fsync durability step in particular
 // (S-15.03 N2) -- against a tight, syscall-driven polling loop with no
 // deliberate sleep, this reliably lands the corrupting write on the temp
@@ -3260,14 +3260,22 @@ fn spawn_temp_file_corruptor(
         .expect("sealed_path must have a filename")
         .to_string_lossy()
         .into_owned();
-    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+    // S-25.08 PR #848 SEC-002: `write_atomic`'s temp name is now
+    // `.{basename}.tmp-{pid}-{nonce}` with an unpredictable nonce, so the
+    // corruptor scans the parent directory for the prefix instead of
+    // polling one deterministic path.
+    let tmp_prefix = format!(".{basename}.tmp-{}-", std::process::id());
 
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop_for_thread = std::sync::Arc::clone(&stop);
     let handle = std::thread::spawn(move || {
         while !stop_for_thread.load(std::sync::atomic::Ordering::Relaxed) {
-            if tmp_path.exists() {
-                let _ = std::fs::write(&tmp_path, &corrupt_bytes);
+            if let Ok(entries) = std::fs::read_dir(&parent) {
+                for entry in entries.flatten() {
+                    if entry.file_name().to_string_lossy().starts_with(&tmp_prefix) {
+                        let _ = std::fs::write(entry.path(), &corrupt_bytes);
+                    }
+                }
             }
         }
     });

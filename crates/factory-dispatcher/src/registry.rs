@@ -80,6 +80,27 @@ pub enum RegistryError {
     },
 }
 
+/// The dispatcher exit code for a registry load error (BC-7.06.001
+/// §Fail-Closed Symmetry; BC-1.08.001 Invariants 1/2).
+///
+/// `SchemaVersion`, `AsyncBlockConflict` and `DuplicateEntry` fail CLOSED
+/// (exit 2, ADR-019 Decision 2); `NotFound`, `Io`, `Toml` and `ToolRegex` fail
+/// OPEN (exit 0, BC-1.08.001). The match is an EXPLICIT variant list with NO
+/// wildcard arm, so a future `RegistryError` variant must be classified here at
+/// compile time instead of silently failing open.
+#[must_use]
+pub fn registry_error_exit_code(error: &RegistryError) -> i32 {
+    match error {
+        RegistryError::SchemaVersion { .. }
+        | RegistryError::AsyncBlockConflict { .. }
+        | RegistryError::DuplicateEntry { .. } => 2,
+        RegistryError::NotFound(_)
+        | RegistryError::Io(_)
+        | RegistryError::Toml(_)
+        | RegistryError::ToolRegex { .. } => 0,
+    }
+}
+
 /// Outcome for a plugin that returns `Error` or crashes. `Continue` is
 /// the default; operators opt into hard-stop behavior per plugin.
 ///

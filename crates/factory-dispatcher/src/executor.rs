@@ -413,206 +413,185 @@ pub fn shard_cap_precheck(
     ))
 }
 
-/// BC-1.18.011 Precondition 6(b)/(c) — native OPEN/DRAINING writer-
-/// admission precheck for the BC-1.18.011 governed one-time B2 migration
-/// (S-25.02 cluster-5, T-11; ADR-052 §Decision 5a). Structurally mirrors
-/// [`shard_cap_precheck`] immediately above it: a `PreToolUse`-only,
-/// non-WASM native check consulted before the registry-driven plugin loop
-/// (Invariant 1 precedent), short-circuiting to `None` for every dispatch
-/// that is not a genuine mutation-tool candidate against a BC-INDEX path
-/// with migration state present on disk.
+/// The result of evaluating the shared admission core once for a PreToolUse
+/// event ([`bc_index_migration_admission`]).
+#[derive(Debug)]
+#[must_use = "dropping a MigrationAdmission silently discards its admission reservation; bind it for the dispatch duration or consume it explicitly"]
+pub struct MigrationAdmission {
+    /// The native gate's verdict: `None` = admitted / out of scope; `Some(Block)`
+    /// = `E-MAINTENANCE-001`; `Some(Error)` = the admission check itself failed
+    /// (fail-closed).
+    pub verdict: Option<vsdd_hook_sdk::HookResult>,
+    /// The reservation file this admission created and left standing (admitted
+    /// event carrying a `tool_use_id`). The dispatcher removes it before exiting
+    /// if a LATER stage of the same dispatch blocks or errors (release-on-block,
+    /// ADR-052 §5a); otherwise PostToolUse removes it.
+    pub reservation: Option<std::path::PathBuf>,
+}
+
+/// BC-1.18.011 Precondition 6(b)/(c)/(d) + BC-1.18.013 Precondition 6(b)/(c) —
+/// the dispatcher's native OPEN/DRAINING writer-admission gate, evaluated by
+/// `main.rs` EXACTLY ONCE per PreToolUse event, structurally AHEAD of
+/// [`shard_cap_precheck`] and every registry plugin (ADR-052 §5a "Shared
+/// protected-path union and shared admission state").
 ///
-/// **FULLY IMPLEMENTED (S-25.02 cluster-5, T-11):** this function's body is
-/// real, load-bearing production logic, not a stub — see the call-site
-/// wiring in `main.rs` (computed exactly once alongside
-/// `shard_gate_precheck_result`, before `build_engine()`, via
-/// [`crate::executor::resolve_shard_gate_precedence`]). The ADR-052
-/// §Decision 5a admission logic it delegates to
-/// (`shard_manager::admit_or_block_bc_index_writer`,
-/// `shard_manager::reconcile_stale_admission_gate`) is likewise fully
-/// implemented in `shard_manager.rs`.
+/// This is a thin, non-WASM native entry point: every decision lives in the
+/// ONE shared admission core ([`crate::shard_manager::admit_protected_write`]),
+/// which both governed migrations share. Scope guards, in order (cheap checks
+/// first; the only filesystem access before the core is the `.factory`
+/// directory `metadata()` check and the symlink-aware `lstat` walk of
+/// `resolve_target_path`; no migration-state read happens for an out-of-scope
+/// write):
 ///
-/// Unlike `shard_cap_precheck`, this gate additionally covers `Bash`
-/// dispatches whose write effect targets `.factory/specs/behavioral-
-/// contracts/` or `.factory/cycles/` (ADR-052 §Decision 5a "Bash admission
-/// and reservation") — the `^Bash$` full-command pre-shell classifier
-/// (§Decision 5c) is a SEPARATE guard from this function and is not
-/// implemented here; this function's own tool-kind guard below covers only
-/// the `Edit`/`Write`/`MultiEdit` admission path, matching
-/// `shard_cap_precheck`'s own scoping. The `Bash`-classifier arm is a
-/// distinct, not-yet-scheduled piece of this ADR's guard stack (S-25.02
-/// cluster-5 explicitly excludes it — see the cluster-5 fix-burst scope
-/// note; not reintroduced here).
+/// * PreToolUse only;
+/// * tools `Edit` / `Write` / `MultiEdit` ONLY — `Bash` is left UNPROCESSED
+///   (no decision, no reservation, no state read or write): the write-effect
+///   `Bash` leg is the separately tracked [D-1232-OBL-4] §5c classifier, and
+///   leaving `Bash` alone means the coordinator's own closed-grammar invocation
+///   can never self-deadlock through this gate (EC-014);
+/// * a usable `file_path` (missing / non-string / empty / NUL-containing is out
+///   of scope, not an error);
+/// * the session's own `<project_root>/.factory` exists as a directory (never
+///   created) — the gate guards exactly ONE factory root per dispatch;
+/// * the target (lexical AND symlink-resolved forms, component-wise and
+///   case-insensitively) is inside `<factory_root>/specs/behavioral-contracts` ∪
+///   `<factory_root>/cycles`; any other path (another project's `.factory`, a
+///   look-alike, `.factory/STATE.md`) is never gated;
+/// * NO `migration-state/` existence guard: the namespace is created
+///   idempotently by the core (BC-1.18.013 EC-020), so a pre-directory writer is
+///   tracked and visible to a coordinator's first drain.
 ///
-/// The `.factory/migration-state/` presence guard below is the same real
-/// short-circuit `shard_cap_precheck`'s own real `shard_config_path
-/// .exists()` check mirrors immediately above it: for every dispatch with
-/// no `.factory/migration-state/` directory on disk (the common case — no
-/// migration ever activated), this function returns `None` immediately,
-/// without evaluating any admission logic at all.
-pub fn bc_index_migration_admission_precheck(
+/// A payload with no `tool_use_id` (absent or JSON `null`) degrades to a
+/// check-only admission (a PRESENT but invalid id fails closed with
+/// `E-MAINTENANCE-002`): no reservation is created, so that write proceeds untracked by the drain
+/// procedure — a deliberate non-blocking degradation backstopped by §7c step-5's
+/// pre-commit fingerprint recheck, never a fabricated key.
+pub fn bc_index_migration_admission(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
-) -> Option<vsdd_hook_sdk::HookResult> {
+) -> MigrationAdmission {
+    let admitted = |reservation| MigrationAdmission {
+        verdict: None,
+        reservation,
+    };
+    let out_of_scope = || admitted(None);
+
     if EventType::from_event_str(&payload.event_name) != EventType::PreToolUse {
-        return None;
+        return out_of_scope();
     }
-
-    let tool_name = payload.tool_name.as_str();
-    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit") {
-        return None;
+    if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
+        return out_of_scope();
     }
-
-    let migration_state_dir = cwd.join(".factory/migration-state");
-    if !migration_state_dir.exists() {
-        return None;
-    }
-
-    // In-scope ONLY for a dispatch that targets `.factory/specs/behavioral-
-    // contracts/` or `.factory/cycles/` — everything else (an unrelated
-    // Edit/Write) stays out of this gate's scope even while a migration
-    // txn is in flight.
-    let target_path = payload
+    // Input guards (ADR-052 §5a "Target path resolution" (a)): a missing,
+    // non-string, empty or NUL-containing `file_path` is out of scope (the tool
+    // itself cannot write it) — not an error.
+    let Some(file_path) = payload
         .tool_input
         .get("file_path")
         .and_then(|v| v.as_str())
-        .map(std::path::PathBuf::from)?;
-    let normalized = target_path.to_string_lossy().replace('\\', "/");
-    let in_scope = normalized.contains(".factory/specs/behavioral-contracts")
-        || normalized.contains(".factory/cycles");
-    if !in_scope {
-        return None;
-    }
-
-    // NOTE (surfaced, not silently fixed — see final report): OBL-1's
-    // drain-procedure wiring (below, in `run_bc_index_migration`'s
-    // fresh-run branch) can leave the gate at DRAINING/LOCKED if the
-    // migration binary crashes or errors between the gate flip and the
-    // next covered abort/completion point.
-    // `shard_manager::reconcile_stale_admission_gate` already exists as
-    // the documented self-heal mechanism for exactly this case, and a
-    // full-crate grep confirms it is never called from anywhere in the
-    // real dispatch path today (dead code) — its own "self-heals by the
-    // next PreToolUse dispatch" doc-comment claim is therefore not
-    // actually true in production yet. Wiring it in here (the natural
-    // call site) was attempted in this burst but reverted: it broke
-    // `test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_precheck_never_runs_no_roll`,
-    // whose STAGING fixture (`write_migration_txn`) does not hold the
-    // `exclusive.lock` a live coordinator would hold — `reconcile_stale_
-    // admission_gate`'s Branch A/B then (correctly, per its own ratified
-    // spec) treats the fixture's generation-id-less STAGING record as an
-    // abandoned pre-generation crash and self-heals it to ABORTED+OPEN,
-    // which defeats that test's "still blocked while genuinely STAGING"
-    // scenario. This is a genuine pre-existing gap this burst's O-5
-    // wiring makes newly load-bearing (before this burst, a stuck gate
-    // had no automatic drain path TO get stuck from) — not something
-    // this burst's own change introduces net-new — but closing it safely
-    // requires the STAGING test fixture to first be updated to hold the
-    // lock (test-writer's domain, not implementer's), so it is left
-    // unwired here rather than silently breaking that test.
-    let gate_state = match crate::shard_manager::read_admission_gate_state(&migration_state_dir) {
-        Ok(state) => state,
-        Err(e) => {
-            return Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!(
-                    "BC-1.18.011: failed to read the BC-INDEX admission-gate state: {e}"
-                ),
-            });
-        }
+        .filter(|p| !p.is_empty() && !p.contains('\0'))
+    else {
+        return out_of_scope();
     };
-
-    // OBL-1 §4 fail-open structural fix (TD-VSDD-060 sibling-site sweep):
-    // this precheck previously duplicated its own ad hoc
-    // `matches!(txn.state, Staging | Committing)` check and NEVER
-    // consulted the persisted OPEN/DRAINING/LOCKED gate state at all — a
-    // dispatch arriving during the drain window (gate flipped to DRAINING/
-    // LOCKED but no txn record created yet, e.g. a crash between
-    // `write_admission_gate_state(Draining)` and the txn-record write) was
-    // silently admitted.
-    //
-    // OBL-1 §5 (O-5 fold-in): when the real Claude Code PreToolUse envelope
-    // carries `tool_use_id` (captured by `HookPayload::extra`'s
-    // `#[serde(flatten)]` catch-all — this dispatcher-native struct does
-    // not promote it to a named field), this precheck now calls
-    // `admit_or_block_bc_index_writer` directly: the SAME
-    // `is_bc_index_admission_open` classification this precheck used to
-    // duplicate ad hoc, PLUS (on admission) creation of the writer
-    // reservation `drain_bc_index_writers` polls for quiescence — closing
-    // the O-5 drain-wiring gap in the same call that fixes the fail-open
-    // gap, one shared call site instead of two independently-maintained
-    // checks.
-    //
-    // A payload with no `tool_use_id` (a malformed/non-conforming
-    // envelope, or a fixture/shape that predates this field) falls back to
-    // a check-only admission decision: no reservation is created, so this
-    // write proceeds untracked by the drain procedure. This is a
-    // deliberate non-blocking degradation, not a silently fabricated key —
-    // per the O-5 assessment's own conclusion, an untracked writer is
-    // "ACCEPTABLE-AS-IS for data integrity... no corruption path" because
-    // Postcondition 3a's TOCTOU fingerprint recheck independently
-    // backstops content integrity regardless of whether this specific
-    // writer was tracked by the drain procedure.
-    if let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) {
-        return match crate::shard_manager::admit_or_block_bc_index_writer(
-            &migration_state_dir,
-            tool_use_id,
-        ) {
-            Ok(()) => None,
-            Err(crate::shard_manager::BcIndexMigrationError::WriterAdmissionRefused { reason }) => {
-                Some(vsdd_hook_sdk::HookResult::Block {
-                    reason: format!("BC-1.18.011 E-MAINTENANCE-001: {reason}"),
-                })
-            }
-            Err(e) => Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!("BC-1.18.011: writer-admission check failed: {e}"),
-            }),
+    // The gate guards exactly ONE factory root per dispatch — the session's own
+    // `<project_root>/.factory` (must exist as a directory; NEVER created here).
+    // There is NO `.factory/migration-state/` existence guard: the namespace is
+    // created idempotently by the core (BC-1.18.013 EC-020), so a pre-directory
+    // writer is tracked and visible to a coordinator's first drain.
+    let mut factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
+        Ok(Some(root)) => root,
+        Ok(None) => {
+            tracing::debug!(
+                target: "bc_1_18_011_migration",
+                "no .factory directory under the project root: admission gate out of scope"
+            );
+            return out_of_scope();
+        }
+        // Unstatable `<project_root>/.factory` (ADR-052 §5a): whether the
+        // directory exists is UNKNOWN -> fail closed `E-MAINTENANCE-002 (io)`; no
+        // reservation exists yet and none is created.
+        Err(e) => return admission_error(&e),
+    };
+    // The harness spells `file_path`s with the project directory exactly as it
+    // gave it to us; when that differs lexically from the canonical `cwd` (a
+    // symlinked path component) the as-given spelling is a lexical alias of the
+    // same root (part of the fail-closed union).
+    if let Some(spelling) = std::env::var_os("CLAUDE_PROJECT_DIR")
+        .and_then(|raw| crate::shard_manager::as_given_factory_root_spelling(&raw))
+    {
+        factory_root.add_lexical_spelling(&spelling);
+    }
+    // A relative `file_path` (defensive; the harness sends absolute paths) is
+    // joined onto the payload's absolute `cwd`, else onto the project root; `~`
+    // is never expanded.
+    let base = payload
+        .extra
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| cwd.to_path_buf());
+    let target = base.join(file_path);
+    let (target_real, target_lex) = crate::shard_manager::resolve_target_path(&target);
+    let Some(family) = crate::shard_manager::ProtectedPathFamily::classify_target(
+        target_real.as_deref(),
+        &target_lex,
+        &factory_root,
+    ) else {
+        tracing::debug!(
+            target: "bc_1_18_011_migration",
+            "write target is outside the session's protected-path union: admitted, no state read"
+        );
+        return out_of_scope();
+    };
+    let tool_use_id =
+        match crate::shard_manager::classify_tool_use_id(payload.extra.get("tool_use_id")) {
+            Ok(id) => id,
+            Err(e) => return admission_error(&e),
         };
-    }
 
-    let active_txn = match crate::shard_manager::read_active_txn_record(
-        &crate::shard_manager::migration_fs::StdFs,
-        &migration_state_dir,
+    match crate::shard_manager::admit_protected_write(
+        &factory_root.migration_state_dir(),
+        tool_use_id,
+        family,
     ) {
-        Ok(txn) => txn,
-        Err(e) => {
-            return Some(vsdd_hook_sdk::HookResult::Error {
-                message: format!(
-                    "BC-1.18.011: failed to read the active BC-INDEX migration txn record: {e}"
-                ),
-            });
+        Ok(crate::shard_manager::AdmissionOutcome::Admitted { reservation }) => {
+            admitted(reservation)
         }
-    };
-
-    if crate::shard_manager::is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
-        return None;
+        Ok(crate::shard_manager::AdmissionOutcome::Blocked { message }) => MigrationAdmission {
+            verdict: Some(vsdd_hook_sdk::HookResult::Block {
+                reason: format!("E-MAINTENANCE-001: {message}"),
+            }),
+            reservation: None,
+        },
+        Err(e) => admission_error(&e),
     }
+}
 
-    let reason = match &active_txn {
-        Some(txn)
-            if matches!(
-                txn.state,
-                crate::shard_manager::BcIndexMigrationTxnState::Staging
-                    | crate::shard_manager::BcIndexMigrationTxnState::Committing
-            ) =>
-        {
-            format!(
-                "BC-1.18.011 E-MAINTENANCE-001: a governed BC-INDEX migration (txn {}, \
-                 state={:?}) is currently in flight — this write is refused; retry after the \
-                 migration completes",
-                txn.txn_id, txn.state
-            )
-        }
-        _ => format!(
-            "BC-1.18.011 E-MAINTENANCE-001: the BC-INDEX writer-admission gate is not OPEN \
-             (state={gate_state:?}) — this write is refused; retry once the gate self-heals or \
-             the current maintenance window completes"
-        ),
-    };
-    Some(vsdd_hook_sdk::HookResult::Block { reason })
+/// The fail-closed `E-MAINTENANCE-002` verdict (error-taxonomy): the
+/// single-line message carries only the `<cause>` token; the underlying detail
+/// (path, `io::Error`, byte length — never a raw `tool_use_id` or record
+/// content) goes to `tracing::warn!`.
+fn admission_error(e: &crate::shard_manager::BcIndexMigrationError) -> MigrationAdmission {
+    let cause = e.admission_failure_cause();
+    tracing::warn!(
+        target: "bc_1_18_011_migration",
+        cause,
+        // The error text can embed untrusted record content (e.g. a serde
+        // variant name): escape control characters and cap its length.
+        detail = crate::shard_manager::sanitize_diagnostic(&e.to_string(), 256),
+        "E-MAINTENANCE-002: writer-admission check failed"
+    );
+    MigrationAdmission {
+        verdict: Some(vsdd_hook_sdk::HookResult::Error {
+            message: format!("E-MAINTENANCE-002: writer-admission check failed ({cause})"),
+        }),
+        reservation: None,
+    }
 }
 
 /// OBL-1 §5 (O-5 fold-in) — PostToolUse counterpart to
-/// [`bc_index_migration_admission_precheck`]: releases the writer
+/// [`bc_index_migration_admission`]: releases the writer
 /// reservation the SAME `tool_use_id`'s PreToolUse admission created (if
 /// any), so [`crate::shard_manager::drain_bc_index_writers`]'s quiescence
 /// poll sees this dispatch as complete.
@@ -628,19 +607,60 @@ pub fn bc_index_migration_reservation_release(
     payload: &crate::payload::HookPayload,
     cwd: &std::path::Path,
 ) {
-    if EventType::from_event_str(&payload.event_name) != EventType::PostToolUse {
+    // Release on BOTH `PostToolUse` and `PostToolUseFailure`, keyed ONLY on the
+    // `tool_use_id` shared with the PreToolUse admission (no `tool_name` filter:
+    // a `PostToolUseFailure` envelope may omit or reshape it, and an id that was
+    // never reserved is a no-op anyway — ADR-052 §5a F-001).
+    if !crate::invoke::is_tool_completion_event(&payload.event_name) {
         return;
     }
-    if !matches!(payload.tool_name.as_str(), "Edit" | "Write" | "MultiEdit") {
-        return;
-    }
-    let migration_state_dir = cwd.join(".factory/migration-state");
-    if !migration_state_dir.exists() {
-        return;
-    }
-    let Some(tool_use_id) = payload.extra.get("tool_use_id").and_then(|v| v.as_str()) else {
+    // ADR-052 §5a "Release-leg evaluation order" step 2 (F-S2508-L6-004): an absent,
+    // non-string, or grammar-invalid `tool_use_id` can never name a reservation, so
+    // return silently BEFORE any filesystem access or log.
+    let Some(tool_use_id) = payload
+        .extra
+        .get("tool_use_id")
+        .and_then(|v| v.as_str())
+        .filter(|id| crate::shard_manager::is_valid_tool_use_id(id))
+    else {
         return;
     };
+    // Anchored on the SAME session factory root as admission (never created).
+    let factory_root = match crate::shard_manager::resolve_factory_root(cwd) {
+        Ok(Some(root)) => root,
+        Ok(None) => return,
+        // Unstatable `.factory`: release is never a verdict (ADR-052 §5a);
+        // no-op, and the reservation, if any, is reclaimed by the drain-start TTL GC.
+        Err(e) => {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                error = %e,
+                "bc_index_migration_reservation_release: .factory is unstatable (non-fatal) -- \
+                 the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
+                 own TTL GC pass instead"
+            );
+            return;
+        }
+    };
+    let migration_state_dir = factory_root.migration_state_dir();
+    match probe_release_migration_state_dir(&migration_state_dir) {
+        Ok(true) => {}
+        Ok(false) => return,
+        // BC-1.18.013 EC-021 / AC-011: a non-ENOENT stat error (EACCES/EIO/ELOOP) is a
+        // non-fatal warn, never a verdict and never silently collapsed into "absent".
+        Err(e) => {
+            tracing::warn!(
+                target: "bc_1_18_011_migration",
+                error = %e,
+                error_kind = ?e.kind(),
+                path = %migration_state_dir.display(),
+                "bc_index_migration_reservation_release: migration-state stat failed (non-fatal) -- \
+                 the reservation, if it exists, will be reclaimed by drain_bc_index_writers's \
+                 own TTL GC pass instead"
+            );
+            return;
+        }
+    }
     if let Err(e) =
         crate::shard_manager::release_bc_index_writer_reservation(&migration_state_dir, tool_use_id)
     {
@@ -654,34 +674,23 @@ pub fn bc_index_migration_reservation_release(
     }
 }
 
-/// BC-1.18.011 Architect Ruling 1 (D-1232-OBL, S-25.02 cluster-5 T-11): the
-/// native-gate PRECEDENCE decision between the migration-admission gate and
-/// the shard-cap gate, extracted as a pure, lib-testable helper (F-C5-P1-006
-/// — this function was previously inlined at `main.rs`'s
-/// `shard_gate_precheck_result` call site, unreachable from any integration
-/// test since it lives in the binary crate).
+/// One-stat presence probe for the release leg's `.factory/migration-state`
+/// directory (F-S2508-L4-001, BC-1.18.013 EC-021 / AC-011).
 ///
-/// A fired migration-admission verdict (`migration_verdict = Some(_)`) wins
-/// unconditionally: `shard_cap` is STRUCTURALLY SKIPPED — never invoked at
-/// all, not merely evaluated and then discarded — because `shard_cap`'s
-/// fired branch reaches `shard_manager::execute_roll`, a DESTRUCTIVE seal-
-/// and-truncate-to-0 operation that must never run once a BC-INDEX-path
-/// write is already blocked by a STAGING/COMMITTING migration txn. This is
-/// why `shard_cap` is a lazy closure (`FnOnce`) rather than an
-/// eagerly-computed `Option` parameter: the "never invoked" guarantee is
-/// then something a caller (or a test, via a closure that records whether
-/// it ran) can observe directly, not merely infer from the returned value.
+/// `Ok(true)` -- the stat succeeded (the release proceeds); `Ok(false)` -- ENOENT
+/// only (genuinely absent: silent no-op); `Err(e)` -- any OTHER stat error
+/// (EACCES/EIO/ELOOP/...), which the caller reports as a non-fatal warn rather
+/// than collapsing into "absent" the way `Path::exists` does.
 ///
-/// `main::run`'s `shard_gate_precheck_result` call site delegates to this
-/// function with an unchanged effective outcome — this extraction is wiring
-/// only, no behavior change.
-pub fn resolve_shard_gate_precedence(
-    migration_verdict: Option<vsdd_hook_sdk::HookResult>,
-    shard_cap: impl FnOnce() -> Option<vsdd_hook_sdk::HookResult>,
-) -> Option<vsdd_hook_sdk::HookResult> {
-    match migration_verdict {
-        Some(verdict) => Some(verdict),
-        None => shard_cap(),
+/// # Errors
+/// Any `std::io::Error` from `std::fs::metadata` whose kind is not `NotFound`.
+pub fn probe_release_migration_state_dir(
+    migration_state_dir: &std::path::Path,
+) -> Result<bool, std::io::Error> {
+    match std::fs::metadata(migration_state_dir) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
     }
 }
 

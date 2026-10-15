@@ -18,11 +18,17 @@ name = "factory_dispatcher"
 path = "src/lib.rs"
 
 [features]
-# test-support: enables VSDD_ASYNC_DRAIN_WINDOW_MS env-override in release builds.
-# Sole wired consumer: ci.yml build-dispatcher matrix "Test (cargo)" step
+# test-support: compiles test-only env seams into RELEASE builds (debug builds
+# always have them). It turns on exactly:
+#   * VSDD_ASYNC_DRAIN_WINDOW_MS (main.rs) -- the async drain-window override;
+#   * VSDD_FORCE_ENGINE_BUILD_FAILURE (main.rs) -- engine-build fault injection;
+#   * VSDD_TEST_ADMISSION_SEAM_DIR (shard_manager/admission.rs `seam`) -- the
+#     W1/W2 observe-and-interleave seam for the writer-admission black-box suite.
+# Wired consumer: ci.yml build-dispatcher matrix "Test (cargo)" step
 # (cargo test --release --features factory-dispatcher/test-support), which runs the
 # bc_3_08_001_s19_05 integration tests with a generous drain window to accommodate
-# WASM cold-start time. The bats-full-suite release binary (ci.yml bats-full-suite
+# WASM cold-start time, and the admission/migration suites that drive the seam.
+# The bats-full-suite release binary (ci.yml bats-full-suite
 # job "Build factory-dispatcher" step) is built WITHOUT this feature and uses the
 # hardcoded ASYNC_DRAIN_WINDOW_MS = 100 ms.
 # DI-019 v1.6 preserved: release.yml builds factory-dispatcher WITHOUT this feature

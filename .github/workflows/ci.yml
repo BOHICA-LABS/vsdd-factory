@@ -12,11 +12,16 @@ on:
     # closes that gap.
     branches: [main, develop]
 
+# Least privilege (SEC-006): every job only checks out, builds, tests and
+# uploads/downloads run artifacts; none writes to the repo or to PRs.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Mount factory artifacts
         run: |
@@ -111,12 +116,13 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install Rust toolchain
         # Pinned in rust-toolchain.toml — keep this version in sync with that file.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
           targets: wasm32-wasip1
 
@@ -133,6 +139,12 @@ jobs:
 
       - name: cargo clippy (workspace, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo clippy (factory-dispatcher, failpoints feature, deny warnings)
+        # The `failpoints` feature is OFF in every other step, so the
+        # `fail_point!` sites and the failpoints-gated test suites would
+        # otherwise never be linted (nor compiled) in CI.
+        run: cargo clippy -p factory-dispatcher --features failpoints --all-targets -- -D warnings
 
       - name: cargo check (workspace, all targets)
         run: cargo check --workspace --all-targets
@@ -187,7 +199,117 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets --no-fail-fast
+
+      - name: cargo test (factory-dispatcher, failpoints feature)
+        # The `failpoints` cargo feature is off in every other step, so every
+        # failpoints-gated test target (today:
+        # bc_1_18_011_b2_migration_crash_injection_test and
+        # bc_1_18_011_b2_migration_obl1_failpoint_smoke_test) compiles to nothing
+        # there and never ran in CI; S-25.08 left 8 of them stale unseen. Any
+        # failure fails this step (and so the required cargo-host check).
+        #
+        # No `--test-threads=1`: failpoint state is process-global, but each test
+        # binary is its own process (cargo runs binaries sequentially) and the
+        # in-process tests serialize through `fail::FailScenario::setup()`'s global
+        # lock (fail_point_scope()). Forcing one thread would mask a test that
+        # forgot the scope instead of surfacing it; the suite is deterministic
+        # under parallel threads (~15 s).
+        env:
+          CI_REQUIRE_ARTIFACTS: "1"
+          VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
+        run: |
+          set -euo pipefail
+          cargo test -p factory-dispatcher --features failpoints --all-targets --no-fail-fast
+
+          # Positive-coverage assertion: the exit code alone cannot tell "all
+          # passed" from "a target compiled to nothing / matched zero tests"
+          # (a dropped #[cfg(feature = "failpoints")] gate, a renamed target, a
+          # filter typo all exit 0). Re-run EVERY failpoints-gated target alone
+          # (cached build) and require its own libtest summary to report at
+          # least its floor of passed tests. Floors are PER TARGET, not a
+          # combined sum, so a vanished target cannot be masked by growth in
+          # another. Each floor is the file's current #[test] fn count (a FLOOR,
+          # not an exact match: adding tests never breaks CI, shrinking or
+          # vanishing does):
+          #   bc_1_18_011_b2_migration_crash_injection_test            39
+          #   bc_1_18_011_b2_migration_obl1_failpoint_smoke_test        1
+          # Adding a new failpoints-gated test file REQUIRES a line here, and
+          # the guard below FAILS the job if one is missing (CR-012b).
+          FLOOR_TARGETS=(
+            "bc_1_18_011_b2_migration_crash_injection_test 39"
+            "bc_1_18_011_b2_migration_obl1_failpoint_smoke_test 1"
+          )
+
+          # Coverage guard (CR-012b): every top-level integration-test file
+          # that carries a failpoints cfg gate MUST appear in FLOOR_TARGETS (the
+          # gate regex tolerates any whitespace around `=` and matches the feature
+          # predicate wherever it nests: cfg(feature = ..), cfg(all(.., feature =
+          # ..)), cfg(any(..)), cfg_attr(..), so it does not depend on rustfmt), and
+          # every FLOOR_TARGETS entry must still be a gated test file. A new
+          # gated target therefore cannot go silently uncovered, and a stale
+          # floor line (renamed/deleted/ungated file) cannot linger.
+          floor_names=" "
+          for entry in "${FLOOR_TARGETS[@]}"; do
+            floor_names="${floor_names}${entry%% *} "
+          done
+          gated_names=" "
+          while IFS= read -r f; do
+            t="$(basename "$f" .rs)"
+            gated_names="${gated_names}${t} "
+            case "$floor_names" in
+              *" $t "*) ;;
+              *)
+                echo "::error file=${f}::${t} carries a failpoints cfg gate but is not in the FLOOR_TARGETS list in .github/workflows/ci.yml; add it with its #[test] count"
+                exit 1
+                ;;
+            esac
+          done < <(grep -lE 'feature[[:space:]]*=[[:space:]]*"failpoints"' crates/*/tests/*.rs | LC_ALL=C sort)
+          for entry in "${FLOOR_TARGETS[@]}"; do
+            t="${entry%% *}"
+            case "$gated_names" in
+              *" $t "*) ;;
+              *)
+                echo "::error::FLOOR_TARGETS lists ${t} but no crates/*/tests/${t}.rs carries a failpoints cfg gate (stale entry)"
+                exit 1
+                ;;
+            esac
+          done
+          echo "failpoints floor guard: ${#FLOOR_TARGETS[@]} gated target(s), all listed"
+
+          assert_floor() {
+            target="$1"
+            floor="$2"
+            out="$(cargo test -p factory-dispatcher --features failpoints \
+              --test "$target" 2>&1)" || {
+              printf '%s\n' "$out"
+              echo "::error::${target} re-run failed"
+              exit 1
+            }
+            printf '%s\n' "$out"
+            passed="$(printf '%s\n' "$out" \
+              | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' | tail -n 1)"
+            if [ -z "$passed" ] || [ "$passed" -lt "$floor" ]; then
+              echo "::error::${target} ran ${passed:-0} tests; expected >= ${floor}"
+              exit 1
+            fi
+            echo "${target}: ${passed} passed (floor ${floor})"
+          }
+          for entry in "${FLOOR_TARGETS[@]}"; do
+            # Intentional word splitting: "<target> <floor>".
+            # shellcheck disable=SC2086
+            assert_floor $entry
+          done
+
+      - name: VP-147 mutant spec drift check (CR-012a)
+        # Cheap (no mutated build, no Kani): proves every checked-in mutant's
+        # `find` text still matches exactly once in the committed tree, so an
+        # edit to the mutated source cannot silently invalidate the VP-147
+        # mutation evidence. The expensive KILLED runs stay in the
+        # workflow_dispatch-only vp147-mutants.yml.
+        run: |
+          set -euo pipefail
+          cargo run -p vp147-mutants -- --check-spec
 
       - name: cargo publish --dry-run (hook-sdk crates) (S-2.5)
         # Catches publishability regressions every push: missing
@@ -367,7 +489,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         # ADR-040 §Decision 9 Ruling 9(c):
         #   - fetch-depth: 0 (item 2) — the gate computes `git merge-base HEAD
         #     origin/<base_branch>` and reads `red-gate-log.md` at arbitrary commits in the
@@ -394,7 +516,9 @@ jobs:
         # Pinned in rust-toolchain.toml — keep this version in sync with that file.
         # Native binary only (crates/policy15-attestation-gate has no wasm target);
         # wasm32-wasip1 is intentionally not requested here.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
+        with:
+          toolchain: 1.95.0
 
       - name: Cache cargo
         # Pinned to commit SHA for security (TD #74); resolves to v2.9.1.
@@ -447,11 +571,13 @@ jobs:
     name: attestation-gate-non-vacuity-controls
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install Rust toolchain
         # Pinned in rust-toolchain.toml — keep this version in sync with that file.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
+        with:
+          toolchain: 1.95.0
 
       - name: Cache cargo
         # Pinned to commit SHA for security (TD #74); resolves to v2.9.1.
@@ -465,7 +591,7 @@ jobs:
         # crate IS the controls job." The 16 `#[test]` functions ARE the non-vacuity controls
         # for the gate's four-outcome verdict (FAIL / PASS-N-activations /
         # PASS-zero-activations / EMPTY-or-UNREACHABLE).
-        run: cargo test -p policy15-attestation-gate
+        run: cargo test -p policy15-attestation-gate --no-fail-fast
 
   platforms-drift:
     # Single source of truth: ci/platforms.yaml. The build-dispatcher
@@ -476,7 +602,7 @@ jobs:
     # knows exactly which side to refresh.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install yq + python3-yaml
         run: |
@@ -555,14 +681,15 @@ jobs:
             exe_suffix: ".exe"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install Rust toolchain
         # Pinned to rust-toolchain.toml (1.95.0). `targets:` here adds
         # both the platform-specific triple AND wasm32-wasip1 in one
         # rustup invocation — the action handles the union internally.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
           targets: ${{ matrix.target }}, wasm32-wasip1
 
@@ -627,7 +754,7 @@ jobs:
         env:
           CI_REQUIRE_ARTIFACTS: "1"
           VSDD_CORPUS_ROOT: ${{ github.workspace }}/.factory
-        run: cargo test --release --features factory-dispatcher/test-support --target ${{ matrix.target }} --workspace
+        run: cargo test --release --features factory-dispatcher/test-support --target ${{ matrix.target }} --workspace --no-fail-fast
 
       - name: Build all native WASM plugins (release)
         # Build all hook-plugin crates on every matrix entry —
@@ -697,7 +824,7 @@ jobs:
         # for debugging cross-platform build issues). release.yml's build-binaries job
         # produces its own staged artifacts independently via separate build runs;
         # nothing downstream downloads this upload for bundling.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: factory-dispatcher-${{ matrix.platform }}
           path: artifact-staging/
@@ -715,7 +842,7 @@ jobs:
     name: bats-full-suite (linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Mount factory artifacts
         # run-all.sh suites that validate STATE.md / cycle artifacts need .factory/.
@@ -746,8 +873,9 @@ jobs:
       - name: Install Rust toolchain
         # Needed to build factory-dispatcher (release) below.
         # Pinned to rust-toolchain.toml version — keep in sync with cargo-host.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@1d64bbcee8ef0c191a54710c227fd268a0d5014b  # 1.95.0 (branch head)
         with:
+          toolchain: 1.95.0
           targets: wasm32-wasip1
 
       - name: Cache cargo
@@ -875,7 +1003,7 @@ jobs:
     name: bats-wave-handoff (macos)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install tools
         # bats, jq, bash, and PyYAML are the runtime requirements for wave-handoff.bats
@@ -951,7 +1079,7 @@ jobs:
     runs-on: macos-latest
     needs: build-dispatcher
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Install bats
         run: brew install bats-core jq
@@ -986,7 +1114,7 @@ jobs:
         # downstream) instead of the stale, always-one-release-behind committed
         # bundle. This is what lets T-001 correctly parse registry entries using
         # a schema value (e.g. `block_if_marker`) newly introduced in this PR.
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: factory-dispatcher-${{ steps.darwin-arch.outputs.platform }}
           path: artifact-download
@@ -1077,7 +1205,7 @@ jobs:
     # do not touch Cargo files — recreating the exact gap this job exists to close.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: cargo deny check advisories
         # AC-007: advisories-only check against the workspace deny.toml at ./Cargo.toml.

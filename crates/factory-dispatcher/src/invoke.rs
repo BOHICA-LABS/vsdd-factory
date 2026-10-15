@@ -3034,3 +3034,15 @@ mod git_context_prereq_tests {
         );
     }
 }
+
+/// ADR-052 §5a F-001: true iff `event_name` is exactly `"PostToolUse"` or
+/// `"PostToolUseFailure"` — the tool-completion events whose `tool_use_id`
+/// releases a writer reservation. Claude Code delivers a FAILED tool call only as
+/// `PostToolUseFailure` (never `PostToolUse`), so releasing on `PostToolUse`
+/// alone leaked every failed protected write's reservation until the TTL.
+/// Exact, case-sensitive match; deliberately NOT a new [`EventType`] variant
+/// (that would widen every `EventType` match in the crate for one predicate).
+#[must_use]
+pub fn is_tool_completion_event(event_name: &str) -> bool {
+    matches!(event_name, "PostToolUse" | "PostToolUseFailure")
+}

@@ -1,19 +1,19 @@
 // Test files use .expect()/.unwrap()/.panic!() for failure reporting.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-//! BC-1.18.011 (S-25.02 cluster-5 "shard-b2", T-11, AC-018) RED-Gate
-//! coverage for the B2 governed one-time migration surface in
+//! BC-1.18.011 (S-25.02 cluster-5 "shard-b2", T-11, AC-018) Red-Gate-authored
+//! (now green) coverage for the B2 governed one-time migration surface in
 //! `shard_manager.rs`, plus the `executor.rs` native admission-gate
 //! precedence tests the architect's Ruling 1/2/3 (task-level, this burst)
 //! require.
 //!
-//! # BC-5.38.001 Red Gate discipline — RED (every function under test is
-//! `todo!()` as of stub-architect's cluster-5 commit `adbc795a`)
+//! # BC-5.38.001 Red Gate discipline
 //!
-//! Every function this file exercises panics today via `todo!()`. Each test
-//! asserts the REAL post-implementation expected outcome, mirroring
+//! At authoring time every function this file exercises was a `todo!()` stub
+//! (stub-architect's cluster-5 commit `adbc795a`); all are now implemented.
+//! Each test asserts the REAL post-implementation expected outcome, mirroring
 //! `bc_1_18_006_roll_test.rs`'s own established methodology: the same
-//! assertion shape is correct both during Red Gate (fails against the stub)
-//! and once BC-1.18.011 is implemented (should pass unchanged).
+//! assertion shape was correct during Red Gate (failing against the stub) and
+//! passes unchanged now that BC-1.18.011 is implemented.
 //!
 //! VP classification (BC-1.18.011 §Verification Properties): VP-132
 //! (proptest; content-preservation structured-row-equivalence — this file's
@@ -26,65 +26,52 @@
 //!
 //! # Architect Rulings baked into this file (do not deviate)
 //!
-//! 1. **Native-gate precedence.** `bc_index_migration_admission_precheck`
+//! 1. **Native-gate precedence.** `bc_index_migration_admission(..).verdict`
 //!    must be evaluated BEFORE `shard_cap_precheck` for a BC-INDEX-path
-//!    dispatch, and `shard_cap_precheck` must be structurally SKIPPED (never
-//!    invoked at all) when migration-admission blocks. The gate-precedence
-//!    tests below enforce this via control flow (`shard_cap_precheck` is
-//!    only reachable in the `None` arm of a `match` on the migration
-//!    verdict) and assert the load-bearing filesystem side effect (no
-//!    roll/truncation), not merely the returned `HookResult`.
-//! 2. `bc_index_migration_admission_precheck`'s refusal path returns
+//!    dispatch. That ORDERING is a property of `main::run`, so it is proven
+//!    ONLY by the real-binary test
+//!    `test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_blackbox`
+//!    (`s2508_admission_blackbox_test.rs`). The in-process tests below prove
+//!    the narrower, honest facts: the admission call itself returns
+//!    `HookResult::Block` for a live txn and performs no roll (no truncation,
+//!    no sealed shard) as a side effect of that call.
+//! 2. `bc_index_migration_admission(..).verdict`'s refusal path returns
 //!    `HookResult::Block` (E-MAINTENANCE-001) — NEVER `HookResult::Error`.
 //! 3. The `^Bash$` full-command pre-shell classifier (ADR-052 §5c) and the
 //!    4 dispatcher-guard amendments (§5b) are OUT OF SCOPE — this file
 //!    tests Edit/Write/MultiEdit admission only, plus one negative control
 //!    confirming Bash is correctly out of THIS function's scope.
 //!
-//! # Genuine ambiguity flagged for implementer/architect (not guessed at)
+//! # Ambiguities flagged at authoring time (both resolved by the implementation)
 //!
-//! `resume_from_staging(_txn_record, _migration_state_dir)`'s signature
-//! carries neither a canonical `BC-INDEX.md` path/body nor an explicit
-//! "original census" parameter, and `BcIndexMigrationTxnRecord` has no
-//! field that stores the pre-split census ID set itself (only
-//! `source_sha256`/`source_body_row_sha256`, both hashes, not the set). It
-//! is therefore unclear whether the EC-060 mandatory census re-run
-//! re-derives its baseline by re-reading the (pre-pivot, still-untouched)
-//! canonical `BC-INDEX.md` at a well-known path relative to
-//! `_migration_state_dir`'s parent, or from a txn-record field not yet
-//! specified. This file's EC-060 tests assert only the OBSERVABLE contract
-//! (a staged generation corrupted with a duplicate row must fail on resume;
-//! a still-valid one must pass) without assuming the internal data source —
-//! flagging this for confirmation once T-11 is implemented.
+//! `resume_from_staging(_txn_record, _migration_state_dir)`'s signature carries
+//! neither a canonical `BC-INDEX.md` path/body nor an explicit "original
+//! census" parameter, so it was unclear where the EC-060 mandatory census
+//! re-run derives its baseline. The implementation re-reads the staged
+//! generation's own shard bodies under `gen-<generation_id>/shards/` (never
+//! re-splitting) and re-checks them against the txn record's
+//! `source_body_row_sha256` when present. This file's EC-060 tests assert only
+//! the OBSERVABLE contract (a staged generation corrupted with a duplicate row
+//! must fail on resume; a still-valid one must pass) without assuming the
+//! internal data source.
 //!
-//! Separately: `pre_commit_fingerprint_recheck`'s hash encoding (lowercase
-//! hex vs. another encoding) is not pinned by the stub; this file assumes
-//! lowercase-hex SHA-256 (`{:x}` via the `sha2` crate), consistent with the
-//! rest of this crate's `sha2`-based hashing convention — flagging as an
-//! inferred, not confirmed, convention.
+//! `pre_commit_fingerprint_recheck`'s hash encoding is lowercase-hex SHA-256
+//! (the crate's `sha256_hex` convention), as these tests assumed.
 //!
-//! **RESOLVED (F-C5-P1-006, S-25.02 cluster-5 fix-burst T-11 follow-up):**
-//! the `main.rs`-wiring ordering defect flagged in this paragraph's earlier
-//! revision has been fixed by extracting the precedence decision into
-//! `executor::resolve_shard_gate_precedence(migration_verdict, shard_cap)`
-//! — a pure, lib-testable helper (`shard_cap` is a lazy `FnOnce` closure
-//! specifically so "never invoked at all," not merely "outcome discarded,"
-//! is directly observable by a test). `main::run`'s `shard_gate_precheck_result`
-//! call site now delegates to this helper with an unchanged effective
-//! outcome. The gate-precedence tests immediately below (against the real
-//! precheck functions, filesystem side effects) remain load-bearing
-//! integration coverage; the `resolve_shard_gate_precedence_*` tests further
-//! below are the regression lock against the pure helper itself, closing
-//! F-C5-P1-006 (the helper was previously inlined at the binary-crate call
-//! site and unreachable from any integration test).
+//! **RESOLVED (F-C5-P1-006; superseded by S-25.08 / ADR-052 §Downstream
+//! item 22):** the `shard_cap_precheck`-after-migration-gate ordering is now
+//! structural in `main::run` (a blocked admission returns before
+//! `shard_cap_precheck` is ever evaluated), pinned by the real-binary
+//! `s2508_admission_blackbox_test.rs` suite
+//! (`test_BC_1_18_011_PC6b_live_txn_blocks_protected_write_before_shard_cap_roll_blackbox`).
+//! The former pure helper `executor::resolve_shard_gate_precedence` and its four
+//! unit tests were removed. The gate-precedence tests below (against the real
+//! precheck functions, filesystem side effects) remain integration coverage.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use factory_dispatcher::executor::{
-    bc_index_migration_admission_precheck, resolve_shard_gate_precedence, shard_cap_precheck,
-};
+use factory_dispatcher::executor::bc_index_migration_admission;
 use factory_dispatcher::payload::HookPayload;
 use factory_dispatcher::shard_manager::migration_fs::{Fs, StdFs};
 use factory_dispatcher::shard_manager::{
@@ -1173,9 +1160,10 @@ fn test_BC_1_18_011_PC7_VP134_hooks_registry_has_no_bc_index_migration_dependenc
 }
 
 // ---------------------------------------------------------------------------
-// Gate-precedence Ruling-1/2/3 — the native OPEN/DRAINING writer-admission
-// gate takes precedence over the (destructive) shard-cap-gate roll, with
-// shard_cap_precheck structurally SKIPPED, never merely outcome-discarded.
+// Ruling-2 — the native writer-admission gate's refusal is a `HookResult::Block`
+// (E-MAINTENANCE-001), and the admission call itself never rolls. (The
+// admission-before-shard-cap ORDERING is pinned by the real-binary test in
+// `s2508_admission_blackbox_test.rs`, not here.)
 // ---------------------------------------------------------------------------
 
 const BC_INDEX_SHARD_CONFIG: &str = "\
@@ -1208,6 +1196,24 @@ fn write_migration_txn(cwd: &Path, state: &str) {
     .unwrap();
 }
 
+/// S-25.08 T-2 (AC-009; ADR-052 §Files-to-Change): a fixture that models a
+/// STAGING txn must ALSO hold `exclusive.lock`, i.e. model a LIVE coordinator.
+/// Without it, the PreToolUse step-3.5 reconciliation (Branch B: STAGING with
+/// `generation_id = null`, no live coordinator) legitimately self-heals the
+/// fixture to ABORTED+OPEN, which would defeat a "still genuinely STAGING"
+/// scenario. Fixture-only change: no assertion is weakened. The returned guard
+/// must be kept alive for the whole scenario.
+fn hold_exclusive_lock(cwd: &Path) -> factory_dispatcher::shard_manager::MigrationLockGuard {
+    let lock_path = cwd.join(".factory/migration-state/exclusive.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    if !lock_path.exists() {
+        std::fs::write(&lock_path, b"").unwrap();
+    }
+    try_acquire_migration_lock(&lock_path)
+        .expect("exclusive.lock must be openable")
+        .expect("exclusive.lock must be free at fixture setup")
+}
+
 fn bc_index_target(cwd: &Path) -> PathBuf {
     cwd.join(".factory/specs/behavioral-contracts/BC-INDEX.md")
 }
@@ -1235,12 +1241,19 @@ fn bc_index_payload(
     }
 }
 
+/// BC-1.18.013 Precondition 6(b) / BC-1.18.011 Precondition 6(b): the exact
+/// `E-MAINTENANCE-001` reason for a BC-INDEX-family write (live STAGING/COMMITTING txn).
+const EXACT_BC_INDEX_BLOCK_REASON: &str = "E-MAINTENANCE-001: BC-INDEX write blocked: migration \
+window active (txn record in STAGING or COMMITTING state); retry after migration completes or aborts";
+
 #[test]
-fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_precheck_never_runs_no_roll()
- {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_staging_txn_with_exact_keyed_reason() {
     let dir = tempfile::tempdir().unwrap();
     write_shard_config(dir.path(), BC_INDEX_SHARD_CONFIG);
     write_migration_txn(dir.path(), "STAGING");
+    // S-25.08 T-2: model a LIVE coordinator (holds exclusive.lock) so the
+    // wired step-3.5 reconciliation cannot self-heal this STAGING fixture.
+    let _live_coordinator = hold_exclusive_lock(dir.path());
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     // Genuinely over-cap: cap is 100 bytes; the canonical content already on
@@ -1248,7 +1261,6 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
     // over cap under BC-1.18.005's own Write formula (projected_size =
     // len(content) alone).
     std::fs::write(&target, "y".repeat(50)).unwrap();
-    let canonical_snapshot_before = std::fs::read(&target).unwrap();
 
     let payload = bc_index_payload(
         dir.path(),
@@ -1256,57 +1268,35 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_staging_blocks_shard_cap_prechec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    // Ruling 1: bc_index_migration_admission_precheck MUST be evaluated
-    // BEFORE shard_cap_precheck for a BC-INDEX-path dispatch, and
-    // shard_cap_precheck MUST be structurally SKIPPED (never invoked at
-    // all) when migration-admission blocks. shard_cap_precheck is only
-    // reachable in the `None` arm below — it is NEVER called when the
-    // migration-admission gate fires, which IS this test's central
-    // assertion.
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
-    let verdict = match migration_verdict {
-        Some(v) => v,
-        None => shard_cap_precheck(&payload, dir.path())
-            .expect("a genuinely over-cap dispatch with no migration in flight must fire"),
-    };
+    // The admission call alone: a live STAGING txn must refuse with a Block.
+    // (Whether shard_cap_precheck runs afterwards is decided by main::run and is
+    // pinned black-box elsewhere; this test makes no claim about that ordering.)
+    let verdict = bc_index_migration_admission(&payload, dir.path())
+        .verdict
+        .expect("a live STAGING txn must refuse the protected write (Some(verdict))");
 
     assert!(
         matches!(verdict, HookResult::Block { .. }),
         "Ruling 2: a migration-admission refusal must surface as HookResult::Block \
          (E-MAINTENANCE-001), never HookResult::Error, got {verdict:?}"
     );
-    if let HookResult::Block { reason } = &verdict {
-        let lower = reason.to_lowercase();
-        assert!(
-            lower.contains("retry") || lower.contains("migrat"),
-            "the Block reason must be retry-actionable (name the migration window and/or retry \
-             guidance), got: {reason}"
-        );
-    }
-
-    // The load-bearing filesystem assertion: NO roll side effect occurred,
-    // even though the write was genuinely over-cap. execute_roll (reached
-    // only via shard_cap_gate_check, which shard_cap_precheck calls) would
-    // have truncated the canonical file to 0 bytes and published a sealed
-    // shard — neither may happen here because shard_cap_precheck was never
-    // reached.
     assert_eq!(
-        std::fs::read(&target).unwrap(),
-        canonical_snapshot_before,
-        "no roll/truncation side effect may occur on a BC-INDEX-path write while a txn record \
-         is STAGING, even when the write is genuinely over-cap"
+        verdict,
+        HookResult::Block {
+            reason: EXACT_BC_INDEX_BLOCK_REASON.to_string()
+        },
+        "BC-1.18.013 Precondition 6(b): the keyed E-MAINTENANCE-001 reason must be exact"
     );
-    assert!(
-        !dir.path()
-            .join(".factory/specs/behavioral-contracts/BC-INDEX.0001.md")
-            .exists(),
-        "no sealed shard file may be published while migration admission is blocking"
-    );
+    // NOTE (L4-006): this test deliberately makes NO "performs no roll" claim. The
+    // admission call never reaches execute_roll on ANY path, so a canonical-file
+    // unchanged assertion here is unfalsifiable (it passes for every implementation).
+    // The roll-skipped-on-block ordering is pinned black-box in
+    // `s2508_admission_blackbox_test.rs`.
 }
 
 #[test]
-fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_precheck_never_runs_no_roll()
- {
+fn test_BC_1_18_011_PC6_RULING2_admission_call_blocks_live_committing_txn_with_exact_keyed_reason()
+{
     // Identical to the STAGING case above but for the COMMITTING state —
     // Precondition 6(b) names BOTH STAGING and COMMITTING as blocking
     // states.
@@ -1316,7 +1306,6 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_prec
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "y".repeat(50)).unwrap();
-    let canonical_snapshot_before = std::fs::read(&target).unwrap();
 
     let payload = bc_index_payload(
         dir.path(),
@@ -1324,186 +1313,74 @@ fn test_BC_1_18_011_PC6_RULING1_gate_precedence_committing_blocks_shard_cap_prec
         serde_json::json!({ "content": "x".repeat(5_000) }),
     );
 
-    let migration_verdict = bc_index_migration_admission_precheck(&payload, dir.path());
-    let verdict = match migration_verdict {
-        Some(v) => v,
-        None => shard_cap_precheck(&payload, dir.path())
-            .expect("a genuinely over-cap dispatch with no migration in flight must fire"),
-    };
-
-    assert!(matches!(verdict, HookResult::Block { .. }));
-    assert_eq!(
-        std::fs::read(&target).unwrap(),
-        canonical_snapshot_before,
-        "no roll/truncation side effect may occur while a txn record is COMMITTING either"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// F-C5-P1-006 (process-gap) regression lock — `resolve_shard_gate_precedence`
-// ---------------------------------------------------------------------------
-//
-// The two filesystem-level `RULING1` tests immediately above exercise
-// Ruling 1 end-to-end against the real `bc_index_migration_admission_precheck`
-// / `shard_cap_precheck` functions and a real on-disk canonical file. They
-// are valuable integration coverage, but they do NOT — and structurally
-// cannot — pin the precedence *contract* itself: their `match` block
-// hand-composes `bc_index_migration_admission_precheck` before
-// `shard_cap_precheck` inline, so a future regression that reintroduces the
-// pass-1-era `main.rs` defect (both prechecks computed eagerly, precedence
-// applied only via `.or(...)` on the two already-computed `Option`s) would
-// leave these two tests green — they never call the shared
-// `resolve_shard_gate_precedence` helper `main::run` actually delegates to.
-//
-// These tests close that gap directly: they call
-// `executor::resolve_shard_gate_precedence` itself and use a call-counter
-// closure to prove the `shard_cap` argument is STRUCTURALLY never invoked
-// (not merely "invoked but its result discarded") whenever the migration
-// verdict is `Some(_)`. This is the load-bearing guarantee `execute_roll`'s
-// destructive seal-and-truncate safety depends on.
-
-#[test]
-fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_block_shard_cap_never_invoked()
- {
-    let migration_verdict = Some(HookResult::Block {
-        reason: "BC-1.18.011 E-MAINTENANCE-001: migration in flight".to_string(),
-    });
-
-    let shard_cap_call_count = AtomicUsize::new(0);
-    let result = resolve_shard_gate_precedence(migration_verdict, || {
-        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
-        // Deliberately a DIFFERENT verdict than the migration one, so a
-        // passing assertion on the returned value below can only be
-        // explained by the migration verdict winning, not by the closure's
-        // return value happening to coincide with it.
-        Some(HookResult::Block {
-            reason: "shard-cap: this must never be observed".to_string(),
-        })
-    });
+    let verdict = bc_index_migration_admission(&payload, dir.path())
+        .verdict
+        .expect("a live COMMITTING txn must refuse the protected write (Some(verdict))");
 
     assert_eq!(
-        shard_cap_call_count.load(Ordering::SeqCst),
-        0,
-        "Ruling 1: the shard_cap closure must be STRUCTURALLY SKIPPED — never invoked at all — \
-         when the migration verdict is Some(_). A nonzero count here is exactly the pass-1-era \
-         defect (both prechecks computed eagerly, precedence applied only via `.or(...)` after \
-         the destructive shard_cap_precheck/execute_roll path had already run) reintroduced."
-    );
-    match result {
-        Some(HookResult::Block { reason }) => {
-            assert_eq!(
-                reason, "BC-1.18.011 E-MAINTENANCE-001: migration in flight",
-                "the migration verdict must win unconditionally and be returned verbatim, not \
-                 the shard_cap closure's verdict"
-            );
-        }
-        other => {
-            panic!("expected the migration Block verdict to be returned verbatim, got {other:?}")
-        }
-    }
-}
-
-#[test]
-fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_error_variant_also_short_circuits()
- {
-    // Ruling 1's "wins unconditionally" guarantee is on `Some(_)` generally,
-    // not merely the `Block` variant — pin an `Error` verdict too, since a
-    // future refactor narrowing the short-circuit to `matches!(_, Block)`
-    // would silently let a fired migration `Error` fall through to the
-    // destructive shard_cap path.
-    let migration_verdict = Some(HookResult::Error {
-        message: "BC-1.18.011: failed to read the active BC-INDEX migration txn record".to_string(),
-    });
-
-    let shard_cap_call_count = AtomicUsize::new(0);
-    let result = resolve_shard_gate_precedence(migration_verdict, || {
-        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
-        None
-    });
-
-    assert_eq!(
-        shard_cap_call_count.load(Ordering::SeqCst),
-        0,
-        "an Error-variant migration verdict must short-circuit shard_cap exactly like a Block \
-         verdict does — `Some(_)` wins unconditionally regardless of which HookResult variant it \
-         carries"
-    );
-    assert!(
-        matches!(result, Some(HookResult::Error { .. })),
-        "the migration Error verdict must be returned verbatim, got {result:?}"
+        verdict,
+        HookResult::Block {
+            reason: EXACT_BC_INDEX_BLOCK_REASON.to_string()
+        },
+        "BC-1.18.013 Precondition 6(b): the keyed E-MAINTENANCE-001 reason must be exact"
     );
 }
 
 #[test]
-fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_none_invokes_shard_cap_once_returns_some()
- {
-    let shard_cap_call_count = AtomicUsize::new(0);
-    let result = resolve_shard_gate_precedence(None, || {
-        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
-        Some(HookResult::Block {
-            reason: "shard-cap: genuinely over cap".to_string(),
-        })
-    });
-
-    assert_eq!(
-        shard_cap_call_count.load(Ordering::SeqCst),
-        1,
-        "when no migration is in flight (migration_verdict = None), the shard_cap closure must \
-         be invoked exactly once — never skipped, never invoked more than once"
-    );
-    match result {
-        Some(HookResult::Block { reason }) => {
-            assert_eq!(reason, "shard-cap: genuinely over cap");
-        }
-        other => panic!(
-            "expected the shard_cap closure's verdict to be returned verbatim, got {other:?}"
-        ),
-    }
-}
-
-#[test]
-fn test_BC_1_18_011_PC6_RULING1_resolve_shard_gate_precedence_migration_none_invokes_shard_cap_once_returns_none()
- {
-    let shard_cap_call_count = AtomicUsize::new(0);
-    let result = resolve_shard_gate_precedence(None, || {
-        shard_cap_call_count.fetch_add(1, Ordering::SeqCst);
-        None
-    });
-
-    assert_eq!(
-        shard_cap_call_count.load(Ordering::SeqCst),
-        1,
-        "the shard_cap closure must still be invoked exactly once even when it has nothing to \
-         report (the common case — no migration in flight AND the dispatch is under cap)"
-    );
-    assert!(
-        result.is_none(),
-        "with no migration verdict and a non-firing shard_cap check, the overall precedence \
-         result must be None (allow the dispatch to proceed), got {result:?}"
-    );
-}
-
-#[test]
-fn test_BC_1_18_011_PRECOND6_admission_precheck_returns_none_when_no_migration_state_dir() {
-    // Negative control — this guard is REAL (already-implemented) code per
-    // stub-architect's own Red-Gate safety note, so this test is expected
-    // to be GREEN today, locking in the exact zero-cost-bypass condition
-    // the positive gate-precedence tests above depend on.
+fn test_BC_1_18_011_PRECOND6_admission_admits_and_reserves_when_no_migration_state_dir() {
+    // BC-1.18.011 Precondition 6(c) "Unconditional reservation namespace"
+    // / EC-015 (replaces the former "no migration-state/ => zero-cost no-op
+    // with nothing created" expectation): a protected write admitted before
+    // `.factory/migration-state/` ever existed STILL reserves, so a coordinator
+    // that activates mid-flight sees it.
     let dir = tempfile::tempdir().unwrap();
     let target = bc_index_target(dir.path());
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "content").unwrap();
-    let payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let mut payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
+    payload
+        .extra
+        .insert("tool_use_id".to_string(), serde_json::json!("T1"));
+    let result = bc_index_migration_admission(&payload, dir.path()).verdict;
     assert!(
         result.is_none(),
-        "with no .factory/migration-state/ directory present at all, this gate must be a \
-         zero-cost no-op (None)"
+        "no migration-state/ present: absent gate = OPEN, no live txn => admitted (None), got {result:?}"
+    );
+    let ms = dir.path().join(".factory/migration-state");
+    let reservation = ms.join("reservations/T1.reservation");
+    let body = std::fs::read(&reservation).unwrap_or_else(|e| {
+        panic!("admitter must create reservations/T1.reservation even when migration-state/ never existed: {e}")
+    });
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("reservation parses as JSON");
+    assert_eq!(v["tool_use_id"], "T1");
+    assert!(v["created_at"].is_string());
+    assert!(
+        !ms.join("gate-state.json").exists(),
+        "the admitter writes no gate-state.json"
+    );
+    let txn_files = std::fs::read_dir(&ms)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("txn-"))
+        .count();
+    assert_eq!(txn_files, 0, "the admitter writes no txn record");
+
+    // EC-015: no `tool_use_id` => check-only: NO directory and NO reservation.
+    let dir2 = tempfile::tempdir().unwrap();
+    let target2 = bc_index_target(dir2.path());
+    std::fs::create_dir_all(target2.parent().unwrap()).unwrap();
+    std::fs::write(&target2, "content").unwrap();
+    let payload2 = bc_index_payload(dir2.path(), "Write", serde_json::json!({ "content": "x" }));
+    let result2 = bc_index_migration_admission(&payload2, dir2.path()).verdict;
+    assert!(result2.is_none(), "admitted check-only, got {result2:?}");
+    assert!(
+        !dir2.path().join(".factory/migration-state").exists(),
+        "a payload without tool_use_id must create no migration-state directory"
     );
 }
 
 #[test]
-fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of_scope() {
+fn test_BC_1_18_011_RULING3_admission_returns_none_for_bash_tool_out_of_scope() {
     // Ruling 3: the ^Bash$ full-command pre-shell classifier (ADR-052
     // §Decision 5c) is a SEPARATE guard, not implemented by this function.
     // This function's own tool-kind guard covers Edit/Write/MultiEdit ONLY
@@ -1515,7 +1392,7 @@ fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of
         "Bash",
         serde_json::json!({ "command": "echo hi" }),
     );
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let result = bc_index_migration_admission(&payload, dir.path()).verdict;
     assert!(
         result.is_none(),
         "a Bash dispatch must be out of THIS function's scope regardless of migration state — \
@@ -1524,14 +1401,14 @@ fn test_BC_1_18_011_RULING3_admission_precheck_returns_none_for_bash_tool_out_of
 }
 
 #[test]
-fn test_BC_1_18_011_admission_precheck_returns_none_for_post_tool_use_event() {
+fn test_BC_1_18_011_admission_returns_none_for_post_tool_use_event() {
     // Negative control — real (already-implemented) event-type guard,
     // mirroring shard_cap_precheck's own PreToolUse-only scoping.
     let dir = tempfile::tempdir().unwrap();
     write_migration_txn(dir.path(), "STAGING");
     let mut payload = bc_index_payload(dir.path(), "Write", serde_json::json!({ "content": "x" }));
     payload.event_name = "PostToolUse".to_string();
-    let result = bc_index_migration_admission_precheck(&payload, dir.path());
+    let result = bc_index_migration_admission(&payload, dir.path()).verdict;
     assert!(
         result.is_none(),
         "this gate is PreToolUse-only, mirroring shard_cap_precheck"
@@ -1558,17 +1435,163 @@ fn test_BC_1_18_011_PRECOND6_admit_or_block_bc_index_writer_creates_reservation_
 }
 
 // ---------------------------------------------------------------------------
+// S-25.08 (T-2, AC-009) -- B2 entry point delegates to the SHARED admission
+// core: reserve-then-verify, step-3.5 reconciliation wired, release-on-block.
+// These were red at the Red Gate (the merged B2 entry point was
+// check-then-reserve and never called `reconcile_stale_admission_gate`); the
+// entry point now delegates to the shared core. These are the IN-PROCESS B2
+// entry-point facets; the real-binary facets are in
+// `s2508_admission_blackbox_test.rs`.
+// ---------------------------------------------------------------------------
+
+fn bc_index_payload_with_tool_use_id(cwd: &Path, tool_use_id: &str) -> HookPayload {
+    let mut payload = bc_index_payload(
+        cwd,
+        "Edit",
+        serde_json::json!({ "old_string": "a", "new_string": "b" }),
+    );
+    payload
+        .extra
+        .insert("tool_use_id".to_string(), serde_json::json!(tool_use_id));
+    payload
+}
+
+fn write_b2_state(cwd: &Path, gate: &str, txn: Option<(&str, serde_json::Value)>) {
+    let ms = cwd.join(".factory/migration-state");
+    std::fs::create_dir_all(ms.join("reservations")).unwrap();
+    std::fs::write(ms.join("exclusive.lock"), b"").unwrap();
+    std::fs::write(ms.join("gate-state.json"), format!("\"{gate}\"")).unwrap();
+    if let Some((state, generation_id)) = txn {
+        std::fs::write(
+            ms.join("txn-act-b2.json"),
+            format!(
+                r#"{{"txn_id":"txn-b2","activation_id":"act-b2","fencing_generation":1,"state":"{state}","generation_id":{generation_id},"source_sha256":null,"source_body_row_sha256":null,"intent_log_path":null,"pending_canonical_moves":[],"created_at":"2026-10-06T00:00:00Z","updated_at":"2026-10-06T00:00:00Z","migration_id":"migrate-bc-index"}}"#
+            ),
+        )
+        .unwrap();
+    }
+}
+
+/// AC-009 / AC-007 (BC-1.18.011 Precondition 6(d) Branch A, EC-010): the B2 entry
+/// point runs the flock-gated stale-gate reconciliation (gate LOCKED/DRAINING, no
+/// active txn, lock acquirable => gate -> OPEN) and then ADMITS, creating the
+/// reservation.
+#[test]
+fn test_BC_1_18_011_PC6d_b2_entry_point_branch_a_heals_stale_gate_then_admits() {
+    for gate in ["LOCKED", "DRAINING"] {
+        let dir = tempfile::tempdir().unwrap();
+        write_b2_state(dir.path(), gate, None);
+        let payload = bc_index_payload_with_tool_use_id(dir.path(), "TA");
+        let verdict = bc_index_migration_admission(&payload, dir.path()).verdict;
+        assert!(
+            verdict.is_none(),
+            "gate {gate} + no txn + lock free: the shared core's Branch A must reconcile the gate \
+             to OPEN and then admit (None), got {verdict:?}"
+        );
+        let gate_after =
+            std::fs::read_to_string(dir.path().join(".factory/migration-state/gate-state.json"))
+                .unwrap();
+        assert!(
+            gate_after.contains("OPEN"),
+            "Branch A must durably flip the gate to OPEN, found {gate_after}"
+        );
+        assert!(
+            dir.path()
+                .join(".factory/migration-state/reservations/TA.reservation")
+                .exists(),
+            "an admitted dispatch holds its reservation until PostToolUse"
+        );
+    }
+}
+
+/// AC-009 / AC-007 (BC-1.18.011 Precondition 6(d) Branch B, EC-010): STAGING with
+/// `generation_id = null` and no live coordinator => txn ABORTED (retained) + gate
+/// OPEN, then admit.
+#[test]
+fn test_BC_1_18_011_PC6d_b2_entry_point_branch_b_aborts_null_generation_staging_then_admits() {
+    let dir = tempfile::tempdir().unwrap();
+    write_b2_state(
+        dir.path(),
+        "DRAINING",
+        Some(("STAGING", serde_json::Value::Null)),
+    );
+    let payload = bc_index_payload_with_tool_use_id(dir.path(), "TB");
+    let verdict = bc_index_migration_admission(&payload, dir.path()).verdict;
+    assert!(
+        verdict.is_none(),
+        "Branch B must abort the null-generation STAGING txn, open the gate, then admit; got \
+         {verdict:?}"
+    );
+    let txn: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join(".factory/migration-state/txn-act-b2.json"))
+            .expect("the ABORTED txn record must be RETAINED (never deleted)"),
+    )
+    .unwrap();
+    assert_eq!(txn["state"], "ABORTED");
+    assert_eq!(txn["abort_reason"], "null_generation");
+    assert!(txn["generation_id"].is_null());
+    assert!(txn["source_sha256"].is_null());
+}
+
+/// AC-009 (BC-1.18.011 Precondition 6(c) reserve-then-verify + release-on-block,
+/// EC-007, EC-008): on FAILED verification (live coordinator holds the lock, txn
+/// STAGING) the admitter has created ITS OWN reservation FIRST and then removes it
+/// before returning the `E-MAINTENANCE-001` Block. Discriminator vs the former
+/// (pre-S-25.08) check-then-reserve ordering: a stale file already sitting at the SAME
+/// `tool_use_id` path is overwritten by the admitter's own reservation and then
+/// removed (the former ordering refused BEFORE creating, so the planted file would survive).
+/// An unrelated writer's reservation is never touched.
+#[test]
+fn test_BC_1_18_011_EC008_b2_failed_verification_removes_own_reservation_created_first() {
+    let dir = tempfile::tempdir().unwrap();
+    write_b2_state(
+        dir.path(),
+        "LOCKED",
+        Some(("STAGING", serde_json::json!("gen-1"))),
+    );
+    let _live_coordinator = hold_exclusive_lock(dir.path());
+    let res_dir = dir.path().join(".factory/migration-state/reservations");
+    std::fs::write(res_dir.join("T5.reservation"), "stale-planted-content").unwrap();
+    std::fs::write(
+        res_dir.join("OTHER.reservation"),
+        r#"{"created_at":"2026-10-06T00:00:00Z","tool_use_id":"OTHER"}"#,
+    )
+    .unwrap();
+
+    let payload = bc_index_payload_with_tool_use_id(dir.path(), "T5");
+    let verdict = bc_index_migration_admission(&payload, dir.path()).verdict;
+    match verdict {
+        Some(HookResult::Block { reason }) => assert!(
+            reason.contains("E-MAINTENANCE-001"),
+            "refusal must be the E-MAINTENANCE-001 Block, got {reason}"
+        ),
+        other => panic!("live STAGING txn must Block (never Error/None), got {other:?}"),
+    }
+    assert!(
+        !res_dir.join("T5.reservation").exists(),
+        "reserve-then-verify: the admitter's own reservation (T5) was created FIRST and must be \
+         removed on failed verification -- a surviving T5 file means the former (pre-S-25.08) check-then-reserve \
+         ordering is still in force"
+    );
+    assert!(
+        res_dir.join("OTHER.reservation").exists(),
+        "another writer's reservation must never be removed by this admitter"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // F-C5-P1-001 (cycle-5 pass-1 adversary finding) — BC-1.18.010 Postcondition
 // 1: the post-migration canonical BC-INDEX.md lean body MUST retain the
 // ORIGINAL YAML frontmatter (`total_bcs` et al.), the real `## Summary`
 // subsystem-registry table, and any cross-cutting invariants — it inserts
 // `## Subsystem Shard Manifest` and removes ONLY the per-subsystem
-// `### SS-NN` BC tables. `run_bc_index_migration`'s `staged_bc_index_body`
-// is currently a hardcoded literal (`"## Summary\n\n## Subsystem Shard
-// Manifest\n\nSee \`shards/BC-INDEX.shard-manifest.toml\`.\n"`) that
-// discards EVERYTHING before the first `### SS-NN` heading wholesale —
-// frontmatter, the real §Summary table, and any cross-cutting invariants —
-// replacing it with a 4-line stub.
+// `### SS-NN` BC tables. Before the fix, `run_bc_index_migration`'s
+// `staged_bc_index_body` was a hardcoded literal (`"## Summary\n\n## Subsystem
+// Shard Manifest\n\nSee \`shards/BC-INDEX.shard-manifest.toml\`.\n"`) that
+// discarded EVERYTHING before the first `### SS-NN` heading wholesale --
+// frontmatter, the real Summary table, and any cross-cutting invariants --
+// replacing it with a 4-line stub. It is now derived via
+// `extract_bc_index_preamble`.
 //
 // This is a fresh-run END-TO-END test against a realistic fixture, driving
 // `run_bc_index_migration` for real — NOT the PC1/PC2 unit helpers in
@@ -1751,8 +1774,9 @@ fn test_BC_1_18_010_PC1_FC5P1001_run_bc_index_migration_preserves_frontmatter_su
 // first uncompleted move" and "never partially applied"; Postcondition 5
 // idempotency; EC-002 "the partial staged output is discarded ... restarts
 // cleanly"; EC-003 "resume ... MUST re-run the full census") against the
-// CURRENT implementation, which does not yet honor it. All three MUST FAIL
-// against HEAD `893719bf`.
+// implementation. At authoring time (HEAD `893719bf`) the implementation did
+// not yet honor it and all three failed; they are the regression pins for the
+// subsequent fixes.
 // ---------------------------------------------------------------------------
 
 fn sha256_hex_of_bytes(bytes: &[u8]) -> String {

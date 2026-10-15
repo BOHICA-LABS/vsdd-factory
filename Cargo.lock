@@ -3585,6 +3585,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vp147-mutants"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "vsdd-context-resolvers"
 version = "0.0.1"
 dependencies = [

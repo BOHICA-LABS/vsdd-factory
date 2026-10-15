@@ -20,16 +20,49 @@
 //!
 //! Two gaps in the original write-then-rename implementation, closed here:
 //!
-//! 1. **Permission preservation.** `File::create` on a brand-new temp file
-//!    gets the platform/umask default mode, NOT the pre-existing target
-//!    file's own mode — a target deliberately `chmod`'d to something
-//!    non-default (e.g. `0o600` for a sensitive file) would silently have
-//!    its permission bits reset to the default on every write. This module
-//!    now reads the pre-existing target's `Permissions` (mode on Unix,
-//!    read-only flag on Windows) and applies them to the temp file before
-//!    the rename, so a rename never changes a file's permission bits as a
-//!    side effect. A target that does not exist yet (first-ever write) has
-//!    nothing to preserve, and is left at the platform default.
+//! 1. **Permission preservation (single-capture contract).** A brand-new
+//!    temp file gets the platform/umask default mode, NOT the pre-existing
+//!    target's own mode, so a target deliberately `chmod`'d to something
+//!    non-default (e.g. `0o600`) would have its permission bits reset on
+//!    every write. The writers therefore make exactly ONE `metadata` call on
+//!    the target, BEFORE the temp is created ([`capture_target_mode`]),
+//!    capturing `Option<u32>` (the mode `& 0o777`; setuid/setgid/sticky are
+//!    never carried). `NotFound` captures `None`; any other metadata error
+//!    is returned. With `Some(_)` the temp is created `0o600` and the open
+//!    handle is `fchmod`ed to the captured mode after the write
+//!    ([`apply_captured_mode`]); with `None` the temp is created `0o666`
+//!    (the kernel applies the process umask, exactly `File::create`
+//!    semantics) and nothing is applied. There is no second stat, no umask
+//!    discovery and no process spawn. The captured mode is the contract: a
+//!    target removed or replaced after the capture does not change the
+//!    final mode. Concurrent-creator caveat: a process that creates the
+//!    target after an absent capture is not observed, so the temp stays at
+//!    the umask default; see [`create_exclusive_temp_for_target`].
+//!
+//!    **Documented non-guarantees of the permission contract:**
+//!
+//!    - *Mode only; ownership is not preserved.* Only the permission bits
+//!      (`& 0o777`) of an overwritten target are carried over. The owner
+//!      (uid) and group (gid) of the replacement file are those of the
+//!      writing process (and the parent directory's group semantics), NOT
+//!      those of the file it replaces. No `fchown` is attempted.
+//!    - *`metadata()` follows symlinks.* The mode is captured with
+//!      `std::fs::metadata`, which follows a symlink at `path`, so the
+//!      captured mode is the symlink TARGET's mode. This is documented,
+//!      intentional behaviour. The final rename then replaces the symlink
+//!      entry itself with a regular file.
+//!    - *Windows ACLs/DACLs are not preserved.* On Windows the mode is
+//!      synthesized from the read-only flag only. A rewritten file is a new
+//!      NTFS file that inherits the PARENT directory's ACL; custom
+//!      ACEs/DACLs, owner and alternate data streams on the old file are
+//!      lost.
+//!    - *Windows read-only target.* If the target carries the read-only
+//!      attribute, the final rename onto it can fail (access denied). The
+//!      error is returned and the target is untouched; the failure path
+//!      removes the temp file best-effort, but if that removal also fails
+//!      (or the process dies) an orphaned `.<basename>.tmp-*` sibling can
+//!      remain. Orphans are inert; see "Crash behaviour" on
+//!      [`write_atomic`].
 //! 2. **fsync durability.** A `rename` that lands before the temp file's
 //!    written bytes are actually durable on disk (still sitting in a
 //!    filesystem write-back cache) leaves a crash window where `path` could
@@ -62,9 +95,9 @@
 //! persistent permission failure unchanged.
 
 use crate::error::MigrateError;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Bounded attempt count for [`rename_with_retry`]'s Windows-transient-lock
@@ -249,33 +282,400 @@ fn is_retryable_rename_error(err: &std::io::Error) -> bool {
     }
 }
 
-/// Write `content` to `path` atomically: write to a sibling `<basename>.tmp-<pid>`
-/// file in the same directory (preserving `path`'s pre-existing permission
-/// bits, if any, and `fsync`ing the data before rename — S-15.03 N2), then
-/// `rename` it into place. On success, no `.tmp-*` sibling survives — the
-/// rename consumes it. On failure to write or fsync the temp file, no
+/// Bounded number of fresh-suffix attempts [`create_exclusive_temp`] makes
+/// when `create_new` reports the candidate name already exists, before it
+/// fails closed with `ErrorKind::AlreadyExists`.
+const TEMP_CREATE_MAX_ATTEMPTS: u32 = 16;
+
+/// Unpredictable 64-bit suffix for a temp-file name (S-25.08 PR #848
+/// SEC-002, CWE-377).
+///
+/// Source choice: `std::hash::RandomState`. Its SipHash keys are seeded
+/// from the OS CSPRNG at first use (per thread), so a same-uid attacker
+/// who can read the pid and the clock still cannot predict the output;
+/// the hasher additionally mixes the pid, the wall-clock nanoseconds and
+/// a process-wide counter so successive calls within one thread never
+/// repeat. This avoids adding a direct `getrandom`/`rand`/`uuid`
+/// dependency to this standalone CLI crate for one 64-bit nonce. The
+/// security property does NOT rest on unpredictability alone: the file
+/// is opened with `create_new` (`O_EXCL`), so a pre-planted file or
+/// symlink at a guessed name is refused rather than followed.
+#[doc(hidden)]
+pub fn unpredictable_suffix() -> u64 {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u32(std::process::id());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    hasher.write_u64(nanos);
+    hasher.finish()
+}
+
+/// Exclusively create (`create_new`, i.e. `O_EXCL` on Unix and
+/// `CREATE_NEW` on Windows) a fresh sibling temp file
+/// `.<basename>.<kind>-<pid>-<nonce:016x>` in `parent`, returning the open
+/// handle and its path. A name collision (`AlreadyExists`, including a
+/// planted file or symlink, dangling or not) is retried with a new
+/// suffix, bounded by `TEMP_CREATE_MAX_ATTEMPTS` (16); exhaustion or any
+/// other error is returned as-is (fail closed, nothing is written
+/// through a pre-existing path). On Unix the file is created with mode
+/// `0o600`, so it is never briefly readable by others.
+///
+/// Writers that replace a governed target should use
+/// [`create_exclusive_temp_for_target`], which also picks the correct
+/// creation mode for a target that does not exist yet.
+pub fn create_exclusive_temp(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+) -> std::io::Result<(File, PathBuf)> {
+    create_temp_with_mode(
+        parent,
+        basename,
+        kind,
+        TEMP_MODE_OWNER_ONLY,
+        unpredictable_suffix,
+    )
+}
+
+/// Suffix-injectable core of [`create_exclusive_temp`] for this crate's unit
+/// tests only: `suffix_fn` is called exactly once per attempt (at most
+/// `TEMP_CREATE_MAX_ATTEMPTS`). Only `AlreadyExists` is retried; any other
+/// error is returned immediately, and exhaustion returns the last
+/// `AlreadyExists` error. No cross-crate caller needs it (the dispatcher
+/// marker writer drives `create_exclusive_temp_for_target_with`), so it is
+/// not part of the public surface.
+#[cfg(test)]
+pub(crate) fn create_exclusive_temp_with<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    suffix_fn: F,
+) -> std::io::Result<(File, PathBuf)> {
+    create_temp_with_mode(parent, basename, kind, TEMP_MODE_OWNER_ONLY, suffix_fn)
+}
+
+/// Owner-only creation mode for a temp that will replace an existing target.
+const TEMP_MODE_OWNER_ONLY: u32 = 0o600;
+/// `File::create`'s requested mode; the process umask narrows it.
+const TEMP_MODE_DEFAULT_CREATE: u32 = 0o666;
+
+/// Single-capture step of the permission contract: ONE `metadata` call on
+/// `target`, made BEFORE the temp is created, returning the target's
+/// permission bits (`& 0o777`, so setuid/setgid/sticky are never carried)
+/// as `Some(mode)`, or `None` when the target does not exist (`NotFound`).
+/// Any other metadata error (`EACCES`, ...) is returned: fail closed rather
+/// than guess a mode.
+///
+/// On non-Unix platforms the value is synthesized from the read-only flag
+/// (`0o444` read-only, `0o666` otherwise) so the same `Option<u32>` flows
+/// through the same seams.
+///
+/// The result is passed to [`create_exclusive_temp_for_target`] and then to
+/// [`apply_captured_mode`]; the target is never stat'ed again.
+pub fn capture_target_mode(target: &Path) -> std::io::Result<Option<u32>> {
+    match std::fs::metadata(target) {
+        Ok(meta) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                Ok(Some(meta.permissions().mode() & 0o777))
+            }
+            #[cfg(not(unix))]
+            {
+                Ok(Some(if meta.permissions().readonly() {
+                    0o444
+                } else {
+                    0o666
+                }))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Like [`create_exclusive_temp`], with the creation mode chosen from
+/// `captured_mode`, the value [`capture_target_mode`] returned for the file
+/// the temp will be renamed over:
+///
+/// - `Some(_)` (target existed at capture): the temp is created `0o600`.
+///   Pair with [`apply_captured_mode`] on the open handle before closing it,
+///   so the temp is owner-only until it takes the captured mode.
+/// - `None` (target absent at capture): the temp is created `0o666` so the
+///   process umask applies, exactly the semantics of `File::create`, and
+///   [`apply_captured_mode`] leaves it alone.
+///
+/// No umask is read or changed, no probe file is made and nothing is
+/// spawned: the umask is applied by the kernel at `open(2)`.
+///
+/// # Creation-mode trust analysis (SEC-002-N3)
+///
+/// The `0o600` birth mode closes the window in which a temp holding the
+/// content of a restrictive target (e.g. a `0o600` file) would be briefly
+/// readable at the umask default. For an absent target the temp is born
+/// `0o666 & !umask`, the very mode `File::create` gives the final file, so
+/// the temp is never more permissive than that result for as long as this
+/// writer is the file's only creator.
+///
+/// Concurrent-creator caveat: the capture is a single point-in-time
+/// observation and the contract is "the final file gets the mode captured
+/// at that instant". If another process creates the target after an absent
+/// capture, the temp (holding this writer's content) was born at the umask
+/// default while the file it replaces may be more restrictive; if the target
+/// is removed or replaced after a `Some` capture, the captured mode is still
+/// the one applied. The exposure is bounded by the umask default, i.e. what
+/// a plain `File::create` of the same content would have exposed. Closing it
+/// entirely would need a lock or `O_TMPFILE`/`linkat`, which this crate does
+/// not use.
+///
+/// # Trust boundary (SEC-002-N1)
+///
+/// Only the temp LEAF is protected (`O_EXCL`, unpredictable suffix). The
+/// parent directory of `target` is trusted: a symlinked or attacker-writable
+/// parent redirects every path beneath it and is out of scope.
+pub fn create_exclusive_temp_for_target(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    captured_mode: Option<u32>,
+) -> std::io::Result<(File, PathBuf)> {
+    create_exclusive_temp_for_target_with(
+        parent,
+        basename,
+        kind,
+        captured_mode,
+        unpredictable_suffix,
+    )
+}
+
+/// Suffix-injectable core of [`create_exclusive_temp_for_target`].
+#[doc(hidden)]
+pub fn create_exclusive_temp_for_target_with<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    captured_mode: Option<u32>,
+    suffix_fn: F,
+) -> std::io::Result<(File, PathBuf)> {
+    let mode = if captured_mode.is_some() {
+        TEMP_MODE_OWNER_ONLY
+    } else {
+        TEMP_MODE_DEFAULT_CREATE
+    };
+    create_temp_with_mode(parent, basename, kind, mode, suffix_fn)
+}
+
+/// SEC-R3-004: `basename` and `kind` are interpolated into a sibling file
+/// name, so each must be a single plain name component: non-empty, no `/`
+/// (nor `\` or `:` on Windows), not `.` or `..`, no NUL. Rejected with
+/// `InvalidInput` before anything is created.
+fn validate_temp_name_component(what: &str, value: &str) -> std::io::Result<()> {
+    // R4-WIN-ADS: on Windows `:` introduces an NTFS alternate data stream
+    // (`name:stream`), so it is rejected there. On Unix `:` is a legal
+    // filename byte and stays allowed.
+    let has_separator = value.contains('/')
+        || (cfg!(windows) && value.contains('\\'))
+        || (cfg!(windows) && value.contains(':'));
+    if value.is_empty() || value == "." || value == ".." || value.contains('\0') || has_separator {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unsafe temp-file {what} {value:?}: must be a single plain name component"),
+        ));
+    }
+    Ok(())
+}
+
+/// Maximum length in bytes of a single generated temp file name (ext4, xfs,
+/// btrfs, APFS and NTFS all cap a path component at 255 bytes; bytes is the
+/// stricter measure).
+const TEMP_NAME_MAX_BYTES: usize = 255;
+
+/// Width of the `-<h:016x>` hash suffix appended to a truncated stem.
+const TEMP_STEM_HASH_SUFFIX_BYTES: usize = 17;
+
+/// FNV-1a 64-bit hash with the fixed standard offset basis and prime. Stable
+/// across processes and platforms (deliberately NOT `RandomState`), so equal
+/// basenames always derive equal stems.
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Build the temp file name `.<stem>.<kind>-<pid>-<nonce:016x>`. A name that
+/// fits in [`TEMP_NAME_MAX_BYTES`] is byte-identical to the documented shape.
+/// Otherwise `<stem>` becomes `<prefix>-<h:016x>` where `<h>` is the stable
+/// FNV-1a 64 hash of the FULL original `basename` and `<prefix>` is the
+/// basename truncated at a UTF-8 char boundary so the name exactly fits (as
+/// closely as char boundaries allow). The `<pid>-<nonce>` tail is untouched.
+fn build_temp_name(basename: &str, kind: &str, pid: u32, nonce: u64) -> std::io::Result<String> {
+    let tail = format!(".{kind}-{pid}-{nonce:016x}");
+    // Leading '.' + stem + tail.
+    let stem_budget = TEMP_NAME_MAX_BYTES.saturating_sub(1 + tail.len());
+    if basename.len() <= stem_budget {
+        return Ok(format!(".{basename}{tail}"));
+    }
+    if stem_budget <= TEMP_STEM_HASH_SUFFIX_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "temp-file kind {kind:?} is too long to form a name within {TEMP_NAME_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    let mut cut = stem_budget - TEMP_STEM_HASH_SUFFIX_BYTES;
+    while !basename.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    Ok(format!(
+        ".{}-{:016x}{tail}",
+        &basename[..cut],
+        fnv1a_64(basename.as_bytes())
+    ))
+}
+
+fn create_temp_with_mode<F: FnMut() -> u64>(
+    parent: &Path,
+    basename: &str,
+    kind: &str,
+    #[cfg_attr(not(unix), allow(unused_variables))] mode: u32,
+    mut suffix_fn: F,
+) -> std::io::Result<(File, PathBuf)> {
+    validate_temp_name_component("basename", basename)?;
+    validate_temp_name_component("kind", kind)?;
+    let mut last_err = None;
+    for _ in 0..TEMP_CREATE_MAX_ATTEMPTS {
+        let candidate = parent.join(build_temp_name(
+            basename,
+            kind,
+            std::process::id(),
+            suffix_fn(),
+        )?);
+        let mut opts = OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(mode);
+        }
+        match opts.open(&candidate) {
+            Ok(file) => return Ok((file, candidate)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last_err = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
+}
+
+/// Give the temp its FINAL permissions through the OPEN handle (`fchmod`
+/// on Unix, no path-based `chmod`, so no path race), before the handle is
+/// closed and the temp renamed.
+///
+/// - `Some(mode)`: the handle takes the mode captured by
+///   [`capture_target_mode`] (S-15.03 N2: a rename must not change a file's
+///   permission bits).
+/// - `None`: nothing to do; the temp was born with the `File::create`
+///   default by [`create_exclusive_temp_for_target`].
+///
+/// The target is not consulted here. A failed `fchmod` is RETURNED (never
+/// swallowed): the caller removes the temp and fails the write, so a file
+/// never lands with permissions other than the ones this function was asked
+/// to apply (NB-B).
+pub fn apply_captured_mode(file: &File, captured_mode: Option<u32>) -> std::io::Result<()> {
+    let Some(mode) = captured_mode else {
+        return Ok(());
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut perms = file.metadata()?.permissions();
+        perms.set_readonly(mode & 0o200 == 0);
+        file.set_permissions(perms)
+    }
+}
+
+/// Write `content` to `path` atomically: write to an exclusively-created
+/// sibling `.<basename>.tmp-<pid>-<nonce>` file in the same directory
+/// (on Unix created `0o600` when `path` already exists, then `fchmod`ed to
+/// `path`'s mode on the open handle; created `0o666 & !umask`, i.e.
+/// `File::create` semantics, when `path` is new; `fsync`ed before rename —
+/// S-15.03 N2; see [`create_exclusive_temp_for_target`]), then
+/// `rename` it into place. On success, no `.<basename>.tmp-*` sibling
+/// survives — the rename consumes it. On failure to write or fsync the temp file, no
 /// attempt is made to write `path` at all, so `path` is left completely
 /// untouched, and the temp file is best-effort removed.
+///
+/// # Trust boundary (SEC-002-N1)
+///
+/// The PARENT directory of `path` is trusted. The temp-file protection
+/// (`create_new`/`O_EXCL`, unpredictable suffix) covers the temp LEAF only:
+/// it refuses a planted file or symlink at the temp name, but it does not
+/// and cannot defend against a symlinked or attacker-writable parent
+/// directory, which redirects every path beneath it. Callers must only
+/// pass governed paths under directories they control.
+///
+/// # Crash behaviour (N-4)
+///
+/// A crash (SIGKILL, power loss) between temp creation and the rename can
+/// orphan a `.<basename>.tmp-<pid>-<nonce>` file in the parent directory.
+/// Orphans are inert (never read as `path`) and no sweep in this crate
+/// removes them; an orphan is only removed by the best-effort cleanup on a
+/// handled write/rename error, or manually.
 pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
+    write_atomic_with_perms_fn(path, content, apply_captured_mode)
+}
+
+/// Permission-apply-injectable core of [`write_atomic`] (S-25.08 PR #848
+/// NB-B test seam): `perms_fn` is called once on the open temp handle with
+/// the captured mode of `path`. Production always passes [`apply_captured_mode`];
+/// tests inject a failing closure to prove an `fchmod` error removes the
+/// temp, fails the write and leaves `path` untouched.
+#[doc(hidden)]
+pub fn write_atomic_with_perms_fn<P>(
+    path: &Path,
+    content: &str,
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
+{
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-output".to_string());
-    let tmp_path = parent.join(format!(".{basename}.tmp-{}", std::process::id()));
+    let captured_mode = capture_target_mode(path).map_err(|source| MigrateError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let (file, tmp_path) =
+        create_exclusive_temp_for_target(parent, &basename, "tmp", captured_mode).map_err(
+            |source| MigrateError::Io {
+                // N-3: the candidate name is not known when creation fails (it is
+                // random and may have exhausted all attempts), so report the one
+                // concrete path that is: the directory the temp file could not be
+                // created in — never a non-existent glob.
+                path: parent.to_path_buf(),
+                source,
+            },
+        )?;
 
-    if let Err(e) = write_and_sync_temp(&tmp_path, content) {
+    if let Err(e) = write_and_sync_temp(file, &tmp_path, captured_mode, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(e);
-    }
-
-    // N2: preserve the pre-existing target's permission bits across the
-    // rename. Best-effort — a target that doesn't exist yet (first write)
-    // or a permissions API that fails for an unrelated reason must not
-    // block the substantive content write, which `std::fs::write` never
-    // guarded against either.
-    if let Ok(existing_meta) = std::fs::metadata(path) {
-        let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
     }
 
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
@@ -284,7 +684,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     // `write_and_sync_temp` already closed via `Drop` before returning).
     rename_with_retry(&tmp_path, path).map_err(|source| {
         // Best-effort cleanup of the orphaned temp file — the rename failure
-        // itself is still reported; a leftover `.tmp-<pid>` here is a
+        // itself is still reported; a leftover `.tmp-<pid>-<nonce>` here is a
         // secondary symptom, not the primary error, and this tool has no
         // other path that can safely remove it on the caller's behalf later.
         let _ = std::fs::remove_file(&tmp_path);
@@ -309,19 +709,29 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), MigrateError> {
     Ok(())
 }
 
-/// Write `content` to `tmp_path` (creating or truncating it) and `fsync` it
-/// before returning, so the caller's subsequent `rename` never lands ahead
-/// of the data actually being durable on disk (S-15.03 N2).
-fn write_and_sync_temp(tmp_path: &Path, content: &str) -> Result<(), MigrateError> {
-    let mut file = File::create(tmp_path).map_err(|source| MigrateError::Io {
-        path: tmp_path.to_path_buf(),
-        source,
-    })?;
+/// Write `content` through `file` (the exclusively-created handle for
+/// `tmp_path`, consumed so it is dropped at return) and `fsync` it before
+/// returning, so the caller's subsequent `rename` never lands ahead of the
+/// data actually being durable on disk (S-15.03 N2).
+fn write_and_sync_temp<P>(
+    mut file: File,
+    tmp_path: &Path,
+    captured_mode: Option<u32>,
+    content: &str,
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
+{
     file.write_all(content.as_bytes())
         .map_err(|source| MigrateError::Io {
             path: tmp_path.to_path_buf(),
             source,
         })?;
+    perms_fn(&file, captured_mode).map_err(|source| MigrateError::Io {
+        path: tmp_path.to_path_buf(),
+        source,
+    })?;
     file.sync_all().map_err(|source| MigrateError::Io {
         path: tmp_path.to_path_buf(),
         source,
@@ -474,24 +884,51 @@ pub fn sync_dir_strict_durable(dir: &Path) -> Result<(), MigrateError> {
 /// are UNAFFECTED — this is a separate, additive, stronger-guarantee
 /// entry point for a governance-integrity-critical writer (BC-1.18.011's
 /// B2 BC-INDEX migration).
+///
+/// The same trust boundary (parent directory trusted, SEC-002-N1) and
+/// crash behaviour (a crash can orphan a `.<basename>.strict-tmp-<pid>-<nonce>`
+/// file, which no sweep removes, N-4) documented on [`write_atomic`] apply.
 pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), MigrateError> {
+    write_atomic_strict_durable_with_perms_fn(path, content, apply_captured_mode)
+}
+
+/// Permission-apply-injectable core of [`write_atomic_strict_durable`]
+/// (NB-B test seam; see [`write_atomic_with_perms_fn`]).
+#[doc(hidden)]
+pub fn write_atomic_strict_durable_with_perms_fn<P>(
+    path: &Path,
+    content: &str,
+    perms_fn: P,
+) -> Result<(), MigrateError>
+where
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
+{
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let basename = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "last-amended-migrate-strict-output".to_string());
-    let tmp_path = parent.join(format!(".{basename}.strict-tmp-{}", std::process::id()));
+    let captured_mode = capture_target_mode(path).map_err(|source| MigrateError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let (file, tmp_path) =
+        create_exclusive_temp_for_target(parent, &basename, "strict-tmp", captured_mode).map_err(
+            |source| {
+                MigrateError::Io {
+                    // N-3: concrete directory, not a glob (see `write_atomic`).
+                    path: parent.to_path_buf(),
+                    source,
+                }
+            },
+        )?;
 
-    if let Err(source) = write_and_sync_temp_strict(&tmp_path, content) {
+    if let Err(source) = write_and_sync_temp_strict(file, captured_mode, content, perms_fn) {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(MigrateError::Io {
             path: tmp_path,
             source,
         });
-    }
-
-    if let Ok(existing_meta) = std::fs::metadata(path) {
-        let _ = std::fs::set_permissions(&tmp_path, existing_meta.permissions());
     }
 
     // `rename_with_retry` (not a bare `std::fs::rename`) — see its own doc
@@ -513,13 +950,13 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
     })
 }
 
-/// Write `content` to `tmp_path` (creating or truncating it) and durably
-/// sync it — `F_FULLFSYNC` on macOS, plain `fsync` elsewhere, via
+/// Write `content` through `file` (the exclusively-created handle for the
+/// temp file) and durably sync it — `F_FULLFSYNC` on macOS, plain `fsync` elsewhere, via
 /// [`sync_file_durable`] — before returning, so the caller's subsequent
 /// rename never lands ahead of the data actually being durable on disk
 /// (D-1232-OBL-2(a)).
 ///
-/// `file` is a binding local to THIS function's own stack frame, never
+/// `file` is moved into THIS function's own stack frame and never
 /// returned or exposed to the caller: it is dropped (its OS handle closed
 /// via `Drop`) at this function's return, strictly BEFORE
 /// [`write_atomic_strict_durable`]'s subsequent `rename_with_retry` call —
@@ -527,9 +964,17 @@ pub fn write_atomic_strict_durable(path: &Path, content: &str) -> Result<(), Mig
 /// shape for [`write_atomic`]) rather than an inline closure specifically
 /// so this scoping is unambiguous on inspection (PR #842 Windows-CI
 /// investigation).
-fn write_and_sync_temp_strict(tmp_path: &Path, content: &str) -> std::io::Result<()> {
-    let mut file = File::create(tmp_path)?;
+fn write_and_sync_temp_strict<P>(
+    mut file: File,
+    captured_mode: Option<u32>,
+    content: &str,
+    perms_fn: P,
+) -> std::io::Result<()>
+where
+    P: FnOnce(&File, Option<u32>) -> std::io::Result<()>,
+{
     file.write_all(content.as_bytes())?;
+    perms_fn(&file, captured_mode)?;
     sync_file_durable(&file)
 }
 
@@ -543,7 +988,7 @@ fn write_and_sync_temp_strict(tmp_path: &Path, content: &str) -> std::io::Result
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
@@ -756,5 +1201,838 @@ mod tests {
             1,
             "an unrelated raw OS error must not be retried"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // S-25.08 PR #848 round-2 B-1 (TD-VSDD-059): the SEC-002 integration
+    // tests plant a symlink at the OLD predictable temp name, which the fix
+    // no longer uses, so they pass even if `create_new(true)` is reverted.
+    // These unit tests drive the crate-private suffix-injection seam
+    // `create_exclusive_temp_with(parent, basename, kind, suffix_fn)` so a
+    // collision is planted at the EXACT candidate name the function will try
+    // first, exercising the `AlreadyExists` retry branch and the bounded
+    // fail-closed exit. They live in this src-level module (not an
+    // integration file) because the seam is crate-private.
+    // -----------------------------------------------------------------
+
+    /// The exact candidate name `create_exclusive_temp_with` must build for
+    /// a given suffix (documented format `.<basename>.<kind>-<pid>-<suffix:016x>`).
+    fn candidate_for(parent: &Path, basename: &str, kind: &str, suffix: u64) -> PathBuf {
+        parent.join(format!(
+            ".{basename}.{kind}-{}-{suffix:016x}",
+            std::process::id()
+        ))
+    }
+
+    /// A deterministic suffix source yielding `values` in order, then
+    /// panicking if over-consumed; the shared counter records how many
+    /// suffixes were requested (== attempts made).
+    fn scripted_suffixes(values: Vec<u64>) -> (impl FnMut() -> u64, Rc<RefCell<usize>>) {
+        let calls = Rc::new(RefCell::new(0usize));
+        let calls_in = Rc::clone(&calls);
+        let f = move || {
+            let mut n = calls_in.borrow_mut();
+            let v = *values
+                .get(*n)
+                .unwrap_or_else(|| panic!("suffix_fn over-consumed: asked for call #{}", *n + 1));
+            *n += 1;
+            v
+        };
+        (f, calls)
+    }
+
+    #[cfg(unix)]
+    const VICTIM_ORIGINAL: &str = "VICTIM-ORIGINAL-CONTENT\n";
+
+    /// Shared body for (a): plant a symlink at the FIRST candidate; the
+    /// second candidate must be used and the victim left untouched.
+    #[cfg(unix)]
+    fn assert_first_candidate_symlink_retries_to_second(dangling: bool) {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let victim_dir = tempfile::tempdir().unwrap();
+        let victim = victim_dir.path().join("victim.txt");
+        if !dangling {
+            std::fs::write(&victim, VICTIM_ORIGINAL).unwrap();
+        }
+        let first = candidate_for(dir.path(), "reservation.json", "tmp", 1);
+        let second = candidate_for(dir.path(), "reservation.json", "tmp", 2);
+        symlink(&victim, &first).unwrap();
+
+        let (suffix_fn, calls) = scripted_suffixes(vec![1, 2]);
+        let (mut file, path) =
+            create_exclusive_temp_with(dir.path(), "reservation.json", "tmp", suffix_fn)
+                .expect("a symlink at the first candidate must be refused and the retry succeed");
+        file.write_all(b"NEW-CONTENT\n").unwrap();
+        drop(file);
+
+        assert_eq!(
+            path, second,
+            "retry must proceed to the second candidate name"
+        );
+        assert_eq!(*calls.borrow(), 2, "exactly two suffixes consumed");
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "NEW-CONTENT\n");
+        assert!(
+            std::fs::symlink_metadata(&first)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the planted symlink must be left in place, not replaced or removed"
+        );
+        if dangling {
+            assert!(
+                !victim.exists(),
+                "create_new must not create the victim through a dangling symlink (CWE-59)"
+            );
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(&victim).unwrap(),
+                VICTIM_ORIGINAL,
+                "create_new must not follow the symlink and truncate the victim (CWE-59/CWE-377)"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_retries_past_symlink_to_existing_victim() {
+        assert_first_candidate_symlink_retries_to_second(false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_retries_past_dangling_symlink() {
+        assert_first_candidate_symlink_retries_to_second(true);
+    }
+
+    /// (b): every one of the 16 candidates collides (a symlink planted at
+    /// each) -> typed `AlreadyExists`, exactly 16 attempts, nothing written
+    /// through any symlink, the target untouched, no new files created.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_all_16_candidates_collide_fails_closed() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let victim_dir = tempfile::tempdir().unwrap();
+        let victim = victim_dir.path().join("victim.txt");
+        std::fs::write(&victim, VICTIM_ORIGINAL).unwrap();
+        let target = dir.path().join("reservation.json");
+        std::fs::write(&target, "TARGET-ORIGINAL\n").unwrap();
+
+        assert_eq!(TEMP_CREATE_MAX_ATTEMPTS, 16, "documented attempt bound");
+        let suffixes: Vec<u64> = (100..100 + u64::from(TEMP_CREATE_MAX_ATTEMPTS)).collect();
+        for s in &suffixes {
+            symlink(
+                &victim,
+                candidate_for(dir.path(), "reservation.json", "tmp", *s),
+            )
+            .unwrap();
+        }
+        let entries_before = std::fs::read_dir(dir.path()).unwrap().count();
+
+        let (suffix_fn, calls) = scripted_suffixes(suffixes);
+        let err = create_exclusive_temp_with(dir.path(), "reservation.json", "tmp", suffix_fn)
+            .expect_err("all candidates colliding must fail closed");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            *calls.borrow(),
+            16,
+            "must try exactly 16 candidates, then stop"
+        );
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM_ORIGINAL);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "TARGET-ORIGINAL\n"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            entries_before,
+            "fail-closed must create nothing"
+        );
+    }
+
+    /// (b) cross-platform: all 16 candidates collide via a pre-created
+    /// regular file at each name (no symlink needed) -> AlreadyExists after
+    /// exactly 16 attempts; the pre-existing files keep their content.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_all_16_regular_file_collisions_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let suffixes: Vec<u64> = (200..216).collect();
+        for s in &suffixes {
+            std::fs::write(
+                candidate_for(dir.path(), "t.md", "strict-tmp", *s),
+                "OCCUPIED\n",
+            )
+            .unwrap();
+        }
+        let (suffix_fn, calls) = scripted_suffixes(suffixes.clone());
+        let err = create_exclusive_temp_with(dir.path(), "t.md", "strict-tmp", suffix_fn)
+            .expect_err("must fail closed");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(*calls.borrow(), 16);
+        for s in suffixes {
+            assert_eq!(
+                std::fs::read_to_string(candidate_for(dir.path(), "t.md", "strict-tmp", s))
+                    .unwrap(),
+                "OCCUPIED\n",
+                "an occupied candidate must never be truncated"
+            );
+        }
+    }
+
+    /// N-1 (cross-platform replacement for the unix-only, root-skipping
+    /// permission test): force a creation failure by pre-creating a
+    /// DIRECTORY at every injected candidate path. `create_new` refuses a
+    /// directory on every platform and as any uid (including root), so the
+    /// failure is deterministic. The target must be untouched.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_directory_at_candidate_fails_and_target_untouched()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.md");
+        std::fs::write(&target, "original\n").unwrap();
+        // Same suffix every call -> the one (directory) path is hit 16 times.
+        std::fs::create_dir(candidate_for(dir.path(), "target.md", "tmp", 7)).unwrap();
+
+        let (suffix_fn, calls) = scripted_suffixes(vec![7; 16]);
+        let result = create_exclusive_temp_with(dir.path(), "target.md", "tmp", suffix_fn);
+
+        let err = result.expect_err("a directory at the candidate path must force a failure");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(*calls.borrow(), 16);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original\n");
+    }
+
+    /// A non-`AlreadyExists` creation error is NOT retried: it is returned
+    /// after the first attempt (a missing parent directory yields NotFound
+    /// on every platform).
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_non_collision_error_is_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing_parent = dir.path().join("no-such-dir");
+        let (suffix_fn, calls) = scripted_suffixes(vec![1, 2, 3]);
+        let err = create_exclusive_temp_with(&missing_parent, "t.md", "tmp", suffix_fn)
+            .expect_err("missing parent must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(*calls.borrow(), 1, "only AlreadyExists is retried");
+    }
+
+    /// Positive control: with no collision the first candidate is used and
+    /// has the documented `.<basename>.<kind>-<pid>-<suffix:016x>` shape.
+    #[test]
+    fn test_S_25_08_SEC002_create_exclusive_temp_first_candidate_name_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let (suffix_fn, calls) = scripted_suffixes(vec![0xABCD]);
+        let (_file, path) = create_exclusive_temp_with(dir.path(), "x.json", "tmp", suffix_fn)
+            .expect("clean directory must create on first attempt");
+        assert_eq!(path, candidate_for(dir.path(), "x.json", "tmp", 0xABCD));
+        assert_eq!(*calls.borrow(), 1);
+    }
+
+    /// SEC-002-N3 / NB-7: the temp file is born `0o600`, never wider.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_N3_create_exclusive_temp_is_owner_only_0o600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (file, path) = create_exclusive_temp(dir.path(), "t.md", "tmp").unwrap();
+        drop(file);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "temp file must be created owner-only");
+    }
+
+    /// SEC-002-N3 follow-up: a NEW file keeps the platform default creation
+    /// mode (what `File::create` yields); only the temp is owner-only.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC002_N3_new_file_via_write_atomic_has_default_creation_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let probe = dir.path().join("probe");
+        File::create(&probe).unwrap();
+        let expected = std::fs::metadata(&probe).unwrap().permissions().mode() & 0o777;
+
+        let target = dir.path().join("new.md");
+        write_atomic(&target, "x\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "new file must have the default creation mode"
+        );
+
+        let strict = dir.path().join("new-strict.md");
+        write_atomic_strict_durable(&strict, "x\n").unwrap();
+        let mode = std::fs::metadata(&strict).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "strict: new file must have the default creation mode"
+        );
+    }
+
+    /// CR-R2-003 (PR #848 round 3): an OVERWRITE keeps the target's existing
+    /// mode through `write_atomic` (the temp is born 0o600; the pre-existing
+    /// 0o640 must survive the rename). The earlier tests only covered the
+    /// new-file case.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_CR_R2_003_write_atomic_overwrite_preserves_existing_mode_0o640() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("existing.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic(&target, "new\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o640,
+            "write_atomic overwrite must preserve the existing 0o640 mode"
+        );
+    }
+
+    /// CR-R2-003: same overwrite contract for `write_atomic_strict_durable`.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_CR_R2_003_write_atomic_strict_durable_overwrite_preserves_existing_mode_0o640()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("existing-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_atomic_strict_durable(&target, "new\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o640,
+            "write_atomic_strict_durable overwrite must preserve the existing 0o640 mode"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // S-25.08 PR #848 round-3 hardening tests (R3-B1, NB-B, SEC-R3-001/002/004).
+    // -----------------------------------------------------------------------
+
+    /// `File::create` probe mode in `dir` (umask-aware default).
+    #[cfg(unix)]
+    fn file_create_probe_mode(dir: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        let probe = dir.join("mode-probe");
+        let f = File::create(&probe).unwrap();
+        let mode = f.metadata().unwrap().permissions().mode() & 0o777;
+        drop(f);
+        std::fs::remove_file(&probe).unwrap();
+        mode
+    }
+
+    /// R3-B1(a): a temp for an EXISTING target is born `0o600`, observed on the
+    /// handle BEFORE any `fchmod` (`apply_captured_mode`). Kills mutation
+    /// M4 (existing-target branch uses the default creation mode).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_R3_B1_temp_for_existing_target_is_born_0o600_before_any_fchmod() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let (file, tmp) = create_exclusive_temp_for_target_with(
+            dir.path(),
+            "t.md",
+            "tmp",
+            capture_target_mode(&target).unwrap(),
+            || 1,
+        )
+        .unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "temp for an existing 0o644 target must be born owner-only (0o600), pre-fchmod"
+        );
+        assert!(tmp.exists());
+    }
+
+    /// R3-B1(b): a temp for an ABSENT target is born with `File::create`
+    /// semantics (umask default), equal to a same-dir probe.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_R3_B1_temp_for_absent_target_is_born_with_file_create_default_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("absent.md");
+        let expected = file_create_probe_mode(dir.path());
+
+        let (file, _tmp) = create_exclusive_temp_for_target_with(
+            dir.path(),
+            "absent.md",
+            "tmp",
+            capture_target_mode(&target).unwrap(),
+            || 2,
+        )
+        .unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, expected,
+            "temp for an absent target must match the File::create probe mode"
+        );
+    }
+
+    /// NB-B: `apply_captured_mode` must SURFACE a failed fchmod instead of
+    /// swallowing it. Failure injection: a read-only handle to `/dev/null`
+    /// (owned by root, so fchmod by an unprivileged user fails EPERM). Loudly
+    /// skipped (message on stderr, no assertion) when the effective uid may
+    /// chmod `/dev/null` (root), because then the injection cannot fail.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_R3_NB_B_apply_captured_mode_surfaces_fchmod_error() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "x\n").unwrap();
+        let dev_null = File::open("/dev/null").unwrap();
+        let me = std::fs::metadata(dir.path()).unwrap().uid();
+        let owner = dev_null.metadata().unwrap().uid();
+        if me == 0 || owner == me {
+            eprintln!(
+                "SKIPPED test_S_25_08_R3_NB_B_apply_captured_mode_surfaces_fchmod_error: \
+                 uid {me} may fchmod /dev/null (owner {owner}); failure injection impossible"
+            );
+            return;
+        }
+
+        assert!(
+            apply_captured_mode(&dev_null, capture_target_mode(&target).unwrap()).is_err(),
+            "a failed fchmod must be returned as Err"
+        );
+    }
+
+    /// SEC-R3-002: setuid is NOT inherited from the target; final mode is the
+    /// permission bits only.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_masks_setuid_from_target_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("suid.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+        let pre = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(pre, 0o4755, "precondition: setuid set on own file");
+
+        write_atomic(&target, "new\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o755, "special bits must be masked, got {mode:o}");
+    }
+
+    /// SEC-R3-002 (strict-durable writer): same masking.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_strict_durable_masks_setuid_from_target_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("suid-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+
+        write_atomic_strict_durable(&target, "new\n").unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o755, "special bits must be masked, got {mode:o}");
+    }
+
+    /// SEC-R3-002: setgid/sticky are masked too where the platform lets an
+    /// unprivileged owner set them (cases the OS refuses are skipped; setuid
+    /// above is the mandatory case).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_002_write_atomic_masks_setgid_and_sticky_where_settable() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut exercised = 0;
+        for (special, expected) in [(0o2755u32, 0o755u32), (0o1777, 0o777)] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("sp.md");
+            std::fs::write(&target, "old\n").unwrap();
+            let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(special));
+            let got = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+            if got != special {
+                continue; // platform refused the special bit for this user
+            }
+            exercised += 1;
+            write_atomic(&target, "new\n").unwrap();
+            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+            assert_eq!(mode, expected, "{special:o} must mask to {expected:o}");
+        }
+        // setuid is covered by the mandatory tests above; here at least ONE of
+        // setgid/sticky must have been settable (Linux: sticky; macOS: setgid),
+        // otherwise nothing was exercised and the test would pass vacuously.
+        eprintln!("setgid/sticky cases exercised: {exercised}");
+        assert!(
+            exercised >= 1,
+            "no setgid/sticky case was exercised (exercised={exercised}); \
+             the special-bit masking was NOT verified"
+        );
+    }
+
+    /// SEC-R3-001 (single-capture contract): the target is stat'ed ONCE, before
+    /// the temp is created; the captured mode is what the final file gets. A
+    /// target that is removed or replaced between capture and apply does NOT
+    /// change the outcome: no second stat, no umask discovery, no `0o600`
+    /// leftover. The hook runs inside the perms seam (after capture + temp
+    /// creation, before apply) and then delegates to the production apply fn.
+    ///
+    /// The seam is `FnOnce(&File, Option<u32>)` (captured mode); the closure
+    /// delegates to [`apply_captured_mode`].
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_001_captured_mode_survives_target_vanishing_before_apply() {
+        use std::os::unix::fs::PermissionsExt;
+        for (label, replace_with_0o600) in [("vanished", false), ("replaced", true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("cap.md");
+            std::fs::write(&target, "old\n").unwrap();
+            // 0o750 carries execute bits, so it can never equal the
+            // `File::create` default `0o666 & !umask` for ANY umask, and it
+            // differs from the 0o600 temp birth mode: the assertion is
+            // umask-independent.
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o750)).unwrap();
+            let umask_default = file_create_probe_mode(dir.path());
+            assert_eq!(
+                umask_default & 0o111,
+                0,
+                "File::create never sets exec bits"
+            );
+
+            let victim = target.clone();
+            write_atomic_with_perms_fn(&target, "new\n", move |file, mode| {
+                // hook: between capture and apply
+                std::fs::remove_file(&victim).unwrap();
+                if replace_with_0o600 {
+                    std::fs::write(&victim, "intruder\n").unwrap();
+                    std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o600))
+                        .unwrap();
+                }
+                apply_captured_mode(file, mode) // <- seam-specific delegate
+            })
+            .unwrap();
+
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "new\n");
+            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o750,
+                "[{label}] final mode must be the CAPTURED 0o750 (not umask default \
+                 {umask_default:o}, not 0o600), got {mode:o}"
+            );
+        }
+    }
+
+    /// Same single-capture contract for the strict-durable writer.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_SEC_R3_001_strict_captured_mode_survives_target_vanishing_before_apply() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("cap-strict.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let victim = target.clone();
+        write_atomic_strict_durable_with_perms_fn(&target, "new\n", move |file, mode| {
+            std::fs::remove_file(&victim).unwrap();
+            apply_captured_mode(file, mode) // <- seam-specific delegate
+        })
+        .unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o750,
+            "captured mode must survive a vanished target, got {mode:o}"
+        );
+    }
+
+    /// Temp files and sibling names left in `dir` besides `keep`.
+    #[cfg(unix)]
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// NB-B propagation (write_atomic): a failing perms closure returns
+    /// `MigrateError::Io`, removes the temp, and leaves the pre-existing target
+    /// (content AND mode) untouched. Closure ignores its args, so it is valid
+    /// for both the current and the redesigned seam shape.
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_NB_B_write_atomic_perms_failure_errs_removes_temp_leaves_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let err = write_atomic_with_perms_fn(&target, "new\n", |_, _| {
+            Err(std::io::Error::other("injected fchmod failure"))
+        })
+        .expect_err("a perms failure must fail the write");
+        assert!(matches!(err, MigrateError::Io { .. }), "got {err:?}");
+        assert!(err.to_string().contains("injected fchmod failure"), "{err}");
+        assert_eq!(
+            names_in(dir.path()),
+            vec!["t.md".to_string()],
+            "temp must be removed"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old\n");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    /// NB-B propagation (write_atomic_strict_durable).
+    #[cfg(unix)]
+    #[test]
+    fn test_S_25_08_NB_B_write_atomic_strict_durable_perms_failure_errs_removes_temp_leaves_target()
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("t.md");
+        std::fs::write(&target, "old\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let err = write_atomic_strict_durable_with_perms_fn(&target, "new\n", |_, _| {
+            Err(std::io::Error::other("injected fchmod failure"))
+        })
+        .expect_err("a perms failure must fail the write");
+        assert!(matches!(err, MigrateError::Io { .. }), "got {err:?}");
+        assert!(err.to_string().contains("injected fchmod failure"), "{err}");
+        assert_eq!(
+            names_in(dir.path()),
+            vec!["t.md".to_string()],
+            "temp must be removed"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old\n");
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    /// SEC-R3-004: public `create_exclusive_temp*` reject an unvalidated
+    /// basename/kind (separator, `..`, NUL, empty) with `InvalidInput` and
+    /// create nothing.
+    #[test]
+    fn test_S_25_08_SEC_R3_004_create_exclusive_temp_rejects_unsafe_basename_and_kind() {
+        let mut bad: Vec<&str> = vec!["a/b", "/abs", "..", "", "a\0b"];
+        if cfg!(windows) {
+            bad.push("a\\b");
+        }
+        for value in bad {
+            for (basename, kind) in [(value, "tmp"), ("ok.md", value)] {
+                let dir = tempfile::tempdir().unwrap();
+                let results = [
+                    (
+                        "create_exclusive_temp",
+                        create_exclusive_temp(dir.path(), basename, kind),
+                    ),
+                    (
+                        "create_exclusive_temp_with",
+                        create_exclusive_temp_with(dir.path(), basename, kind, || 7),
+                    ),
+                    (
+                        "create_exclusive_temp_for_target",
+                        create_exclusive_temp_for_target(dir.path(), basename, kind, None),
+                    ),
+                    (
+                        "create_exclusive_temp_for_target_with",
+                        create_exclusive_temp_for_target_with(
+                            dir.path(),
+                            basename,
+                            kind,
+                            None,
+                            || 7,
+                        ),
+                    ),
+                ];
+                for (name, res) in results {
+                    match res {
+                        Ok((_, p)) => {
+                            panic!("{name}({basename:?}, {kind:?}) must be rejected, created {p:?}")
+                        }
+                        Err(e) => assert_eq!(
+                            e.kind(),
+                            std::io::ErrorKind::InvalidInput,
+                            "{name}({basename:?}, {kind:?}) must fail InvalidInput, got {e:?}"
+                        ),
+                    }
+                }
+                let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+                    .unwrap()
+                    .map(|e| e.unwrap().path())
+                    .collect();
+                assert!(
+                    leftovers.is_empty(),
+                    "rejected ({basename:?}, {kind:?}) must create nothing, found {leftovers:?}"
+                );
+            }
+        }
+    }
+    // -----------------------------------------------------------------------
+    // S-25.08 PR #848 round-4 red tests (implementer contract).
+    // -----------------------------------------------------------------------
+
+    /// R4-WIN-ADS: on Windows, `:` in a name component introduces an NTFS
+    /// alternate data stream (`file:stream`), so the validator must reject any
+    /// `basename` or `kind` containing `:` with `InvalidInput`, before
+    /// anything is created. Required change: in `validate_temp_name_component`
+    /// treat `:` like a separator under `cfg!(windows)`. (On Unix `:` is a
+    /// legal filename byte and stays allowed; the Unix-side source gate
+    /// `test_S_25_08_R4_WIN_ADS_validator_handles_colon_under_cfg_windows` in
+    /// the factory-dispatcher crate checks the code path on every CI OS.)
+    #[cfg(windows)]
+    #[test]
+    fn test_S_25_08_R4_WIN_ADS_create_exclusive_temp_rejects_colon_in_basename_or_kind() {
+        for (basename, kind) in [
+            ("a:stream", "tmp"),
+            ("a.md", "t:mp"),
+            (":", "tmp"),
+            ("C:evil", "tmp"),
+            ("a.md::$DATA", "tmp"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let results = [
+                (
+                    "create_exclusive_temp",
+                    create_exclusive_temp(dir.path(), basename, kind),
+                ),
+                (
+                    "create_exclusive_temp_for_target",
+                    create_exclusive_temp_for_target(dir.path(), basename, kind, None),
+                ),
+                (
+                    "create_exclusive_temp_for_target_with",
+                    create_exclusive_temp_for_target_with(dir.path(), basename, kind, None, || 1),
+                ),
+            ];
+            for (name, res) in results {
+                match res {
+                    Ok((_, p)) => {
+                        panic!("{name}({basename:?}, {kind:?}) must reject ':', created {p:?}")
+                    }
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        std::io::ErrorKind::InvalidInput,
+                        "{name}({basename:?}, {kind:?}) must fail InvalidInput, got {e:?}"
+                    ),
+                }
+            }
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        }
+    }
+
+    /// Filesystem filename length bound enforced for generated temp names:
+    /// ext4/xfs/btrfs/APFS(UTF-8)/NTFS(UTF-16 units, but bytes is stricter)
+    /// all cap a single component at 255 bytes.
+    const R4_MAX_TEMP_NAME_BYTES: usize = 255;
+
+    fn r4_file_name_of(path: &Path) -> String {
+        path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    /// R4-LEN: for a very long `basename` the generated temp name must still
+    /// fit in `R4_MAX_TEMP_NAME_BYTES` (today the create fails with
+    /// ENAMETOOLONG). Required scheme (implementer):
+    ///
+    /// * the name keeps the documented shape
+    ///   `.<stem>.<kind>-<pid>-<nonce:016x>`; only `<stem>` changes;
+    /// * if the full documented name would exceed 255 bytes, `<stem>` becomes
+    ///   `<prefix>-<h:016x>` where `<h>` is a STABLE (fixed-key, NOT
+    ///   `RandomState`) 64-bit hash (e.g. FNV-1a 64 or `SipHasher13` with
+    ///   zero keys) of the FULL original basename, and `<prefix>` is the
+    ///   original basename truncated at a UTF-8 CHAR BOUNDARY to whatever
+    ///   length makes the total name exactly fit (<= 255 bytes);
+    /// * short names are left byte-for-byte unchanged (no hash);
+    /// * the `<pid>-<nonce>` tail is untouched, so the name stays unique per
+    ///   writer and unpredictable (the nonce still comes from `suffix_fn` /
+    ///   `unpredictable_suffix`); the stem hash only keeps different long
+    ///   basenames with a common prefix from colliding.
+    #[test]
+    fn test_S_25_08_R4_LEN_long_basename_temp_name_fits_filename_bound() {
+        for basename in [
+            "p".repeat(300),
+            "p".repeat(255),
+            "é".repeat(200), // 400 bytes, multi-byte: truncation must hit a char boundary
+            format!("{}.md", "x".repeat(250)),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let (file, path) =
+                create_exclusive_temp_for_target_with(dir.path(), &basename, "tmp", None, || 7)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "basename of {} bytes must yield a valid temp: {e:?}",
+                            basename.len()
+                        )
+                    });
+            drop(file);
+            let name = r4_file_name_of(&path);
+            assert!(
+                name.len() <= R4_MAX_TEMP_NAME_BYTES,
+                "temp name is {} bytes (> {R4_MAX_TEMP_NAME_BYTES}): {name}",
+                name.len()
+            );
+            assert!(name.starts_with('.'), "{name}");
+            assert!(
+                name.ends_with(&format!("-{}-{:016x}", std::process::id(), 7u64)),
+                "pid/nonce tail must be preserved verbatim: {name}"
+            );
+            assert!(name.contains(".tmp-"), "kind must be preserved: {name}");
+        }
+    }
+
+    /// R4-LEN: two DIFFERENT long basenames sharing a >255-byte common prefix,
+    /// created with an identical pid and nonce, must still get DISTINCT temp
+    /// names (the stable full-basename hash disambiguates), and an identical
+    /// basename must map to an identical stem (hash is deterministic).
+    #[test]
+    fn test_S_25_08_R4_LEN_distinct_long_basenames_keep_distinct_temp_names() {
+        let common = "q".repeat(280);
+        let a = format!("{common}A");
+        let b = format!("{common}B");
+        let dir = tempfile::tempdir().unwrap();
+        let (fa, pa) = create_exclusive_temp_for_target_with(dir.path(), &a, "tmp", None, || 1)
+            .expect("first long basename");
+        let (fb, pb) = create_exclusive_temp_for_target_with(dir.path(), &b, "tmp", None, || 1)
+            .expect("second long basename, same pid + nonce");
+        drop((fa, fb));
+        assert_ne!(
+            pa, pb,
+            "distinct long basenames must not collide on one temp name"
+        );
+
+        let other = tempfile::tempdir().unwrap();
+        let (fa2, pa2) = create_exclusive_temp_for_target_with(other.path(), &a, "tmp", None, || 1)
+            .expect("same long basename again");
+        drop(fa2);
+        assert_eq!(
+            r4_file_name_of(&pa),
+            r4_file_name_of(&pa2),
+            "stem derivation must be deterministic (stable hash, not RandomState)"
+        );
+    }
+
+    /// R4-LEN: a short name is left exactly as documented (no hash, no
+    /// truncation).
+    #[test]
+    fn test_S_25_08_R4_LEN_short_basename_name_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, path) =
+            create_exclusive_temp_for_target_with(dir.path(), "t.md", "tmp", None, || 3).unwrap();
+        drop(file);
+        assert_eq!(path, candidate_for(dir.path(), "t.md", "tmp", 3));
     }
 }

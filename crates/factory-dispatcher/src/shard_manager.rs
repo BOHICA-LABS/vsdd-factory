@@ -137,6 +137,18 @@ use migration_fs::{Fs, StdFs};
 #[cfg(kani)]
 mod obl1_kani_proofs;
 
+/// S-25.08: the ONE shared native admission core (reserve-then-verify,
+/// protected-path union, step-3.5 reconciliation Branches A/B/C, release) both
+/// governed migrations and the dispatcher's production PreToolUse path share.
+mod admission;
+pub use admission::{
+    ABORT_REASON_NULL_GENERATION, AdmissionOutcome, FactoryRoot, MIGRATION_ID_APPEND_LOG,
+    MIGRATION_ID_B2, ProtectedPathFamily, StaleGateReconciliation, admit_protected_write,
+    as_given_factory_root_spelling, classify_tool_use_id, e_maintenance_block_message,
+    is_valid_tool_use_id, reconcile_stale_admission_gate, release_reservation_file,
+    resolve_factory_root, resolve_target_path, sanitize_diagnostic, sanitize_diagnostic_id,
+};
+
 // ---------------------------------------------------------------------------
 // Cross-platform "genuinely missing" disambiguation (PR #824 pr-review
 // Finding #1, BLOCKING on Windows CI; REWRITTEN S-25.02 cluster-2 after the
@@ -10236,9 +10248,10 @@ mod bc_1_18_006_roll_tests {
     ///   via the ALREADY-COVERED EC-024 arm (see the sibling test above),
     ///   never reaching `remove_file` at all.
     /// - A read-only PARENT directory: `write_exclusive`'s FIRST attempt
-    ///   creates its own `.tmp-<pid>` file in that SAME parent directory
+    ///   creates its own `.{basename}.tmp-{pid}-{nonce:016x}`
+    ///   file (exclusive `create_new`) in that SAME parent directory
     ///   BEFORE ever touching the destination path — a read-only parent
-    ///   makes THAT `File::create` fail with `PermissionDenied` (verified
+    ///   makes THAT exclusive create fail with `PermissionDenied` (verified
     ///   empirically), so `first_err.kind() != AlreadyExists` and the call
     ///   fails via the UNRELATED `SealWriteFailed` (E-SHD-001) path instead,
     ///   never reaching the 0-byte-reclaim logic at all.
@@ -12182,18 +12195,10 @@ mod bc_1_18_006_roll_tests {
 
 // ===========================================================================
 // BC-1.18.010 — Mechanism B2 end-state addressing (S-25.02 cluster-5
-// "shard-b2", T-10) — STUB SURFACE, stub-architect this burst.
-//
-// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
-//
-// This section and the BC-1.18.011 section below it are COMPILABLE STUBS
-// only. Every non-trivial function body is `todo!()`, citing the AC/BC
-// postcondition/invariant it will implement. Trivial, zero-branching,
-// ≤3-line, no-I/O, no-helper-call bodies are marked GREEN-BY-DESIGN per
-// BC-5.38.002 and given real bodies (see the stub commit report). No
-// WIRING-EXEMPT bodies are used in this section — every `From<...> for
-// HookResult` impl below branches on the source error's variant and is
-// therefore `todo!()`, unlike a pure single-field delegation.
+// "shard-b2", T-10). Implemented: every function in this section has a real
+// body (the original BC-5.38.001 Red Gate `todo!()` stub surface has been fully
+// replaced); `From<...> for HookResult` impls branch on the source error's
+// variant.
 //
 // Scope: BC-1.18.010 (this section, T-10) specifies the END-STATE
 // addressing scheme only — first-level `BC-S Prefix` → `SS-NN` pure-
@@ -12728,10 +12733,8 @@ pub fn open_bc_index_path_during_migration(
 
 // ===========================================================================
 // BC-1.18.011 — Governed one-time migration for the B2 BC-INDEX body split
-// (S-25.02 cluster-5 "shard-b2", T-11) — STUB SURFACE, stub-architect this
-// burst.
-//
-// # BC-5.38.001 Red Gate discipline — STUBBED (all functions `todo!()`)
+// (S-25.02 cluster-5 "shard-b2", T-11). Implemented: the original BC-5.38.001
+// Red Gate `todo!()` stub surface has been fully replaced by real bodies.
 //
 // Implements the durable txn-record + framed checksummed intent-log
 // STAGING/COMMITTING/COMPLETED/ABORTED state machine (ADR-052 §Decision 7a/
@@ -12904,11 +12907,34 @@ pub enum BcIndexMigrationError {
     )]
     FingerprintMismatchAbort,
 
+    /// BC-1.18.011 EC-031 / error-taxonomy `RESERVATION_TTL_BELOW_FLOOR`:
+    /// the PRODUCTION drain entry point is configured with a
+    /// `MAX_RESERVATION_TTL` below the 1,800 s floor. Raised BEFORE any gate or
+    /// drain action (nothing mutated). Deliberately NOT
+    /// [`BcIndexMigrationError::BinaryIntegrityFailure`] (digest/TOCTOU).
+    #[error(
+        "BC-INDEX migration: configured reservation TTL {configured_secs}s is below the \
+         {floor_secs}s production floor (RESERVATION_TTL_BELOW_FLOOR, exit 2)"
+    )]
+    ReservationTtlBelowFloor {
+        configured_secs: u64,
+        floor_secs: u64,
+    },
+
     #[error(
         "BC-INDEX migration: writer-reservation quiescence not reached within the drain \
          timeout (DRAIN_TIMEOUT_ABORT, exit 2); gate returned to OPEN"
     )]
     DrainTimeoutAbort,
+
+    /// ADR-052 §5a "`tool_use_id` presence and validity" (F-009): the
+    /// PreToolUse payload carries a `tool_use_id` key that is PRESENT but is not
+    /// a string, is empty, or violates the grammar `[A-Za-z0-9_.-]{1,128}` (no
+    /// leading `.`). The admission FAILS CLOSED (`E-MAINTENANCE-002`
+    /// `invalid_tool_use_id`). `len` is the byte length only — never the raw
+    /// value (log-injection / path-traversal hygiene).
+    #[error("writer admission: invalid tool_use_id ({len} bytes)")]
+    InvalidToolUseId { len: usize },
 
     #[error(
         "BC-INDEX migration: ARCH-INDEX three-way parity check failed \
@@ -12953,11 +12979,13 @@ pub enum BcIndexMigrationError {
     },
 
     /// BC-1.18.011 Precondition 6(b)/(c) — the native OPEN/DRAINING
-    /// writer-admission gate refused this dispatch (an active txn record
-    /// in STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-
-    /// binary process-exit-code path — this variant is constructed only by
-    /// `admit_or_block_bc_index_writer`, whose caller (`executor.rs`'s
-    /// `bc_index_migration_admission_precheck`) translates it into
+    /// writer-admission gate refused a writer (an active txn record in
+    /// STAGING/COMMITTING, or a non-OPEN gate state). NOT a migration-binary
+    /// process-exit-code path — this variant is constructed only by
+    /// `admit_or_block_bc_index_writer`, the B2 in-process entry point. The
+    /// dispatcher's PreToolUse path does NOT go through this variant:
+    /// `executor::bc_index_migration_admission` calls `admit_protected_write`
+    /// directly and turns `AdmissionOutcome::Blocked` into
     /// `HookResult::Block` (E-MAINTENANCE-001), never `HookResult::Error`
     /// (BC-1.18.011 Architect Ruling 2).
     #[error("BC-INDEX writer admission refused: {reason}")]
@@ -12979,6 +13007,37 @@ pub enum BcIndexMigrationError {
 }
 
 impl BcIndexMigrationError {
+    /// The `<cause>` token of the `E-MAINTENANCE-002` single-line message
+    /// `E-MAINTENANCE-002: writer-admission check failed (<cause>)`
+    /// (error-taxonomy `E-MAINTENANCE-002` row): `invalid_tool_use_id`, `io` (cannot create
+    /// `reservations/` / the reservation, or cannot read gate/txn state), or
+    /// `state_integrity` (malformed gate/txn record, non-string `migration_id`,
+    /// more than one live txn, any other integrity failure). The underlying
+    /// detail goes to `tracing::warn!`, never into the message.
+    #[must_use]
+    pub fn admission_failure_cause(&self) -> &'static str {
+        match self {
+            BcIndexMigrationError::InvalidToolUseId { .. } => "invalid_tool_use_id",
+            BcIndexMigrationError::Io { .. } => "io",
+            // Every remaining variant is listed explicitly (no `_` arm) so a
+            // new `BcIndexMigrationError` variant fails to compile here and
+            // forces a deliberate `<cause>` token choice (S-25.08 PR #848
+            // CR-005). All of these map to `state_integrity`.
+            BcIndexMigrationError::BinaryIntegrityFailure { .. }
+            | BcIndexMigrationError::RecoveryRequiresReauthorization
+            | BcIndexMigrationError::ExpiryAbort
+            | BcIndexMigrationError::FingerprintMismatchAbort
+            | BcIndexMigrationError::ReservationTtlBelowFloor { .. }
+            | BcIndexMigrationError::DrainTimeoutAbort
+            | BcIndexMigrationError::ArchIndexParityAbort { .. }
+            | BcIndexMigrationError::CompletionManifestRejection { .. }
+            | BcIndexMigrationError::CensusMismatchAbort { .. }
+            | BcIndexMigrationError::ContentPreservationAbort { .. }
+            | BcIndexMigrationError::WriterAdmissionRefused { .. }
+            | BcIndexMigrationError::ShardCapConfigUnavailable { .. } => "state_integrity",
+        }
+    }
+
     /// Map this error to the migration-binary process exit code ADR-052
     /// §Error Code Semantics assigns it. `ExpiryAbort` alone is exit 1
     /// ("no harm done, but re-activation required"); every other error
@@ -13769,27 +13828,24 @@ pub fn is_bc_index_admission_open(
     }
 }
 
-/// PreToolUse admission-check entry point (ADR-052 §Decision 5a's atomic
-/// admission protocol steps 1-5, minus the flock-gated stale-gate
-/// reconciliation sub-procedure — see
-/// [`reconcile_stale_admission_gate`] for that). On admission, creates the
-/// writer reservation file; on refusal, returns the reason without
-/// creating one.
 /// Read the persisted OPEN/DRAINING/LOCKED admission-gate state from
 /// `.factory/migration-state/gate-state.json` — absent file defaults to
 /// `Open` (the OPEN default case: no gate-state file and no txn record
 /// present).
 ///
-/// `pub(crate)` (widened from private, OBL-1 §4 fail-open fix): consulted
-/// directly by `executor::bc_index_migration_admission_precheck`, which
-/// previously never checked gate state at all — see that function's own
-/// doc comment.
+/// `pub(crate)` (widened from private, OBL-1 §4 fail-open fix): consulted by
+/// the shared admission core ([`admit_protected_write`]) on every admission.
 pub(crate) fn read_admission_gate_state(
     migration_state_dir: &Path,
 ) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
     let path = migration_state_dir.join("gate-state.json");
-    match std::fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).map_err(|e| {
+    // Read RAW BYTES, then decode: an OS read failure (anything but ENOENT) is
+    // `Io` (E-MAINTENANCE-002 `io`), while a decode/parse failure — invalid
+    // UTF-8, empty, truncated, wrong schema/casing — is a malformed record
+    // (`state_integrity`). `read_to_string` would conflate invalid UTF-8 into
+    // an `io::Error` (BC-1.18.013 EC-032).
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
             BcIndexMigrationError::BinaryIntegrityFailure {
                 message: format!("malformed gate-state at {}: {e}", path.display()),
             }
@@ -13820,64 +13876,42 @@ fn write_admission_gate_state(
     })
 }
 
+/// B2 in-process admission entry point: delegates to the ONE shared admission
+/// core ([`admit_protected_write`]) — reserve-then-verify, the step-3.5
+/// reconciliation, and release of the admitter's own reservation on failed
+/// verification. There is no second reserve/verify implementation (S-25.08
+/// B2-4: the pre-fix check-then-reserve ordering is gone).
+///
+/// Constructs no `Fs` and takes no `&impl Fs` parameter, so the public
+/// signature stays unchanged. The protected-path family is the B2 BC-INDEX
+/// family (`BC-INDEX` scope).
 pub fn admit_or_block_bc_index_writer(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
-    // Production entry point (called from `executor.rs`'s PreToolUse
-    // admission precheck) — constructs its own `StdFs` rather than taking
-    // an `&impl Fs` parameter, so this function's public signature (and its
-    // `executor.rs`/test call sites) stays unchanged while its internal
-    // `read_active_txn_record` call is still routed through the OBL-1 seam.
-    let fs = StdFs;
-    let gate_state = read_admission_gate_state(_migration_state_dir)?;
-    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
-    if !is_bc_index_admission_open(gate_state, active_txn.as_ref()) {
-        let detail = match &active_txn {
-            Some(txn) => format!(
-                "a BC-INDEX governed migration is currently in flight (txn {} state={:?}); \
-                 writers must retry after the migration completes",
-                txn.txn_id, txn.state
-            ),
-            None => format!(
-                "the BC-INDEX writer-admission gate is not OPEN (state={gate_state:?}); \
-                 writers must retry once the gate self-heals or the current maintenance \
-                 window completes"
-            ),
-        };
-        return Err(BcIndexMigrationError::WriterAdmissionRefused { reason: detail });
+    match admit_protected_write(
+        _migration_state_dir,
+        Some(_tool_use_id),
+        ProtectedPathFamily::BcIndex,
+    )? {
+        AdmissionOutcome::Admitted { .. } => Ok(()),
+        AdmissionOutcome::Blocked { message } => {
+            Err(BcIndexMigrationError::WriterAdmissionRefused { reason: message })
+        }
     }
-
-    let reservations_dir = _migration_state_dir.join("reservations");
-    std::fs::create_dir_all(&reservations_dir).map_err(|source| BcIndexMigrationError::Io {
-        path: reservations_dir.clone(),
-        source,
-    })?;
-    let reservation = WriterReservation {
-        created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        tool_use_id: _tool_use_id.to_string(),
-    };
-    let json = serde_json::to_string_pretty(&reservation).map_err(|e| {
-        BcIndexMigrationError::BinaryIntegrityFailure {
-            message: format!("failed to serialize writer reservation: {e}"),
-        }
-    })?;
-    let reservation_path = reservations_dir.join(format!("{_tool_use_id}.reservation"));
-    last_amended_migrate::atomic_write::write_atomic(&reservation_path, &json).map_err(|e| {
-        BcIndexMigrationError::Io {
-            path: reservation_path.clone(),
-            source: migrate_err_to_io(e),
-        }
-    })
 }
 
 /// PostToolUse counterpart: remove the reservation file this tool
 /// invocation's PreToolUse created. A missing file (writer crashed between
-/// Pre and Post) is a no-op, not an error.
+/// Pre and Post) is a no-op, not an error; an id that could not have produced
+/// a reservation file name (see [`is_valid_tool_use_id`]) is likewise a no-op.
 pub fn release_bc_index_writer_reservation(
     _migration_state_dir: &Path,
     _tool_use_id: &str,
 ) -> Result<(), BcIndexMigrationError> {
+    if !is_valid_tool_use_id(_tool_use_id) {
+        return Ok(());
+    }
     let path = _migration_state_dir
         .join("reservations")
         .join(format!("{_tool_use_id}.reservation"));
@@ -13886,96 +13920,6 @@ pub fn release_bc_index_writer_reservation(
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(BcIndexMigrationError::Io { path, source }),
     }
-}
-
-/// Flock-gated stale-gate reconciliation (ADR-052 §Decision 5a step 3.5,
-/// Branch A / Branch B). A recovery process (or the next ordinary
-/// PreToolUse admission check) that finds `gate_state ∈ {LOCKED,
-/// DRAINING}` with no live coordinator holding `exclusive.lock` self-heals
-/// the gate back to `OPEN` — this is the mechanism that makes
-/// `E-MAINTENANCE-001` always self-heal by the next PreToolUse dispatch,
-/// never requiring operator intervention for a routine stuck-gate case.
-pub fn reconcile_stale_admission_gate(
-    _migration_state_dir: &Path,
-) -> Result<BcIndexAdmissionGateState, BcIndexMigrationError> {
-    // No production or test caller exists today (see this function's own
-    // "never called from anywhere in the real dispatch path" doc note in
-    // `executor.rs::bc_index_migration_admission_precheck`) — constructs
-    // its own `StdFs` rather than taking an `&impl Fs` parameter, matching
-    // `admit_or_block_bc_index_writer`'s pattern, so a future wiring burst
-    // can call this with its existing 1-arg signature unchanged.
-    let fs = StdFs;
-    let lock_path = _migration_state_dir.join("exclusive.lock");
-    if !lock_path.exists() {
-        std::fs::write(&lock_path, b"").map_err(|source| BcIndexMigrationError::Io {
-            path: lock_path.clone(),
-            source,
-        })?;
-    }
-    let current_state = read_admission_gate_state(_migration_state_dir)?;
-
-    let Some(_guard) = try_acquire_migration_lock(&lock_path)? else {
-        // A live coordinator holds the lock -- return the gate's CURRENT
-        // (unreconciled) state; reconciliation is that coordinator's own
-        // responsibility, not this caller's.
-        return Ok(current_state);
-    };
-
-    let active_txn = read_active_txn_record(&fs, _migration_state_dir)?;
-    let reconciled = match &active_txn {
-        // Branch A: no active txn record at all -- the gate can only be
-        // stuck due to a crash between "flip DRAINING/LOCKED" and
-        // "create/commit the txn record"; safe to flip OPEN.
-        None => BcIndexAdmissionGateState::Open,
-        // Branch B: a STAGING txn with no generation_id yet assigned means
-        // the coordinator crashed before `stage_new_generation` ever ran
-        // (ADR-052 §Decision 7c step 1) -- nothing durable was ever
-        // published, so this txn is safely abandoned.
-        Some(txn)
-            if txn.state == BcIndexMigrationTxnState::Staging && txn.generation_id.is_none() =>
-        {
-            let mut aborted = txn.clone();
-            aborted.state = BcIndexMigrationTxnState::Aborted;
-            aborted.updated_at =
-                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            write_txn_record(&fs, _migration_state_dir, &aborted)?;
-            BcIndexAdmissionGateState::Open
-        }
-        // Branch C (F-C5-P2-003 follow-on): a STAGING txn WITH a
-        // generation_id assigned might still be a crash-truncated partial
-        // staging pass (EC-002) or a complete-but-corrupted one (EC-060) --
-        // since this function only reaches here after itself acquiring the
-        // exclusive migration lock (no live coordinator currently holds
-        // it), re-run the SAME mandatory resume-time census/PC1 check
-        // `run_bc_index_migration`'s own STAGING-resume branch consults
-        // ([`resume_from_staging`] is a pure read-and-verify, no
-        // canonical-path mutation) and reclaim via
-        // [`discard_incomplete_staging`] exactly like that branch does on
-        // failure. A genuinely still-valid staged generation
-        // (`resume_from_staging` succeeds) is left untouched -- it may yet
-        // be resumed to completion by a future migration invocation.
-        Some(txn) if txn.state == BcIndexMigrationTxnState::Staging => {
-            match resume_from_staging(txn, _migration_state_dir) {
-                Ok(()) => current_state,
-                Err(_) => {
-                    let mut txn = txn.clone();
-                    discard_incomplete_staging(&fs, _migration_state_dir, &mut txn)?;
-                    BcIndexAdmissionGateState::Open
-                }
-            }
-        }
-        // Every other active-txn shape (COMMITTING) represents genuine
-        // in-flight migration work: executing the real canonical-path
-        // renames is a materially heavier, more consequential action than
-        // this lighter-touch probe should trigger incidentally from an
-        // ordinary PreToolUse dispatch -- that recovery belongs to the
-        // explicit `migrate-bc-index` CLI entry point
-        // ([`run_bc_index_migration`]'s own COMMITTING-resume branch), not
-        // here. Leave the gate's current state untouched.
-        Some(_) => current_state,
-    };
-    write_admission_gate_state(_migration_state_dir, reconciled)?;
-    Ok(reconciled)
 }
 
 /// ADR-052 §Decision 5a drain procedure's own documented default drain
@@ -13987,7 +13931,327 @@ pub const DEFAULT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// exited by the time any drain step runs — TTL-only GC, never
 /// PID-liveness, per [`drain_bc_index_writers`]'s own doc comment / v1.9
 /// H1 correction).
-pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+///
+/// 3,600 s (ADR-052 §5a; BC-1.18.011 / BC-1.18.013 Precondition 6(c)):
+/// longer than the worst-case legitimate tool-call duration (a human
+/// permission-prompt delay or a long `MultiEdit`), so the drain's step-1 GC
+/// can never reclaim a LIVE writer's reservation. The production entry point
+/// additionally enforces the [`MIN_PRODUCTION_RESERVATION_TTL`] floor via
+/// [`validate_production_reservation_ttl`].
+pub const DEFAULT_MAX_RESERVATION_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
+
+// ---------------------------------------------------------------------------
+// Reservation TTL policy and the terminal-record reconciliation input/decision
+// types (S-25.08; VP-146 / VP-147; ADR-052 §Decision 5a).
+// ---------------------------------------------------------------------------
+
+/// ADR-052 §5a / BC-1.18.011 Precondition 6(c): the PRODUCTION entry
+/// point MUST reject any configured reservation TTL below this floor.
+pub const MIN_PRODUCTION_RESERVATION_TTL: std::time::Duration =
+    std::time::Duration::from_secs(1800);
+
+// The production default can never silently drift below the production floor:
+// a compile-time guard (no runtime seam), so `validate_production_reservation_ttl`
+// at the production entry point is a belt-and-braces check for any future
+// configurable source, not the only line of defence.
+const _: () = assert!(
+    DEFAULT_MAX_RESERVATION_TTL.as_secs() >= MIN_PRODUCTION_RESERVATION_TTL.as_secs(),
+    "DEFAULT_MAX_RESERVATION_TTL must be >= MIN_PRODUCTION_RESERVATION_TTL (ADR-052 §5a)"
+);
+
+/// Production-entry-point TTL validation (S-25.08 AC-008). Returns the TTL
+/// unchanged when `>= MIN_PRODUCTION_RESERVATION_TTL`, else a configuration
+/// error. (The injectable test seam `drain_bc_index_writers` is NOT bound by
+/// the floor.)
+pub fn validate_production_reservation_ttl(
+    ttl: std::time::Duration,
+) -> Result<std::time::Duration, BcIndexMigrationError> {
+    if ttl < MIN_PRODUCTION_RESERVATION_TTL {
+        return Err(BcIndexMigrationError::ReservationTtlBelowFloor {
+            configured_secs: ttl.as_secs(),
+            floor_secs: MIN_PRODUCTION_RESERVATION_TTL.as_secs(),
+        });
+    }
+    Ok(ttl)
+}
+
+/// The single pure staleness predicate (S-25.08 AC-008; ADR-052 §5a
+/// "Reservation timestamp rules", F-008). No PID input, no ambient time.
+///
+/// Rules, in order:
+/// 1. a `created_at` beyond `now + RESERVATION_CLOCK_SKEW_TOLERANCE_SECS` (a
+///    FUTURE stamp) is untrusted and treated as `None`; a stamp inside the
+///    tolerance is accepted and simply ages as 0;
+/// 2. `basis = created_at.or(mtime)`; with neither available the age is UNKNOWN
+///    and the reservation is NOT stale (never reclaimable on missing data);
+/// 3. `age = now.saturating_sub(basis)` (a future `mtime` ages as 0); stale iff
+///    `age > ttl` (strict).
+///
+/// Every ambiguity resolves toward RETENTION: wrongfully reclaiming a live
+/// writer's reservation lets the coordinator snapshot mid-write, while
+/// wrongfully retaining one yields only a bounded, visible
+/// `DRAIN_TIMEOUT_ABORT` stall.
+pub fn reservation_is_stale(
+    created_at_epoch_secs: Option<u64>,
+    mtime_epoch_secs: Option<u64>,
+    now_epoch_secs: u64,
+    ttl_secs: u64,
+) -> bool {
+    let trusted_created_at = created_at_epoch_secs
+        .filter(|c| *c <= now_epoch_secs.saturating_add(RESERVATION_CLOCK_SKEW_TOLERANCE_SECS));
+    match trusted_created_at.or(mtime_epoch_secs) {
+        Some(basis) => now_epoch_secs.saturating_sub(basis) > ttl_secs,
+        None => false,
+    }
+}
+
+/// Accepted clock skew (seconds) between a reservation's `created_at` and the
+/// coordinator's `now` before `created_at` is treated as untrusted
+/// (BC-1.18.011 EC-025).
+pub const RESERVATION_CLOCK_SKEW_TOLERANCE_SECS: u64 = 300;
+
+/// Canonical input record of the pure terminal-record reconciliation core
+/// ([`decide_terminal_record_reconciliation`]; VP-146 / VP-147).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalReconcileInputs {
+    pub lock_acquired: bool,
+    pub record_present: bool,
+    pub txn_state: Option<BcIndexMigrationTxnState>,
+    pub record_parses: bool,
+    pub txn_id_eq: bool,
+    pub generation_id_eq: bool,
+    pub count_eq_n: bool,
+    pub hashes_eq: [bool; 4],
+    pub txn_migration_known: bool,
+}
+
+/// Decision of the pure terminal-record reconciliation core (VP-146 /
+/// VP-147).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalReconcileDecision {
+    NoOp,
+    FinalizeThenOpenGate,
+    FailClosedMismatch,
+    RefuseForeignMigration,
+}
+
+/// The ONE shared pure terminal-record reconciliation core (ADR-052 §5a
+/// Branch C; BC-1.18.011 Precondition 6(d) decision table / Postcondition 9;
+/// BC-1.18.013 Postcondition 5a). Total over its input space; first match
+/// wins:
+///
+/// 1. lock NOT acquired (live coordinator) or no live txn -> `NoOp`;
+/// 2. live txn's `migration_id` is not a known migration (`txn_migration_known`
+///    is false: `migration_id` ∉ K) -> `RefuseForeignMigration` (precedence over
+///    every record check); a live txn of EITHER known migration is decided
+///    against its OWN terminal record, selected by `migration_id`;
+/// 3. known migration, its own record ABSENT -> `NoOp` (STAGING and COMMITTING
+///    alike);
+/// 4. record present, txn COMMITTING and every check passes ->
+///    `FinalizeThenOpenGate`;
+/// 5. record present otherwise (STAGING of any generation, or any failed
+///    check) -> `FailClosedMismatch`.
+///
+/// Pure: no I/O, no ambient time, no PID input.
+pub fn decide_terminal_record_reconciliation(
+    inputs: &TerminalReconcileInputs,
+) -> TerminalReconcileDecision {
+    let live = matches!(
+        inputs.txn_state,
+        Some(BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing)
+    );
+    if !inputs.lock_acquired || !live {
+        return TerminalReconcileDecision::NoOp;
+    }
+    if !inputs.txn_migration_known {
+        return TerminalReconcileDecision::RefuseForeignMigration;
+    }
+    if !inputs.record_present {
+        return TerminalReconcileDecision::NoOp;
+    }
+    let all_checks_pass = inputs.record_parses
+        && inputs.txn_id_eq
+        && inputs.generation_id_eq
+        && inputs.count_eq_n
+        && inputs.hashes_eq.iter().all(|ok| *ok);
+    if inputs.txn_state == Some(BcIndexMigrationTxnState::Committing) && all_checks_pass {
+        TerminalReconcileDecision::FinalizeThenOpenGate
+    } else {
+        TerminalReconcileDecision::FailClosedMismatch
+    }
+}
+
+/// The pure ADR-052 §5a step-3.5 reconciliation PLAN (Branches A/B/C) that the
+/// effectful [`reconcile_stale_admission_gate`] executes. Factored out of the
+/// shell (behavior-identical) so VP-147's `obl1_kani_proofs` model the REAL
+/// branch selection rather than a harness-local copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleGateReconciliationPlan {
+    /// `exclusive.lock` NOT acquired (EWOULDBLOCK): a live coordinator. No
+    /// action of any kind.
+    LiveCoordinator,
+    /// Nothing for the reconciler to repair: gate OPEN with no live txn, or a
+    /// live own-migration txn with no terminal record that is not a
+    /// null-generation STAGING (a legitimately running / binary-resumable
+    /// activation).
+    NothingToReconcile,
+    /// Branch A: gate ∈ {LOCKED, DRAINING} and no live txn -> gate OPEN.
+    ReopenGate,
+    /// Branch B: live own STAGING txn with `generation_id = null`, its
+    /// terminal record absent (any gate state, incl. an absent gate file
+    /// that reads OPEN) -> txn ABORTED (marker), THEN gate OPEN.
+    AbortNullGenerationThenReopenGate,
+    /// Branch C: the live txn's `migration_id` is not a known migration
+    /// (`migration_id` ∉ K) -> never finalized, never aborted; plain block.
+    RefuseForeignMigration,
+    /// Branch C: known-migration live txn + its own terminal record, not provably finished
+    /// (STAGING + record always; COMMITTING with any failed check) -> no txn
+    /// write, no gate write; mismatch block.
+    FailClosedMismatch,
+    /// Branch C: own live COMMITTING txn + its terminal record with every
+    /// verification check passing -> txn COMPLETED, THEN gate OPEN.
+    FinalizeThenOpenGate,
+}
+
+/// Plan the step-3.5 reconciliation from the state re-read under the lock.
+///
+/// `terminal` carries the lock outcome, the live txn's state (`None` when no
+/// STAGING/COMMITTING txn exists) and the Branch C facts;
+/// `live_txn_generation_id_is_null` is consulted only for a live txn. First
+/// match wins:
+///
+/// 1. lock not acquired -> [`StaleGateReconciliationPlan::LiveCoordinator`];
+/// 2. no live txn -> Branch A when the gate is not OPEN, else nothing;
+/// 3. otherwise the Branch C core [`decide_terminal_record_reconciliation`]
+///    decides; its `NoOp` falls through to Branch B (own live txn STAGING with
+///    a null generation; NO gate condition — BC-1.18.011 Precondition
+///    6(d) row-3 caller contract; safe because planning runs only under an
+///    acquired `exclusive.lock`) or else nothing.
+///
+/// Pure: no I/O, no ambient time, no PID input.
+pub fn plan_stale_gate_reconciliation(
+    gate: BcIndexAdmissionGateState,
+    terminal: &TerminalReconcileInputs,
+    live_txn_generation_id_is_null: bool,
+) -> StaleGateReconciliationPlan {
+    if !terminal.lock_acquired {
+        return StaleGateReconciliationPlan::LiveCoordinator;
+    }
+    let live = matches!(
+        terminal.txn_state,
+        Some(BcIndexMigrationTxnState::Staging | BcIndexMigrationTxnState::Committing)
+    );
+    if !live {
+        return if gate == BcIndexAdmissionGateState::Open {
+            StaleGateReconciliationPlan::NothingToReconcile
+        } else {
+            StaleGateReconciliationPlan::ReopenGate
+        };
+    }
+    match decide_terminal_record_reconciliation(terminal) {
+        TerminalReconcileDecision::RefuseForeignMigration => {
+            StaleGateReconciliationPlan::RefuseForeignMigration
+        }
+        TerminalReconcileDecision::FailClosedMismatch => {
+            StaleGateReconciliationPlan::FailClosedMismatch
+        }
+        TerminalReconcileDecision::FinalizeThenOpenGate => {
+            StaleGateReconciliationPlan::FinalizeThenOpenGate
+        }
+        TerminalReconcileDecision::NoOp => {
+            if terminal.txn_state == Some(BcIndexMigrationTxnState::Staging)
+                && live_txn_generation_id_is_null
+            {
+                StaleGateReconciliationPlan::AbortNullGenerationThenReopenGate
+            } else {
+                StaleGateReconciliationPlan::NothingToReconcile
+            }
+        }
+    }
+}
+
+/// Seconds since the Unix epoch of `t`; `None` for a pre-epoch instant (the
+/// age is then UNKNOWN — never clamped to 0, which would make the reservation
+/// maximally old and reclaimable; ADR-052 §5a "Reservation timestamp rules" (F-008)).
+fn epoch_secs_checked(t: std::time::SystemTime) -> Option<u64> {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+}
+
+/// Why a reservation's `created_at` was not usable (the `reason` field of the
+/// F-008 diagnostics).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreatedAtParse {
+    Usable(u64),
+    /// Unreadable file, not JSON, field absent / not a string / not RFC 3339.
+    Unparseable,
+    /// A valid RFC 3339 instant before 1970-01-01T00:00:00Z.
+    PreEpoch,
+}
+
+/// Parse a reservation file's `created_at` field as RFC 3339 (any UTC offset,
+/// normalised to UTC epoch seconds, sub-second truncated). Never clamps.
+fn parse_reservation_created_at(path: &Path) -> CreatedAtParse {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Ok(reservation) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Some(created_at) = reservation.get("created_at").and_then(|v| v.as_str()) else {
+        return CreatedAtParse::Unparseable;
+    };
+    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(created_at) else {
+        return CreatedAtParse::Unparseable;
+    };
+    match u64::try_from(parsed.timestamp()) {
+        Ok(secs) => CreatedAtParse::Usable(secs),
+        Err(_) => CreatedAtParse::PreEpoch,
+    }
+}
+
+/// Emit the F-008 `tracing::warn!` for every fallback / unknown-age outcome of
+/// [`reservation_is_stale`]'s inputs (target `bc_1_18_011_migration`, field
+/// `reason` ∈ {`created_at_unparseable`, `created_at_pre_epoch`,
+/// `created_at_future`, `mtime_future`, `age_unknown`}). Kept out of the pure
+/// predicate so it stays I/O- and logging-free for the Kani models.
+fn log_reservation_timestamp_fallback(
+    path: &Path,
+    created_at: CreatedAtParse,
+    mtime: Option<u64>,
+    now: u64,
+) {
+    let mut reasons: Vec<&'static str> = Vec::new();
+    let mut created_usable = false;
+    match created_at {
+        CreatedAtParse::Unparseable => reasons.push("created_at_unparseable"),
+        CreatedAtParse::PreEpoch => reasons.push("created_at_pre_epoch"),
+        CreatedAtParse::Usable(c) => {
+            if c > now.saturating_add(RESERVATION_CLOCK_SKEW_TOLERANCE_SECS) {
+                reasons.push("created_at_future");
+            } else {
+                created_usable = true;
+            }
+        }
+    }
+    if !created_usable {
+        match mtime {
+            Some(m) if m > now => reasons.push("mtime_future"),
+            Some(_) => {}
+            None => reasons.push("age_unknown"),
+        }
+    }
+    for reason in reasons {
+        tracing::warn!(
+            target: "bc_1_18_011_migration",
+            path = sanitize_diagnostic(&path.display().to_string(), 256),
+            reason,
+            "reservation timestamp fallback (ADR-052 §5a, Reservation timestamp rules, F-008): ambiguous timestamps resolve \
+             toward retention"
+        );
+    }
+}
 
 /// Poll the writer-reservations directory until it is empty (quiescence)
 /// or the drain timeout elapses (ADR-052 §Decision 5a drain procedure step
@@ -14002,22 +14266,33 @@ pub fn drain_bc_index_writers(
 ) -> Result<(), BcIndexMigrationError> {
     // Step 1: TTL-only stale-reservation GC (v1.9 H1 — NOT PID-liveness;
     // the creating PreToolUse binary is a per-event process that has
-    // already exited by the time any drain step runs).
+    // already exited by the time any drain step runs). Staleness is the
+    // single pure predicate [`reservation_is_stale`]: judged by the
+    // reservation's `created_at` field, falling back to file mtime ONLY when
+    // the field is absent or unparseable (ADR-052 §5a "Reservation timestamp rules"; defect B2-3).
     if let Ok(entries) = std::fs::read_dir(_reservations_dir) {
-        let now = std::time::SystemTime::now();
+        let now_secs = epoch_secs_checked(std::time::SystemTime::now()).unwrap_or(0);
         for entry in entries.flatten() {
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            let Ok(modified) = meta.modified() else {
-                continue;
-            };
-            if now
-                .duration_since(modified)
-                .unwrap_or(std::time::Duration::ZERO)
-                > _max_reservation_ttl
-            {
-                let _ = std::fs::remove_file(entry.path());
+            let path = entry.path();
+            let created_at = parse_reservation_created_at(&path);
+            let mtime = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(epoch_secs_checked);
+            let ttl_secs = _max_reservation_ttl.as_secs();
+            let stale = reservation_is_stale(
+                match created_at {
+                    CreatedAtParse::Usable(c) => Some(c),
+                    CreatedAtParse::Unparseable | CreatedAtParse::PreEpoch => None,
+                },
+                mtime,
+                now_secs,
+                ttl_secs,
+            );
+            log_reservation_timestamp_fallback(&path, created_at, mtime, now_secs);
+            if stale {
+                let _ = std::fs::remove_file(&path);
             }
         }
     }
@@ -14025,9 +14300,22 @@ pub fn drain_bc_index_writers(
     // Step 4: poll until quiescence (empty reservations dir) or timeout.
     let start = std::time::Instant::now();
     loop {
-        let is_quiescent = std::fs::read_dir(_reservations_dir)
-            .map(|mut it| it.next().is_none())
-            .unwrap_or(true);
+        // Fail closed: ONLY a missing directory (no writer ever reserved) or an
+        // empty one is quiescence. Any other read error (permissions, I/O)
+        // leaves the in-flight writer set UNKNOWN, so it must never be reported
+        // as quiescent — the coordinator would proceed to LOCKED + snapshot
+        // while an admitted writer may still be mid-write. The drain itself
+        // never advances the gate.
+        let is_quiescent = match std::fs::read_dir(_reservations_dir) {
+            Ok(mut it) => it.next().is_none(),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => true,
+            Err(source) => {
+                return Err(BcIndexMigrationError::Io {
+                    path: _reservations_dir.to_path_buf(),
+                    source,
+                });
+            }
+        };
         if is_quiescent {
             return Ok(());
         }
@@ -15612,6 +15900,11 @@ pub fn run_bc_index_migration(
     // injected at the top of this call graph rather than threaded through
     // the public API, matching the OBL-1 design's own "production call
     // sites pass &StdFs" framing.
+    // BC-1.18.011 EC-031: validate the production reservation TTL BEFORE
+    // any gate or drain action — nothing is mutated on a configuration error (no
+    // `exclusive.lock`, no `create_dir_all`, no gate write, no GC).
+    let reservation_ttl = validate_production_reservation_ttl(DEFAULT_MAX_RESERVATION_TTL)?;
+
     let fs = StdFs;
     let migration_state_dir = _cwd.join(".factory/migration-state");
 
@@ -16087,12 +16380,11 @@ pub fn run_bc_index_migration(
         path: reservations_dir.clone(),
         source,
     })?;
+    // `reservation_ttl` was validated at the top of this function (EC-031).
     write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Draining)?;
-    if let Err(e) = drain_bc_index_writers(
-        &reservations_dir,
-        DEFAULT_DRAIN_TIMEOUT,
-        DEFAULT_MAX_RESERVATION_TTL,
-    ) {
+    if let Err(e) =
+        drain_bc_index_writers(&reservations_dir, DEFAULT_DRAIN_TIMEOUT, reservation_ttl)
+    {
         let _ = write_admission_gate_state(&migration_state_dir, BcIndexAdmissionGateState::Open);
         return Err(e);
     }
