@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.5"
 status: active
 producer: product-owner
 timestamp: 2026-09-06T00:00:00Z
@@ -11,7 +11,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/architecture/decisions/ADR-047-indeterminate-outcome-model-durable-mutation-marker-next-advance-gate.md
   - .factory/specs/domain-spec/capabilities.md
-input-hash: "63e1688"
+input-hash: "7ee926f"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -117,6 +117,74 @@ default whole-corpus validators are honestly `O(active shards)`, not `O(1)` and 
    this Postcondition binds both the present agent-level enforcement and any future automated
    enforcement identically.
 
+7. **Archival ordering, atomicity, and crash-reconciliation contract (v1.3; closes the
+   rename-before-publish gap in Postcondition 2).** Postcondition 2's "same invocation" guarantee
+   is a same-invocation ORDER-AND-ROLL-FORWARD guarantee, not a multi-file transaction: no
+   filesystem primitive makes a file rename and a shard-index publish jointly atomic, so this
+   Postcondition fixes the order and the recovery rule instead.
+
+   (a) **Order.** Within the triggering seal invocation the steps run strictly in this order:
+   BC-1.18.006 step (b) (publish the new sealed shard), step (c) (truncate the canonical file),
+   then the archival moves oldest-first, then BC-1.18.006 step (d) as ONE atomic shard-index
+   publish that records the new seal AND every moved entry's rewritten archived `path` together.
+   The published index therefore never records the new seal without the archived paths of the
+   shards moved in the same invocation, nor the reverse, whenever the invocation completes. The
+   moves precede the publish; the publish is never moved ahead of them (the index must never
+   claim an archived location the filesystem has not yet made true).
+
+   (b) **Move-only, no-replace, same filesystem.** Each archival move is a single rename of the
+   existing file into `archive/<artifact-stem>/` within the same cycle directory tree. It MUST NOT
+   replace an existing file: if the destination already exists the move is refused (use the
+   platform's no-replace rename where one exists, otherwise an existence check immediately before
+   the rename). It MUST NOT fall back to copy-then-delete: a rename that fails for any reason,
+   including a cross-device failure, is a failed move. A failed or refused move fails the
+   invocation loud with `HookResult::Error` (never `Block`), code `E-SHD-002` (form (b)
+   `ArchivalMoveFailed`; the destination-exists refusal is form (d), kind
+   `archive_destination_exists`), and NO shard-index publish is applied by that invocation. Moves
+   that already succeeded earlier in the same pass are NOT rolled back; they are recovered by (c).
+
+   (c) **Archive-path reconciliation (mandatory, roll-forward, idempotent).** At the start of
+   every native-gate invocation targeting a Layer-2-sharded artifact whose shard-index exists, and
+   BEFORE trigger evaluation and BEFORE the Postcondition 2 retention check (including the
+   re-invocation of the BC-1.18.008 backfill split, whose Postcondition 4 composition moves
+   shards before its index publish), the dispatcher MUST classify every NON-archived `[[shard]]`
+   entry (recorded `path` is a bare root-level filename) by the presence of its root file R
+   (`.factory/cycles/<cycle>/<filename>`) and its archive file A
+   (`archive/<artifact-stem>/<filename>`), and act as follows:
+
+   | Recorded path | R | A | Action |
+   |---------------|---|---|--------|
+   | root | present | absent | Consistent. No action. |
+   | root | absent | present | CRASH RESIDUE (rename completed, index publish did not). REPAIR: rewrite that entry's `path` to `archive/<artifact-stem>/<filename>`; publish all such repairs for the artifact in ONE atomic shard-index write. No file content is read, rewritten, moved or deleted. |
+   | root | present | present | Duplicate. FAIL LOUD (`E-SHD-002` form (d), kind `archive_duplicate`); neither file is deleted, moved or overwritten; the index is not changed. |
+   | root | absent | absent | Missing. FAIL LOUD (`E-SHD-002` form (d), kind `archive_missing`); recovery is from git history; nothing is fabricated or silently skipped. |
+
+   Already-archived entries (recorded `path` under `archive/`) are not probed on every invocation
+   (that would make the check `O(all shards ever)`, contradicting Postcondition 4); a probe cost of
+   at most two `stat` calls per non-archived entry keeps this check `O(active shards)`. The
+   reconciliation is NOT gated by the canonical-file-state plausibility predicate that guards the
+   BC-1.18.006 `E-SHD-006`/`E-SHD-007` unindexed-orphan self-heal, because the crash window
+   includes a non-empty canonical file (the backfill-split path). The existing `E-SHD-007`
+   self-heal, which scans only for UNINDEXED root-level sealed files, does not cover this state
+   (an indexed entry whose file has moved) and is not relied on for it; this reconciliation is a
+   second, distinct pass of the same recovery family and runs in the same pre-trigger position
+   as that self-heal. A failure to publish the repaired index surfaces a fresh `HookResult::Error`
+   naming `E-SHD-007`, as the existing self-heal's own I/O failures do. Re-running the
+   reconciliation against an already-repaired index performs no write (idempotent).
+
+   (d) **Composition with the unindexed-seal heal.** A failure or crash after step (c) and before
+   the index publish leaves the new seal as an UNINDEXED root-level file; the existing
+   `E-SHD-007` self-heal appends it, and this Postcondition's reconciliation repairs any
+   archive-moved siblings. The next invocation's retention check then runs over the corrected
+   index and completes any archival still owed (Postcondition 2 as amended by EC-002), so a
+   crash defers archival to the next invocation but never loses or duplicates a shard.
+
+   (e) **Observable window.** Between a crash and the next invocation, an index-resolving reader
+   can find a `[[shard]]` entry whose recorded root path is absent while the content exists
+   under `archive/<artifact-stem>/`. Glob-based readers are unaffected (the archive-inclusive
+   glob of Postcondition 6 finds it). The window ends at the next native-gate invocation for the
+   artifact; no reader may treat the dangling path as proof that the shard is gone.
+
 ## Invariants
 
 1. **Archival never deletes data.** The retention/compaction mechanism moves files; it never
@@ -137,6 +205,15 @@ default whole-corpus validators are honestly `O(active shards)`, not `O(1)` and 
    entry MUST remain enumerable). A count derived purely from the shard-index's `[[shard]]`
    sequence length is always the artifact's true lifetime shard count.
 
+4. **Exactly-once presence of sealed content (v1.3).** At every point between filesystem
+   operations of an archival pass, the content of every indexed sealed shard exists in exactly
+   one of R and A, because each archival step is a single no-replace rename. The reconciliation
+   of Postcondition 7(c) and the whole archival mechanism never read, rewrite, copy or delete
+   sealed-shard content; the only mutation they apply to an existing shard is the rename itself.
+   The one tolerated divergence is between the index's recorded `path` and the file's location,
+   which Postcondition 7(c) repairs. Any other divergence (both present, both absent) is failed
+   loud, never repaired by guessing.
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
@@ -147,6 +224,12 @@ default whole-corpus validators are honestly `O(active shards)`, not `O(1)` and 
 | EC-004 | An operator manually moves a shard file out of `archive/` back to the cycle root | Not a supported operation under this BC's contract; the shard-index's recorded path would then diverge from the file's actual location — flagged as a manual-intervention risk, not a mechanism defect (consistent with the project's existing operator-escape-hatch posture, e.g. BC-1.18.003's manual marker deletion, which is explicitly supported and audited; unarchival is NOT similarly audited by this BC and is out of scope) |
 | EC-005 | The shard-index is missing or corrupt at the moment a retention check would run (companion to the story's own EC-005) | Fail-loud: the native gate returns `HookResult::Error`; the triggering write is blocked; dispatch is halted for that artifact until the operator restores the index from git history — retention/compaction MUST NOT silently skip its check and proceed as if no archival were needed |
 | EC-006 | A POLICY-1 (`append_only_numbering`) audit runs against an artifact with archived history, where a D-NNN/BC/VP/story-ID's SOLE prior occurrence has aged into `archive/<artifact-stem>/` | The audit MUST use the archive-inclusive glob (Postcondition 6) and detect the ID's prior occurrence there; a subsequent attempt to reuse that same ID IS flagged as a POLICY-1 violation, never silently missed — contrast with EC-003, where a generic non-POLICY-1 whole-corpus validator correctly stays opt-in-excluded from the same archived shard |
+| EC-007 | Crash or failure AFTER one or more archival renames and BEFORE the shard-index publish (the index still records the moved shard's root-level path; the file now lives under `archive/<artifact-stem>/`) | The NEXT native-gate invocation for the artifact runs the Postcondition 7(c) reconciliation before trigger evaluation and before the retention check: the entry is classified (root, R absent, A present) and its `path` is rewritten to the archived location in one atomic index write. No content is read, rewritten or deleted; nothing is lost or duplicated; the invocation continues normally. A second run finds nothing to repair and writes nothing |
+| EC-008 | An archival move's destination already exists (a file already sits at `archive/<artifact-stem>/<filename>`) while the source is still at the cycle root | The move is refused, never replacing the destination: `HookResult::Error`, `E-SHD-002` form (d), kind `archive_destination_exists`; no index publish; both files untouched. If the reconciliation pass instead finds R and A both present for a root-recorded entry, it fails loud with kind `archive_duplicate` and changes nothing |
+| EC-009 | A root-recorded entry has neither R nor A on disk | Fail loud (`E-SHD-002` form (d), kind `archive_missing`); not silently skipped, not fabricated; recovery is from git history |
+| EC-010 | An archival pass moves N > 1 shards and the move of shard k (1 < k <= N) fails (including a cross-device rename failure) | `HookResult::Error` (`E-SHD-002` form (b)); no index publish; shards 1..k-1 stay in the archive (no rollback, no copy-back) and shards k..N stay at the cycle root; the next invocation reconciles shards 1..k-1 per EC-007 and the retention check then archives the remainder |
+| EC-011 | A crash lands between the canonical truncate (BC-1.18.006 step (c)) and the index publish, in an invocation that had also performed archival renames | Both recoveries compose on the next invocation: the existing `E-SHD-007` self-heal indexes the unindexed new seal, the Postcondition 7(c) reconciliation repairs the archive-moved siblings, and the retention check completes any archival still owed (Postcondition 7(d)) |
+| EC-012 | **(v1.5; ADR-052 v1.33 §Decision 11(c) point 7(e) row (11)(iii); BC-1.18.006 Postcondition 9)** The shard-index read by the retention check (or by the Postcondition 7(c) reconciliation) carries an unsafe entry or stem: an entry `path` such as `../../specs/x`, `archive/other/<name>`, an absolute path, a name with a different stem, an ESC-bearing name or a `seq` that disagrees with its name, or an `artifact_stem` that is not a safe path component (including a stem handed directly to a retention or whole-corpus function) | The index fails to decode BEFORE any archival move, reconciliation classification or `stat` of a derived path: `ErrorKind::InvalidData` over `ShardIndexEntryRejected { kind }` (`artifact_stem_unsafe` / `shard_path_unsafe` / `shard_path_shape_mismatch` / `shard_path_stem_mismatch` / `shard_path_seq_mismatch`), reported by the retention surface as `E-SHD-002` form (a) (`ShardRetentionError::IndexUnavailable`, "shard-index missing or corrupt"), `HookResult::Error`; nothing is renamed, created, removed or written, no shard-index change is applied, the offending value is never echoed, and no sanitized or default path is substituted (never a silent skip of the retention check, per EC-005) |
 
 ## Canonical Test Vectors
 
@@ -159,6 +242,17 @@ default whole-corpus validators are honestly `O(active shards)`, not `O(1)` and 
 | Whole-corpus `grep -c "D-" decision-log*.md archive/decision-log/decision-log*.md` (explicit opt-in) | Matches all 5 sealed shards + current file (6 files total) | happy-path |
 | Shard-index file corrupt (malformed TOML) at retention-check time | `HookResult::Error`; write blocked; no archival attempted | error |
 | POLICY-1 uniqueness audit on an artifact where `D-042` exists ONLY inside `archive/decision-log/decision-log.0003.md`; a new write attempts to reuse `D-042` | Archive-inclusive glob (Postcondition 6) finds the existing `D-042` occurrence in the archived shard; the reuse attempt is flagged as a POLICY-1 (`append_only_numbering`) violation | edge-case |
+| Fault injection: 11 shards, `retention_count=10`; the seal's archival rename of `decision-log.0001.md` succeeds, then the process is killed before the index publish. Next invocation | Pre-recovery: index entry seq 1 records `decision-log.0001.md`, R absent, A present. After the next invocation's reconciliation: entry seq 1 `path` = `archive/decision-log/decision-log.0001.md`; the file bytes are identical to their pre-archival form (same SHA-256); no file deleted or duplicated; lifetime `[[shard]]` count unchanged | edge-case |
+| Same state, reconciliation run twice in a row | Second run: no write to the shard-index (byte-identical file, unchanged mtime), no error | edge-case |
+| Fault injection: 12 shards, `retention_count=10`, two overflow shards (seq 1, 2); rename of seq 1 succeeds, rename of seq 2 fails (injected `EXDEV`) | `HookResult::Error` naming `E-SHD-002` form (b); no index publish; seq 1 in archive, seq 2 at root; next invocation repairs seq 1's `path`, then archives seq 2 (no copy-back, no copy-then-delete at any point) | error |
+| Destination `archive/decision-log/decision-log.0001.md` already exists and `decision-log.0001.md` also exists at the cycle root | Move refused / reconciliation fails loud: `E-SHD-002` form (d), kind `archive_destination_exists` (move) or `archive_duplicate` (reconcile); both files byte-unchanged; index unchanged | error |
+| Root-recorded entry seq 3; `decision-log.0003.md` absent at the root and absent under `archive/decision-log/` | `HookResult::Error`, `E-SHD-002` form (d), kind `archive_missing`; index unchanged | error |
+| Crash after seal step (c) (canonical truncated, new seal `decision-log.0011.md` unindexed) plus one archival rename done | Next invocation: `E-SHD-007` self-heal appends seq 11; reconciliation repairs the moved sibling's `path`; retention check then archives any shard still owed; final lifetime count = 11, active count `<= retention_count` | edge-case |
+| Index with 11 shards and `retention_count = 10` where shard #1's entry has `path = "../../specs/x"` (v1.5, EC-012) | Retention check fails at index decode before any move: `E-SHD-002` form (a), `HookResult::Error`; `archive/` not created; no file anywhere renamed or overwritten (directory tree byte-identical); no `kind` value or offending string in the message beyond the token `shard_path_unsafe` | error |
+| Index with `path = "archive/other/decision-log.0001.md"` (another stem) on the overflow shard | `E-SHD-002` form (a), `kind = shard_path_stem_mismatch`; nothing moved | error |
+| Index whose `artifact_stem = "../x"`, or `archive_overflow_shards` called with an unsafe `ArtifactStem` input | `E-SHD-002` form (a), `kind = artifact_stem_unsafe`; nothing moved, no `archive/` directory created | error |
+| Index with `decision-log.0003.md` recorded as `seq = 4` | `E-SHD-002` form (a), `kind = shard_path_seq_mismatch`; nothing moved | error |
+| Benign index with archived and root entries (including a 5-digit `decision-log.10000.md`, `seq = 10000`) | Decodes unchanged; retention and reconciliation behave exactly as in the existing vectors | happy-path |
 
 ## Verification Properties
 
@@ -166,6 +260,7 @@ default whole-corpus validators are honestly `O(active shards)`, not `O(1)` and 
 |--------|----------|-------------|
 | VP-121 | Bounded-active-count invariant — after any sequence of seals, the number of NON-archived `[[shard]]` entries for a given artifact never exceeds `retention_count` | proptest (arbitrary seal sequences; property: active count `<= retention_count` after every seal) |
 | VP-121 | No-data-loss invariant — every `[[shard]]` entry ever created remains present (active or archived) in the shard-index; none are ever removed | proptest (arbitrary seal + archival sequences; property: `len(shard_index.shards)` is monotonically non-decreasing) |
+| VP-121 | Crash-reconciliation / exactly-once-presence invariant (Postcondition 7, Invariant 4) — for any fault-injection point between the archival renames and the index publish, the next invocation leaves every indexed shard present in exactly one of R and A, with the index `path` matching its location, the lifetime `[[shard]]` count unchanged, and sealed-shard bytes unchanged (SHA-256 equal); a second reconciliation writes nothing | fault-injection integration test (one case per crash point in an N-move pass) + proptest over crash-point and move-count (VP-121 §"Crash-reconciliation / exactly-once presence", property 3) |
 | VP-122 | Default-glob exclusion invariant — the default whole-corpus glob pattern never matches a path under `archive/<artifact-stem>/` | unit test (glob-matching assertion against a fixture directory tree with both active and archived shards) |
 | VP-141 | Archive-inclusive POLICY-1 scan-mode invariant — a POLICY-1 (`append_only_numbering`) append-only/gap/uniqueness audit's effective glob scope ALWAYS includes `archive/<artifact-stem>/` UNION active shards for a Layer-2-sharded artifact; it never silently excludes an ID whose sole occurrence has been archived (Postcondition 6) | integration + static-check (dual-leg VP-141: integration/fixture-based assertion over a synthetic active+archive shard tree — archived-only ID + attempted reuse → POLICY-1 violation detected, per this BC's Canonical Test Vector — plus a static/compliance check that the `consistency-validator`/adversary-prompt agent definitions and POLICY-1's `verification_steps` in `.factory/policies.yaml` specify archive-inclusive scanning, since no WASM/native hook implements POLICY-1 today) |
 
@@ -219,7 +314,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 ## VP Anchors
 
-- VP-121, VP-122 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-121 (proptest; bounded active count + no-data-loss / honest O(active)), VP-122 (unit-test; default-glob archive exclusion + fail-loud missing/corrupt index E-SHD-002).
+- VP-121, VP-122 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-121 (proptest; bounded active count + no-data-loss / honest O(active); plus VP-121 §"Crash-reconciliation / exactly-once presence", property 3 — proptest + fault injection for Postcondition 7, Invariant 4 and EC-007..EC-011, registered by the architect after the v1.3 amendment), VP-122 (unit-test; default-glob archive exclusion + fail-loud missing/corrupt index E-SHD-002).
 - VP-141 — allocated by formal-verifier (S-25.02 F3→F4 consistency-gate finding F-1 closure; VP-INDEX v3.07). VP-141 (integration + static-check; Postcondition 6/EC-006 — archive-inclusive POLICY-1 (`append_only_numbering`) scan-mode invariant: a POLICY-1 append-only/gap/uniqueness audit's effective glob scope ALWAYS includes `archive/<artifact-stem>/` UNION active shards for a Layer-2-sharded artifact, never silently excluding an ID whose sole occurrence has been archived, per ADR-051 §Decision 6's "Whole-corpus history-scanning validator enumeration and POLICY-1 reconciliation" subsection). Back-reference added here (formal-verifier's VP-141 body already cited this BC in `source_bc`; this BC's own §Verification Properties table already cited VP-141, but this §VP Anchors list did not yet cite it back — gap closed here, reference-only, no behavior change).
 
 ## Traceability
@@ -239,6 +334,9 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.5 | 2026-10-14 | product-owner | Application of ADR-052 v1.33 §Decision 11(c) point 7(e) row (11)(iii) (unsafe on-disk names must not reach `rename`/`remove`/`read_dir`). NEW EC-012: an unsafe index entry or stem is refused at index decode BEFORE any archival move or reconciliation probe, and the retention surface reports `E-SHD-002` form (a) (closed `ShardIndexEntryRejected { kind }` tokens, no value echo; decode rules are BC-1.18.006 Postcondition 9). 5 Canonical Test Vectors added. No Postcondition, Invariant or existing EC/vector changed; H1 unchanged. |
+| 1.4 | 2026-10-14 | product-owner | VP citation alignment after the architect registered the crash-reconciliation leg as VP-121 property 3 (VP-INDEX propagation): the §Verification Properties crash-reconciliation row's "formal-verifier/architect to confirm" placeholder is replaced by a section-anchor cite to VP-121 §"Crash-reconciliation / exactly-once presence", property 3 (cited by anchor and VP id, no version pin, per POLICY 19); the §VP Anchors VP-121 line gains the leg. Documentary only: no Postcondition, Invariant, EC or vector change. |
+| 1.3 | 2026-10-14 | product-owner | Spec-gap closure (rename-before-publish crash window in Postcondition 2, found against the develop `archive_overflow_shards`, which renames overflow shards into `archive/` and rewrites each entry's `path` in memory BEFORE the one shard-index publish): added Postcondition 7 — normative ordering (seal, truncate, archival renames, then ONE atomic index publish carrying the seal and all archived paths), move-only/no-replace/no-copy-fallback rule, mandatory pre-trigger archive-path reconciliation (root-recorded entry with R absent and A present is repaired to the archive path, idempotently, one atomic index write; R and A both present or both absent fails loud with `E-SHD-002` form (d)), composition with the BC-1.18.006 `E-SHD-007` unindexed-seal self-heal, and the bounded observable window. Added Invariant 4 (exactly-once presence of sealed content), EC-007..EC-011, 6 Canonical Test Vectors, and a VP-121 crash-reconciliation extension leg row. Corrects the provisional S-25.02 v5.8 AC-010(b) premise: the existing `E-SHD-007` self-heal scans only for UNINDEXED root-level sealed files and does not repair an indexed entry whose file has moved, so a distinct reconciliation pass is specified here. No H1, Postcondition 1-6, or existing EC/vector change. |
 | 1.2 | 2026-09-06 | product-owner | Fix-burst amendment (S-25.02 F3→F4 consistency gate finding F-1, MAJOR): added Postcondition 6 — POLICY-1 (`append_only_numbering`) enforcement MUST use an archive-INCLUSIVE whole-corpus scan, an explicit carve-out from Postcondition 3's opt-in-required default, naming the four audited-and-cleared SS-04 crates and the genuine `consistency-validator`/adversary-prompt-level gap, per ADR-051 §Decision 6's "Whole-corpus history-scanning validator enumeration and POLICY-1 reconciliation" subsection. Added EC-006 (archive-inclusive POLICY-1 detection) + 1 new Canonical Test Vector + 1 new Verification Properties row (VP-NNN, pending formal-verifier allocation). Architecture Anchors gained the POLICY-1/agent-definition enforcement surface. Traceability ADR row extended to cite the specific ADR-051 §Decision 6 subsection. Closes the S-25.02 story AC-012 mis-citation gap (AC-012 previously cited Postcondition 3, which does NOT establish the archive-inclusive obligation — story-writer re-points AC-012 to Postcondition 6 next). |
 | 1.1 | 2026-09-05 | product-owner | Fix-burst amendment (F-S2502-F2-007, POLICY 5): added `## SDK Grounding Evidence` section with literal stable-anchor grep output for `write_atomic`, `write_indeterminate_marker`, and `HookResult`. No postcondition/invariant/VP content change. |
 | 1.0 | 2026-09-05 | product-owner | Initial creation. F2 spec-evolution burst, S-25.02 activation. Configurable `retention_count`, same-invocation archival move, `path_allow`-preserved-but-default-glob-excluded archive scope, honest O(active-shards) accounting per ADR-047 §8b mandate. CAP-043 capability anchor. ADR-051 §D6 citation. |

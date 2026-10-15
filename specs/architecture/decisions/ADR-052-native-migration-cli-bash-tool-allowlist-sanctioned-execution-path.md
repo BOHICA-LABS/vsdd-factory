@@ -2,7 +2,7 @@
 document_type: architecture-decision-record
 adr_id: ADR-052
 level: L3
-version: "1.31"
+version: "1.33"
 status: accepted
 date: 2026-09-20
 producer: architect
@@ -198,6 +198,14 @@ The verdict-only admission precheck (`bc_index_migration_admission_precheck` in 
 §5a "Entry-point naming" now lists exactly two entry points, `migration_writer_admission` (callers read `.verdict`)
 and `migration_reservation_release`. S-25.08 ships the `bc_index_migration_*` names; S-25.09 renames them and must
 not re-add the precheck. Recorded under the v1.31 changelog row.
+**v1.33 (two scope rulings from the S-25.09 pass 5 default-deny source gates; no state-machine, exit-code,
+`<cause>`, taxonomy-code or VP-count change; v1.32 is uncommitted at authoring, so this is recorded as the NEW
+version):** (1) Item 11(g)(2)(f) "Scope of the tracing-field half": the rule is scoped to the migration and shard
+surface (`shard_manager.rs`, `shard_manager/`, plus a provenance extension over the shard/migration error family),
+not dispatcher-wide; the other surfaces are governed by S-26.06 (production-level tracing macros emptied into
+InternalLog events; no-subscriber tripwire). (2) Item 11(c) point 7(e) rows (11)-(13): shard-index `[[shard]]`
+`path` and `artifact_stem`, the retention `pub` API and the BC-INDEX manifest names are parsed newtypes at decode
+time, fail-loud, value never echoed. Recorded under the v1.33 changelog row.
 
 ## Context
 
@@ -3549,7 +3557,18 @@ how the verdict is delivered.
       string comparison. (5) txn `migration_id`: never a path component; compared against the closed set K and
       rendered only through the 256 sanitizer (item 9). (6) txn `intent_log_path`: never opened or joined; compared
       for equality with the path DERIVED from the validated `GenerationId` (the v1.24 rule), a mismatch is
-      `txn_record_malformed` as before. (7) `tool_use_id` (reservation file name): the same grammar and the same
+      `txn_record_malformed` as before. *One rule (v1.32; closes the S-25.09 pass 5 "joined after equality"
+      ambiguity):* the recorded value is a COMPARISON OPERAND ONLY. The only path ever opened, read, joined or
+      handed to a file API is the path DERIVED by `intent_log_path_for_generation(&GenerationId)`; after the
+      equality check succeeds the code uses that derived value, not the recorded one, even though the two strings
+      are then identical. A recorded value is never an input to any path construction, and the code MUST NOT read
+      it back out of the record for use after the comparison (`recorded_intent_log_path` returns the comparison
+      result or the derived path, never a path built from the recorded string). Content binding (Decision 7c
+      drain step 3 "MUST denote") and the Tier 1 rule ("written by the coordinator, not derived") do not
+      permit opening the recorded value: they state what the record must CONTAIN, and the file read is of the
+      derived path; there is no derived fallback for a null or absent value (that stays `state_integrity`). A test
+      records a value that equals the derived string and asserts the opened path is the derived `PathBuf` (no
+      join operand originates in the record). (7) `tool_use_id` (reservation file name): the same grammar and the same
       function (no rule change; it was the model for the predicate). (8) `canonical_move_plan` /
       `pending_canonical_moves[]` paths: owned by ADR-054 Decision 1.2 (`INTENT_LOG_VALUE_REJECTED`, 4096 bytes,
       anchored under the project root); unchanged, and they are projects-relative paths, not single components.
@@ -3582,7 +3601,80 @@ how the verdict is delivered.
       error-taxonomy.md; a red table test row for `process_exit_code` (adding the variant without a row fails the
       build) and a red test per `reason` asserting no file under `migration-state/` and a byte-identical directory.
       (9) Shard / generation file names `BC-INDEX-SS-NN.md`: built from the BC-ID grammar (`MalformedBcId`), never from
-      free record text; unchanged. (10) `fencing_generation`, `schema_version`: integers, never a path. The rule for
+      free record text; unchanged. (10) `fencing_generation`, `schema_version`: integers, never a path.
+      **(11) Shard-index names and the artifact stem (v1.33; closes the S-25.09 pass 5 "on-disk TOML names reach
+      path joins" gap, (a) and (b)).** Finding: the shard-index `[[shard]]` entry's `path` and the `artifact_stem`
+      flow, unvalidated, into `archived_shard_path`, `shard_sibling_path`, `shard_index_path_for`,
+      `archived_shard_index_path_string`, `whole_corpus_shard_paths` and `load_shard_index_for_retention_check` and
+      from there into `rename_with_retry`, `remove`, `read_dir` and the archive-directory join. A hand-edited or
+      hostile `<stem>.shard-index.toml`, or a hostile `[[shard]]` `artifact_stem` in `shard-config.toml`, can name
+      `../../specs/x` and make the archival move rename or overwrite a file outside the cycle root. Rulings:
+      (i) *Two parsed newtypes, sole constructors.* `ArtifactStem::parse(&str)` accepts only a value for which
+      `is_safe_path_component` holds (point 7(a)); `SealedShardName::parse(&ArtifactStem, &str)` accepts only
+      `<artifact_stem>.<digits>.md` where `<digits>` is all ASCII digits, at least 4 (the `{seq:04}` minimum-width
+      form; never a fixed 4), and the whole name also satisfies `is_safe_path_component`. The index entry `path`
+      string is decoded, at DECODE time (a serde `TryFrom<String>` on the `ShardIndexEntry` field, so a violating
+      file cannot produce a `ShardIndex` value at all), into exactly one of two shapes: a bare `SealedShardName`
+      (sibling of the canonical file), or the archived form `archive/<artifact_stem>/<SealedShardName>` whose middle
+      component equals the index's own artifact stem (`archived_shard_index_path_string`'s output). Any other string
+      (extra or fewer components, `.`/`..`, a separator or drive prefix, a different stem) is rejected, and the
+      entry's `seq` must equal the numeric value of the digit segment of its name. (ii) *Typed signatures, no bare
+      `&str`.* `archived_shard_path`, `shard_sibling_path`, `shard_index_path_for`, `archived_shard_index_path_string`,
+      `whole_corpus_shard_paths` and `load_shard_index_for_retention_check` (the retention `pub` API, S-25.02) take
+      `&ArtifactStem` and, where they take a filename, `&SealedShardName`; no join operand originates in an
+      unparsed `String`. The stem of every `[[shard]]` config entry is parsed by the same constructor at
+      `shard-config.toml` decode time and a violation is `ShardConfigError::ArtifactStemUnsafe`, rendered per item
+      11(g)(2)(f) (BC-1.18.005 Postcondition 10 slot rule: the stem is a config-derived slot, escaped and capped).
+      (iii) *Verdict: fail-loud at decode, value never echoed.* A shard-index violation is a decode failure of the
+      index. `load_shard_index` returns it through its existing `io::Result` as `ErrorKind::InvalidData` whose
+      source is a fixed-text `ShardIndexEntryRejected { kind }`, with `kind` a CLOSED token set
+      `artifact_stem_unsafe | shard_path_unsafe | shard_path_shape_mismatch | shard_path_stem_mismatch |
+      shard_path_seq_mismatch`; its Display is fixed text plus the token and NEVER the offending value (it is
+      on-disk content; same rule as point 7(d)). Every existing caller keeps its existing fail-loud mapping, so the
+      retention surface reports it as `E-SHD-002` form (a) (`ShardRetentionError::IndexUnavailable`, "shard-index
+      missing or corrupt") and the roll and backfill surfaces report it through their existing index-load failure;
+      nothing is renamed, removed or written, no shard-index change is applied, and nothing falls back to a
+      sanitized guess. A rejected `ArtifactStem` passed directly to a retention or whole-corpus function surfaces
+      the same way (`InvalidData`, token `artifact_stem_unsafe`). No new taxonomy code: the failure class "the index
+      file is corrupt" is exactly form (a)'s class; product-owner extends form (a) with the closed `kind` token
+      list and the no-echo clause. (iv) *Owners.* The predicate and the `pub` visibility of
+      `is_safe_path_component` are S-25.09's (already delivered). The newtypes, the decode-time `TryFrom`, the
+      retargeted signatures and the `ShardConfigError::ArtifactStemUnsafe` variant are S-25.02's: they are the
+      shard code S-25.02 owns and T-5 (retention rewiring) already edits every one of these functions, so the
+      signature change lands in the same task before the call site merges; S-25.02 depends on S-25.09 and may call
+      the predicate directly. Red tests (S-25.02, RED first): a hostile index (`path = "../../specs/x"`,
+      `"archive/other/decision-log.0001.md"`, `"decision-log.0001.md/.."`, an absolute path, an ESC-bearing name,
+      a seq/name mismatch) fails the load with no filesystem change (byte-identical directory); a hostile
+      `artifact_stem` in config; a benign index decodes unchanged.
+      **(12) BC-INDEX manifest names (v1.33; (c)).** Finding: `resolve_bc_shard_path` joins the top-level
+      manifest entry's `sub_manifest` and returns the sub-manifest entry's `path` unchecked, and
+      `first_level_shard_path` formats `shards/BC-INDEX-{ss_id}.md` from the snapshot's `ss_id`; all three are
+      on-disk text (the manifests, and the snapshot parsed from the ARCH-INDEX mapping). Rulings: (i) *Newtypes at
+      decode.* `SsId::parse` accepts `SS-` plus exactly two ASCII digits and is applied where `SubsystemPrefixSnapshot`
+      is built and where the manifests are decoded. `ShardsRelPath` is exactly two components, the literal `shards`
+      then a name that satisfies `is_safe_path_component`; additionally the top-level manifest entry's `path` must
+      equal `shards/BC-INDEX-<ss_id>.md`, its `sub_manifest` must equal `shards/BC-INDEX-<ss_id>.manifest.toml`
+      (the ss_id being that entry's own, which must equal the ss_id the prefix snapshot mapped), and a sub-manifest
+      entry's `path` must have the form `shards/BC-INDEX-<ss_id>.<suffix>.md` with `<suffix>` one or more ASCII
+      lowercase letters. The validators run at manifest decode (`TryFrom`), so no `PathBuf` is joined from an
+      unparsed string; `first_level_shard_path` builds its path from a parsed `SsId`. (ii) *Verdict.* A new
+      `BcIndexAddressingError::UnsafeManifestName { slot, kind }` with `slot` a closed token (`ss_id | path |
+      sub_manifest | sub_shard_path`) and `kind` a closed token (`ss_id_malformed | manifest_path_unsafe |
+      manifest_path_shape_mismatch`); fixed text plus the two tokens, never the value; it joins the exhaustive
+      `render_with_cap` match (item 11(g)(4), no wildcard arm) and surfaces as the reader's existing hook-result
+      error; nothing is read from the offending path. This family carries no taxonomy code today (its siblings
+      `Io`, `Toml`, `MalformedBcId`, `UnmappedBcPrefix` have none), so none is added; product-owner adds the edge case.
+      (iii) *Owner.* S-25.09, not S-25.02: the reader and its error type are rendered and swept under S-25.09
+      (AC-026 renders `BcIndexAddressingError`; this point 7 sweep and the `CURRENT.json` reader parity are S-25.09's),
+      S-25.02 AC-017 owns only the BC-1.18.010 addressing behaviour that is already delivered, and S-25.02 depends on
+      S-25.09, so the dependency order forbids the reverse. S-25.09 adds one acceptance criterion with the red
+      tests: hostile `sub_manifest` (`../../x`, absolute, nested, wrong stem), hostile sub-manifest `path`, hostile
+      `ss_id`, benign byte-identical, and a default-deny path gate whose key is provenance (any `.join(` operand in
+      the addressing functions that is not a parsed newtype), not the identifier of a finding. (13) *Sweep
+      statement.* After v1.33 no on-disk or config-derived string reaches a `.join(`, `format!` path, `rename`,
+      `remove` or `read_dir` argument except through a parsed newtype in this point or points (1)-(10); Windows
+      reserved names and case collisions on top of these grammars stay S-25.16's.
+      The rule for
       any future identifier: a value read from disk that becomes a path component MUST be a parsed newtype whose
       constructor is `is_safe_path_component` (or a stricter grammar), never a bare `String`.
 
@@ -3781,6 +3873,66 @@ how the verdict is delivered.
       widens the trigger text and the `<reason>` domain from the earlier four to all six), each reason
       sanitized as above; and the pass-1 black-box vector for halt reasons moves from S-25.09 to S-25.11 with
       the halt-site list as its vectors.
+      *Cross-story ownership, stated once (v1.32; S-25.09 pass 5 deferrals D-1 and D-2):* (D-1)
+      `execute_canonical_path_moves` logging the record-decoded `canonical` / `staging` / `reason` raw, and the
+      COMMITTING `ForwardRecovery` arm renaming record-supplied paths with no anchoring check, are two defects with
+      two owners that together are the whole of S-25.11's scope for that function. SANITIZATION (every log line,
+      tracing field and halt reason that renders a record-decoded `canonical`, `staging`, `target` or `reason`
+      goes through item 11(g), per slot) is S-25.11 AC-008 and is NOT limited to the six halt sites: it covers
+      every log or tracing call in that function. ANCHORING (a plan or intent-record path must be a
+      projects-relative path anchored under the project root, at most 4096 bytes, validated by the
+      `INTENT_LOG_VALUE_REJECTED` predicate of ADR-054 Decision 1.2) is DEFINED by ADR-054 Decision 1.2 and ENFORCED
+      by S-25.11 at the consumer: the `ForwardRecovery` rename arm must take its source and destination only from
+      paths that have passed that predicate (decode through the ADR-054 reader, never from raw record text), and
+      must refuse (halt with `CANONICAL_MOVE_HALTED`, exit 2) before any rename otherwise. S-25.09 owes neither.
+      (D-2) The 11(g)(2)(f) rule ("operative for every error type whose rendering reaches an operator, hook-result
+      or log surface") applies to `ShardRetentionError` and `MechanismABackfillError` (S-25.02, BC-1.18.007 /
+      BC-1.18.008) ONLY IF the function that raises each has a production caller, because "reaches an operator
+      surface" is a property of a reachable path. A grep of the S-25.09 worktree on 2026-10-14 finds
+      `load_shard_index_for_retention_check` and `run_mechanism_a_backfill_split` defined in
+      `shard_manager.rs` and referenced only by doc comments and the BC-1.18.007 / BC-1.18.008 integration tests:
+      no production caller. Both are therefore the unwired seams of their stories, not live operator surfaces.
+      Ruling: each stays unconverted until a production caller is wired; the story that WIRES the caller (the
+      mechanism-A / retention call site in the migration binary or the shard-roll path) owns converting the raised
+      error types to `render_with_cap` in that same story, before the call site merges, and a call site MUST NOT
+      merge with raw `#[error]` interpolation of `artifact_stem` or io sources. The orchestrator must name that
+      wiring story (an existing S-25.x story if one wires either function, else a new one); an unwired function
+      with no planned caller is removed rather than carried.
+
+      *Scope of the tracing-field half of this rule (v1.33; S-25.09 pass 5 default-deny gate, 63 failing fields).*
+      Ruling: the tracing-field rule is SCOPED to the migration and shard surface; it is NOT dispatcher-wide.
+      (1) *The rule.* On the in-scope surface every `tracing::*!` field value and format argument is a literal, a
+      SCREAMING_CASE constant, a numeric value, a closed-enum token, or `sanitize_diagnostic(_, 64)` /
+      `render_with_cap(64)` (item 11(g)(1)); BC-1.18.005 Postcondition 10 and item 11(g)(2)(f)(3) name exactly this
+      surface and are unchanged. (2) *The boundary the gate must use.* In scope: `crates/factory-dispatcher/src/
+      shard_manager.rs` and every file under `crates/factory-dispatcher/src/shard_manager/` (including
+      `admission.rs`), plus, by provenance, any other file under `crates/factory-dispatcher/src` that passes a
+      value of the shard/migration error family (`ShardConfigError`, `ShardRollError`, `ShardRetentionError`,
+      `MechanismABackfillError`, `BcIndexAddressingError`, `BcIndexMigrationError`, `AppendLogMigrationError`), or
+      text read from `shard-config.toml`, a shard index, a BC-INDEX manifest or a `migration-state` record, to a
+      tracing macro (the gate keys on those type names, so a new call site in a new file is caught). Out of scope,
+      and the gate MUST NOT scan them for this rule: `executor.rs`, `indeterminate_marker.rs`, `invoke.rs`,
+      `sinks/`, `vsdd_sink.rs` and every other file not matched above; the gate asserts the exclusion list equals
+      that named set so it cannot silently grow, keeps a non-vacuity floor on the in-scope scan, and carries a
+      positive control for the provenance extension. (3) *Why the other surfaces are not governed by this rule.* A
+      tracing field is a log-injection or secret-leak surface only where a subscriber renders it, and the
+      dispatcher binary installs none (`Cargo.toml` has `tracing` and no `tracing-subscriber`; BC-3.08.001 Event
+      11-13 driver fact check). The shard surface stays in scope because the rule is already normative for it and
+      because those library functions run under embedding tests that install a capturing subscriber. (4) *Where
+      the rest is governed.* S-26.06 (E-26) owns every non-shard diagnostic: its AC-002 empties the production-
+      relevant levels (`error!`, `warn!`, `info!`) of `crates/factory-dispatcher/src`, so each operator-relevant
+      diagnostic becomes an InternalLog event with the 64-per-slot rule of item 11(g)(1), classified one by one in
+      its AC-001 inventory; the remaining `debug!` breadcrumbs are discarded in production by design (its AC-008).
+      The 63 non-shard fields therefore need no S-25.09 change. (5) *Tripwire.* The "safe" claim holds only while no
+      subscriber exists, so the S-26.06 AC-008 source gate (no `tracing-subscriber` dependency, no
+      `set_global_default`) is the guard, S-25.17 forbids the dependency as well, and installing any subscriber is
+      forbidden until an ADR amendment in the SAME change extends this rule dispatcher-wide (every tracing field
+      carrying on-disk, config, environment or tool-input text, capped at 64). BC changes owed (product-owner):
+      BC-1.18.005 Postcondition 10 gains one sentence stating the tracing-field half is scoped as in (2) (wording
+      only, no new edge case); and the BC authoring S-26.06 already owes (`behavioral_contracts: []`) must anchor its
+      AC-002 and AC-008 in a new BC-3.08.001 invariant ("the dispatcher installs no `tracing` subscriber; the
+      production-relevant `tracing` levels are empty; operator-relevant diagnostics are InternalLog events") so the
+      tripwire has a BC.
 
    (g) *Sanitization caps are per SURFACE, and a data-derived value is sanitized at RENDER time, never at
    construction (v1.25; closes the Event 12 / operator-line cap conflation).* Two surfaces render the same
@@ -3892,7 +4044,36 @@ how the verdict is delivered.
       `migrate-bc-index: ` prefix, 308 with `backfill-append-logs: `), `ManifestExpiredOrAbsent` 241. The test
       asserts, for every variant, `fixed_chars <= FIXED_TEXT_MAX_CHARS`, and separately that the full stderr line
       of each `ExpiryAbort` arm is at most `FIXED_TEXT_MAX_CHARS` plus the longer subcommand prefix (22) and equals
-      the item-8 text verbatim. No BC edit is owed for this ruling. (d) *Why not a different rule.* A whole-string cap with a protected prefix (e.g. "never cut inside the
+      the item-8 text verbatim. No BC edit is owed for this ruling.
+      *Scope and nesting of the fixed-text bound (v1.32; closes the S-25.09 pass 5 ShardConfigError / nested-detail
+      ambiguity; normative, one rule):* (1) *Scope: EVERY type that has a `render_with_cap`.* The bound
+      `FIXED_TEXT_MAX_CHARS` applies uniformly to every error type that renders through `render_with_cap`, present
+      and future: `BcIndexMigrationError`, `ShardConfigError`, `ShardRollError`, `BcIndexAddressingError` and every
+      type that later adopts item 11(g)(2)(f) or (4). It is a property of the mechanism, not of one enum; item
+      11(g)(2)(f)(3) adopts item 11(g)(4) for `ShardConfigError` in full, and that includes this clause. (2) *Over-long
+      fixed text is shortened, never exempted.* `ShardConfigError::EmptyArtifactPath` (about 536 characters of fixed
+      text) is shortened to at most 512 characters, keeping its code token, the cause and the operator remedy; if a BC
+      pins the longer wording verbatim, the product-owner shortens the BC wording in the same burst (the BC is not
+      the reason to exceed the bound for a type whose text is not an operator-guidance sentence pinned for exit-2
+      stderr as `ExpiryAbort` is). No variant of any type is allowlisted. (3) *Test (one table-driven test per type).*
+      Each type exposes an exhaustive, wildcard-free enumeration of its variants' `Fixed` parts (a `#[cfg(test)]` or
+      `pub(crate)` accessor that is itself an exhaustive `match`, so a new variant fails to compile until counted),
+      and the test asserts `fixed_chars <= FIXED_TEXT_MAX_CHARS` for EVERY variant of EVERY type with a
+      `render_with_cap`, plus the same arithmetic for the rendered line at caps 64 and 256 against hostile data
+      (`detail_chars <= Σ fixed + Σ numeric + cap × data slots`). The test names the type in its failure message.
+      (4) *Nested errors are SPLICED per part, never capped as a whole string.* When a variant carries another
+      error's rendering inside its own `detail` (for example `BcIndexMigrationError::ShardCapConfigUnavailable`
+      carrying a `ShardConfigError`, or `ArchIndexParityAbort` carrying its parts), the parent does NOT call
+      `sanitize_diagnostic(child.to_string(), N)` and does NOT scale the cap (`cap * 8` and every comparable
+      multiplier is forbidden: it truncates the child's fixed text exactly when it is long). The child exposes its
+      ordered parts (the same `Fixed` / numeric / `Data` list its `render_with_cap` joins), and the parent emits the
+      child's `Fixed` and numeric parts VERBATIM and each child `Data` part as `sanitize_diagnostic(part, cap)` at
+      the parent's own cap (256 on stderr/Display, 64 in an InternalLog event), spliced after the parent's own
+      fixed clause. The parent's own fixed text is bounded by `FIXED_TEXT_MAX_CHARS`; the spliced child's fixed
+      text is bounded by the child's own variant bound, so the nested total is at most the sum of the two bounds,
+      plus numeric parts, plus `cap` per data slot, and the unit test in (3) asserts exactly that sum for each nested
+      pairing (hostile slots at 64 and 256, intact child fixed clause at both caps). Because `sanitize_diagnostic` is
+      idempotent, a `Data` part that arrives already escaped is not double-escaped. (d) *Why not a different rule.* A whole-string cap with a protected prefix (e.g. "never cut inside the
       first token") still re-truncates the composed text and leaves the second fixed clause exposed; a larger
       whole-string cap re-opens the log-injection bound for data slots. Per-slot rendering is the only rule that
       satisfies 11(g)(1) without exception, and it already exists for `AdmissionStateIntegrity`.
@@ -5676,6 +5857,8 @@ committed files.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 1.33 | 2026-10-14 | architect | **Two scope rulings from the S-25.09 pass 5 default-deny source gates; no state-machine, exit-code, `<cause>`, taxonomy-code or VP-count change.** (1) Item 11(g)(2)(f) "Scope of the tracing-field half": SCOPED to `shard_manager.rs`, `shard_manager/` and, by provenance, any file passing a shard/migration error-family value or shard-config / shard-index / BC-INDEX manifest / migration-state text to a tracing macro; `executor.rs`, `indeterminate_marker.rs`, `invoke.rs`, `sinks/`, `vsdd_sink.rs` are out (no subscriber is installed; S-26.06 AC-002 empties the production levels into InternalLog events, AC-008 is the no-subscriber tripwire; installing a subscriber requires a dispatcher-wide ADR amendment in the same change). Owed: BC-1.18.005 Postcondition 10 one-sentence scope note; S-26.06's pending BC authoring anchors AC-002/AC-008 in a new BC-3.08.001 invariant. (2) Item 11(c) point 7(e) rows (11)-(13): (a)/(b) shard-index `[[shard]]` `path` and `artifact_stem` plus the retention `pub` API (`ArtifactStem`, `SealedShardName`, decode-time `TryFrom`, typed signatures, `ShardIndexEntryRejected { kind }` as the `InvalidData` source, `ShardConfigError::ArtifactStemUnsafe`; fail-loud, value never echoed; reported as `E-SHD-002` form (a); owner S-25.02 with T-5); (c) BC-INDEX manifest `ss_id`, `sub_manifest`, `path` (`SsId`, `ShardsRelPath`, `BcIndexAddressingError::UnsafeManifestName { slot, kind }`; owner S-25.09). Owed (product-owner): `E-SHD-002` form (a) closed `kind` list and no-echo clause; BC-1.18.006 decode-time name validation postcondition and BC-1.18.007 / BC-1.18.005 / BC-1.18.010 edge cases for the new verdicts. |
+| 1.32 | 2026-10-14 | architect | **Four rulings from the S-25.09 local adversary pass 5; no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.31 is committed and immutable, so this is a NEW version.** (1) Item 11(g)(4)(c): `FIXED_TEXT_MAX_CHARS` applies to every type with `render_with_cap` (`BcIndexMigrationError`, `ShardConfigError`, `ShardRollError`, `BcIndexAddressingError`, future adopters); an over-long variant (`ShardConfigError::EmptyArtifactPath`) is shortened, never exempted; one table-driven exhaustive test per type; a nested error is SPLICED per part (child `Fixed`/numeric verbatim, child `Data` sanitized at the parent's own cap) and a whole-string or scaled cap (`cap * 8`) is forbidden. (2) Item 11(c) point 7(e)(6): the recorded `intent_log_path` is a comparison operand only; the derived path is the only one opened or joined. (3) Item 11(c) halt-reason paragraph: D-1 ownership stated (sanitization of every log/halt render in `execute_canonical_path_moves` is S-25.11 AC-008; anchoring is defined by ADR-054 Decision 1.2 and enforced at the `ForwardRecovery` rename arm by S-25.11). (4) D-2: `ShardRetentionError` / `MechanismABackfillError` conversion is owed by the story that wires a production caller of `load_shard_index_for_retention_check` / `run_mechanism_a_backfill_split` (both currently have none); no S-25.09 obligation. |
 | 1.31 | 2026-10-14 | architect | **Spec-to-code alignment with the human-approved CR-003 removal (PR #848, commit `245a437a` on `feature/S-25.08`; CLAUDE.md rule 12); no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.30 is committed and immutable, so this is a NEW version.** The verdict-only admission precheck (S-25.08 `bc_index_migration_admission_precheck`; v1.21 neutral name `migration_writer_admission_precheck`) had no production caller and discarded the writer reservation, a leak hazard, and was removed. §5a "Shared protected-path union" and "Entry-point naming (v1.21)": exactly TWO migration-neutral entry points, `migration_writer_admission` (callers read `.verdict`; reservation owned by the caller via `MigrationAdmission`, released on completion) and `migration_reservation_release`, "and their successors" per BC-1.18.011 v1.25 Precondition 6(d) / BC-1.18.013 v1.18 Precondition 6(b); the precheck form is NOT an entry point and MUST NOT be reintroduced. Naming by story stated: S-25.08 ships the `bc_index_migration_*` names, S-25.09 renames them to the neutral names and MUST NOT re-add the precheck. §5c status paragraph and §Downstream item 29 corrected; §Downstream items 14 and the v1.x "position ... already holds" quotes annotated as historical (unchanged otherwise). TD-VSDD-060 sweep: remaining `admission_precheck` mentions are changelog/history rows or `append_log_backfill_*` never-existing-name instructions, all intentionally unchanged. |
 | 1.30 | 2026-10-13 | architect | **Stale admission-detail wording corrected after BC-1.18.013 v1.17 (ruling (a)); no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.29 is committed and immutable, so this is a NEW version.** §5a "Factory-root lookup mapping" PreToolUse-admission row: the `io` `migration.admission_failed` `detail` is the per-slot rendering of `BcIndexMigrationError::Io` under item 11(g)(4) (`BC-INDEX migration: I/O error at ` + `<path>` escaped/capped 64 + `: ` + `<OS message>` escaped/capped 64, errno suffix retained so EACCES and ELOOP stay distinguishable), with no `ErrorKind` token and no `error_kind` event field, replacing "sanitized path + `ErrorKind` + message". The release/advisory leg (§5a row and §Downstream "Release leg") is unchanged: it is not an `Io` variant and keeps `<path>: <kind>: <msg>` with a closed-vocabulary fixed kind token and path/msg capped at 64 each. TD-VSDD-060 sweep: no other `ErrorKind`/`error_kind` mention describes the admission detail. |
 | 1.29 | 2026-10-13 | architect | **Two corrections after D-1259; no state-machine, exit-code, taxonomy-code, `<cause>` or VP-count change; v1.28 is committed (factory-artifacts 7cc527d0) and immutable.** **(1) Fixed-text bound (item 11(g)(4)(c)):** the v1.28 bound of 256 characters per variant's fixed text conflicted with the verbatim `ExpiryAbort::NullGeneration` Display text (286 characters; 304 with the `migrate-bc-index: ` prefix, 308 with `backfill-append-logs: `) pinned by BC-1.18.011 EC-047 (`ManifestExpiredOrAbsent` is 241). Ruling: the BC wording is kept (no product-owner edit owed); the bound is now the uniform named constant `FIXED_TEXT_MAX_CHARS = 512` counted in `chars()`, with no allowlist or per-variant exemption; fixed text is still never truncated and the per-data-slot caps (256 stderr/Display, 64 event) are unchanged. Test assertion: for every variant `fixed_chars <= FIXED_TEXT_MAX_CHARS`; each `ExpiryAbort` arm's full stderr line equals the item-8 text verbatim and is at most 512 + 22 characters; the `detail <= Σ fixed + Σ numeric + 64 × slots` check is unchanged. **(2) GAP-14 ownership correction:** `BcIndexMigrationError::ActivationManifestInvalid` and its raiser (the armed-activation manifest reader, which does not exist in code) are delivered by the new story S-25.13 (human decision D-1259), the `AppendLogMigrationError` mirror by S-25.14 (split from S-25.13). Corrected: the v1.28 §Downstream owed "Stories / code" bullet (S-25.09 no longer adds the variant), the BC-1.18.011 Precondition 5 / EC-087 owed bullet (implementation ownership sentence), §Decision 11(c) point 7(f) and the §Error Code Semantics row (ownership notes). The taxonomy code, exit 2 and reason tokens are unchanged. |

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-09-05T00:00:00Z
@@ -14,7 +14,7 @@ inputs:
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.006.md
   - .factory/specs/behavioral-contracts/ss-01/BC-1.18.008.md
   - plugins/vsdd-factory/hooks-registry.toml
-input-hash: "7c73862"
+input-hash: "a4fee05"
 traces_to: .factory/specs/prd.md
 origin: greenfield
 extracted_from: null
@@ -217,11 +217,11 @@ introduced by this BC).
 
 ## Story Anchor
 
-S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle Artifacts
+S-25.19 — Cohort B fail-closed flip, calibrated registry entries and F4 calibration (split out of S-25.02 T-12, formerly AC-020/AC-021/AC-022, per the 2026-10-14 human decision; this BC no longer anchors to S-25.02).
 
 ## VP Anchors
 
-- VP-129, VP-130 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02). VP-129 (static-check; Bash-arm exclusion + closed-cohort config audit), VP-130 (integration; sequencing gate after BC-1.18.008 backfill-split + per-validator calibration evidence). Fuel-ceiling numeric bound PROVISIONAL-until-F4.
+- VP-129, VP-130 — allocated by formal-verifier (S-25.02 F2 verification-property extension burst; VP-INDEX v3.02); now anchored to S-25.19 (the story that implements and verifies the Cohort B flip). VP-129 (static-check; Bash-arm exclusion + closed-cohort config audit), VP-130 (integration; sequencing gate after BC-1.18.008 backfill-split + per-validator calibration evidence). Fuel-ceiling numeric bound PROVISIONAL-until-F4.
 
 ## Traceability
 
@@ -232,7 +232,7 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 | L2 Domain Invariants | none (dispatcher runtime architectural invariant, not an L2 domain-spec DI-NNN) |
 | Architecture Module | SS-07 (Hook Bash Layer — `hooks-registry.toml` routing-table `failure_policy` assignment) |
 | ADR | ADR-051 §Decision 9 (Cohort B fail-closed flip sequencing, corrected); ADR-047 §Decision 8a (Cohort B partition, plugin-name corrected) and §Decision 8b (ratified future phase); ADR-039 §Decision 3 (calibration-precedes-fail-closed-flip ordering constraint) |
-| Stories | S-25.02 |
+| Stories | S-25.19 |
 | Cycle | v1.0-brownfield-backfill (F2 — product-owner spec-evolution burst) |
 | Feature | E-25 — Validation Integrity and Large-Artifact Resilience |
 
@@ -240,5 +240,6 @@ S-25.02 — Artifact Sharding Layer 2: Size-Triggered Shard Rotation for Cycle A
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.2 | 2026-10-14 | product-owner | Story-anchor amendment per the 2026-10-14 human decision splitting S-25.02 T-12 (Cohort B fail-closed flip, calibrated registry entries and F4 calibration; formerly AC-020/AC-021/AC-022) into new story S-25.19. `## Story Anchor` and `## VP Anchors` (VP-129/VP-130) now name S-25.19, and the Traceability `Stories` row moves from S-25.02 to S-25.19 for parity. No postcondition, invariant or edge-case content change. Stories affected by BC change: S-25.02 (anchor removed), S-25.19 (anchor added); story-writer must propagate under bc_array_changes_propagate_to_body_and_acs. VP anchor change: VP-129/VP-130 now anchored to S-25.19; architect must propagate to VP-INDEX, verification-architecture.md and verification-coverage-matrix.md under vp_index_is_vp_catalog_source_of_truth. |
 | 1.1 | 2026-09-05 | product-owner | Fix-burst amendment (F-S2502-F2-009 + F-S2502-F2-003 + F-S2502-F2-007): Traceability ADR row's `ADR-047 §Decision 8a (Cohort B partition, plugin-name corrected v1.6)` de-loaded of its volatile `v1.6` version pin per TD-VSDD-091/POLICY 19 — the stable `§Decision 8a` section anchor already resolves the citation without the version token, mirroring the CAP-032/`ADR-026` precedent. VP-129's closed-cohort row Proof Method normalized from bare "config audit" to "static-check (config audit...)" per VP-INDEX v3.02's authoritative method assignment (both VP-129 rows now consistently read "static-check") — no property content changed. Added `## SDK Grounding Evidence` section with literal stable-anchor grep output for the three Cohort B registry entries and the marker-write primitives. No postcondition/invariant/scope change. |
 | 1.0 | 2026-09-05 | product-owner | Initial creation. F2 spec-evolution burst, S-25.02 activation. Allocated as BC-7.08.001 (next free SS-07 family slot after the existing BC-7.01–BC-7.07 range; confirmed against BC-INDEX.md and the live `ss-07/` directory listing at authoring time — no collision). Cohort B fail-closed flip for the CORRECTED plugin name `validate-burst-log` (Edit/Write/MultiEdit arm only — explicitly excluding the unrelated `^Bash$` chain-detection arm), `regression-gate`, `convergence-tracker`; hard-gated on BC-1.18.005/006/008's postconditions holding (shard cap enforced, gate live, AND the pre-existing oversized files already backfill-split) per ADR-051 Decision 9's corrected sequencing. CAP-041 capability anchor (extends the INDETERMINATE/fail-closed cohort mechanism to a second, human-confirmed set). ADR-051 §D9 + ADR-047 §D8a/§D8b + ADR-039 §D3 citations. |
