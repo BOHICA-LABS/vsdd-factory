@@ -264,6 +264,58 @@ When an R-NNN has `NFR candidate: yes` in its Mitigation:
 - Set the NFR's `Risk Source` column to the originating R-NNN
 - The NFR must have a numerical target derived from the risk's quantifiable mitigation
 
+### Per-Story Holdout Scenario Authorship (BC-5.39.003)
+
+At story-materialization time (Phase 2, when each story file is finalized), you author 2–4 hidden, single-use holdout scenarios per story. These are separate from wave-level scenarios (HS-NNN pool) and the end-of-pipeline evaluation pool — they form the first tier of the three-tier holdout architecture.
+
+**Authorship rules:**
+
+1. **Write during Phase 2, not Phase 3.** Scenarios must be authored before test-writer and implementer ever see the story. The holdout wall is established at materialization — scenarios written after implementation begins are compromised.
+
+2. **Single-use.** Each scenario is evaluated exactly once. After the holdout-evaluator runs it, it is marked `lifecycle_status: consumed` and moved to the evaluations directory. Never author replacement scenarios mid-story.
+
+3. **Wire-level assertions on observed output.** Focus on what the public surface emits: exit codes, response bytes, output field values, observable side-effects. Do NOT describe implementation internals.
+
+4. **Scoped to the story's touched surface.** A story-level scenario exercises only the API/CLI surface explicitly extended by this story. Do not test behaviors that belong to other stories.
+
+5. **2–4 per story.** Minimum: 2 (one happy path, one edge/error path). Maximum: 4. More than 4 per story defeats the purpose — keep them focused and fast to evaluate (minutes, not hours).
+
+6. **Cover different spec arms.** Design scenarios to reach BC postcondition arms that synthetic unit tests are unlikely to exercise end-to-end (composition paths, error cascades, output format details).
+
+**Directory layout:**
+
+```
+.factory/holdout-scenarios/
+  story-scenarios/
+    STORY-NNN/
+      SHS-NNN-001-[short-title].md   # happy path
+      SHS-NNN-002-[short-title].md   # edge/error path
+      SHS-NNN-003-[short-title].md   # optional: composition path
+      SHS-NNN-004-[short-title].md   # optional: output-shape assertion
+  evaluations/
+    story-STORY-NNN/                  # written by holdout-evaluator after consumption
+  wave-scenarios/                     # separate pool; you author these at Phase 2 wave planning
+```
+
+**Frontmatter for story-level scenarios:**
+
+Use the standard holdout-scenario template with these additional fields:
+```yaml
+scope: story                         # distinguishes from wave/final scenarios
+story_id: STORY-NNN
+single_use: true
+lifecycle_status: active             # → consumed after evaluation
+```
+
+**What makes a good story-level scenario:**
+
+| Characteristic | Good | Bad |
+|---|---|---|
+| Assertion target | Observable output bytes, exit code, HTTP status + body | Internal state, log lines, database rows |
+| Scope | Story's single new endpoint/command/flag | Full pipeline behavior |
+| Distinctness | Tests a BC arm that unit tests reach only via mocks | Duplicates an existing unit test assertion |
+| Failure guidance | One-sentence behavioral gap description | "Fix the implementation" |
+
 ### Holdout Scenario Generation from ASM/R
 Generate holdout scenarios from high-impact assumptions and risks:
 - Every ASM with Impact-if-Wrong=HIGH or `Holdout candidate: yes` must have at least one holdout scenario with `assumption_source: ASM-NNN` in frontmatter
