@@ -16,7 +16,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Mount factory artifacts
         run: |
@@ -111,12 +111,13 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
         # Pinned in rust-toolchain.toml — keep this version in sync with that file.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master 2026-08-04
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
           targets: wasm32-wasip1
 
@@ -476,7 +477,7 @@ jobs:
     # knows exactly which side to refresh.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install yq + python3-yaml
         run: |
@@ -555,14 +556,15 @@ jobs:
             exe_suffix: ".exe"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
         # Pinned to rust-toolchain.toml (1.95.0). `targets:` here adds
         # both the platform-specific triple AND wasm32-wasip1 in one
         # rustup invocation — the action handles the union internally.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master 2026-08-04
         with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
           targets: ${{ matrix.target }}, wasm32-wasip1
 
@@ -697,7 +699,7 @@ jobs:
         # for debugging cross-platform build issues). release.yml's build-binaries job
         # produces its own staged artifacts independently via separate build runs;
         # nothing downstream downloads this upload for bundling.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: factory-dispatcher-${{ matrix.platform }}
           path: artifact-staging/
@@ -715,7 +717,7 @@ jobs:
     name: bats-full-suite (linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Mount factory artifacts
         # run-all.sh suites that validate STATE.md / cycle artifacts need .factory/.
@@ -746,8 +748,9 @@ jobs:
       - name: Install Rust toolchain
         # Needed to build factory-dispatcher (release) below.
         # Pinned to rust-toolchain.toml version — keep in sync with cargo-host.
-        uses: dtolnay/rust-toolchain@1.95.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master 2026-08-04
         with:
+          toolchain: 1.95.0
           targets: wasm32-wasip1
 
       - name: Cache cargo
@@ -875,7 +878,7 @@ jobs:
     name: bats-wave-handoff (macos)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install tools
         # bats, jq, bash, and PyYAML are the runtime requirements for wave-handoff.bats
@@ -951,7 +954,7 @@ jobs:
     runs-on: macos-latest
     needs: build-dispatcher
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install bats
         run: brew install bats-core jq
