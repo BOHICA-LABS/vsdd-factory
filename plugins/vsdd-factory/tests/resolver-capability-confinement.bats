@@ -25,15 +25,12 @@
 #   BC-4.12.004 INV1 — no panic / no crash on resolver errors
 
 # ---------------------------------------------------------------------------
-# Setup / teardown helpers
+# Provenance recording (setup_file runs once per suite; output always visible)
 # ---------------------------------------------------------------------------
 
-setup() {
-    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-cap-confinement-XXXXXX")"
-
+setup_file() {
+    # Resolve the dispatcher ONCE; provenance and every test use this exact path.
     REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
-    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
-
     # Build dispatcher if needed (same pattern as resolver-integration.bats).
     DISPATCHER="${REPO_ROOT}/target/debug/factory-dispatcher"
     if [[ ! -x "${DISPATCHER}" ]]; then
@@ -50,6 +47,24 @@ setup() {
             exit 1
         fi
     fi
+    export DISPATCHER
+    # Record which factory-dispatcher binary this suite exercises.
+    # D-693 / F-S2107-P6-017: auditable path + sha256 + mtime via TAP comments.
+    load "${BATS_TEST_DIRNAME}/helpers/dispatcher-provenance.bash"
+    emit_dispatcher_provenance "${DISPATCHER}"
+}
+
+# ---------------------------------------------------------------------------
+# Setup / teardown helpers
+# ---------------------------------------------------------------------------
+
+setup() {
+    FACTORY_TMP="$(mktemp -d "${BATS_TMPDIR}/resolver-cap-confinement-XXXXXX")"
+
+    REPO_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../.." && pwd)"
+    PLUGIN_ROOT="${REPO_ROOT}/plugins/vsdd-factory"
+
+    # DISPATCHER is resolved once in setup_file (provenance names this binary).
 
     # naughty_resolver.wasm lives in the dispatcher test fixtures (tracked by git).
     # hook-plugins/ is gitignored (build artifacts); we symlink at test runtime.
@@ -158,7 +173,7 @@ EOF
     temp_plugin_root="$(make_naughty_plugin_root)"
 
     local sink_file
-    sink_file="${BATS_TMPDIR}/cap-confinement-sink-${RANDOM}.jsonl"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     # Dispatcher payload: SubagentStop with wave-gate-dispatch agent_type.
     # The convergence hook has needs_context = ["naughty_resolver"], so the
@@ -245,7 +260,7 @@ waves:
 EOF
 
     local sink_file
-    sink_file="$(mktemp "${BATS_TMPDIR}/vp076d-sink-XXXXXX.jsonl")"
+    sink_file="${FACTORY_TMP}/sink.jsonl"
 
     local payload='{"event_name":"SubagentStop","session_id":"bats-vp076d","dispatcher_trace_id":"bats-vp076d-trace","agent_type":"wave-gate-dispatch","last_assistant_message":"Wave gate adversary pass completed for this iteration of the story review cycle."}'
 
