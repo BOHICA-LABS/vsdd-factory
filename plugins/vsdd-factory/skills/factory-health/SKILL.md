@@ -222,6 +222,36 @@ Also check for content that shouldn't be in STATE.md:
 
 If any issues found, report them and recommend `/vsdd-factory:compact-state`.
 
+### 10. Factory-artifact leak scan (#515 — content-based)
+
+Detect factory artifacts that leaked onto the product branch. The `.factory/`
+path-prefix leak check (#341) only sees artifacts under `.factory/`; a factory
+artifact committed to a product path (e.g. a root-level `red-gate-log-*.md`)
+is invisible to it. This scan keys on CONTENT — the frontmatter
+`document_type:` — instead of location.
+
+```bash
+# Rust binary (crates/factory-artifact-leak-scan, POLICY 21) — build once if absent:
+[ -x target/release/factory-artifact-leak-scan ] || cargo build --release -p factory-artifact-leak-scan
+target/release/factory-artifact-leak-scan
+```
+
+The scanner is advisory (it reports, never mutates). It reads the factory
+document_type set from `templates/` (honoring `CLAUDE_PLUGIN_ROOT`) and flags
+any tracked file, outside `.factory/` and outside plugin machinery, whose
+`document_type` is a factory-produced type — except product deliverables like
+demo-evidence, which are exempt only under their canonical home directory.
+
+- **Exit 0 / "Product tree is clean"**: no leaks.
+- **Exit 1 (table of leaks)**: relocate each to its canonical `.factory/` home
+  (see `config/artifact-path-registry.yaml`) via `/vsdd-factory:relocate-artifact`,
+  or, if a genuine product deliverable, add its `(document_type -> home directory)`
+  pair to `PRODUCT_TRACKED_HOMES` in `crates/factory-artifact-leak-scan` with
+  justification.
+- If the repo has no Rust toolchain (plugin consumed outside the engine repo),
+  skip this check and note it as NOT RUN in the report — do not fail health on
+  a missing binary.
+
 ## Output
 
 Report a summary:

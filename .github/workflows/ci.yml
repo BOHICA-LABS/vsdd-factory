@@ -761,13 +761,15 @@ jobs:
           shared-key: bats-full-suite-linux-v2
           cache-on-failure: true
 
-      - name: Build factory-dispatcher (release)
+      - name: Build factory-dispatcher + leak scanner (release)
         # Dispatcher-dependent bats suites (regression-v1.0, td-71-stderr-block-reason,
         # per-story-adversary-convergence-hook, etc.) skip gracefully when the binary
-        # is absent. Building it here ensures those suites run rather than skip,
+        # is absent. Building here ensures those suites run rather than skip,
         # giving full coverage. Target path: target/release/factory-dispatcher —
         # matches $REPO_ROOT/target/release/factory-dispatcher in bats setup().
-        run: cargo build --release -p factory-dispatcher
+        # factory-artifact-leak-scan is likewise exercised by its bats suite via
+        # target/release/factory-artifact-leak-scan (skip-if-absent).
+        run: cargo build --release -p factory-dispatcher -p factory-artifact-leak-scan
 
       - name: Stage WASM plugins for run-all.sh
         # Suites that invoke the dispatcher live-test need the WASM plugins staged
