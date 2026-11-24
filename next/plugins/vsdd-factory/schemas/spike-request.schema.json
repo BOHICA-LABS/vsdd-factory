@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spike-request.schema.json",
+  "type": "object",
+  "properties": {
+    "question": { "type": "string", "maxLength": 400, "description": "One question an experiment can answer." },
+    "why_blocking": { "type": "string", "maxLength": 400 },
+    "kind": { "type": "string", "enum": ["experiment", "research"], "description": "experiment runs code; research reads documentation and sources. Both run in an isolated worktree, so every runner has its own working directory." },
+    "method_hint": { "type": "string", "maxLength": 600 },
+    "ref": { "type": "string", "description": "Branch or commit to start from; empty means the commit the asking step left." },
+    "done_when": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["question", "why_blocking", "kind"]
+}

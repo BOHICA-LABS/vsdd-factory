@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node (tests and workflows only; the plugin has no package.json)
+node_modules/
+
+# Local scratch
+.DS_Store
+
+# Worktrees and local settings: story worktrees never belong in the repository,
+# and settings.local.json is per-person.
+.claude/worktrees/
+/.worktrees/
+.claude/settings.local.json
+
+# The root-level .mcp.json holds live keys (packaging.md 2.3) and stays
+# untracked; it is never copied into the plugin. The plugin's own bundled
+# .mcp.json is shipped and MUST be committable, so the negation below
+# re-includes it whatever a shallower ignore file says.
+/.mcp.json
+!/plugins/vsdd-factory/.mcp.json
+
+# The plugin must never contain runtime output; bytecode goes to the user cache
+# (the launcher sets PYTHONPYCACHEPREFIX). Nothing generated belongs under
+# plugins/vsdd-factory/ — lint enforces this.

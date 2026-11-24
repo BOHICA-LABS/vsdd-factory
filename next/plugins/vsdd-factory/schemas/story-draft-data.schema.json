@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "story-draft-data.schema.json",
+  "type": "object",
+  "description": "What a feature story-draft step returns (pipeline.md 2.10.8): one story unit per story the step wrote, copied from the unit of that story's passing vsdd gate plan --story result.",
+  "properties": {
+    "units": {
+      "type": "array",
+      "description": "Story units in the shape section 2.10.8 fixes; the script passes each to runStories().",
+      "items": { "type": "object" }
+    }
+  },
+  "required": ["units"]
+}

@@ -1,0 +1,10 @@
+{
+  "ledger_id": "SP-009",
+  "question": "Is the moon made of cheese?",
+  "verdict": "probably",
+  "answer": "Used a verdict outside the one list.",
+  "method": "Astral tasting.",
+  "evidence": [],
+  "confidence": 0.5,
+  "cached": false
+}

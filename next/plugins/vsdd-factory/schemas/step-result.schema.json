@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "step-result.schema.json",
+  "type": "object",
+  "properties": {
+    "step": {
+      "type": "object",
+      "description": "Identity given in the prompt, returned unchanged. The step record is stored under it.",
+      "properties": {
+        "run": { "type": "string" },
+        "workflow": { "type": "string" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "attempt": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["run", "workflow", "name", "subject", "attempt"]
+    },
+    "status": { "type": "string", "enum": ["done", "needs_spike", "blocked", "failed"] },
+    "summary": { "type": "string", "maxLength": 600 },
+    "head": { "type": "string", "description": "Commit the step left its branch at; empty if it made none." },
+    "artifacts": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
+    "gates": { "type": "array", "items": { "$ref": "gate-result.schema.json" } },
+    "blocked": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["spec_gap", "environment", "spike_limit", "gate", "agent_budget", "conflict", "reviewer_blocked", "other"] },
+        "reason": { "type": "string", "maxLength": 600 },
+        "question": { "type": "string", "maxLength": 400 }
+      },
+      "required": ["kind", "reason"]
+    },
+    "spike_request": { "$ref": "spike-request.schema.json" },
+    "data": { "type": "object", "description": "Step-specific payload; shapes in section 2.10.8. Required; it may be empty. Every field a script reads is required by that step's data schema." }
+  },
+  "required": ["step", "status", "summary", "head", "data"]
+}

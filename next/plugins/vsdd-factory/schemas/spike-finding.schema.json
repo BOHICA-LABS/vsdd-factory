@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spike-finding.schema.json",
+  "type": "object",
+  "properties": {
+    "ledger_id": { "type": "string", "description": "Id returned by vsdd spike open; empty only when the runner returned nothing." },
+    "question": { "type": "string" },
+    "verdict": { "type": "string", "enum": ["confirmed", "refuted", "answered", "inconclusive", "refused"], "description": "The spike ledger in the state design uses this same list." },
+    "answer": { "type": "string", "maxLength": 1200 },
+    "method": { "type": "string", "maxLength": 800 },
+    "evidence": { "type": "array", "items": { "type": "string", "maxLength": 300 }, "maxItems": 10 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "cached": { "type": "boolean", "description": "True when the ledger already held this answer and no experiment ran." },
+    "artifacts": { "type": "array", "items": { "type": "string" }, "description": "Paths in the kept worktree, for reference only." },
+    "follow_up": { "type": "string", "maxLength": 400 }
+  },
+  "required": ["ledger_id", "question", "verdict", "answer", "method", "evidence", "confidence", "cached"]
+}

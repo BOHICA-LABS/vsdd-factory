@@ -1,0 +1,77 @@
+# The roster as data: the user's model policy, the 20 agents, the 13 skills, the 12 workflows,
+# the one marked override, and the context budgets (packaging.md 2.6; blueprint 4.2, 4.3).
+#
+# B4a consumes this file: tools/build.py generates the TIER, ROLE and OVERRIDE tables in
+# workflow-lib/prelude.js from [tiers], [agents] and [overrides]. The lint suite (B6) checks agent,
+# skill and workflow files against it; until B6 lands only the build reads it.
+
+[platform]
+min_claude_code = "2.1.331"
+python_floor = "3.11"
+
+[tiers]                              # the one source for agent files and the prelude
+planner  = { model = "fable",  effort = "xhigh" }
+builder  = { model = "sonnet", effort = "xhigh" }
+reviewer = { model = "opus",   effort = "xhigh" }
+clerk    = { model = "sonnet", effort = "low" }        # steps that run one vsdd command (D5)
+
+[agents]                             # name = tier (blueprint 4.3, 20 agents)
+product-owner = "planner"
+architect = "planner"
+ux-designer = "planner"
+story-writer = "planner"
+codebase-analyzer = "planner"
+researcher = "planner"
+spike-runner = "planner"
+test-writer = "builder"
+implementer = "builder"
+verifier = "builder"
+demo-recorder = "builder"
+technical-writer = "builder"
+devops = "builder"
+adversary = "reviewer"
+code-reviewer = "reviewer"
+security-reviewer = "reviewer"
+holdout-evaluator = "reviewer"
+ui-reviewer = "reviewer"
+scenario-reviewer = "reviewer"
+clerk = "clerk"
+
+[skills]                             # name = "person" | "model" | "both" (only status is model-visible)
+status = "model"
+setup = "person"
+decide = "person"
+drive = "person"
+brief = "person"
+research = "person"
+review = "person"
+author = "person"
+retro = "person"
+defer = "person"
+observe = "person"
+preview = "person"
+export-pdf = "person"
+
+[workflows]                          # name = { calls = [...] }: only story is ever called (blueprint 4.5)
+ingest = { calls = [] }
+discover = { calls = [] }
+spec = { calls = [] }
+feature = { calls = ["story"] }
+plan = { calls = [] }
+wave = { calls = ["story"] }
+story = { calls = [] }
+verify = { calls = ["story"] }
+release = { calls = [] }
+maintain = { calls = ["story"] }
+multi = { calls = ["story"] }
+spike = { calls = [] }
+
+[overrides]                          # the only steps that run off their agent's tier (D5); lint rejects any other
+"ingest/map" = "builder"
+"ingest/analyze" = "builder"
+
+[budgets]                            # the context budget the lints hold every file to
+model_visible_skills = 1
+listed_description_chars = 400
+agent_file_lines = 60
+skill_file_lines = 150

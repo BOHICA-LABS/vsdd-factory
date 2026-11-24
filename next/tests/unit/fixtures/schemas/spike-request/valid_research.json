@@ -1,0 +1,5 @@
+{
+  "question": "What does the wasmtime 48 release note change for the hook fuel budget?",
+  "why_blocking": "The lessons-size budget hangs on the default fuel cap.",
+  "kind": "research"
+}

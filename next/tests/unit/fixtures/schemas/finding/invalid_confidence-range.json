@@ -1,0 +1,14 @@
+{
+  "key": "code:src/app.py:main:crashes on empty input",
+  "title": "Confidence outside the unit interval",
+  "severity": "low",
+  "category": "code",
+  "scope": "unit",
+  "owner": "implementer",
+  "location": { "path": "src/app.py" },
+  "spec_ref": "",
+  "repro": "",
+  "observed": "Crash",
+  "expected": "Usage message",
+  "confidence": 1.5
+}

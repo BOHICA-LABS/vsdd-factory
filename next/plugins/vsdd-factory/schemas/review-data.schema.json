@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-data.schema.json",
+  "type": "object",
+  "description": "What a reviewer step returns (pipeline.md 2.10.8). All four fields are required.",
+  "properties": {
+    "reviewed_sha": { "type": "string", "description": "The commit the pass reviewed." },
+    "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "claim_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "outcome": { "type": "string", "enum": ["resolved", "not_resolved", "withdrawn"] },
+          "note": { "type": "string" }
+        },
+        "required": ["key", "outcome"]
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "description": "One entry per review item. state is checked, not_checkable (the note is the reason) or skipped.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": { "type": "string" },
+          "state": { "type": "string", "enum": ["checked", "not_checkable", "skipped"] },
+          "note": { "type": "string", "description": "Required: the reason for the state, so a not_checkable item never stands unexplained." }
+        },
+        "required": ["item", "state", "note"]
+      }
+    }
+  },
+  "required": ["reviewed_sha", "findings", "claim_checks", "coverage"]
+}

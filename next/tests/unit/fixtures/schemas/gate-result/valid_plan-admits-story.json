@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "gate": "plan",
+  "subject": "S-9.01",
+  "passed": true,
+  "sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "evidence": ".factory/local/evidence/S-9.01/plan.1a2b3c4d5e6f.json",
+  "failures": [],
+  "unit": {
+    "id": "S-9.01",
+    "branch": "story/S-9.01",
+    "worktree": ".worktrees/S-9.01"
+  }
+}

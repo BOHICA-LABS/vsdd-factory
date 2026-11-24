@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "gate": "green",
+  "subject": "S-9.01",
+  "passed": true,
+  "evidence": ".factory/local/evidence/S-9.01/green.json",
+  "failures": []
+}

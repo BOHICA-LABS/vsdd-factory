@@ -1,0 +1,7 @@
+{
+  "workflow": "feature",
+  "subject": "S-9.01",
+  "status": "done",
+  "summary": "Next kind outside the enumeration.",
+  "next": { "kind": "workflow-someday", "command": "/vsdd-factory:verify", "args": {} }
+}

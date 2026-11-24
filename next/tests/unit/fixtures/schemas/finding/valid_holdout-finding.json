@@ -1,0 +1,13 @@
+{
+  "key": "holdout:HS-014",
+  "title": "Hidden scenario HS-014 scored 0.62, under the 0.85 floor.",
+  "severity": "high",
+  "category": "holdout",
+  "scope": "integration",
+  "owner": "product-owner",
+  "location": { "path": "" },
+  "spec_ref": "BC-9.02.001",
+  "repro": "HS-014, rotation seed 7",
+  "observed": "satisfaction 0.62",
+  "expected": "at or above the floor 0.85"
+}

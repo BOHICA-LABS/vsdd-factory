@@ -1,0 +1,8 @@
+{
+  "question": "Does the platform fire PreToolUse for the Workflow tool's own calls?",
+  "why_blocking": "The driver's auto-allow rule depends on seeing the call.",
+  "kind": "experiment",
+  "method_hint": "Recording hook in the spike plugin; one toy workflow; compare the payload log.",
+  "ref": "",
+  "done_when": "The payload log holds one entry for the toy workflow call, or the log is empty after one run."
+}

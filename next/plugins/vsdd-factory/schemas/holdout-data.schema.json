@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "holdout-data.schema.json",
+  "type": "object",
+  "description": "What a holdout-evaluator step returns: scores and symptoms, never findings and never grounded (pipeline.md 2.10.8). holdoutFindings() and the tool build findings from the scores.",
+  "properties": {
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": { "type": "string" },
+          "satisfaction": { "type": "number", "minimum": 0, "maximum": 1 },
+          "must_pass": { "type": "boolean" },
+          "ran": { "type": "boolean" }
+        },
+        "required": ["scenario", "satisfaction", "must_pass", "ran"]
+      }
+    },
+    "symptoms": {
+      "type": "array",
+      "description": "Observed and expected behaviour; no location and no scenario text.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": { "type": "string" },
+          "observed": { "type": "string" },
+          "expected": { "type": "string" }
+        },
+        "required": ["scenario", "observed", "expected"]
+      }
+    }
+  },
+  "required": ["scores", "symptoms"]
+}

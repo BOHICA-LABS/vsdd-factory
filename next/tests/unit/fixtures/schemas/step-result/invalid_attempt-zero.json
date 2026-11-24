@@ -1,0 +1,13 @@
+{
+  "step": {
+    "run": "r-0f11c2",
+    "workflow": "story",
+    "name": "implement",
+    "subject": "S-9.01",
+    "attempt": 0
+  },
+  "status": "done",
+  "summary": "Attempt counter came back as zero.",
+  "head": "",
+  "data": {}
+}

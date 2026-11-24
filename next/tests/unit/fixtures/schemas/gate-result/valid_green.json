@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "gate": "green",
+  "subject": "S-9.01",
+  "passed": true,
+  "sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "evidence": ".factory/local/evidence/S-9.01/green.1a2b3c4d5e6f.json",
+  "diff_patch": ".factory/local/runs/r-0f11c2/patches/S-9.01.diff",
+  "metrics": { "suite_seconds": 41 },
+  "failures": [],
+  "flaky": ["tests/test_flaky_timeout.py::test_retry"]
+}

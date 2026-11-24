@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ruling-data.schema.json",
+  "type": "object",
+  "description": "What the arbiter returns (pipeline.md 2.10.8).",
+  "properties": {
+    "rulings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "ruling": { "type": "string", "enum": ["defect", "not_defect", "spec_gap"] },
+          "reason": { "type": "string" }
+        },
+        "required": ["key", "ruling", "reason"]
+      }
+    }
+  },
+  "required": ["rulings"]
+}

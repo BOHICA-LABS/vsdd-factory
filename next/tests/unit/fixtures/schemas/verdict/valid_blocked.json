@@ -1,0 +1,30 @@
+{
+  "perimeter": "story",
+  "subject": "S-9.01",
+  "head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "passes": 2,
+  "outcome": "blocked",
+  "reason": "cap",
+  "rounds_used": 3,
+  "blocking": [
+    {
+      "key": "code:src/export/csv.py:_rows:off-by-one drops the last row",
+      "title": "CSV export drops the final row",
+      "severity": "high",
+      "category": "code",
+      "scope": "unit",
+      "owner": "implementer",
+      "location": { "path": "src/export/csv.py", "line_start": 41, "line_end": 48, "quote": "return writer.getvalue()" },
+      "spec_ref": "BC-9.02.001",
+      "repro": "export 20 rows",
+      "observed": "19 lines",
+      "expected": "20 lines"
+    }
+  ],
+  "advisory": [],
+  "deferred": [],
+  "dismissed": [
+    { "key": "docs:README.md:none:typos in the readme", "by": "arbiter", "reason": "outside the story's contracts" }
+  ],
+  "coverage_missing": []
+}

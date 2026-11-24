@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fix-data.schema.json",
+  "type": "object",
+  "description": "What a fixer step returns (pipeline.md 2.10.8).",
+  "properties": {
+    "resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "resolution": { "type": "string", "enum": ["fixed", "disputed"] },
+          "commit": { "type": "string" },
+          "note": { "type": "string", "description": "Kept in the step record for the arbiter only; it never reaches the next reviewer." }
+        },
+        "required": ["key", "resolution"]
+      }
+    }
+  },
+  "required": ["resolutions"]
+}

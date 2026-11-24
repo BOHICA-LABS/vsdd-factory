@@ -1,0 +1,13 @@
+{
+  "key": "code:src/app.py:main:crashes on empty input",
+  "title": "Owner is a reviewer, not a fixer",
+  "severity": "medium",
+  "category": "code",
+  "scope": "unit",
+  "owner": "adversary",
+  "location": { "path": "src/app.py", "line_start": 10, "line_end": 12, "quote": "def main()" },
+  "spec_ref": "",
+  "repro": "python -m app < /dev/null",
+  "observed": "Traceback",
+  "expected": "A clean usage message"
+}

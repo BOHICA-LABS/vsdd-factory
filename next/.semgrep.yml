@@ -1,0 +1,10 @@
+# .semgrep.yml — Semgrep configuration for vsdd-factory 1.0
+#
+# Default rule selection is in .github/workflows/semgrep.yml's SEMGREP_RULES
+# env var (p/security-audit, p/secrets, p/owasp-top-ten, p/cwe-top-25). This
+# file holds future custom organizational rules.
+#
+# To add a custom rule, append to the `rules:` list below following the Semgrep
+# rule schema: https://semgrep.dev/docs/writing-rules/rule-syntax/
+
+rules: []

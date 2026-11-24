@@ -1,0 +1,14 @@
+{
+  "workflow": "feature",
+  "subject": "S-9.01",
+  "status": "done",
+  "summary": "Bug fix delivered through the fast route.",
+  "progress": true,
+  "decisions": [],
+  "next": {
+    "kind": "workflow",
+    "command": "/vsdd-factory:verify",
+    "args": { "scope": "delta" }
+  },
+  "counts": { "agents": 9, "spikes": 1 }
+}

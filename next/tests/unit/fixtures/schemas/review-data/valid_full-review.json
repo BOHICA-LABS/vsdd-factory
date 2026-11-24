@@ -1,0 +1,10 @@
+{
+  "reviewed_sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "findings": [],
+  "claim_checks": [{ "key": "code:src/export/csv.py:_rows", "outcome": "resolved", "note": "rewritten and covered" }],
+  "coverage": [
+    { "item": "BC-9.02.001", "state": "checked", "note": "covered by tests/test_export.py" },
+    { "item": "edge: empty file", "state": "not_checkable", "note": "no fixture format agreed; needs a decision" },
+    { "item": "BC-9.02.002 ui clause", "state": "skipped", "note": "no ui in this story" }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "vsdd-factory",
+  "displayName": "VSDD Factory",
+  "version": "1.0.0",
+  "description": "Verified Spec-Driven Development for Claude Code: specifications, stories, test-first delivery, adversarial review, holdout evaluation and release gating, run by workflows and enforced by hooks.",
+  "author": { "name": "Bohica Labs", "url": "https://github.com/bohica-labs" },
+  "homepage": "https://github.com/bohica-labs/vsdd-factory#readme",
+  "repository": "https://github.com/bohica-labs/vsdd-factory",
+  "license": "MIT",
+  "keywords": ["vsdd", "spec-driven", "tdd", "sdlc", "workflows", "adversarial-review"],
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/bohica-labs/vsdd-factory/tree/main/docs",
+  "supportUrl": "https://github.com/bohica-labs/vsdd-factory/issues",
+  "engines": { "claude-code": ">=2.1.331" },
+  "network": {
+    "hosts": [
+      "api.perplexity.ai", "mcp.tavily.com", "mcp.context7.com", "registry.npmjs.org",
+      "github.com", "api.github.com", "*.githubusercontent.com",
+      "*.docker.io", "*.docker.com"
+    ]
+  },
+  "userConfig": {
+    "perplexity_api_key": {
+      "type": "string", "sensitive": true,
+      "title": "Perplexity API key",
+      "description": "Lets research agents search with Perplexity. Optional: leave empty to work without it."
+    },
+    "tavily_api_key": {
+      "type": "string", "sensitive": true,
+      "title": "Tavily API key",
+      "description": "Lets research agents search and extract with Tavily. Optional."
+    },
+    "context7_api_key": {
+      "type": "string", "sensitive": true,
+      "title": "Context7 API key",
+      "description": "Lets agents fetch current library documentation from Context7. Optional."
+    }
+  }
+}

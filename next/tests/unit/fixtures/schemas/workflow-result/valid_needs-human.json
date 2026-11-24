@@ -1,0 +1,6 @@
+{
+  "workflow": "release",
+  "subject": "auth-sso",
+  "status": "needs_human",
+  "summary": "Waiting for the release approval."
+}

@@ -1,0 +1,6 @@
+{
+  "rulings": [
+    { "key": "code:src/export/csv.py:_rows", "ruling": "defect", "reason": "upheld; the contract is explicit" },
+    { "key": "docs:readme-tone", "ruling": "not_defect", "reason": "builder disputed; style only" }
+  ]
+}

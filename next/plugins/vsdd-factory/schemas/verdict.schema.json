@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verdict.schema.json",
+  "type": "object",
+  "properties": {
+    "perimeter": { "type": "string", "enum": ["spec", "plan", "story", "wave", "release"] },
+    "subject": { "type": "string" },
+    "head": { "type": "string", "description": "Commit the last pass reviewed." },
+    "passes": { "type": "integer", "minimum": 0 },
+    "outcome": { "type": "string", "enum": ["converged", "blocked", "failed"] },
+    "reason": { "type": "string", "enum": ["clean", "cap", "spec_gap", "no_result", "reviewer_blocked"] },
+    "rounds_used": { "type": "integer", "minimum": 0, "description": "Passes or rounds used across every run for this unit." },
+    "blocking": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "advisory": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "deferred": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "dismissed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "by": { "type": "string", "enum": ["reviewer", "arbiter", "human"] },
+          "reason": { "type": "string" }
+        },
+        "required": ["key", "by", "reason"]
+      }
+    },
+    "coverage_missing": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["perimeter", "subject", "head", "passes", "outcome", "reason", "blocking", "advisory", "deferred", "dismissed", "coverage_missing"]
+}

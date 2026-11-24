@@ -1,0 +1,10 @@
+{
+  "ledger_id": "SP-008",
+  "question": "Do two concurrent dispatches pair a runner with its dispatch?",
+  "verdict": "inconclusive",
+  "answer": "Only one dispatch could be observed in the probe window; the pairing check never ran twice.",
+  "method": "Two dispatches from one session, one recording hook.",
+  "evidence": [],
+  "confidence": 0.3,
+  "cached": false
+}

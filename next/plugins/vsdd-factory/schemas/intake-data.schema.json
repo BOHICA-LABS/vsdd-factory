@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "intake-data.schema.json",
+  "type": "object",
+  "description": "What the spec intake step returns (pipeline.md 2.10.8): the stage names whose output the intake filled, which the checkpoint records as done.",
+  "properties": {
+    "covers": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["covers"]
+}

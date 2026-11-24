@@ -1,0 +1,13 @@
+{
+  "key": "code:src/app.py:main:crashes on empty input",
+  "title": "Location without a path",
+  "severity": "medium",
+  "category": "code",
+  "scope": "unit",
+  "owner": "implementer",
+  "location": { "line_start": 10 },
+  "spec_ref": "",
+  "repro": "",
+  "observed": "Traceback",
+  "expected": "A clean usage message"
+}

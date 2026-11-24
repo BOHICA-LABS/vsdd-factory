@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "workflow-result.schema.json",
+  "type": "object",
+  "description": "What every workflow returns to the main session or to its parent. Kept under 2 KB.",
+  "properties": {
+    "workflow": { "type": "string" },
+    "subject": { "type": "string" },
+    "status": { "type": "string", "enum": ["done", "partial", "needs_human", "blocked", "failed"] },
+    "summary": { "type": "string", "maxLength": 600 },
+    "progress": { "type": "boolean", "description": "False when the run changed nothing on disk." },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "kind": { "type": "string" }, "summary": { "type": "string" } },
+        "required": ["id", "kind", "summary"]
+      }
+    },
+    "next": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["workflow", "human", "done"] },
+        "command": { "type": "string" },
+        "args": { "type": "object" }
+      },
+      "required": ["kind"]
+    },
+    "counts": { "type": "object", "properties": { "agents": { "type": "integer" }, "spikes": { "type": "integer" } } }
+  },
+  "required": ["workflow", "subject", "status", "summary"]
+}

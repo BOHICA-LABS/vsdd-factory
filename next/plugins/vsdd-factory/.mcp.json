@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "perplexity": {
+      "command": "npx",
+      "args": ["-y", "@perplexity-ai/mcp-server@1.3.0"],
+      "env": { "PERPLEXITY_API_KEY": "${user_config.perplexity_api_key}" }
+    },
+    "tavily": {
+      "type": "http",
+      "url": "https://mcp.tavily.com/mcp/",
+      "headers": { "Authorization": "Bearer ${user_config.tavily_api_key}" }
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "${user_config.context7_api_key}" }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.86"]
+    }
+  }
+}

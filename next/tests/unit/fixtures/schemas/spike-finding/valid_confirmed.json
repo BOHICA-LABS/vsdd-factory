@@ -1,0 +1,15 @@
+{
+  "ledger_id": "SP-007",
+  "question": "Does a detached job outlive the Bash call that started it?",
+  "verdict": "confirmed",
+  "answer": "Yes: the job wrote its result file eleven seconds after the call was killed at four.",
+  "method": "Background sleeper plus a killed foreground wait; timestamps compared after.",
+  "evidence": [
+    "worktree notes: notes.md lines 12-19",
+    "job result file: /tmp/spoke-job/result.json"
+  ],
+  "confidence": 0.85,
+  "cached": false,
+  "artifacts": ["notes.md"],
+  "follow_up": "Measure the ceiling of ten minutes in the story tier."
+}

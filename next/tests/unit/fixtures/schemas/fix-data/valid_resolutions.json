@@ -1,0 +1,6 @@
+{
+  "resolutions": [
+    { "key": "code:src/export/csv.py:_rows", "resolution": "fixed", "commit": "1a2b3c4", "note": "rewrote the loop" },
+    { "key": "test:empty-file", "resolution": "disputed", "commit": "", "note": "the spec does not ask for it" }
+  ]
+}

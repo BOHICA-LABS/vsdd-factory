@@ -1,0 +1,5 @@
+{
+  "rulings": [
+    { "key": "code:src/export/csv.py:_rows", "ruling": "maybe", "reason": "not a ruling" }
+  ]
+}

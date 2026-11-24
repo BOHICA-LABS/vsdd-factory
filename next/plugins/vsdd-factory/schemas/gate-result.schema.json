@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gate-result.schema.json",
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean", "description": "False when the command itself could not run." },
+    "state": { "type": "string", "enum": ["done", "pending"], "description": "pending: the job is still running; run the same command again. Absent means done." },
+    "diff_patch": { "type": "string", "description": "Green and wave gates: path of the patch the gate wrote for the commit it measured. Given to the next reviewer." },
+    "gate": { "type": "string" },
+    "subject": { "type": "string" },
+    "passed": { "type": "boolean" },
+    "sha": { "type": "string", "description": "Commit the gate measured." },
+    "evidence": { "type": "string", "description": "Path of the evidence record." },
+    "metrics": { "type": "object" },
+    "failures": { "type": "array", "items": { "type": "string", "maxLength": 400 }, "maxItems": 20 },
+    "flaky": { "type": "array", "items": { "type": "string" }, "description": "Identities of inherited tests that failed and then passed on the second run (section 2.9.8). Copied into the unit's closure record." },
+    "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "unit": { "type": "object", "description": "Only from vsdd gate plan --story, and always when it passes: the admitted story unit (section 2.10.8)." },
+    "error": { "type": "string" }
+  },
+  "required": ["ok", "gate", "subject", "passed", "sha", "evidence", "failures"]
+}

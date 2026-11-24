@@ -1,0 +1,20 @@
+{
+  "key": "code:src/export/csv.py:_rows:off-by-one drops the last row",
+  "title": "CSV export drops the final row",
+  "severity": "high",
+  "category": "code",
+  "scope": "unit",
+  "owner": "implementer",
+  "location": {
+    "path": "src/export/csv.py",
+    "line_start": 41,
+    "line_end": 48,
+    "quote": "return writer.getvalue()"
+  },
+  "spec_ref": "BC-9.02.001 (the export contains every row the query returned)",
+  "repro": "python -m tests.manual.export_rows | wc -l  # one less than the query count",
+  "observed": "Export of 20 rows writes 19 lines.",
+  "expected": "Export writes one line per row plus the header.",
+  "suggestion": "Iterate rows without the range bound that excludes the last index.",
+  "confidence": 0.9
+}

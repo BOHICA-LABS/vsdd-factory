@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Test and gate output
+build/
+
+# Factory state: .factory/ is the worktree of the factory-artifacts branch,
+# mounted here by vsdd init; .worktrees/ holds story and spike worktrees.
+# Both are excluded from the product tree.
+.factory/
+.worktrees/
+
+.DS_Store

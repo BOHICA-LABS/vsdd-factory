@@ -1,0 +1,6 @@
+{
+  "workflow": "verify",
+  "subject": "auth-sso",
+  "status": "green",
+  "summary": "Used a status outside the enumeration."
+}

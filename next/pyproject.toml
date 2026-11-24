@@ -1,0 +1,29 @@
+# Development-only project: the shipped plugin Python is standard-library only and
+# is started through uv with no package installation (see plugins/vsdd-factory/py/).
+# These dependencies exist for the test suite and the lint layer. Versions are
+# pinned exactly in uv.lock; the ranges here keep resolution reproducible.
+[project]
+name = "vsdd-factory"
+version = "1.0.0"
+description = "Development environment for the vsdd-factory 1.0 plugin rewrite"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=8.3,<9",
+    "ruff>=0.13,<0.14",
+    "pyyaml>=6.0.1,<7",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# Tests import the shipped package directly (packaging.md 2.6).
+pythonpath = ["plugins/vsdd-factory/py"]
+testpaths = ["tests/unit", "tests/hooks", "tests/lint", "tests/conformance"]
+# The sample project has its own unittest suite with its own fixtures; it is
+# exercised by the end-to-end tier, not by this one. The e2e tier itself stays
+# collectable for explicit runs: pytest tests/e2e -m e2e.
+norecursedirs = [".*", "build", "dist", "tests/e2e/sample-project"]
+markers = [
+    "e2e: end-to-end probes that start real model sessions (run explicitly; deselect with -m 'not e2e')",
+]

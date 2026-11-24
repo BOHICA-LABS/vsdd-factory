@@ -1,0 +1,31 @@
+{
+  "units": [
+    {
+      "id": "S-25.01",
+      "position": "ready",
+      "worktree": ".worktrees/S-25.01",
+      "tree": "",
+      "branch": "story/S-25.01",
+      "base": "1a2b3c4",
+      "head": "",
+      "story_path": "stories/S-25.01.md",
+      "bcs": ["BC-1.18.010"],
+      "acs": [],
+      "criticality": "high",
+      "kind": "feature",
+      "method": "story",
+      "repo": "",
+      "security": false,
+      "ui": false,
+      "demo_required": false,
+      "waived": [],
+      "guidance": "",
+      "deferred": [],
+      "diff_patch": "",
+      "test_output": "",
+      "dirty": false,
+      "open_pr": "",
+      "rounds_used": 0
+    }
+  ]
+}

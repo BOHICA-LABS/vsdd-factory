@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "claim.schema.json",
+  "type": "object",
+  "description": "What one fixer's claim passes to the next reviewer (pipeline.md 2.10.8). Structured only: no quote and none of the fixer's free text. A claim about a finding of category holdout carries the key alone; any other claim also carries the location's path and line range.",
+  "properties": {
+    "key": { "type": "string" },
+    "path": { "type": "string", "description": "The location's path, for a claim that is not about a holdout finding." },
+    "line_start": { "type": "integer" },
+    "line_end": { "type": "integer" },
+    "resolution": { "type": "string", "enum": ["fixed", "disputed"] },
+    "commit": { "type": "string" }
+  },
+  "required": ["key", "resolution", "commit"]
+}

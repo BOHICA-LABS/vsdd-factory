@@ -1,0 +1,12 @@
+{
+  "ledger_id": "SP-010",
+  "question": "Can evidence exceed the cap?",
+  "verdict": "answered",
+  "answer": "Eleven evidence strings when ten are allowed.",
+  "method": " stuffing the array past maxItems.",
+  "evidence": [
+    "e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11"
+  ],
+  "confidence": 0.5,
+  "cached": false
+}

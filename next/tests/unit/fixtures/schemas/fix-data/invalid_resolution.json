@@ -1,0 +1,5 @@
+{
+  "resolutions": [
+    { "key": "code:src/export/csv.py:_rows", "resolution": "postponed" }
+  ]
+}

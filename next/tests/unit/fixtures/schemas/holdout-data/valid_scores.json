@@ -1,0 +1,9 @@
+{
+  "scores": [
+    { "scenario": "HS-014", "satisfaction": 0.9, "must_pass": true, "ran": true },
+    { "scenario": "HS-021", "satisfaction": 0.0, "must_pass": false, "ran": false }
+  ],
+  "symptoms": [
+    { "scenario": "HS-014", "observed": "export wrote 19 rows", "expected": "20 rows" }
+  ]
+}

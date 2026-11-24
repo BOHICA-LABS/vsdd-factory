@@ -1,0 +1,18 @@
+{
+  "step": {
+    "run": "r-0f11c2",
+    "workflow": "story",
+    "name": "review",
+    "subject": "S-9.01",
+    "attempt": 2
+  },
+  "status": "blocked",
+  "summary": "The reviewer refused: no change is recorded for the commit it was given.",
+  "head": "",
+  "blocked": {
+    "kind": "reviewer_blocked",
+    "reason": "the diff for the reviewed sha is empty; the worktree is dirty",
+    "question": "Should the implementer commit before the review pass?"
+  },
+  "data": {}
+}

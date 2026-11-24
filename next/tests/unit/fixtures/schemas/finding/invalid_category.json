@@ -1,0 +1,13 @@
+{
+  "key": "wibble:src/x.py",
+  "title": "Category outside the list",
+  "severity": "high",
+  "category": "wibble",
+  "scope": "unit",
+  "owner": "implementer",
+  "location": { "path": "src/x.py" },
+  "spec_ref": "",
+  "repro": "",
+  "observed": "x",
+  "expected": "y"
+}

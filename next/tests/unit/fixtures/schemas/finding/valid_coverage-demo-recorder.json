@@ -1,0 +1,13 @@
+{
+  "key": "coverage:.factory/holdout/HS-007.md:demo recording",
+  "title": "The demo recording for the holdout scenario is missing",
+  "severity": "high",
+  "category": "coverage",
+  "scope": "unit",
+  "owner": "demo-recorder",
+  "location": { "path": "assets/demo", "line_start": 1, "line_end": 1, "quote": "" },
+  "spec_ref": "BC-9.02.003",
+  "repro": "",
+  "observed": "no demo recording covers the scenario",
+  "expected": "a recording evidencing the acceptance criterion"
+}
