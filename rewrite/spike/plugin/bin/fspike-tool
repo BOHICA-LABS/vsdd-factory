@@ -1,0 +1,12 @@
+#!/bin/sh
+# Probe helper: shows whether <plugin>/bin is on PATH and gives probes a command to run.
+case "$1" in
+  path) echo "FSPIKE-TOOL-OK $(command -v fspike-tool)" ;;
+  long) sleep "${2:-150}"; echo "LONG-OK after ${2:-150}s" ;;
+  detach) nohup sh -c "sleep ${3:-25}; echo DETACHED-OK > '$2'" >/dev/null 2>&1 &
+          echo "DETACH-STARTED pid $!" ;;
+  close) echo "CLOSING-RECORD-WRITTEN" ;;
+  allowme) echo "ALLOWME-RAN" ;;
+  denyme) echo "DENYME-RAN" ;;
+  *) echo "usage: fspike-tool path|long|detach|close|allowme|denyme"; exit 1 ;;
+esac
