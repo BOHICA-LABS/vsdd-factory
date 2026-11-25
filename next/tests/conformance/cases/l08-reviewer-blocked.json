@@ -1,0 +1,39 @@
+{
+  "name": "l08-reviewer-blocked",
+  "about": "A reviewer that returns blocked gives blocked, reviewer_blocked, not failed.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": false,
+          "blocked": true
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "blocked",
+      "reason": "reviewer_blocked",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    }
+  }
+}

@@ -1,0 +1,1 @@
+$.pending: expected array, got boolean

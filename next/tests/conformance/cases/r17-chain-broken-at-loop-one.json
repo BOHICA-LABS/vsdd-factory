@@ -1,0 +1,340 @@
+{
+  "name": "r17-chain-broken-at-loop-one",
+  "about": "Loop 1 runs to the cap, a later loop converges: the verdict is converged and the chain broken (rule 9).",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {
+      "h1..h1": []
+    },
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "fix-i-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "fix-findings",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": "",
+        "gates": [
+          {
+            "gate": "green",
+            "subject": "S-9.01",
+            "passed": true,
+            "sha": "h1",
+            "evidence": "e",
+            "failures": []
+          }
+        ]
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p2",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 2
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "fix-i-l1-p2",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "fix-findings",
+          "loop": 1,
+          "pass": 2
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": "",
+        "gates": [
+          {
+            "gate": "green",
+            "subject": "S-9.01",
+            "passed": true,
+            "sha": "h1",
+            "evidence": "e",
+            "failures": []
+          }
+        ]
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p3",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 3
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "fix-i-l1-p3",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "fix-findings",
+          "loop": 1,
+          "pass": 3
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": "",
+        "gates": [
+          {
+            "gate": "green",
+            "subject": "S-9.01",
+            "passed": true,
+            "sha": "h1",
+            "evidence": "e",
+            "failures": []
+          }
+        ]
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p4",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 4
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l2-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 2,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": []
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "blocked",
+        "reason": "cap"
+      },
+      {
+        "run": "r1",
+        "loop": 2,
+        "outcome": "converged",
+        "reason": "clean"
+      }
+    ],
+    "skipped": [],
+    "chain": false,
+    "passes_used": 4
+  }
+}

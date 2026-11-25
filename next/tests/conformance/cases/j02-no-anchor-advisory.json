@@ -1,0 +1,50 @@
+{
+  "name": "j02-no-anchor-advisory",
+  "about": "A severe finding with no spec_ref and no repro is advisory.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:b",
+        "title": "t-code:b",
+        "severity": "high",
+        "category": "code",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [
+        {
+          "key": "code:b",
+          "title": "t-code:b",
+          "severity": "high",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

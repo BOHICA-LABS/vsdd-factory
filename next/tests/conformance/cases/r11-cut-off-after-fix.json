@@ -1,0 +1,143 @@
+{
+  "name": "r11-cut-off-after-fix",
+  "about": "Records that stop after a fix leave the findings open: failed, no_result.",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {},
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "fix-implementer-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "fix-findings",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        },
+        "gates": [
+          {
+            "gate": "green",
+            "subject": "S-9.01",
+            "passed": true,
+            "sha": "h1",
+            "evidence": "e",
+            "failures": []
+          }
+        ],
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "failed",
+      "reason": "no_result",
+      "blocking": [
+        {
+          "key": "code:a",
+          "title": "t-code:a",
+          "severity": "high",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "failed",
+        "reason": "no_result"
+      }
+    ],
+    "skipped": [],
+    "chain": false,
+    "passes_used": 1
+  }
+}

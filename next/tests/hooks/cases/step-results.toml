@@ -1,0 +1,48 @@
+# The step-results case table (rules/step-results.md): the live-run fixture
+# holds a surveyed story with a passing green record at its head, so a
+# matching gate entry is one the store also has.
+
+[[case]]
+name = "a passing gate entry that names no record is blocked"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input.step.run" = "{run}", "tool_input.step.subject" = "{story}", "tool_input.gates" = [ { ok = true, gate = "demo", subject = "{story}", sha = "{sha}", passed = true, evidence = "x.json", failures = [] } ] }
+expect = { outcome = "block", rule = "step-results", code = "gate_result_mismatch" }
+launcher = true
+
+[[case]]
+name = "an entry whose commit differs from its record is blocked"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input.step.run" = "{run}", "tool_input.step.subject" = "{story}", "tool_input.gates" = [ { ok = true, gate = "green", subject = "{story}", sha = "aaaaaaaaaaaaaaaaaaaa", passed = true, evidence = "x.json", failures = [] } ] }
+expect = { outcome = "block", rule = "step-results", code = "gate_result_mismatch" }
+launcher = true
+
+[[case]]
+name = "an entry that matches its record is stored"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input.step.run" = "{run}", "tool_input.step.subject" = "{story}", "tool_input.gates" = [ { ok = true, gate = "green", subject = "{story}", sha = "{sha}", passed = true, evidence = "x.json", failures = [] } ] }
+expect = { outcome = "allow", rule = "step-results" }
+launcher = true
+
+[[case]]
+name = "a failing entry with no record is stored"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input.step.run" = "{run}", "tool_input.step.subject" = "{story}", "tool_input.gates" = [ { ok = true, gate = "green", subject = "{story}", sha = "{sha}", passed = false, evidence = "", failures = ["one"] } ] }
+expect = { outcome = "allow", rule = "step-results" }
+
+[[case]]
+name = "a result for an unknown run is refused"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input.step.run" = "r-unknown" }
+expect = { outcome = "block", rule = "step-results", code = "run_not_live" }
+
+[[case]]
+name = "a result with no step identity passes unstored"
+project = "live-run"
+payload = "PreToolUse/structured-step.json"
+set = { "tool_input" = { "relayed" = "the clerk's object, no step in sight" } }
+expect = { outcome = "allow", rule = "step-results" }

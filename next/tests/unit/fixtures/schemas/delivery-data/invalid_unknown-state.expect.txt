@@ -1,0 +1,1 @@
+$.state: value 'shipped' is not one of ['', 'merged', 'awaiting_merge', 'ci_failed', 'conflict', 'review_stale', 'refused', 'checkout_dirty']

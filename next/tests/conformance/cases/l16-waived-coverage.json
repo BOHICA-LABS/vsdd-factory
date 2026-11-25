@@ -1,0 +1,46 @@
+{
+  "name": "l16-waived-coverage",
+  "about": "A waived coverage item leaves no gap.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [
+      "coverage:S-9.01:AC-1"
+    ],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage_missing": [
+            "AC-1"
+          ]
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    }
+  }
+}

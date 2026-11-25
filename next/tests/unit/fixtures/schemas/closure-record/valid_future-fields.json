@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "workflow": "story",
+  "subject": "S-9.01",
+  "cycle": "product-1",
+  "state": "delivering",
+  "stages": {
+    "draft": { "at": "2026-11-24T09:30:00Z" },
+    "review": { "at": "2026-11-24T10:15:00Z", "reviewed_by_panel": "yes" }
+  },
+  "verdict": {
+    "outcome": "converged",
+    "waived_total": 4
+  },
+  "delivery": {
+    "state": "awaiting_merge",
+    "run": "r-20261124-0915-a1",
+    "at": "2026-11-24T10:20:00Z",
+    "pushed": "2026-11-24T11:00:00Z",
+    "merged_by": "jda"
+  },
+  "rebased_on": "1a2b3c4d5e6f"
+}

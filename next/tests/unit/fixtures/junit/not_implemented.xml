@@ -1,0 +1,16 @@
+<testsuites>
+  <testsuite name="tally" tests="3" failures="0" errors="3">
+    <testcase classname="tests.test_stub" name="test_stub_raises" time="0.001">
+      <error type="NotImplementedError" message="stub">NotImplementedError</error>
+    </testcase>
+    <testcase classname="tests.test_stub" name="test_java_style" time="0.001">
+      <error type="UnsupportedOperationException" message="stub">unsupported</error>
+    </testcase>
+    <testcase classname="tests.test_stub" name="test_crash" time="0.001">
+      <error type="ImportError" message="no module">ImportError</error>
+    </testcase>
+    <testcase classname="tests.test_stub" name="test_no_type" time="0.001">
+      <error message="mystery">boom</error>
+    </testcase>
+  </testsuite>
+</testsuites>

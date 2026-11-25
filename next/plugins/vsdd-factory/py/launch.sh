@@ -176,6 +176,7 @@ case "$entry" in
     rc=$?
     case "$rc" in
       0)  exit 0 ;;
+      1)  exit 1 ;;                        # vsdd's own negative answer: silent, the code is the message
       2)  # vsdd itself exits 2 for a usage error, so blame uv only when the
           # interpreter check confirms it; otherwise pass the code through.
         interpreter_ok || printf 'vsdd-factory: %s\n' "$msg_py_floor" >&2

@@ -1,0 +1,15 @@
+{
+  "id": "blocked.S-7.04",
+  "kind": "blocked",
+  "status": "approved",
+  "choice": "open-spike",
+  "values": { "name": "lockout-timing" },
+  "note": "I have supplied it",
+  "digest": "",
+  "opened": "2026-11-24T12:00:00Z",
+  "settled": "2026-11-24T12:30:00Z",
+  "settled_by": "terminal",
+  "settled_by_session": "",
+  "reason": "spike_limit",
+  "dependencies": []
+}

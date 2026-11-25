@@ -28,6 +28,15 @@ uv run --no-project python tools/lint.py --format    # format_check
 
 There is no build step, no runtime, no UI and no third-party dependency.
 
+The runner collects every `unittest.TestCase` in `tests/` and in the
+`test_*.py` files beside the `tally` package, and every module-level `test_*`
+function of those modules; a test function with required parameters — or one
+that is a coroutine, an async generator or a generator, which the runner
+would call without awaiting or iterating — is reported as an error case, and
+a test module that fails to import (whatever the failure: a missing module,
+a syntax error, a name error) as an ImportError case, so `build/junit.xml`
+holds every test of a run.
+
 ## Planned story: add `median()`
 
 Specified, not yet implemented; no test covers it. This is the standing

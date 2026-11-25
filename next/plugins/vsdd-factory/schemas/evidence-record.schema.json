@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evidence-record.schema.json",
+  "type": "object",
+  "description": "One gate's evidence for one commit: .factory/local/evidence/<subject>/<gate>.<sha12>.json, with the raw output (.log, cut to 256 KB), the JUnit report or the diff patch beside it (record evidence). Not tracked. Written by vsdd gate, vsdd survey and vsdd story deliver through evidence_write; read by the per-gate lookup of topic evidence-lookup. Cap 8,000 bytes.",
+  "properties": {
+    "schema": { "type": "integer", "enum": [1], "description": "Stamped by evidence_write." },
+    "gate": { "type": "string", "minLength": 1, "description": "red, green, demo or review." },
+    "subject": { "type": "string", "description": "The unit the evidence belongs to; the directory carries it too." },
+    "sha": { "type": "string", "minLength": 12, "description": "The commit the record measured." },
+    "at": { "type": "string", "description": "ISO 8601 UTC, whole seconds, ending Z; for people — the lookup orders by seq." },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Stamped by evidence_write under the store's lock: one more than the highest in the subject's directory. The lookup orders the records of a gate by it, so same-second writes keep their write order (S3B-records-1)."
+    },
+    "passed": { "type": "boolean" },
+    "refreeze": { "type": "boolean", "description": "True on a re-freeze: a red record written after a frozen test changed." },
+    "patch_id": { "type": "string", "description": "The git patch-id --stable of the subject's diff from its base to sha; empty when there is no diff." },
+    "frozen": {
+      "type": "array",
+      "description": "Red records only: one entry per frozen file with its SHA-256. A passing red record, and every re-freeze, carries the complete frozen set (finding P3SEAM-15).",
+      "items": {
+        "type": "object",
+        "properties": { "file": { "type": "string" }, "sha": { "type": "string" } },
+        "required": ["file", "sha"]
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Red records only: the frozen test identities."
+    },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } },
+      "description": "Red records only: the map from acceptance criterion to test identities."
+    },
+    "flaky": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Green records: the flaky test identities; copied into the unit's closure record, because evidence is not kept."
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "Green records: the absolute path of the patch file the gate wrote — the whole base-to-head patch, also after --since (a range patch lives beside it)."
+    }
+  },
+  "required": ["schema", "gate", "sha", "at", "passed", "seq"]
+}

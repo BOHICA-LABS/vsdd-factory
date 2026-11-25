@@ -1,0 +1,113 @@
+{
+  "name": "r06-repair-new-file",
+  "about": "A repair that touches a new file: the new file is one of the later loop's items (VSA-03).",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {
+      "h1..h2": [
+        "brand_new.py"
+      ]
+    },
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l2-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 2,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h2",
+        "data": {
+          "reviewed_sha": "h2",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "brand_new.py",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h2",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h2",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "converged",
+        "reason": "clean"
+      },
+      {
+        "run": "r1",
+        "loop": 2,
+        "outcome": "converged",
+        "reason": "clean"
+      }
+    ],
+    "skipped": [],
+    "chain": true,
+    "passes_used": 1
+  }
+}

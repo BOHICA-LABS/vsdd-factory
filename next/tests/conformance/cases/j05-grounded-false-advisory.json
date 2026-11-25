@@ -1,0 +1,52 @@
+{
+  "name": "j05-grounded-false-advisory",
+  "about": "A finding marked grounded: false is advisory whatever its severity.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:d",
+        "title": "t-code:d",
+        "severity": "critical",
+        "category": "code",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e",
+        "grounded": false
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [
+        {
+          "key": "code:d",
+          "title": "t-code:d",
+          "severity": "critical",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e",
+          "grounded": false
+        }
+      ],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

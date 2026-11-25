@@ -11,9 +11,12 @@
         "workflow": { "type": "string" },
         "name": { "type": "string" },
         "subject": { "type": "string" },
-        "attempt": { "type": "integer", "minimum": 1 }
+        "attempt": { "type": "integer", "minimum": 1 },
+        "method": { "type": "string", "description": "The method the step was given." },
+        "loop": { "type": "integer", "minimum": 1, "description": "Review, fix and arbitrate steps only: the review loop of the unit within this run." },
+        "pass": { "type": "integer", "minimum": 1, "description": "Review, fix and arbitrate steps only: the pass or round within the loop." }
       },
-      "required": ["run", "workflow", "name", "subject", "attempt"]
+      "required": ["run", "workflow", "name", "subject", "attempt", "method"]
     },
     "status": { "type": "string", "enum": ["done", "needs_spike", "blocked", "failed"] },
     "summary": { "type": "string", "maxLength": 600 },

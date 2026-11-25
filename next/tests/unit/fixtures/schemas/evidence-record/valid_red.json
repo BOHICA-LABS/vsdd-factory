@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "gate": "red",
+  "subject": "S-9.01",
+  "sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "at": "2026-11-24T09:40:00Z",
+  "seq": 2,
+  "passed": true,
+  "refreeze": false,
+  "patch_id": "",
+  "frozen": [
+    {
+      "file": "tests/test_export.py",
+      "sha": "aa11bb33cc55dd77eeff00112233445566778899"
+    }
+  ],
+  "tests": [
+    "tests/test_export.py::test_new_column"
+  ],
+  "criteria": {
+    "AC-1": [
+      "tests/test_export.py::test_new_column"
+    ]
+  }
+}

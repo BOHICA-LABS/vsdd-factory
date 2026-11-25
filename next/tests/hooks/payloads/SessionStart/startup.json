@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "SessionStart",
+  "session_id": "sess_9f83ab",
+  "cwd": "{root}",
+  "source": "startup"
+}

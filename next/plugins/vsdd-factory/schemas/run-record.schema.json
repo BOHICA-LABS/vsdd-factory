@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-record.schema.json",
+  "type": "object",
+  "description": "One workflow run: .factory/local/runs/<run-id>/run.json (record run). Not tracked. Written by vsdd survey through vsdd.state.runs.run_open; ended is empty while the run is live (topic run-lock). Cap 2,000 bytes.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The run's identifier, which names its directory and every step record's run field: r-<YYYYMMDD>-<HHMM>-<2 of [0-9a-z]> (the shape is runs._new_id's; the shipped checker has no pattern keyword). Required: steps_list, runs_list and flush read it, and a record without it is unsafe to path."
+    },
+    "workflow": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The workflow this run serves: survey, spike, discover, story, wave, verify, maintain, feature, ingest, import, release."
+    },
+    "subject": { "type": "string", "description": "The unit the run serves, empty for a whole-cycle run." },
+    "repository": { "type": "string", "description": "The member repository of a hub the run writes; empty in a single layout." },
+    "cycle": { "type": "string", "description": "The cycle the run belongs to; empty for _standing work." },
+    "session": { "type": "string", "minLength": 1, "description": "The caller-marker session that started the run." },
+    "start": { "type": "string", "description": "ISO 8601 UTC, whole seconds, ending Z." },
+    "agents": { "type": "integer", "minimum": 0, "description": "The agent count the run has spent." },
+    "parent": { "type": "string", "description": "The parent run id of a child run; empty otherwise." },
+    "stories": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The stories admitted to this run. Run membership is the one check every gate makes (finding P3OPS-07, P3REQ-07)."
+    },
+    "request": { "type": "string", "description": "The request or question the run was given: the spike question, the change-request id, the feature request." },
+    "amendment": { "type": "boolean", "description": "True while this run holds a specification amendment (feature route, delta stage)." },
+    "ended": { "type": "string", "description": "The end time, empty while the run is live. Set once; the first end time stays." }
+  },
+  "required": ["id", "workflow", "subject", "repository", "cycle", "session", "start", "agents", "parent", "stories", "request", "amendment", "ended"]
+}

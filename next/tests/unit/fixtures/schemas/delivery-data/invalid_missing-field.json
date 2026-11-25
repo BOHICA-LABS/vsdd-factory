@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "error": "",
+  "state": "merged",
+  "pr": "",
+  "merged_sha": "abc123",
+  "detail": "",
+  "reviewed_sha": "def456",
+  "changed_files": [],
+  "diff_patch": ""
+}

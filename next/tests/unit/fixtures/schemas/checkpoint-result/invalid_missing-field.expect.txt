@@ -1,0 +1,1 @@
+$.progress: missing required property 'progress'

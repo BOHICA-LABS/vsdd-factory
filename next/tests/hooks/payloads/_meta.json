@@ -1,0 +1,6 @@
+{
+  "captured_by": "hand-written at slice depth; E2 replaces these with recorded ones",
+  "claude_code_version": "2.1.295",
+  "captured": "2026-11-24",
+  "substitutions": ["{root}", "{home}", "{plugin}"]
+}

@@ -11,11 +11,10 @@ export const meta = {
 //
 // Top-level names introduced (everything else a script sees is a platform global):
 //   RUN, CLOSE_RESERVE, TOKEN_FLOOR, LIMIT_KEYS, applyLimits, safe, enc, parseArgs,
-//   stepSchema, made, brief, runSpike, step, gated, relay, runStories,
-//   STR_ARR, OBJ, KV, S_REVIEW, S_RESOLUTION, S_FIXES, S_RULINGS, SCORE, SYMPTOM,
-//   S_HOLDOUT, S_PRECONDITION, S_NEXT, S_SURVEY, S_CLOSE, S_DELIVERY, S_WAVE_GATE,
+//   stepSchema, made, brief, runSpike, step, gated, relay, emptyOf, runStories,
 //   HARD, REACH, judge, converge, holdoutFindings
-// plus the generated constants (TIER, ROLE, OVERRIDE, the S_* schema literals).
+// plus the generated constants (TIER, ROLE, OVERRIDE and every S_* schema literal, generated
+// from <plugin>/schemas/*.schema.json — no S_* literal is written by hand).
 // Constraints (packaging.md 2.5): declarations only; no import/export; no clocks.
 
 // >>> generated:tables
@@ -204,14 +203,6 @@ const S_GATE = {
       "type": "boolean",
       "description": "False when the command itself could not run."
     },
-    "state": {
-      "type": "string",
-      "enum": [
-        "done",
-        "pending"
-      ],
-      "description": "pending: the job is still running; run the same command again. Absent means done."
-    },
     "diff_patch": {
       "type": "string",
       "description": "Green and wave gates: path of the patch the gate wrote for the commit it measured. Given to the next reviewer."
@@ -249,7 +240,7 @@ const S_GATE = {
       "items": {
         "type": "string"
       },
-      "description": "Identities of inherited tests that failed and then passed on the second run (section 2.9.8). Copied into the unit's closure record."
+      "description": "Identities of inherited tests that failed and then passed when the gate ran the suite once more (the flaky rule of record:baseline). Copied into the unit's closure record."
     },
     "findings": {
       "type": "array",
@@ -389,6 +380,17 @@ const S_GATE = {
     },
     "error": {
       "type": "string"
+    },
+    "test_output": {
+      "type": "string",
+      "description": "Green gate: path of the log holding every configured command's output (green.<sha12>.log). Empty when the gate wrote none."
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Green gate with --since: the files the range changed (vsdd.state.verdicts.changed_files, --no-renames); [] without --since."
     }
   },
   "required": [
@@ -401,237 +403,28 @@ const S_GATE = {
     "failures"
   ]
 };
-const S_GATE_OUTPUT = {
+const S_PENDING_OUTPUT = {
   "type": "object",
-  "anyOf": [
-    {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean",
-          "description": "False when the command itself could not run."
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "done",
-            "pending"
-          ],
-          "description": "pending: the job is still running; run the same command again. Absent means done."
-        },
-        "diff_patch": {
-          "type": "string",
-          "description": "Green and wave gates: path of the patch the gate wrote for the commit it measured. Given to the next reviewer."
-        },
-        "gate": {
-          "type": "string"
-        },
-        "subject": {
-          "type": "string"
-        },
-        "passed": {
-          "type": "boolean"
-        },
-        "sha": {
-          "type": "string",
-          "description": "Commit the gate measured."
-        },
-        "evidence": {
-          "type": "string",
-          "description": "Path of the evidence record."
-        },
-        "metrics": {
-          "type": "object"
-        },
-        "failures": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "maxLength": 400
-          },
-          "maxItems": 20
-        },
-        "flaky": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Identities of inherited tests that failed and then passed on the second run (section 2.9.8). Copied into the unit's closure record."
-        },
-        "findings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "key": {
-                "type": "string",
-                "maxLength": 200,
-                "description": "Stable identity, <category>:<path>:<symbol or clause>. The same defect has the same key in every pass."
-              },
-              "title": {
-                "type": "string",
-                "maxLength": 160
-              },
-              "severity": {
-                "type": "string",
-                "enum": [
-                  "critical",
-                  "high",
-                  "medium",
-                  "low"
-                ]
-              },
-              "category": {
-                "type": "string",
-                "enum": [
-                  "spec-fidelity",
-                  "test",
-                  "code",
-                  "security",
-                  "integration",
-                  "performance",
-                  "accessibility",
-                  "ux",
-                  "docs",
-                  "spec",
-                  "traceability",
-                  "holdout",
-                  "formal",
-                  "coverage"
-                ]
-              },
-              "scope": {
-                "type": "string",
-                "enum": [
-                  "unit",
-                  "integration",
-                  "system",
-                  "spec"
-                ]
-              },
-              "owner": {
-                "type": "string",
-                "enum": [
-                  "product-owner",
-                  "architect",
-                  "ux-designer",
-                  "story-writer",
-                  "test-writer",
-                  "implementer",
-                  "verifier",
-                  "technical-writer",
-                  "devops",
-                  "codebase-analyzer",
-                  "demo-recorder"
-                ],
-                "description": "The roster agent that should fix it. Fixes are routed on this field."
-              },
-              "location": {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string",
-                    "description": "Relative to the root of the reviewed tree: the unit's worktree for a story, the integration worktree for a wave or a release, the project root for files under .factory/."
-                  },
-                  "line_start": {
-                    "type": "integer"
-                  },
-                  "line_end": {
-                    "type": "integer"
-                  },
-                  "quote": {
-                    "type": "string",
-                    "maxLength": 400
-                  }
-                },
-                "required": [
-                  "path"
-                ]
-              },
-              "spec_ref": {
-                "type": "string",
-                "description": "Contract clause or acceptance criterion violated; empty if none."
-              },
-              "repro": {
-                "type": "string",
-                "maxLength": 800,
-                "description": "Command or scenario that shows the defect; empty if none."
-              },
-              "observed": {
-                "type": "string",
-                "maxLength": 600
-              },
-              "expected": {
-                "type": "string",
-                "maxLength": 600
-              },
-              "suggestion": {
-                "type": "string",
-                "maxLength": 600
-              },
-              "confidence": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              }
-            },
-            "required": [
-              "key",
-              "title",
-              "severity",
-              "category",
-              "scope",
-              "owner",
-              "location",
-              "spec_ref",
-              "repro",
-              "observed",
-              "expected"
-            ]
-          }
-        },
-        "unit": {
-          "type": "object",
-          "description": "Only from vsdd gate plan --story, and always when it passes: the admitted story unit (section 2.10.8)."
-        },
-        "error": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok",
-        "gate",
-        "subject",
-        "passed",
-        "sha",
-        "evidence",
-        "failures"
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "true while the job runs."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending"
       ]
     },
-    {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "pending"
-          ],
-          "description": "The job is still running; run the same command again."
-        },
-        "retry": {
-          "type": "string",
-          "description": "The same command to run again."
-        }
-      },
-      "required": [
-        "ok",
-        "state",
-        "retry"
-      ]
+    "retry": {
+      "type": "string",
+      "description": "The same command to run again."
     }
+  },
+  "required": [
+    "ok",
+    "state",
+    "retry"
   ]
 };
 const S_REVIEW_DATA = {
@@ -1015,6 +808,238 @@ const S_INTAKE_DATA = {
     "covers"
   ]
 };
+const S_IMPLEMENT_DATA = {
+  "type": "object",
+  "properties": {
+    "test_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The test file, relative to the worktree."
+          },
+          "test": {
+            "type": "string",
+            "description": "The test's identity or name."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 400
+          }
+        },
+        "required": [
+          "path",
+          "test",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "test_defects"
+  ]
+};
+const S_STORY_UNIT = {
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "position": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "red",
+        "green",
+        "reviewed",
+        "evidenced",
+        "delivered"
+      ],
+      "description": "See topic:story-life."
+    },
+    "worktree": {
+      "type": "string",
+      "description": "Absolute path of the story's worktree."
+    },
+    "tree": {
+      "type": "string",
+      "description": "The root that finding paths are relative to."
+    },
+    "branch": {
+      "type": "string"
+    },
+    "base": {
+      "type": "string",
+      "description": "The recorded commit the branch was cut from (topic:worktrees)."
+    },
+    "head": {
+      "type": "string"
+    },
+    "story_path": {
+      "type": "string"
+    },
+    "bcs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Contract ids."
+    },
+    "acs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Acceptance criteria."
+    },
+    "criticality": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "feature",
+        "fix",
+        "port",
+        "facade",
+        "docs",
+        "chore",
+        "harness"
+      ]
+    },
+    "tests_agent": {
+      "type": "string",
+      "description": "The agent of the story's tests stage, from its kind; empty when the kind has no tests stage."
+    },
+    "tests_method": {
+      "type": "string",
+      "description": "The story's resolved tests-stage method; empty when the kind has no tests stage."
+    },
+    "impl_agent": {
+      "type": "string",
+      "description": "The agent of the story's implement stage, from its kind."
+    },
+    "impl_method": {
+      "type": "string",
+      "description": "The story's resolved implement-stage method; empty when it has none."
+    },
+    "red_gate": {
+      "type": "boolean",
+      "description": "Whether the story's kind has a red gate (the story-kind row), so the gates expect a passing red record."
+    },
+    "repo": {
+      "type": "string"
+    },
+    "security": {
+      "type": "boolean"
+    },
+    "ui": {
+      "type": "boolean"
+    },
+    "demo_required": {
+      "type": "boolean"
+    },
+    "waived": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "guidance": {
+      "type": "string"
+    },
+    "deferred": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "Path of the latest diff patch; empty before the first green gate."
+    },
+    "test_output": {
+      "type": "string"
+    },
+    "review_rules": {
+      "type": "string",
+      "description": "Path of review-rules.md; empty when the project has none."
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "open_pr": {
+      "type": "string"
+    },
+    "rounds_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocked": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean"
+        }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "For a fix story: the keys of the findings it answers."
+    }
+  },
+  "required": [
+    "id",
+    "position",
+    "worktree",
+    "tree",
+    "branch",
+    "base",
+    "head",
+    "story_path",
+    "bcs",
+    "acs",
+    "criticality",
+    "kind",
+    "tests_agent",
+    "tests_method",
+    "impl_agent",
+    "impl_method",
+    "red_gate",
+    "repo",
+    "security",
+    "ui",
+    "demo_required",
+    "waived",
+    "guidance",
+    "deferred",
+    "diff_patch",
+    "test_output",
+    "review_rules",
+    "dirty",
+    "open_pr",
+    "rounds_used",
+    "blocked",
+    "fixes"
+  ]
+};
 const S_STORY_DRAFT_DATA = {
   "type": "object",
   "properties": {
@@ -1160,6 +1185,20 @@ const S_STEP_RESULT = {
         "attempt": {
           "type": "integer",
           "minimum": 1
+        },
+        "method": {
+          "type": "string",
+          "description": "The method the step was given."
+        },
+        "loop": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Review, fix and arbitrate steps only: the review loop of the unit within this run."
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Review, fix and arbitrate steps only: the pass or round within the loop."
         }
       },
       "required": [
@@ -1167,7 +1206,8 @@ const S_STEP_RESULT = {
         "workflow",
         "name",
         "subject",
-        "attempt"
+        "attempt",
+        "method"
       ]
     },
     "status": {
@@ -1202,14 +1242,6 @@ const S_STEP_RESULT = {
           "ok": {
             "type": "boolean",
             "description": "False when the command itself could not run."
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "done",
-              "pending"
-            ],
-            "description": "pending: the job is still running; run the same command again. Absent means done."
           },
           "diff_patch": {
             "type": "string",
@@ -1248,7 +1280,7 @@ const S_STEP_RESULT = {
             "items": {
               "type": "string"
             },
-            "description": "Identities of inherited tests that failed and then passed on the second run (section 2.9.8). Copied into the unit's closure record."
+            "description": "Identities of inherited tests that failed and then passed when the gate ran the suite once more (the flaky rule of record:baseline). Copied into the unit's closure record."
           },
           "findings": {
             "type": "array",
@@ -1388,6 +1420,17 @@ const S_STEP_RESULT = {
           },
           "error": {
             "type": "string"
+          },
+          "test_output": {
+            "type": "string",
+            "description": "Green gate: path of the log holding every configured command's output (green.<sha12>.log). Empty when the gate wrote none."
+          },
+          "changed_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Green gate with --since: the files the range changed (vsdd.state.verdicts.changed_files, --no-renames); [] without --since."
           }
         },
         "required": [
@@ -1986,12 +2029,14 @@ const S_WORKFLOW_RESULT = {
     "status": {
       "type": "string",
       "enum": [
+        "",
         "done",
         "partial",
         "needs_human",
         "blocked",
         "failed"
-      ]
+      ],
+      "description": "Empty when the command itself could not run."
     },
     "summary": {
       "type": "string",
@@ -2029,6 +2074,7 @@ const S_WORKFLOW_RESULT = {
         "kind": {
           "type": "string",
           "enum": [
+            "",
             "workflow",
             "human",
             "done"
@@ -2062,6 +2108,1199 @@ const S_WORKFLOW_RESULT = {
     "subject",
     "status",
     "summary"
+  ]
+};
+const S_SURVEY = {
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "error": {
+      "type": "string",
+      "description": "One line; empty when ok."
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "workflow": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "cycle": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "",
+        "full",
+        "delta"
+      ]
+    },
+    "project_dir": {
+      "type": "string"
+    },
+    "plugin_root": {
+      "type": "string"
+    },
+    "head": {
+      "type": "string"
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "met": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "met",
+          "detail"
+        ]
+      }
+    },
+    "done": {
+      "type": "array",
+      "description": "The stage names recorded as done.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "The units and their positions; story units carry the fields of story-unit.schema.json.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "red",
+              "green",
+              "reviewed",
+              "evidenced",
+              "delivered"
+            ],
+            "description": "See topic:story-life."
+          },
+          "worktree": {
+            "type": "string",
+            "description": "Absolute path of the story's worktree."
+          },
+          "tree": {
+            "type": "string",
+            "description": "The root that finding paths are relative to."
+          },
+          "branch": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "description": "The recorded commit the branch was cut from (topic:worktrees)."
+          },
+          "head": {
+            "type": "string"
+          },
+          "story_path": {
+            "type": "string"
+          },
+          "bcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Contract ids."
+          },
+          "acs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Acceptance criteria."
+          },
+          "criticality": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "fix",
+              "port",
+              "facade",
+              "docs",
+              "chore",
+              "harness"
+            ]
+          },
+          "tests_agent": {
+            "type": "string",
+            "description": "The agent of the story's tests stage, from its kind; empty when the kind has no tests stage."
+          },
+          "tests_method": {
+            "type": "string",
+            "description": "The story's resolved tests-stage method; empty when the kind has no tests stage."
+          },
+          "impl_agent": {
+            "type": "string",
+            "description": "The agent of the story's implement stage, from its kind."
+          },
+          "impl_method": {
+            "type": "string",
+            "description": "The story's resolved implement-stage method; empty when it has none."
+          },
+          "red_gate": {
+            "type": "boolean",
+            "description": "Whether the story's kind has a red gate (the story-kind row), so the gates expect a passing red record."
+          },
+          "repo": {
+            "type": "string"
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "ui": {
+            "type": "boolean"
+          },
+          "demo_required": {
+            "type": "boolean"
+          },
+          "waived": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guidance": {
+            "type": "string"
+          },
+          "deferred": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "diff_patch": {
+            "type": "string",
+            "description": "Path of the latest diff patch; empty before the first green gate."
+          },
+          "test_output": {
+            "type": "string"
+          },
+          "review_rules": {
+            "type": "string",
+            "description": "Path of review-rules.md; empty when the project has none."
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "open_pr": {
+            "type": "string"
+          },
+          "rounds_used": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "decision": {
+                "type": "string"
+              },
+              "open": {
+                "type": "boolean"
+              }
+            }
+          },
+          "fixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For a fix story: the keys of the findings it answers."
+          }
+        },
+        "required": [
+          "id",
+          "position",
+          "worktree",
+          "tree",
+          "branch",
+          "base",
+          "head",
+          "story_path",
+          "bcs",
+          "acs",
+          "criticality",
+          "kind",
+          "tests_agent",
+          "tests_method",
+          "impl_agent",
+          "impl_method",
+          "red_gate",
+          "repo",
+          "security",
+          "ui",
+          "demo_required",
+          "waived",
+          "guidance",
+          "deferred",
+          "diff_patch",
+          "test_output",
+          "review_rules",
+          "dirty",
+          "open_pr",
+          "rounds_used",
+          "blocked",
+          "fixes"
+        ]
+      }
+    },
+    "config": {
+      "type": "object",
+      "description": "The configuration values a run needs: tier_override, review_rules, and holdout with its three thresholds (topic:holdout-findings)."
+    },
+    "limits": {
+      "type": "object",
+      "description": "Under the prelude's names (see tables/limits.toml); an unknown key fails the run."
+    },
+    "spikes_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rounds_used": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wave and verify: rounds this unit used in earlier runs."
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of the open and settled decisions."
+    },
+    "waived": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "",
+            "workflow",
+            "human",
+            "done"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "error",
+    "run_id",
+    "workflow",
+    "subject",
+    "cycle",
+    "scope",
+    "project_dir",
+    "plugin_root",
+    "head",
+    "preconditions",
+    "done",
+    "units",
+    "config",
+    "limits",
+    "spikes_used",
+    "rounds_used",
+    "decisions",
+    "waived",
+    "next"
+  ]
+};
+const S_CLOSE = {
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "error": {
+      "type": "string",
+      "description": "One line; empty when ok."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "",
+        "done",
+        "partial",
+        "needs_human",
+        "blocked",
+        "failed"
+      ],
+      "description": "Empty when the command itself could not run."
+    },
+    "progress": {
+      "type": "boolean",
+      "description": "False when the run changed nothing on disk."
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "summary"
+        ]
+      }
+    },
+    "next": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "",
+            "workflow",
+            "human",
+            "done"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "error",
+    "status",
+    "progress",
+    "decisions",
+    "next"
+  ]
+};
+const S_DELIVERY = {
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "False only when the command did not reach an actionable state. The per-state ok list is defined once in the story-deliver command spec (rewrite/spec/commands/story-deliver.md)."
+    },
+    "error": {
+      "type": "string",
+      "description": "One line a person can act on; empty when ok."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "",
+        "merged",
+        "awaiting_merge",
+        "ci_failed",
+        "conflict",
+        "review_stale",
+        "refused",
+        "checkout_dirty"
+      ],
+      "description": "Empty only when the command itself could not run."
+    },
+    "pr": {
+      "type": "string",
+      "description": "The pull request link; empty in local mode."
+    },
+    "merged_sha": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string",
+      "description": "What failed, for the repair step."
+    },
+    "reviewed_sha": {
+      "type": "string",
+      "description": "The commit the converged verdict covers."
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The files changed from reviewed_sha to the delivered head; after a repair, the list the scoped review is accountable for."
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "The patch from reviewed_sha to the head, for the scoped review after a repair."
+    },
+    "needs_person": {
+      "type": "string",
+      "enum": [
+        "",
+        "protected_path",
+        "dependency",
+        "configured"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "error",
+    "state",
+    "pr",
+    "merged_sha",
+    "detail",
+    "reviewed_sha",
+    "changed_files",
+    "diff_patch",
+    "needs_person"
+  ]
+};
+const S_WAVE_GATE = {
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "False when the command itself could not run."
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "Path of the patch the wave gate measured, for the next reviewer."
+    },
+    "gate": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "sha": {
+      "type": "string",
+      "description": "Commit the gate measured."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Path of the evidence record."
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 400
+      },
+      "maxItems": 20
+    },
+    "flaky": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Identities of inherited tests that failed and then passed when the gate ran the suite once more (the flaky rule of record:baseline). Copied into the unit's closure record."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Stable identity, <category>:<path>:<symbol or clause>. The same defect has the same key in every pass."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "spec-fidelity",
+              "test",
+              "code",
+              "security",
+              "integration",
+              "performance",
+              "accessibility",
+              "ux",
+              "docs",
+              "spec",
+              "traceability",
+              "holdout",
+              "formal",
+              "coverage"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "unit",
+              "integration",
+              "system",
+              "spec"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "product-owner",
+              "architect",
+              "ux-designer",
+              "story-writer",
+              "test-writer",
+              "implementer",
+              "verifier",
+              "technical-writer",
+              "devops",
+              "codebase-analyzer",
+              "demo-recorder"
+            ],
+            "description": "The roster agent that should fix it. Fixes are routed on this field."
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Relative to the root of the reviewed tree: the unit's worktree for a story, the integration worktree for a wave or a release, the project root for files under .factory/."
+              },
+              "line_start": {
+                "type": "integer"
+              },
+              "line_end": {
+                "type": "integer"
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 400
+              }
+            },
+            "required": [
+              "path"
+            ]
+          },
+          "spec_ref": {
+            "type": "string",
+            "description": "Contract clause or acceptance criterion violated; empty if none."
+          },
+          "repro": {
+            "type": "string",
+            "maxLength": 800,
+            "description": "Command or scenario that shows the defect; empty if none."
+          },
+          "observed": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "expected": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "suggestion": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "severity",
+          "category",
+          "scope",
+          "owner",
+          "location",
+          "spec_ref",
+          "repro",
+          "observed",
+          "expected"
+        ]
+      }
+    },
+    "unit": {
+      "type": "object",
+      "description": "Only from vsdd gate plan --story, and always when it passes: the admitted story unit (section 2.10.8)."
+    },
+    "error": {
+      "type": "string"
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of the stories that still block the gate; empty when none does."
+    },
+    "worktree": {
+      "type": "string",
+      "description": "The integration worktree the wave was measured in."
+    },
+    "base": {
+      "type": "string",
+      "description": "The commit the wave started from."
+    },
+    "stories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "red",
+              "green",
+              "reviewed",
+              "evidenced",
+              "delivered"
+            ],
+            "description": "See topic:story-life."
+          },
+          "worktree": {
+            "type": "string",
+            "description": "Absolute path of the story's worktree."
+          },
+          "tree": {
+            "type": "string",
+            "description": "The root that finding paths are relative to."
+          },
+          "branch": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "description": "The recorded commit the branch was cut from (topic:worktrees)."
+          },
+          "head": {
+            "type": "string"
+          },
+          "story_path": {
+            "type": "string"
+          },
+          "bcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Contract ids."
+          },
+          "acs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Acceptance criteria."
+          },
+          "criticality": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "fix",
+              "port",
+              "facade",
+              "docs",
+              "chore",
+              "harness"
+            ]
+          },
+          "tests_agent": {
+            "type": "string",
+            "description": "The agent of the story's tests stage, from its kind; empty when the kind has no tests stage."
+          },
+          "tests_method": {
+            "type": "string",
+            "description": "The story's resolved tests-stage method; empty when the kind has no tests stage."
+          },
+          "impl_agent": {
+            "type": "string",
+            "description": "The agent of the story's implement stage, from its kind."
+          },
+          "impl_method": {
+            "type": "string",
+            "description": "The story's resolved implement-stage method; empty when it has none."
+          },
+          "red_gate": {
+            "type": "boolean",
+            "description": "Whether the story's kind has a red gate (the story-kind row), so the gates expect a passing red record."
+          },
+          "repo": {
+            "type": "string"
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "ui": {
+            "type": "boolean"
+          },
+          "demo_required": {
+            "type": "boolean"
+          },
+          "waived": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guidance": {
+            "type": "string"
+          },
+          "deferred": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "diff_patch": {
+            "type": "string",
+            "description": "Path of the latest diff patch; empty before the first green gate."
+          },
+          "test_output": {
+            "type": "string"
+          },
+          "review_rules": {
+            "type": "string",
+            "description": "Path of review-rules.md; empty when the project has none."
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "open_pr": {
+            "type": "string"
+          },
+          "rounds_used": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "decision": {
+                "type": "string"
+              },
+              "open": {
+                "type": "boolean"
+              }
+            }
+          },
+          "fixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For a fix story: the keys of the findings it answers."
+          }
+        },
+        "required": [
+          "id",
+          "position",
+          "worktree",
+          "tree",
+          "branch",
+          "base",
+          "head",
+          "story_path",
+          "bcs",
+          "acs",
+          "criticality",
+          "kind",
+          "tests_agent",
+          "tests_method",
+          "impl_agent",
+          "impl_method",
+          "red_gate",
+          "repo",
+          "security",
+          "ui",
+          "demo_required",
+          "waived",
+          "guidance",
+          "deferred",
+          "diff_patch",
+          "test_output",
+          "review_rules",
+          "dirty",
+          "open_pr",
+          "rounds_used",
+          "blocked",
+          "fixes"
+        ]
+      }
+    },
+    "needs": {
+      "type": "object",
+      "properties": {
+        "security": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "security",
+        "ui"
+      ],
+      "description": "The capability flags any story in the wave set."
+    },
+    "holdout_batches": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The scenario ids of one holdout batch; the script joins each batch with ids.join(', ')."
+      },
+      "description": "The holdout scenarios grouped into batches; each inner list is joined into one scenario list."
+    },
+    "fix_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "red",
+              "green",
+              "reviewed",
+              "evidenced",
+              "delivered"
+            ],
+            "description": "See topic:story-life."
+          },
+          "worktree": {
+            "type": "string",
+            "description": "Absolute path of the story's worktree."
+          },
+          "tree": {
+            "type": "string",
+            "description": "The root that finding paths are relative to."
+          },
+          "branch": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "description": "The recorded commit the branch was cut from (topic:worktrees)."
+          },
+          "head": {
+            "type": "string"
+          },
+          "story_path": {
+            "type": "string"
+          },
+          "bcs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Contract ids."
+          },
+          "acs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Acceptance criteria."
+          },
+          "criticality": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "fix",
+              "port",
+              "facade",
+              "docs",
+              "chore",
+              "harness"
+            ]
+          },
+          "tests_agent": {
+            "type": "string",
+            "description": "The agent of the story's tests stage, from its kind; empty when the kind has no tests stage."
+          },
+          "tests_method": {
+            "type": "string",
+            "description": "The story's resolved tests-stage method; empty when the kind has no tests stage."
+          },
+          "impl_agent": {
+            "type": "string",
+            "description": "The agent of the story's implement stage, from its kind."
+          },
+          "impl_method": {
+            "type": "string",
+            "description": "The story's resolved implement-stage method; empty when it has none."
+          },
+          "red_gate": {
+            "type": "boolean",
+            "description": "Whether the story's kind has a red gate (the story-kind row), so the gates expect a passing red record."
+          },
+          "repo": {
+            "type": "string"
+          },
+          "security": {
+            "type": "boolean"
+          },
+          "ui": {
+            "type": "boolean"
+          },
+          "demo_required": {
+            "type": "boolean"
+          },
+          "waived": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guidance": {
+            "type": "string"
+          },
+          "deferred": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "diff_patch": {
+            "type": "string",
+            "description": "Path of the latest diff patch; empty before the first green gate."
+          },
+          "test_output": {
+            "type": "string"
+          },
+          "review_rules": {
+            "type": "string",
+            "description": "Path of review-rules.md; empty when the project has none."
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "open_pr": {
+            "type": "string"
+          },
+          "rounds_used": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "decision": {
+                "type": "string"
+              },
+              "open": {
+                "type": "boolean"
+              }
+            }
+          },
+          "fixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For a fix story: the keys of the findings it answers."
+          }
+        },
+        "required": [
+          "id",
+          "position",
+          "worktree",
+          "tree",
+          "branch",
+          "base",
+          "head",
+          "story_path",
+          "bcs",
+          "acs",
+          "criticality",
+          "kind",
+          "tests_agent",
+          "tests_method",
+          "impl_agent",
+          "impl_method",
+          "red_gate",
+          "repo",
+          "security",
+          "ui",
+          "demo_required",
+          "waived",
+          "guidance",
+          "deferred",
+          "diff_patch",
+          "test_output",
+          "review_rules",
+          "dirty",
+          "open_pr",
+          "rounds_used",
+          "blocked",
+          "fixes"
+        ]
+      },
+      "description": "Admitted story units, given when the measured gate failed: the fix stories to start."
+    },
+    "holdout": {
+      "type": "object",
+      "description": "What holdoutFindings() needs besides the scores (topic:holdout-findings).",
+      "properties": {
+        "seed": {
+          "type": "string",
+          "description": "The rotation seed."
+        },
+        "contracts": {
+          "type": "object",
+          "description": "Scenario id to the contract ids it cites.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "test_output": {
+      "type": "string",
+      "description": "Green gate: path of the log holding every configured command's output (green.<sha12>.log). Empty when the gate wrote none."
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Green gate with --since: the files the range changed (vsdd.state.verdicts.changed_files, --no-renames); [] without --since."
+    }
+  },
+  "required": [
+    "ok",
+    "diff_patch",
+    "gate",
+    "subject",
+    "passed",
+    "sha",
+    "evidence",
+    "metrics",
+    "failures",
+    "flaky",
+    "findings",
+    "unit",
+    "error",
+    "pending",
+    "worktree",
+    "base",
+    "stories",
+    "needs",
+    "holdout_batches",
+    "fix_units",
+    "holdout",
+    "test_output",
+    "changed_files"
   ]
 };
 // <<< generated:schemas
@@ -2113,64 +3352,6 @@ const stepSchema = (data) => ({
   },
   required: S_STEP_RESULT.required,
 })
-const STR_ARR = { type: 'array', items: { type: 'string' } }
-const OBJ = { type: 'object', properties: {} }
-const KV = (props, req) => ({ type: 'object', properties: props, required: req })
-// Composites of pipeline.md 2.10.8; the generated block holds the rest, from <plugin>/schemas/.
-const S_REVIEW = {
-  type: 'object',
-  properties: {
-    reviewed_sha: { type: 'string' }, findings: { type: 'array', items: S_FINDING },
-    claim_checks: { type: 'array', items: KV({ key: { type: 'string' }, outcome: { type: 'string', enum: ['resolved', 'not_resolved', 'withdrawn'] }, note: { type: 'string' } }, ['key', 'outcome']) },
-    coverage: { type: 'array', items: KV({ item: { type: 'string' }, state: { type: 'string', enum: ['checked', 'not_checkable', 'skipped'] }, note: { type: 'string' } }, ['item', 'state']) },
-  },
-  required: ['reviewed_sha', 'findings', 'claim_checks', 'coverage'],
-}
-const S_RESOLUTION = KV({ key: { type: 'string' }, resolution: { type: 'string', enum: ['fixed', 'disputed'] }, commit: { type: 'string' }, note: { type: 'string' } }, ['key', 'resolution'])
-const S_FIXES = { type: 'object', properties: { resolutions: { type: 'array', items: S_RESOLUTION } }, required: ['resolutions'] }
-const S_RULINGS = { type: 'object', properties: { rulings: { type: 'array', items: KV({ key: { type: 'string' }, ruling: { type: 'string', enum: ['defect', 'not_defect', 'spec_gap'] }, reason: { type: 'string' } }, ['key', 'ruling']) } }, required: ['rulings'] }
-const SCORE = KV({ scenario: { type: 'string' }, satisfaction: { type: 'number' }, must_pass: { type: 'boolean' }, ran: { type: 'boolean' } }, ['scenario', 'satisfaction', 'must_pass', 'ran'])
-const SYMPTOM = KV({ scenario: { type: 'string' }, observed: { type: 'string' }, expected: { type: 'string' } }, ['scenario', 'observed', 'expected'])
-const S_HOLDOUT = { type: 'object', properties: { scores: { type: 'array', items: SCORE }, symptoms: { type: 'array', items: SYMPTOM } }, required: ['scores', 'symptoms'] }
-const S_PRECONDITION = KV({ name: { type: 'string' }, met: { type: 'boolean' }, detail: { type: 'string' } }, ['name', 'met', 'detail'])
-const S_NEXT = { type: 'object', properties: { kind: { type: 'string' }, command: { type: 'string' }, args: OBJ } }
-const S_SURVEY = {
-  type: 'object',
-  properties: {
-    ok: { type: 'boolean' }, error: { type: 'string' }, run_id: { type: 'string' }, workflow: { type: 'string' },
-    subject: { type: 'string' }, cycle: { type: 'string' }, scope: { type: 'string', enum: ['full', 'delta'] },
-    project_dir: { type: 'string' }, plugin_root: { type: 'string' }, head: { type: 'string' },
-    preconditions: { type: 'array', items: S_PRECONDITION }, done: STR_ARR, units: { type: 'array', items: OBJ },
-    config: OBJ, limits: OBJ, spikes_used: { type: 'integer' }, decisions: STR_ARR, waived: STR_ARR, next: S_NEXT,
-  },
-  required: ['ok', 'run_id', 'project_dir', 'plugin_root', 'preconditions', 'done', 'units', 'config', 'limits'],
-}
-// The close composes the workflow result's progress, decisions and next (pipeline.md 2.5).
-const S_CLOSE = {
-  type: 'object',
-  properties: { ok: { type: 'boolean' }, status: { type: 'string' }, progress: S_WORKFLOW_RESULT.properties.progress, decisions: S_WORKFLOW_RESULT.properties.decisions, next: S_WORKFLOW_RESULT.properties.next },
-  required: ['ok', 'status', 'next'],
-}
-const S_DELIVERY = {
-  type: 'object',
-  properties: {
-    ok: { type: 'boolean' }, error: { type: 'string' }, state: { type: 'string' }, pr: { type: 'string' },
-    merged_sha: { type: 'string' }, detail: { type: 'string' }, reviewed_sha: { type: 'string' }, changed_files: STR_ARR,
-    diff_patch: { type: 'string' }, needs_person: { type: 'string' },
-  },
-  required: ['ok'],
-}
-// vsdd gate wave (pipeline.md 2.10.8): the gate result fields plus the wave's own.
-const S_WAVE_GATE = {
-  type: 'object',
-  properties: {
-    ...S_GATE.properties,
-    pending: { type: 'boolean' }, worktree: { type: 'string' }, base: { type: 'string' },
-    stories: { type: 'array', items: OBJ }, needs: KV({ security: { type: 'boolean' }, ui: { type: 'boolean' } }, []),
-    holdout_batches: { type: 'array', items: OBJ }, diff_patch: { type: 'string' }, fix_units: { type: 'array', items: OBJ },
-  },
-  required: [...S_GATE.required, 'stories'],
-}
 
 const made = (id, status, kind, reason) => ({ step: { ...id, attempt: 0 }, status, summary: reason, head: '', blocked: { kind, reason }, data: {} })
 
@@ -2219,11 +3400,13 @@ async function runSpike(req, stepKey, phaseTitle) {
 }
 
 // Run one step. o.method is required; retries an unusable result; serves spike requests within the limits.
+// The identity carries the method and, on review, fix and arbitrate steps, the loop and pass
+// (topics/verdicts.md), so a re-run of one pass writes new records instead of overwriting old ones.
 async function step(type, name, subject, task, o = {}) {
   if (!o.method) throw new Error(`Step ${name} names no method.`)
   const tier = RUN.tier || TIER[OVERRIDE[`${RUN.wf}/${o.stage || name}`] || ROLE[type]]
   if (!tier) throw new Error(`Agent "${type}" is not in the roster, and no tier override covers ${RUN.wf}/${o.stage || name}.`)
-  const id = { run: RUN.id, workflow: RUN.wf, name, subject }
+  const id = { run: RUN.id, workflow: RUN.wf, name, subject, method: o.method, ...(o.pass ? { loop: o.loop || 1, pass: o.pass } : {}) }
   const spikes = o.spikes || []
   let bad = 0
   for (let n = 1; ; n++) {
@@ -2236,7 +3419,7 @@ async function step(type, name, subject, task, o = {}) {
       agentType: 'vsdd-factory:' + type, model: tier.model, effort: tier.effort, schema: stepSchema(o.data),
       phase: o.phase, label: `${subject} · ${name} #${n}`,
     })
-    if (!r || !r.step || r.step.name !== name || r.step.subject !== subject) {
+    if (!r || !r.step || r.step.name !== name || r.step.subject !== subject || r.step.method !== o.method) {
       if (++bad >= RUN.limits.attempts) return made(id, 'failed', 'other', 'The step returned no usable result.')
       continue
     }
@@ -2271,7 +3454,23 @@ async function gated(type, name, subject, task, gate, o = {}) {
     note = `\nThe ${gate} gate did not pass last time: ${gs.length ? why.join(' | ').slice(0, 1500) : 'no gate result was returned'}. Deal with that first.` +
       (o.each ? ` Then run the closing command again for every ${o.each}, and return every unit.` : '')
   }
-  return made({ run: RUN.id, workflow: RUN.wf, name, subject }, 'blocked', 'gate', `The ${gate} gate still fails after ${RUN.limits.attempts} attempts.`)
+  return made({ run: RUN.id, workflow: RUN.wf, name, subject, method: o.method }, 'blocked', 'gate', `The ${gate} gate still fails after ${RUN.limits.attempts} attempts.`)
+}
+
+// The empty object of a relayed output schema: every required field present, empty by type
+// (topics/result-schemas.md: a relayed command prints every field on every exit), and valid
+// against the schema it is returned for (CATCHUP-R5): an object fills its own required members
+// the same way, and the relayed-output enums admit '' so the empty string is one of their
+// options. For a schema whose root is a union, the first branch is used.
+function emptyOf(schema) {
+  const s = (schema && schema.anyOf && schema.anyOf[0]) || schema || {}
+  const out = {}
+  for (const key of s.required || []) {
+    const p = (s.properties || {})[key] || {}
+    const t = p.type
+    out[key] = t === 'integer' || t === 'number' ? 0 : t === 'boolean' ? false : t === 'array' ? [] : t === 'object' ? emptyOf(p) : ''
+  }
+  return out
 }
 
 // Run one vsdd command through the clerk and return its JSON output. One retry on nothing.
@@ -2284,7 +3483,8 @@ async function relay(name, subject, command, schema, phaseTitle) {
     const r = await agent(
       'Run exactly this command, with a Bash timeout of 600000, and return the JSON it prints as your result. ' +
         'If the JSON has state "pending", run the same command again, and repeat until it does not. ' +
-        'Do not interpret, repair or summarise it. If it prints no JSON, return {"ok": false, "error": "<what it printed>"}.\n' + full,
+        'Do not interpret, repair or summarise it. If it prints no JSON, return ' + JSON.stringify(emptyOf(schema)) +
+        ' with "error" set to what it printed.\n' + full,
       {
         agentType: 'vsdd-factory:clerk', model: (RUN.tier || TIER.clerk).model, effort: (RUN.tier || TIER.clerk).effort,
         schema, phase: phaseTitle, label: `${subject} · ${name}${n > 1 ? ' (retry)' : ''}`,
@@ -2292,7 +3492,8 @@ async function relay(name, subject, command, schema, phaseTitle) {
     )
     if (r) return r
   }
-  return { ok: false, error: 'The clerk step returned nothing, twice.' }
+  // The clerk invented nothing twice: the schema's own empty object, with the failure said.
+  return { ...emptyOf(schema), ok: false, error: 'The clerk step returned nothing, twice.' }
 }
 
 // Start child stories (wave, verify, feature, maintain, multi). A batch starts only if it fits
@@ -2328,7 +3529,9 @@ function judge(findings, perimeter, waived) {
   for (const f of findings || []) {
     // Holdout is exempt from the location and grounding conditions (blueprint 4.10).
     const placed = f.category === 'holdout' || Boolean(f.location && f.location.path)
-    const hard = HARD.includes(f.severity) && (f.category === 'holdout' || Boolean(f.spec_ref || f.repro)) && placed
+    // grounded === false is the tool's own mark that a finding is not grounded (topics/verdicts.md):
+    // not hard, whatever its severity. An absent mark leaves the judgement to the other conditions.
+    const hard = HARD.includes(f.severity) && (f.category === 'holdout' || Boolean(f.spec_ref || f.repro)) && placed && f.grounded !== false
     if ((waived || []).includes(f.key)) v.advisory.push(f)
     else if (REACH[perimeter].includes(f.scope)) (hard ? v.blocking : v.advisory).push(f)
     else if (f.scope === 'spec') (hard ? v.spec_gaps : v.advisory).push(f)
@@ -2340,13 +3543,15 @@ function judge(findings, perimeter, waived) {
 // c.review(pass, claims, gaps) -> { ok, head, findings, claim_checks, coverage_missing },
 //                                 or { ok: false, blocked: true } when a reviewer returned blocked
 // c.fix(open, advisory, pass)  -> { ok, resolutions: [{ key, resolution: 'fixed' | 'disputed', commit, note }] }
-// c.arbitrate(open)            -> { rulings: [{ key, ruling: 'defect' | 'not_defect' | 'spec_gap', reason }] } (optional)
+// c.arbitrate(open, pass, notes) -> { rulings: [{ key, ruling: 'defect' | 'not_defect' | 'spec_gap', reason }] }
+//                 notes: Map key -> the disputing builder's note, for the arbitration prompt only
 // c.used -> passes or rounds this unit already used in earlier runs (from the survey)
 async function converge(c) {
   const raised = new Map()
   const waived = (c.waived || []).slice()
   const dismissed = []
   const disputed = new Set()
+  const notes = new Map() // the fixer's dispute notes, by key: the arbiter sees them, no one else does
   const used = c.used || 0
   let claims = [], open = [], advisory = [], deferred = [], gaps = [], head = '', pass = 0, extra = 0
   const verdict = (outcome, reason) => ({ perimeter: c.perimeter, subject: c.subject, head, passes: pass, rounds_used: used + pass, outcome, reason, blocking: open, advisory, deferred, dismissed, coverage_missing: gaps })
@@ -2377,7 +3582,7 @@ async function converge(c) {
     if (!open.length) return verdict('converged', 'clean')
     if (used + pass >= c.cap + extra) {
       if (extra || !c.arbitrate) break
-      const a = await c.arbitrate(open)
+      const a = await c.arbitrate(open, pass, notes)
       const ruled = new Map(((a && a.rulings) || []).map((x) => [x.key, x]))
       const upheld = []
       for (const f of open) {
@@ -2397,9 +3602,10 @@ async function converge(c) {
     if (!fx || !fx.ok) return verdict('failed', 'no_result')
     const how = new Map((fx.resolutions || []).map((x) => [x.key, x]))
     // A claim is structured data: no title, quote or fixer text; a holdout claim is the key alone.
+    // The disputed note travels only to the arbiter (P3SEAM-14): through c.arbitrate's notes map.
     claims = open.map((f) => {
       const h = how.get(f.key) || {}
-      if (h.resolution === 'disputed') disputed.add(f.key)
+      if (h.resolution === 'disputed') { disputed.add(f.key); notes.set(f.key, h.note || '') }
       if (f.category === 'holdout') return { key: f.key, resolution: h.resolution || 'fixed', commit: h.commit || '' }
       const where = f.location ? { path: f.location.path, line_start: f.location.line_start, line_end: f.location.line_end } : {}
       return { key: f.key, ...where, resolution: h.resolution || 'fixed', commit: h.commit || '' }
@@ -2481,7 +3687,7 @@ try {
 } finally {
   phase('Close')
   if (outcome != null && outcome.status !== 'done' && outcome.status !== 'blocked') outcome.status = 'failed'
-  await relay('close', sid, `vsdd checkpoint toy-story --run ${RUN.id} --subject ${sid} --outcome ${outcome ? outcome.status : 'failed'} --json`, S_CLOSE, 'Close')
+  await relay('close', sid, `vsdd checkpoint toy-story --run ${RUN.id}${!outcome || outcome.status === 'failed' ? ' --outcome failed' : ''} --json`, S_CLOSE, 'Close')
 }
 return outcome
 

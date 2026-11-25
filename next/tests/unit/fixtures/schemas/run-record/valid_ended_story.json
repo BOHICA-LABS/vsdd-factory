@@ -1,0 +1,17 @@
+{
+  "workflow": "story",
+  "subject": "S-9.01",
+  "repository": "",
+  "cycle": "product-1",
+  "session": "0c1d2e3f4a5b",
+  "start": "2026-11-24T09:15:00Z",
+  "agents": 12,
+  "parent": "",
+  "stories": [
+    "S-9.01"
+  ],
+  "request": "S-9.01 grew a second failing test",
+  "amendment": true,
+  "ended": "2026-11-24T11:02:00Z",
+  "id": "r-20261124-0915-7q"
+}

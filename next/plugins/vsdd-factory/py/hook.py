@@ -5,19 +5,18 @@
 """Entry point for hook events; runs the rule engine's main().
 
 This file is the `uv run --script` target that py/launch.sh starts. The hook
-runner itself lives in the vsdd package under py/vsdd/ and arrives with the
-runner package (H1). Until then this stub implements the launch contract's
-inert path: consume stdin, allow everything, never block.
+runner lives in the vsdd package under py/vsdd/hooks/ (H1).
 
 Contract (rewrite/design/hooks.md 2.2):
-  exit 0   allow (stdout may carry one JSON object)
+  exit 0   allow (stdout holds at most one JSON object, or plain text on
+           PreCompact)
   exit 10  a rule blocked (the reason is already on stderr; the launcher maps
            it to exit 2 for Claude Code)
   exit 13  the interpreter is older than the 3.11 floor (defence in depth;
            the launcher already passes --python '>=3.11' to uv)
+  any other code is the runner's own crash, which the launcher maps
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -38,17 +37,9 @@ def main(argv: list[str]) -> int:
         )
         return 13
 
-    raw = sys.stdin.read()
-    try:
-        if raw.strip():
-            json.loads(raw)
-    except json.JSONDecodeError:
-        # Invalid input is logged and handled by the real runner. The stub
-        # allows: a broken payload must never wedge a session that is not
-        # yet guarded by anything.
-        pass
+    from vsdd.hooks import main as runner
 
-    return 0
+    return runner.main(argv)
 
 
 if __name__ == "__main__":

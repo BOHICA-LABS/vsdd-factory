@@ -1,0 +1,50 @@
+{
+  "name": "j07-beyond-reach-deferred",
+  "about": "A story review defers a finding beyond the unit scope.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:f",
+        "title": "t-code:f",
+        "severity": "high",
+        "category": "code",
+        "scope": "integration",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [],
+      "deferred": [
+        {
+          "key": "code:f",
+          "title": "t-code:f",
+          "severity": "high",
+          "category": "code",
+          "scope": "integration",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "spec_gaps": []
+    }
+  }
+}

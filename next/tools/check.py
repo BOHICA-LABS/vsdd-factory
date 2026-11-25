@@ -30,9 +30,13 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
 
+sys.dont_write_bytecode = True  # the plugin tree stays free of generated files
+
 NEXT = Path(__file__).resolve().parent.parent
 PLUGIN = NEXT / "plugins" / "vsdd-factory"
 OLD_REPO_ROOT = NEXT.parent  # the checkout that stages next/; holds the canonical LICENSE
+ROSTER_PATH = NEXT / "tests" / "lint" / "roster.toml"  # [platform] is where the floors live (B6)
+SPEC_DIR = OLD_REPO_ROOT / "rewrite" / "spec"
 
 REGISTRY: list = []
 
@@ -276,8 +280,8 @@ def plugin_manifest() -> None:
         "plugin.json icon must be ./.claude-plugin/icon.png",
     )
     expect(
-        manifest["engines"] == {"claude-code": ">=2.1.331"},
-        "plugin.json engines must pin the Claude Code floor",
+        manifest["engines"] == {"claude-code": f">={roster_platform()['min_claude_code']}"},
+        "plugin.json engines must pin the Claude Code floor of tests/lint/roster.toml [platform]",
     )
     expect(
         manifest["documentationUrl"] == "https://github.com/bohica-labs/vsdd-factory/tree/main/docs",
@@ -659,8 +663,19 @@ def launcher_modes_on_a_live_project() -> None:
 
     with tempfile.TemporaryDirectory(prefix="vsdd-check-") as td:
         base = make_project(Path(td))
-        result = launch(["hook", "gate"], base, stdin_text='{"tool_name":"Bash","tool_input":{}}')
-        expect(result.returncode == 0, f"gate through the stub runner must exit 0, got {result.returncode}: {result.stderr!r}")
+        # A full PreToolUse payload (HD11): the runner reads hook_event_name,
+        # and a payload without it is bad input that blocks.
+        gate_payload = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo ok"},
+                "session_id": "check-session",
+                "cwd": str(base),
+            }
+        )
+        result = launch(["hook", "gate"], base, stdin_text=gate_payload)
+        expect(result.returncode == 0, f"gate through the runner must exit 0, got {result.returncode}: {result.stderr!r}")
 
         result = launch(["hook", "brief"], base, stdin_text="{}")
         expect(result.returncode == 0, "brief on a live project must exit 0")
@@ -729,8 +744,10 @@ def roster_parses_and_matches_the_blueprint() -> None:
     """tests/lint/roster.toml: four tiers, the 20 agents, and the two roster overrides."""
     roster = tomllib.loads((NEXT / "tests" / "lint" / "roster.toml").read_text())
     expect(set(roster["tiers"]) == {"planner", "builder", "reviewer", "clerk"}, "roster must have the four tiers")
-    expect(roster["tiers"]["clerk"] == {"model": "sonnet", "effort": "low"}, "the clerk tier is sonnet at low effort")
-    expect(roster["tiers"]["reviewer"] == {"model": "opus", "effort": "xhigh"}, "the reviewer tier is opus at xhigh")
+    expect(roster["tiers"]["clerk"] == {"model": "sonnet", "effort": "low", "color": "yellow"}, "the clerk tier is sonnet at low effort, yellow")
+    expect(roster["tiers"]["reviewer"] == {"model": "opus", "effort": "xhigh", "color": "red"}, "the reviewer tier is opus at xhigh, red")
+    expect(roster["tiers"]["planner"] == {"model": "fable", "effort": "xhigh", "color": "blue"}, "the planner tier is fable at xhigh, blue")
+    expect(roster["tiers"]["builder"] == {"model": "sonnet", "effort": "xhigh", "color": "green"}, "the builder tier is sonnet at xhigh, green")
     expect(set(roster["agents"]) == set(B4A_ROSTER_AGENTS), "roster agents must be the 20 of blueprint 4.3")
     expect(
         roster["overrides"] == {"ingest/map": "builder", "ingest/analyze": "builder"},
@@ -812,12 +829,19 @@ def shared_core_modules_present() -> None:
         expect((pkg / name).is_file(), f"missing py/vsdd/{name}")
 
 
+def roster_platform() -> dict:
+    """The roster's [platform] table: the floors, stated once (B6)."""
+    return tomllib.loads(ROSTER_PATH.read_text())["platform"]
+
+
 @check
 def python_compiles_on_the_floor() -> None:
-    """L-PY: the shipped package parses on the Python floor, 3.11 (packaging.md,
-    assigned to B3). ast feature_version refuses syntax newer than the floor,
-    so a 3.12-only construct cannot reach a user whose uv resolved 3.11."""
-    floor = (3, 11)
+    """L-PY: the shipped package parses on the Python floor of
+    tests/lint/roster.toml [platform] (packaging.md, assigned to B3). ast
+    feature_version refuses syntax newer than the floor, so a 3.12-only
+    construct cannot reach a user whose uv resolved 3.11."""
+    floor_text = roster_platform()["python_floor"]
+    floor = tuple(int(part) for part in floor_text.split("."))
     for py in sorted((PLUGIN / "py").rglob("*.py")):
         source = py.read_text(encoding="utf-8")
         try:
@@ -833,28 +857,43 @@ def python_compiles_on_the_floor() -> None:
 def schemas_are_the_single_source() -> None:
     """Every shipped schema parses, is draft 2020-12, and its $id matches the
     file name; every $ref resolves to a sibling schema file; and the set is
-    exactly what blueprint 4.10 names."""
+    exactly the result schemas of blueprint 4.10 plus the event log line."""
     schemas = sorted((PLUGIN / "schemas").glob("*.schema.json"))
     expect(schemas, "no schemas shipped")
     required = {
         "finding.schema.json",
         "gate-result.schema.json",
-        "gate-output.schema.json",
+        "pending-output.schema.json",
+        "caller-marker.schema.json",
         "review-data.schema.json",
         "claim.schema.json",
         "fix-data.schema.json",
         "ruling-data.schema.json",
         "holdout-data.schema.json",
         "intake-data.schema.json",
+        "implement-data.schema.json",
+        "story-unit.schema.json",
         "story-draft-data.schema.json",
         "spike-request.schema.json",
         "spike-finding.schema.json",
         "step-result.schema.json",
         "verdict.schema.json",
         "workflow-result.schema.json",
+        "survey.schema.json",
+        "checkpoint-result.schema.json",
+        "delivery-data.schema.json",
+        "wave-gate-data.schema.json",
+        "event.schema.json",
+        "run-record.schema.json",
+        "step-record.schema.json",
+        "evidence-record.schema.json",
+        "closure-record.schema.json",
+        "cycle-record.schema.json",
+        "decision-record.schema.json",
+        "lock.schema.json",
     }
     shipped = {p.name for p in schemas}
-    expect(shipped == required, f"schemas must be exactly the 4.10 set; missing: {sorted(required - shipped)}, extra: {sorted(shipped - required)}")
+    expect(shipped == required, f"schemas must be exactly the result-schema set; missing: {sorted(required - shipped)}, extra: {sorted(shipped - required)}")
     names: set[str] = set()
     texts: dict[str, str] = {}
     for path in schemas:
@@ -932,6 +971,328 @@ def frontmatter_reader_smoke() -> None:
         pass
     else:
         raise CheckError("frontmatter reader accepted a float outside the subset")
+
+
+@check
+def relayed_outputs_require_every_property() -> None:
+    """A command a script relays prints every field of its output schema on
+    every exit (topics/result-schemas.md), so set(required) == set(properties)
+    for each relayed output schema: a missing required field is a field the
+    script reads into the void (CATCHUP-R3)."""
+    relayed = (
+        "survey",
+        "checkpoint-result",
+        "delivery-data",
+        "story-unit",
+        "wave-gate-data",
+        "pending-output",
+    )
+    for name in relayed:
+        schema = read_json(PLUGIN / "schemas" / f"{name}.schema.json")
+        properties = set(schema.get("properties") or {})
+        required = set(schema.get("required") or [])
+        expect(
+            required == properties,
+            f"{name}.schema.json: the relay rule needs required == properties; "
+            f"missing from required: {sorted(properties - required)}, not a property: {sorted(required - properties)}",
+        )
+
+
+def _without_descriptions(node):
+    """A copy of a schema node with every description annotation dropped."""
+    if isinstance(node, list):
+        return [_without_descriptions(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+    return {k: _without_descriptions(v) for k, v in node.items() if k != "description"}
+
+
+def _property(schema_name: str, prop: str):
+    schema = read_json(PLUGIN / "schemas" / f"{schema_name}.schema.json")
+    return _without_descriptions((schema.get("properties") or {}).get(prop))
+
+
+@check
+def composed_schemas_match_their_sources() -> None:
+    """The compositions the old prelude built from $ref are copied by hand
+    between the shipped files (CATCHUP-R9); each copied property must equal its
+    source property, descriptions aside, so one side cannot change alone."""
+    for prop in ("status", "progress", "decisions", "next"):
+        expect(
+            _property("checkpoint-result", prop) == _property("workflow-result", prop),
+            f"checkpoint-result.{prop} has drifted from workflow-result.{prop}",
+        )
+    expect(
+        _property("survey", "next") == _property("workflow-result", "next"),
+        "survey.next has drifted from workflow-result.next",
+    )
+    gate_props = read_json(PLUGIN / "schemas" / "gate-result.schema.json").get("properties") or {}
+    for prop in gate_props:
+        expect(
+            _property("gate-result", prop) == _property("wave-gate-data", prop),
+            f"wave-gate-data.{prop} has drifted from gate-result.{prop}",
+        )
+
+
+@check
+def spec_literals_are_the_generated_set() -> None:
+    """Every S_* identifier in a spec code block or a workflow body is a literal
+    the build generates from <plugin>/schemas/*.schema.json (CATCHUP-R1): a
+    ported script that names a deleted composite must fail here, not with a
+    ReferenceError on the platform."""
+    spec = importlib.util.spec_from_file_location("vsdd_build_check", NEXT / "tools" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(build)
+    generated = set(build.LITERAL_NAMES.values())
+    token_re = re.compile(r"(?<![A-Za-z0-9_])(S_[A-Z0-9_]+)(?![A-Za-z0-9_])")
+    fence_re = re.compile(r"^```", re.M)
+
+    def fenced_code_blocks(text: str):
+        parts = fence_re.split(text)
+        for part in parts[1::2]:  # odd slices are inside fences
+            yield part
+
+    offenders: dict[str, set] = {}
+
+    spec_dir = NEXT.parent / "rewrite" / "spec"
+    spec_topics = sorted(spec_dir.rglob("*.md")) if spec_dir.is_dir() else []
+    for path in spec_topics:
+        text = path.read_text(encoding="utf-8")
+        found = {t for block in fenced_code_blocks(text) for t in token_re.findall(block)}
+        unknown = found - generated
+        if unknown:
+            offenders.setdefault(str(path), set()).update(unknown)
+
+    for path in build._workflow_files():
+        text = path.read_text()
+        start, end = text.find("// >>> stamped:prelude"), text.find("// <<< stamped:prelude")
+        body = text[:start] + text[end + len("// <<< stamped:prelude"):] if start >= 0 and end >= 0 else text
+        unknown = set(token_re.findall(body)) - generated
+        if unknown:
+            offenders.setdefault(str(path), set()).update(unknown)
+
+    expect(
+        not offenders,
+        "S_* names that are not generated literals: "
+        + "; ".join(f"{p}: {sorted(n)}" for p, n in sorted(offenders.items())),
+    )
+
+
+CHECKPOINT_CALL_RE = re.compile(r"(vsdd checkpoint[^\n`]*)")
+FENCE_SPLIT_RE = re.compile(r"^```", re.M)
+
+
+def _checkpoint_problems(call: str, in_fence: bool) -> list[str]:
+    """One invocation against commands/checkpoint.md's syntax,
+    `vsdd checkpoint <workflow> --run <id> [--outcome failed]` (--json last). The
+    script texts' conditional, `${failed ? ' --outcome failed' : ''}`, is resolved
+    first; any other interpolation is a value placeholder."""
+    call = re.sub(r"\$\{failed[^}]*' --outcome failed'[^}]*\}", " --outcome failed", call)
+    call = re.sub(r"\$\{[^}]*\}", "V", call)
+    tokens = call.replace("[", " ").replace("]", " ").split()
+    rest = tokens[2:] if tokens[:2] == ["vsdd", "checkpoint"] else []
+    if not rest:
+        return []  # the command named with nothing invoked
+    if rest[0] == "brief":
+        return []  # the brief variant: [[command:checkpoint-brief]], no --run
+    if not in_fence and not any(token.startswith("--") for token in rest):
+        return []  # a prose mention ("vsdd checkpoint releases it"), no invocation to grammar
+    problems: list[str] = []
+    i = 1
+    while i < len(rest):
+        token = rest[i]
+        if token == "--run":
+            if i + 1 >= len(rest):
+                problems.append("--run carries no run id")
+                break
+            i += 2
+            continue
+        if token == "--outcome":
+            value = rest[i + 1] if i + 1 < len(rest) else ""
+            if value != "failed":
+                problems.append(f"--outcome must be failed, got {value!r} (commands/checkpoint.md)")
+            i += 2
+            continue
+        if token == "--json":
+            break  # the command ends here; the rest of the line is the script's JS
+        if token.startswith("--"):
+            problems.append(
+                f"flag {token!r} is not in the syntax `vsdd checkpoint <workflow> --run <id> "
+                "[--outcome failed]`"
+            )
+            i += 1
+            continue
+        problems.append(f"unexpected argument {token!r}")
+        i += 1
+    return problems
+
+
+@check
+def checkpoint_calls_match_the_signature() -> None:
+    """Every `vsdd checkpoint` invocation in a spec file or a toy body matches
+    commands/checkpoint.md (P3SEAM-10, P3COV-10, CATCHUP-R10): a `--subject` a
+    parser would refuse, or an `--outcome` other than failed, stalls the closing
+    command and holds the run's lock. Inside a fenced code block or a toy body
+    every call is grammar-checked; in prose only a candidate that carries flags is
+    one, so a mention of the command is never mistaken for an invocation."""
+    sources: list[tuple[str, str, bool]] = []
+    spec_dir = NEXT.parent / "rewrite" / "spec"
+    if spec_dir.is_dir():
+        for path in sorted(spec_dir.rglob("*.md")):
+            sources.append((f"rewrite/spec/{path.relative_to(spec_dir)}", path.read_text(encoding="utf-8"), True))
+    for path in sorted((NEXT / "tests" / "workflows" / "toys").glob("*.js")):
+        sources.append((f"next/tests/workflows/toys/{path.name}", path.read_text(), False))
+    problems: list[str] = []
+    for label, text, is_markdown in sources:
+        if is_markdown:
+            # Fence-split: the odd slices are inside ``` pairs and are code.
+            slices = FENCE_SPLIT_RE.split(text)
+            segments = [(segment, index % 2 == 1) for index, segment in enumerate(slices)]
+        else:
+            segments = [(text, True)]
+        for segment, fenced in segments:
+            for match in CHECKPOINT_CALL_RE.finditer(segment):
+                for problem in _checkpoint_problems(match.group(1), fenced):
+                    problems.append(f"{label}: {problem} (in {match.group(1)!r})")
+    expect(not problems, "; ".join(problems[:10]))
+
+
+PRODUCT_CLASS_KEYS = ["tests", "harness", "ci", "repo-config", "manifests", "docs", "source"]
+
+
+@check
+def policy_tables_are_consistent() -> None:
+    """The three shipped policy tables (C2) parse and cross-reference: a wall
+    row may only name classes, vsdd groups, and command families the design's
+    command-families table defines, every row denies the runs class, the
+    person-only and governed constants are the single copies in the design's
+    tables/callers.toml, and the reveals vocabulary is the artifact registry's."""
+    policy_dir = PLUGIN / "py" / "vsdd" / "policy"
+    artifacts = tomllib.loads((policy_dir / "artifacts.toml").read_text())
+    classes = tomllib.loads((policy_dir / "classes.toml").read_text())
+    walls = tomllib.loads((policy_dir / "walls.toml").read_text())
+
+    computed = {"own-worktree", "project", "tmp", "outside"}
+    class_names = {name for name in classes if name != "_product"} | computed
+    groups = walls.get("callers", {})
+    rows = {
+        name: row
+        for name, row in walls.items()
+        if isinstance(row, dict) and name not in ("callers", "reveals")
+    }
+    expect("main" in rows and "other" in rows, "walls.toml must carry the main and other rows")
+    kinds = {name for name, row in artifacts.items() if isinstance(row, dict)}
+
+    for name, row in rows.items():
+        for key in ("read_deny", "read_allow", "write"):
+            unknown = {str(grant).split(":")[0] for grant in row.get(key, [])} - class_names
+            expect(
+                not unknown,
+                f"walls.toml [{name}] {key} names undefined path classes: {sorted(unknown)}",
+            )
+        unknown_groups = set(row.get("vsdd", [])) - set(groups)
+        expect(
+            not unknown_groups,
+            f"walls.toml [{name}] holds undefined vsdd groups: {sorted(unknown_groups)}",
+        )
+        expect(
+            "runs" in row.get("read_deny", []),
+            f"walls.toml [{name}] does not deny the runs class (wall W3, every row)",
+        )
+
+    for name, row in rows.items():
+        expect(
+            "relaxed_by" not in row or name == "main",
+            f"walls.toml [{name}] carries relaxed_by; only the main row may (decision D6)",
+        )
+        if name.startswith("vsdd-factory:") and name not in (
+            "vsdd-factory:spike-runner", "vsdd-factory:clerk"
+        ):
+            expect(
+                row.get("dispatch") == ["vsdd-factory:spike-runner"],
+                f"walls.toml [{name}] must dispatch the spike runner and nothing else",
+            )
+    command_families = set(
+        tomllib.loads((SPEC_DIR / "tables" / "command-families.toml").read_text())["families"]
+    ) | {"*"}
+    for name, row in rows.items():
+        unknown = set(row.get("commands", [])) - command_families
+        expect(
+            not unknown,
+            f"walls.toml [{name}] commands name undefined command families: {sorted(unknown)} "
+            "(tables/command-families.toml is the one list of family names)",
+        )
+
+    measure_holders = {n for n, r in rows.items() if "measure" in r.get("vsdd", [])}
+    expect(
+        measure_holders == {"vsdd-factory:clerk"},
+        f"only the clerk's row holds the measure group: {sorted(measure_holders)}",
+    )
+    callers_spec = tomllib.loads((SPEC_DIR / "tables" / "callers.toml").read_text())
+    human_only = set(callers_spec["HUMAN_ONLY"])
+    governed = set(callers_spec["GOVERNED"])
+    granted_subcommands = {sub for members in groups.values() for sub in members}
+    expect(
+        not human_only & granted_subcommands,
+        "a [callers] group carries a person-only subcommand: "
+        + ", ".join(sorted(human_only & granted_subcommands)),
+    )
+    for gov in sorted(governed):
+        expect(
+            any(entry == gov or gov.startswith(entry) for entry in granted_subcommands),
+            f"the governed subcommand {gov!r} matches no granted group entry, so merge-guard's "
+            "route list would bite on nothing",
+        )
+    expect(not governed & human_only, "a subcommand is both person-only and governed")
+
+    for key, revealed in walls.get("reveals", {}).items():
+        if key.startswith("list "):
+            kind = key[len("list "):]
+            expect(
+                kind in kinds,
+                f"reveals key {key!r} matches no artifact kind in artifacts.toml",
+            )
+        unknown = set(revealed) - class_names
+        expect(not unknown, f"reveals key {key!r} names undefined classes: {sorted(unknown)}")
+
+    for name in PRODUCT_CLASS_KEYS:
+        row = classes.get(name)
+        expect(isinstance(row, dict), f"classes.toml is missing the {name} class")
+        expect(
+            str(row.get("from_config", "")).startswith("paths."),
+            f"classes.toml [{name}] must take its globs from the project configuration",
+        )
+    precedence = classes.get("_product", {}).get("precedence", [])
+    expect(
+        precedence == PRODUCT_CLASS_KEYS,
+        f"classes.toml [_product] precedence must be {PRODUCT_CLASS_KEYS}, got {precedence}",
+    )
+    expect(
+        precedence.index("tests") < precedence.index("source"),
+        "the precedence must resolve tests before source, or src/**/tests.rs is source",
+    )
+
+
+@check
+def event_schema_is_the_shipped_file() -> None:
+    """The event log's schema is the shipped JSON file, loaded by the writer
+    (CATCHUP-R15): the file is the single source, the log's line admits what the
+    launcher writes, and the documented type list lives in its table."""
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(PLUGIN / "py"))
+    from vsdd.events import EVENT_SCHEMA  # noqa: E402
+
+    shipped = read_json(PLUGIN / "schemas" / "event.schema.json")
+    expect(
+        EVENT_SCHEMA == shipped,
+        "py/vsdd/events.py must load its schema from plugins/vsdd-factory/schemas/event.schema.json "
+        "(an inline copy has drifted from the shipped file)",
+    )
+    expect(
+        shipped.get("properties", {}).get("session_id", {}).get("type") == ["string", "null"],
+        "the event schema must admit the launcher's null session_id",
+    )
 
 
 # ---------------------------------------------------------------------------

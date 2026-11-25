@@ -1,77 +1,95 @@
 # The roster as data: the user's model policy, the 20 agents, the 13 skills, the 12 workflows,
-# the one marked override, and the context budgets (packaging.md 2.6; blueprint 4.2, 4.3).
+# the one marked override, and the context budgets, as failing tests.
 #
-# B4a consumes this file: tools/build.py generates the TIER, ROLE and OVERRIDE tables in
-# workflow-lib/prelude.js from [tiers], [agents] and [overrides]. The lint suite (B6) checks agent,
-# skill and workflow files against it; until B6 lands only the build reads it.
+# Sources: agents-skills.md#2.12, agents-skills.md#2.4, agents-skills.md#2.5, packaging.md
+# (layer 3), BLUEPRINT.md#4.2, BLUEPRINT.md#4.3, BLUEPRINT.md#4.5, pipeline.md#2.3.
+#
+# Package B6 delivers this file. Two consumers:
+#   - tools/build.py generates the TIER, ROLE and OVERRIDE tables in workflow-lib/prelude.js
+#     from [tiers], [agents] and [overrides];
+#   - the lint suite (tests/lint/test_roster_lint.py) holds every shipped agent, workflow and
+#     manifest to this file (L-ROSTER, L-AGENT, L-XREF, L-BUDGET, L-MAN).
+# Until all packages are built, the lint checks only that nothing on disk is absent from the
+# roster (packaging/build-plan.md, "The thin slice"); the roster itself lists the whole design,
+# so the prelude's tier tables are complete from the start.
+# Agent packages are in the spec registry, one package per agent; the named tool sets are
+# topics/tool-sets.md in the design.
 
-[platform]
+[platform]                           # read by L-MAN: the engines floor in plugin.json equals min_claude_code
 min_claude_code = "2.1.331"
 python_floor = "3.11"
 
 [tiers]                              # the one source for agent files and the prelude
-planner  = { model = "fable",  effort = "xhigh" }
-builder  = { model = "sonnet", effort = "xhigh" }
-reviewer = { model = "opus",   effort = "xhigh" }
-clerk    = { model = "sonnet", effort = "low" }        # steps that run one vsdd command (D5)
+planner  = { model = "fable",  effort = "xhigh", color = "blue" }
+builder  = { model = "sonnet", effort = "xhigh", color = "green" }
+reviewer = { model = "opus",   effort = "xhigh", color = "red" }
+clerk    = { model = "sonnet", effort = "low",   color = "yellow" }   # steps that run one vsdd command (decision D5)
 
-[agents]                             # name = tier (blueprint 4.3, 20 agents)
-product-owner = "planner"
-architect = "planner"
-ux-designer = "planner"
-story-writer = "planner"
+[agents]                             # name = tier (20 names; BLUEPRINT.md#4.3)
+product-owner     = "planner"
+architect         = "planner"
+ux-designer       = "planner"
+story-writer      = "planner"
 codebase-analyzer = "planner"
-researcher = "planner"
-spike-runner = "planner"
-test-writer = "builder"
-implementer = "builder"
-verifier = "builder"
-demo-recorder = "builder"
-technical-writer = "builder"
-devops = "builder"
-adversary = "reviewer"
-code-reviewer = "reviewer"
+researcher        = "planner"
+spike-runner      = "planner"
+test-writer       = "builder"
+implementer       = "builder"
+verifier          = "builder"
+demo-recorder     = "builder"
+technical-writer  = "builder"
+devops            = "builder"
+adversary         = "reviewer"
+code-reviewer     = "reviewer"
 security-reviewer = "reviewer"
 holdout-evaluator = "reviewer"
-ui-reviewer = "reviewer"
+ui-reviewer       = "reviewer"
 scenario-reviewer = "reviewer"
-clerk = "clerk"
+clerk             = "clerk"
 
-[skills]                             # name = "person" | "model" | "both" (only status is model-visible)
-status = "model"
-setup = "person"
-decide = "person"
-drive = "person"
-brief = "person"
-research = "person"
-review = "person"
-author = "person"
-retro = "person"
-defer = "person"
-observe = "person"
-preview = "person"
+# name = who may invoke it; "both" means person and model. status is the one model-visible
+# skill (skills/status.md): the model-visible budget below counts it.
+[skills]
+status     = "both"
+setup      = "person"
+decide     = "person"
+drive      = "person"
+brief      = "person"
+research   = "person"
+review     = "person"
+author     = "person"
+retro      = "person"
+defer      = "person"
+observe    = "person"
+preview    = "person"
 export-pdf = "person"
 
-[workflows]                          # name = { calls = [...] }: only story is ever called (blueprint 4.5)
-ingest = { calls = [] }
+# name = { calls = [...] }. The twelve names of pipeline.md#2.3; its Calls column is the source of
+# the call edges: wave, feature, verify, maintain and multi call story, and story calls none
+# (BLUEPRINT.md#4.5). The lint holds every workflow file to its row (L-XREF), and a workflow another
+# workflow calls may hold no workflow() call of its own.
+[workflows]
+ingest   = { calls = [] }
 discover = { calls = [] }
-spec = { calls = [] }
-feature = { calls = ["story"] }
-plan = { calls = [] }
-wave = { calls = ["story"] }
-story = { calls = [] }
-verify = { calls = ["story"] }
-release = { calls = [] }
+spec     = { calls = [] }
+feature  = { calls = ["story"] }
+plan     = { calls = [] }
+wave     = { calls = ["story"] }
+story    = { calls = [] }
+verify   = { calls = ["story"] }
+release  = { calls = [] }
 maintain = { calls = ["story"] }
-multi = { calls = ["story"] }
-spike = { calls = [] }
+multi    = { calls = ["story"] }
+spike    = { calls = [] }
 
-[overrides]                          # the only steps that run off their agent's tier (D5); lint rejects any other
+[overrides]                          # the only steps that run off their agent's tier (decision D5); lint rejects any other
 "ingest/map" = "builder"
 "ingest/analyze" = "builder"
 
 [budgets]                            # the context budget the lints hold every file to
-model_visible_skills = 1
-listed_description_chars = 400
-agent_file_lines = 60
+model_visible_skills = 1             # status, the one skill with a value other than "person"
+listed_description_chars = 4400      # 20 agent descriptions of at most 200, 1 skill description of at most 400
+agent_file_lines = 70                # whole file with the stamped regions removed: frontmatter plus a body of at most 60 lines
+agent_body_lines = 60                # body only; the stamped regions (shared block, severity table) are not counted
 skill_file_lines = 150
+method_file_lines = 150

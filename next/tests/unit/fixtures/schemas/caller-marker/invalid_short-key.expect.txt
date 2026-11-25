@@ -1,0 +1,1 @@
+$.key: string is 31 characters; the minimum is 32

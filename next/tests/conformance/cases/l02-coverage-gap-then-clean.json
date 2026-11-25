@@ -1,0 +1,93 @@
+{
+  "name": "l02-coverage-gap-then-clean",
+  "about": "An unaccounted item is a coverage finding; the fixer is asked and the next pass converges.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage_missing": [
+            "AC-1"
+          ]
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "coverage:S-9.01:AC-1",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [],
+          "claim_checks": [
+            {
+              "key": "coverage:S-9.01:AC-1",
+              "outcome": "resolved"
+            }
+          ],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 2,
+      "rounds_used": 2,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "trace": [
+      {
+        "pass": 1,
+        "claims": [],
+        "gaps": [],
+        "fix": [
+          "coverage:S-9.01:AC-1"
+        ]
+      },
+      {
+        "pass": 2,
+        "claims": [
+          {
+            "key": "coverage:S-9.01:AC-1",
+            "path": "",
+            "resolution": "fixed",
+            "commit": "c1"
+          }
+        ],
+        "gaps": [
+          "AC-1"
+        ]
+      }
+    ]
+  }
+}

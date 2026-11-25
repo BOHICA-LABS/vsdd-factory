@@ -1,0 +1,211 @@
+{
+  "name": "r10-arbitration-record",
+  "about": "Rulings come from the loop's arbitration record (decision D6).",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 2,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {},
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "fix-implementer-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "fix-findings",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "disputed",
+              "commit": "",
+              "note": "because"
+            }
+          ]
+        },
+        "gates": [
+          {
+            "gate": "green",
+            "subject": "S-9.01",
+            "passed": true,
+            "sha": "h1",
+            "evidence": "e",
+            "failures": []
+          }
+        ],
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p2",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 2
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "arbitrate-u-l",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "arbitrate",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "rulings": [
+            {
+              "key": "code:a",
+              "ruling": "not_defect",
+              "reason": "r"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:architect",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 2,
+      "rounds_used": 2,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [
+        {
+          "key": "code:a",
+          "by": "arbiter",
+          "reason": "r"
+        }
+      ],
+      "coverage_missing": []
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "converged",
+        "reason": "clean"
+      }
+    ],
+    "skipped": [],
+    "chain": true,
+    "passes_used": 2
+  }
+}

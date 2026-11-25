@@ -5,17 +5,17 @@
 """Entry point for the `vsdd` command.
 
 Started by py/launch.sh as `uv run --script cli.py <args>` (and reachable
-through bin/vsdd). The operator subcommands are added package by package; this
-unit delivers the argument parser frame, the global `-C <dir>` option slot and
-`--version`. The version is read from the plugin manifest, which is its single
-source.
+through bin/vsdd). The commands themselves live in modules under
+`vsdd.state`, `vsdd.gates`, `vsdd.delivery` and `vsdd.cli`, dispatched by
+`vsdd.cli.dispatch` (state-core.md 3.1): this file holds the guarded import
+and the guarded call that turn a broken installation or a killed run into
+exit 2 — an import error or a crash must not leave as exit 1, the launcher's
+negative answer.
 
 Exit codes (blueprint 4.9): 0 success or "yes"; 1 a negative answer; 2 a
 usage or environment error.
 """
 
-import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -27,43 +27,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 PROGRAM = "vsdd"
 
 
-def plugin_version() -> str:
-    manifest = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+def main(argv: list[str] | None = None, **kwargs) -> int:
+    """One whole run of vsdd; `vsdd <words>` argument tokens in, exit code out."""
+    if argv is None:
+        argv = sys.argv[1:]
     try:
-        with open(manifest, encoding="utf-8") as fh:
-            return str(json.load(fh)["version"])
-    except (OSError, KeyError, json.JSONDecodeError):
-        # An unusable manifest is an environment error, not a crash: exit 2
-        # with the name of the faulty installation.
-        print(f"{PROGRAM}: cannot read the plugin manifest at {manifest}; the plugin installation is damaged. Reinstall the plugin.", file=sys.stderr)
-        raise SystemExit(2)
-
-
-def build_parser(version: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog=PROGRAM,
-        description="vsdd-factory operator tool (subpackage commands arrive with their packages).",
-    )
-    parser.add_argument("--version", action="version", version=f"{PROGRAM} {version}")
-    parser.add_argument(
-        "-C",
-        metavar="DIR",
-        help="project directory (global option; honoured by the subcommands)",
-    )
-    return parser
-
-
-def main(argv: list[str]) -> int:
-    version = plugin_version()
-    parser = build_parser(version)
-    parser.parse_args(argv)  # --version and -h exit from here
-    # No subcommand was given. The subcommand table is empty in this unit, so
-    # this is a usage error; outside-initialised-project handling arrives with
-    # the subcommands themselves.
-    parser.print_usage(sys.stderr)
-    print(f"{PROGRAM}: no subcommand given; try '{PROGRAM} --help'", file=sys.stderr)
-    return 2
+        from vsdd.cli import dispatch
+    except BaseException as exc:
+        if isinstance(exc, SystemExit):
+            raise
+        print(f"{PROGRAM}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    try:
+        return dispatch.main(list(argv), **kwargs)
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        # Anything at all that escapes the dispatcher is an environment error,
+        # not the negative answer: exit 2 with the name of the fault.
+        print(f"{PROGRAM}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

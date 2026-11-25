@@ -1,0 +1,17 @@
+{
+  "step": {
+    "run": "r-20261124-0915-a1",
+    "workflow": "story",
+    "name": "implement",
+    "subject": "S-9.01",
+    "attempt": 1,
+    "method": "tdd"
+  },
+  "status": "done",
+  "summary": "Both failing tests pass on the head commit.",
+  "head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "data": {},
+  "agent_type": "builder",
+  "worktree_head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "agent_id": "agent-0f3e"
+}

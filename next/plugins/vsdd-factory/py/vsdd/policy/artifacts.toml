@@ -1,0 +1,397 @@
+# The artifact registry: one row per artifact kind, with the story kinds.
+# Sources: state.md#2.5, state.md#2.4, state.md#layout, state.md#2.8, hooks.md#2.11.3,
+# BLUEPRINT.md#4.6, pipeline.md#2.9.1, pipeline.md#2.9.13.
+#
+# This file is the single definition. The design tables under rewrite/spec/tables/ point here
+# (spec README rule 7: when a package is built, its code and tests become the truth).
+#
+# Read by the hook rule `artifacts` before a write, by `vsdd validate` for a whole tree and by
+# `vsdd new`. The kind cells are the tables of state.md#2.5, one row per kind; the
+# [dependencies] locked-set rule is state.md#2.8, its path state.md#layout. Caps are in bytes;
+# "Living" means edited in place with history in git.
+#
+# Slice depth: the [contract], [story], [[story-kind]] and [_unknown] rows are pinned by
+# tests/unit/test_policy.py. The other kind rows are the design's rows carried verbatim and are
+# untested design placeholders: their glob and id cells still use the design's notation (<NN>,
+# comma-listed alternates), not machine globs, and a loader would send every write to such a kind
+# to [_unknown] until the package that ships the kind gives them real cells. cap_note carries the
+# design's cap cell verbatim; where a kind caps per file (design-system, asset, demo-evidence,
+# review-report, analysis, deferred-item), max_bytes is the per-kind or per-story total and the
+# per-file caps are the prose in cap_note.
+#
+# Columns - the format of hooks.md#2.11.3 plus the state design's extras: glob/id/dir (path,
+# identifier pattern, derived directory; schemes are held by [[table:identifiers]] in the design);
+# frontmatter (allowed keys, types, enumerated values; "" is a key the design lists with no type;
+# for TOML- and JSON-bodied kinds the design's description of the body); writer and lifecycle
+# (state.md#2.5); max_bytes, the size cap checked before the write, with cap_note carrying the
+# design's cap cell verbatim; lock ("spec" = spec_locked; "done" = artifact_locked); headings;
+# template (vsdd new). A write matching no kind gets [_unknown].
+#
+# The story kinds: [[story-kind]] below holds, per kind, the tests stage and the implement stage
+# (agent and default method) and whether the kind has a red gate (BLUEPRINT.md#4.6; the kind table
+# exists once, here). A story may override the tests stage with frontmatter `tests_method` and the
+# implement stage with frontmatter `impl_method`; the survey and admission resolve kind and
+# override into the story unit, and the write-grant suffix `@<method>` in walls.toml matches the
+# resolved method of the caller's own stage (impl_method for an implement agent, tests_method for
+# a tests agent).
+
+[contract]
+glob        = ".factory/specs/product/contracts/*/BC-*.md"
+id          = '^BC-(\d+)\.(\d{2})\.(\d{3})$'  # equals the file stem and the frontmatter id
+dir         = "{1}.{2}"  # the parent directory is derived from the identifier
+frontmatter = { id = "str", title = "str", status = ["draft", "retired"], subsystem = "ref:subsystem", capability = "ref:capability", origin = ["new", "recovered"], replaced_by = "ref:contract?", aliases = "list[str]?" }
+writer      = "product-owner"
+lock        = "spec"  # frozen while the specification set is locked (below)
+# A `ref:` value is checked for syntax when the file is written. Whether the referenced artifact exists is
+# checked by `vsdd gate spec`, `vsdd gate plan`, `vsdd validate` and at approval, so a contract may name a
+# subsystem that a later stage writes, and parallel story writers may reference each other.
+headings    = ["Behavior", "Preconditions", "Postconditions", "Invariants", "Edge cases", "Test vectors"]
+max_bytes   = 8000
+template    = "contract.md"
+lifecycle   = "draft, then retired. \"Approved\" is computed: the latest approved spec decision covers the file. \"Implemented\" is derived: a done story names it. Test vectors live in the contract."
+
+# The story row: "ready" and "done" are computed from closure records, not written; the contracts
+# syntax here, their existence at the gates. Frontmatter: the story's keys of state.md#2.5
+# (hooks.md#2.11.3's [story] row is "illustrative; the content is state.md section 2.5"), with the
+# stage methods carried as the two keys impl_method and tests_method.
+[story]
+glob        = ".factory/stories/E-*/S-*.md"
+id          = '^S-(\d+)\.(\d{2})$'  # must equal the file stem and the frontmatter id
+dir         = "E-{1}"  # the parent directory is derived from the identifier
+writer      = "story-writer"
+headings    = ["Acceptance criteria"]
+max_bytes   = 16000
+lock        = "done"  # frozen once its delivery closure exists (artifact_locked)
+forbid      = ['\b[\w./-]+\.(rs|py|ts|tsx|js|go|java):\d+\b']  # volatile file:line citations
+tables      = true  # every table row has as many cells as its header
+lifecycle   = "draft. \"Ready\" is computed: the plan's closure places the story in a wave, or a run's closure records its admission (a fast-route story, a readiness chore, a fix story). \"Done\" is computed: its delivery closure exists. Frozen once done."
+
+# The story's frontmatter keys, with types. "str" / "int" / "bool" are the leaf types;
+# "list[...]" a one-line list; "ref:<kind>" is checked for syntax at the write and for existence
+# at the gates; a trailing "?" marks a key a story may omit. Descriptions the design gave a key
+# live in the comments.
+[story.frontmatter]
+id = "str"
+title = "str"
+status = ["draft", "dropped"]
+cycle = "str"                          # the cycle the story belongs to
+kind = ["feature", "fix", "port", "facade", "docs", "chore", "harness"]
+impl_method = "str?"                   # another method of the kind's implement agent
+tests_method = "str?"                  # another method of the test-writer for the tests stage (ui-tests, e2e-tests)
+depends_on = "list[ref:story]?"        # stories whose delivery this story waits for
+contracts = "list[ref:contract]"
+properties = "list[str]?"              # domain property ids the story accounts for
+points = "int?"                        # estimate in story points
+priority = ["P0", "P1", "P2"]
+criticality = ["critical", "high", "medium", "low"]
+security = "bool?"                     # needs a security-reviewer pass
+ui = "bool?"                           # touches the user interface
+demo = "bool?"                         # needs recorded demo evidence at the green gate
+screens = "list[ref:screen]?"          # the screens the story implements
+repo = "str?"                          # the [[component]] repository, in a multi-repo project
+source = "str?"                        # the finding a fix story answers
+
+# A write under the state directory that matches no kind.
+[_unknown]
+policy = "block"
+
+[brief]
+glob = ".factory/specs/product/brief.md"
+frontmatter = { title = "", status = ["draft"] }
+writer = "The main session in the brief skill, which saves the draft after each section; the product-owner, which writes the final text"
+max_bytes = 12000
+lifecycle = "Living. \"Approved\" is computed from decision brief. A brief that exists with no brief decision is \"in draft\", which is a route state: the next command is /vsdd-factory:brief."
+
+[prd]
+glob = ".factory/specs/product/prd.md"
+frontmatter = { title = "", status = "" }
+writer = "product-owner"
+max_bytes = 16000
+lifecycle = "Living. Goals, scope, non-goals, release slicing, success measures. It lists no contracts; that list is derived."
+
+[domain-spec]
+glob = ".factory/specs/product/domain/<section>.md"
+frontmatter = { title = "" }
+writer = "product-owner"
+max_bytes = 32000
+lifecycle = "Living. One file per section: capabilities, entities, invariants, events, edge-cases, assumptions, risks, failure-modes, glossary. Items are ## CAP-012: Title headings. A retired item keeps its heading and gains a line Retired: replaced by CAP-031. A section over its cap splits by area: capabilities-billing.md."
+
+[supplement]
+glob = ".factory/specs/product/supplements/nfr.md, errors.md, interfaces.md"
+frontmatter = { title = "" }
+writer = "product-owner"
+max_bytes = 24000
+lifecycle = "Living. Items are headings, as above."
+
+[architecture-overview]
+glob = ".factory/specs/architecture/overview.md"
+frontmatter = { title = "" }
+writer = "architect"
+max_bytes = 24000
+lifecycle = "Living."
+
+[subsystem]
+glob = ".factory/specs/architecture/SS-<NN>.md"
+frontmatter = { id = "", title = "", status = ["active", "retired"], depends_on = "", repo = "" }
+writer = "architect"
+max_bytes = 16000
+lifecycle = "Living. The subsystem list is these files; there is no separate registry."
+
+[module-map]
+glob = ".factory/specs/architecture/modules.toml"
+frontmatter = "TOML: [[module]] with name, paths, subsystem, criticality, pure"
+writer = "architect"
+max_bytes = 16000
+lifecycle = "Living. Gates read it for criticality thresholds; the hook rule purity-advice may read it for pure paths."
+
+[project-conventions]
+glob = ".factory/specs/architecture/conventions.md"
+frontmatter = { title = "" }
+writer = "architect"
+max_bytes = 12000
+lifecycle = "Living. How code is written in this project. Given to builders."
+
+[review-rules]
+glob = ".factory/specs/architecture/review-rules.md"
+frontmatter = { title = "" }
+writer = "architect"
+max_bytes = 8000
+lifecycle = "Living. The project's own rules for reviewers. It replaces the policy registry."
+
+[adr]
+glob = ".factory/specs/architecture/decisions/ADR-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["proposed", "rejected"], subsystems = "", supersedes = "" }
+writer = "architect"
+max_bytes = 12000
+lifecycle = "proposed. \"Accepted\" is computed: an approved spec decision lists the record's id, and from then it is frozen, even under a later amendment. \"Superseded\" is derived. The old ADR-052 reached 685 KB at version 1.33 by being amended in place; here an amendment is a new record."
+
+[verification-property]
+glob = ".factory/specs/architecture/properties/VP-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["draft", "withdrawn", "retired"], contracts = "", method = ["unit", "property", "fuzz", "model-check", "proof", "manual"], module = "", harness = "", replaced_by = "" }
+writer = "architect"
+max_bytes = 6000
+lifecycle = "draft. \"Active\" is computed from the approved specification set, and \"proven\" from the verify closure that lists it after the formal check of vsdd gate release passed for it. Frozen once proven, which the old protect-vp hook never actually enforced."
+
+[toolchain]
+glob = ".factory/specs/architecture/toolchain.toml"
+frontmatter = "TOML: [commands], test_report, [paths], in the shapes of the [commands] and [paths] keys of the project configuration"
+writer = "architect"
+max_bytes = 4000
+lifecycle = "Living. The commands and path globs the project uses. For an empty repository the architect chooses them in spec; for an existing one ingest recovers them. It is part of the specification set, so the spec decision approves it, and the next survey writes its values into the factory.toml keys that are still unset."
+
+[assessment]
+glob = ".factory/specs/architecture/assessments/<slug>.md"
+frontmatter = { title = "", kind = ["verification", "service-clones", "clone", "port", "impact", "data-model", "feasibility"], cycle = "" }
+writer = "architect"
+max_bytes = 16000
+lifecycle = "Living. One per topic: the verification strategy, the service-clone assessment, one clone specification per service, a port assessment, the impact of a change."
+
+[dependencies]
+glob = ".factory/specs/architecture/dependencies.toml"
+writer = "architect"
+lock = "spec"
+lifecycle = "Part of the locked specification set, so a dependency a person approves in a merge decision cannot be written into it during a build. Dependency detection in vsdd story deliver reads dependencies.toml and the dependencies of every approved merge decision newer than the latest approved spec decision; the next spec or amendment run has the architect fold them in."
+
+[ux-overview]
+glob = ".factory/specs/ux/overview.md"
+frontmatter = { id = "", title = "", status = ["active", "retired"] }
+writer = "ux-designer"
+max_bytes = 12000
+lifecycle = "Living. UI projects only."
+
+[screen]
+glob = ".factory/specs/ux/screens/SCR-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["active", "retired"] }
+writer = "ux-designer"
+max_bytes = 8000
+lifecycle = "Living. UI projects only."
+
+[flow]
+glob = ".factory/specs/ux/flows/FLOW-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["active", "retired"], screens = "" }
+writer = "ux-designer"
+max_bytes = 8000
+lifecycle = "Living. UI projects only."
+
+[design-system]
+glob = ".factory/specs/ux/design-system/**"
+frontmatter = "none (JSON, YAML, Markdown files)"
+writer = "ux-designer"
+max_bytes = 64000
+cap_note = "64,000 per file"
+lifecycle = "Living."
+
+[asset]
+glob = ".factory/specs/*/assets/<name>.(svg, png, jpg, mmd, excalidraw, drawio)"
+frontmatter = "none"
+writer = "The owner of the directory"
+max_bytes = 512000
+cap_note = "512,000 per file"
+lifecycle = "Living."
+
+[epic]
+glob = ".factory/stories/E-<N>/epic.md"
+frontmatter = { id = "", title = "", cycle = "", capabilities = "", status = ["open", "dropped"] }
+writer = "story-writer"
+max_bytes = 6000
+lifecycle = "\"Done\" is derived: every story in the directory is done or dropped."
+
+[holdout-scenario]
+glob = ".factory/holdout/HS-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["active", "stale", "retired"], contracts = "", category = "", must_pass = "" }
+writer = "product-owner"
+max_bytes = 6000
+lifecycle = "Living. There is no separate wave scenario kind: the scenarios for a wave are those whose contracts the wave's stories implement, and the rotation sample is drawn by vsdd from a recorded seed."
+
+[review-report]
+glob = ".factory/reviews/<yyyy-mm-dd>-<lens>-<n>.md"
+frontmatter = { commit = "" }
+writer = "The reviewer for the lens, in an on-demand review started by the review skill"
+max_bytes = 16000
+cap_note = "16,000; at most 50 files, reported by vsdd status when exceeded"
+lifecycle = "Write-once. The reviewer is handed the path, which vsdd review prepare <lens> returns. A review inside the pipeline writes no file: its structured result is the review."
+
+[holdout-evaluation]
+glob = ".factory/holdout/evaluations/<cycle>/<unit>-<n>.json"
+frontmatter = "JSON: commit, seed, scores, symptoms, and walled_findings (the full form of scenario-review findings and of any finding located under holdout/)"
+writer = "vsdd checkpoint, from the evaluator's and the scenario-reviewer's step records"
+max_bytes = 24000
+lifecycle = "Write-once. Inside the holdout wall. The product owner reads it when refreshing scenarios and when fixing scenario-review findings. Removed with holdout/evaluations/<cycle>/ when the cycle closes."
+
+[demo-evidence]
+glob = ".factory/demo/<cycle>/<story>/AC-<k>.(tape, spec.ts, sh), AC-<k>.txt, AC-<k>.png, report.md"
+frontmatter = "none"
+writer = "demo-recorder"
+max_bytes = 1500000
+cap_note = "script 8,000; transcript 20,000; screenshot 300,000; 1,500,000 per story"
+lifecycle = "The script and the text transcript are the evidence, because they can be run again. Rendered video and GIF files go to .factory/local/media/ and are never committed. Removed only when the cycle closes."
+
+[analysis]
+glob = ".factory/analysis/<scope>/<slug>.md"
+frontmatter = { title = "", pass = "" }
+writer = "codebase-analyzer"
+max_bytes = 24000
+cap_note = "24,000; 40 files per scope"
+lifecycle = "Living during ingestion, then kept as the source of recovered contracts. The scope is codebase or a reference repository's name."
+
+[research-report]
+glob = ".factory/research/<yyyy-mm-dd>-<slug>.md"
+frontmatter = { title = "", kind = ["domain", "technical", "market", "competitive", "feedback", "opportunity", "retrospective"], question = "" }
+writer = "researcher"
+max_bytes = 32000
+lifecycle = "Living. A superseded report is deleted with vsdd retire, by the checkpoint when a step names it. A report of kind retrospective carries the cycle's proposals, each naming the line it would add to conventions.md or review-rules.md; this replaces the lessons register."
+
+[spike-ledger-entry]
+glob = ".factory/spikes/SP-<NNN>.md"
+writer = "vsdd spike open creates it; vsdd spike record completes it"
+max_bytes = 4000
+lifecycle = "Permanent. vsdd spike open searches it first, so a question already answered is not run again; an earlier finding is returned only to an asker whose own deny set is covered by the entry's read_deny, so a finding produced under looser walls never reaches a stricter asker. The body holds the answer and up to ten evidence lines."
+
+[spike-ledger-entry.frontmatter]
+id = ""
+question = ""
+asker = ""
+run = ""
+ref = ""
+opened = ""
+minutes = ""
+verdict = ["confirmed", "refuted", "answered", "inconclusive", "refused"]
+method = ""
+agent = "the runner's agent id, from the caller marker"
+asker_type = "the asker's agent type, whose walls the runner inherits; taken from the asking step's stored record or from the hook's admission record, never from the runner's argument"
+read_deny = "the classes this runner was denied: its own and the asker's"
+question_hash = ""
+worktree = ""
+branch = ""
+name = "for a named spike"
+
+[idea]
+glob = ".factory/ideas/ID-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["proposed", "pursue", "research", "deferred", "rejected"], score = "", decided = "" }
+writer = "vsdd idea register"
+max_bytes = 3000
+lifecycle = "Permanent, so rejected and deferred ideas are not proposed again. Body: a summary."
+
+[deferred-item]
+glob = ".factory/deferred/<slug>.md"
+frontmatter = { title = "", target = "a story, an epic or unscheduled", source = "", severity = "", decided = "date" }
+writer = "The main session through the defer skill, which only a person can invoke"
+max_bytes = 2000
+cap_note = "2,000; at most 40, reported by vsdd status when exceeded"
+lifecycle = "Deleted by vsdd retire <path>. Waivers and advisory findings are not stored here: vsdd report debt derives them from closure records, together with the debt a baseline recorded."
+
+[change-request]
+glob = ".factory/requests/CR-<NNN>.md"
+frontmatter = { id = "", title = "", status = ["queued", "active", "done", "dropped"], received = "", cycle = "the cycle the request runs in, once it has one", amendment = "true for a request written when a spec-gap decision is settled amend" }
+writer = "vsdd survey feature, for every request; settle_decision, for an amendment; vsdd import, for epics that were in flight; vsdd story new-fix --maintain, for a maintenance cycle"
+max_bytes = 8000
+lifecycle = "This is the only copy of a request: cycle.json names it. The briefing shows how many are queued. When the cycle closes the route starts feature with the oldest. An amendment request is not queued: it runs inside the open cycle. Body: the request as the person gave it, or for an amendment the gaps it covers."
+
+# ---- the story kinds (BLUEPRINT.md#4.6; pipeline.md#2.9.13) -----------------
+#
+# One enumeration, used by the state registry, the workflows and the hooks. tests and implement
+# name the stage's agent and its default method; a story's tests_method / impl_method frontmatter
+# overrides the method with another method of the same agent. red_gate is whether the kind has a
+# red gate: the hook rule that enforces tests before code reads its exemptions from these rows
+# (red_gate = false exempts the kind), and vsdd gate red is the gate itself.
+
+[[story-kind]]
+id = "feature"
+tests_agent = "test-writer"
+tests_method = "failing-tests"       # the method includes the stubs the tests need
+implement_agent = "implementer"
+implement_method = "tdd"
+red_gate = true
+
+[[story-kind]]
+id = "fix"
+tests_agent = "test-writer"
+tests_method = "regression-test"
+implement_agent = "implementer"
+implement_method = "fix-findings"
+red_gate = true
+note = "created from findings, with a regression test among its criteria"
+
+[[story-kind]]
+id = "port"
+tests_agent = "test-writer"
+tests_method = "equivalence-tests"   # against the reference implementation
+implement_agent = "implementer"
+implement_method = "port-translation"
+red_gate = true
+
+[[story-kind]]
+id = "facade"
+tests_agent = ""
+tests_method = ""
+implement_agent = "implementer"
+implement_method = "service-clone"
+red_gate = false
+note = "service clones and fakes; clone fidelity against the recorded behaviour of the real service is measured at the wave gate"
+
+[[story-kind]]
+id = "docs"
+tests_agent = ""
+tests_method = ""
+implement_agent = "technical-writer"
+implement_method = "docs"
+red_gate = false
+note = "the green gate runs the documentation check (commands.docs_check)"
+
+[[story-kind]]
+id = "chore"
+tests_agent = ""
+tests_method = ""
+implement_agent = "devops"
+implement_method = "repo-setup"      # or ci or toolchain, per the chore
+red_gate = false
+note = "scaffold, test harness, CI, toolchain configuration"
+
+[[story-kind]]
+id = "harness"
+tests_agent = ""
+tests_method = ""
+implement_agent = "verifier"
+implement_method = "proofs"          # proofs, fuzzing, mutation, performance or clone-fidelity
+red_gate = false
+note = "proofs, fuzz targets, benchmarks"

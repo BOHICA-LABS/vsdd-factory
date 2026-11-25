@@ -1,0 +1,87 @@
+{
+  "name": "r03-builder-echoes-method",
+  "about": "A builder's agent type echoing the reviewer's method is not counted.",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {},
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-i-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [
+            {
+              "key": "code:m",
+              "title": "t-code:m",
+              "severity": "medium",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:implementer",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "",
+      "passes": 0,
+      "rounds_used": 0,
+      "outcome": "failed",
+      "reason": "no_result",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "loops": [],
+    "skipped": [
+      {
+        "step": "review-i-l1-p1.1",
+        "why": "agent_type"
+      }
+    ],
+    "chain": false,
+    "passes_used": 0
+  }
+}

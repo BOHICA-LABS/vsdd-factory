@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "workflow": "story",
+  "subject": "S-9.01",
+  "cycle": "product-1",
+  "state": "delivering",
+  "stages": {
+    "draft": { "at": "2026-11-24T09:30:00Z" },
+    "review": { "at": "2026-11-24T10:15:00Z", "rounds": 2 }
+  },
+  "verdict": {
+    "perimeter": "src/export/**",
+    "head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "patch_id": "cb91b0a0d0c8ffb4ef6b3ebbddbbbbfed4a5eb5d",
+    "passes": 3,
+    "rounds_used": 3,
+    "outcome": "converged",
+    "advisory": 2,
+    "dismissed": 1,
+    "waived": 0
+  },
+  "delivery": {
+    "state": "awaiting_merge",
+    "detail": "",
+    "needs_person": "",
+    "run": "r-20261124-0915-a1",
+    "at": "2026-11-24T10:20:00Z",
+    "head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    "patch_id": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "base": "0fe1dc2ba45567788990011223344556677889a1",
+    "branch": "story/S-9.01"
+  },
+  "flaky": ["tests/test_slow.py::test_poll"],
+  "admitted_by": "plan"
+}

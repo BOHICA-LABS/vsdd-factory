@@ -1,0 +1,7 @@
+<testsuites>
+  <testsuite name="tally" tests="3">
+    <testcase classname="tests.deep.test_nested" name="test_attr" file="tests/deep/test_other.py" time="0.001"/>
+    <testcase classname="tests.test_stats.TestMean" name="test_from_classname" time="0.001"/>
+    <testcase classname="parser.tests.test_x.TestX" name="test_sourced" time="0.001"/>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,127 @@
+{
+  "name": "r04-lens-coverage",
+  "about": "Only the accounting lens's coverage entries decide a gap (S5P-N9).",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1",
+      "AC-2"
+    ],
+    "changed": {},
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-1",
+              "state": "checked",
+              "note": "n"
+            },
+            {
+              "item": "AC-2",
+              "state": "skipped",
+              "note": "later"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      },
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-s-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "security-review",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "done",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": [
+            {
+              "item": "AC-2",
+              "state": "checked",
+              "note": "n"
+            }
+          ]
+        },
+        "agent_type": "vsdd-factory:security-reviewer",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "failed",
+      "reason": "no_result",
+      "blocking": [
+        {
+          "key": "coverage:S-9.01:AC-2",
+          "title": "Not accounted for: AC-2",
+          "severity": "high",
+          "category": "coverage",
+          "scope": "unit",
+          "owner": "test-writer",
+          "location": {
+            "path": ""
+          },
+          "spec_ref": "AC-2",
+          "repro": "",
+          "observed": "No reviewer marked this item checked.",
+          "expected": "A test or another evidence route covers it."
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": [
+        "AC-2"
+      ]
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "failed",
+        "reason": "no_result"
+      }
+    ],
+    "skipped": [],
+    "chain": false,
+    "passes_used": 1
+  }
+}

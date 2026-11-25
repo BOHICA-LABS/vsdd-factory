@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "gate": "green",
+  "subject": "S-9.01",
+  "sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "at": "2026-11-24T10:00:00Z",
+  "seq": 1,
+  "passed": true,
+  "patch_id": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+  "diff_patch": "/factory/demo/.factory/local/evidence/S-9.01/diff.1a2b3c4d5e6f.patch",
+  "flaky": [
+    "tests/test_slow.py::test_poll"
+  ]
+}

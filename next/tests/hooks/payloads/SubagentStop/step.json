@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "SubagentStop",
+  "session_id": "sess_9f83ab",
+  "agent_id": "wf-step-3",
+  "agent_type": "workflow-subagent",
+  "cwd": "{root}"
+}

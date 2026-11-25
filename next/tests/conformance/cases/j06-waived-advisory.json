@@ -1,0 +1,52 @@
+{
+  "name": "j06-waived-advisory",
+  "about": "A waived finding is advisory, never blocking.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:e",
+        "title": "t-code:e",
+        "severity": "critical",
+        "category": "code",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": [
+      "code:e"
+    ]
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [
+        {
+          "key": "code:e",
+          "title": "t-code:e",
+          "severity": "critical",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

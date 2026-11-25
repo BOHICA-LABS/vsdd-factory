@@ -11,7 +11,9 @@ Generates, in this order (packaging.md 2.5, as corrected by P3BLD-21):
    toy workflows under ``tests/workflows/toys/*.js``);
 4. the stamped shared block in every agent file (``<plugin>/agents/*.md``) — the spike-runner and
    clerk variants receive their own blocks (agents-skills.md 2.7) — and the stamped severity table
-   plus finding-key rule in every reviewer agent file (an agent the roster's tier makes a reviewer).
+   plus finding-key rule in every reviewer agent file (an agent the roster's tier makes a reviewer);
+5. ``<plugin>/hooks/hooks.json``, from the rule registry (``vsdd/hooks/registry.py``, B4b) — a rule
+   cannot be registered and unwired, which is what happened to the old pre-compaction hooks.
 
 ``--check`` changes nothing and exits 1, naming each problem and each drifting file, when any
 generated copy differs or a marker pair is not exactly one opening followed by one closing in place.
@@ -22,12 +24,16 @@ Standard library only. Run from ``next/``: ``uv run --no-sync python tools/build
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
 
 NEXT = Path(__file__).resolve().parent.parent
 PLUGIN = NEXT / "plugins" / "vsdd-factory"
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(PLUGIN / "py"))
 
 PRELUDE_SRC = NEXT / "workflow-lib" / "prelude.js"
 ROSTER = NEXT / "tests" / "lint" / "roster.toml"
@@ -149,31 +155,98 @@ def _generate_tables() -> str:
 LITERAL_NAMES = {
     "finding.schema.json": "S_FINDING",
     "gate-result.schema.json": "S_GATE",
-    "gate-output.schema.json": "S_GATE_OUTPUT",
+    "pending-output.schema.json": "S_PENDING_OUTPUT",
     "review-data.schema.json": "S_REVIEW_DATA",
     "claim.schema.json": "S_CLAIM",
     "fix-data.schema.json": "S_FIX_DATA",
     "ruling-data.schema.json": "S_RULING_DATA",
     "holdout-data.schema.json": "S_HOLDOUT_DATA",
     "intake-data.schema.json": "S_INTAKE_DATA",
+    "implement-data.schema.json": "S_IMPLEMENT_DATA",
+    "story-unit.schema.json": "S_STORY_UNIT",
     "story-draft-data.schema.json": "S_STORY_DRAFT_DATA",
     "spike-request.schema.json": "S_SPIKE_REQUEST",
     "spike-finding.schema.json": "S_SPIKE_FINDING",
     "step-result.schema.json": "S_STEP_RESULT",
     "verdict.schema.json": "S_VERDICT",
     "workflow-result.schema.json": "S_WORKFLOW_RESULT",
+    "survey.schema.json": "S_SURVEY",
+    "checkpoint-result.schema.json": "S_CLOSE",
+    "delivery-data.schema.json": "S_DELIVERY",
+    "wave-gate-data.schema.json": "S_WAVE_GATE",
 }
 
 
 def _generate_schemas() -> str:
-    by_id: dict[str, dict] = {}
-    for path in sorted((PLUGIN / "schemas").glob("*.schema.json")):
-        by_id[path.name] = json.loads(path.read_text())
+    by_id = _shipped_schemas()
     parts = []
     for filename, name in LITERAL_NAMES.items():
+        if filename not in by_id:
+            continue  # named by _mapping_problems; never crash the build on a mapping typo
         schema = _strip_schema_node(by_id[filename], by_id)
         parts.append(f"const {name} = {_lines(name, schema)};")
     return "\n".join(parts)
+
+
+def _shipped_schemas() -> dict[str, dict]:
+    return {p.name: json.loads(p.read_text()) for p in sorted((PLUGIN / "schemas").glob("*.schema.json"))}
+
+
+# Shipped schemas that are not prelude literals: the event log line is the
+# Python writer's schema (py/vsdd/events.py loads the file), not a workflow's,
+# and the caller marker is the runner's own file (HD13; record caller-marker).
+NON_PRELUDE_SCHEMAS = {
+    "event.schema.json",
+    "caller-marker.schema.json",
+    "run-record.schema.json",
+    "step-record.schema.json",
+    "evidence-record.schema.json",
+    "closure-record.schema.json",
+    "cycle-record.schema.json",
+    "decision-record.schema.json",
+    "lock.schema.json",
+}
+
+HAND_LITERAL_RE = re.compile(r"^\s*const\s+(S_[A-Z0-9_]+)\s*=", re.M)
+
+
+def _hand_literal_problems(path: Path, text: str, regions: list[tuple[str, str]]) -> list[str]:
+    """Every hand-written `const S_* =` outside the generated or stamped regions.
+
+    The build generates every S_* literal from <plugin>/schemas/*.schema.json;
+    one written by hand in prelude.js's own code or in a workflow body is a
+    second source that --check cannot see (result-schemas.md: no S_* literal is
+    written by hand).
+    """
+    outside = text
+    for opening, closing in regions:
+        start = outside.find(opening)
+        end = outside.find(closing)
+        if start < 0 or end < 0:
+            continue
+        outside = outside[:start] + outside[end + len(closing):]
+    return [
+        f"{path}: hand-written schema literal {name} "
+        "(the build alone writes S_* constants, into the generated block)"
+        for name in HAND_LITERAL_RE.findall(outside)
+    ]
+
+
+def _mapping_problems() -> list[str]:
+    """LITERAL_NAMES must cover exactly the shipped schema files it does not map by name."""
+    shipped = set(_shipped_schemas())
+    mapped = set(LITERAL_NAMES) | NON_PRELUDE_SCHEMAS
+    problems: list[str] = []
+    if mapped - shipped:
+        problems.append(
+            "LITERAL_NAMES names schemas that are not shipped: " + ", ".join(sorted(mapped - shipped))
+        )
+    if shipped - mapped:
+        problems.append(
+            "shipped schemas no literal mapping covers (add to LITERAL_NAMES or NON_PRELUDE_SCHEMAS): "
+            + ", ".join(sorted(shipped - mapped))
+        )
+    return problems
 
 
 # Generated block 3: the stamped prelude region of every workflow.
@@ -292,9 +365,31 @@ def _reviewer_variant(name: str) -> str:
     return (NEXT / "workflow-lib" / "agent-shared.md").read_text().rstrip("\n")
 
 
+def is_reviewer(name: str, roster: dict, text: str = "") -> bool:
+    """Whether an agent file takes the reviewer stamps (severity table, key rule).
+
+    The one decision the build and the roster lint both call. A rostered agent
+    is a reviewer when its tier is, which the model comparison cannot express
+    ('reviewer' is a tier name, not a model); the model is the fallback only
+    for an agent no roster row lists.
+    """
+    tier = roster.get("agents", {}).get(name)
+    if tier is not None:
+        return tier == "reviewer"
+    reviewer_model = roster["tiers"]["reviewer"]["model"]
+    return bool(text) and _frontmatter_field(text, "model") == reviewer_model
+
+
+def _display(path: Path) -> str:
+    """The path for a report: under next/ relative, else the full path."""
+    try:
+        return str(path.relative_to(NEXT))
+    except ValueError:
+        return str(path)
+
+
 def _stamp_agents(problems: list[str], drifted: list[str], check_only: bool) -> None:
     roster = tomllib.loads(ROSTER.read_text())
-    reviewer_tier = roster["tiers"]["reviewer"]["model"]
     agents = roster.get("agents", {})
     severity = (NEXT / "workflow-lib" / "severity.md").read_text()
     keyrule_src = NEXT / "workflow-lib" / "finding-key.md"
@@ -303,10 +398,9 @@ def _stamp_agents(problems: list[str], drifted: list[str], check_only: bool) -> 
     for path in agent_files:
         text = path.read_text()
         name = path.stem
-        tier = agents.get(name) or _frontmatter_field(text, "model")
-        is_reviewer = tier == reviewer_tier
+        reviewer = is_reviewer(name, roster, text)
         wanted = _stamp_shared(text, _reviewer_variant(name))
-        if is_reviewer:
+        if reviewer:
             try:
                 wanted = _stamp_region(wanted, SEVERITY_MARKERS, severity)
                 wanted = _stamp_region(wanted, KEYRULE_MARKERS, keyrule)
@@ -314,9 +408,16 @@ def _stamp_agents(problems: list[str], drifted: list[str], check_only: bool) -> 
                 problems.append(f"{path}: {exc}")
                 continue
         if wanted != text:
-            drifted.append(str(path.relative_to(NEXT)))
+            drifted.append(_display(path))
             if not check_only:
                 path.write_text(wanted)
+
+
+def _hooks_json() -> tuple[str, list[str]]:
+    """The generated ``hooks/hooks.json`` from the rule registry (B4b)."""
+    from vsdd.hooks import registry
+
+    return registry.hooks_json(), []
 
 
 def build(*, check_only: bool = False) -> tuple[list[str], list[str]]:
@@ -325,7 +426,9 @@ def build(*, check_only: bool = False) -> tuple[list[str], list[str]]:
 
     prelude_src = PRELUDE_SRC.read_text()
     wanted_tables = _generate_tables()
+    problems.extend(_mapping_problems())
     wanted_schemas = _generate_schemas()
+    problems.extend(_hand_literal_problems(PRELUDE_SRC, prelude_src, [TABLE_MARKERS, SCHEMA_MARKERS]))
     try:
         assembled = _replace_between(
             _replace_between(prelude_src, TABLE_MARKERS, wanted_tables),
@@ -345,6 +448,7 @@ def build(*, check_only: bool = False) -> tuple[list[str], list[str]]:
 
     for path in _workflow_files():
         text = path.read_text()
+        problems.extend(_hand_literal_problems(path, text, [PRELUDE_MARKERS]))
         try:
             wanted = generate_workflow_body(path, assembled)
         except MarkerProblem as exc:
@@ -354,11 +458,24 @@ def build(*, check_only: bool = False) -> tuple[list[str], list[str]]:
         # passes it too (U3-R8).
         problems.extend(meta_ok(wanted, path))
         if wanted != text:
-            drifted.append(str(path.relative_to(NEXT)))
+            drifted.append(_display(path))
             if not check_only:
                 path.write_text(wanted)
 
     _stamp_agents(problems, drifted, check_only)
+
+    # Step 5 (B4b): hooks.json, generated from the rule registry.
+    try:
+        wanted_hooks, hook_problems = _hooks_json()
+        problems.extend(hook_problems)
+        hooks_path = PLUGIN / "hooks" / "hooks.json"
+        if not hooks_path.exists() or hooks_path.read_text() != wanted_hooks:
+            drifted.append("plugins/vsdd-factory/hooks/hooks.json")
+            if not check_only:
+                hooks_path.parent.mkdir(parents=True, exist_ok=True)
+                hooks_path.write_text(wanted_hooks)
+    except Exception as exc:  # a registry fault names itself at the build
+        problems.append(f"hooks/hooks.json: the registry could not be generated: {exc}")
 
     # Guard: a stamped prelude marker appears only in files the build stamps,
     # scanned over the whole of next/ (excluding virtual environments and
@@ -366,7 +483,7 @@ def build(*, check_only: bool = False) -> tuple[list[str], list[str]]:
     allowed = {p.resolve() for p in _workflow_files()} | {PRELUDE_SRC.resolve()}
     allowed |= {NEXT / "tools" / "build.py", NEXT / "tools" / "check.py"}
     # The harness strips stamped regions by indexOf, and the build's own
-    # regression test quotes the marker strings in fixtures.
+    # regression tests quote the marker strings in fixtures.
     allowed |= {
         NEXT / "tests" / "workflows" / "harness.mjs",
         NEXT / "tests" / "workflows" / "universal.test.mjs",

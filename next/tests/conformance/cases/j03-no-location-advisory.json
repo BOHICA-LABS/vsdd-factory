@@ -1,0 +1,50 @@
+{
+  "name": "j03-no-location-advisory",
+  "about": "A severe finding with an empty location path is advisory.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:c",
+        "title": "t-code:c",
+        "severity": "high",
+        "category": "code",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": ""
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [
+        {
+          "key": "code:c",
+          "title": "t-code:c",
+          "severity": "high",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": ""
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

@@ -4,7 +4,10 @@
     "workflow": "story",
     "name": "review",
     "subject": "S-9.01",
-    "attempt": 2
+    "attempt": 2,
+    "method": "spec-review",
+    "loop": 1,
+    "pass": 2
   },
   "status": "blocked",
   "summary": "The reviewer refused: no change is recorded for the commit it was given.",

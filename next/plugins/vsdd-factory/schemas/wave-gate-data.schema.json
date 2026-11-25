@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wave-gate-data.schema.json",
+  "type": "object",
+  "description": "Output of vsdd gate wave (pipeline.md#2.10.8): the gate result fields plus the wave's own. The command prints every field on every exit, empty where it has nothing to say. While its job runs it prints the pending output (pending-output.schema.json); this is the final result.",
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "False when the command itself could not run."
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "Path of the patch the wave gate measured, for the next reviewer."
+    },
+    "gate": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "sha": {
+      "type": "string",
+      "description": "Commit the gate measured."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Path of the evidence record."
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 400
+      },
+      "maxItems": 20
+    },
+    "flaky": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Identities of inherited tests that failed and then passed when the gate ran the suite once more (the flaky rule of record:baseline). Copied into the unit's closure record."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "finding.schema.json"
+      }
+    },
+    "unit": {
+      "type": "object",
+      "description": "Only from vsdd gate plan --story, and always when it passes: the admitted story unit (section 2.10.8)."
+    },
+    "error": {
+      "type": "string"
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of the stories that still block the gate; empty when none does."
+    },
+    "worktree": {
+      "type": "string",
+      "description": "The integration worktree the wave was measured in."
+    },
+    "base": {
+      "type": "string",
+      "description": "The commit the wave started from."
+    },
+    "stories": {
+      "type": "array",
+      "items": {
+        "$ref": "story-unit.schema.json"
+      }
+    },
+    "needs": {
+      "type": "object",
+      "properties": {
+        "security": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "security",
+        "ui"
+      ],
+      "description": "The capability flags any story in the wave set."
+    },
+    "holdout_batches": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The scenario ids of one holdout batch; the script joins each batch with ids.join(', ')."
+      },
+      "description": "The holdout scenarios grouped into batches; each inner list is joined into one scenario list."
+    },
+    "fix_units": {
+      "type": "array",
+      "items": {
+        "$ref": "story-unit.schema.json"
+      },
+      "description": "Admitted story units, given when the measured gate failed: the fix stories to start."
+    },
+    "holdout": {
+      "type": "object",
+      "description": "What holdoutFindings() needs besides the scores (topic:holdout-findings).",
+      "properties": {
+        "seed": {
+          "type": "string",
+          "description": "The rotation seed."
+        },
+        "contracts": {
+          "type": "object",
+          "description": "Scenario id to the contract ids it cites.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "test_output": {
+      "type": "string",
+      "description": "Green gate: path of the log holding every configured command's output (green.<sha12>.log). Empty when the gate wrote none."
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Green gate with --since: the files the range changed (vsdd.state.verdicts.changed_files, --no-renames); [] without --since."
+    }
+  },
+  "required": [
+    "ok",
+    "diff_patch",
+    "gate",
+    "subject",
+    "passed",
+    "sha",
+    "evidence",
+    "metrics",
+    "failures",
+    "flaky",
+    "findings",
+    "unit",
+    "error",
+    "pending",
+    "worktree",
+    "base",
+    "stories",
+    "needs",
+    "holdout_batches",
+    "fix_units",
+    "holdout",
+    "test_output",
+    "changed_files"
+  ]
+}

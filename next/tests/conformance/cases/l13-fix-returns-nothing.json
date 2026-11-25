@@ -1,0 +1,84 @@
+{
+  "name": "l13-fix-returns-nothing",
+  "about": "A fixer that returns nothing fails the loop with the open findings in blocking.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "failed",
+      "reason": "no_result",
+      "blocking": [
+        {
+          "key": "code:a",
+          "title": "t-code:a",
+          "severity": "high",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "trace": [
+      {
+        "pass": 1,
+        "claims": [],
+        "gaps": [],
+        "fix": [
+          "code:a"
+        ]
+      }
+    ]
+  }
+}

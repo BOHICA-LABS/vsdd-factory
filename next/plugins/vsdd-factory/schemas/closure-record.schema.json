@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "closure-record.schema.json",
+  "type": "object",
+  "description": "One unit's closure: .factory/cycles/<cycle>/units/<workflow>[.<subject>].json (record closure). Tracked. Every writer goes through vsdd.state.cycles.closure_update, which owns the read-modify-write and the validation; the stage entries keep the order the stages finished in. Cap 16,000 bytes. A later version may add a field, at the top level or inside stages, verdict or delivery: read records that carry an unknown field, never refuse them (decision D33).",
+  "properties": {
+    "schema": { "type": "integer", "enum": [1], "description": "The record form; closure_update starts records at 1." },
+    "workflow": { "type": "string", "minLength": 1, "description": "The workflow the unit belongs to: spec, plan, wave, story, verify, ingest, import, maintain." },
+    "subject": { "type": "string", "description": "The unit id (W-02, S-7.03); empty for a whole-workflow unit such as spec or verify." },
+    "cycle": { "type": "string", "minLength": 1, "description": "The cycle the record sits in; _standing for work outside a product cycle." },
+    "state": { "type": "string", "minLength": 1, "description": "How far the unit has got; open when the record is created." },
+    "stages": {
+      "type": "object",
+      "additionalProperties": { "type": "object" },
+      "description": "Stage entries in the order the stages finished, which is what lets revise clear from the review stage onward without a list of stages."
+    },
+    "verdict": {
+      "type": "object",
+      "description": "The convergence verdict (topic verdicts) as vsdd.state.verdicts.summary computes it: perimeter, head, patch_id, passes, rounds_used, outcome, and the counts of advisory, dismissed and waived findings.",
+      "properties": {
+        "perimeter": { "type": "string" },
+        "head": { "type": "string", "description": "The commit the last pass reviewed; empty when nothing was reviewed." },
+        "patch_id": { "type": "string", "description": "The git patch-id of the diff from delivery.base to head; empty when it cannot be computed." },
+        "passes": { "type": "integer", "minimum": 0 },
+        "rounds_used": { "type": "integer", "minimum": 0, "description": "The loop-1 total across runs, never below the stored one (decision D13)." },
+        "outcome": { "type": "string", "description": "converged, review_stale, pending and the other outcomes of topic verdicts." },
+        "advisory": { "type": "integer", "minimum": 0 },
+        "dismissed": { "type": "integer", "minimum": 0 },
+        "waived": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["outcome"]
+    },
+    "delivery": {
+      "type": "object",
+      "description": "What vsdd story deliver and the admission wrote: the state the delivery reached and the facts the evidence lookup reads back.",
+      "properties": {
+        "state": { "type": "string", "description": "merged, awaiting_merge, ci_failed, conflict, review_stale, refused, checkout_dirty; empty before delivery." },
+        "detail": { "type": "string", "description": "What failed, for the repair step." },
+        "needs_person": { "type": "string", "description": "protected_path, dependency or configured when delivery stopped for a person; empty otherwise." },
+        "run": { "type": "string", "description": "The run that delivered or admitted the unit." },
+        "at": { "type": "string", "description": "ISO 8601 UTC, whole seconds, ending Z." },
+        "head": { "type": "string", "description": "The commit the delivery or the admission measured." },
+        "patch_id": { "type": "string", "description": "The git patch-id of the subject's diff from delivery.base to head at that moment." },
+        "base": { "type": "string", "description": "The commit the story branch was cut from; admission sets it, and delivery re-records it after a rebase." },
+        "branch": { "type": "string", "description": "The branch the story is delivered to: the target branch (require_story's 'target'), not the story branch; admission records it, and delivery re-records it after a rebase." }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "description": "A plain object until G7 shapes the ingest and import baseline records (plan decision D3)."
+    },
+    "waves": {
+      "type": "object",
+      "description": "The plan closure only: the map from wave to stories that vsdd plan schedule computed."
+    },
+    "flaky": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The identities of inherited tests a gate recorded as flaky, copied from the gate's evidence by the command that writes this record."
+    },
+    "admitted_by": { "type": "string", "description": "How the story became ready: plan, or the run that admitted it through vsdd gate plan --story or vsdd story new-fix." }
+  },
+  "required": ["schema", "workflow", "subject", "cycle", "state", "stages"]
+}

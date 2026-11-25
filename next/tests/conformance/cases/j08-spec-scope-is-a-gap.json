@@ -1,0 +1,50 @@
+{
+  "name": "j08-spec-scope-is-a-gap",
+  "about": "A hard spec-scope finding becomes a spec gap.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "spec:g",
+        "title": "t-spec:g",
+        "severity": "high",
+        "category": "code",
+        "scope": "spec",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "spec_gaps": [
+        {
+          "key": "spec:g",
+          "title": "t-spec:g",
+          "severity": "high",
+          "category": "code",
+          "scope": "spec",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ]
+    }
+  }
+}

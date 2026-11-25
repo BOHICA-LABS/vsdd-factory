@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "title": "Factory event log line",
+  "description": "One line of the hook event log, one JSON object per line, files .factory/local/events/<UTC date>.jsonl (hooks.md 2.12). The Python writer loads this file and validates every event against it before writing, so the shipped schema cannot drift from the code; the documented event types are the table tables/event-types.toml. The writer's stricter millisecond timestamp is applied in py/vsdd/events.py, which refuses a line of its own making that is not exact.",
+  "type": "object",
+  "properties": {
+    "v": {"type": "integer", "enum": [1]},
+    "ts": {
+      "type": "string",
+      "description": "ISO 8601, UTC: whole seconds from the launcher, milliseconds from the Python writer (enforced by the writer itself)."
+    },
+    "type": {"type": "string", "description": "dotted event type"},
+    "severity": {"enum": ["info", "warn", "block", "error"]},
+    "session_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "Null on a launcher-written line: the shell cannot know the session."
+    },
+    "agent_type": {"type": "string"},
+    "agent_id": {"type": "string"},
+    "event": {"type": "string"},
+    "tool": {"type": "string"},
+    "cwd": {"type": "string", "description": "The working directory the payload carried, on the lines about a tool call."},
+    "story": {"type": "string", "description": "The story id whose worktree the call works in, on the lines about a tool call."},
+    "ms": {"type": "integer", "minimum": 0},
+    "rule": {"type": "string"},
+    "code": {"type": "string"},
+    "reason": {"type": "string"},
+    "fix": {"type": "string"},
+    "target": {"type": "string"},
+    "command": {"type": "string"},
+    "id": {"type": "string"},
+    "detail": {
+      "type": ["string", "object", "array"],
+      "description": "Free-form payload; string leaves are redacted like every other field."
+    }
+  },
+  "required": ["v", "ts", "type", "severity", "session_id"],
+  "additionalProperties": true
+}

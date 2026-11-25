@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   runWorkflow, runWorkflowFile, readMeta, stripStamped, minimal, alternate,
-  PLATFORM_AGENT_CAP,
+  PLATFORM_AGENT_CAP, DeadAgentError,
 } from './harness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -31,13 +31,24 @@ const smallest = (prompt, opts) => (opts.schema ? minimal(opts.schema) : '')
 
 const DONE_GATE = (subject) => ({ ok: true, gate: 'green', subject, passed: true, sha: 'h1', evidence: 'e', failures: [] })
 
-// A step stub: a done step result whose name/subject match the label "subject · name #n".
+// The method the prompt's first line carries; the step identity repeats it.
+const promptMethod = (prompt) => /^Method: (\S+)\./m.exec(prompt)?.[1] ?? 'm'
+
+// A step stub: a done step result whose step echoes the identity its prompt gave it
+// (the 'Return step = {...} unchanged.' line, CATCHUP-R21), falling back to the label
+// "subject · name #n" when the prompt carries none.
 const doneResult = (prompt, opts) => {
   const base = typeof smallest(prompt, opts) === 'object' && smallest(prompt, opts) ? smallest(prompt, opts) : {}
   if (base.step) {
-    const label = opts.label || ''
-    const m = /^(.*) · ([a-z0-9-]+(?:-retry\d+)?) #\d+/.exec(label)
-    base.step = { run: 'r1', workflow: 'toy', name: m ? m[2] : 'x', subject: m ? m[1] : 'S-1.01', attempt: 1 }
+    const echoed = /Return step = ({.*?}) unchanged\./.exec(prompt)
+    if (echoed) {
+      base.step = JSON.parse(echoed[1])
+    } else {
+      const label = opts.label || ''
+      const m = /^(.*) · ([a-z0-9-]+(?:-retry\d+)?) #\d+/.exec(label)
+      const method = /^Method: (\S+)\./m.exec(prompt)?.[1] ?? 'm'
+      base.step = { run: 'r1', workflow: 'toy', name: m ? m[2] : 'x', subject: m ? m[1] : 'S-1.01', attempt: 1, method }
+    }
     if (base.status === 'done' && (!base.gates || base.gates.length === 0)) {
       base.gates = [DONE_GATE(base.step.subject)]
     }
@@ -47,6 +58,17 @@ const doneResult = (prompt, opts) => {
 }
 
 const THE_AGENT = (prompt, opts) => doneResult(prompt, opts)
+
+// A story unit every required key of schemas/story-unit.schema.json carries, empty by type:
+// a survey's units array is typed by [[schema:story-unit]], so a test unit is a full unit.
+const storyUnit = (id, extra = {}) => ({
+  id, position: 'ready', worktree: '/p/.wt/' + id, tree: '/p/.wt/' + id, branch: 'feature/' + id,
+  base: 'b', head: '', story_path: 'stories/' + id + '.md', bcs: [], acs: [], criticality: 'high',
+  kind: 'feature', tests_agent: 'test-writer', tests_method: 'failing-tests', impl_agent: 'implementer',
+  impl_method: 'tdd', red_gate: true, repo: '', security: false, ui: false,
+  demo_required: false, waived: [], guidance: '', deferred: [], diff_patch: '', test_output: '',
+  review_rules: '', dirty: false, open_pr: '', rounds_used: 0, blocked: {}, fixes: [], ...extra,
+})
 
 // An agent stub that answers every step from the prompt's own identity line
 // ("Return step = {...} unchanged."), so no toy label is hard-coded and
@@ -145,6 +167,11 @@ const okStub = (prompt, opts) => {
     // survey: units live under units; give none unless the test set them via a closure
     if (Array.isArray(v.units)) v.units = surveyState.units
     if (v.config) v.config = surveyState.config
+    // A real survey names the run and the directories, so relay() builds its closing
+    // command with -C and the tests exercise that form (CATCHUP-R6).
+    if ('run_id' in v) v.run_id = v.run_id || 'r1'
+    if ('project_dir' in v) v.project_dir = v.project_dir || '/proj'
+    if ('plugin_root' in v) v.plugin_root = v.plugin_root || '/plugin'
   }
   return v
 }
@@ -167,10 +194,20 @@ test('2 and 3. phase titles match meta, the name matches the file, and every age
     for (const phase of run.phases) {
       assert.ok(titles.includes(phase), `${file}: phase "${phase}" is not in meta.phases`)
     }
+    // Once <plugin>/agents/ is populated (package A1), a roster name without an agent
+    // file is a defect: the interim ROLE-table check must grow into the real one.
+    const agentsDir = path.join(PLUGIN, 'agents')
+    const agentFiles = fs.existsSync(agentsDir) ? fs.readdirSync(agentsDir).filter((f) => f.endsWith('.md')) : []
     for (const call of run.calls) {
       if (call.agentType.startsWith('vsdd-factory:')) {
         const name = call.agentType.slice('vsdd-factory:'.length)
         assert.ok(roleHas(name), `${file}: agentType ${name} is not in the roster`)
+        if (agentFiles.length) {
+          assert.ok(
+            agentFiles.includes(`${name}.md`),
+            `${file}: agentType ${name} has no agents/${name}.md file`,
+          )
+        }
       }
     }
   }
@@ -274,8 +311,22 @@ test('7. the checkpoint command runs when every step is done, and when one agent
     workflows: { 'vsdd-factory:story': path.join(TOYS, 'toy-story.js') },
   })
   assert.equal(run.error, null, String(run.error))
-  const closes = run.calls.filter((c) => c.agentType === 'vsdd-factory:clerk' && c.prompt.includes('vsdd checkpoint'))
+  // Match 'checkpoint', not 'vsdd checkpoint': relay() prefixes 'vsdd -C <dir>', so the
+  // substring 'vsdd checkpoint' survives only when the survey left project_dir empty (CATCHUP-R6).
+  const closes = run.calls.filter((c) => c.agentType === 'vsdd-factory:clerk' && / checkpoint /.test(c.prompt))
   assert.ok(closes.length >= 1, 'no checkpoint call')
+  assert.match(closes[0].prompt, /vsdd -C \/proj checkpoint/, 'the closing command must carry -C with the survey project_dir')
+  // relay() tells the clerk the schema's empty object, not a hand-shaped {"ok": false} (CATCHUP-R5):
+  // the survey and the close prompts carry the full empty object of their schema.
+  const survey = run.calls.find((c) => c.agentType === 'vsdd-factory:clerk' && c.prompt.includes('vsdd survey'))
+  assert.ok(survey, 'no survey call')
+  assert.match(survey.prompt, /"ok":false/)
+  assert.match(survey.prompt, /"run_id":""/)
+  assert.match(survey.prompt, /"preconditions":\[\]/)
+  assert.match(survey.prompt, /"units":\[\]/)
+  for (const fragment of ['"status":""', '"progress":false', '"decisions":[]', '"next":{"kind":""}']) {
+    assert.ok(closes[0].prompt.includes(fragment), `the close clerk prompt lacks the empty object fragment ${fragment}`)
+  }
 
   surveyState = { units: [], config: {} }
   const boomed = await runWorkflow('toy-build', {
@@ -283,8 +334,23 @@ test('7. the checkpoint command runs when every step is done, and when one agent
     agents: { 'S-1.01 · build #1': () => { throw new Error('exploded'); }, '*': okStub },
     workflows: { 'vsdd-factory:story': path.join(TOYS, 'toy-story.js') },
   })
-  const boomClose = boomed.calls.filter((c) => c.prompt.includes('vsdd checkpoint'))
+  const boomClose = boomed.calls.filter((c) => c.prompt.includes('checkpoint'))
   assert.ok(boomClose.length >= 1, 'a thrown agent skipped the checkpoint')
+})
+
+test('7b. a story whose agent throws still closes with --outcome failed', async () => {
+  // CATCHUP-R10: a throw leaves outcome unset when the finally block closes the run, and the
+  // close must carry --outcome failed there as it does for a failed result (story-script.md
+  // passes failed=true from its catch).
+  surveyState = { units: [], config: {} }
+  const run = await runWorkflow('toy-story', {
+    args: { story: 'S-1.01' },
+    agents: { 'S-1.01 · work #1': () => { throw new Error('exploded'); }, '*': okStub },
+  })
+  assert.notEqual(run.error, null, 'the thrown agent should fail the run')
+  const closes = run.calls.filter((c) => c.agentType === 'vsdd-factory:clerk' && c.prompt.includes('checkpoint'))
+  assert.ok(closes.length >= 1, 'a thrown agent skipped the checkpoint')
+  assert.match(closes[0].prompt, /vsdd checkpoint[^\n]*--outcome failed/, 'a thrown run must close with --outcome failed')
 })
 
 // ----------------------------------------------------------------- 8 (fixture-backed, below with 10)
@@ -311,7 +377,7 @@ test('10 and 8. walled scenario text reaches no other agent, and claims carry no
     const v = minimal(opts.schema)
     const m = /^(.*) · ([a-z0-9-]+) #\d+/.exec(opts.label || '')
     if (v && v.step) {
-      v.step = { run: 'r1', workflow: 'toy-build', name: m[2], subject: m[1], attempt: 1 }
+      v.step = { run: 'r1', workflow: 'toy-build', name: m[2], subject: m[1], attempt: 1, method: promptMethod(prompt) }
       v.status = 'done'
       v.summary = ''
       v.head = 'h1'
@@ -421,7 +487,7 @@ test('13. a child receives agents = story_agents, and a child that throws is cha
   fs.writeFileSync(child, "export const meta = {\n  name: 'boom',\n  phases: [],\n}\nthrow new Error('child boom')\n")
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
 
-  const unit = { id: 'S-1.02', position: 'ready' }
+  const unit = storyUnit('S-1.02')
   surveyState = { units: [unit], config: {} }
   const parent = await runWorkflow('toy-build', {
     args: { request: 'r' },
@@ -438,7 +504,157 @@ test('13. a child receives agents = story_agents, and a child that throws is cha
   )
 })
 
+// ----------------------------------------------------------------- 14
+
+test('14. the amended step identity and verdicts: method, loop and pass ride in the identity; grounded false is never hard; a dead clerk returns the schema\'s empty object', async () => {
+  surveyState = { units: [], config: {} }
+  const run = await runWorkflow('toy-verdict', {
+    args: { run_id: 'r1' },
+    agents: {
+      'vsdd-factory:clerk': () => {
+        throw new DeadAgentError()
+      },
+      '*': identityStub,
+    },
+  })
+  assert.equal(run.error, null, String(run.error))
+  const r = run.result
+  // judge(): grounded === false demotes even a critical finding to advisory (topics/verdicts.md).
+  assert.deepEqual(
+    { grounded: r.groundedBlocking, ungrounded: r.ungroundedBlocking, advisory: r.ungroundedAdvisory },
+    { grounded: 1, ungrounded: 0, advisory: 1 },
+  )
+  // A holdout finding with empty spec_ref and repro still blocks: category holdout is exempt
+  // from the grounding condition (blueprint 4.10, CATCHUP-R13).
+  assert.equal(r.holdoutBareBlocking, 1)
+  // The identity the step echoed is the identity its prompt gave it, method, loop and pass included.
+  assert.equal(r.step.method, 'tdd')
+  assert.equal(r.step.loop, 1)
+  assert.equal(r.step.pass, 2)
+  // relay(): the empty object of checkpoint-result, ok false and the error said.
+  assert.equal(r.closed.ok, false)
+  assert.match(r.closed.error, /clerk/)
+  assert.equal(r.closed.status, '')
+  assert.equal(r.closed.progress, false)
+  // vm realms clone results, so compare by JSON text, not by prototype.
+  assert.equal(JSON.stringify(r.closed.decisions), '[]')
+  assert.equal(JSON.stringify(r.closed.next), '{"kind":""}')
+})
+
 // ----------------------------------------------------------------- prelude behaviour the platform table fixes
+
+// The identity contract (CATCHUP-R4): a result whose step does not echo the given identity
+// exactly is unusable and is retried, then fails; and converge()'s arbitrate receives the
+// pass it arbitrates at and the disputed builder's notes.
+test('the amended identity and arbitration: a foreign method is retried then fails; pass alone carries loop 1; arbitrate sees the pass and the dispute notes', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-identity-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  // A tmp workflow carries the stamped prelude itself, as a stamped toy would on disk.
+  const stamped = (name, body) => {
+    const prelude = fs.readFileSync(path.join(ROOT, 'workflow-lib', 'prelude.js'), 'utf8')
+    const file = path.join(dir, `${name}.js`)
+    fs.writeFileSync(
+      file,
+      `export const meta = {\n  name: '${name}',\n  phases: [],\n}\n` +
+        `// >>> stamped:prelude\n${prelude}// <<< stamped:prelude\n${body}`,
+    )
+    return file
+  }
+  const write = stamped
+
+  // A stub that echoes a different method: never usable, retried to the attempt limit, then failed.
+  write(
+    'foreign',
+    `RUN.wf = 'foreign'\n` +
+    `const r = await step('implementer', 'work', 'S-1.01', 'Do it.', { method: 'tdd' })\n` +
+    `return { status: r.status, summary: r.summary }\n`,
+  )
+  const foreignRun = await runWorkflowFile(path.join(dir, 'foreign.js'), {
+    agents: {
+      '*': (prompt, opts) => {
+        const v = identityStub(prompt, opts)
+        if (v && v.step) v.step.method = 'some-other-method'
+        return v
+      },
+    },
+  })
+  assert.equal(foreignRun.error, null, String(foreignRun.error))
+  assert.equal(foreignRun.result.status, 'failed')
+  assert.match(foreignRun.result.summary, /no usable result/)
+  assert.equal(foreignRun.calls.length, 2, 'the unusable result was not retried to the attempt limit')
+
+  // A step given pass alone carries loop 1 (prelude-steps.md: loop is o.loop || 1 when pass is given).
+  write(
+    'passalone',
+    `RUN.wf = 'passalone'\n` +
+    `const r = await step('implementer', 'work', 'S-1.01', 'Do it.', { method: 'tdd', pass: 3 })\n` +
+    `return { loop: r.step.loop, pass: r.step.pass }\n`,
+  )
+  const passAlone = await runWorkflowFile(path.join(dir, 'passalone.js'), { agents: { '*': identityStub } })
+  assert.equal(passAlone.error, null, String(passAlone.error))
+  assert.equal(passAlone.result.loop, 1)
+  assert.equal(passAlone.result.pass, 3)
+
+  // converge(): the arbiter is called with the pass it arbitrates at and the disputing builder's
+  // notes; a disputed, non-critical finding it rules not_defect is dismissed and the run converges.
+  write(
+    'arb',
+    `RUN.wf = 'arb'\n` +
+    `const finding = { key: 'code:k1', title: 't', severity: 'high', category: 'code', scope: 'unit',\n` +
+    `  owner: 'implementer', location: { path: 'x.py' }, spec_ref: 'BC-1', repro: 'r', observed: 'o', expected: 'e' }\n` +
+    `const seen = []\n` +
+    `const v = await converge({\n` +
+    `  perimeter: 'story', subject: 'S-1.01', cap: 2, used: 0, waived: [],\n` +
+    `  review: async () => ({ ok: true, head: 'h1', findings: [{ ...finding }], claim_checks: [], coverage_missing: [] }),\n` +
+    `  fix: async (open, advisory, pass) => ({ ok: true, resolutions: [{ key: open[0].key, resolution: 'disputed', commit: 'c1', note: 'checked the history; not a defect' }] }),\n` +
+    `  arbitrate: async (open, pass, notes) => {\n` +
+    `    seen.push({ pass, notes: [...notes.entries()], keys: open.map((f) => f.key) })\n` +
+    `    return { rulings: [{ key: open[0].key, ruling: 'not_defect', reason: 'the dispute stands' }] }\n` +
+    `  },\n` +
+    `})\n` +
+    `return { outcome: v.outcome, dismissed: v.dismissed, seen }\n`,
+  )
+  const arbRun = await runWorkflowFile(path.join(dir, 'arb.js'), { agents: { '*': identityStub } })
+  assert.equal(arbRun.error, null, String(arbRun.error))
+  assert.equal(arbRun.result.outcome, 'converged')
+  assert.equal(arbRun.result.seen.length, 1, 'the arbiter was called once, at the cap')
+  assert.equal(arbRun.result.seen[0].pass, 2, 'the arbiter must receive the pass it arbitrates at')
+  // vm realms clone results: compare by JSON text, not by prototype (as test 14 does).
+  assert.equal(JSON.stringify(arbRun.result.seen[0].keys), JSON.stringify(['code:k1']))
+  assert.equal(
+    JSON.stringify(arbRun.result.seen[0].notes),
+    JSON.stringify([['code:k1', 'checked the history; not a defect']]),
+    'the arbiter must receive the disputing builder’s note',
+  )
+  assert.equal(arbRun.result.dismissed.length, 1)
+})
+
+test('safe() admits a typed identifier and never an option, and the survey limit keys carry gate and ci minutes', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-safe-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const prelude = fs.readFileSync(path.join(ROOT, 'workflow-lib', 'prelude.js'), 'utf8')
+  const file = path.join(dir, 'safeprobe.js')
+  fs.writeFileSync(
+    file,
+    `export const meta = {\n  name: 'safeprobe',\n  phases: [],\n}\n` +
+      `// >>> stamped:prelude\n${prelude}// <<< stamped:prelude\n` +
+      `return { option: safe('-C/x'), identifier: safe('S-1.01'), dot: safe('a.b-c_d/e') }\n`,
+  )
+  const run = await runWorkflowFile(file, { agents: { '*': (p, o) => minimal(o.schema) } })
+  assert.equal(run.error, null, String(run.error))
+  assert.equal(run.result.option, '', 'a value beginning with a dash would become a vsdd option; safe() must refuse it')
+  assert.equal(run.result.identifier, 'S-1.01')
+  assert.equal(run.result.dot, 'a.b-c_d/e')
+
+  // The minutes keys are real limit keys: a survey carrying them runs clean
+  // (the unknown-key counterpart is test 9).
+  surveyState = { units: [], config: {}, limits: {} }
+  const limited = await runWorkflow('toy-story', {
+    args: { story: 'S-1.01', limits: { gate_minutes: 60, ci_minutes: 30 } },
+    agents: { '*': okStub },
+  })
+  assert.equal(limited.error, null, String(limited.error))
+})
 
 test('the spike wrapper: one spike in an isolated worktree, restarted with the finding', async () => {
   surveyState = { units: [], config: {} }
@@ -446,7 +662,7 @@ test('the spike wrapper: one spike in an isolated worktree, restarted with the f
   const buildAttempt = (prompt, opts) => {
     const v = minimal(opts.schema)
     Object.assign(v, {
-      step: { run: 'r1', workflow: 'toy-build', name: opts.label.includes('#1') ? 'build' : 'build-retry1', subject: 'S-1.01', attempt: 1 },
+      step: { run: 'r1', workflow: 'toy-build', name: opts.label.includes('#1') ? 'build' : 'build-retry1', subject: 'S-1.01', attempt: 1, method: promptMethod(prompt) },
       status: 'done',
       head: 'h1',
       gates: [DONE_GATE('S-1.01')],
@@ -579,6 +795,78 @@ test('ingest/map runs on the builder tier from the roster override', async () =>
   const overrides = JSON.parse(overrideMatch[1])
   assert.equal(overrides['ingest/map'], 'builder')
   assert.equal(overrides['ingest/analyze'], 'builder')
+})
+
+// CATCHUP-R5: the answer relay() dictates for a clerk whose command printed no JSON — the
+// schema's empty object with error set — must itself validate against the schema the clerk is
+// bound to, for every schema a script relays. The harness validates each clerk answer through
+// its validateValue, so an invalid dictation throws inside the run and this test fails.
+test('the dictated no-JSON answer is a valid result of every relayed schema', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-relay-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const prelude = fs.readFileSync(path.join(ROOT, 'workflow-lib', 'prelude.js'), 'utf8')
+  const file = path.join(dir, 'relayprobe.js')
+  fs.writeFileSync(
+    file,
+    `export const meta = {\n  name: 'relayprobe',\n  phases: [],\n}\n` +
+      `// >>> stamped:prelude\n${prelude}// <<< stamped:prelude\n` +
+      `const out = {}\n` +
+      `out.survey = await relay('survey', 'S-1.01', 'vsdd survey relayprobe --json', S_SURVEY, 'P')\n` +
+      `out.close = await relay('close', 'S-1.01', 'vsdd checkpoint relayprobe --run r1 --json', S_CLOSE, 'P')\n` +
+      `out.delivery = await relay('deliver', 'S-1.01', 'vsdd story deliver --json', S_DELIVERY, 'P')\n` +
+      `out.waveGate = await relay('gate wave', 'W-1', 'vsdd gate wave --json', S_WAVE_GATE, 'P')\n` +
+      `return out\n`,
+  )
+  const run = await runWorkflowFile(file, {
+    agents: {
+      // The clerk does exactly what the prompt says: it returns the object the prompt embeds.
+      'vsdd-factory:clerk': (prompt) => {
+        const m = /return (\{.*\}) with "error" set/.exec(prompt)
+        assert.ok(m, 'the prompt does not dictate the schema’s empty object')
+        return { ...JSON.parse(m[1]), error: 'it printed no JSON' }
+      },
+    },
+  })
+  assert.equal(run.error, null, String(run.error))
+  for (const name of ['survey', 'close', 'delivery', 'waveGate']) {
+    assert.equal(run.result[name].error, 'it printed no JSON', `${name}: the dictated answer was not returned`)
+  }
+})
+
+// SL1-51: gated() passes o.stage into step() on every attempt, so a retried gated step whose
+// "<workflow>/<stage>" the roster's OVERRIDE table lists keeps its override tier. If the stage
+// passthrough is dropped, the retry resolves 'ingest/map-retry1' and falls back to the agent's
+// own tier, which this test catches through the model the harness recorded.
+test('a retried gated step keeps its stage and its override tier', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-gated-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const prelude = fs.readFileSync(path.join(ROOT, 'workflow-lib', 'prelude.js'), 'utf8')
+  const file = path.join(dir, 'gatedprobe.js')
+  fs.writeFileSync(
+    file,
+    `export const meta = {\n  name: 'gatedprobe',\n  phases: [],\n}\n` +
+      `// >>> stamped:prelude\n${prelude}// <<< stamped:prelude\n` +
+      `RUN.wf = 'ingest'\n` +
+      `const r = await gated('product-owner', 'map', 'S-1.01', 'Map it.', 'green', { method: 'tdd' })\n` +
+      `return { status: r.status, head: r.head }\n`,
+  )
+  let attempt = 0
+  const run = await runWorkflowFile(file, {
+    agents: {
+      '*': (prompt, opts) => {
+        attempt++
+        const v = identityStub(prompt, opts)
+        if (attempt === 1) v.gates = [] // the first attempt returns no gate result, forcing the retry
+        return v
+      },
+    },
+  })
+  assert.equal(run.error, null, String(run.error))
+  const stepCalls = run.calls.filter((c) => /· map(-retry1)? #/.test(c.label))
+  assert.equal(stepCalls.length, 2, `the gated step did not retry: ${run.calls.map((c) => c.label)}`)
+  assert.match(stepCalls[1].label, /map-retry1/, 'the second attempt is not a retry')
+  assert.equal(stepCalls[0].model, 'sonnet', 'the first attempt missed the override tier')
+  assert.equal(stepCalls[1].model, 'sonnet', 'the retry lost the override tier: gated() did not pass the stage through')
 })
 
 test('harness realm: log() records, budget() charges agent() and throws past the total, pipeline drops a throwing stage to null, workflow() rethrows a child error and nests once', async (t) => {

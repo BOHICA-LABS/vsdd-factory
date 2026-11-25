@@ -1,0 +1,207 @@
+{
+  "name": "l05-cap-disputed-critical",
+  "about": "A critical finding is never dismissed by the arbiter.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 2,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "critical",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "disputed",
+              "commit": "",
+              "note": "because"
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "critical",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c2",
+              "note": ""
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "critical",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": {
+      "rulings": [
+        {
+          "key": "code:a",
+          "ruling": "not_defect",
+          "reason": "r"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 3,
+      "rounds_used": 3,
+      "outcome": "blocked",
+      "reason": "cap",
+      "blocking": [
+        {
+          "key": "code:a",
+          "title": "t-code:a",
+          "severity": "critical",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "trace": [
+      {
+        "pass": 1,
+        "claims": [],
+        "gaps": [],
+        "fix": [
+          "code:a"
+        ]
+      },
+      {
+        "pass": 2,
+        "claims": [
+          {
+            "key": "code:a",
+            "path": "x.py",
+            "resolution": "disputed",
+            "commit": ""
+          }
+        ],
+        "gaps": [],
+        "arbitrate": {
+          "keys": [
+            "code:a"
+          ],
+          "notes": [
+            [
+              "code:a",
+              "because"
+            ]
+          ]
+        },
+        "fix": [
+          "code:a"
+        ]
+      },
+      {
+        "pass": 3,
+        "claims": [
+          {
+            "key": "code:a",
+            "path": "x.py",
+            "resolution": "fixed",
+            "commit": "c2"
+          }
+        ],
+        "gaps": []
+      }
+    ]
+  }
+}

@@ -7,8 +7,9 @@ every section and every key the loader accepts appears in it — and an unknown
 key or a wrong type is an error, never a relaxation: an invalid value never
 loosens a gate. That includes the free-form-looking sections: ``[[component]]``,
 ``[[reference]]``, ``[[repo]]`` and ``[discover]`` each accept exactly the keys
-the example shows, and ``[caps]`` names come from the artifact registry (C2),
-whose name and bound checks land with that package.
+the example shows, and ``[caps]`` names come from the shipped artifact registry
+(``py/vsdd/policy/artifacts.toml``), which also fixes the "at most twice its
+default" bound.
 
 Standard library only (``tomllib`` is 3.11+, the floor). Behaviour notes:
 
@@ -84,6 +85,34 @@ _HOOK_RULE_STRENGTHS = ("block", "advise", "off")
 
 _AUTO_ALLOW_KEYS = ("scope",)
 _AUTO_ALLOW_SCOPES = ("off", "core", "extended")
+
+# The keys a rule takes of its own (config/hooks.md); strength belongs to
+# every tunable rule and is validated apart. A rule id the runner does not
+# know is the hook runner's check, not the loader's.
+_HOOK_RULE_OWN_KEYS: dict[str, tuple] = {
+    "bash-git": (("attribution", BOOL),),
+    "bash-destructive": (("allow_pr_close", BOOL),),
+    "secrets": (("secret_globs", STR_LIST),),
+    "purity-advice": (("pure_paths", STR_LIST), ("side_effect_patterns", STR_LIST)),
+}
+
+
+def _refresh_protected_paths(data: dict) -> None:
+    """The protected-paths default follows ``[release]`` (finding AU-T2-15):
+    ``.github/**``, ``.env*``, ``CODEOWNERS``, then the files ``[release]``
+    names — the change log and each version file."""
+    release = data["release"]
+    seen: list[str] = []
+    for path in (
+        ".github/**",
+        ".env*",
+        "CODEOWNERS",
+        release["changelog"],
+        *[entry["path"] for entry in release["version_files"]],
+    ):
+        if path not in seen:
+            seen.append(path)
+    data["delivery"]["protected_paths"] = seen
 
 
 def _sec(**keys) -> dict:
@@ -350,10 +379,13 @@ def _kill_rates(incoming: object, where: str) -> dict:
 def _apply_hook_rules(container: dict, incoming: object, where: str, problems: dict | None) -> None:
     """Validate ``[hooks.rules.*]`` per rule, never for the whole file.
 
-    A rule whose table is wrong falls back to its built-in defaults: the
-    problem lands in ``problems`` (keyed by rule id) for the runner to log as
-    ``config.invalid`` and list in the briefing, and the other rules keep
-    theirs (hooks.md 2.6).
+    The keys under a rule are closed (config/hooks.md; finding P3SEAM-06):
+    ``strength``, the keys the rule takes of its own, and for ``auto-allow``
+    only ``scope``. A fault under a rule costs that rule its settings only —
+    it falls back to its built-in defaults, reported in ``problems`` keyed by
+    rule id — while a fault in ``[hooks]`` itself is a ``ConfigError``
+    (finding SL1-47, decision 6). Whether a rule id exists is the hook
+    runner's check.
     """
     if not isinstance(incoming, dict):
         raise ConfigError(f"{where} must be a table, got {_type(incoming)}")
@@ -364,6 +396,7 @@ def _apply_hook_rules(container: dict, incoming: object, where: str, problems: d
         if not isinstance(table, dict):
             collected[name] = [f"{where}.{name} must be a table, got {_type(table)}"]
             continue
+        rules_entry: dict = {}
         if name == "auto-allow":
             scope = table.get("scope", "off")
             if scope not in _AUTO_ALLOW_SCOPES:
@@ -377,25 +410,42 @@ def _apply_hook_rules(container: dict, incoming: object, where: str, problems: d
                         f"{where}.{name}.{key}: unknown key (known: {', '.join(_AUTO_ALLOW_KEYS)})"
                     )
             if not problems_of_rule:
-                rules[name] = {"scope": scope}
-        elif "strength" in table:
-            strength = table["strength"]
-            if strength not in _HOOK_RULE_STRENGTHS:
-                problems_of_rule.append(
-                    f"{where}.{name}.strength must be one of "
-                    f"{'|'.join(_HOOK_RULE_STRENGTHS)}, got {strength!r}"
-                )
-            if name in _LOCKED_HOOK_RULES:
-                problems_of_rule.append(
-                    f"{where}.{name}: {name} is locked; setting strength is a "
-                    "configuration error (hooks.md 2.6)"
-                )
-            if not problems_of_rule and strength != "block":
-                rules[name] = {"strength": strength}
+                rules_entry = {"scope": scope}
         else:
-            rules[name] = dict(table)
+            own_keys = dict(_HOOK_RULE_OWN_KEYS.get(name, ()))
+            strength = table.get("strength")
+            if "strength" in table:
+                if strength not in _HOOK_RULE_STRENGTHS:
+                    problems_of_rule.append(
+                        f"{where}.{name}.strength must be one of "
+                        f"{'|'.join(_HOOK_RULE_STRENGTHS)}, got {strength!r}"
+                    )
+                if name in _LOCKED_HOOK_RULES:
+                    problems_of_rule.append(
+                        f"{where}.{name}: {name} is locked; setting strength is a "
+                        "configuration error (hooks.md 2.6)"
+                    )
+            for key in table:
+                if key != "strength" and key not in own_keys:
+                    problems_of_rule.append(
+                        f"{where}.{name}.{key}: unknown key (known: "
+                        f"{', '.join(sorted({'strength', *own_keys}))})"
+                    )
+            if not problems_of_rule:
+                if "strength" in table and name not in _LOCKED_HOOK_RULES and strength != "block":
+                    rules_entry["strength"] = strength
+                for key, kind in own_keys.items():
+                    if key in table:
+                        try:
+                            rules_entry[key] = _check_scalar(
+                                table[key], kind, f"{where}.{name}.{key}"
+                            )
+                        except ConfigError as exc:
+                            problems_of_rule.append(str(exc))
         if problems_of_rule:
             collected[name] = problems_of_rule
+        elif rules_entry:
+            rules[name] = rules_entry
     container["rules"] = rules
 
 
@@ -422,17 +472,54 @@ def _apply_hooks(data: dict, incoming: object, where: str) -> None:
     _apply_table(data, "hooks", incoming, where)
 
 
+def _artifact_caps() -> dict[str, int]:
+    """The size caps the artifact registry ships, as ``kind -> default bytes``.
+
+    The registry (``py/vsdd/policy/artifacts.toml``) is the single definition of
+    the cap names and defaults (state.md 2.12; the C2 policy tables). Loaded on
+    first use and cached: the registry ships with the plugin and never changes
+    while it runs.
+    """
+    global _ARTIFACT_CAPS
+    if _ARTIFACT_CAPS is None:
+        from .policy import load
+
+        registry = load("artifacts")
+        _ARTIFACT_CAPS = {
+            kind: row["max_bytes"]
+            for kind, row in registry.items()
+            if isinstance(row, dict) and isinstance(row.get("max_bytes"), int)
+        }
+    return _ARTIFACT_CAPS
+
+
+_ARTIFACT_CAPS: dict[str, int] | None = None
+
+
 def _apply_caps(data: dict, incoming: object, where: str) -> None:
     if not isinstance(incoming, dict):
         raise ConfigError(f"{where} must be a table, got {_type(incoming)}")
+    known = _artifact_caps()
     caps: dict = {"waived": list(data["caps"]["waived"])}
     for key, value in incoming.items():
         if key == "waived":
             caps["waived"] = _check_scalar(value, STR_LIST, f"{where}.waived")
-        else:
-            # Cap names come from the artifact registry (C2), which also owns
-            # the "at most twice its default" bound check (state.md 2.12).
-            caps[key] = _check_scalar(value, INT, f"{where}.{key}")
+            continue
+        if key not in known:
+            raise ConfigError(
+                f"{where}.{key}: unknown cap; a cap names an artifact kind with a "
+                f"size limit ({', '.join(sorted(known))})"
+            )
+        number = _check_scalar(value, INT, f"{where}.{key}")
+        default = known[key]
+        # A raised cap is at most twice its default and never below one byte
+        # (state.md 2.12); an out-of-range value never loosens a gate silently.
+        if not 1 <= number <= 2 * default:
+            raise ConfigError(
+                f"{where}.{key} must lie between 1 and twice its default "
+                f"({2 * default}); the {key} cap defaults to {default}"
+            )
+        caps[key] = number
     data["caps"] = caps
 
 
@@ -613,6 +700,12 @@ class Config:
             return self.data[section]
         return self.data[section][key]
 
+    def hook_rules(self) -> dict[str, dict]:
+        """The validated ``[hooks.rules.*]`` tables, one entry per rule that
+        left its defaults. A rule id the runner does not know is reported by
+        the runner, not here."""
+        return dict(self.data["hooks"]["rules"])
+
     def command(self, name: str) -> str:
         """One of ``[commands]``, defaulting to empty: a missing command is a state."""
         return str(self.data["commands"].get(name, ""))
@@ -655,6 +748,7 @@ def loads(text: str, path: Path | None = None) -> Config:
         raise ConfigError(f"schema must be the integer {SCHEMA_VERSION}, got {schema!r}")
 
     layout = (raw.get("project") or {}).get("layout", "single")
+    protected_given = isinstance(raw.get("delivery"), dict) and "protected_paths" in raw["delivery"]
     for section, incoming in raw.items():
         if section == "schema":
             continue
@@ -680,6 +774,8 @@ def loads(text: str, path: Path | None = None) -> Config:
             _apply_reference(data, incoming, "[[reference]]")
         elif section == "repo":
             _apply_repo(data, incoming, layout=layout)
+    if not protected_given:
+        _refresh_protected_paths(data)
     return Config(data, path)
 
 

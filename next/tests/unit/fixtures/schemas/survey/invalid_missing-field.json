@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "error": "",
+  "run_id": "r-7f3a1c",
+  "workflow": "feature",
+  "subject": "B5",
+  "cycle": "1.0",
+  "scope": "full",
+  "project_dir": "/p",
+  "plugin_root": "/n/plugins/vsdd-factory",
+  "head": "abc123",
+  "preconditions": [],
+  "done": [],
+  "units": [],
+  "limits": {},
+  "spikes_used": 0,
+  "decisions": [],
+  "waived": [],
+  "next": {
+    "kind": "done"
+  }
+}

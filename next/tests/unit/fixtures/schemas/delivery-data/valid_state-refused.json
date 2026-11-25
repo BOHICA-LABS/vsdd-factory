@@ -1,0 +1,14 @@
+{
+  "ok": false,
+  "error": "Delivery refused: no converged verdict.",
+  "state": "refused",
+  "pr": "",
+  "merged_sha": "abc123",
+  "detail": "",
+  "reviewed_sha": "def456",
+  "changed_files": [
+    "src/x.py"
+  ],
+  "diff_patch": "",
+  "needs_person": ""
+}

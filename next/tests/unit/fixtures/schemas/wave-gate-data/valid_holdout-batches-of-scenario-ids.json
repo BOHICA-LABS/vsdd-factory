@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "gate": "wave",
+  "subject": "B5",
+  "passed": true,
+  "sha": "abc123",
+  "evidence": "",
+  "failures": [],
+  "diff_patch": "",
+  "metrics": {},
+  "flaky": [],
+  "findings": [],
+  "unit": {},
+  "error": "",
+  "pending": [],
+  "worktree": "/p/.integr",
+  "base": "abc123",
+  "stories": [],
+  "needs": {
+    "security": false,
+    "ui": false
+  },
+  "holdout_batches": [
+    [
+      "HS-001",
+      "HS-002"
+    ],
+    [
+      "HS-003"
+    ]
+  ],
+  "fix_units": [],
+  "holdout": {
+    "seed": "",
+    "contracts": {}
+  },
+  "test_output": "",
+  "changed_files": []
+}

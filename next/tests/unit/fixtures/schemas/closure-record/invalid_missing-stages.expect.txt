@@ -1,0 +1,1 @@
+$.stages: missing required property 'stages'

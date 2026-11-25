@@ -1,0 +1,42 @@
+{
+  "id": "S-9.01",
+  "position": "ready",
+  "worktree": "/p/.worktrees/S-9.01",
+  "tree": "/p/.worktrees/S-9.01",
+  "branch": "feature/S-9.01",
+  "base": "abc123",
+  "head": "",
+  "story_path": "stories/S-9.01.md",
+  "bcs": [
+    "BC-9.02.001"
+  ],
+  "acs": [
+    "AC-1"
+  ],
+  "criticality": "high",
+  "kind": "feature",
+  "tests_agent": "test-writer",
+  "impl_agent": "implementer",
+  "red_gate": true,
+  "impl_method": "tdd",
+  "tests_method": "",
+  "repo": "",
+  "security": false,
+  "ui": false,
+  "demo_required": false,
+  "waived": [],
+  "guidance": "",
+  "deferred": [],
+  "diff_patch": "",
+  "test_output": "",
+  "review_rules": "",
+  "dirty": false,
+  "open_pr": "",
+  "rounds_used": 0,
+  "blocked": {
+    "kind": "",
+    "decision": "",
+    "open": false
+  },
+  "fixes": []
+}

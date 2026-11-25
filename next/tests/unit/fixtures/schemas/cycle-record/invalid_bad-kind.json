@@ -1,0 +1,9 @@
+{
+  "id": "hotfix-1.2.1",
+  "kind": "patch",
+  "title": "Urgent fix",
+  "route": "",
+  "opened": "2026-11-24T08:00:00Z",
+  "baseline": "v1.2.0",
+  "request": "CR-004"
+}

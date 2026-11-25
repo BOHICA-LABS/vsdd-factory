@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'f=\"${CLAUDE_PLUGIN_ROOT}/py/launch.sh\"; [ -r \"$f\" ] && exec sh \"$f\" hook brief; d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; case \"$d\" in /*) ;; *) exit 0;; esac; h=\"${HOME%/}\"; while [ -n \"$d\" ] && [ \"$d\" != \"$h\" ] && [ \"$d\" != / ]; do [ -f \"$d/.factory/factory.toml\" ] && { printf \"{\\\"continue\\\":true,\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"vsdd-factory: the plugin files are missing, so the factory gates are blocking. Reinstall the plugin.\\\"},\\\"systemMessage\\\":\\\"vsdd-factory: the plugin files are missing; every guarded call is blocked\\\"}\\n\"; exit 0 ; }; d=\"${d%/*}\"; done; exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'f=\"${CLAUDE_PLUGIN_ROOT}/py/launch.sh\"; [ -r \"$f\" ] && exec sh \"$f\" hook gate; d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; case \"$d\" in /*) ;; *) exit 0;; esac; h=\"${HOME%/}\"; while [ -n \"$d\" ] && [ \"$d\" != \"$h\" ] && [ \"$d\" != / ]; do [ -f \"$d/.factory/factory.toml\" ] && { printf \"vsdd-factory: the plugin files are missing, so the factory gates cannot run. Reinstall the plugin.\\n\" >&2; exit 2 ; }; d=\"${d%/*}\"; done; exit 0'",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ],
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|StructuredOutput"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'f=\"${CLAUDE_PLUGIN_ROOT}/py/launch.sh\"; [ -r \"$f\" ] && exec sh \"$f\" hook notify; d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; case \"$d\" in /*) ;; *) exit 0;; esac; h=\"${HOME%/}\"; while [ -n \"$d\" ] && [ \"$d\" != \"$h\" ] && [ \"$d\" != / ]; do [ -f \"$d/.factory/factory.toml\" ] && { exit 0 ; }; d=\"${d%/*}\"; done; exit 0'"
+          }
+        ]
+      }
+    ]
+  }
+}

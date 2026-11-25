@@ -1,0 +1,13 @@
+{
+  "locks": [
+    {
+      "scope": "acme-api:develop",
+      "run": "r-20261126-1402-7q",
+      "workflow": "wave",
+      "subject": "W-02",
+      "session": "0c1d2e3f4a5b6701",
+      "taken": "2026-11-26T14:02:00Z",
+      "seen": "2026-11-26T14:31:10Z"
+    }
+  ]
+}

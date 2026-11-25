@@ -1,0 +1,32 @@
+# The merge-guard case table (rules/merge-guard.md): the develop-checkout
+# fixture's main checkout sits on the integration branch.
+
+[[case]]
+name = "a commit on the integration branch is blocked"
+project = "develop-checkout"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "git commit --allow-empty -m x" }
+expect = { outcome = "block", rule = "merge-guard", code = "commit_on_guarded" }
+launcher = true
+
+[[case]]
+name = "git status passes on the integration branch"
+project = "develop-checkout"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "git status" }
+expect = { outcome = "allow", rule = "merge-guard" }
+launcher = true
+
+[[case]]
+name = "a push to the integration branch is blocked"
+project = "develop-checkout"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "git push origin develop" }
+expect = { outcome = "block", rule = "merge-guard", code = "push_to_guarded" }
+
+[[case]]
+name = "a commit in the story worktree passes"
+project = "story-after-red"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "git commit --allow-empty -m x" }
+expect = { outcome = "allow", rule = "merge-guard" }

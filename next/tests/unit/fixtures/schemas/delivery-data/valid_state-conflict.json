@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "error": "",
+  "state": "conflict",
+  "pr": "",
+  "merged_sha": "abc123",
+  "detail": "",
+  "reviewed_sha": "def456",
+  "changed_files": [
+    "src/x.py"
+  ],
+  "diff_patch": "",
+  "needs_person": ""
+}

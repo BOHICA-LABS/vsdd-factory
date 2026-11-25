@@ -1,0 +1,11 @@
+<testsuites>
+  <testsuite name="tally" tests="2">
+    <testcase classname="tests.test_r" name="test_twice" time="0.001"/>
+    <testcase classname="tests.test_r" name="test_twice" time="0.001">
+      <failure message="second">AssertionError</failure>
+    </testcase>
+    <testcase classname="tests.test_r" name="test_skip_only" time="0.001">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

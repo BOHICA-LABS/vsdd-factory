@@ -1,0 +1,61 @@
+# The tests-first case table (rules/tests-first.md via topics/rule-testing.md):
+# the fixture projects are rule_projects.CASE_PROJECTS; {worktree} and friends
+# are substituted into the `set` strings.
+
+[[case]]
+name = "product source before red is blocked by the implementer"
+project = "story-before-red"
+payload = "PreToolUse/edit-agent.json"
+set = { "tool_input.file_path" = "{worktree}/src/lib.rs" }
+expect = { outcome = "block", rule = "tests-first", code = "no_red_evidence" }
+launcher = true
+
+[[case]]
+name = "an unfrozen test file passes after red"
+project = "story-after-red"
+payload = "PreToolUse/edit-agent.json"
+set = { "tool_input.file_path" = "{worktree}/tests/test_other.py" }
+expect = { outcome = "allow", rule = "tests-first" }
+launcher = true
+
+[[case]]
+name = "a sed on source before red is the edit it stands for"
+project = "story-before-red"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "sed -i 's/a/b/' {worktree}/src/lib.rs" }
+expect = { outcome = "block", rule = "tests-first", code = "no_red_evidence" }
+
+[[case]]
+name = "a sed -i -e on source before red is the edit it stands for"
+project = "story-before-red"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "sed -i -e 's/a/b/' {worktree}/src/lib.rs" }
+expect = { outcome = "block", rule = "tests-first", code = "no_red_evidence" }
+
+[[case]]
+name = "the same sed -i after red passes"
+project = "story-after-red"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "sed -i 's/a/b/' {worktree}/src/lib.rs" }
+expect = { outcome = "allow", rule = "tests-first" }
+
+[[case]]
+name = "a redirect into a frozen test is blocked after red"
+project = "story-after-red"
+payload = "PreToolUse/bash-main.json"
+set = { "tool_input.command" = "echo x > {worktree}/tests/test_sample.py" }
+expect = { outcome = "block", rule = "tests-first", code = "red_test_frozen" }
+
+[[case]]
+name = "an implementer edit after its own commit passes"
+project = "story-committed"
+payload = "PreToolUse/edit-agent.json"
+set = { "tool_input.file_path" = "{worktree}/src/lib.rs" }
+expect = { outcome = "allow", rule = "tests-first" }
+
+[[case]]
+name = "a test-writer source edit after red at a later commit is blocked"
+project = "story-committed"
+payload = "PreToolUse/edit-agent.json"
+set = { "agent_type" = "vsdd-factory:test-writer", "tool_input.file_path" = "{worktree}/src/lib.rs" }
+expect = { outcome = "block", rule = "tests-first", code = "red_already_recorded" }

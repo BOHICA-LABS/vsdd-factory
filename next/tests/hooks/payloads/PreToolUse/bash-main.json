@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "session_id": "sess_9f83ab",
+  "cwd": "{root}",
+  "permission_mode": "default",
+  "tool_input": {"command": "echo hello"}
+}

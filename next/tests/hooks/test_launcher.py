@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,12 +202,21 @@ class TestCliEntry(FakeUvCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("uv python install 3.12", result.stderr)
 
-    def test_crash_propagates_the_code(self) -> None:
+    def test_vsdd_exit_1_passes_through_silent(self) -> None:
+        """SL1-03: vsdd's own negative answer (rc 1) is the code, not a launch failure."""
         for interpreter in INTERPRETERS:
             with self.subTest(shell=interpreter):
                 result = self.run_cli(interpreter, fake_rc=1)
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("exit 1", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr, "")
+
+    def test_crash_propagates_the_code(self) -> None:
+        for interpreter in INTERPRETERS:
+            with self.subTest(shell=interpreter):
+                result = self.run_cli(interpreter, fake_rc=3)
+                self.assertEqual(result.returncode, 3)
+                self.assertIn("exit 3", result.stderr)
                 self.assertIn("uv --version", result.stderr)
 
     def test_uv_missing_via_seam(self) -> None:
@@ -285,9 +296,26 @@ class TestInertAndDisabled(FakeUvCase):
 
 
 class TestEventLogSchema(FakeUvCase):
-    """R8: every appended line carries the fields hooks.md 2.12 requires."""
+    """R8: every appended line carries the fields hooks.md 2.12 requires —
+    validated against the shipped EVENT_SCHEMA, not merely by hand-picked
+    field checks (CATCHUP-R14: the hand-built dict proved nothing about the
+    line the launcher actually writes)."""
 
     REQUIRED = {"v", "ts", "type", "severity", "session_id"}
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plugins" / "vsdd-factory" / "py"))
+        from vsdd.events import EVENT_SCHEMA, _TS_READ_RE  # noqa: PLC0415
+
+        cls.event_schema = EVENT_SCHEMA
+        cls.ts_pattern = _TS_READ_RE
+
+    def validate_against_schema(self, event: dict) -> None:
+        from vsdd.schema import validate  # noqa: PLC0415
+
+        errors = validate(event, self.event_schema)
+        self.assertEqual([str(e) for e in errors], [], f"launcher line fails EVENT_SCHEMA: {event}")
 
     def test_launch_failed_line_matches_schema(self) -> None:
         result = self.run_hook("gate", "sh", fake_rc=1, fake_find_rc=2)
@@ -295,6 +323,9 @@ class TestEventLogSchema(FakeUvCase):
         lines = self.event_lines()
         self.assertTrue(lines, "a launch failure must append an event")
         for event in lines:
+            self.validate_against_schema(event)
+            self.assertRegex(event["ts"], self.ts_pattern.pattern + r"$")
+            self.assertIsNone(event["session_id"], "a launcher-written line carries a null session_id")
             for field in self.REQUIRED:
                 self.assertIn(field, event, f"event missing {field!r}: {event}")
             self.assertEqual(event["v"], 1)
@@ -305,6 +336,16 @@ class TestEventLogSchema(FakeUvCase):
             self.assertIn("code", event)
             self.assertIn("mode", event)
 
+    def test_hooks_off_line_matches_schema(self) -> None:
+        """The other launcher-written line (runner.disabled) validates too."""
+        result = self.run_hook("brief", "sh", hooks_off=True, fake_rc=0)
+        self.assertEqual(result.returncode, 0)
+        events = self.event_lines()
+        self.assertTrue(events)
+        for event in events:
+            self.validate_against_schema(event)
+            self.assertEqual(event["type"], "runner.disabled")
+
     def test_vsdd_events_dir_redirects_the_log(self) -> None:
         redirected = self.root / "redirected"
         launch(
@@ -314,6 +355,38 @@ class TestEventLogSchema(FakeUvCase):
         )
         files = list(redirected.glob("*.jsonl"))
         self.assertEqual(len(files), 1, "VSDD_EVENTS_DIR must redirect the event log")
+
+
+def launch_env(project: Path) -> dict:
+    import os
+
+    env = dict(os.environ)
+    env["CLAUDE_PROJECT_DIR"] = str(project)
+    return env
+
+
+class TestBareNameInvocation(unittest.TestCase):
+    """SL1-13 (CATCHUP-R14): invoking the launcher by bare name (`sh launch.sh`, no
+    slash in $0) must still find its sources — the `here=.` branch of the case guard.
+    Run with the working directory set to py/, the only place a bare name resolves."""
+
+    def test_bare_name_invocation_from_the_py_directory(self) -> None:
+        py_dir = Path(__file__).resolve().parents[2] / "plugins" / "vsdd-factory" / "py"
+        with tempfile.TemporaryDirectory(prefix="vsdd-bare-") as td:
+            project = make_project(Path(td))
+            for interpreter in INTERPRETERS:
+                with self.subTest(shell=interpreter):
+                    result = subprocess.run(
+                        [interpreter, "launch.sh", "cli", "--version"],
+                        cwd=py_dir,
+                        env=launch_env(project),
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("vsdd 1.0.0", result.stdout)
 
 
 class TestReadOnlyCache(unittest.TestCase):

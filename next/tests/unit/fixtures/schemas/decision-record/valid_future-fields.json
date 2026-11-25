@@ -1,0 +1,17 @@
+{
+  "id": "release",
+  "kind": "release",
+  "status": "approved",
+  "choice": "approve",
+  "values": {
+    "ticket": "VSD-12",
+    "signed_off_by": "the board"
+  },
+  "note": "",
+  "digest": "e69de29bb2d1d643",
+  "opened": "2026-11-24T12:00:00Z",
+  "settled": "2026-11-24T13:00:00Z",
+  "settled_by": "terminal",
+  "settled_by_person": "jda",
+  "follows": ["spec"]
+}

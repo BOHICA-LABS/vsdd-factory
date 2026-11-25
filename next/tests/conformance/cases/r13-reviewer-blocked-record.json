@@ -1,0 +1,67 @@
+{
+  "name": "r13-reviewer-blocked-record",
+  "about": "A blocked reviewer record gives blocked, reviewer_blocked.",
+  "kind": "records",
+  "input": {
+    "subject": "S-9.01",
+    "cap": 3,
+    "waived": [],
+    "acs": [
+      "AC-1"
+    ],
+    "changed": {},
+    "records": [
+      {
+        "step": {
+          "run": "r1",
+          "workflow": "story",
+          "name": "review-a-l1-p1",
+          "subject": "S-9.01",
+          "attempt": 1,
+          "method": "review-story-diff",
+          "loop": 1,
+          "pass": 1
+        },
+        "status": "blocked",
+        "summary": "s",
+        "head": "h1",
+        "data": {
+          "reviewed_sha": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage": []
+        },
+        "agent_type": "vsdd-factory:adversary",
+        "worktree_head": "h1",
+        "agent_id": ""
+      }
+    ]
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "blocked",
+      "reason": "reviewer_blocked",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "loops": [
+      {
+        "run": "r1",
+        "loop": 1,
+        "outcome": "blocked",
+        "reason": "reviewer_blocked"
+      }
+    ],
+    "skipped": [],
+    "chain": false,
+    "passes_used": 1
+  }
+}

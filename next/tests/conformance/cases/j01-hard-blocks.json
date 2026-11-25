@@ -1,0 +1,50 @@
+{
+  "name": "j01-hard-blocks",
+  "about": "A critical, anchored, located, grounded finding of reach blocks.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:a",
+        "title": "t-code:a",
+        "severity": "critical",
+        "category": "code",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [
+        {
+          "key": "code:a",
+          "title": "t-code:a",
+          "severity": "critical",
+          "category": "code",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

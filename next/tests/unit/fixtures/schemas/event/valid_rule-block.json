@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "ts": "2026-11-24T09:31:12.512Z",
+  "type": "rule.block",
+  "severity": "block",
+  "session_id": "sess_9f83ab",
+  "agent_type": "vsdd-factory:implementer",
+  "agent_id": "agent-7",
+  "event": "PreToolUse",
+  "tool": "Edit",
+  "ms": 9,
+  "rule": "tests-first",
+  "code": "no_red_evidence",
+  "id": "b-7f3a2c",
+  "reason": "src/lib.rs is product source in story S-1.02, and no failing test run is recorded for that story.",
+  "fix": "write the failing test, then run the red gate: vsdd gate red --story S-1.02",
+  "target": "/repo/.worktrees/S-1.02/src/lib.rs",
+  "story": "S-1.02",
+  "cwd": "/repo/.worktrees/S-1.02"
+}

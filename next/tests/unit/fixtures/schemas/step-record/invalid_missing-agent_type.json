@@ -1,0 +1,16 @@
+{
+  "step": {
+    "run": "r-20261124-0915-a1",
+    "workflow": "story",
+    "name": "review-adversary-l1-p1",
+    "subject": "S-9.01",
+    "attempt": 2,
+    "method": "adversary"
+  },
+  "status": "needs_spike",
+  "summary": "Needs a timing spike before the fix.",
+  "head": "",
+  "data": {},
+  "worktree_head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "agent_id": "agent-0f3e"
+}

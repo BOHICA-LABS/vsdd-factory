@@ -1,0 +1,50 @@
+{
+  "name": "j09-wave-reaches-integration",
+  "about": "A wave review reaches integration findings.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "code:h",
+        "title": "t-code:h",
+        "severity": "high",
+        "category": "code",
+        "scope": "integration",
+        "owner": "implementer",
+        "location": {
+          "path": "x.py"
+        },
+        "spec_ref": "BC-1",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "wave",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [
+        {
+          "key": "code:h",
+          "title": "t-code:h",
+          "severity": "high",
+          "category": "code",
+          "scope": "integration",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

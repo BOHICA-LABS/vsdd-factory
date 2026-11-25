@@ -1,0 +1,116 @@
+# Project configuration for the tally sample, filled in as state.md 2.12
+# prescribes. Normally written by `vsdd init` by detection and then edited
+# by a person; it is checked in here so the end-to-end tiers start from a
+# known configuration. No agent tool call can write it.
+
+schema = 1
+
+[project]
+name = "tally"
+languages = ["python"]
+ui = false
+layout = "single"
+
+[branches]
+integration = "main"
+release = "main"
+protected = ["main"]
+story = "story/{id}"
+spike = "spike/{name}"
+
+[commands]
+build = ""
+test = "uv run --no-project python tools/junit_runner.py"
+test_report = "junit:build/junit.xml"
+lint = "uv run --no-project python tools/lint.py"
+format_check = "uv run --no-project python tools/lint.py --format"
+run = ""
+ui_check = ""
+docs_check = ""
+mutation = ""
+scan = ""
+audit = ""
+bench = ""
+proofs = ""
+
+[commands.env]
+# none: every command is standard library and needs no environment
+
+[paths]
+tests = ["tests/**"]
+harness = []
+ci = []
+repo_config = [".gitignore"]
+manifests = []
+docs = ["README.md"]
+source = ["tally/**", "tools/**"]
+
+[delivery]
+mode = "pr"
+ci = "none"
+merge = "auto"
+merge_strategy = "squash"
+protected_paths = [".github/**", ".env*", "CODEOWNERS", "CHANGELOG.md"]
+dependency_changes = "human"
+ci_wait_minutes = 30
+
+[convergence]
+passes = 3
+rounds = 3
+
+[limits]
+agents_per_run = 900
+agents_per_story = 40
+stories_per_wave_run = 24
+step_attempts = 2
+delivery_rounds = 3
+gate_minutes = 60
+parallel_gates = 4
+failed_runs_before_stuck = 2
+
+[spikes]
+per_step = 2
+per_run = 6
+per_day = 20
+minutes = 20
+max_open = 3
+retain_days = 14
+
+[holdout]
+mean_min = 0.85
+must_pass_min = 0.6
+stddev_max = 0.15
+rotation = 0.8
+batch = 12
+
+[mutation]
+kill_rate = { critical = 0.95, high = 0.90, medium = 0.80, low = 0.70 }
+
+[stops]
+plan = "auto"
+plan_ceiling_agents = 600
+
+[evidence]
+wave_demo = false
+final_demo = false
+
+[maintain]
+sweeps = []
+fixes_per_run = 10
+
+[release]
+version_files = []
+changelog = "CHANGELOG.md"
+tag_format = "v{version}"
+publish = []
+github_release = true
+
+[state]
+push = true
+lock_stale_minutes = 20
+retain_runs_days = 30
+prune_closed_cycles = true
+
+[notify]
+channel = "none"
+command = ""

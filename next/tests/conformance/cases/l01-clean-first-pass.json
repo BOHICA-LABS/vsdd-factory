@@ -1,0 +1,42 @@
+{
+  "name": "l01-clean-first-pass",
+  "about": "One clean pass converges: clean, one pass, rounds_used 1.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 1,
+      "rounds_used": 1,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    }
+  }
+}

@@ -1,0 +1,11 @@
+<testsuites>
+  <testsuite name="tally" tests="3" failures="1" errors="0" skipped="1">
+    <testcase classname="tests.test_calc" name="test_add" time="0.001"/>
+    <testcase classname="tests.test_calc" name="test_wrong" time="0.001">
+      <failure message="1 != 2">AssertionError: 1 != 2</failure>
+    </testcase>
+    <testcase classname="tests.test_calc" name="test_later" time="0.002">
+      <skipped message="todo"/>
+    </testcase>
+  </testsuite>
+</testsuites>

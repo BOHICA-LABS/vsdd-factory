@@ -1,0 +1,39 @@
+# The probe case table (hooks.md 2.14 via topics/rule-testing.md): one table of
+# cases that prove the runner core in process and, where `launcher = true`,
+# through the real launcher. Payload names are relative to tests/hooks/payloads/;
+# `set` applies dotted overrides. `expect.outcome` is allow or block; a block
+# names the rule and code. Recorded payloads replace these at E2.
+
+[[case]]
+name = "main session echo passes untouched"
+payload = "PreToolUse/bash-main.json"
+expect = { outcome = "allow" }
+
+[[case]]
+name = "a vsdd call is rewritten with its caller marker"
+payload = "PreToolUse/bash-vsdd.json"
+expect = { outcome = "allow", rewritten = true }
+
+[[case]]
+name = "a typed VSDD_CALLER assignment blocks"
+payload = "PreToolUse/bash-vsdd.json"
+set = { "tool_input.command" = "VSDD_CALLER=forged vsdd survey" }
+expect = { outcome = "block", rule = "runner", code = "caller_forged" }
+launcher = true
+
+[[case]]
+name = "an agent's vsdd call is allowed with its marker"
+payload = "PreToolUse/bash-vsdd.json"
+expect = { outcome = "allow", rewritten = true, decision = "allow" }
+
+[[case]]
+name = "a marker rewrite passes through the launcher"
+payload = "PreToolUse/bash-vsdd.json"
+expect = { outcome = "allow", rewritten = true }
+launcher = true
+
+[[case]]
+name = "bad input blocks the gate through the launcher"
+payload = "broken"
+expect = { outcome = "block", rule = "runner", code = "runner_bad_input" }
+launcher = true

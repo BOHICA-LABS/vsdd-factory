@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "implement-data.schema.json",
+  "type": "object",
+  "description": "Step data of the story implement step. test_defects lists frozen tests the builder believes are wrong and may not edit; it is empty when there are none.",
+  "properties": {
+    "test_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The test file, relative to the worktree."
+          },
+          "test": {
+            "type": "string",
+            "description": "The test's identity or name."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 400
+          }
+        },
+        "required": [
+          "path",
+          "test",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "test_defects"
+  ]
+}

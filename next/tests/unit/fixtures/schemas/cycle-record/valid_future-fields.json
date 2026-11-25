@@ -1,0 +1,10 @@
+{
+  "id": "product-1",
+  "kind": "product",
+  "title": "First product cycle",
+  "route": "standard",
+  "opened": "2026-11-20T08:00:00Z",
+  "baseline": "",
+  "request": "brief",
+  "reopened_on": "2026-12-01T08:00:00Z"
+}

@@ -1,0 +1,159 @@
+{
+  "name": "l06-cap-disputed-security",
+  "about": "A security-category finding is never dismissed by the arbiter.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 2,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:s",
+              "title": "t-code:s",
+              "severity": "high",
+              "category": "security",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "code:s",
+              "resolution": "disputed",
+              "commit": "",
+              "note": "because"
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:s",
+              "title": "t-code:s",
+              "severity": "high",
+              "category": "security",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [
+            {
+              "key": "code:s",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "code:s",
+              "resolution": "fixed",
+              "commit": "c2",
+              "note": ""
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:s",
+              "title": "t-code:s",
+              "severity": "high",
+              "category": "security",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": {
+      "rulings": [
+        {
+          "key": "code:s",
+          "ruling": "not_defect",
+          "reason": "r"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 3,
+      "rounds_used": 3,
+      "outcome": "blocked",
+      "reason": "cap",
+      "blocking": [
+        {
+          "key": "code:s",
+          "title": "t-code:s",
+          "severity": "high",
+          "category": "security",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": "x.py"
+          },
+          "spec_ref": "BC-1",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    }
+  }
+}

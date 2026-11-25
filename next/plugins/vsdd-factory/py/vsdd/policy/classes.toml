@@ -1,0 +1,181 @@
+# Every path class: its globs, how it may be written, who writes it, and the precedence among the
+# seven product classes. Single definition; the design tables under rewrite/spec/tables/ point here.
+# Sources: state.md#2.4, hooks.md#2.7, BLUEPRINT.md#4.7, agents-skills.md#2.9.
+#
+# write = "tools" (default) | "code" | "none"
+#   tools: Edit and Write by agents whose row grants the class, never the shell
+#   code:  only the vsdd command and the runner
+#   none:  no tool call (a person edits it; reference code)
+# Classes inside the state directory are matched relative to the project root. The seven project-code
+# classes are matched relative to the root of the git worktree that contains the path. `route` is the
+# sentence a block message uses to name the correct way to change something in that class.
+# Nesting (state.md 2.4): brief lies inside spec-product, guidance inside spec-arch,
+# holdout-evaluations inside holdout, research-inputs inside research, decisions inside control, and
+# runs and evidence inside local. A contained class is matched first, so its exclusions above hold.
+
+[config]
+globs = [".factory/factory.toml"]
+write = "none"
+writer = """
+A person, in an editor or with vsdd config set in their own terminal. Code writes it in three stated
+cases, each announced in the next briefing: vsdd init and vsdd import create the file (including the
+[hooks] answers setup collected and, for a hub, the [[repo]] entries); vsdd repos split appends
+[[repo]] entries; and the survey fills [commands] and [paths] keys that are still unset from the
+toolchain file an approved spec decision covers."""
+route = "Project configuration is edited by a person. Show them the line to change."
+
+[control]
+globs = [".factory/notes.json", ".factory/cycles/**"]
+write = "code"
+writer = "vsdd"
+
+[decisions]
+globs = [".factory/cycles/*/decisions/**"]
+write = "code"
+writer = "vsdd checkpoint opens; settle_decision settles"
+
+[brief]
+globs = [".factory/specs/product/brief.md"]
+write = "tools"
+writer = "product-owner; the main session through the brief skill"
+
+[spec-product]
+globs = [".factory/specs/product/**"]
+write = "tools"
+writer = "product-owner"
+
+[spec-arch]
+globs = [".factory/specs/architecture/**"]
+write = "tools"
+writer = "architect"
+
+[guidance]
+globs = [".factory/specs/architecture/conventions.md", ".factory/specs/architecture/review-rules.md"]
+write = "tools"
+writer = "architect. The two guidance files, named apart inside spec-arch because three rules treat them apart: their lock, the decision digest, and the code-reviewer's read wall, which denies spec-arch and allows these"
+
+[spec-ux]
+globs = [".factory/specs/ux/**"]
+write = "tools"
+writer = "ux-designer"
+
+[stories]
+globs = [".factory/stories/**"]
+write = "tools"
+writer = "story-writer"
+
+[holdout]
+globs = [".factory/holdout/**"]
+write = "tools"
+writer = "product-owner (scenarios)"
+route = "Holdout scenarios are written by the product owner: /vsdd-factory:author holdout"
+
+[holdout-evaluations]
+globs = [".factory/holdout/evaluations/**"]
+write = "code"
+writer = "vsdd checkpoint, from the evaluator's step records; and the full form of walled findings (a finding from the scenario-reviewer, or one located under .factory/holdout/). No other tracked class, no decision packet and no closure record holds it; the only other copy is the step record in runs, which no caller can read"
+
+[reviews]
+globs = [".factory/reviews/**"]
+write = "tools"
+writer = "adversary, code-reviewer, security-reviewer, ui-reviewer, create only, for on-demand reviews only"
+
+[demo]
+globs = [".factory/demo/**"]
+write = "tools"
+writer = "demo-recorder"
+
+[analysis]
+globs = [".factory/analysis/**"]
+write = "tools"
+writer = "codebase-analyzer; security-reviewer, create only (the grant is in walls.toml)"
+
+[research]
+globs = [".factory/research/**"]               # except inputs/, which is the research-inputs class below
+write = "tools"
+writer = "researcher"
+
+[research-inputs]
+globs = [".factory/research/inputs/**"]
+write = "code"
+writer = "vsdd discover collect"
+
+[requests]
+globs = [".factory/requests/**"]
+write = "code"
+writer = "vsdd survey feature; settle_decision for an amendment request; vsdd import; vsdd story new-fix --maintain for a maintenance cycle"
+
+[deferred]
+globs = [".factory/deferred/**"]
+write = "tools"
+writer = "the main session through the defer skill"
+
+[ideas]
+globs = [".factory/ideas/**"]
+write = "code"
+writer = "vsdd idea register"
+
+[spikes]
+globs = [".factory/spikes/**"]
+write = "code"
+writer = "vsdd spike open and record"
+
+[runs]
+globs = [".factory/local/runs/**"]
+write = "code"
+writer = "the hook runner (step records), vsdd (run records). Every caller, the main session included, is denied reading the whole class, which gives the pipeline design's wall W3 and keeps scenario scores and scenario-review findings from builders; what a step needs from an earlier step arrives in its prompt, and people read findings through vsdd review show"
+
+[evidence]
+globs = [".factory/local/evidence/**"]
+write = "code"
+writer = "vsdd gate and the other measuring commands"
+
+[local]
+globs = [".factory/local/**"]                  # apart from runs and evidence, which are their own classes
+write = "code"
+writer = "vsdd, the hook runner"
+
+[reference]
+globs = [".reference/**"]
+write = "none"
+writer = "Nobody. Reference repositories are read-only."
+
+# The seven product classes: globs from [paths] in the project configuration, matched relative to the
+# worktree root.
+[tests]
+from_config = "paths.tests"
+[harness]
+from_config = "paths.harness"                  # proofs, fuzz targets, benchmarks
+[ci]
+from_config = "paths.ci"
+[repo-config]
+from_config = "paths.repo_config"              # toolchain and repository configuration files
+[manifests]
+from_config = "paths.manifests"                # build manifests and lock files
+[docs]
+from_config = "paths.docs"
+[source]
+from_config = "paths.source"
+
+# A product path has exactly one class: the first in the precedence list whose globs match. So
+# src/parser/tests.rs is in tests although src/** is a source glob. paths.py resolves it once, and
+# write-scopes, tests-first and the tool's red gate all use that answer. A product path that matches
+# no class is "unclassified": no agent may write it, and the block message gives the [paths] line to
+# add.
+[_product]
+precedence = ["tests", "harness", "ci", "repo-config", "manifests", "docs", "source"]
+
+# Computed classes, not listed: own-worktree, project, tmp and outside.
+#
+# own-worktree is the git worktree that holds the caller's working directory and, for a spike
+# runner, also the worktree its open ledger entry records - the union of the two, not either-or
+# (a named spike works in .worktrees/spike-<name>/, which vsdd spike open --name records, while the
+# platform gives the runner a throwaway worktree as its working directory, and both are its own).
+# It never means the main checkout (a spike runner whose working directory is the main checkout and
+# whose entry names no worktree has none of its own, so every write is blocked). It is deliberately
+# not "the worktree containing the call's effective directory": the effective-directory rule
+# (rule-model) answers where a call runs, while own-worktree answers where this caller may work, so
+# a spike runner writing into a story worktree or the integration worktree is blocked however it
+# spells the path. project is every path outside the state directory; tmp is the system temporary
+# directory and is always writable; and outside is every path outside the project, the plugin
+# directory and the temporary directory.

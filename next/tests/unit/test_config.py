@@ -331,13 +331,24 @@ class TestRanges:
         with pytest.raises(ConfigError, match="at least 1"):
             loads(EMPTY + "[spikes]\nminutes = 0\n")
 
-    @pytest.mark.xfail(
-        reason="[caps] names and the twice-the-default bound are the artifact "
-        "registry's (C2); recorded as a deferred check, not skipped silently"
-    )
-    def test_caps_bound_check_is_c2(self):
-        with pytest.raises(ConfigError):
+    def test_caps_name_artifact_kinds_with_a_size_limit(self):
+        # The cap names and defaults come from the shipped artifact registry
+        # (py/vsdd/policy/artifacts.toml); story defaults to 16,000 bytes.
+        cfg = loads(EMPTY + "[caps]\nstory = 32000\n")
+        assert cfg.get("caps")["story"] == 32000
+        with pytest.raises(ConfigError, match="unknown cap"):
+            loads(EMPTY + "[caps]\nplatypus = 100\n")
+
+    def test_caps_at_most_twice_the_default(self):
+        # "Raise a cap to at most twice its default" (state.md 2.12): the story
+        # cap defaults to 16,000, so 32,000 is the highest raise and a lower
+        # bound of 1 byte is kept.
+        with pytest.raises(ConfigError, match=r"twice its default \(32000\)"):
+            loads(EMPTY + "[caps]\nstory = 32001\n")
+        with pytest.raises(ConfigError, match="twice its default"):
             loads(EMPTY + "[caps]\nstory = -5\n")
+        with pytest.raises(ConfigError, match="defaults to 16000"):
+            loads(EMPTY + "[caps]\nstory = 0\n")
 
 
 class TestPreludeLimits:

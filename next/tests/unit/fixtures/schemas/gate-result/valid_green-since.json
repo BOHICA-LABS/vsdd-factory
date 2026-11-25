@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "gate": "green",
+  "subject": "S-9.01",
+  "passed": true,
+  "sha": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "evidence": "/proj/.factory/local/evidence/S-9.01/green.1a2b3c4d5e6f.json",
+  "diff_patch": "/proj/.factory/local/evidence/S-9.01/diff.1a2b3c4d5e6f.patch",
+  "test_output": "/proj/.factory/local/evidence/S-9.01/green.1a2b3c4d5e6f.log",
+  "changed_files": ["tally/stats.py", "tests/test_stats.py"],
+  "metrics": { "tests": 12, "failed": 0, "skipped": ["format_check"], "seconds": 4.1, "baseline": "" },
+  "failures": [],
+  "flaky": []
+}

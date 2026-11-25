@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cycle-record.schema.json",
+  "type": "object",
+  "description": "What a cycle is: .factory/cycles/<cycle>/cycle.json (record cycle). Tracked; written only by code. Kept permanently. Cap 2,000 bytes. A later version may add a field: read records that carry an unknown field, never refuse them (decision D33).",
+  "properties": {
+    "id": { "type": "string", "minLength": 2, "maxLength": 40, "description": "The cycle's name: a slug of 2 to 40 lower-case characters." },
+    "kind": { "type": "string", "enum": ["product", "feature", "hotfix", "maintenance"] },
+    "title": { "type": "string", "minLength": 1 },
+    "route": { "type": "string", "description": "standard from the opening when a brief opens the cycle; written by vsdd feature route when a change request opened it; empty for a maintenance cycle." },
+    "opened": { "type": "string", "description": "ISO 8601 UTC, whole seconds, ending Z." },
+    "baseline": { "type": "string", "description": "A release tag, an ingest or an import; empty for a first release. What delta runs compare against, not the commit story branches are cut from." },
+    "request": { "type": "string", "description": "brief, or the id of the one request file, CR-<NNN>." },
+    "closed": { "type": "string", "description": "Once closed: the close date the release checkpoint adds." },
+    "version": { "type": "string", "description": "Once closed: the release version." },
+    "archive_commit": { "type": "string", "description": "Once closed: the commit of the state branch just before pruning." }
+  },
+  "required": ["id", "kind", "title", "route", "opened", "baseline", "request"]
+}

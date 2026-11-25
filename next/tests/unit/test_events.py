@@ -79,9 +79,59 @@ class TestValidation:
         with pytest.raises(EventError):
             EventLog(tmp_path, "   ").build("session.start")
 
+    def test_session_id_must_be_a_string(self, tmp_path):
+        """CATCHUP-R7: admitting a null session_id in the schema opened the writer to
+        None, which nothing reported; the writer keeps its strict non-empty string."""
+        with pytest.raises(EventError):
+            EventLog(tmp_path, None).build("session.start")
+        with pytest.raises(EventError):
+            EventLog(tmp_path, 7).build("session.start")
+        # And nothing was written: the refusal happens before any line exists.
+        assert not (tmp_path / "events").exists() or not list((tmp_path / "events").glob("*.jsonl"))
+
     def test_schema_constant_declares_the_contract(self):
         assert EVENT_SCHEMA["$id"] == "event.schema.json"
         assert EVENT_SCHEMA["required"] == ["v", "ts", "type", "severity", "session_id"]
+
+
+class TestReaderAdmitsLauncherLines:
+    """SL1-05: the schema the command prints must admit the lines the shell
+    launcher writes — a whole-second ts and a null session_id — while the
+    Python writer keeps its own strict millisecond form."""
+
+    LAUNCHER_LINE = {
+        "v": 1,
+        "ts": "2026-11-24T09:31:05Z",
+        "type": "runner.launch_failed",
+        "severity": "error",
+        "session_id": None,
+        "code": "py_floor",
+        "mode": "gate",
+    }
+
+    def test_launcher_written_line_validates(self):
+        from vsdd.schema import validate
+
+        assert validate(dict(self.LAUNCHER_LINE), EVENT_SCHEMA) == []
+
+    def test_whole_second_and_millisecond_both_admitted(self):
+        from vsdd.events import _TS_READ_RE
+
+        # The shipped schema file carries no "pattern" (the checker subset does not
+        # enforce it): the writer applies its own millisecond form in build(), and
+        # the log's admitted shape is the module's read pattern, both forms included.
+        assert _TS_READ_RE.fullmatch("2026-11-24T09:31:05.123Z")
+        assert _TS_READ_RE.fullmatch("2026-11-24T09:31:05Z")
+        assert _TS_READ_RE.fullmatch("2026-11-24 09:31:05") is None
+
+    def test_writer_keeps_the_millisecond_form(self, log):
+        event = log.build("session.start")
+        assert event["ts"].endswith("Z")
+        assert "." in event["ts"]
+
+    def test_writer_session_id_stays_a_string(self, log):
+        event = log.build("session.start")
+        assert event["session_id"] == "sess-1"
 
 
 class TestHygiene:
@@ -191,12 +241,12 @@ class TestWriterValidatesAgainstTheSchema:
         assert validate(line, EVENT_SCHEMA) == []
 
     def test_ts_pattern_compiles_and_matches_a_written_ts(self, log, tmp_path):
-        import re
+        from vsdd.events import _TS_RE
 
         log.log("session.start")
         (line,) = log.read()
-        pattern = re.compile(EVENT_SCHEMA["properties"]["ts"]["pattern"])
-        assert pattern.fullmatch(line["ts"]), line["ts"]
+        # The writer's own strict millisecond form, applied by build() on top of the schema.
+        assert _TS_RE.fullmatch(line["ts"]), line["ts"]
 
     def test_v_is_enumerated(self):
         assert EVENT_SCHEMA["properties"]["v"]["enum"] == [1]

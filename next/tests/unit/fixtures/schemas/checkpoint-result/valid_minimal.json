@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "error": "",
+  "status": "done",
+  "progress": true,
+  "decisions": [],
+  "next": {
+    "kind": "done",
+    "command": "",
+    "args": {}
+  }
+}

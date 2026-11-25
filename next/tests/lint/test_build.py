@@ -25,8 +25,13 @@ STAMPED = f"{META}{OPEN}\n{BODY}{CLOSE}\n"
 
 
 def in_sandbox(original: Path, temp: Path) -> Path:
-    """A copy of next/'s build inputs under temp, so the real tree is untouched."""
-    shutil.copytree(original, temp / "copy")
+    """A copy of next/'s build inputs under temp, so the real tree is untouched.
+
+    The virtual environment and the caches are not build inputs and are left out:
+    copying them cost about eight seconds for every test in this file.
+    """
+    skip = shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules")
+    shutil.copytree(original, temp / "copy", ignore=skip)
     return temp / "copy"
 
 
@@ -118,6 +123,61 @@ class TestMarkerIntegrity(unittest.TestCase):
         stripped = build_mod._strip_schema_node(schema, {})
         self.assertIn("description", stripped["properties"])
         self.assertNotIn("description", stripped)
+
+
+class TestHandLiteralGuard(unittest.TestCase):
+    """CATCHUP-R2: the build alone writes S_* constants (result-schemas.md: no S_*
+    literal is written by hand), and every shipped schema file is accounted for in
+    the literal mapping, so a schema without a mapping cannot silently lose its literal."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="vsdd-buildtest-")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = in_sandbox(NEXT, Path(self._tmp.name))
+        self._build = self._reload()
+
+    def _reload(self):
+        spec = importlib.util.spec_from_file_location("vsdd_build_guard", self.root / "tools" / "build.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_shipped_tree_is_clean(self):
+        drifted, problems = self._build.build(check_only=True)
+        self.assertEqual(problems, [], problems)
+
+    def test_hand_written_literal_in_the_prelude_is_reported(self):
+        prelude = self.root / "workflow-lib" / "prelude.js"
+        text = prelude.read_text()
+        # Outside both generated blocks: appending after the last one is the hand-written spot.
+        marker = "S_HANDMADE_PLACEHOLDER"
+        prelude.write_text(text + f"\nconst {marker} = {{ 'type': 'object' }}\n", encoding="utf-8")
+        drifted, problems = self._build.build(check_only=True)
+        self.assertTrue(any(marker in p for p in problems), problems)
+        # --check exits nonzero on it.
+        self.assertEqual(self._build.main(["--check"]), 1)
+
+    def test_hand_written_literal_in_a_workflow_body_is_reported(self):
+        toy = self.root / "tests" / "workflows" / "toys" / "toy-build.js"
+        text = toy.read_text()
+        toy.write_text(text.replace("// <<< stamped:prelude", "// <<< stamped:prelude\nconst S_BODYMADE = {}", 1), encoding="utf-8")
+        drifted, problems = self._build.build(check_only=True)
+        self.assertTrue(any("S_BODYMADE" in p for p in problems), problems)
+
+    def test_generated_literals_themselves_are_not_reported(self):
+        drifted, problems = self._build.build(check_only=True)
+        self.assertFalse(any("S_FINDING" in p or "S_GATE" in p for p in problems), problems)
+
+    def test_shipped_schema_without_a_mapping_is_an_error(self):
+        orphan = self.root / "plugins" / "vsdd-factory" / "schemas" / "orphan.schema.json"
+        orphan.write_text('{"type": "object"}', encoding="utf-8")
+        drifted, problems = self._build.build(check_only=True)
+        self.assertTrue(any("orphan.schema.json" in p and "no literal mapping covers" in p for p in problems), problems)
+
+    def test_mapping_without_a_shipped_file_is_an_error(self):
+        self._build.LITERAL_NAMES["ghost.schema.json"] = "S_GHOST"
+        drifted, problems = self._build.build(check_only=True)
+        self.assertTrue(any("ghost.schema.json" in p and "not shipped" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

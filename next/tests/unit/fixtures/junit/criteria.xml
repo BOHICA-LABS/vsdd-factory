@@ -1,0 +1,8 @@
+<testsuites>
+  <testsuite name="tally" tests="4">
+    <testcase classname="tests.test_c" name="test_ac1_first" time="0.001"/>
+    <testcase classname="tests.test_c" name="test_ac12_second" time="0.001"/>
+    <testcase classname="tests.test_c" name="test_AC2_upper" time="0.001"/>
+    <testcase classname="tests.test_c" name="test_no_criterion_here" time="0.001"/>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pending-output.schema.json",
+  "type": "object",
+  "description": "What a long command (vsdd gate ..., vsdd story deliver, vsdd release) prints while its job runs (pipeline.md#2.10.8, state.md#2.16): the first call starts the job, every call waits for it, and when the job is done the command returns its ordinary result. The command prints every field on every exit.",
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "true while the job runs."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "pending"
+      ]
+    },
+    "retry": {
+      "type": "string",
+      "description": "The same command to run again."
+    }
+  },
+  "required": [
+    "ok",
+    "state",
+    "retry"
+  ]
+}

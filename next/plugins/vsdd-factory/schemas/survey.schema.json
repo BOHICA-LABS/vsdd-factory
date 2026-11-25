@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "survey.schema.json",
+  "type": "object",
+  "description": "Output of vsdd survey: the survey object every workflow starts from (pipeline.md#2.10.8, pipeline.md#2.5). The command prints every field on every exit, empty where it has nothing to say, so a script never reads an absent field.",
+  "properties": {
+    "ok": {"type": "boolean"},
+    "error": {"type": "string", "description": "One line; empty when ok."},
+    "run_id": {"type": "string"},
+    "workflow": {"type": "string"},
+    "subject": {"type": "string"},
+    "cycle": {"type": "string"},
+    "scope": {"type": "string", "enum": ["", "full", "delta"]},
+    "project_dir": {"type": "string"},
+    "plugin_root": {"type": "string"},
+    "head": {"type": "string"},
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "met": {"type": "boolean"}, "detail": {"type": "string"}},
+        "required": ["name", "met", "detail"]
+      }
+    },
+    "done": {"type": "array", "description": "The stage names recorded as done.", "items": {"type": "string"}},
+    "units": {
+      "type": "array",
+      "description": "The units and their positions; story units carry the fields of story-unit.schema.json.",
+      "items": {"$ref": "story-unit.schema.json"}
+    },
+    "config": {
+      "type": "object",
+      "description": "The configuration values a run needs: tier_override, review_rules, and holdout with its three thresholds (topic:holdout-findings)."
+    },
+    "limits": {
+      "type": "object",
+      "description": "Under the prelude's names (see tables/limits.toml); an unknown key fails the run."
+    },
+    "spikes_used": {"type": "integer", "minimum": 0},
+    "rounds_used": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wave and verify: rounds this unit used in earlier runs."
+    },
+    "decisions": {"type": "array", "items": {"type": "string"}, "description": "Ids of the open and settled decisions."},
+    "waived": {"type": "array", "items": {"type": "string"}},
+    "next": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string", "enum": ["", "workflow", "human", "done"]},
+        "command": {"type": "string"},
+        "args": {"type": "object"}
+      },
+      "required": ["kind"]
+    }
+  },
+  "required": [
+    "ok",
+    "error",
+    "run_id",
+    "workflow",
+    "subject",
+    "cycle",
+    "scope",
+    "project_dir",
+    "plugin_root",
+    "head",
+    "preconditions",
+    "done",
+    "units",
+    "config",
+    "limits",
+    "spikes_used",
+    "rounds_used",
+    "decisions",
+    "waived",
+    "next"
+  ]
+}

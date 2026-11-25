@@ -1,0 +1,136 @@
+{
+  "name": "l09-claims-shape",
+  "about": "Claims after a fix carry key, location members, resolution and commit; a holdout claim the key alone.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 3,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "holdout:HS-1",
+              "title": "t-holdout:HS-1",
+              "severity": "high",
+              "category": "holdout",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": ""
+              },
+              "spec_ref": "",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            },
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "holdout:HS-1",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            },
+            {
+              "key": "code:a",
+              "resolution": "fixed",
+              "commit": "c1",
+              "note": ""
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [],
+          "claim_checks": [
+            {
+              "key": "holdout:HS-1",
+              "outcome": "resolved"
+            },
+            {
+              "key": "code:a",
+              "outcome": "resolved"
+            }
+          ],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": null
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 2,
+      "rounds_used": 2,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [],
+      "coverage_missing": []
+    },
+    "trace": [
+      {
+        "pass": 1,
+        "claims": [],
+        "gaps": [],
+        "fix": [
+          "holdout:HS-1",
+          "code:a"
+        ]
+      },
+      {
+        "pass": 2,
+        "claims": [
+          {
+            "key": "holdout:HS-1",
+            "resolution": "fixed",
+            "commit": "c1"
+          },
+          {
+            "key": "code:a",
+            "path": "x.py",
+            "resolution": "fixed",
+            "commit": "c1"
+          }
+        ],
+        "gaps": []
+      }
+    ]
+  }
+}

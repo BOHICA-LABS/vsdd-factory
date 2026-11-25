@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "gate": "wave",
+  "subject": "B5",
+  "passed": true,
+  "sha": "abc123",
+  "evidence": "",
+  "failures": [],
+  "pending": [],
+  "worktree": "/p/.integr",
+  "base": "abc123",
+  "stories": [],
+  "needs": {
+    "security": false,
+    "ui": false
+  },
+  "holdout_batches": [],
+  "fix_units": []
+}

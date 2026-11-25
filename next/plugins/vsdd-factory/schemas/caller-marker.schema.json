@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caller-marker.schema.json",
+  "title": "Factory caller marker",
+  "description": "One caller marker file, .factory/local/hooks/calls/<key>.json, written by the hook runner before it lets a vsdd call through (hooks.md 2.11.10; record caller-marker). The tool reads it back with vsdd.state.callers.caller and deletes it on read; the runner only writes it. The file is staged as <state>/local/hooks/tmp/<key>.json.tmp and renamed into calls/, so a reader never sees half of one and a kill before the rename leaves nothing in calls/ for the prune to miss. Unread markers older than ten minutes are pruned by the reader.",
+  "type": "object",
+  "properties": {
+    "v": {"type": "integer", "enum": [1]},
+    "key": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 32,
+      "description": "The one-time key, 32 lowercase hexadecimal characters (secrets.token_hex(16)); also the file name and the VSDD_CALLER value of the rewritten command. Exactly 32 characters is enforced here; the character set by the writer."
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The hook payload's session_id."
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "The calling agent's id, empty for the main session."
+    },
+    "agent_type": {
+      "type": "string",
+      "description": "The calling agent's type, empty for the main session, vsdd-factory:<name> for a plugin agent, workflow-subagent for a workflow step."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The working directory the payload carried."
+    },
+    "ts": {
+      "type": "string",
+      "description": "ISO 8601 UTC with millisecond precision, the event log's form."
+    }
+  },
+  "required": ["v", "key", "session_id", "agent_id", "agent_type", "cwd", "ts"],
+  "additionalProperties": false
+}

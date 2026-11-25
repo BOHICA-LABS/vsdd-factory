@@ -4,7 +4,8 @@
     "workflow": "story",
     "name": "implement",
     "subject": "S-9.01",
-    "attempt": 1
+    "attempt": 1,
+    "method": "tdd"
   },
   "status": "ok",
   "summary": "Used a status outside the enumeration.",

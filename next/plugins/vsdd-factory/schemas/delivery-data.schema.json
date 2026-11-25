@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delivery-data.schema.json",
+  "type": "object",
+  "description": "Output of vsdd story deliver (pipeline.md#2.10.8, BLUEPRINT.md#4.10). The command prints every field on every exit, empty where it has nothing to say, so a script never reads an absent field.",
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "False only when the command did not reach an actionable state. The per-state ok list is defined once in the story-deliver command spec (rewrite/spec/commands/story-deliver.md)."
+    },
+    "error": { "type": "string", "description": "One line a person can act on; empty when ok." },
+    "state": {
+      "type": "string",
+      "enum": ["", "merged", "awaiting_merge", "ci_failed", "conflict", "review_stale", "refused", "checkout_dirty"],
+      "description": "Empty only when the command itself could not run."
+    },
+    "pr": { "type": "string", "description": "The pull request link; empty in local mode." },
+    "merged_sha": { "type": "string" },
+    "detail": { "type": "string", "description": "What failed, for the repair step." },
+    "reviewed_sha": { "type": "string", "description": "The commit the converged verdict covers." },
+    "changed_files": { "type": "array", "items": { "type": "string" }, "description": "The files changed from reviewed_sha to the delivered head; after a repair, the list the scoped review is accountable for." },
+    "diff_patch": {
+      "type": "string",
+      "description": "The patch from reviewed_sha to the head, for the scoped review after a repair."
+    },
+    "needs_person": {
+      "type": "string",
+      "enum": ["", "protected_path", "dependency", "configured"]
+    }
+  },
+  "required": ["ok", "error", "state", "pr", "merged_sha", "detail", "reviewed_sha", "changed_files", "diff_patch", "needs_person"]
+}

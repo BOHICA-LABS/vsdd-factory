@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "session_id": "sess_9f83ab",
+  "agent_id": "wf-step-3",
+  "agent_type": "workflow-subagent",
+  "cwd": "{root}",
+  "permission_mode": "auto",
+  "tool_input": {"command": "vsdd survey"}
+}

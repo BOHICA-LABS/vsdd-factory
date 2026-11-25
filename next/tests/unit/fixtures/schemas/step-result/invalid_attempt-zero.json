@@ -4,7 +4,8 @@
     "workflow": "story",
     "name": "implement",
     "subject": "S-9.01",
-    "attempt": 0
+    "attempt": 0,
+    "method": "tdd"
   },
   "status": "done",
   "summary": "Attempt counter came back as zero.",

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "step-record.schema.json",
+  "type": "object",
+  "$ref": "step-result.schema.json",
+  "description": "The stored copy of a step result (schema step-result) plus what the hook adds: .factory/local/runs/<run>/steps/<workflow>/<subject>/<name>.<attempt>.json (record step). A $ref to step-result beside this schema's own type and properties, with agent_type, worktree_head and agent_id added (plan decision D3). Not tracked; written only through vsdd.state.steps.store_step. Cap 64,000 bytes.",
+  "properties": {
+    "agent_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The calling agent's type, carried from the hook payload."
+    },
+    "worktree_head": {
+      "type": "string",
+      "description": "The commit the step left its worktree at, as the step-results rule read it."
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "The calling agent's id, empty for the main session. A second write to the same step key is accepted only from the same agent_id or with identical content (decision D4)."
+    },
+    "grounded": {
+      "type": "boolean",
+      "description": "Present when the step-results rule grounded the record's findings; false marks a finding that stayed ungrounded."
+    }
+  },
+  "required": ["agent_type", "worktree_head", "agent_id"]
+}

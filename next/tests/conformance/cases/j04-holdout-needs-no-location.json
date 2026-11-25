@@ -1,0 +1,50 @@
+{
+  "name": "j04-holdout-needs-no-location",
+  "about": "Category holdout is exempt from the location and anchor conditions.",
+  "kind": "judge",
+  "input": {
+    "findings": [
+      {
+        "key": "holdout:HS-1",
+        "title": "t-holdout:HS-1",
+        "severity": "high",
+        "category": "holdout",
+        "scope": "unit",
+        "owner": "implementer",
+        "location": {
+          "path": ""
+        },
+        "spec_ref": "",
+        "repro": "",
+        "observed": "o",
+        "expected": "e"
+      }
+    ],
+    "perimeter": "story",
+    "waived": []
+  },
+  "expect": {
+    "result": {
+      "blocking": [
+        {
+          "key": "holdout:HS-1",
+          "title": "t-holdout:HS-1",
+          "severity": "high",
+          "category": "holdout",
+          "scope": "unit",
+          "owner": "implementer",
+          "location": {
+            "path": ""
+          },
+          "spec_ref": "",
+          "repro": "",
+          "observed": "o",
+          "expected": "e"
+        }
+      ],
+      "advisory": [],
+      "deferred": [],
+      "spec_gaps": []
+    }
+  }
+}

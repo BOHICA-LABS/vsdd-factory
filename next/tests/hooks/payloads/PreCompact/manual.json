@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreCompact",
+  "session_id": "sess_9f83ab",
+  "cwd": "{root}",
+  "trigger": "manual",
+  "custom_instructions": ""
+}

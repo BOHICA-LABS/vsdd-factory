@@ -1,0 +1,17 @@
+{
+  "workflow": "feature",
+  "subject": "",
+  "repository": "",
+  "cycle": "product-1",
+  "session": "0c1d2e3f4a5b",
+  "start": "2026-11-24T09:15:00Z",
+  "agents": 0,
+  "parent": "",
+  "stories": [
+    "S-7.01"
+  ],
+  "request": "",
+  "amendment": false,
+  "ended": "",
+  "id": "r-20261124-0915-7q"
+}

@@ -3,9 +3,10 @@
 Daily JSONL files, one JSON object per line, in ``<project>/.factory/local/
 events/<UTC date>.jsonl``; the environment variable ``VSDD_EVENTS_DIR``
 overrides the directory for tests. Every line carries ``v``, ``ts`` (ISO 8601,
-UTC, millisecond precision), ``type`` (dotted), ``severity`` (``info``,
-``warn``, ``block``, ``error``) and ``session_id``; lines about a tool call add
-``agent_type``, ``agent_id``, ``event``, ``tool`` and ``ms``.
+UTC; millisecond precision from this writer, whole seconds from the shell
+launcher), ``type`` (dotted), ``severity`` (``info``, ``warn``, ``block``,
+``error``) and ``session_id`` (null on a launcher-written line); lines about a
+tool call add ``agent_type``, ``agent_id``, ``event``, ``tool`` and ``ms``.
 
 Hygiene, as the design fixes it: each line is one ``write`` on a file opened
 with ``O_APPEND`` so concurrent agents do not interleave; lines are capped at
@@ -48,6 +49,9 @@ COMMAND_LIMIT = 200
 DEFAULT_RETENTION_DAYS = 30
 
 _TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
+# The log admits both the writer's millisecond form and the shell launcher's whole-second form
+# (the launcher writes runner.launch_failed and runner.disabled before any Python runs).
+_TS_READ_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z")
 _TYPE_RE = re.compile(r"[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+")
 
 # The value of a secret-shaped assignment: a quoted string with spaces, or any
@@ -81,42 +85,16 @@ TOKEN_PATTERNS = (
     re.compile(r"Bearer\s+[A-Za-z0-9._-]{16,}"),
 )
 
-#: The schema the writer validates against; ``vsdd events schema`` prints it,
-#: so the documented schema cannot drift from the code (hooks.md 2.12). Every
-#: keyword is one the shipped checker (:mod:`vsdd.schema`) enforces, and
-#: :meth:`EventLog.build` validates every event against it before writing —
-#: except ``pattern``, which build() applies itself through ``_TS_RE``.
-EVENT_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "event.schema.json",
-    "title": "Factory event log line",
-    "type": "object",
-    "properties": {
-        "v": {"type": "integer", "enum": [1]},
-        "ts": {"type": "string", "pattern": _TS_RE.pattern},
-        "type": {"type": "string", "description": "dotted event type"},
-        "severity": {"enum": list(SEVERITIES)},
-        "session_id": {"type": "string", "minLength": 1},
-        "agent_type": {"type": "string"},
-        "agent_id": {"type": "string"},
-        "event": {"type": "string"},
-        "tool": {"type": "string"},
-        "ms": {"type": "integer", "minimum": 0},
-        "rule": {"type": "string"},
-        "code": {"type": "string"},
-        "reason": {"type": "string"},
-        "fix": {"type": "string"},
-        "target": {"type": "string"},
-        "command": {"type": "string"},
-        "id": {"type": "string"},
-        "detail": {
-            "type": ["string", "object", "array"],
-            "description": "Free-form payload; string leaves are redacted like every other field.",
-        },
-    },
-    "required": ["v", "ts", "type", "severity", "session_id"],
-    "additionalProperties": True,
-}
+#: The schema the writer validates against, loaded from the shipped file
+#: ``<plugin>/schemas/event.schema.json`` so the documented schema cannot drift
+#: from the code (hooks.md 2.12; the single-source schema directory). It is
+#: the log's schema, so it admits what the launcher writes too: a null
+#: ``session_id`` and a whole-second ``ts``. Every keyword is one the shipped
+#: checker (:mod:`vsdd.schema`) enforces, and :meth:`EventLog.build` validates
+#: every event against it before writing — except its own stricter millisecond
+#: timestamp, which build() applies through ``_TS_RE``.
+EVENT_SCHEMA_FILE = Path(__file__).resolve().parents[2] / "schemas" / "event.schema.json"
+EVENT_SCHEMA = json.loads(EVENT_SCHEMA_FILE.read_text(encoding="utf-8"))
 
 _REQUIRED = ("v", "ts", "type", "severity", "session_id")
 
@@ -182,7 +160,7 @@ def _fit(event: dict) -> str:
         if len(encoded.encode("utf-8")) <= MAX_LINE_BYTES:
             return encoded
     slim = {key: trimmed[key] for key in _REQUIRED}
-    slim["session_id"] = str(slim["session_id"])[:64]
+    slim["session_id"] = slim["session_id"][:64]  # build() guarantees a str; never str()-a None into the log
     slim["trimmed"] = True
     return _encode(slim)
 
@@ -235,8 +213,8 @@ class EventLog:
         and no field value escapes the redactor by not being a string.
         """
         problems = self.check(type_, severity)
-        if not str(self.session_id).strip():
-            problems.append("session_id must not be empty")
+        if not isinstance(self.session_id, str) or not self.session_id.strip():
+            problems.append("session_id must be a non-empty string")
         if problems:
             raise EventError("; ".join(problems))
         event: dict = {

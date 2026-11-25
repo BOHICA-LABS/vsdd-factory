@@ -1,0 +1,297 @@
+# The wall table: one row per caller, the vsdd subcommand groups a row may hold, and what each
+# read command reveals. Single definition; the design tables under rewrite/spec/tables/ point here.
+# Sources: hooks.md#2.7, agents-skills.md#2.9, BLUEPRINT.md#4.3, BLUEPRINT.md#4.9.
+#
+# Top-level format: [main], [other], ["vsdd-factory:<agent>"], with [callers] and [reveals] in this
+# same file.
+#
+# Key meanings:
+#   read_deny   path classes the caller may not read
+#   read_allow  classes that stay readable even when a class that contains them is denied
+#   write       the complete list of classes the caller may write; suffixes:
+#               ":create" new files only, ":frozen" on tests, ":before-red" on source,
+#               "@<method>" only in a story whose resolved method for the caller's own stage
+#               (its impl_method when it is the kind's implement agent, tests_method when it is
+#               the tests agent) is that one - so devops's tests:create@repo-setup matches the
+#               impl_method of the chore story, although a chore has no tests stage
+#   story_only  the caller may write project code only inside a story worktree
+#   dispatch    agent types the caller may start with the Agent tool; "*" means any; absent means none
+#   commands    the git and GitHub command families the caller may run (the command-families
+#               table in the design); "*" means any; an absent key means none
+#   tool_only   every Bash command the caller runs must be a call of the plugin's command-line tool
+#   vsdd        groups of vsdd subcommands from [callers]; absent means the read group only
+#   spike       marks the spike agent's row
+#   relaxed_by  on the main row only: the [hooks] key that relaxes it (decision D6); no agent row
+#               may carry it
+#
+# Rules every row follows: every row denies "runs", the main session's included; rows of agents that
+# have no shell or a vsdd-only shell, the clerk and the spike runner, deny "outside"; a builder row
+# grants the read and story-gate groups; a row with tool_only = true is the clerk or one of the four
+# planners.
+#
+# Coverage: wherever a row's read_deny or write names a class, it also covers the classes nested
+# inside it (brief inside spec-product, guidance inside spec-arch, holdout-evaluations inside
+# holdout, research-inputs inside research, decisions inside control, runs and evidence inside
+# local; the nesting is classes.toml's), except a nested class the row's read_allow names: the
+# code-reviewer denies spec-arch yet reads guidance, and the holdout-evaluator denies spec-product
+# yet reads brief. A grant covers its nested classes the same way, so the product-owner's
+# spec-product grant covers brief.
+#
+# The vsdd group names are defined in [callers]. Command family names are defined by the
+# command-families table of the design. Path class names are defined in classes.toml.
+
+# ---- callers that are not factory agents -------------------------------------
+
+[main]
+read_deny = ["holdout", "runs"]                # runs is denied to every caller; findings are read with vsdd review show
+write = ["brief", "deferred", "project"]
+dispatch = ["*"]
+commands = ["*"]                               # merge-guard still blocks whatever commits to, pushes to or moves the integration and release branches
+vsdd = ["read", "author", "operator"]          # not pipeline or env: survey, checkpoint, deliver, release and env start are the clerk's
+relaxed_by = "hooks.main_session_wall"         # false drops holdout from read_deny and adds the spec classes to write (D6)
+
+[other]                                        # any agent type that is not listed: the strictest treatment
+read_deny = ["holdout", "reviews", "runs"]
+write = ["project"]
+
+# ---- planners ----------------------------------------------------------------
+
+["vsdd-factory:product-owner"]
+tool_only = true                               # vsdd-only shell (BLUEPRINT.md 4.3)
+read_deny = ["runs", "outside"]                # it writes the holdout scenarios, so it may read them
+write = ["spec-product", "holdout"]
+dispatch = ["vsdd-factory:spike-runner"]
+vsdd = ["read", "spec-check"]                  # gate spec --only <part>
+
+["vsdd-factory:architect"]
+tool_only = true
+read_deny = ["holdout", "runs", "outside"]
+write = ["spec-arch"]
+dispatch = ["vsdd-factory:spike-runner"]
+vsdd = ["read", "spec-check", "route"]         # gate spec --only <part>; feature route
+
+["vsdd-factory:ux-designer"]
+tool_only = true
+read_deny = ["holdout", "runs", "outside"]
+write = ["spec-ux"]
+dispatch = ["vsdd-factory:spike-runner"]
+vsdd = ["read", "spec-check"]
+
+["vsdd-factory:story-writer"]
+tool_only = true
+read_deny = ["holdout", "runs", "outside"]
+write = ["stories"]
+dispatch = ["vsdd-factory:spike-runner"]
+vsdd = ["read", "spec-check", "admit"]         # gate plan --story, which admits the story
+
+["vsdd-factory:codebase-analyzer"]
+read_deny = ["holdout", "runs"]
+write = ["analysis"]
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-read"]                        # it reads history; it commits nothing
+
+["vsdd-factory:researcher"]                    # reads untrusted pages; no shell at all
+read_deny = ["holdout", "runs", "outside"]
+write = ["research"]
+dispatch = ["vsdd-factory:spike-runner"]
+
+["vsdd-factory:spike-runner"]
+spike = true                                   # the spike row: exemption and containment apply
+read_deny = ["holdout", "reviews", "runs", "outside"]   # plus the read_deny of the asker recorded in its ledger entry
+write = ["own-worktree"]                       # the ledger is written by vsdd spike open and record
+dispatch = []
+commands = ["git-commit", "git-read", "git-other"]   # inside its own worktree; no push, merge or pull request
+vsdd = ["read", "spike"]
+
+# ---- builders ----------------------------------------------------------------
+
+["vsdd-factory:test-writer"]
+read_deny = ["holdout", "runs"]
+write = ["tests:frozen", "manifests", "source:before-red"]   # may change frozen tests; stubs only until red exists
+story_only = true
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate", "refreeze"]      # vsdd gate red, and gate red --refreeze, which only this row may run
+
+["vsdd-factory:implementer"]
+read_deny = ["holdout", "runs"]
+write = ["source", "manifests"]                # never tests
+story_only = true                              # project code only inside a story worktree
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate"]                  # it finishes with vsdd gate green
+
+["vsdd-factory:verifier"]
+read_deny = ["holdout", "reviews", "runs"]
+write = ["harness", "tests"]                   # not the tests frozen at a story's red gate
+story_only = true
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate"]
+
+["vsdd-factory:demo-recorder"]
+read_deny = ["holdout", "runs"]
+write = ["demo"]
+story_only = true
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate", "env"]           # gate demo ends its story; env starts the product it records
+
+["vsdd-factory:technical-writer"]
+read_deny = ["holdout", "runs"]
+write = ["docs"]
+story_only = true
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate"]                  # gate green ends a docs story
+
+["vsdd-factory:devops"]
+read_deny = ["holdout", "runs"]
+write = ["ci", "repo-config", "manifests", "source:create@repo-setup", "tests:create@repo-setup"]
+                                               # @repo-setup: only in a chore story whose method is repo-setup (the scaffold)
+story_only = true
+dispatch = ["vsdd-factory:spike-runner"]
+commands = ["git-commit", "git-read"]
+vsdd = ["read", "story-gate"]
+
+# ---- reviewers ---------------------------------------------------------------
+
+["vsdd-factory:adversary"]
+read_deny = ["holdout", "reviews", "runs", "outside"]
+write = ["reviews:create"]                     # may create its report in an on-demand review; may not change an existing file
+dispatch = ["vsdd-factory:spike-runner"]
+
+["vsdd-factory:code-reviewer"]
+# every class in the state directory except evidence and guidance (agents-skills.md 2.9);
+# local (locks, jobs, caller markers, events, media) is part of the state directory and is denied
+read_deny = ["config", "control", "decisions", "brief", "spec-product", "spec-arch", "spec-ux",
+             "stories", "holdout", "holdout-evaluations", "reviews", "demo", "analysis", "research",
+             "research-inputs", "requests", "deferred", "ideas", "spikes", "runs", "local", "outside"]
+read_allow = ["evidence", "guidance"]
+write = ["reviews:create"]
+dispatch = ["vsdd-factory:spike-runner"]
+
+["vsdd-factory:security-reviewer"]
+read_deny = ["holdout", "reviews", "runs", "outside"]   # no shell (BLUEPRINT.md 4.3)
+write = ["reviews:create", "analysis:create"]  # BLUEPRINT.md 4.3: reviews and analysis, create only
+dispatch = ["vsdd-factory:spike-runner"]
+
+["vsdd-factory:ui-reviewer"]
+read_deny = ["holdout", "reviews", "runs"]
+write = ["reviews:create"]
+dispatch = ["vsdd-factory:spike-runner"]
+vsdd = ["read", "env"]
+
+["vsdd-factory:holdout-evaluator"]
+# the full deny list is agents-skills.md 2.9: source, tests, harness, manifests, repo-config, ci,
+# evidence, reviews, stories, research, analysis, spikes, spec-arch, spec-ux, and spec-product except
+# brief; plus runs (every row) and outside. It judges the product from outside; it may read holdout,
+# brief and docs.
+read_deny  = ["spec-product", "spec-arch", "spec-ux", "source", "tests", "harness", "manifests",
+              "repo-config", "ci", "evidence", "reviews", "runs", "stories", "research", "analysis",
+              "spikes", "outside"]
+read_allow = ["brief"]                         # a class named here wins over a containing class that is denied
+write = []                                     # its evaluation file is written by code
+commands = []                                  # no git, no gh
+dispatch = ["vsdd-factory:spike-runner"]       # the runner then inherits this row's read_deny
+vsdd = ["env"]                                 # the only vsdd subcommands it may run
+
+["vsdd-factory:scenario-reviewer"]
+read_deny = ["source", "tests", "ci", "reviews", "stories", "analysis", "spec-arch", "spec-ux", "runs", "outside"]
+write = []                                     # it reads holdout and spec-product and returns findings
+dispatch = ["vsdd-factory:spike-runner"]
+
+# ---- clerk -------------------------------------------------------------------
+
+["vsdd-factory:clerk"]
+tool_only = true                               # every Bash command must be a call of the vsdd tool
+read_deny = ["holdout", "reviews", "runs", "outside"]
+write = []
+dispatch = []
+vsdd = ["read", "pipeline", "measure", "route", "env"]
+
+# ---- the vsdd subcommand groups a row may hold -------------------------------
+
+# group = the vsdd subcommands in it. A group is matched on the subcommand and, where the entry names
+# one, the flag: plain "status" is in read, and "status --fix", which releases locks and removes
+# worktrees, is only in pipeline and author. In the same way "gate red --refreeze" is only in
+# refreeze, which the test-writer's row alone holds. The gate groups are split by what the gates
+# change: story-gate (red, green, demo) measures one story; spec-check (gate spec --only) and admit
+# (gate plan --story, which moves a story into a run) are the planners'; measure is every gate, held
+# by the clerk alone. --version is in read: it reveals nothing, and the smoke probes run it from a
+# workflow step. doctor is in operator, which only the main row holds. A caller with no vsdd key may
+# run the read group only.
+[callers]
+read = ["status", "list", "refs", "coverage", "path", "validate", "config", "explain", "rules", "review show", "--version"]
+measure = ["gate"]                             # every gate; the clerk's row alone holds this group
+refreeze = ["gate red --refreeze"]             # held by the test-writer's row only
+story-gate = ["gate red", "gate green", "gate demo"]
+spec-check = ["gate spec --only"]
+admit = ["gate plan --story"]
+route = ["feature route"]
+pipeline = ["survey", "checkpoint", "plan schedule", "story", "release", "idea", "report", "discover", "repos split", "status --fix"]
+spike = ["spike"]
+env = ["env"]
+author = ["new", "note", "defer", "retire", "driver", "lock release", "review prepare", "init", "import --dry-run", "checkpoint brief", "status --fix"]
+operator = ["doctor", "events", "obs", "export", "render", "hooks", "repos scan"]
+
+# One entry per artifact kind, keyed `list <kind id>` from the kind ids of artifacts.toml, so the
+# vocabulary cannot drift from the registry and L-POLICY's "one entry per kind" holds. The value is
+# the class (or, when a kind's glob spans several, the classes) that the kind's glob falls in: the
+# files `vsdd list <kind>` prints, so read-walls treats the command as a read of exactly those
+# classes. A `vsdd list <kind>` with a kind that has no entry is treated as revealing every walled
+# class, so a misspelt or new kind is refused for a walled caller instead of passing. refs, coverage
+# and review show leave walled content out by default, so they reveal nothing walled without the
+# flag; with --include-walled they reveal the classes listed, and the rule blocks the flag for a
+# caller that is denied any of them.
+[reveals]
+"list brief" = ["brief"]
+"list contract" = ["spec-product"]
+"list prd" = ["spec-product"]
+"list domain-spec" = ["spec-product"]
+"list supplement" = ["spec-product"]
+"list architecture-overview" = ["spec-arch"]
+"list subsystem" = ["spec-arch"]
+"list module-map" = ["spec-arch"]
+"list project-conventions" = ["guidance"]
+"list review-rules" = ["guidance"]
+"list adr" = ["spec-arch"]
+"list verification-property" = ["spec-arch"]
+"list toolchain" = ["spec-arch"]
+"list assessment" = ["spec-arch"]
+"list dependencies" = ["spec-arch"]
+"list ux-overview" = ["spec-ux"]
+"list screen" = ["spec-ux"]
+"list flow" = ["spec-ux"]
+"list design-system" = ["spec-ux"]
+"list asset" = ["spec-product", "spec-arch", "spec-ux"]   # .factory/specs/*/assets/ spans the three spec classes
+"list epic" = ["stories"]
+"list story" = ["stories"]
+"list holdout-scenario" = ["holdout"]
+"list review-report" = ["reviews"]
+"list holdout-evaluation" = ["holdout-evaluations"]
+"list demo-evidence" = ["demo"]
+"list analysis" = ["analysis"]
+"list research-report" = ["research"]
+"list spike-ledger-entry" = ["spikes"]
+"list idea" = ["ideas"]
+"list deferred-item" = ["deferred"]
+"list change-request" = ["requests"]
+"refs --include-walled" = ["holdout", "reviews"]
+"coverage --include-walled" = ["holdout"]
+"review show" = ["reviews"]                    # rendered findings count as review content, so a reviewer cannot read an earlier pass this way
+"review show --include-walled" = ["reviews", "holdout"]
+
+# Notes:
+# - gate-guard refuses a vsdd call whose subcommand is in a group the caller's row does not grant. A
+#   builder row grants read and story-gate (and refreeze for the test-writer); a planner row read and
+#   spec-check, with route for the architect and admit for the story-writer; the clerk row read,
+#   pipeline, measure, route and env; the main session's row read, author and operator; the rows of
+#   the demo-recorder, the ui-reviewer and the holdout-evaluator hold env. The person-only commands
+#   are refused for every caller.
+# - read-walls treats a read subcommand as a read of the classes [reveals] lists for it, so
+#   "vsdd list holdout-scenario" by an implementer is blocked exactly as a Read of a scenario file is.
+# - The person-only (HUMAN_ONLY) and governed (GOVERNED) command lists are constants of the tool's
+#   code, not data here, because they change only when the tool's code changes. Their values stay in
+#   the design's tables/callers.toml until H6 writes them as code constants in vsdd/hooks/model.py,
+#   which is then the one copy the tests and check.py read; shipped code never reads a file here.

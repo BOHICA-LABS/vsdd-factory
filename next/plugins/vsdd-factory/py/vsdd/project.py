@@ -52,6 +52,7 @@ __all__ = [
     "read_branch",
     "main_checkout",
     "story_branch_id",
+    "path_class",
 ]
 
 FACTORY_DIR = ".factory"
@@ -147,11 +148,15 @@ def find_project_root(start: Path | str, home: Path | str | None = None) -> Path
     launcher hands over in ``VSDD_FACTORY_ROOT``.
 
     ``None`` outside a factory project: the hooks stay silent there
-    (decision D24).
+    (decision D24). A ``home`` of ``None`` means ``$HOME`` (finding SL1-48):
+    the walk always stops below the person's home directory unless a caller
+    passes an explicit ``home`` of its own.
     """
     current = Path(os.path.abspath(start))
     if current.is_file():
         current = current.parent
+    if home is None:
+        home = os.environ.get("HOME") or None  # an empty HOME is unset
     stop_home = os.path.abspath(str(home)) if home is not None else None
     while True:
         # Home and the filesystem root are walked up to, never used as roots.
@@ -390,3 +395,72 @@ def detect(path: Path | str) -> Project | None:
         worktree=classified,
         branch=branch,
     )
+
+
+def _holding_worktree_root(path: Path) -> Path | None:
+    """The nearest ancestor of ``path`` that is a git worktree root: the
+    first directory upward whose ``.git`` (file or directory) exists."""
+    current = Path(os.path.abspath(path))
+    if current.is_file():
+        current = current.parent
+    while True:
+        if (current / ".git").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+def path_class(path, *, root=None, config=None) -> str | None:
+    """The product class of an absolute path, by ``[_product].precedence``
+    (state-core.md 3.4).
+
+    The first class in the precedence whose ``from_config`` globs match the
+    path relative to the root of the git worktree holding it. ``None`` when
+    no glob matches, when the path is in no project, or when it is under
+    ``.factory/``. ``root`` and ``config`` spare a caller that has them the
+    search and the load (the hook passes both); when ``path_class`` loads the
+    file itself, an invalid one raises ``ConfigError``.
+    """
+    from .config import ConfigError  # re-exported name, kept close to its use
+    from .config import load as load_config
+    from .globs import glob_regex
+    from .policy import load as load_policy
+
+    del ConfigError  # only named for the contract; loads() raises it
+    path = Path(os.path.abspath(path))
+    if root is None:
+        root = find_project_root(path, home=os.environ.get("HOME"))
+        if root is None:
+            return None
+    root = Path(os.path.abspath(root))
+    state_dir = root / FACTORY_DIR
+    try:
+        relative_to_root = path.relative_to(root)
+    except ValueError:
+        return None
+    if relative_to_root.parts[:1] == (FACTORY_DIR,):
+        return None
+    if config is None:
+        config = load_config(state_dir / CONFIG_NAME)
+    data = getattr(config, "data", config)
+
+    worktree_root = _holding_worktree_root(path) or root
+    try:
+        relative = path.relative_to(worktree_root)
+    except ValueError:
+        return None
+    posix = relative.as_posix()
+    if not posix or posix == ".":
+        return None
+
+    classes = load_policy("classes")
+    for name in classes["_product"]["precedence"]:
+        from_config = classes.get(name, {}).get("from_config", "")
+        section, _, key = from_config.partition(".")
+        globs = (data.get(section) or {}).get(key, []) if isinstance(data, dict) else []
+        for glob in globs:
+            if glob_regex(str(glob)).fullmatch(posix):
+                return name
+    return None

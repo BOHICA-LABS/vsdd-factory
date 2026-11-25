@@ -1,0 +1,146 @@
+{
+  "name": "l04-cap-disputed-dismissed",
+  "about": "At the cap a disputed finding is dismissed by the arbiter's not_defect ruling.",
+  "kind": "loop",
+  "input": {
+    "perimeter": "story",
+    "subject": "S-9.01",
+    "cap": 2,
+    "used": 0,
+    "waived": [],
+    "arbiter": true,
+    "passes": [
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [],
+          "coverage_missing": []
+        },
+        "fix": {
+          "ok": true,
+          "resolutions": [
+            {
+              "key": "code:a",
+              "resolution": "disputed",
+              "commit": "",
+              "note": "because"
+            }
+          ]
+        }
+      },
+      {
+        "review": {
+          "ok": true,
+          "head": "h1",
+          "findings": [
+            {
+              "key": "code:a",
+              "title": "t-code:a",
+              "severity": "high",
+              "category": "code",
+              "scope": "unit",
+              "owner": "implementer",
+              "location": {
+                "path": "x.py"
+              },
+              "spec_ref": "BC-1",
+              "repro": "",
+              "observed": "o",
+              "expected": "e"
+            }
+          ],
+          "claim_checks": [
+            {
+              "key": "code:a",
+              "outcome": "not_resolved"
+            }
+          ],
+          "coverage_missing": []
+        },
+        "fix": null
+      }
+    ],
+    "arbitration": {
+      "rulings": [
+        {
+          "key": "code:a",
+          "ruling": "not_defect",
+          "reason": "r"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "verdict": {
+      "perimeter": "story",
+      "subject": "S-9.01",
+      "head": "h1",
+      "passes": 2,
+      "rounds_used": 2,
+      "outcome": "converged",
+      "reason": "clean",
+      "blocking": [],
+      "advisory": [],
+      "deferred": [],
+      "dismissed": [
+        {
+          "key": "code:a",
+          "by": "arbiter",
+          "reason": "r"
+        }
+      ],
+      "coverage_missing": []
+    },
+    "trace": [
+      {
+        "pass": 1,
+        "claims": [],
+        "gaps": [],
+        "fix": [
+          "code:a"
+        ]
+      },
+      {
+        "pass": 2,
+        "claims": [
+          {
+            "key": "code:a",
+            "path": "x.py",
+            "resolution": "disputed",
+            "commit": ""
+          }
+        ],
+        "gaps": [],
+        "arbitrate": {
+          "keys": [
+            "code:a"
+          ],
+          "notes": [
+            [
+              "code:a",
+              "because"
+            ]
+          ]
+        }
+      }
+    ]
+  }
+}
