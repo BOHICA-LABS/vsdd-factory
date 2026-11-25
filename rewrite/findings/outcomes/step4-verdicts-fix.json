@@ -1,0 +1,104 @@
+[
+  {
+    "id": "S4R-verdicts-1",
+    "outcome": "fixed",
+    "what_was_done": "covering's stored branch now covers by the stored verdict's own head through the same _covers test as the computed one (head equality or patch-id from delivery.base); the delivery.head/patch_id consultation is gone. test_closure_used_without_records rewritten to summary()'s form with no delivery.head; the stale H1/H2 case added as test_closure_not_covered_after_a_new_commit; test_computed_overrules_closure's stored verdict now carries summary()'s head and patch_id; records' test_evidence_lookup review case updated to the same rule (the sanctioned ORDER section 4 edit).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (covering); next/tests/unit/test_verdicts.py; next/tests/unit/test_state_gate_evidence.py::test_evidence_lookup"
+  },
+  {
+    "id": "S4R-verdicts-2",
+    "outcome": "fixed",
+    "what_was_done": "changed_files runs git -c core.quotePath=false diff --name-only -z --no-renames and splits on NUL, so unusual paths arrive unquoted. The test stores an accented name (cafe.py, spelled from the filesystem so NFC/NFD agrees) and a name with a double quote, asserts both arrive verbatim and that no C-quoted form appears.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (changed_files); next/tests/unit/test_verdicts.py::test_changed_files_and_later_loop_items"
+  },
+  {
+    "id": "S4R-verdicts-3",
+    "outcome": "fixed",
+    "what_was_done": "New records case r17-chain-broken-at-loop-one: loop 1 runs to blocked/cap over four passes and a later loop converges, expecting chain false; unit test test_chain_open_at_one_loop_keeps_covering_none asserts the computed verdict covers nothing while chain is broken. Killing both mutations verified: _chain reduced to the last loop and covering dropping the chain check each fail them.",
+    "where": "next/tests/conformance/cases/r17-chain-broken-at-loop-one.json; next/tests/unit/test_verdicts.py::test_chain_open_at_one_loop_keeps_covering_none"
+  },
+  {
+    "id": "S4R-verdicts-4",
+    "outcome": "fixed",
+    "what_was_done": "Two records cases from r06: r18-repair-item-unaccounted, whose later-loop reviewer accounts for none of brand_new.py (expect failed/no_result with the coverage finding open), and r19-changed-range-unknown, whose changed map lacks the range (expect failed/no_result with empty lists, head empty — decision D10). Both discriminate items=[] from items=changed(...) or [].",
+    "where": "next/tests/conformance/cases/r18-repair-item-unaccounted.json, r19-changed-range-unknown.json"
+  },
+  {
+    "id": "S4R-verdicts-5",
+    "outcome": "fixed",
+    "what_was_done": "r08-waive-after-cap redone as a real after-cap story: four passes that end blocked/cap without the waiver and converge with it, so removing the waiver from the case input fails the case. The waivers()->verdict() wiring is tested by test_waived_verdict_converges_through_the_decision, which settles finding.S-9.01 through decision_open/settle_decision and asserts the verdict and covering turn converged (verified to fail with waived=[] in _compute).",
+    "where": "next/tests/conformance/cases/r08-waive-after-cap.json; next/tests/unit/test_verdicts.py::test_waived_verdict_converges_through_the_decision"
+  },
+  {
+    "id": "S4R-verdicts-6",
+    "outcome": "fixed",
+    "what_was_done": "test_verdict_never_regounds_an_unmarked_finding added: an unmarked critical finding on src/module.py keeps blocking after a later commit removes the file, so a tool that re-grounds against the current worktree would unground it and fail the test. The grounded:false half stays in test_verdict_trusts_stored_mark.",
+    "where": "next/tests/unit/test_verdicts.py::test_verdict_never_regounds_an_unmarked_finding"
+  },
+  {
+    "id": "S4R-verdicts-7",
+    "outcome": "fixed",
+    "what_was_done": "One shared reader: story_unit.acs(body) skips fences (strips ``` and ~~~ openings and closings) and verdicts._story_acs delegates to it, so the tool and the unit cannot require different items. test_items_equal_unit_acs now puts '### AC-9' inside its fence and both readers must still answer ['AC-1','AC-2']; the unfenced story_unit reader fails it. Note: this edits story_unit.py, which the survey-2 plan edits in section 4 — the finding asked for exactly this.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (acs); next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_story_acs); next/tests/unit/test_verdicts.py::test_items_equal_unit_acs"
+  },
+  {
+    "id": "S4R-verdicts-8",
+    "outcome": "fixed",
+    "what_was_done": "New records case r20-walk-on-after-clean: pass 1 clean, pass 2 opens a hard finding with no fix, and the last pass's verdict (failed/no_result, finding blocking) is expected. The spec row 'A loop whose records go on after a pass with nothing open' now maps to that case instead of r11-cut-off-after-fix, whose records never go on past a clean pass.",
+    "where": "next/tests/conformance/cases/r20-walk-on-after-clean.json; next/tests/conformance/test_conformance.py (SPEC_ROWS)"
+  },
+  {
+    "id": "S4R-verdicts-9",
+    "outcome": "fixed",
+    "what_was_done": "The two holdout-score rows are listed in DEFERRED_TO_G6A with a comment naming the deferral (plan step-4 verdicts.md 1), and test_spec_rows_have_cases asserts deferred rows claim no case; they no longer map to j04.",
+    "where": "next/tests/conformance/test_conformance.py (DEFERRED_TO_G6A, SPEC_ROWS, test_spec_rows_have_cases)"
+  },
+  {
+    "id": "S4R-verdicts-10",
+    "outcome": "fixed",
+    "what_was_done": "r16's records are now ordered as steps_list returns them (alphabetical by step name, fix-implementer before fix-tw), so dropping D6's method sort flips loop 1 out of converged and fails the case (verified by mutation). A third fix record fix-x-l2-p3 whose passing gate sits at another sha lands in skipped with why 'gate' (verified that removing the sha check fails the case).",
+    "where": "next/tests/conformance/cases/r16-fix-order-last-wins.json"
+  },
+  {
+    "id": "S4R-verdicts-11",
+    "outcome": "fixed",
+    "what_was_done": "public_verdict maps walled keys in dismissed to walled:<12 hex> and empties the reason (kept as an empty string because verdict.schema.json requires the member), for reviewer withdrawals and arbiter dismissals alike. The test extends test_public_verdict_hides_walled with a second rebuild whose reviewer withdraws the walled finding; the unmapped form fails it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (public_verdict); next/tests/unit/test_verdicts.py::test_public_verdict_hides_walled"
+  },
+  {
+    "id": "S4R-verdicts-12",
+    "outcome": "fixed",
+    "what_was_done": "convergence.replay sets blocked/cap at the cap when the arbitration is already spent and findings stay open, instead of asking the fixer again and ending failed/no_result. New records case r22-cap-after-arbitration: pass 3 is settled by the arbiter and converges, pass 4 opens a new finding and the loop is capped with it (verified to fail with the branch removed).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/convergence.py (replay); next/tests/conformance/cases/r22-cap-after-arbitration.json"
+  },
+  {
+    "id": "S4R-verdicts-13",
+    "outcome": "fixed",
+    "what_was_done": "closure-record.schema.json's verdict properties renamed commit to head and gained patch_id and rounds_used, with descriptions tying them to vsdd.state.verdicts.summary, and records/closure.md's verdict paragraph now names the summary form. The schema change is an interface note for the not-yet-built checkpoint writers; summary() and test_summary_is_valid_closure_verdict already produced these keys.",
+    "where": "next/plugins/vsdd-factory/schemas/closure-record.schema.json; rewrite/spec/records/closure.md"
+  },
+  {
+    "id": "S4R-verdicts-14",
+    "outcome": "fixed",
+    "what_was_done": "conformance.test.mjs computes the judge and loop results once (a shared promise over one harness run) and registers one test per case named by its file stem, so a failing case no longer stops a loop and hides later disagreements; node --test reports 26 tests.",
+    "where": "next/tests/conformance/conformance.test.mjs"
+  },
+  {
+    "id": "S4R-verdicts-15",
+    "outcome": "fixed",
+    "what_was_done": "Derived the second way: _compute reads the stored closure verdict's rounds_used (helper _closure_rounds_used, shared by rounds_used) and _rebuild raises the last loop 1's used to at least that count, so the arbiter falls on the same pass as the script's on a clone with no or short run records; the public rebuild signature is unchanged (stored_used defaults to 0 there). test_replay_uses_the_used_the_script_was_given stores a closure at rounds_used 1 with a disputed fix and an arbitration record and asserts the pass-2 dismissal and convergence; without the floor the loop ends failed/no_result (verified by mutation).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_rebuild used floor, _closure_rounds_used); next/tests/unit/test_verdicts.py::test_replay_uses_the_used_the_script_was_given"
+  },
+  {
+    "id": "S4R-verdicts-16",
+    "outcome": "fixed",
+    "what_was_done": "The rejection of P3BLD-27 is re-recorded in this file, which the findings build appends to outcomes/ORDER after step4-rules.json, so the ledger shows P3BLD-27 rejected instead of left-for-builder waiting for G3; the entry below carries it.",
+    "where": "rewrite/findings/outcomes/step4-verdicts-fix.json; rewrite/findings/outcomes/ORDER (appended by rewrite/tools/findings.py build)"
+  },
+  {
+    "id": "P3BLD-27",
+    "outcome": "rejected",
+    "what_was_done": "The shorter rule (judge the last pass only) stays rejected per plan decision D1, re-recorded after step4-rules.json so the ledger no longer shows left-for-builder for G3: the tool's verdict is the full replay built and conforming here — a claim the next reviewer did not confirm keeps its finding open and a dismissal needs the dispute and the ruling (case l10-claim-not-confirmed is one the shorter rule gets wrong).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/convergence.py (replay); next/tests/conformance/cases/l10-claim-not-confirmed.json"
+  }
+]

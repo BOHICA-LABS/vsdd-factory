@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caller-marker.schema.json",
+  "type": "object",
+  "description": "Fields of a caller marker (hooks.md#2.11.10): the payload's session_id, agent_id, agent_type and cwd, and the time; the key is random and used once. The design spells the first four key names; the time field has no stated key spelling, so it is not named here. No types and no required list are given.",
+  "properties": {
+    "session_id": {},
+    "agent_id": {},
+    "agent_type": {},
+    "cwd": {}
+  },
+  "additionalProperties": true
+}

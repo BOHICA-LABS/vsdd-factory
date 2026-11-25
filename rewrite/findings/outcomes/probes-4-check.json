@@ -1,0 +1,32 @@
+[
+ {
+  "id": "PR4C-06",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not a change to a plan of steps 3 to 5 or to a built unit: it belongs to the packages named in the triage (T1), and is carried into the step 6 plan where it concerns the first headless run.",
+  "where": "spec/packaging/sandbox-needs.md and the T1 doctor; PR4-1"
+ },
+ {
+  "id": "PR4C-12",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not a change to a plan of steps 3 to 5 or to a built unit: it belongs to the packages named in the triage (E2, W2), and is carried into the step 6 plan where it concerns the first headless run.",
+  "where": "Every headless driver: E2's run (step-4 ORDER.md \u00a77-8), the story-ready fixture and W2 (step 6), the scheduler recipe (item 25), probe harnesses"
+ },
+ {
+  "id": "PR4C-15",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not a change to a plan of steps 3 to 5 or to a built unit: it belongs to the packages named in the triage (B8), and is carried into the step 6 plan where it concerns the first headless run.",
+  "where": "step-3 RESOLUTIONS.md (workflow survives /clear); step-3 ORDER.md \u00a77 (P3OPS-20 clear half); hook-runner-b.md (lock_release on every reason)"
+ },
+ {
+  "id": "PR4C-16",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not a change to a plan of steps 3 to 5 or to a built unit: it belongs to the packages named in the triage (E2, K1), and is carried into the step 6 plan where it concerns the first headless run.",
+  "where": "Typed-command gates (item 2, K1 decide) and headless drivers"
+ },
+ {
+  "id": "PR4C-17",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not a change to a plan of steps 3 to 5 or to a built unit: it belongs to the packages named in the triage (E2, B8), and is carried into the step 6 plan where it concerns the first headless run.",
+  "where": "PR4-3; spec/topics/spikes.md; the headless drivers"
+ }
+]

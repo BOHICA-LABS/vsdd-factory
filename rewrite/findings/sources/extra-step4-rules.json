@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S4B-rules-1",
+    "origin": "slice step 4, rules, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/step-results.md (Grounding paragraph)",
+    "problem": "The spec says line_start and line_end must lie inside the file but does not say what one bound alone means; the plan fixes it ('one bound given stands for both') and vsdd.grounding implements that. The spec should carry the rule so the verdict tier and the rule cannot diverge.",
+    "proposed_resolution": "Add one sentence to the grounding paragraph: a single bound stands for both ends, and a bound that is not an integer leaves the line check out (the quote is then sought in the whole file).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4B-rules-2",
+    "origin": "slice step 4, rules, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (subshell segments)",
+    "problem": "shell.parse represents a top-level subshell as one opaque segment whose text is '()', so a rule that must judge what a subshell runs (merge-guard's opaque_git) has to re-scan the whole command text and can attribute a subshell's git verb to no segment in particular. Carrying the inner text on the subshell segment would let rules judge subshells precisely instead of conservatively.",
+    "proposed_resolution": "Have shell.parse put the subshell's inner text on the Segment (text field or a new field) in a step-3 maintenance change; merge-guard then scans the segment's own text instead of the whole command.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4B-rules-3",
+    "origin": "slice step 4, rules, builder",
+    "severity": "minor",
+    "where": "next/tests/hooks/runner_helpers.py (launch)",
+    "problem": "launch() forwards the pytest process environment to the launcher child but never sets CLAUDE_PROJECT_DIR, so hook children resolve the project root from the child shell's own directory walk; a test whose notion of the project differs from the child's walk (worktree cwds, hub layouts) gets a silently inert or differently-scoped runner. Step 3's launcher tests pass because cwd and project coincide.",
+    "proposed_resolution": "Teach launch() to set CLAUDE_PROJECT_DIR from its cwd argument (a step 3 file, so the change belongs to a fix run of the hook-runner unit), or document that callers must pass it through env.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4B-rules-4",
+    "origin": "slice step 4, rules, builder",
+    "severity": "major",
+    "where": "next/tests/hooks/test_rule_cases.py (_CASE_DIRS, case_payload, test_gate_case_coverage)",
+    "problem": "Step 4's ORDER.md R5 states test_rule_cases.py 'keeps reading tests/hooks/fixture_cases/ only, as built', but the built _CASE_DIRS also globs tests/hooks/cases/, so the step 3 runner executes the rules unit's three new tables. Its runner cannot express them: it ignores the case 'project' key (rule_projects.CASE_PROJECTS fixtures) and performs no {worktree}/{run}/{sha} substitution, so the fixture-based blocking cases fail (10 failures in the whole-suite run: an expected block reads 0 because in a bare project no story worktree exists for tests-first to judge, and merge-guard's develop is not checked out anywhere). The rules unit is forbidden to edit test_rule_cases.py (ORDER.md section 6), so the mismatch is reported, not patched.",
+    "proposed_resolution": "A fix run of the hook-runner unit extends test_rule_cases.py's case_payload to honour the case 'project' key through tests.hooks.rule_projects.case_project and to substitute the fixture's returned values into payload and set (the 20-line body of tests/hooks/test_rule_tables.py does exactly this and can be lifted), or restricts _CASE_DIRS to fixture_cases/ and makes test_gate_case_coverage delegate per-rule coverage to tests/hooks/test_rule_tables.py's tables.",
+    "on_slice_path": true
+  }
+]

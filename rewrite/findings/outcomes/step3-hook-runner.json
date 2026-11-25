@@ -1,0 +1,140 @@
+[
+  {
+    "id": "P3COV-07",
+    "outcome": "fixed",
+    "what_was_done": "The decision paired with the runner's vsdd rewrite is allow when a Permit stands, agent_id is set, the tool is StructuredOutput, or permission_mode is auto/bypassPermissions; otherwise ask. Stated in topics/rule-model.md ('What the runner itself says'); every reason begins 'vsdd-factory hook:'. Static allow rules for the prefixed command stay with H6 (not at slice depth).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (_pre_tool_use_decision); tests: next/tests/hooks/test_caller.py::test_decision_pairing, next/tests/hooks/test_emit.py::test_stdout_by_outcome"
+  },
+  {
+    "id": "PR3-3",
+    "outcome": "fixed",
+    "what_was_done": "Same pairing rule: in unattended paths (agent_id set, StructuredOutput, auto/bypassPermissions) every rewrite pairs with allow; the main session in a prompting mode gets ask, not a rewritten call that cannot run. Reason strings are prefixed so they cannot be mistaken for command output.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py; tests: next/tests/hooks/test_caller.py::test_decision_pairing"
+  },
+  {
+    "id": "P3BLD-26",
+    "outcome": "rejected",
+    "what_was_done": "Not taken: the one-time marker stays, per plan (HD13 ships caller-marker.schema.json because two units meet at the file; records' caller(key) reads, deletes and prunes). The prefix form would still need a second channel for the hooks-alive test and its forgery story is weaker for replayable facts.",
+    "where": "next/plugins/vsdd-factory/schemas/caller-marker.schema.json; next/plugins/vsdd-factory/py/vsdd/hooks/caller.py; tests: next/tests/hooks/test_caller.py::test_marker_and_prefix"
+  },
+  {
+    "id": "PR3-2",
+    "outcome": "fixed",
+    "what_was_done": "The self-guarding command is built as designed, with HD12's two precautions (the walk starts only at an absolute path; HOME is stripped of a trailing slash): exit 2 with the reinstall message in a factory project, silent 0 elsewhere, the down-briefing JSON with systemMessage in brief, silent 0 in notify, and the launcher's own code when the launcher is present. Verified under sh, bash and dash.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (guard_command) generated into next/plugins/vsdd-factory/hooks/hooks.json by tools/build.py; tests: next/tests/lint/test_hooks_wiring.py::test_guard"
+  },
+  {
+    "id": "P3OPS-18",
+    "outcome": "left-for-builder",
+    "what_was_done": "The H1 half is in: SubagentStop carries the 4 s deadline, in registry.EVENTS (HD4), asserted in next/tests/lint/test_hooks_wiring.py::test_shape. The remainder is not at slice depth: the platform-timeout probe and any shell watchdog belong to B8 then B2, and announcing rule.timeout in the briefing belongs to H9.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py; later packages: B8 (probe/watchdog), B2 (onFailure), H9 (announcement)"
+  },
+  {
+    "id": "SL1-48",
+    "outcome": "fixed",
+    "what_was_done": "The runner's per-path Python resolution calls vsdd.project.find_project_root with the caller's HOME — the same algorithm find-root.sh runs — and both resolvers already share tests/root_cases.py. New: the context resolution is asserted against the shared table, with the session project as the fallback.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/model.py (project_at); tests: next/tests/hooks/test_ctx.py::test_ctx_agrees_with_the_shared_root_table"
+  },
+  {
+    "id": "SL1-14",
+    "outcome": "fixed",
+    "what_was_done": "The exclusive walk (HOME and / terminate it before their own .factory is tested) is what the runner's resolver uses, via find_project_root; the runner in addition refuses a VSDD_FACTORY_ROOT whose real path is the real home or /, and the guard never tests the home directory.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_root_usable); tests: next/tests/hooks/test_runner.py::test_root_at_home_is_inert, next/tests/hooks/test_ctx.py::test_state_at_home_adopts_nothing, next/tests/lint/test_hooks_wiring.py::test_guard"
+  },
+  {
+    "id": "SL1-40",
+    "outcome": "fixed",
+    "what_was_done": "The guard normalises HOME (trailing slash stripped) and starts its walk only at an absolute path, matching vsdd.project's relative-gitdir handling; a state rooted at home adopts nothing. Stated in topics/hook-wiring.md and topics/caller-identity.md remain the owners of the gitdir rule; the guard's part is tested.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (guard_command); tests: next/tests/lint/test_hooks_wiring.py::test_guard"
+  },
+  {
+    "id": "SL1-47",
+    "outcome": "fixed",
+    "what_was_done": "config.py owns the per-rule check (already built by the layer-2 catch-up): a fault in one rule's table resets that rule to its defaults, any other fault resets the whole file to defaults. The runner announces both: a faulting rule's rule_config falls back, hook_problems reach the SessionStart notice as config.invalid, and a failing strength is never a relaxation.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/model.py (rule_config), main.py (_notices); tests: next/tests/hooks/test_runner.py::test_applies_and_strength (faulty table resets that rule only), next/tests/hooks/test_ctx.py covers project.config_error"
+  },
+  {
+    "id": "SL1-50",
+    "outcome": "fixed",
+    "what_was_done": "story and cwd are properties of the shipped event schema and the runner sends them on its rule events when known; the design's example rule.block line is the schema fixture, so the example, the schema and the writer agree.",
+    "where": "next/plugins/vsdd-factory/schemas/event.schema.json; next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (_context_target_fields); fixture: next/tests/unit/fixtures/schemas/event/valid_rule-block.json; test: next/tests/hooks/test_emit.py::test_block_format"
+  },
+  {
+    "id": "AU-P2-10",
+    "outcome": "fixed",
+    "what_was_done": "Completed the earlier outcome: the example rule.block line is copied into topics/event-log.md (Format), cwd and story are in the schema's properties, and the example line is the fixture the validator exercises.",
+    "where": "rewrite/spec/topics/event-log.md; next/plugins/vsdd-factory/schemas/event.schema.json; next/tests/unit/fixtures/schemas/event/valid_rule-block.json"
+  },
+  {
+    "id": "SL1-17",
+    "outcome": "left-for-builder",
+    "what_was_done": "No action at this depth: the frontmatter reader under next/ already implements the hooks.md superset with both module docstrings stating the subset relation, and tests/unit holds its tests. Nothing in the runner overrides it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/frontmatter.py (existing, unchanged)"
+  },
+  {
+    "id": "SL1-18",
+    "outcome": "left-for-builder",
+    "what_was_done": "No action at this depth: the reader's date scalar handling is in next/ from layer 2, documented in its docstring, with the differential test in tests/unit.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/frontmatter.py (existing, unchanged)"
+  },
+  {
+    "id": "SL1-21",
+    "outcome": "left-for-builder",
+    "what_was_done": "No action at this depth: redact-then-cut order is implemented in events.py with its pinning test in tests/unit, unchanged by this unit.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/events.py (existing, unchanged)"
+  },
+  {
+    "id": "P3SEAM-24",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: lock liveness is the second part of H1 (hook-runner-b, with records' lock_seen and lock_release). This unit delivers the marker the refresh will read.",
+    "where": "later package: hook-runner-b (S2b/S4 side: records)"
+  },
+  {
+    "id": "P3BLD-14",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: path classes are the second part of H1 (hook-runner-b), on S1's path_class and glob_regex. ctx.classes raises ContextUnavailable until then, by design.",
+    "where": "later package: hook-runner-b"
+  },
+  {
+    "id": "P3OPS-20",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: same second part (liveness with records); the clear half waits for a probe (B8).",
+    "where": "later packages: hook-runner-b, B8"
+  },
+  {
+    "id": "AU-S2-09",
+    "outcome": "left-for-builder",
+    "what_was_done": "The event-type list remains second-stated in prose; this unit added no third copy (the runner reads its own rows, and the fixture example carries the design's fields). Consolidation of event types into the table is the T3 events-schema work (vsdd events schema), not at slice depth.",
+    "where": "later package: T3"
+  },
+  {
+    "id": "AU-S2-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "Spec-text consolidation of record and rule files into their topics is a documentation pass planned for when H1's spec files shrink to pointers; no code rides on it.",
+    "where": "later: the spec-shrink pass"
+  },
+  {
+    "id": "AU-S2-10",
+    "outcome": "left-for-builder",
+    "what_was_done": "History-phrase cleanup in the spec is the same documentation pass; the files this unit owns (topics/rule-model.md, topics/event-log.md) were written without history framing in this unit's additions.",
+    "where": "later: the spec-shrink pass"
+  },
+  {
+    "id": "P3OPS-23",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the unmounted-state line on SessionStart belongs to the rest of H1 with H9 (a launcher-written line, like the legacy one).",
+    "where": "later packages: H1 (rest), H9"
+  },
+  {
+    "id": "P3REQ-13",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: same as P3OPS-23 (the launcher's brief-mode line) plus S1's vsdd status.",
+    "where": "later packages: H1 (rest), S1"
+  },
+  {
+    "id": "L2-catchup-fix-3",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: 'vsdd events schema' (T3) is the package that restores the two-list equality mechanically; here each extra type is a constant at its call site in the runner.",
+    "where": "later package: T3"
+  }
+]

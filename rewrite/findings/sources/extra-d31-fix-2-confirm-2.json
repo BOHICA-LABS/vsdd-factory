@@ -1,0 +1,20 @@
+[
+  {
+    "id": "d31-fix-2-C2-1",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-duties.toml (test-writer duty, the split sentence; adversary item flag-off)",
+    "problem": "This round's design choice to split a test (test-writer duty: 'Split a test that asserts both kinds: the part the on state breaks is moved, and the rest keeps the name') does not fit the reviewer item that is supposed to cover it. The adversary's item flag-off asks that 'each test the diff moves has its assertions unchanged' and that 'the diff deletes, renames or weakens no other existing test'. A correct split fails both on their face: the moved part holds only some of the original's assertions, and the part that keeps the name has lost the assertions that moved, so it is an existing test the diff weakens. A reviewer that follows the item raises a finding on every correct split. Nothing checks what matters about a split either: that the two parts together keep every assertion of the original, unchanged. F-STATES's unmeasured cell hands exactly that question to the items flag-off and flag-removed. Also, 'both kinds' follows the sentence that defines `old` and `pending`, so it can be read as a test that asserts both an old and a pending part rather than a test the on state only partly breaks.",
+    "proposed_resolution": "In the item flag-off of the adversary's duty, add: for a split test, the moved part and the part that keeps the name together hold every assertion of the original, unchanged, and the moved part holds only what the on state breaks. Exclude a split's remaining part from 'weakens no other existing test'. In the test-writer duty, write 'Split a test that the on state breaks only in part' instead of 'that asserts both kinds'.",
+    "on_slice_path": false
+  },
+  {
+    "id": "d31-fix-2-C2-2",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES, the criterion refusal for a new off or default test)",
+    "problem": "The new refusal in F-STATES rejects a new off or default test whose name 'names one [criterion] whose text lacks the words flag off'. It takes which criteria a name names from gate-red's rule, which is a substring match ('its name contains ac<N>'). A test named for AC-12 therefore also names AC-1, and a token whose encoded key contains `ac` followed by a digit (the tidy form allows a key such as `hvac2-mode`, which encodes as `hvac2_mode`) makes every test that carries the token name that criterion. In a story with ten or more criteria whose flag-off criterion is AC-1x, or with such a key, an off test written as the duty says is refused because it also names a criterion without 'flag off'. The test-writer cannot rename its way out, because the state token is required. Before this round the check only asked whether a name named any criterion, so the loose match caused no refusal.",
+    "proposed_resolution": "In F-STATES, define which criteria a name names for this refusal: each `ac<N>` that no letter or digit comes directly before and no digit comes directly after, read in the name once every token of the flag has been taken out. Leave gate-red's own map rule as it is, since that rule is on the thin slice path.",
+    "on_slice_path": false
+  }
+]

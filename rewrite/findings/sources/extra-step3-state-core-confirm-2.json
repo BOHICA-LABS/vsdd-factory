@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S3R-state-core-C2-1",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py",
+    "problem": "The S3R-state-core-C1-7 fix pasted its explanatory comment twice in compile_registry: the five-line block 'A ref: target with no pattern anywhere is a compile-time fault ... (plan 3.5: the RegistryError names the row).' appears at lines 172-176 and again, word for word, at lines 177-181, just before the loop that re-raises with '[<row>].<key>: ...'. Behaviour is correct; the text is noise a reader has to compare to see that the two copies say the same thing.",
+    "proposed_resolution": "Delete one of the two identical comment blocks above the ref: compile loop in artifacts.py.",
+    "on_slice_path": true
+  }
+]

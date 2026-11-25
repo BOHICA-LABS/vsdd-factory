@@ -1,0 +1,110 @@
+# The route table: an ordered list of project states and the next command each gives.
+# Sources: pipeline.md#2.4, BLUEPRINT.md#5.1, BLUEPRINT.md#4.14.
+#
+# A route is not a script. `vsdd status` computes the next command from what is on disk, the session
+# briefing prints it, and every workflow returns it. The tool evaluates the table top to bottom and
+# the first match is `next`. Implemented once, as an ordered list of (condition, next) in the tool's
+# Python beside the condition functions, with a fixture per row; only the tool evaluates it.
+# A project state that no built row matches answers a human line that says the state needs a route
+# row that is not built yet, so an unrouted state is never silent.
+# "Stop" marks a human decision. Every row below the first three is scoped: it names
+# whether a cycle is open. After a release closes the cycle, no `verify` or `release` row can match,
+# so the answer is "done" or the queued request, never `verify` again. A project that was ingested or
+# imported and has no brief is in steady state, and a queued request starts because its row sits
+# directly below the lock and multi-repository rows, above every row that would send a person away.
+# "Could run" in the two decision rows is the same function the survey's preconditions use, so the
+# route never names a command the survey would refuse. A story waiting on its own decision does not
+# stop later waves; a wave whose gate is waiting on a decision does ([[workflow:wave]]).
+#
+# The plan unit and the route. The `plan` unit is closed when a `plan` run ends with the plan gate
+# passed, and a `revise` on a `plan` decision reopens it. "The plan is ready", the precondition of
+# `wave`, means that unit is closed and no `plan` decision is open.
+#
+# A cycle's route is the `route` field of its `cycle.json`, a tracked record: `standard` from the
+# opening of a cycle that began with a brief, and written by `vsdd feature route` for a cycle a
+# change request opened ([[command:feature-route]]). So a fresh clone, or a resume after the run
+# records are pruned, routes the same way, and a cycle whose change request has no route yet matches
+# neither the `plan` row nor the no-plan case of the `verify` row.
+#
+# Fixtures. Six fixtures are named because they failed before: a brownfield project with a queued
+# request gives `feature` with that request; a greenfield project after its release gives done; a
+# standing `ideas` decision plus a queued request gives `feature`; a fast route whose story is
+# delivered gives `verify`, not `plan`; a maintenance cycle with delivered fixes gives `verify`; a
+# standard-route feature whose delta specification is approved, with no run records on disk, gives
+# `plan`.
+
+[[row]]
+condition = "The project is not initialised"
+next = "human: run /vsdd-factory:setup"
+
+[[row]]
+condition = "A run lock is held by a live run"
+next = "human: wait, or inspect the run; a run that stopped in this session continues when its command is run again, and vsdd lock release frees its lock"
+
+[[row]]
+condition = "The root holds a multi-repository manifest and project-level work is due"
+next = "multi"
+
+[[row]]
+condition = "No cycle is open and a change request is queued"
+next = "feature with the oldest queued request"
+
+[[row]]
+condition = "A second cycle (a critical fix) is open and has work that can run"
+next = "That cycle's next workflow, with cycle in args"
+
+[[row]]
+condition = "No cycle is open, an ingest has finished and its spec decision is open"
+next = "human: that decision"
+
+[[row]]
+condition = "No cycle is open, source exists, and there is no baseline (no ingest, import or release) and no approved brief"
+next = "ingest"
+
+[[row]]
+condition = "No cycle is open, the brief exists as a draft"
+next = "human: continue /vsdd-factory:brief"
+
+[[row]]
+condition = "No cycle is open and none of the above"
+next = "done (steady state: write a brief, or feature, maintain, discover on demand)"
+
+[[row]]
+condition = "A cycle is open: a spec-gap decision was settled amend and nothing else in the open wave can run"
+next = "feature with amend"
+
+[[row]]
+condition = "A cycle is open: a change request is in flight and neither delivered nor awaiting a decision"
+next = "feature"
+
+[[row]]
+condition = "A cycle is open: the brief is approved and the specification is not converged, or its decision asked for revision"
+next = "spec"
+
+[[row]]
+condition = "A cycle is open: the specification is approved and [commands] has no test or test_report"
+next = "human: the lines to add to factory.toml (this arises only when the approved toolchain file did not supply them)"
+
+[[row]]
+condition = "A cycle is open that needs a plan (the route in its cycle.json is standard, which a cycle that began with a brief has from its opening): the specification is approved and the plan unit is not closed. Or, in any open cycle, an amendment was approved and the plan has not been re-traced"
+next = "plan"
+
+[[row]]
+condition = "A cycle is open: every unit that could run waits on an open decision"
+next = "human: the list of decisions"
+
+[[row]]
+condition = "A cycle is open: a wave is open, or a later wave has runnable stories"
+next = "wave"
+
+[[row]]
+condition = "A cycle is open: all waves closed (or, in a cycle with no plan, which is one whose route is trivial, bugfix or hotfix or whose kind is maintenance, every admitted story delivered) and verify has not converged on the current commit"
+next = "verify"
+
+[[row]]
+condition = "A cycle is open: decision release is approved for the current commit"
+next = "release"
+
+[[row]]
+condition = "A cycle is open: only open decisions remain"
+next = "human: the list of decisions"

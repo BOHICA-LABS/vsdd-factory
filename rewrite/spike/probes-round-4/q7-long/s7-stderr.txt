@@ -1,0 +1,1 @@
+Background tasks still running 10m after the last turn (workflow "Round-4 probe Q7: ten-minute foreground call with explicit 6"); stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.

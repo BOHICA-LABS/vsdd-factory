@@ -1,0 +1,12 @@
+[
+ {
+  "id": "step3-hook-runner-fix-6-C2-1",
+  "files": [
+   "topics/caller-identity.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": false
+ }
+]

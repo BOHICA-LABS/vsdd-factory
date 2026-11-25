@@ -1,0 +1,74 @@
+[
+  {
+    "id": "S3R-hook-runner-7",
+    "outcome": "fixed",
+    "what_was_done": "cd's option words (-P, -L, -e, ...) are skipped and '--' ends the options, so the first operand decides the later wheres ('cd -P /tmp && git status' now gives /tmp, 'cd -- sub' /base/sub, 'cd -- -P' the literal /base/-P, an option-only cd gives '' because it goes home). pushd and popd set the later wheres to '' (the directory stack decides; never guessed). A for or case reserved word now marks its segment opaque, so the loop variable is no longer read as the program ('for f in a b; do rm -rf $f; done': header opaque, body program rm). Verified by mutation: reverting the cd branch fails test_where_unknown_forms.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_cd_target, _build_segment); tests: next/tests/hooks/test_shell.py::test_where_unknown_forms, test_for_and_case_headers_are_opaque"
+  },
+  {
+    "id": "S3R-hook-runner-8",
+    "outcome": "fixed",
+    "what_was_done": "The coverage check is factored into gate_case_problems(rows, table) and the modules-to-rows check into module_row_problems(rows, rules_dir); test_gate_case_coverage calls both over registry.RULES (vacuous-safe while RULES is empty). A case's module is compared against the module the row actually loads (entry.module or 'vsdd.rules.' + id with dashes as underscores), so a defaulted row no longer reads as ''. module_row_problems faults a vsdd/rules/*.py file with no row and a row whose module is not a vsdd.rules file. Both are tested with hand-built RuleEntry rows: an uncovered gate row, a covered one, a case naming a defaulted module, a straying module, an orphaned module file, and a row with no file — each caught by mutation, since the empty live loop alone proves nothing.",
+    "where": "next/tests/hooks/test_rule_cases.py (loaded_module, gate_case_problems, module_row_problems); tests: next/tests/hooks/test_rule_cases.py::test_gate_case_problems_catches_gaps, test_modules_match_rows, test_gate_case_coverage"
+  },
+  {
+    "id": "S3R-hook-runner-10",
+    "outcome": "fixed",
+    "what_was_done": "test_structured_output_rewrite_is_allowed now clears agent_id and agent_type on the payload (the recorded payload carries agent_id 'wf-step-3', which allowed through the agent branch and proved nothing about the StructuredOutput branch). Added test_spike_exempt_rule_skipped_inside_a_spike: a spike_exempt blocking fixture rule in make_project(story='spike-probe')'s worktree exits 0, and outside it exits 10. Verified by mutation: removing the StructuredOutput branch of HD7 and ignoring the spike exemption each fail their test.",
+    "where": "next/tests/hooks/test_caller.py (test_structured_output_rewrite_is_allowed); next/tests/hooks/test_runner.py (TestAppliesAndStrength::test_spike_exempt_rule_skipped_inside_a_spike)"
+  },
+  {
+    "id": "S3R-hook-runner-12",
+    "outcome": "fixed",
+    "what_was_done": "Added test_rewrite_from_unflagged_rule_is_its_crash_at_advise: factory.toml sets [hooks.rules.probe] strength = 'advise', the unflagged rule's Rewrite is its crash (exit 10, rule_error on stderr), and no updatedInput is printed. Verified by mutation: letting the check lapse at advise strength fails the test.",
+    "where": "next/tests/hooks/test_emit.py::test_rewrite_from_unflagged_rule_is_its_crash_at_advise"
+  },
+  {
+    "id": "S3R-hook-runner-14",
+    "outcome": "fixed",
+    "what_was_done": "test_advise_converts_block_and_logs_would_block now asserts the would_block event's id matches ^b-[0-9a-f]{6}$ and its command field is 'echo'. Verified by mutation: replacing the id and dropping the target/command fields each fail the test.",
+    "where": "next/tests/hooks/test_runner.py (TestAppliesAndStrength::test_advise_converts_block_and_logs_would_block)"
+  },
+  {
+    "id": "S3R-hook-runner-15",
+    "outcome": "fixed",
+    "what_was_done": "test_registered_rules_are_announced_as_relaxations asserts the exact relaxation sentence ('vsdd-factory: rules below full strength this session: soft-rule (off).') and that 'typoo (advise)' is absent from the context, so the unfiltered line can no longer satisfy the assertion. Verified by mutation: removing the registered filter fails the test.",
+    "where": "next/tests/hooks/test_runner.py (TestSessionNotices::test_registered_rules_are_announced_as_relaxations)"
+  },
+  {
+    "id": "S3R-hook-runner-17",
+    "outcome": "fixed",
+    "what_was_done": "Two caller tests. test_marker_is_staged_outside_calls spies on os.replace and asserts the staged file sits under <root>/.factory/local/hooks/tmp/ as <key>.json.tmp before landing in calls/ — this is the test that fails when the staging moves back into calls/. test_replace_failure_leaves_no_tmp_in_calls makes os.replace raise (a kill before the rename): the call blocks with caller_marker_unwritable and calls/ holds no *.tmp file. Added the schema fixture invalid_short-key.json (+ expect sidecar 'string is 31 characters; the minimum is 32'), whose only fault is the short key, so removing minLength/maxLength from caller-marker.schema.json fails test_schema_fixtures. All three verified by mutation.",
+    "where": "next/tests/hooks/test_caller.py (test_marker_is_staged_outside_calls, test_replace_failure_leaves_no_tmp_in_calls); next/tests/unit/fixtures/schemas/caller-marker/invalid_short-key.json with its .expect.txt"
+  },
+  {
+    "id": "S3R-hook-runner-19",
+    "outcome": "fixed",
+    "what_was_done": "main._recent_rule_faults now matches event types through the model.py constants EVENT_RULE_ERROR and EVENT_RULE_TIMEOUT instead of the literals 'rule.error' and 'rule.timeout' — the quarantine no longer breaks silently if a constant is renamed. main._events_dir delegates to a shared _events_dir_of(env, root), the same resolver the bad-input path uses.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_recent_rule_faults, _events_dir)"
+  },
+  {
+    "id": "S3R-hook-runner-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "Settled on: arithmetic is opaque only when it nests a command substitution. _read_word distinguishes '$((' from '$(': an arithmetic span sets word.subst only when its interior ('$(', '`') holds a command substitution or a backtick, in the bare and the double-quoted forms alike; _own_opacity's '$((' exclusion is no longer dead code but the other half of the same decision, and the module and _Word docstrings say so. 'echo $((1+2))', quoted 'n=$((1+2))' and a vsdd call with an arithmetic argument stay judgeable, so the caller marker survives; '$(($(wc -l)+1))' and a backtick inside the arithmetic are opaque. Verified by mutation: forcing subst for arithmetic fails the test.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_read_word, _opens_arithmetic, _arithmetic_nests_substitution, _own_opacity, docstrings); tests: next/tests/hooks/test_shell.py::test_arithmetic_is_not_opaque_unless_it_runs_something"
+  },
+  {
+    "id": "S3R-hook-runner-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "Bad input in notify and brief now logs rule.error (rule 'runner', code 'runner_bad_input', fail 'open', session id 'unknown'); rule.block stays gate-only; the directory resolution is shared (_events_dir_of) and honours VSDD_EVENTS_DIR in both paths. test_bad_input_logged_in_gate_only now expects one rule.error after notify, two after brief, and rule.block third after gate, with no rule.block outside gate. Verified by mutation: deleting the notify/brief logging block fails the test.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_bad_input, _events_dir_of); tests: next/tests/hooks/test_runner.py::test_bad_input_logged_in_gate_only"
+  },
+  {
+    "id": "S3R-hook-runner-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "test_wiring_generated_from_a_fixture_table gained a SessionEnd row (ender, recorder on SessionEnd) and asserts its wire: no matcher, no timeout key, no onFailure, no async, and the notify guard's command. Verified by mutation: wiring a timeout key for SessionEnd fails the test.",
+    "where": "next/tests/lint/test_hooks_wiring.py::test_wiring_generated_from_a_fixture_table"
+  },
+  {
+    "id": "S3R-hook-runner-C1-4",
+    "outcome": "fixed",
+    "what_was_done": "rules/tests-first.md now says there is no declaration decorator: the RuleEntry row in registry.RULES is the rule's one declaration (HD1), and topics/rule-model.md shows tests-first's row with spike_exempt = True. topics/seams-hooks.md's provided table now reads 'one module exposing check, and one RuleEntry row in the registry, which is the declaration (HD1); case tables'.",
+    "where": "rewrite/spec/rules/tests-first.md; rewrite/spec/topics/seams-hooks.md"
+  }
+]

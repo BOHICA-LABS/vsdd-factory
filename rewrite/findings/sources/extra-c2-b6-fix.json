@@ -1,0 +1,11 @@
+[
+  {
+    "id": "L2-c2-b6-fix-1",
+    "origin": "slice layer 2, c2-b6-fix",
+    "severity": "major",
+    "where": "rewrite/spec/topics/research-and-browser-tools.md (the example tools line); rewrite/spec/topics/agent-file.md; next/plugins/vsdd-factory/py/vsdd/frontmatter.py",
+    "problem": "The design's example of an agent tools line lists MCP tool names unquoted (tools: mcp__plugin_vsdd-factory_context7__resolve-library-id, mcp__context7__..., for example in topics/research-and-browser-tools.md), but the shipped frontmatter reader refuses a bare scalar holding an underscore - it reads as a YAML 1.1 number spelling and instructs the writer to quote it. Every agent file that carries an MCP tool in its tools line unquoted would fail the shipped reader (the lint parses agent frontmatter with that reader since the c2-b6-fix pass, so the lint catches this; but the spec examples as written are unrepresentable, and the A-package authors who copy them would ship agent files the platform misreads).",
+    "proposed_resolution": "Quote the tools value in the design examples (tools: \"mcp__..., mcp__...\"), and have the A packages that write agent files with MCP tools carry the quoted form; alternatively widen the frontmatter subset to accept a bare scalar with underscores, which is the looser-reader path the design refused (hooks.md 2.4).",
+    "on_slice_path": false
+  }
+]

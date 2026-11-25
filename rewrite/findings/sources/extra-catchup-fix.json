@@ -1,0 +1,29 @@
+[
+  {
+    "id": "L2-catchup-fix-1",
+    "origin": "slice layer 2, catchup-fix",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/survey.schema.json (config); rewrite/spec/topics/wave-script.md (s.config.holdout, s.config.tier_override)",
+    "problem": "survey.config is typed as a bare object while every script reads into it: story.js and wave-script.md read s.config.tier_override, and wave-script.md feeds s.config.holdout (mean_min, must_pass_min, stddev_max) straight into holdoutFindings(). The relay-rule's companion promise, 'every field a script reads is required by that step's data schema' (topics/result-schemas.md), is not held for config's members, so a survey that omits holdout silently turns every threshold into the prelude's defaults.",
+    "proposed_resolution": "Type config's members in survey.schema.json (tier_override: string; review_rules: string; holdout: object with the three numeric thresholds) and require them, empty-valued where the project has none, so emptyOf() and the fixtures carry them.",
+    "on_slice_path": true
+  },
+  {
+    "id": "L2-catchup-fix-2",
+    "origin": "slice layer 2, catchup-fix",
+    "severity": "minor",
+    "where": "next/tests/workflows/harness.mjs (runWorkflowFile); next/tests/workflows/universal.test.mjs (the amended identity and arbitration test)",
+    "problem": "runWorkflowFile runs a file as-is and does not stamp the prelude, so a test that authors a workflow in a temporary directory must hand-copy prelude.js between stamped markers itself (the new identity test does). A future test author who forgets the stamp gets a bare ReferenceError at run time, and the hand-stamp duplicates the build's insert logic that tests/lint/test_build.py already had to re-verify.",
+    "proposed_resolution": "Give harness.mjs a stampedTempWorkflow(dir, name, body) helper, or a runWorkflowFile option that stamps workflow-lib/prelude.js between the markers before running, so tests author bodies only.",
+    "on_slice_path": false
+  },
+  {
+    "id": "L2-catchup-fix-3",
+    "origin": "slice layer 2, catchup-fix",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/event.schema.json; rewrite/spec/tables/event-types.toml",
+    "problem": "The old spec schema carried x-documented-types, and a repair record pinned it equal to tables/event-types.toml. Shipping the event schema as the writer's file (the CATCHUP-R15 split) dropped that tie: the documented type list is now prose-side only, and nothing fails when tables/event-types.toml and the types the writer actually emits drift apart.",
+    "proposed_resolution": "When the events command package builds 'vsdd events schema', add a check that every type the table lists matches the writer's dotted-type rule and that every type the writer emits is documented, restoring the two-list equality mechanically.",
+    "on_slice_path": false
+  }
+]

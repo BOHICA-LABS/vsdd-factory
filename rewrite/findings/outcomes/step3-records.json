@@ -1,0 +1,158 @@
+[
+  {
+    "id": "P3OPS-07",
+    "outcome": "left-for-builder",
+    "what_was_done": "Only the store half is built: run_admit records a story in the calling run and run_require is the one membership check. Re-recording the admitted stories of a unit in a new run (test_admit_again_same_unit_new_run) is the survey's part (S3). (Review round: S3R-records-16.)",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py; tests/unit/test_state_runs.py"
+  },
+  {
+    "id": "P3REQ-07",
+    "outcome": "left-for-builder",
+    "what_was_done": "Only the store half is built (run_admit, run_require, run_open stories). The survey's re-admission of earlier units in a new run is S3's (test_admit_again_same_unit_new_run). (Review round: S3R-records-16.)",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py; tests/unit/test_state_runs.py"
+  },
+  {
+    "id": "P3REQ-08",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: run records carry the amendment flag (run_open amendment=, run_set(amendment=)) and only run_live is defined (decision D5). The survey must mark the amendment when the cycle's route is standard and the cycle has no approved spec decision of its own. Package S3 takes it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py"
+  },
+  {
+    "id": "P3OPS-12",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: closure records gained the plain-object baseline field the ingest and import packages extend (G7), and the store is ready for the inherited-test list through closure records. G7 and G2 deliver the rest.",
+    "where": "next/plugins/vsdd-factory/schemas/closure-record.schema.json"
+  },
+  {
+    "id": "P3SEAM-13",
+    "outcome": "fixed",
+    "what_was_done": "Decision D4 in code: store_step refuses a second write to a step key (step_exists) unless the same agent_id writes again or the content is identical, so a review loop that runs twice in one story cannot mix its passes and an agent whose result the platform refused can replace it. Tested in test_step_collision. The repair-round step-name prefix is the story script's part (W2).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py; tests/unit/test_state_steps.py"
+  },
+  {
+    "id": "P3SEAM-15",
+    "outcome": "fixed",
+    "what_was_done": "evidence_write refuses an incomplete re-freeze (refreeze_incomplete): a re-freeze must list every file the latest earlier red record froze, and a passing red record must carry frozen, tests and criteria. Tested in test_refreeze_incomplete.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py; tests/unit/test_state_gate_evidence.py"
+  },
+  {
+    "id": "PR4C-05",
+    "outcome": "fixed",
+    "what_was_done": "Kept the store's own schema check (write_record validates every step record against step-record, which $refs step-result) and kept D4's same-agent_id replacement instead of a flat refusal, so an agent whose result the platform's check refused answers again with the same agent_id and replaces it. Tested in test_step_collision and the schema fixtures.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py, store.py; tests/unit/test_state_steps.py"
+  },
+  {
+    "id": "PR4C-08",
+    "outcome": "fixed",
+    "what_was_done": "flush never raises: a git failure comes back as state failed with the cause in error, and a failure whose text is the sandbox's Operation not permitted names the Bash sandbox and points at the hook path. Tested in test_flush_never_raises; stated in spec topics/state-commits.md.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; tests/unit/test_state_commits.py; rewrite/spec/topics/state-commits.md"
+  },
+  {
+    "id": "S3B-state-core-3",
+    "outcome": "fixed",
+    "what_was_done": "flush reads the changed paths through the state core's changed_paths helper (which passes -uall) and never open-codes git status; the requirement is stated once in spec topics/state-commits.md so future callers see it. Committed state lands through flush's helper in test_flush.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; rewrite/spec/topics/state-commits.md"
+  },
+  {
+    "id": "VSA-16",
+    "outcome": "fixed",
+    "what_was_done": "closure_update is the one write path for every writer, the survey included: the spec's Written by list now names vsdd survey (through the worktree library) and the single write path, and the store's test_closure exercises closure_update as the only writer. Tested in test_closures.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py; tests/unit/test_state_cycles.py; rewrite/spec/records/closure.md"
+  },
+  {
+    "id": "P3OPS-20",
+    "outcome": "left-for-builder",
+    "what_was_done": "Built and tested here: lock_seen matching by run, by story and by session, at most one write a minute per entry, raising nothing; and lock_release by run, session, stale and force. hook-runner-b makes the guarded calls and closes the finding (minus the clear half of P3OPS-20, which waits for probe B8).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; tests/unit/test_state_locks.py"
+  },
+  {
+    "id": "P3BLD-14",
+    "outcome": "left-for-builder",
+    "what_was_done": "Built and tested here: lock_seen (the refresh) and lock_release (the release at session end) exist and are tested; hook-runner-b wires them into the hook events and closes the finding.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; tests/unit/test_state_locks.py"
+  },
+  {
+    "id": "P3SEAM-24",
+    "outcome": "left-for-builder",
+    "what_was_done": "Built and tested here: lock_seen decides belonging from the facts it is given (run, story, session), which the refresh on a call naming the run or carrying the step's run plugs into. hook-runner-b closes the finding when it makes the calls.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; tests/unit/test_state_locks.py"
+  },
+  {
+    "id": "P3SEAM-07",
+    "outcome": "left-for-builder",
+    "what_was_done": "Only the run_live half is built (decision D5: a run is live when ended is empty), and store_step refuses a dead run. spec_locked and the lock-holder definition arrive with H4, which takes run_live and the lock's freshness.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py, steps.py"
+  },
+  {
+    "id": "P3OPS-13",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the fetch before a survey is S3's, the state push and the machine lease are S2b's widened build. Nothing on the slice pushes; flush is local only.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py"
+  },
+  {
+    "id": "P3OPS-19",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the driver flag and vsdd driver are deferred with S2b's widened build; the briefing's driver instruction belongs to the briefing (S2b, H9).",
+    "where": ""
+  },
+  {
+    "id": "AU-P2-11",
+    "outcome": "open",
+    "what_was_done": "Reopened by the review round (S3R-records-17): a spec-text fix with no code to follow must not sit at left-for-builder, which would take it out of the open count. It waits for the spec pass.",
+    "where": "rewrite/spec/topics/run-lock.md"
+  },
+  {
+    "id": "AU-S2-15",
+    "outcome": "open",
+    "what_was_done": "Reopened by the review round (S3R-records-17): a spec-text fix with no code to follow must not sit at left-for-builder, which would take it out of the open count. It waits for the spec pass.",
+    "where": "rewrite/spec/topics/run-lock.md"
+  },
+  {
+    "id": "AU-S2-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands (locks.py, callers.py, tested), but the finding is spec duplication and the duplication is still there: records/lock.md restates topics/run-lock.md. Left for the spec pass that reduces the records/*.md files to links; the code cannot close it. (Review round: S3R-records-15.)",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py, callers.py; tests/unit/test_state_locks.py, test_state_callers.py"
+  },
+  {
+    "id": "VSA-01",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the red lookup after a rebase is G4a's fixture. The pieces it needs exist here: patch_id(tree, base, head), the red rule over base..head ancestry, and delivery.base recorded through closure_update and re-recordable by delivery.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py"
+  },
+  {
+    "id": "CL-R1",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: cycle records carry route and cycle_write is the one path that writes them; vsdd feature route itself (which must only write in the run that opened the cycle) is G5's command.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py"
+  },
+  {
+    "id": "P3COV-11",
+    "outcome": "open",
+    "what_was_done": "Reopened by the review round (S3R-records-17): a spec-text fix with no code to follow must not sit at left-for-builder, which would take it out of the open count. It waits for the spec pass.",
+    "where": ""
+  },
+  {
+    "id": "AU-P2-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands (KINDS and resolve_decision each exist once in code; test_kinds_table and test_resolve_prefers_open, and now a check against tables/decision-kinds.toml), but the spec duplication remains: human-stops.md still lists the choices the table holds. Left for the spec pass that reduces the duplicated lists to links. (Review round: S3R-records-15.)",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; tests/unit/test_state_decisions.py"
+  },
+  {
+    "id": "AU-S2-04",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands, but the id@cycle rule is still stated four times (conventions.md, topics/decisions.md, topics/hotfix-cycle.md, commands/decide.md). Left for the spec pass that collapses the statements to one. (Review round: S3R-records-15.)",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+  },
+  {
+    "id": "P3OPS-10",
+    "outcome": "left-for-builder",
+    "what_was_done": "The store half is built: decision_status reads stale when an open or approved decision's digest no longer matches, settling refuses stale, and spec_approved returns the stale detail. Tested in test_spec_approved. The route row and the new spec decision the survey opens are S3's.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; tests/unit/test_state_decisions.py"
+  },
+  {
+    "id": "P3OPS-14",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: settling open-spike refuses not_built (decision D10) instead of writing a half-formed spike request. The named-spike request file arrives with S6 and takes the same settling path.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+  }
+]

@@ -1,0 +1,50 @@
+[
+ {
+  "id": "step4-rules-fix-3-C1-4",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: A -c, --config-env or GIT_CONFIG_* key that redirects a verb (alias.*, push.*, remote.*.push) never passes on position: block opaque_git. Make _chunk_names also match <src>:<name> and <src>:refs/heads/<name>. Add as blocked cases: both alias pushes from the story worktree; a lone aliased verb on the main checkout (git ci -m x with the alias already configured); and from the story worktree, git -c remote.origin.push=HEAD:refs/heads/develop push origin and git config remote.origin.push ... && git push origin.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block, _chunk_names, _config_directed); next/tests/hooks/test_merge_guard.py"
+ },
+ {
+  "id": "step4-rules-fix-3-C1-5",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: Test the cd operand as typed for CDPATH, and honour a CDPATH assignment on the cd's own segment. Mark every segment between a function's { or ( and its close as body (where \"\", not plain). Give a -C or --git-dir target that does not exist at parse time where \"\". Resolve an existing -C with realpath. Add each measured command as a blocked case, using a CDPATH row that sh itself follows and a symlink to <root>/.git made before the call.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_cd_target, _sets_cdpath, _build_segment body_group, _minus_c); next/tests/hooks/test_merge_guard.py"
+ },
+ {
+  "id": "step4-rules-fix-3-C2-5",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: Read a destination as guarded when it is <name>, heads/<name> or refs/heads/<name> (case-folded on macOS). Make wildcard refspecs and bare :/+: block as --all does. Read HEAD and @ in update-ref/symbolic-ref (without --no-deref) as the branch HEAD names. Add these cases.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_is_ref, _push, _refspec_destination, update-ref/fetch branches)"
+ },
+ {
+  "id": "step4-rules-fix-3-C2-6",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: Mark the separate-value options of each governed verb (push -o/--push-option/--repo/--receive-pack/--exec; checkout/switch -b/-B/-c/-C/--orphan/--conflict; rebase -x/--exec/-X/-s/--onto) and consume their values. Read the branch from -B/-C/--force-create's own value. Add the six cases.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_positionals, _push, _checkout, _switch, _rebase_branch_args, _VERB_OPTIONS)"
+ },
+ {
+  "id": "step4-rules-fix-3-C2-7",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: After an eval, builtin, source or . segment whose text holds cd, pushd or popd, set where \"\" for later segments. Read builtin cd as cd. Add the cases to both rules' tests.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse where threading); next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py"
+ },
+ {
+  "id": "step4-rules-fix-3-C2-8",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: Mark an unquoted {...} holding a top-level comma or .. as expanded, like a glob, so the word is not literal and the path is not nameable. Add the cases.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_read_word)"
+ },
+ {
+  "id": "step4-rules-fix-3-C2-9",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for H5 when the build widens, by decision ORCH-8: the spellings this entry measures are outside the plain forms an agent writes directly, the rule's limit is stated in rules/merge-guard.md, and a guard at the ref (ORCH-7, an open decision of the person) would close the whole class. If that guard is not adopted, H5 applies this resolution with its measured commands as test cases: Treat a program word holding an expansion, a substitution or a glob as git-bearing and not plain (position decides), and as an unreadable write. Let an alias whose value names git or a writer poison later segments. Add the cases.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_bearing); next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (write_unknown)"
+ },
+ {
+  "id": "ORCH-8",
+  "outcome": "left-for-builder",
+  "what_was_done": "Decided by the orchestrating session and told to the user on 2026-11-25; applied to tests-first and merge-guard by the round step4-rules-fix-4, which records what it built. The stance is written into rules/tests-first.md and rules/merge-guard.md by that round.",
+  "where": "rewrite/spec/rules/tests-first.md; rewrite/spec/rules/merge-guard.md"
+ }
+]

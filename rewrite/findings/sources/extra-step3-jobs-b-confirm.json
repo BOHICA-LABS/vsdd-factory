@@ -1,0 +1,10 @@
+[
+  {
+    "id": "S3R-jobs-b-C1-1",
+    "origin": "slice step 3, jobs-b, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/env-start.md",
+    "problem": "The fix for S3R-jobs-b-4 gives the negative answer {ok: false, error, log}, exit 1, as a closed list of five cases ('the worktree for the subject does not exist, commands.run is empty, no port is free in 28100 to 28199, the run command exits on three ports, or the product lock stays held'). The built env.start gives the same answer in three more cases: ports.lock stays held while another start chooses a port (env.py line 228, 'another start is choosing a port; ports.lock stayed held'), the product record would exceed the job record cap less its headroom (env.py line 246), and another start of the same subject is still settling after the wait (env.py line 367). A reader of the spec, or a builder working from it, would take the five as all the refusals there are. The shape and exit code are right in every case, so nothing that reads the answer breaks.",
+    "proposed_resolution": "In env-start.md's Output and failure cases, add the three cases: ports.lock staying held while another start chooses a port, a product record over the job record's cap (records/job.md, 4,000 bytes) less the headroom kept for later writes, and another start of the subject still settling after the five-second wait. Otherwise mark the list as examples ('for example') so that it is not read as complete."
+  }
+]

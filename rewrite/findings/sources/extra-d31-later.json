@@ -1,0 +1,29 @@
+[
+ {
+  "id": "D31-9",
+  "origin": "decision D31, second correction round (noted by the corrector, outside its findings)",
+  "severity": "major",
+  "where": "commands/env-start.md; topics/flag-lifecycle.md; tables/flag-release-checks.toml",
+  "problem": "`vsdd env start` turns every live temporary flag on for the wave and release evaluations. That includes a flag whose feature is unfinished, so hidden scenarios of behaviour that exists today could fail there for a reason that is not a defect.",
+  "proposed_resolution": "Decide which flags an evaluation turns on: only flags that have no pending test and whose stories in the wave are all delivered, with the others left at their default; say so where the override is defined and test it with a wave that holds one finished and one unfinished flag.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31-10",
+  "origin": "decision D31, second correction round (noted by the corrector, outside its findings)",
+  "severity": "minor",
+  "where": "topics/flag-lifecycle.md; topics/governed-delivery.md",
+  "problem": "The pull request's Rollback and Feature flags sections are written for any story that names a flag. That includes a story that removes a flag, where turning the flag off is not a way back.",
+  "proposed_resolution": "For a removal or withdrawal story, have the Rollback section say that the way back is to revert the merge, and leave out the line about turning the flag off.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31-11",
+  "origin": "decision D31, second correction round (noted by the corrector, outside its findings)",
+  "severity": "minor",
+  "where": "tables/flag-story-checks.toml",
+  "problem": "A test can still be moved as `pending` after its flag has been turned on in the repository's definitions; nothing refuses it until a later removal story names it.",
+  "proposed_resolution": "Have F-STATES refuse a new `pending` move for a flag whose definition already serves the on value, or have the turn-on check run again when such a move is made.",
+  "on_slice_path": false
+ }
+]

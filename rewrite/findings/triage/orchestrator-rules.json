@@ -1,0 +1,261 @@
+[
+ {
+  "id": "ORCH-6",
+  "files": [
+   "topics/hooks-inert.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-7",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S4R-rules-7",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5",
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-rules-C1-1",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-rules-C1-2",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-rules-C2-1",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5",
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-rules-C2-2",
+  "files": [
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "H5",
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-rules-C2-3",
+  "files": [
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4B-rules-1",
+  "files": [
+   "rules/step-results.md",
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "H7",
+   "G3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4B-rules-2",
+  "files": [
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H1",
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4B-rules-3",
+  "files": [
+   "packaging/tests-hooks.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S4B-rules-4",
+  "files": [
+   "packaging/tests-hooks.md"
+  ],
+  "packages": [
+   "H1",
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-rules-fix-3-C1-4",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C1-5",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C2-5",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C2-6",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C2-7",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C2-8",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "step4-rules-fix-3-C2-9",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "ORCH-8",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-rules-fix-3-C2-1",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-rules-fix-3-C2-2",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-rules-fix-3-C2-3",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-rules-fix-3-C2-4",
+  "files": [
+   "rules/merge-guard.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": true
+ }
+]

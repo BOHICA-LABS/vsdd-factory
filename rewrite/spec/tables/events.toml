@@ -1,0 +1,71 @@
+# Hook wiring: each wired event, its matcher, mode, timeout and the rules that run on it. Machine
+# copy of the wiring table. The rules cells are the wiring table's cells verbatim; the rule ids behind
+# the prose ("all gates" = the eleven gates' rules minus the advisor and auto-allow, "the advisor" =
+# purity-advice) are the rule list of [[table:rules]]. The guard command and the wiring notes are
+# [[topic:hook-wiring]].
+# Sources: hooks.md#2.3, hooks.md#2.10.
+#
+# hooks/hooks.json is generated from the rule table (vsdd/hooks/registry.py) by tools/build.py and
+# checked in. tools/build.py --check fails if the checked-in file differs from the generated one.
+# There are no per-platform variants and no activation step. Seven events are wired.
+# Timeouts are in seconds; a test asserts that no timeout in the file exceeds 60.
+# onFailure: "block" (Claude Code 2.1.295 or later) makes Claude Code itself treat a hook that cannot
+# start, times out, or exits with an unexpected code as a block. async: true is used only for
+# recorders; the generator refuses to put async on a handler that has a gate rule.
+
+[events.SessionStart]
+matcher = "none (all sources: startup, resume, clear, compact, fork)"
+mode = "brief"
+timeout_seconds = 15
+rules = ["session-briefing"]
+
+[events.UserPromptExpansion]
+matcher = "^vsdd-factory:decide$"
+mode = "gate"
+timeout_seconds = 10
+other = { onFailure = "block" }
+rules = ["decisions"]
+
+[events.PreToolUse]
+# One name list; the runner routes by tool_name. Besides the built-in tools it names the tools that
+# can read a local file or carry data out: the Playwright navigation, tab and upload tools in both
+# spellings (the plugin's server and the user's own), WebFetch, WebSearch, and the research tools. It
+# also names Workflow, for one purpose: auto-allow may approve a start of one of this plugin's
+# workflows by the main session, so the driver is not stopped by a prompt. No gate rule applies to
+# Workflow, so hooks still never decide when work starts.
+matcher = "Bash|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|Agent|Task|StructuredOutput|Workflow|WebFetch|WebSearch|mcp__(plugin_vsdd-factory_)?playwright__browser_(navigate|navigate_back|tabs|file_upload)|mcp__(plugin_vsdd-factory_)?(perplexity|tavily|context7)__.*"
+mode = "gate"
+timeout_seconds = 10
+other = { onFailure = "block" }
+rules = "all gates, the advisor, auto-allow"
+
+[events.SubagentStart]
+matcher = "^vsdd-factory:|^workflow-subagent$"
+mode = "notify"
+timeout_seconds = 5
+other = { async = true }
+rules = "lifecycle-log; spike-bounds (pairs a starting spike runner with its admission)"
+
+[events.SubagentStop]
+# Synchronous because spike-bounds and read-walls can refuse a stop. Mode notify, so a launch failure
+# never traps an agent that is trying to finish.
+matcher = "^vsdd-factory:|^workflow-subagent$"
+mode = "notify"
+timeout_seconds = 5
+rules = "lifecycle-log, spike-bounds, read-walls (the final-message check)"
+
+[events.PreCompact]
+matcher = "none (manual and auto)"
+mode = "notify"
+timeout_seconds = 30
+rules = ["compaction"]
+
+[events.SessionEnd]
+matcher = "none"
+mode = "notify"
+timeout_seconds = "platform budget of 1.5"
+rules = "lifecycle-log (log, prune, and release a run lock the session holds)"
+
+# Deliberately not wired: PostToolUse (the tool writes pr.created and pr.merged, and the gates write
+# commit.made), PostToolUseFailure, Stop, PostCompact (the briefing after compaction arrives through
+# SessionStart with source compact), PermissionRequest, WorktreeCreate and WorktreeRemove.

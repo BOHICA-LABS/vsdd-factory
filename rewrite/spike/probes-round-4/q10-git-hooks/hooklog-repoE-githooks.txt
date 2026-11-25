@@ -1,0 +1,4 @@
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoE GIT_DIR=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoE
+hook: tracked=[1.0] untracked=[cat: data.gen: No such file or directory]
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoE/.worktrees/_integration GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoE/.git/worktrees/_integration toplevel=/private/tmp/pr4-q10.YhrECl/repoE/.worktrees/_integration
+hook: tracked=[cat: scripts/version: No such file or directory] untracked=[cat: data.gen: No such file or directory]

@@ -1,0 +1,29 @@
+[
+ {
+  "id": "probes-4-apply-C2-1",
+  "origin": "probes-4-apply, confirmation",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/prelude-steps.md (relay); next/workflow-lib/prelude.js (relay); rewrite/plans/step-5/agents.md (the clerk, section 3); rewrite/plans/step-5/RESOLUTIONS.md (PR4C-13)",
+  "problem": "The correction limited the clerk's no-JSON rule to 'a finished call', so that a call moved to the background leads to a re-run and not to an error result. But the clerk also reads relay()'s task text (topics/prelude-steps.md, built in prelude.js). That text still says, with no limit: 'If it prints no JSON, return <the empty object> with \"error\" set to what it printed.' A moved call has printed no JSON, so the clerk again gets two instructions that disagree, which is the fault probes-4-apply-C1-2 was about. Step-5 RESOLUTIONS.md PR4C-13 says the rule 'speaks of a finished call, so a moved call does not trigger it'; that is true of the clerk file only. The corrector's stated safety net is also wrong. relay() makes its second attempt only when the agent returns nothing (`if (r) return r`), so an error object goes straight to the script. Only the next run re-attaches to the job. The case is rare: relay commands carry no --wait, so a job's default 100 s wait lies inside the 600000 ms timeout. A call is moved only if the clerk sets its own timeout under 100 s.",
+  "proposed_resolution": "Make the two texts agree, in one of two ways. Either B4a's relay() text (prelude-steps.md and prelude.js) limits its no-JSON sentence to a finished call and adds M3's background sentence; whichever unit next edits the prelude does this (left-for-builder, B4a). Or, if the prelude stays as it is, step-5 RESOLUTIONS.md PR4C-13 says that the task text's no-JSON rule still applies to a moved clerk call, that the step then ends with an error, and that the next run's re-attach recovers it. It must not say that relay retries.",
+  "on_slice_path": false
+ },
+ {
+  "id": "probes-4-apply-C2-2",
+  "origin": "probes-4-apply, confirmation",
+  "severity": "minor",
+  "where": "rewrite/findings/sources/extra-probes-4.json (PR4-2); rewrite/spec/packaging/e2e-story-tier.md; rewrite/findings/by-package/E2.md",
+  "problem": "The correction chose not to add a hook against an agent waiting on or reading a background task. Instead, E2's eleven-minute gate is to measure: wherever a call shows the backgrounding signature, the step's next Bash call is the same command, and a run in which no call was moved says this was not measured. That measurement is written only in PR4-2's proposed_resolution. PR4-2 is open and untriaged, so the ledger maps it by its spec file (topics/long-commands.md) to G1 alone. It is listed in by-package/G1.md, not in E2.md, and packaging/e2e-story-tier.md does not mention it. E2's builder will not see the check this design choice relies on.",
+  "proposed_resolution": "Triage PR4-2 so that its packages include E2 as well as G1 (for long-commands.md), or add the measurement to packaging/e2e-story-tier.md, the eleven-minute gate's own file. Either way, the check then reaches E2's builder through by-package/E2.md or the E2 brief.",
+  "on_slice_path": false
+ },
+ {
+  "id": "probes-4-apply-C2-3",
+  "origin": "probes-4-apply, confirmation",
+  "severity": "minor",
+  "where": "rewrite/plans/step-5/agents.md (M3; the demo method's Finish; the clerk; section 7 item 3); rewrite/spec/topics/long-commands.md",
+  "problem": "M3's new sentence says a re-run 're-attaches to the job already running and is not a second copy'. That is true only of job commands. long-commands.md lists the job commands (every gate that builds or tests, story deliver, release, plan schedule) and says that the other gates and commands return directly. Yet the lint of section 7 item 3 requires the sentence in every Finish that names a gate, and long-commands.md says the same ('every method that ends with a gate command'). That covers the demo method, whose closing `gate demo` is not a job: its Finish is 'M3 without its first sentence', so it keeps this sentence. It also covers the clerk, which relays `survey` and `checkpoint`, neither of them a job. For those commands the reason given is false. If such a call were moved, the re-run would start the second copy the platform's notice warns against.",
+  "proposed_resolution": "Limit the sentence to job commands. long-commands.md and section 7 item 3 say 'every Finish whose closing command is a job command (the list in long-commands.md)'. The demo method's Finish leaves the sentence out, because `gate demo` returns directly. The clerk's copy applies to the job commands relay sends (`story deliver` today). For `survey` and `checkpoint`, which return directly, a moved call is waited for, as the platform's notice says.",
+  "on_slice_path": false
+ }
+]

@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ruling-data.schema.json",
+  "description": "Pointer. The schema is delivered built by C1: its single source is next/plugins/vsdd-factory/schemas/ruling-data.schema.json in the repository, enforced by the shipped checker (py/vsdd/schema.py) and the fixtures under next/tests/unit/fixtures/schemas/ruling-data/."
+}

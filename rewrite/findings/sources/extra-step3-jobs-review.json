@@ -1,0 +1,182 @@
+[
+  {
+    "id": "S3R-jobs-1",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch, _choose_port)",
+    "problem": "D15 and the builder's own text in rewrite/spec/commands/env-start.md say a product that exits within the settle window is retried on the next port, three in all. The code retries on the same port three times. After a failed attempt _launch unlinks the record, so _choose_port again picks the lowest port no live record holds, which is the port that just failed. Probe: with a run command that exits when {port} is 28100 and sleeps otherwise, env.start tried 28100, 28100, 28100 and returned exit 1 with 'exited with 5 on three ports'. The case D15 names, a port another program holds, therefore always fails. test_start_fails_loudly_when_command_exits cannot see this because its command fails on every port.",
+    "proposed_resolution": "Keep a set of ports already tried in _launch and pass it to _choose_port so they are skipped. Add test_start_retries_on_the_next_port: the run command exits on 28100 and sleeps on any other port, the start succeeds on 28101, and the log shows the failed attempt.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-2",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_choose_port, _launch)",
+    "problem": "D15 says the port is chosen under ports.lock, but _choose_port releases ports.lock (os.close in its finally) before _launch writes the record that claims the port. Two starts for different subjects can both see the port as free. Probe: three concurrent env.start calls on one project gave [28100, 28100, 28101] in one of five trials, and each record names its port. Parallel stories that start demos at the same time are exactly this case. The products collide on one port, or one dies late, after the settle window has passed.",
+    "proposed_resolution": "Hold ports.lock from the choice until the 'starting' record that names the port has been written, for example by having _choose_port write the record while it still holds the lock. Add a test that runs several concurrent starts and asserts distinct ports.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-3",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, the 'lost its worker twice' branch)",
+    "problem": "When a job keeps dying, attach writes the failure result with record.collected = False and returns it. The next call is therefore served the same stale failure without measuring, which breaks D5 ('a result is served once'; a failing gate is never returned without measuring again). Probe: after the loud failure, a second attach with a now-working command returned the old 'lost its worker twice' failure, and only the third call ran the work. test_job_that_keeps_dying_fails_loudly makes no second call.",
+    "proposed_resolution": "Write collected: True in that branch. The call returns the result, and other waiters still receive it through the unchanged nonce. In test_job_that_keeps_dying_fails_loudly, add a second attach and assert that it runs the work again.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-4",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, the restarted flag)",
+    "problem": "The cap of one restart is tracked per call. Calls last at most 240 s (100 s by default) and a gate lasts minutes, so a job that dies every time, but later than one call's wait, is restarted by each new call forever and never reported. The intent of D6 ('a job that dies every time is loud') is not met. Probe: with run_shell running 'sleep 1.5; kill -9 $PPID' and calls of wait=1, six calls in a row returned pending with starts = 2, 3, 4, 5, 6, never ok: false. With real gates each restart costs a whole run, and the clerk re-runs pending without end. The plan's loop says 'if this call has already restarted once', so this is a gap in the plan that the code inherits. The record already carries starts.",
+    "proposed_resolution": "Decide the loud failure from the record as well as the call: a loss found when record.starts >= 2 writes the failure result (with collected: True, see S3R-jobs-3) instead of restarting. Add a test in which the job dies after the call's wait and successive short calls end in ok: false within two starts.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-5",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main, signal.alarm)",
+    "problem": "The D9 backstop is signal.alarm(limit + 30) with no SIGALRM handler. Its default action kills the worker without writing a result and without killing the running command's process group. The job is then seen as lost and restarted, runs its whole limit again, and is reported as 'the job lost its worker twice and kept dying' rather than as the time limit. Probe: a work function that sleeps in Python (outside ctx.run) with limit_seconds=1 returned after 62 s with starts = 2 and the lost-twice error. With S3R-jobs-4 it restarts forever. Nothing tests the backstop.",
+    "proposed_resolution": "Install a SIGALRM handler in worker_main that kills guard['pgid'], writes the time-limit failure result ({**error_shape, ok: false, error: 'ran longer than <n> minutes (limits.gate_minutes); log: ...'}), writes done and exits. Make the 30-second margin a module constant so a test can shrink it, then test a work function that overruns outside ctx.run.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-6",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (JobContext.run, _limit_message)",
+    "problem": "Plan 3.3 promises the failure text 'ran longer than <n> minutes (limits.gate_minutes)'. ctx.run instead builds the message from int(self._deadline - started), the time left when the current command started, not the job's limit. Probe: limit_seconds=2 gave 'ran longer than 1 seconds'. A 60-minute gate gives 'ran longer than 3599 seconds', and a second command that times out with ten minutes left gives '599 seconds'. The message never says minutes in practice. test_time_limit_stops_the_job checks only the substrings 'longer than' and 'limits.gate_minutes', so it cannot fail on this.",
+    "proposed_resolution": "Give JobContext the job's limit_seconds from the payload and build _limit_message from it. Assert the exact text in the test (for example with limit_seconds=60 and a monkeypatched deadline, or by checking the formatter for 60 and 120).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-7",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main failure results)",
+    "problem": "Plan 3.2 promises that a failure made by the job layer is {**error_shape, ok: false, error: '<one line naming the log>'}. Only the lost-twice failure names the log. The time-limit failure ('ran longer than 1 seconds (limits.gate_minutes)') and the crash failure ('the job crashed: KeyError: 'command'') do not, so a caller is told the traceback is in the log without being told where the log is. The crash text also embeds str(exc) as it is, which can span several lines. The builder did not report this as a departure.",
+    "proposed_resolution": "Append '; log: <path>' to every job-layer failure and collapse newlines in the exception text. In test_time_limit_stops_the_job and test_work_crash_keeps_command_shape, assert that the log's path appears in the error.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-8",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main final record write; attach step 1)",
+    "problem": "The record is read, changed and rewritten by two processes without a lock. The worker writes the result file, reads the record, then writes it with state done. An attach that sees the result in that gap writes collected: True, and the worker's write then puts collected: False back, so the next call is served the old result without measuring (D5). In the other order, attach's write from its stale read turns a 'done' record back into 'running' with the lock free, and list_jobs (S2c's status) then reports a finished job as running. Probe: with the gap widened by a one-second sleep in a scratch copy, the record ended done/collected: False and two collected calls ran the work once. Without the sleep the gap is short but real (attach polls every 0.2 s).",
+    "proposed_resolution": "Serve a result only when record.state == 'done', which is the worker's last write; after it, only attach writes the record. Or keep collected in its own file (create it with O_EXCL and the nonce), or serialise record updates with a lock. Add a test that monkeypatches a pause between the result write and the done write and asserts the result is served once.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-9",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_jobs.py (test_semaphore_caps_running_jobs)",
+    "problem": "The test cannot fail. It looks for state 'queued' on the second job right after attach has written that state, before the worker could take a slot. With _take_slot changed to return at once (no semaphore at all), all 19 job tests still pass (mutant run in a scratch copy). limits.parallel_gates, the semaphore the package brief names, therefore has no working test.",
+    "proposed_resolution": "Assert the cap itself. While the first job runs (for example sleep 2), poll for at least a second that the second record never reaches 'running'. Afterwards assert second.started >= first.finished from the records.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-10",
+    "origin": "slice step 3, jobs, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_jobs.py (test_two_waiters_get_one_result, test_same_command_twice_starts_one_job)",
+    "problem": "The nonce rule of D5 (every call waiting on a job receives its result) has no test that can fail. With _serves changed to ignore the nonce, all 19 job tests still pass (mutant run in a scratch copy): the second waiter starts a fresh job, and the assertion starts == 1 still holds, because every fresh start that follows no loss has starts == 1. The plan's 'one run' and 'the command ran once' are never counted.",
+    "proposed_resolution": "Count the runs as test_collected_result_is_not_served_again does (the command appends to a file) and assert exactly one run, in both test_two_waiters_get_one_result and test_same_command_twice_starts_one_job.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-11",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (module docstring, worker_main); job_worker.py",
+    "problem": "The module docstring says 'The worker makes the descriptor non-inheritable'. It does not. pass_fds clears close-on-exec on the lock descriptor, and a probe in the worker showed fd 3 inheritable: a child started with close_fds=False listed it. The builder's reported departure credits PEP 446, but PEP 446 does not cover a descriptor passed through pass_fds. The D3 invariant holds today only because subprocess defaults to close_fds=True. Any work function that uses os.system, posix_spawn or close_fds=False would hand the job lock to a child that can outlive the job.",
+    "proposed_resolution": "Put the descriptor number in the payload and call os.set_inheritable(fd, False) in worker_main. Fix the docstring. Add a test in which a work function starts a child with close_fds=False that outlives the worker, and assert the job's lock comes free.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-12",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_delete_key, stop_products, prune)",
+    "problem": "Lock files are unlinked while a process may still hold them. stop_products on a product still 'starting' finds the lock held but pid null, so it kills nothing, deletes the record and lock file, and reports {pid: null}. The starter then rewrites the record as running, and the product runs on an unlinked lock: every later _lock_held says false, so it can no longer be stopped or listed and its port is handed out again. The same happens after a KILL that leaves a setsid'd descendant holding the lock, and in a prune that races a re-attach of a seven-day-old key (a second inode, two workers).",
+    "proposed_resolution": "Unlink a lock file only after acquiring it, which proves no holder is left; otherwise leave the file in place. In stop_products, skip or wait out records in state 'starting', as env.start's _held_answer already does.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-13",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_worktree_dir); next/tests/unit/test_env.py",
+    "problem": "D17, and the builder's edit to env-start.md, say that a story id runs in its story worktree and anything else in the integration worktree. _worktree_dir uses classify_worktree(subject) for any kind, so a 'spike-x' subject runs in .worktrees/spike-x (probe confirmed). The story-worktree path, the one step 5's demo uses, has no test: every test_env case uses 'demo-N' and so the integration worktree. A probe shows it works today.",
+    "proposed_resolution": "Use the classified worktree only when its kind is 'story', or else amend D17 and env-start.md to name spikes. Add test_start_runs_a_story_in_its_worktree: S-9.01 with its worktree runs there, and without it the answer is negative even though _integration exists.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-14",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_write_record, attach); env.py (_product_record); next/tests/unit/test_jobs.py (test_bad_spec_is_refused)",
+    "problem": "The 4,000-byte cap is partly enforced. _write_record drops args and error_shape, then writes the record even if it is still over the cap (its comment says 'before giving up'). Product records, whose command and cwd come from configuration, are never checked. attach also creates the store directory before it refuses an over-cap spec, although the plan says nothing is written. test_bad_spec_is_refused accepts any '*.lock' entry as 'nothing written', so it would not notice a stray lock file.",
+    "proposed_resolution": "Validate before the mkdir. Make _write_record raise, or truncate deterministically, when the cap is still exceeded, and apply the cap to product records too. In the test, assert that the store directory does not exist after the refusals.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-15",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_atomic_write, _key_paths)",
+    "problem": "A kill between mkstemp and os.replace leaves '.<key>.json.<random>' or '.<key>.result.json.<random>' in the store, and nothing removes it. _key_paths skips every name that starts with '.', so prune never removes these temporary files, and they build up across restarts.",
+    "proposed_resolution": "In prune, delete dot-prefixed temporary files of the _atomic_write form that are older than a short age (for example one hour), and add a case to test_list_jobs_and_prune.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-16",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_emit); next/tests/unit/test_jobs.py, test_env.py",
+    "problem": "The builder reports 'All five event types proven landing', but no test checks events. _emit swallows EventError and OSError, so a change to the event schema or the EventLog API would silently drop every job.* and env.* event. A probe confirms that all five land today.",
+    "proposed_resolution": "Add a test that runs attach with a session_id, env.start with a caller and env.stop, then reads EventLog(events_dir_for(root), session).read() and asserts job.started, job.done, job.lost (from the kill test), env.started and env.stopped with id, command and detail.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-17",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py; jobs.py (__all__)",
+    "problem": "env.py states the store path a second time (_store_of hard-codes '.factory/local/jobs' next to jobs._STORE). It re-implements _append and _unlink, which jobs.py already has as _append_line and the unlink in _delete_key, and imports eleven private names from jobs.py. The __all__ of jobs.py lists product_ports but leaves out stop_products, one of the interfaces section 3.4 promises.",
+    "proposed_resolution": "Export one store-path helper from jobs.py and use it in env.py, reuse the existing helpers, and add stop_products to __all__.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-18",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main); attach",
+    "problem": "When a worker is SIGKILLed (by the OOM killer, by a person, or as in test_lost_worker_restarts_once), its configured command's process group runs on, because it has its own session and nothing records its group. The restart then runs a second copy of the same gate command in the same worktree beside the first, and the two can write the same output and evidence files.",
+    "proposed_resolution": "Record the running command's process group in the record (ctx.run already knows it from guard['pgid']). In the loss branch of attach, killpg that group before starting the new worker. Extend test_lost_worker_restarts_once to assert that the first sleep is gone.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-19",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-jobs.json (P3REQ-06)",
+    "problem": "P3REQ-06 was moved from open to left-for-builder, a status that means the design is settled and the code must follow. The design is not settled. The resolution adds the survey to the long commands and a state field to the survey output, but rewrite/spec/topics/long-commands.md still leaves the survey out of its list of job commands, and commands/survey.md has no pending answer. The S3 second-part builder would be told the spec carries a design it does not carry.",
+    "proposed_resolution": "Leave P3REQ-06 open, deferred to S3's second part, until the spec is amended (long-commands.md lists survey, and survey.md gains the pending state). Or amend the spec first, then mark it left-for-builder.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-jobs-20",
+    "origin": "slice step 3, jobs, review",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/env-stop.md; rewrite/findings/ledger.json (AU-S2-12, S3B-jobs-1)",
+    "problem": "The ledger now shows AU-S2-12 as fixed (state-core's outcome replaced this unit's left-for-builder), yet env-stop.md still gives two syntaxes in its Syntax line (the command table's '--subject <id>' against the blueprint's bare 'env stop', with the conflicts pointer). This unit edited the same file and left that line, which the plan reserves for the orchestrator. The builder's own finding S3B-jobs-1 is described as fixed while building, but no outcome records it, so it shows as open.",
+    "proposed_resolution": "The orchestrator reopens AU-S2-12, or records it as not-fixed for env-stop.md, until the Syntax line reads only 'vsdd env stop'. Record an outcome for S3B-jobs-1.",
+    "on_slice_path": true
+  }
+]

@@ -1,0 +1,6 @@
+# The story kinds ship inside the artifact registry, at
+# "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml" (package C2): its [[story-kind]] rows
+# carry, per kind, the tests stage and the implement stage (agent and default method) and whether it
+# has a red gate, and the [story] frontmatter carries the impl_method and tests_method overrides.
+# The shipped file is the single definition (README rule 7); this pointer is kept valid TOML.
+# Sources: BLUEPRINT.md#4.6, pipeline.md#2.9.1, pipeline.md#2.9.13.

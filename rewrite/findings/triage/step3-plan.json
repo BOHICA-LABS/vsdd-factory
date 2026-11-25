@@ -1,0 +1,15 @@
+[
+ {
+  "id": "S3P-1",
+  "files": [
+   "topics/prelude-steps.md",
+   "schemas/checkpoint-result.schema.json",
+   "schemas/survey.schema.json"
+  ],
+  "packages": [
+   "B4a",
+   "W2"
+  ],
+  "on_slice_path": true
+ }
+]

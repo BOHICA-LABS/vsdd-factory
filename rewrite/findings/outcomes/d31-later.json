@@ -1,0 +1,20 @@
+[
+ {
+  "id": "D31-9",
+  "outcome": "left-for-builder",
+  "what_was_done": "Recorded by the orchestrating session from the corrector's notes. No further round of design fixes is run on D31; the package named in the triage settles it when it is built.",
+  "where": "commands/env-start.md; topics/flag-lifecycle.md; tables/flag-release-checks.toml"
+ },
+ {
+  "id": "D31-10",
+  "outcome": "left-for-builder",
+  "what_was_done": "Recorded by the orchestrating session from the corrector's notes. No further round of design fixes is run on D31; the package named in the triage settles it when it is built.",
+  "where": "topics/flag-lifecycle.md; topics/governed-delivery.md"
+ },
+ {
+  "id": "D31-11",
+  "outcome": "left-for-builder",
+  "what_was_done": "Recorded by the orchestrating session from the corrector's notes. No further round of design fixes is run on D31; the package named in the triage settles it when it is built.",
+  "where": "tables/flag-story-checks.toml"
+ }
+]

@@ -1,0 +1,80 @@
+[
+  {
+    "id": "S3R-state-core-1",
+    "outcome": "fixed",
+    "what_was_done": "The code half is completed: render_config now walks SPECS['project'] instead of the hand-typed ('name', 'languages', 'ui', 'layout') tuple, so a key added to the SPECS project row is written without a second edit. Both tests the finding asked for are in and bite: test_init_writes_exactly_the_specs_keys asserts for every fixed section that the written keys equal SPECS[section] minus protected_paths and rules, and test_init_undetected_values_equal_specs_defaults now checks every written key - a key present in 'detected' must equal the detected value, every other key its SPECS default. Verified both directions: dropping limits.gate_minutes from the renderer fails the first test; writing limits.agents_per_run = 999 fails the second.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/detection.py (render_config); next/tests/unit/test_config_keys.py::test_init_writes_exactly_the_specs_keys, ::test_init_undetected_values_equal_specs_defaults"
+  },
+  {
+    "id": "S3R-state-core-3",
+    "outcome": "fixed",
+    "what_was_done": "Two tests added beside the existing one. test_create_branch_twice_keeps_the_first_commit calls _create_branch directly on one repository: True, then False with the branch tip unchanged - removing the empty old value from update-ref fails it (verified). test_init_losing_a_concurrent_create_mounts_the_winner reaches init's losing path by wrapping _create_branch to return False after the real create, so init mounts what it finds and reports created=False; without it the losing branch of _run was dead code in every test.",
+    "where": "next/tests/unit/test_init.py::test_create_branch_twice_keeps_the_first_commit, ::test_init_losing_a_concurrent_create_mounts_the_winner"
+  },
+  {
+    "id": "S3R-state-core-13",
+    "outcome": "fixed",
+    "what_was_done": "test_import_loads_no_submodule now reads sys.modules after the first lookup and asserts the vsdd.state.* entries are exactly vsdd.state.gitrun and vsdd.state.mount (the owner plus what it imports) - verified failing by making the facade import every sibling module on the first lookup. test_shipped_commands_register_cleanly validates the whole failure object a relayed command prints - {**empty_of(output), **failure, ok: false, error} - against the shipped schema with vsdd.schema.validate, for every registered command with an output, not merely a key subset of empty_of.",
+    "where": "next/tests/unit/test_state_facade.py::test_import_loads_no_submodule; next/tests/unit/test_dispatch.py::test_shipped_commands_register_cleanly"
+  },
+  {
+    "id": "S3R-state-core-23",
+    "outcome": "fixed",
+    "what_was_done": "test_init_detection_protects_a_master_only_repository added: init on a repository whose only branch is master, asserting detected['branches.protected'] == ['master'] and the written config carries protected = ['master']. Deleting the detection line that derives protected from the release branch fails it while the sample-based test (main, equal to the SPECS default) keeps passing - the exact blind spot the finding named.",
+    "where": "next/tests/unit/test_init.py::test_init_detection_protects_a_master_only_repository"
+  },
+  {
+    "id": "S3R-state-core-28",
+    "outcome": "fixed",
+    "what_was_done": "test_init_through_bin_vsdd now puts the directory of sys.executable on the PATH it passes, next to the directory of uv (deduplicated), exactly as test_import_error_exits_2 already did, so the launcher finds a Python 3.11+ in the Linux ~/.local/bin layout where uv lives apart from every interpreter.",
+    "where": "next/tests/unit/test_init.py::test_init_through_bin_vsdd"
+  },
+  {
+    "id": "S3R-state-core-30",
+    "outcome": "fixed",
+    "what_was_done": "The conditions table in topics/hooks-inert.md now matches topics/state-directory.md and the code: partial is '.factory/factory.toml exists and the mount test fails', ready is '.factory/factory.toml exists and the mount test passes', and both rows say an invalid file is the loader's report, not a condition. The old 'parses with schema = 1' and 'the configuration parses' wordings are gone.",
+    "where": "rewrite/spec/topics/hooks-inert.md (the five-conditions table)"
+  },
+  {
+    "id": "S3R-state-core-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "_is_interrupted_mount is strict now: besides .factory holding only the entry .git, the .git must be a regular file (a .git directory is a repository of its own and is never removed), its gitdir must be an existing worktree registration of this repository - commondir resolves to <root>/.git and the gitdir sits under its worktrees/ - and the registration's own gitdir file must point back at <root>/.factory/.git. Anything else returns False, so mount_state never rmtrees it and init answers the 'move it aside' refusal. Both halves verified: with the old lenient check the new tests fail (init answered ready and the nested history was gone); with the fix a nested repository is refused and left byte-for-byte whole. Interface note: mount_state and init behaviour on a foreign .factory changes from 'cleared' to 'refused'; that is the intended repair, not a plan-interface change.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/mount.py (_is_interrupted_mount); next/tests/unit/test_init.py::test_init_refuses_a_nested_repository_and_leaves_it_whole; next/tests/unit/test_mount.py::test_mount_state_never_removes_a_nested_repository"
+  },
+  {
+    "id": "S3R-state-core-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "The registration check in _load_command no longer splits the module stem at its first underscore: the entry is accepted when the stem equals cmd_<words[0] with '-' written '_'> or starts with that followed by '_', so cmd_lock_release.py registers lock-release while cmd_survey_extra.py still refines survey. A hyphenated case (test_hyphenated_first_word_registers_by_its_module_stem) runs both commands() and a dispatched call, and fails against the old partition-based check.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (_load_command); next/tests/unit/test_dispatch.py::test_hyphenated_first_word_registers_by_its_module_stem"
+  },
+  {
+    "id": "S3R-state-core-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "test_init_origin_mount sets repo-local user.email and user.name in the clone before init, so it no longer depends on a global git identity. Verified under GIT_CONFIG_GLOBAL=/dev/null: failed without the lines ('KeyError: state'), passes with them.",
+    "where": "next/tests/unit/test_init.py::test_init_origin_mount"
+  },
+  {
+    "id": "S3R-state-core-C1-4",
+    "outcome": "fixed",
+    "what_was_done": "The up-front refusal in cmd_init._run now fires whenever .factory exists at all (plain file, symlink, non-empty directory) and is neither an empty directory nor a verified interrupted mount, before anything is created - the old order created the state branch first and died in worktree add with the branch left behind. test_init_refuses_a_plain_file_state_directory_without_leaving_a_branch added: exit 2 naming 'move it aside', no factory-artifacts ref created, the person's file untouched; it fails against the old code (verified).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run); next/tests/unit/test_init.py::test_init_refuses_a_plain_file_state_directory_without_leaving_a_branch"
+  },
+  {
+    "id": "S3R-state-core-C1-5",
+    "outcome": "fixed",
+    "what_was_done": "The SL1-27 outcome in step3-state-core.json is re-recorded: init exits 1 with state 'partial' and next naming /vsdd-factory:status --fix (the exit-2 wording predates the S3R-6 correction).",
+    "where": "rewrite/findings/outcomes/step3-state-core.json (SL1-27 entry)"
+  },
+  {
+    "id": "S3R-state-core-C1-6",
+    "outcome": "fixed",
+    "what_was_done": "The 'unreadable' reason code is added to the closed set: a row in the reason-code table of rewrite/spec/rules/artifacts.md for a file that cannot be read or decoded when the tree is checked as a whole (vsdd validate, flush), noting a write-time check always holds the text. plan 3.5 defines its code set as 'those of spec rules/artifacts.md except artifact_frozen, plus criterion_contract', so the spec row heals the departure without editing the plan (rewrite/plans/ is outside this task's writable set).",
+    "where": "rewrite/spec/rules/artifacts.md (Checks and reason codes); next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (check_paths, unchanged code)"
+  },
+  {
+    "id": "S3R-state-core-C1-7",
+    "outcome": "fixed",
+    "what_was_done": "The compile-time ref check re-raises with the row and key holding the bad cell: the message reads '[<row>].<key>: ref:<target>: a kind with no id row and no constant pattern', where it named '[<target>]' alone. test_registry_compiles_cells_loudly now asserts '[things].who' in the message; it fails against the unwrapped raise (verified). _ref_pattern's own message was reworded to 'ref:<target>: ...' to fit - it is a private helper of the same module.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (registry, _ref_pattern); next/tests/unit/test_artifacts.py::test_registry_compiles_cells_loudly"
+  }
+]

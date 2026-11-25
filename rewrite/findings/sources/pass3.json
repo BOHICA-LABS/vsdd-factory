@@ -1,0 +1,1309 @@
+{
+ "missing": [],
+ "reviews": [
+  {
+   "key": "seams",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass3-seams.md",
+   "verdict": "The six documents mostly agree, but 24 seam problems remain: 1 blocker, 8 major and 15 minor, 14 of them on the thin-slice path. Most of the last two rounds' changes are consistent everywhere they appear: the route in cycle.json, the guidance class, the digest exclusions, the refreeze group, the D4 switch and setup order, the walled key, the product classes and admission returning a unit. The blocker: `vsdd feature route` must read a 'delta record' that has no path or class, and the specification lock refuses the architect's write during the delta step. The majors on the slice path: no record carries the method that the verdict's reviewer-ownership check needs; 'the cycle's base' is undefined, and cycle.json offers only `baseline`, a release tag; local delivery cannot merge into a branch checked out in the person's checkout; the wall rows deny builders the git status, diff and log calls that D4 approves, and a row with no `commands` key gets every git family; and state.md's 'whole key list' makes the [hooks] keys errors, which breaks D12. The other majors: 'live run' has two incompatible meanings, one story `method` key is asked to choose two stages' methods, and the core scope approves every configured command where D4 named only build and test.",
+   "checked": 45,
+   "sound": 26,
+   "findings": 24
+  },
+  {
+   "key": "coverage",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass3-coverage.md",
+   "verdict": "The design keeps to every platform limit the probes established. No script reads a file or runs a command, nesting is one level, no step relies on the Agent tool, steps are held on their StructuredOutput call rather than a refused stop, spikes pass isolation themselves, hook timeouts are in seconds, and long commands re-attach inside the ten-minute cap. Three slice-path mechanisms rest on things that are untrue or unknown. Local delivery must merge into a branch the person's checkout holds, which git will not allow without touching that checkout. The fallbacks for the unproven caller-identity probes (27 to 29) identify a caller by its working directory, which is the shared project root for every story step. The slice plan also omits B8 and three other packages its own packages depend on. On coverage, four old capabilities are designed but cannot run as written: measured checks with no command or threshold key (clone fidelity, fuzz, coverage, perf budgets, cross-repo integration), test-writer methods no step can select (ui-tests, e2e-tests) along with orphan methods, notifications with no build package, and smaller gaps (stale mapping rows, Storybook setup, repo-initialization remote, sample-project downloads). Totals: 1 blocker, 5 major, 8 minor.",
+   "checked": 44,
+   "sound": 30,
+   "findings": 14
+  },
+  {
+   "key": "operations",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass3-operations.md",
+   "verdict": "No blockers: 16 major and 9 minor findings, 9 of them on the thin-slice path. The happy path and most single failures inside a run are sound. A dead agent, an empty result, a compaction, a missing uv, a spike storm and a review that never converges all end in bounded agent starts. The agent-start budget matches the code: about 4 to 10 per story, 70 to 90 per realistic six-story wave. The design breaks where one run stops and the next begins:\n- A lock orphaned in a live session is never released, and no command is named for it.\n- A resumed parent cannot pass a child a story an earlier run admitted, so fast-route stories waiting on a merge decision never complete.\n- A crashed planner run redoes everything.\n- After a cap, the direct choice runs no round.\n- A hand-edited approved spec leaves no decision and no command.\n- An existing second clone never fetches state.\nTwo enforcement holes are on the slice path: delivery never checks red evidence, so a fabricated red gate bypasses tests-first; and in local mode git ref commands can move the integration branch past merge-guard. Local mode also has no defined merge that avoids the person's checkout. The tool cannot tell which method a stored review pass belonged to. Brownfield baseline comparison cannot be built for lint, format or scanner findings, or for a suite with no JUnit report at ingest.",
+   "checked": 47,
+   "sound": 22,
+   "findings": 25
+  },
+  {
+   "key": "requirements",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass3-requirements.md",
+   "verdict": "Most of the user's decisions and requirements are built where blueprint 2.4 says: the model policy, the uv and standard-library hook runner, the walls, convergence, the three routine stops, the six spike entrances, compaction and warm start. The direct brownfield question is still not answered. None of the five starting points in blueprint 3.4 reliably reaches a release as written:\n- An ingest can measure its baseline before its commands are known, and nothing measures it again.\n- The hand-off of a queued request to feature is undefined, which affects the second-feature case and the import case.\n- The no-tests, no-CI case branches its fix story before the harness exists, and it schedules a CI story in every later cycle because delivery.ci never leaves none.\n- A hub of existing repositories cannot ingest its second repository.\n\nResume from cold is partly met:\n- The survey runs long measurements with no job.\n- Resumed feature, verify, maintain and wave runs lose the stories an earlier run admitted.\n- A resumed standard-route feature holds no amendment.\n\nThe spike ledger is an unwalled channel out of the holdout wall. The person's quick spike opens with the wrong command form as the skeleton is written. On the slice path, local-mode delivery has nowhere to merge without touching the person's checkout, which the design promises it never does.\n\nTotals: 10 major and 4 minor findings, no blocker.",
+   "checked": 71,
+   "sound": 55,
+   "findings": 14
+  },
+  {
+   "key": "builder",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass3-builder.md",
+   "verdict": "The slice path can be built in outline, but not from the text as it stands. One gap stops it: the tool must recompute the review verdict before it merges, and it cannot. The rule counts a pass only when the stored agent type owns the pass's method, but no record stores the method. Nothing says how the tool finds the passes, disputes and rulings among the step records. The scoped review after a failed delivery overwrites the first review's records, because it reuses their names in the same run.\n\nLocal delivery, which the slice uses, merges onto a branch that is checked out in the person's own checkout. The design both requires that merge and forbids touching that checkout. The red and green gates leave open how a test maps to its file, where the base commit's report comes from, what a stub marker is, and whether a dirty worktree may be measured. That last gap lets green evidence be recorded for code that was never committed. The machine records and the tool's own outputs have no schema files, so packages the plan builds in parallel have nothing shared to agree on. The fixture the story tier starts from is named but not defined, and copying an overlay cannot mount a state branch.\n\nThe slice's package list in rewrite/STATE.md cannot be built in the order section 9 gives. It omits B6, C2 and B8, and needs S4 through H7. The sample project sits inside E1, which depends on almost every package. S3 is too large for one builder and has dependencies the table does not show, one of them circular. Five workflow packages miss agent packages that their universal tests need. Coverage of commands, agents, skills, workflows and rules is complete.",
+   "checked": 52,
+   "sound": 25,
+   "findings": 27
+  }
+ ],
+ "findings": [
+  {
+   "id": "P3SEAM-01",
+   "severity": "blocker",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.4 delta-and-route row, 2.6, 2.9.5",
+    "rewrite/BLUEPRINT.md 4.9 feature route row, 3.3 step 2",
+    "rewrite/design/state.md 2.16 feature route row, 2.4 lock row",
+    "rewrite/design/agents-skills.md 2.6 architect and story-writer rows",
+    "rewrite/design/hooks.md 2.11.3 artifact_frozen"
+   ],
+   "problem": "`vsdd feature route --run <id>` must derive the route from 'the delta record the step just wrote' or 'the stored change analysis', but no document gives that record a path, kind or class. The only candidate, an impact assessment under specs/architecture/assessments, is in spec-arch. That class is locked during the delta step: the latest spec decision is approved, and the run holds no amendment until `feature route` marks one. The route command is the step's closing command, so it runs before the step record exists. The story-writer, the spec packet and plan in delta scope also need the analysis, and the story-writer cannot read runs. Every feature run, and so every brownfield change and bug fix, has no input for its route.",
+   "proposed_resolution": "Add a file input: `vsdd feature route --run <id> --delta-file <path>`. The architect writes the delta data JSON in the temporary directory. The tool validates it and copies it into the cycle's tracked record (for example cycles/<cycle>/units/feature.json), which becomes the 'stored change analysis' that the story-writer, the packet and plan read. Update pipeline.md 2.9.4, blueprint 4.9, state.md 2.8 and 2.16, agents-skills.md 2.6 and the delta-analysis method."
+  },
+  {
+   "id": "P3SEAM-02",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.10 Verdict row, 5.4",
+    "rewrite/design/pipeline.md 2.9.1 review row, 2.10.1, 2.10.3, 2.11.2, 2.11.3",
+    "rewrite/design/hooks.md 2.11.7 step 2",
+    "rewrite/design/state.md 2.8 Step record, S7 store_step",
+    "rewrite/design/packaging.md 2.5, layer 2b fixture"
+   ],
+   "problem": "The tool must count a review pass only when the stored agent type is 'the reviewer that owns the pass's method'. No record holds a method: the step identity is run, workflow, name, subject and attempt, and the hook stores only the agent type and the head. Step names are built at run time. In story.js they name the agent (review-adversary-p1); in wave.js they name neither the agent nor the method (integration-review-r1, security-r1). No document defines the step-name grammar the verdict function would need to find a unit's passes, fixes and arbitration. G3 cannot build the check or its conformance fixture as specified.",
+   "proposed_resolution": "Add `method`, and the pass or round number, to the step identity: brief() puts them in the echoed `step` object, pipeline.md 2.10.1 adds them to the schema, and the hook stores them. The verdict counts a record as a pass when its method is a review method of the perimeter (pipeline.md 2.9.13) and the stored agent type is the agent whose file lists that method. Fixes and arbitration are found by their methods. Update blueprint 4.10, hooks.md 2.11.7, state.md 2.8 and S7, and the packaging fixture."
+  },
+  {
+   "id": "P3SEAM-03",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 admission paragraph and red-gate detail, 2.9.4 survey row, 2.10.8 Story unit base",
+    "rewrite/design/state.md 2.16 gate plan and gate green rows, 2.8 Cycle record and evidence lookup, 4 packaging S2",
+    "rewrite/BLUEPRINT.md 4.13"
+   ],
+   "problem": "A story branch is cut 'from the cycle's base', but cycle.json has no base, only `baseline` (a release tag, an ingest or an import; empty for a first release). The hotfix parenthesis makes `baseline` look like the intended source. Elsewhere the text speaks of a 'base branch', or branches.integration. Nothing says which commit is used (local or remote head, and when) or where it is recorded for the descent check. Read as `baseline`, feature-cycle stories are cut from the last release tag. The green diff then includes every earlier story of the cycle, and the red gate counts their passing tests as new and fails.",
+   "proposed_resolution": "Define the base once, in state.md 2.16 (the worktree library) and pipeline.md 2.9.1. It is the head of branches.integration (the remote head after a fetch in pr mode) when the worktree is created; in a hotfix cycle it is the release tag the cycle names. Record the commit in the run record and in the story closure. The unit's base, the descent check, the red-gate comparison and the green diff all use that recorded commit."
+  },
+  {
+   "id": "P3SEAM-04",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 delivery detail",
+    "rewrite/design/state.md 1, 2.3, 2.16 story deliver",
+    "rewrite/design/hooks.md 2.11.4 merge-guard",
+    "rewrite/BLUEPRINT.md 4.12, 9.2 G4a"
+   ],
+   "problem": "Local mode is one sentence: 'it merges locally'. With no remote, the integration branch is normally checked out in the person's main checkout. Git will not check it out again in .worktrees/_integration/. Advancing the ref leaves the person's index and files behind HEAD, and merging in the main checkout breaks the rule that 'the person's own checkout is never switched, pulled or committed to'. No behaviour is chosen, so G4a has no specified merge on the slice path.",
+   "proposed_resolution": "State the local-mode merge in pipeline.md 2.9.1 and state.md 2.16: merge in a tool-owned worktree on a detached head, and advance the ref only when the integration branch is not checked out elsewhere. When it is checked out, either fast-forward that checkout only if it is clean and at the old head (a stated exception), or return awaiting_merge with the one command for the person. vsdd doctor and status report the condition. Note the rule beside merge-guard."
+  },
+  {
+   "id": "P3SEAM-05",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.7 implementer and test-writer rows, commands key default, other row; 2.11.1 families; 2.11.10 core row",
+    "rewrite/BLUEPRINT.md 2.1 D4, 5.4",
+    "rewrite/design/agents-skills.md 2.9 command scopes",
+    "rewrite/design/packaging.md 2.6 smoke probe 7"
+   ],
+   "problem": "The implementer and test-writer rows grant only `git-commit`. `git status`, `diff` and `log` fall in `git-read`, so bash-git blocks the very calls D4 core approves, and smoke probe 7 (a builder runs git status) is blocked. An absent `commands` key means any family, so devops, the verifier, the technical-writer, the demo-recorder, the codebase-analyzer and the 'strictest' `other` row may push, open pull requests and add worktrees. agents-skills.md 2.9 says no pipeline agent does that. `git-read` also includes checkout, switch, fetch and gh api.",
+   "proposed_resolution": "Define git-read as the reading commands only (status, diff, log, show, rev-parse, ls-files, blame, grep) in hooks.md 2.11.1; a command in no family is refused unless the row holds '*'. Make an absent `commands` key mean [\"git-read\"]. Give every builder row [\"git-commit\", \"git-read\"] and the main row [\"*\"]. Mirror this in agents-skills.md 2.9."
+  },
+  {
+   "id": "P3SEAM-06",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/state.md 2.12 example, whole-key-list sentence, ownership table",
+    "rewrite/design/hooks.md 2.6, 2.11.1 secret_globs, 2.11.10 purity-advice, 2.12 log_retention_days",
+    "rewrite/BLUEPRINT.md 2.1 D12"
+   ],
+   "problem": "state.md 2.12 says its example is the whole key list and unknown keys are errors. Its [hooks] example has only main_session_wall and the auto-allow scope. hooks.md 2.6 documents log_retention_days, [hooks.rules.<id>] strength, attribution and allow_pr_close. hooks.md 2.11.1 and 2.11.10 refer to secret_globs and the purity-advice patterns, which have no key anywhere. A loader built in B3 to state.md would reject a person's `strength = \"advise\"`, and an invalid value never relaxes a gate, so D12 breaks.",
+   "proposed_resolution": "Add the [hooks] keys to the state.md 2.12 example with their defaults: log_retention_days, and per rule strength plus attribution, allow_pr_close, secret_globs, pure_paths and side_effect_patterns. Alternatively, state there that [hooks] is validated by the hook design's schema, with hooks.md 2.6 as its full list. Use the same names in hooks.md 2.11.1 and 2.11.10."
+  },
+  {
+   "id": "P3SEAM-07",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.7 step 2",
+    "rewrite/BLUEPRINT.md 5.4, 5.2",
+    "rewrite/design/state.md 2.4, 2.11, S7 spec_locked",
+    "rewrite/design/pipeline.md 2.5 concurrency"
+   ],
+   "problem": "step-results accepts a record only for a 'live run', and spec_locked is released while 'a live run' holds an amendment. Liveness is defined only for a lock holder (`seen` recent). discover, a report-only maintain and spike take no lock, so under that reading their step records are refused: the ideas checkpoint loses its score records, and a spike requested by one of their steps is refused at spike open. The other reading, 'not yet checkpointed', leaves the specification unlocked for 30 days after an amendment run crashes.",
+   "proposed_resolution": "Define it once in state.md 2.8. A run is live when its record has no checkpoint mark and either it holds the lock with a fresh `seen`, or its workflow takes no lock and it was opened within its time limit. Amendment runs always lock, so for spec_locked the definition reduces to lock liveness. Cite it in hooks.md 2.11.7 and blueprint 5.2 and 5.4."
+  },
+  {
+   "id": "P3SEAM-08",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.6, 4.14",
+    "rewrite/design/pipeline.md 2.9.13 story tests row, 2.11.2 KIND and u.method",
+    "rewrite/design/hooks.md 2.7 @<method> suffix, 2.11.2 check 2",
+    "rewrite/design/state.md 2.5 story frontmatter",
+    "rewrite/design/packaging.md L-KIND"
+   ],
+   "problem": "One optional `method` key is said to choose the tests method (ui-tests or e2e-tests, in 2.9.13) and the implement method (in 4.6 and story.js, which applies it to the implementer only, so `method: ui-tests` goes to the implementer). story.js defaults a chore story to repo-setup, but the hook's `source:create@repo-setup` reads the story's own key. A scaffold story without the key is denied creating source, and a CI chore story without it is told to use repo-setup. The kind-to-agent-and-method table exists twice, in 4.6 and in story.js KIND, with no single source; artifacts.toml holds only the red-gate column.",
+   "proposed_resolution": "Put the full 4.6 table (tests agent and default method, implement agent and default method, red gate) in artifacts.toml's story-kind table. Split the key into tests_method and impl_method. The survey and the admission commands resolve each into the unit. story.js uses the unit's values instead of KIND, and the hook resolves @<method> from the same value. Update blueprint 4.6 and 4.14, pipeline.md 2.9.13, state.md 2.5 and hooks.md 2.7."
+  },
+  {
+   "id": "P3SEAM-09",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 2.1 D4, 2.4, 5.4, 11.3 item 1",
+    "rewrite/design/hooks.md 2.11.10 core row"
+   ],
+   "problem": "D4 as adopted approves 'the project's configured build and test commands'. The core scope approves every configured command: lint, format_check, run (a product server), ui_check, docs_check, mutation, scan, audit (which may reach the network), bench, proofs, and every [[component]] command. 11.3 tells the person about only two adaptations, argument prefixes and workflow starts. This third widening sits inside core, although extended is kept off precisely because it goes beyond D4.",
+   "proposed_resolution": "Limit core to commands.build and commands.test (and those keys of [[component]]), matched as a prefix, in hooks.md 2.11.10 and blueprint 5.4. Move the other configured commands to extended. Alternatively, list the widening in 11.3 and in the setup explanation."
+  },
+  {
+   "id": "P3SEAM-10",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2 end(), 2.11.3 close(), 5.1 S7",
+    "rewrite/BLUEPRINT.md 4.9 checkpoint row",
+    "rewrite/design/state.md 2.16 checkpoint row"
+   ],
+   "problem": "story.js and wave.js call `vsdd checkpoint <wf> --run <id> --subject <id>`, but the command is specified as `checkpoint <workflow> --run <id> [--outcome failed]`. A parser built to the table rejects the call, so the standalone story checkpoint fails: no closures are written, and the lock is held until the session ends or it goes stale.",
+   "proposed_resolution": "Remove --subject from both skeletons, because the run record holds the subject. Alternatively, add [--subject <id>] to blueprint 4.9, state.md 2.16 and pipeline.md S7, checked against the run record."
+  },
+  {
+   "id": "P3SEAM-11",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md amendment 6, 2.10.8 Story unit and Survey rows, 2.11.2 u.review_rules, 2.11.3 s.rounds_used",
+    "rewrite/design/state.md 2.16",
+    "rewrite/BLUEPRINT.md 5.1"
+   ],
+   "problem": "story.js reads u.review_rules, but the Story unit field list has no review_rules: the survey's `config` holds it, and amendment 6 says it is per unit. A unit from gate plan --story, story new-fix or the wave survey therefore tells every story reviewer 'Review rules: none'. wave.js reads s.rounds_used, which the Survey fields do not include, so the wave cap never counts earlier runs.",
+   "proposed_resolution": "Add review_rules to the Story unit fields, filled by every command that returns a unit. Add rounds_used for the run's own unit (wave, verify) to the Survey fields. Update pipeline.md 2.10.8 and state.md 2.16."
+  },
+  {
+   "id": "P3SEAM-12",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.12",
+    "rewrite/design/state.md 2.12 prelude-name table",
+    "rewrite/design/pipeline.md 2.11.1 RUN.limits",
+    "rewrite/design/packaging.md 2.6 universal test 9"
+   ],
+   "problem": "The survey returns the limits gate_minutes and ci_minutes under the prelude's names, but RUN.limits defines neither. A test is to fail on any unknown limit key, so once that check exists every real survey fails it, and without the check universal test 9 tests nothing.",
+   "proposed_resolution": "Add gate_minutes: 60 and ci_minutes: 30 to RUN.limits in pipeline.md 2.11.1."
+  },
+  {
+   "id": "P3SEAM-13",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2 review() and the delivery loop, 2.10.3",
+    "rewrite/design/state.md 2.8 Step record path"
+   ],
+   "problem": "review() runs twice in one story run, once for the main loop and once after a delivery repair. Both runs name their steps review-<l>-p<k>, fix-<who>-p<k> and arbitrate, with pass starting at 1, so they produce the same step-record keys. Nothing says whether store_step overwrites or refuses. The verdict that delivery recomputes from the stored passes then mixes the two loops, or loses the converged pass.",
+   "proposed_resolution": "Prefix the scoped loop's step names with the delivery round (repair<n>-review-...). State in state.md 2.8 that a step record is never overwritten: a second write to an existing key is refused, so a collision fails in the harness."
+  },
+  {
+   "id": "P3SEAM-14",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/agents-skills.md 2.6 architect row",
+    "rewrite/design/pipeline.md 2.7 loop step 1, 2.10.8 Fix data, 2.11.1 converge(), 2.11.2 arbitrate",
+    "rewrite/design/hooks.md 2.7 (runs denied to every row)"
+   ],
+   "problem": "The arbiter is to be given 'the open findings and the builder's dispute notes', and the note 'is kept in the step record for the arbiter only'. But converge() drops the resolutions' notes, arbitrate(open) passes only the findings, and the arbiter cannot read runs. Under D18 it may dismiss only a disputed finding, yet it never sees the dispute.",
+   "proposed_resolution": "converge() keeps the notes of disputed resolutions by key and calls c.arbitrate(open, notes). The scripts put the notes inline in the arbitration prompt only; universal test 8 already keeps them from reviewers."
+  },
+  {
+   "id": "P3SEAM-15",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/state.md 2.16 gate red row, 2.8 evidence lookup",
+    "rewrite/design/hooks.md 2.11.4",
+    "rewrite/design/pipeline.md 2.9.1, 2.11.2 fix()"
+   ],
+   "problem": "A re-freeze record holds 'the new hashes of frozen tests the test-writer changed', and the evidence lookup returns it as the latest red record. tests-first and the green gate read the frozen set from that record. If it lists only the changed tests, the other frozen tests stop being frozen, and tests added in a coverage fix are frozen by neither record. The gate name in a re-freeze result is unstated, but fix() requires it to be 'red'.",
+   "proposed_resolution": "In state.md 2.16 and 2.8, state that a re-freeze record carries the complete frozen set (the earlier identities and hashes, the changed ones with new hashes, and the tests added in the fix pass) and that its result has gate: \"red\". Cite the rule in hooks.md 2.11.4."
+  },
+  {
+   "id": "P3SEAM-16",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 green gate, 2.2 rule 2",
+    "rewrite/design/state.md 2.12, 2.16 gate green",
+    "rewrite/design/agents-skills.md 2.8 failing-tests"
+   ],
+   "problem": "The green gate requires that 'no stub marker remains', but no marker string, configuration key or method instruction defines one, and gates may not assume a toolchain. G2 must invent the check or hard-code a language idiom.",
+   "proposed_resolution": "Define a fixed token (for example VSDD-STUB in a comment) that the failing-tests method writes in every stub, and have the green gate search the story's diff for it. State it in pipeline.md 2.9.1, state.md 2.16 and the method."
+  },
+  {
+   "id": "P3SEAM-17",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/agents-skills.md 2.7 standard file and example",
+    "rewrite/BLUEPRINT.md 4.3",
+    "rewrite/design/packaging.md L-AGENT"
+   ],
+   "problem": "The standard agent file has 'a six-key frontmatter' and 'Lint rejects any other key', and the example adversary file omits omitClaudeMd. Blueprint 4.3 and L-AGENT require omitClaudeMd: true on every agent, and spike-runner also carries isolation. An agent frame built from the template fails the lint, or a lint built from 2.7 refuses every agent file.",
+   "proposed_resolution": "In agents-skills.md 2.7, list seven keys (adding omitClaudeMd: true), plus isolation: worktree on spike-runner, and add the key to the example."
+  },
+  {
+   "id": "P3SEAM-18",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.8 entrance table, 2.9.12, 2.11.1 runSpike()",
+    "rewrite/design/state.md 2.16 spike commands",
+    "rewrite/BLUEPRINT.md 6"
+   ],
+   "problem": "The spike command forms disagree. pipeline.md 2.8 writes `--step <workflow>/<subject>/<name>` without the attempt, which the prelude and state.md include. `spike record` is written without `--id` in 2.8 and 2.9.12. The spike workflow is said to open with `spike open --run <id>` and to call the shared runSpike(), which always passes --step, so spike open looks for an asking-step record that does not exist and refuses.",
+   "proposed_resolution": "Use the state.md 2.16 forms in pipeline.md 2.8 and 2.9.12 and blueprint 6. runSpike() omits --step when it is given no step key, and the spike workflow calls it without one."
+  },
+  {
+   "id": "P3SEAM-19",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.9 survey row",
+    "rewrite/design/state.md 2.16 survey row",
+    "rewrite/design/pipeline.md 2.9.4 survey row, 2.3, 5.1 S2"
+   ],
+   "problem": "Before any analysis, the feature survey must know amend (to run inside the open cycle), severity (a critical request bypasses the queue and is cut from the release tag) and intent. The documented survey options carry none of them; --amend appears in one sentence of state.md only.",
+   "proposed_resolution": "Add --amend, --intent <value> and --severity <value> to the survey signature in blueprint 4.9, state.md 2.16 and pipeline.md 5.1 S2."
+  },
+  {
+   "id": "P3SEAM-20",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.1 brief()",
+    "rewrite/BLUEPRINT.md 4.9",
+    "rewrite/design/state.md 2.16 job commands, feature route row"
+   ],
+   "problem": "brief() appends `--wait 540 --json` to every closing command, but --wait is defined only for job commands. The architect's closing `vsdd feature route --run <id> --wait 540` is therefore a usage error, and the route is not written.",
+   "proposed_resolution": "State in blueprint 4.9 and state.md 2.16 that --wait is a global option, ignored by commands that are not jobs. Alternatively, have brief() append it only for job commands."
+  },
+  {
+   "id": "P3SEAM-21",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.7 [callers] operator",
+    "rewrite/BLUEPRINT.md 4.9 operator row",
+    "rewrite/design/packaging.md 2.6 smoke probe 6"
+   ],
+   "problem": "`--version` is only in the operator group, which only the main row holds, but smoke probe 6 runs `vsdd --version` from a workflow step. gate-guard refuses it for every agent row and for `other`, so the probe fails by design.",
+   "proposed_resolution": "Move --version into the read group in hooks.md 2.7 and blueprint 4.9; it reveals nothing."
+  },
+  {
+   "id": "P3SEAM-22",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.9 gate row and enforcement sentence",
+    "rewrite/design/state.md 2.16 per-gate callers",
+    "rewrite/design/hooks.md 2.7 measure group",
+    "rewrite/design/pipeline.md 2.9.2 gate wave --settle"
+   ],
+   "problem": "Blueprint 4.9 and state.md 2.16 give per-gate callers (red by the test-writer and the clerk, wave and release by the clerk, plan --story by the story-writer) and say the hook enforces them. But [callers] has `measure = [\"gate\"]`, held by every builder, planner and the clerk. Any of them may run the state-changing `gate wave --settle` (it moves stories between waves) and `gate plan --story` (it admits a story to a run).",
+   "proposed_resolution": "Split measure in hooks.md 2.7 [callers]: story-gate (gate red, green, demo) for builders, spec-check (gate spec --only) for planners, and admit (gate plan --story) for the story-writer. The clerk keeps every gate. Update blueprint 4.9."
+  },
+  {
+   "id": "P3SEAM-23",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.2 write-scopes check 2, 2.11.3 lock check, 2.7 architect row",
+    "rewrite/design/state.md 2.4 class table and lock row"
+   ],
+   "problem": "Write-scopes check 2 tests 'P's class' in the singular, while the lock resolves brief.md and conventions.md to their nested classes (brief, guidance). Under that reading the product-owner (spec-product) may not write the final brief, and the architect (spec-arch) may not write conventions.md or review-rules.md. That blocks the brief skill's final step, the conventions method, author conventions and setup's move of conventions.",
+   "proposed_resolution": "In hooks.md 2.11.2 check 2, state that a state path's classes are every class whose globs match it. The write is granted when the row grants any of them, after check 1 has refused any match that is code-only or none."
+  },
+  {
+   "id": "P3SEAM-24",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 10 item 28, 4.13",
+    "rewrite/design/state.md 2.11, 5 H-2",
+    "rewrite/design/hooks.md 2.11.10 lifecycle-log",
+    "rewrite/design/pipeline.md 2.11.1 step(), 2.11.2"
+   ],
+   "problem": "The fallback for probe 28 keeps the lock alive through calls 'whose working directory lies in a worktree the run owns', and claims the design already does this. Story steps are not isolated: they start in the main session's working directory and are given the worktree by path. Reviewers have no shell, so they never change directory. If probe 28 fails, a long review lets the lock go stale and a second session can take over a live run.",
+   "proposed_resolution": "Refresh `seen` on any guarded call whose target path or working directory lies in a worktree the locked run owns, or whose vsdd command carries that run's id. Reword blueprint 4.13 and 10 item 28, state.md 2.11 and hooks.md 2.11.10."
+  },
+  {
+   "id": "P3COV-01",
+   "severity": "blocker",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 Details (story deliver bullet: local mode 'merges locally'), 3.6 (main-checkout sync row)",
+    "rewrite/design/state.md 2.3 (alternatives table), 2.12 [delivery] mode, 2.16 story deliver and release rows",
+    "rewrite/BLUEPRINT.md 4.12 delivery.mode, 9.2 G4a",
+    "rewrite/design/hooks.md 2.11.4 merge-guard (local mode note)"
+   ],
+   "problem": "In local mode the integration branch is the branch the person's main checkout has checked out (any repository with no remote, as in the slice and every new greenfield project). The design says only that the tool 'merges locally'. Git refuses to check that branch out in .worktrees/_integration/. Moving the ref with update-ref after a detached merge leaves the person's index and working tree at the old commit, so the checkout shows the story reversed as staged edits and the next commit from it reverts the story. Merging in the main checkout breaks the stated rule that the person's checkout is never touched. No rule chooses between these. vsdd release in local mode has the same gap.",
+   "proposed_resolution": "State one rule in pipeline.md 2.9.1, state.md 2.16 (story deliver, release) and blueprint 4.12. The tool makes the merge commit in a detached .worktrees/_integration/. When the person's checkout holds the integration branch and is clean, the tool fast-forwards it with git -C <root> merge --ff-only. When it is dirty, delivery returns awaiting_merge with the reason and the one finishing command. Record this as the single stated exception in the state.md 2.3 table and pipeline.md 3.6, and add a G4a fixture with the main checkout on the integration branch, clean and dirty."
+  },
+  {
+   "id": "P3COV-02",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.9 (how the tool knows who is calling), 4.13 Liveness, section 10 items 27, 28, 29",
+    "rewrite/design/hooks.md 2.5 Ctx, 2.11.10 (caller markers, lifecycle-log, extended scope), 2.16",
+    "rewrite/design/state.md 2.11",
+    "rewrite/design/pipeline.md 2.11.1 step() (no isolation passed)"
+   ],
+   "problem": "Story stages run as ordinary steps with no platform isolation, so the payload cwd of every test-writer, implementer, reviewer and clerk step is the project root, the same for every parallel story. A cd inside a command does not change it. Three fallbacks depend on a unique cwd. If item 27 fails, markers matched by process and cwd cannot tell concurrent steps apart. If item 28 fails, the lock is refreshed only by calls from a run-owned worktree, which no story step makes, and the main session makes no calls while Workflow runs; the lock then goes stale after 20 minutes mid-wave and a second session can take it over. If item 29 also fails, section 10 says 'item 27 must pass', so there is no fallback and the survey refuses every run. The extended scope's 'inside the caller's own worktree' has the same flaw for builders.",
+   "proposed_resolution": "In hooks.md 2.5, define the caller's worktree as the worktree holding the target path, or the directory of the cd, git -C or vsdd -C prefix, never the payload cwd alone. Use that definition in lifecycle-log, auto-allow and the marker fallback. Make any vsdd call carrying --run of the locked run refresh the lock (blueprint 4.13, state.md 2.11). Give items 27 and 29 a fallback that needs neither a rewrite nor a process walk: the hook keys the marker by a hash of the session id and the tokenised command, and the tool hashes its own argv and takes the newest unread match (the strictest when several match). Update the fallback cells of items 27 to 29."
+  },
+  {
+   "id": "P3COV-03",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/STATE.md thin slice layer 1 units and plan item 4 (layer 2 package list)",
+    "rewrite/BLUEPRINT.md 9.1 (B4a depends on B6; B8), 9.2 (S1 depends on C2), 9.3 (H7 depends on S4), 9.4 (A1 depends on B8)",
+    "rewrite/design/hooks.md 2.4 (policy.py loads the three policy tables)"
+   ],
+   "problem": "The slice omits B8, although A1 depends on it and B8's open items decide slice code: 27 to 29 (the H1 rewrite and marker, the S2b lock), 31 and 34 (the B4a parser and percent-encoder), 6 and 30. It also omits C2 (artifacts.toml and classes.toml, needed by S1 and by tests-first), B6 (roster.toml, from which B4a generates its tables) and S4 (a dependency of H7).",
+   "proposed_resolution": "Add the B8 probes for items 6, 27, 28, 29, 30, 31 and 34, run before H1 and S2b. Add C2 and the roster part of B6 to layer 1. Either add S4 or split H7 so step-results ships without the decisions rule. Record the change in STATE.md and blueprint 9."
+  },
+  {
+   "id": "P3COV-04",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.12 [commands] (closed key list; unknown key is an error), 2.16 gate wave/release/ingest/sweep/integration row",
+    "rewrite/design/pipeline.md 2.9.2 Details, 2.9.6 measured row, 2.9.8, 2.9.10 measured sweeps, 2.9.11 integrate",
+    "rewrite/BLUEPRINT.md 4.6 facade row, 4.12, 4.13",
+    "old: maintenance-sequence.md sweeps 5 and 6; skills formal-verify, perf-check, dtu-validate; multi-repo.lobster; agent performance-engineer"
+   ],
+   "problem": "Several measured checks have no command or threshold key. Nothing in the closed key list says how to run the clone-fidelity harness, a time-bounded fuzz target, the cross-repository integration suite, or a coverage measurement. There is no key for a coverage threshold, a performance budget or a regression percentage. Clone fidelity is compared only against 'the recorded behaviour of the real service', and nothing records that behaviour or re-checks the real service, which was the point of old sweep 6. A project cannot add the missing keys because unknown keys are errors. The DTU, fuzzing, performance-budget and cross-repository capabilities therefore do not port as runnable checks.",
+   "proposed_resolution": "Add to state.md 2.12 and blueprint 4.12: commands.fidelity; commands.fuzz taking {seconds}, with limits.fuzz_seconds; commands.coverage with coverage.min by criticality (or delete the coverage thresholds from 4.13, 2.9.8 and state.md 2.8); [perf] regression_pct with a budget file under specs/architecture/; and a hub-level commands.integration. In pipeline.md 2.9.2 and 2.9.10, say who records the real service's behaviour (a clone-fidelity harness story, with a blocked/environment decision when credentials are missing) and that the maintain sweep re-records it to detect drift."
+  },
+  {
+   "id": "P3COV-05",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.13 story tests row, 2.11.2 story.js (tests stage uses K.tests[1]; only implement uses u.method), 2.9.7",
+    "rewrite/design/state.md 2.5 Story row (method = implement-agent method), 2.12 [paths] docs",
+    "rewrite/BLUEPRINT.md 4.4 e2e-tester row, 4.6",
+    "rewrite/design/agents-skills.md 2.8, 3.2 rows 98 and 107",
+    "rewrite/design/packaging.md L-METHOD"
+   ],
+   "problem": "A story's single method key is defined as an implement-agent method, and story.js never applies it to the tests stage. So ui-tests and e2e-tests are never run, contradicting 2.9.13, and a UI story cannot name both ui-tests and ui-implementation. claude-md is reached by no step, skill or author type, setup does not run it, and CLAUDE.md is in no path class. release-notes is never run (vsdd release renders the change log), and the devops observability method has no caller. L-METHOD checks only that some agent names each method. As a result, end-to-end journey tests and UI component tests (old e2e-tester, the storybook mapping) and scaffold-claude-md do not port.",
+   "proposed_resolution": "Add a story key tests_method (a test-writer method) to state.md 2.5 and blueprint 4.6, and use it in story.js for the tests stage. Add a check that every method is reachable from a 2.9.13 row, an author type, a review lens or a story key. For claude-md, either add 'author claude-md' and put CLAUDE.md in the docs default globs, or drop the method and correct row 98 with the reason. Either add a technical-writer release-notes step to release or drop the method. Drop devops observability."
+  },
+  {
+   "id": "P3COV-06",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.6 last bullet, 3.4 last row, 5.1 S1 (notify.channel)",
+    "rewrite/design/state.md 2.12 [notify], 2.16 checkpoint row",
+    "rewrite/BLUEPRINT.md 4.9 checkpoint row, 4.12, 9.2",
+    "old: agents/orchestrator/steady-state.md Human Notification System; maintenance-sequence.md Notifications"
+   ],
+   "problem": "The only replacement for the old notification system is one sentence in pipeline.md and two config keys. The blueprint, the authority, never mentions it; no command or function performs it; and no build package delivers it. Scheduled maintain and discover runs and an unattended drive therefore open decisions that nobody sees until the next session, which defeats low touch for exactly the runs it serves. The old capability is dropped without a stated reason.",
+   "proposed_resolution": "In state.md 2.16, add to the checkpoint row: when it opens a decision, run the configured channel. github-issue opens one issue per decision; command runs the configured command detached, with the decision id, kind and summary in VSDD_* variables, and a failure is logged. Name the keys in blueprint 4.12, assign the work to S3 in 9.2, and add a fixture."
+  },
+  {
+   "id": "P3COV-07",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.5 (Permit; updatedInput), 2.11.10 built-in auto-allow",
+    "rewrite/BLUEPRINT.md section 10 items 7 and 27"
+   ],
+   "problem": "The platform pairs updatedInput with permissionDecision allow or ask. The design rewrites every vsdd call but does not say which decision goes with a call auto-allow does not permit, or one another rule advised. allow would widen D4 (approving state-changing main-session calls under scope off). ask forces prompts in auto mode. No decision may leave the rewrite ignored, and the survey then refuses. The prefixed command also no longer matches item 7's static vsdd allow rules or a person's own rules.",
+   "proposed_resolution": "State that the rewrite goes with allow when auto-allow permits the call and with ask otherwise. Extend probe 27 to these cases in the default and auto modes, and write item 7's static fallback rules in a form that matches the VSDD_CALLER-prefixed command."
+  },
+  {
+   "id": "P3COV-08",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.3 (SubagentStart async), 2.11.6 Who asked row",
+    "rewrite/design/state.md 2.16 vsdd spike open",
+    "rewrite/BLUEPRINT.md 6, section 10 item 35"
+   ],
+   "problem": "For a spike runner dispatched with the Agent tool, the admission is paired with the runner in an async SubagentStart hook. Nothing orders that before the runner's first vsdd spike open, which refuses when no asker can be established. Agent-requested spikes in a normal session, the entrance walled reviewers use, can therefore fail at random.",
+   "proposed_resolution": "Have vsdd spike open claim the oldest unclaimed admission of the caller's session itself when the marker's agent id has none, or do the pairing in the synchronous PreToolUse rule on the runner's first guarded call. Add the ordering case to probe 35."
+  },
+  {
+   "id": "P3COV-09",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/agents-skills.md 2.7 (${CLAUDE_PLUGIN_ROOT} in agent body), 2.12 research/retro rows, 7 probes V1 and V3",
+    "rewrite/design/packaging.md 2.13 N1",
+    "rewrite/design/hooks.md 2.3, 2.11.2 final-message check",
+    "rewrite/BLUEPRINT.md section 10 items 10 and 32",
+    "rewrite/reference/claude-code-plugin-platform-facts.md section 4 (fork background default true)"
+   ],
+   "problem": "Four assumptions are used but neither proven nor listed in section 10. First, ${CLAUDE_PLUGIN_ROOT} is substituted in agent bodies; V1's fallback (add the root at SubagentStart) cannot work because that hook is async. Second, the final message is available to the SubagentStop rule. Third, forked skills return synchronously, whereas the docs default fork to background, and research/retro rely on the reply. Fourth, explicit tool lists can call MCP tools without ToolSearch, which the platform workflow reference says loads them; item 10 and V3 also give different fallbacks, and the WebSearch/WebFetch fallback may be deferred the same way. The workflow concurrency cap is also min(16, CPUs-2), not 16.",
+   "proposed_resolution": "Add the four items to section 10 and B8. Set background: false on the research and retro skills. Make V1's fallback 'the dispatching prompt names the plugin root'. Choose one fallback for item 10 and include WebSearch and WebFetch in its probe."
+  },
+  {
+   "id": "P3COV-10",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2 end(), 2.11.3, 5.1 S7",
+    "rewrite/BLUEPRINT.md 4.9 checkpoint row",
+    "rewrite/design/state.md 2.16 checkpoint row"
+   ],
+   "problem": "story.js and wave.js call 'vsdd checkpoint <wf> --run ... --subject ...', but the authoritative signature is 'checkpoint <workflow> --run <id> [--outcome failed]'. A strict parser exits 2, the clerk returns ok:false, and the standalone story's lock is not released.",
+   "proposed_resolution": "Drop --subject from both scripts, since the run record knows its subject, or add [--subject <id>] to the signature in blueprint 4.9, state.md 2.16 and pipeline S7."
+  },
+  {
+   "id": "P3COV-11",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/agents-skills.md 3.2 row 8",
+    "rewrite/design/hooks.md 3.1 rows 18 and 60",
+    "rewrite/design/pipeline.md 3.5 Phase 0 approval row"
+   ],
+   "problem": "Four mapping rows describe mechanisms that no longer exist. Row 8 (check-input-drift: 'staleness check ... shown by status') and hooks row 18 ('reported by vsdd stale') name staleness and vsdd stale, which the second pass removed. Pipeline 3.5 says ingest 'ends with a report and waits for the person's intent', but it now ends at decision spec. Hooks row 60 says lessons are a workflow artifact, but the lessons register is gone. The mapping is the record that every capability ports, so these rows mislead builders.",
+   "proposed_resolution": "Rewrite rows 8 and 18 as dropped, because the decision digest and the specification lock make drift impossible after approval (as packaging.md 3 does for compute-input-hash). Correct the Phase 0 row to decision spec, and point row 60 at the retrospective report."
+  },
+  {
+   "id": "P3COV-12",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/agents-skills.md 2.10 Storybook paragraph, 3.2 row 107, 2.12 setup row",
+    "rewrite/BLUEPRINT.md 4.5 setup row"
+   ],
+   "problem": "agents-skills 2.10 and row 107 say setup tells UI projects to register a 'storybook' MCP server, but setup's specified steps (agents-skills 2.12, blueprint 4.5) have no such step. Four agents list mcp__storybook__* tools, so on every UI project the Storybook-backed UI methods silently fall back to index.json.",
+   "proposed_resolution": "Add the step to the setup row in both places, and add a vsdd doctor check when project.ui is true."
+  },
+  {
+   "id": "P3COV-13",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/agents-skills.md 3.2 row 93",
+    "old skills/repo-initialization/SKILL.md (gh repo create, branch protection)",
+    "rewrite/design/state.md 2.12 delivery.mode (detected once by init)"
+   ],
+   "problem": "Neither setup nor the repo-setup chore story creates the remote repository or protects its branches, and no reason is given. A greenfield project therefore stays in local mode, and nothing tells the person that adding a remote later means editing delivery.mode themselves.",
+   "proposed_resolution": "Either state the drop in row 93 (a person creates the remote), with vsdd doctor reporting 'remote found, delivery.mode is local' and the line to change; or have setup offer, with confirmation, to create the remote and protect its branches."
+  },
+  {
+   "id": "P3COV-14",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.6 Layer 4 (sample test command; no package download), E4 known lint failure",
+    "rewrite/STATE.md measured uv facts (only uv run --script measured)"
+   ],
+   "problem": "The sample's test command, 'uv run python tools/junit_runner.py', is a project uv run, not --script, and its behaviour was never measured. It creates .venv in each story worktree, and if pyproject.toml declares a build system it builds and installs the project, downloading the backend (PyPI fetch failed in the sandbox). The sample's lint, format and build commands are unspecified, and the usual Python linters are downloads too. The slice's red and green gates can therefore fail on network errors or on .venv falling in no path class.",
+   "proposed_resolution": "Specify that the sample has no [build-system] (or sets tool.uv.package = false), that its commands are 'uv run --no-project --offline python tools/...', that it ships a standard-library tools/lint.py and format check, and that .venv/ and build/ are in its .gitignore. Add a smoke assertion that no network fetch happens."
+  },
+  {
+   "id": "P3OPS-01",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.1 relay(); 2.11.2 story.js; 2.4 route row 'A run lock is held by a live run'; 5.1 need S2",
+    "rewrite/design/state.md 2.10 status --fix; 2.11 lock bullets; 2.16 vsdd lock release",
+    "rewrite/design/hooks.md 2.11.10 lifecycle-log",
+    "rewrite/BLUEPRINT.md 4.9, 4.13 Liveness, section 7"
+   ],
+   "problem": "Liveness is keyed on the session: any guarded call from the holder's session refreshes seen. Three ordinary events leave a lock held by a run that has stopped, inside a live session: relay() retrying a survey that already took the lock, a person interrupting a workflow, or a throw between the survey and try. The person's own calls keep that lock fresh forever. status --fix releases only a lock whose holder is dead, which is undefined for a live session; plain lock release has no stated semantics; the route says 'wait'. The survey is called idempotent in pipeline S2 but refused on re-entry in state 2.11.",
+   "proposed_resolution": "1. Survey re-entry: a lock held by a run of the caller's own session, for the same workflow and subject, with no step record, is taken over. 2. Refresh seen only on calls that belong to the run (step.run on StructuredOutput, --run on vsdd calls, run worktrees), not on main-session calls. 3. Define lock release: own session or stale; --force (person) any; holder dead = stale or session ended. 4. The route and briefing name vsdd lock release when the holder is this session, else --force in a terminal. 5. Fixture: interrupt after the survey, re-run, and the run continues."
+  },
+  {
+   "id": "P3OPS-02",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 tests and deliver rows, green-gate detail",
+    "rewrite/design/state.md 2.16 gate green, story deliver",
+    "rewrite/design/hooks.md 2.11.4 merge-guard and tests-first; 2.11.7 step-results; 2.10 row 6",
+    "rewrite/BLUEPRINT.md 3.2, 4.13"
+   ],
+   "problem": "Delivery requires green, verdict, demo and CI, and never red evidence. Green compares frozen tests with 'the latest red record' but does not need one to exist. step-results does not check gate entries against evidence records. A test-writer, which may write source before red, can commit tests plus implementation and return a fabricated passing red result; the implementer has nothing to write, green passes, and delivery merges. tests-first also ignores Bash writes to source. Blueprint 3.2's guarantee ('cannot merge code') is false.",
+   "proposed_resolution": "1. gate green and story deliver require a passing red or re-freeze record for every kind with a red gate. 2. step-results checks each gates[] entry against the evidence record it names (gate, subject, sha, passed) and blocks a mismatch. 3. tests-first inspects Bash writes into source before red. 4. Cases for both."
+  },
+  {
+   "id": "P3OPS-03",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 deliver detail (local mode); 3.6 'Nothing in 1.0 pulls or merges in the person's checkout'",
+    "rewrite/design/state.md 2.3 person's checkout row; 2.12 delivery.mode",
+    "rewrite/design/hooks.md 2.11.4",
+    "rewrite/BLUEPRINT.md 4.12"
+   ],
+   "problem": "In local mode the integration branch is usually the branch checked out in the person's main checkout. Git refuses to check it out in a tool-owned worktree. git update-ref leaves the person's index showing the story reversed, so their next commit undoes it. Merging in their checkout breaks the stated invariant and clobbers uncommitted work. The design defines neither path, and the slice's first local delivery hits this.",
+   "proposed_resolution": "Define the local merge: merge in the worktree where the branch is checked out when it has no tracked changes; return checkout_dirty (blocked, reason environment, naming the checkout) when it is dirty; when checked out nowhere, merge in a tool-owned detached worktree and move the ref. Amend the invariant wording. init and doctor report the case. Add slice tests for clean and dirty."
+  },
+  {
+   "id": "P3OPS-04",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.4 merge-guard; 2.11.1 command families; 2.7 example rows; 2.11.10 auto-allow core",
+    "rewrite/design/agents-skills.md 2.9 command scopes",
+    "rewrite/design/state.md 2.16 story deliver, gate wave"
+   ],
+   "problem": "merge-guard does not match commands that move the integration or release ref without a checkout: git update-ref, branch -f/-M/-C, switch -C, checkout -B, fetch . x:<branch>. These fall in git-read ('every other git command'). The family table is wrong both ways: if git-read must be granted, test-writer and implementer (commands = [git-commit]) cannot run git status, diff or log; if it is implied, ref writes pass. Verifier and devops rows default to every family, including push, gh-pr and worktree, which agents-skills forbids. The tool never checks that the integration head is one it produced.",
+   "proposed_resolution": "Narrow git-read to read-only subcommands. Add a git-ref family that no agent holds, and have merge-guard block it for every caller when it names the integration or release branch. Every agent row lists commands explicitly, and an absent key means none; builders get git-commit and git-read. story deliver and gate wave refuse with integration_moved when the integration head is not one the tool recorded or produced through its own merges."
+  },
+  {
+   "id": "P3OPS-05",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.7 item 2",
+    "rewrite/design/pipeline.md 2.10.1 step identity; 2.10.3; 2.9.1 review row",
+    "rewrite/design/state.md 2.8 step record",
+    "rewrite/BLUEPRINT.md 4.10 Verdict row, 5.4, 11.1 P2LEAN-10"
+   ],
+   "problem": "A review pass counts only when the stored agent type owns the pass's method, but the method is only in the prompt. Step records hold the identity, the agent type and the head. Step names follow no single pattern across story, wave and verify, and the step-name table was removed. The tool cannot map a record to a method, so G3 either rejects real passes or skips the check.",
+   "proposed_resolution": "Add method to the step identity: brief() puts it in the identity the agent echoes, and step-results stores it. The tool counts a record as a pass only when its method is a review method of that perimeter and the stored agent type owns it in the roster. Add a conformance fixture in which a builder echoes a reviewer's method."
+  },
+  {
+   "id": "P3OPS-06",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.5 main loop; 2.9 failure rows; 2.6 quarantine; 2.11.8 runner lines",
+    "rewrite/design/state.md 2.9 State problems",
+    "rewrite/design/pipeline.md 2.6 blocked reason stuck",
+    "rewrite/BLUEPRINT.md D12"
+   ],
+   "problem": "A deterministic crash in a locked rule (step-results, gate-guard) blocks every step result or clerk call. The blocks reach step agents, not the person, who after two runs gets blocked/stuck with retry, direct and descope, none of which helps. Nothing names VSDD_FACTORY_HOOKS_QUARANTINE. A rule module's import error happens outside the per-rule try, so it is a runner crash, never logged as rule.error, and the quarantine condition cannot be met; only hooks=off remains.",
+   "proposed_resolution": "Import rule modules inside the per-rule try. The rule_error block's fix line names the restart command with the quarantine variable. The briefing and vsdd status list rules with repeated rule.error, with the restart line. The checkpoint copies a unit's last block codes into its blocked packet."
+  },
+  {
+   "id": "P3OPS-07",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 'Where a child's unit comes from'; 2.9.4 survey, story-draft, deliver rows",
+    "rewrite/design/state.md 2.16 gate plan ('changes nothing'); 2.8 run record",
+    "rewrite/BLUEPRINT.md 3.3, 3.4, D15"
+   ],
+   "problem": "Every gate checks that a story is recorded in the run it is given, but admission is recorded only in the admitting run. When a fast-route story ends awaiting_merge (D15: the first CI story, any dependency change) or a run dies mid-child, the resumed feature run either skips story-draft and has no units, or reruns gate plan --story, which 'changes nothing', so the child's gates refuse. Fix stories from wave and verify are in the same position. The route loops with no progress.",
+   "proposed_resolution": "The feature, wave, verify and maintain surveys return, and record in the new run, every story admitted to the open cycle that is neither delivered nor descoped. Re-admission records the story in the calling run. feature passes the survey units to runStories() when story-draft is done. Scenario tests for a merge decision approved in a new session, and for a kill mid-child."
+  },
+  {
+   "id": "P3OPS-08",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.5 done test; 2.9.4 delta row",
+    "rewrite/design/state.md 2.8 done test bullets",
+    "rewrite/BLUEPRINT.md 4.14, section 7",
+    "rewrite/design/pass2-closeout-3.md 'Seen while checking'"
+   ],
+   "problem": "The done test counts a done step record 'inside a run that has not reached its checkpoint', without saying an earlier crashed run counts. Read as the current run, a resumed spec, ingest or plan redoes every planner step. If earlier records count, a resumed standard-route feature skips its delta step, so nothing marks the amendment and every evolve write is refused by the spec lock.",
+   "proposed_resolution": "Done records from any earlier run of the same workflow and unit that ended without a checkpoint count once they validate. The feature survey marks the amendment when the cycle's route is standard and it has no approved spec decision of its own. Fixtures: kill a spec run mid-way and resume; kill a standard feature after delta and resume."
+  },
+  {
+   "id": "P3OPS-09",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.1 converge(); 2.11.2 story.js review() and unused u.guidance; 2.11.3 wave.js; 2.6 finding, revise and hold rows",
+    "rewrite/design/state.md 2.8 choice table",
+    "rewrite/BLUEPRINT.md 4.11, 5.1"
+   ],
+   "problem": "After a cap, rounds_used is at least cap+1. On the next run converge() returns blocked/cap before any pass, with an empty open list, so direct does nothing and the same finding decision reopens. This is a regression of OPS-23. A waiver converges only if the tool's verdict applies settled waivers, which is unstated. The survey returns guidance, but no prompt carries it, so guidance from revise, hold, direct and blocked-direct never reaches an agent.",
+   "proposed_resolution": "The survey returns direct (guidance and open keys). converge() then runs one fix carrying the guidance and one pass, with no arbitration. The tool's verdict applies settled waivers, so a waived unit's position is reviewed. brief() adds the person's guidance whenever present, with a universal test. Conformance fixtures for direct and waive after a cap."
+  },
+  {
+   "id": "P3OPS-10",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.6 ('the stop returns'); 2.5 'specification is approved'; 2.4 route table",
+    "rewrite/design/state.md 2.8 stale decisions cannot be settled; 2.9 State problems",
+    "rewrite/design/hooks.md 2.11.5 step 3",
+    "rewrite/BLUEPRINT.md D19, 4.11"
+   ],
+   "problem": "After a hand edit, the approval's digest no longer matches. Settling refuses the stale decision, and nothing opens a new one. In a change-request cycle the spec row needs a brief and cannot match; plan, wave and story are refused; the route ends at 'only open decisions remain' with none listed; the briefing does not mention staleness. In a fast-route cycle the edit can reach a release unreviewed, against D19.",
+   "proposed_resolution": "Add a route row for a stale latest spec decision. The next survey or checkpoint opens a new spec decision whose packet lists the files changed since the approval. The briefing lists it under State problems, with the revert alternative. In-flight stories wait until it is settled."
+  },
+  {
+   "id": "P3OPS-11",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 3.4, 4.13",
+    "rewrite/design/pipeline.md 2.9.1 green gate; 2.9.8",
+    "rewrite/design/state.md 2.8 baseline record; 2.12 [commands]",
+    "rewrite/design/packaging.md 2.6 E4 row and baseline fixture"
+   ],
+   "problem": "lint, format_check, scan and audit are plain shell strings with no report format. No identity survives line moves. 'Only new findings block' therefore cannot be computed: lint fails at the baseline and on every story. E4 run 1 ('the inherited lint failure does not fail any gate') would fail.",
+   "proposed_resolution": "Add lint_report, format_report and scan_report keys (SARIF or JSON). A finding's identity is tool, rule, path and a hash of the normalised line text. Without a report, compare by exit status, announce that the check cannot fail while the baseline fails it, and schedule a readiness chore. Add a G2 fixture with a moved inherited finding."
+  },
+  {
+   "id": "P3OPS-12",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.8 coverage-and-baseline row; 2.9.4 readiness",
+    "rewrite/design/state.md 2.12 'Where the commands cannot work yet'; 2.8 baseline record",
+    "rewrite/BLUEPRINT.md 3.4, 4.13"
+   ],
+   "problem": "1. A suite with no JUnit report at ingest gives a baseline with no failing-test identities, so the harness chore and the first bug fix see every inherited failure as new. 2. pipeline asks for the harness only when there is 'no suite'; state also asks when there is 'no JUnit report'. 3. An inherited failing test that a story fixes stays inherited, so a later regression passes every gate.",
+   "proposed_resolution": "1. Record whether identities were measured; when they were not, delivery of the harness chore re-measures them into the baseline, and that chore's own green gate requires only that the report is produced and its own tests pass. 2. One readiness condition everywhere: no suite or no JUnit report. 3. Closure records list inherited tests a story made pass, and gates stop treating those as inherited."
+  },
+  {
+   "id": "P3OPS-13",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.2 rule 6; 2.3 Push; 2.11 two machines and adoption; 2.9 State problems",
+    "rewrite/BLUEPRINT.md 4.13, section 7, section 8 OPS-07"
+   ],
+   "problem": "Nothing fetches the state branch before the briefing or the survey. An existing second clone routes on stale state and redoes checkpointed work. Two machines can run the same wave at once, both build the same stories, and adoption lets one take over the other's open PR mid-delivery. Both reach conflicting closure-record pushes with no named repair.",
+   "proposed_resolution": "The survey fetches and fast-forwards, or rebases, the state branch before preconditions, and the briefing reports when state is behind the remote. The survey writes and pushes a lease (scope, run, machine, time); another machine's survey refuses while it is fresh; checkpoints and deliveries refresh it and the checkpoint clears it. A push conflict opens blocked, reason environment, and status --fix retries the rebase."
+  },
+  {
+   "id": "P3OPS-14",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.6 blocked row; 2.8 limits",
+    "rewrite/design/state.md 2.8 choice table, settling writes the record only",
+    "rewrite/BLUEPRINT.md 4.11, section 6"
+   ],
+   "problem": "Settling open-spike writes only the decision record. It opens no named spike, carries no mission, and leaves the unit runnable. The step asks again, uses two more spikes and is blocked again. A later spike close is never fed back to the step.",
+   "proposed_resolution": "Settling open-spike also writes the named-spike request with the packet's questions, as spec-gap amend writes its request. The unit stays blocked on that spike, and the route names /vsdd-factory:spike open <n> -- <question>. spike close releases the unit, and the asking step receives the finding."
+  },
+  {
+   "id": "P3OPS-15",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.10 auto-allow core row; 2.11.1 shell.py",
+    "rewrite/BLUEPRINT.md 5.4"
+   ],
+   "problem": "The built-in part of auto-allow requires a single segment, but the core prefix match of configured commands does not. A configured command followed by ;, &&, $(...), backticks, eval or sh -c with an opaque payload is approved without a prompt in the default permission mode, for exactly the commands the heuristic checks cannot read.",
+   "proposed_resolution": "Approve a configured command only as one segment followed by plain argument tokens: no separators, substitutions, eval, sh -c, xargs or redirects. shell.py marks commands with substitutions as opaque, and auto-allow never permits an opaque command. Add cases."
+  },
+  {
+   "id": "P3OPS-16",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.1 secrets row; amendment 16; 2.7 builder rows",
+    "rewrite/BLUEPRINT.md 5.4"
+   ],
+   "problem": "Builders keep outside readable, and the credential list misses ~/.git-credentials, ~/.config/git/credentials, ~/.cargo/credentials.toml, ~/.pypirc, ~/.gem/credentials, ~/.kube/config, ~/.config/gcloud, ~/.azure, ~/.terraform.d/credentials.tfrc.json and ~/.gnupg. gh auth status --show-token prints the token, as gh auth token does.",
+   "proposed_resolution": "Extend the default credential list, kept as data with a case per entry. Block gh auth status -t and --show-token, and git credential-* helpers."
+  },
+  {
+   "id": "P3OPS-17",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.2 launcher skeleton; 2.9 rows for no Python and uv cannot run",
+    "rewrite/BLUEPRINT.md 4.1, section 7"
+   ],
+   "problem": "uv exits 2 for three causes with different fixes: no interpreter at the floor, an unwritable cache, an old uv. The launcher maps all three to 'could not run (exit 2)', while the table promises 'uv python install 3.12' for the first.",
+   "proposed_resolution": "On rc 2 only, run uv python find --no-python-downloads '>=3.11' and uv --version once to choose the message. Add a failure test per case."
+  },
+  {
+   "id": "P3OPS-18",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.3 onFailure notes, SubagentStop row, time budgets; 2.9 timeout row; 2.16 onFailure row; 2.11.2 final-message check",
+    "rewrite/BLUEPRINT.md section 10 item 13"
+   ],
+   "problem": "The runner's deadline does not cover uv start-up or cache-lock contention. For a hook that exceeds its timeout, onFailure is the only defence and is not probed; item 13 tests only a missing file and the prompt-expansion event. The scenario-text check on SubagentStop runs in notify mode with a 1 s deadline, so it fails open and is only logged.",
+   "proposed_resolution": "Add a hook timeout to item 13; if it does not block, wrap the runner in a shell watchdog that exits 2. Give the final-message check the 4 s gate deadline, and announce rule.timeout on it in the next briefing."
+  },
+  {
+   "id": "P3OPS-19",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.9 Running line and driver instruction",
+    "rewrite/BLUEPRINT.md section 7",
+    "rewrite/design/pipeline.md 2.4 driver paragraph"
+   ],
+   "problem": "The driver instruction follows only the Running line, which needs a live lock. A compaction just after a workflow returns, with the lock already released, drops it, and the driver stops.",
+   "proposed_resolution": "Print the driver line whenever driver.json names this session, with or without a live run."
+  },
+  {
+   "id": "P3OPS-20",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.11 liveness; 2.10 clearing is always safe",
+    "rewrite/design/hooks.md 2.11.10 lifecycle-log; 2.3 SessionEnd row",
+    "rewrite/BLUEPRINT.md section 10 item 28"
+   ],
+   "problem": "If step calls carry their own session ids (item 28), runs with no worktree (spec, plan, ingest, feature delta) refresh nothing, and their lock goes stale after 20 minutes. SessionEnd also fires on /clear and releases the lock whatever the reason, even if a workflow survives the clear.",
+   "proposed_resolution": "Also refresh on StructuredOutput with step.run equal to the locked run and on vsdd calls with --run. Probe whether a workflow survives /clear; if it does, keep the lock on SessionEnd with reason clear."
+  },
+  {
+   "id": "P3OPS-21",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.7 last paragraph",
+    "rewrite/BLUEPRINT.md 4.1 schema.py, 4.10",
+    "rewrite/design/state.md 2.8 done test"
+   ],
+   "problem": "Whether the platform validates StructuredOutput before or after PreToolUse is unknown. If after, a done record can be stored for a result the platform rejects, which a later survey could count as done. The stated reason not to validate ('no stdlib validator') is contradicted by schema.py in the shared core.",
+   "proposed_resolution": "Validate against the step-result schema (and the data schema when the identity names it) with schema.py and block an invalid result once. Record the platform's ordering in the payload capture."
+  },
+  {
+   "id": "P3OPS-22",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.3 wave.js fix(); 2.7 loop step 5",
+    "rewrite/BLUEPRINT.md D18, 5.1"
+   ],
+   "problem": "Wave and release fixes always report fixed, so no finding can be disputed there. The arbiter can never dismiss one, and every finding upheld at the cap goes to a person, against D18's low-touch intent.",
+   "proposed_resolution": "A fix story's result carries the keys its fixer disputed, and the wave's fix() maps them to disputed. Add a harness scenario."
+  },
+  {
+   "id": "P3OPS-23",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.3 conditions table (unmounted)",
+    "rewrite/design/hooks.md 2.8",
+    "rewrite/BLUEPRINT.md D24, section 7"
+   ],
+   "problem": "A clone whose 1.0 state branch exists but is not mounted is completely silent. Every model action there is ungated, and nothing says the project is a factory project.",
+   "proposed_resolution": "On SessionStart only, when a remote factory-artifacts ref exists (shell built-ins), print one line saying the state is not mounted, the gates are off, and to run setup. This extends D24's pre-1.0 exception without reopening D24."
+  },
+  {
+   "id": "P3OPS-24",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.16 vsdd survey",
+    "rewrite/design/pipeline.md 2.9.4 survey row",
+    "rewrite/BLUEPRINT.md 3.4"
+   ],
+   "problem": "The feature survey takes the lock before it writes or queues the request. A request typed in a second session during a wave is refused and lost.",
+   "proposed_resolution": "When another cycle is active and the request is not critical, write requests/CR-NNN.md and return queued before trying the lock."
+  },
+  {
+   "id": "P3OPS-25",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.1 bash-destructive; 2.7 devops and verifier rows"
+   ],
+   "problem": "Recursive deletion of worktree directories is allowed, and git worktree remove --force is blocked only outside the worktree roots. A builder can destroy a sibling story's or a named spike's uncommitted work.",
+   "proposed_resolution": "Allow recursive deletion only of build output inside the caller's own worktree; only the tool removes worktree directories. Add a sibling-worktree case."
+  },
+  {
+   "id": "P3REQ-01",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.3 feature row, 2.4 route row 'No cycle is open and a change request is queued', 2.9.4 survey row, 2.9.7 close row",
+    "rewrite/design/state.md 2.5 change request row, 2.7 next field, 2.11 lock, 2.16 survey row",
+    "rewrite/BLUEPRINT.md 3.4 row 2, 4.9 survey row",
+    "rewrite/design/packaging.md 2.6 route and import fixtures"
+   ],
+   "problem": "The route names 'feature with the oldest queued request', but nothing defines what next.args carries, and the feature survey can receive a request only as free text in --request-uri, which always writes a new request file. There are three readings and all fail. The request text duplicates the request and leaves the CR queued, so it is offered again after the release. 'CR-NNN' is stored as a new request whose text is the identifier. An empty args fails because request is required on a first run. Whether a request typed while another run holds the lock is recorded before the lock refusal is also unstated.",
+   "proposed_resolution": "Define next for a queued request as {command: '/vsdd-factory:feature', args: {request: 'CR-NNN'}}. A request argument that is exactly a queued CR id is passed as --subject and activates that file instead of writing a new one. feature with no request and no amend takes the in-flight request, or else the oldest queued one. The survey writes a new request file before any lock check and returns 'queued' without taking the lock when a cycle is active. Apply this in pipeline 2.3, 2.4 and 2.9.4, state 2.5, 2.7 and 2.16, and blueprint 4.9, and add a fixture for a typed request that is queued and later activated once."
+  },
+  {
+   "id": "P3REQ-02",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 'Where a child's unit comes from', 2.9.4 story-draft and deliver rows, 2.9.5 readiness paragraph",
+    "rewrite/design/state.md 2.12 missing-commands bullets, 2.16 gate plan row, 2.8 cycle record (no base field)",
+    "rewrite/BLUEPRINT.md 3.4 row 4, 4.6"
+   ],
+   "problem": "On a fast route the story-writer writes and admits the readiness chores and the change's own story in one step. Admission cuts every branch at once from 'the cycle's base', which is not defined anywhere. The fix story's worktree therefore lacks the test harness that the readiness chore later delivers, and it is never refreshed, because delivery rebases only on a conflict. Its red gate cannot produce a JUnit report, so the story is blocked and then stuck. On the standard route, plan schedule puts only the scaffold alone in the first wave, so a harness chore can share wave 1 with stories whose red gate needs it.",
+   "proposed_resolution": "Define the cycle's base as the integration head at admission (the release tag for a hotfix). When the route lists readiness stories, the fast route runs story-draft and deliver twice: first the readiness chores alone, then the change's own stories. plan schedule puts the test-harness chore in a first wave of its own, like the scaffold. Apply this in pipeline 2.9.1, 2.9.4 and 2.9.5, state 2.12 and 2.16, and blueprint 4.6, and add an E4 assertion that the fix story's red gate reads a JUnit report."
+  },
+  {
+   "id": "P3REQ-03",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.12 [delivery] ci comment and missing-commands bullet ('until it merges'), 2.12 three code-write cases, 2.4 config row",
+    "rewrite/design/pipeline.md 2.9.1 delivery bullet, 2.9.4 route readiness, 2.9.5 readiness",
+    "rewrite/BLUEPRINT.md 3.4 row 4, 4.7 config row, 4.12 delivery.ci row"
+   ],
+   "problem": "delivery.ci = 'none' is treated as true 'until it merges', but nothing changes it when the CI chore merges: no agent may write factory.toml, code may write it only in three stated cases, and the briefing does not ask the person. Every later feature route and plan gate therefore schedules another CI chore, each a protected-path merge decision for a person. story deliver also keeps skipping the CI wait, so the CI the factory added is never waited on.",
+   "proposed_resolution": "Derive the fact. Once a chore story with method ci has a delivery closure, delivery.ci = 'none' no longer counts: delivery waits for checks, readiness lists no CI chore, and the briefing names the obsolete line once. Apply this in state 2.12, pipeline 2.9.1, 2.9.4 and 2.9.5, and blueprint 4.12, and add an E4 assertion that a second cycle schedules no CI story."
+  },
+  {
+   "id": "P3REQ-04",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.8 coverage-and-baseline row before synthesize, 'What the baseline is for'",
+    "rewrite/design/state.md 2.8 baseline record, 2.12 'Missing commands are a state'",
+    "rewrite/BLUEPRINT.md 4.12 missing commands, 4.13 baseline",
+    "rewrite/design/packaging.md E4 run (1)"
+   ],
+   "problem": "vsdd gate ingest measures the baseline (failing-test identities, lint, format) in a stage that runs before the architect writes toolchain.toml, and ingest is not among the workflows that refuse without commands. When init could not detect test, test_report or lint, the baseline lists nothing. After approval fills the commands, every inherited failure and lint finding counts as new and fails the gates of unrelated stories, and nothing measures again. An import gets a first-survey measurement, but an ingest does not. The E4 sample's custom JUnit runner is not in init's detection list, so E4 run (1) would fail its own assertion.",
+   "proposed_resolution": "When gate ingest runs with test, test_report, lint or format_check unset, it records those measurements as 'not taken'. The first survey after the spec approval applies the toolchain and takes them, as for an import (as a job, see P3REQ-06). Readiness reads 'has a suite' from the taken measurement. Apply this in pipeline 2.9.8, state 2.8 and 2.12, and blueprint 4.13."
+  },
+  {
+   "id": "P3REQ-05",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 3.2 'Brownfield multi-repo' mapping, 2.9.11 synthesize row, 2.4 ingest route rows, 2.6 whole-set lock, 2.9.6/2.9.7 hub release",
+    "rewrite/design/state.md 2.8 closure row and baseline record (single _standing/units/ingest.json, decision spec), 2.5 toolchain row, 2.14, 2.16 survey row",
+    "rewrite/BLUEPRINT.md 3.4 'Several repositories' row, 4.8, 4.13"
+   ],
+   "problem": "The design maps multi-repository brownfield to 'ingest with repo for each repository', but the second ingest fails at several points. Its done test reads the first ingest's closed ingest.json, so every stage reads as done. Its baseline would overwrite the first one's, and its decision would reuse the identifier spec in _standing. Once the first baseline is approved, the whole-set specification lock refuses its writes, because an ingest holds no amendment. The route never names it, since a baseline already exists. The gates compare against one baseline measured with one repository's commands, and toolchain.toml cannot fill per-repository commands. Which run opens the hub's single release decision is also unstated.",
+   "proposed_resolution": "In a hub, ingest without repo covers every member in one run, storing one baseline object per repository in the ingest closure (each with its own integration head and measurements, read by the gates for stories with that repo). It writes toolchain.toml with a [[repo]] section per member, whose approval fills that entry's unset commands, and it ends at one spec decision. A member added later is ingested with repo in a run that holds an amendment. The route's ingest row becomes 'a member has no baseline'. In a hub, verify runs once at the hub and opens the one release decision. Apply this in pipeline 2.4, 2.9.8, 2.9.11 and 3.2, state 2.5, 2.8 and 2.14, and blueprint 3.4 and 4.13, and have E4 run (4) ingest two existing repositories."
+  },
+  {
+   "id": "P3REQ-06",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.9 'Long commands', 7 fresh clone row",
+    "rewrite/design/pipeline.md amendment 4, 2.5 done test, 2.10.8 survey fields",
+    "rewrite/design/state.md 2.8 (survey re-measures; import baseline by first survey), 2.10 fresh clone row, 2.15 step 4, 2.16 survey row and job paragraph"
+   ],
+   "problem": "The survey re-measures every gate whose evidence is missing (on a fresh clone, every closed story's green gate and the plan baseline), and it takes an import's whole baseline: suite, lint, format, mutation per module and scanners. Yet it is not a long command. It has no job and no pending state, and it runs in one clerk Bash call capped at ten minutes, while already holding the lock it took before the done test. On any project with a slow suite, the retry meets its own lock or starts the measurement again from scratch.",
+   "proposed_resolution": "Run the survey's measurements as the same keyed detached jobs the gate commands use. vsdd survey re-attaches like any long command and returns {ok, state: 'pending'} until they finish; the clerk already re-runs pending commands. Add state to the survey fields and list survey among the long commands in blueprint 4.9, pipeline amendment 4 and state 2.16."
+  },
+  {
+   "id": "P3REQ-07",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 'Where a child's unit comes from', 2.9.4 survey/story-draft/deliver rows, 2.10.8 Story unit row and survey fields",
+    "rewrite/design/state.md 2.8 run record and done test, 2.16 gate plan and story new-fix rows"
+   ],
+   "problem": "Admission records a story only in the run that admitted it, and every gate refuses a story not recorded in the run it is given. A new run of the same feature command (after the session ended mid-review) re-runs story-writer, and gate plan --story 'changes nothing', so the story is not recorded in the new run and its gates refuse it (blocked, then stuck). If the earlier run checkpointed, story-draft is closed and skipped, and the feature survey returns no units, so the new run has nothing to deliver. Fix stories admitted by earlier verify, maintain or wave rounds are in the same position, since fix stories are not in the plan's wave map.",
+   "proposed_resolution": "The survey of every workflow that calls story returns, as units, every story the open cycle admitted for that workflow (and a wave's fix stories) that is not delivered, and records each in the new run. gate plan --story, re-run for a story an earlier run admitted, records it in this run and returns the unit. When story-draft is done, the feature deliver stage takes its units from the survey. Apply this in pipeline 2.9.1, 2.9.4 and 2.10.8 and state 2.8 and 2.16, with a harness scenario that kills a fast route after admission. The standalone story survey on the slice path must likewise record its unit in its own run."
+  },
+  {
+   "id": "P3REQ-08",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.16 feature route row and survey row, 2.8 run record, S7 spec_locked",
+    "rewrite/design/pipeline.md 2.9.4 delta row, 2.6 lock paragraph",
+    "rewrite/design/pass2-closeout-3.md 'Seen while checking' (noted, not among R1-R5)"
+   ],
+   "problem": "Only vsdd feature route, the delta step's closing command, marks a feature run as holding the amendment. A standard-route run that checkpointed with its delta stage done (failed through finally, or partial at the budget) is resumed by a new run that skips delta and so holds no amendment. spec_locked is then true, and every evolve, check-fix and review-fix write by the planners is refused.",
+   "proposed_resolution": "The feature survey marks the run as holding the amendment when the cycle's route is standard and the cycle has no approved spec decision of its own (the same predicate closeout-3 proposes for R2). List vsdd feature route and the feature survey as writers of the run record. Apply this in state 2.8 and 2.16 and pipeline 2.9.4."
+  },
+  {
+   "id": "P3REQ-09",
+   "severity": "major",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 6 walls row ('ask safely')",
+    "rewrite/design/pipeline.md 2.8 open/record/ledger, 2.11.1 runSpike prompt",
+    "rewrite/design/agents-skills.md 2.9 read walls (spikes readable by builders)",
+    "rewrite/design/hooks.md 2.11.6 read-walls bullet",
+    "rewrite/design/packaging.md 2.6 universal test 10"
+   ],
+   "problem": "The walls protect what a spike runner reads, not what the asker hands it. The product-owner, scenario-reviewer and holdout-evaluator read hidden scenarios, and any of them may ask. The question and the runner's answer are written into the project ledger in .factory/spikes/, which test-writers, implementers, the story-writer and the architect may read. The question also goes into the prompt of a runner denied holdout, which may copy it into a kept worktree that builders can open. Universal test 10 plants its marker only in findings, so this path is untested.",
+   "proposed_resolution": "A spike whose asker may read holdout is walled. Its ledger entry is stored in the holdout-evaluations class and is named elsewhere by its id only. Its kept worktree is denied to callers denied holdout. Its cached finding is returned only to askers that may read holdout. Universal test 10 also plants its marker in a spike question. Apply this in blueprint 6, pipeline 2.8, hooks 2.11.6, state's spike ledger and 2.16, and packaging 2.6."
+  },
+  {
+   "id": "P3REQ-10",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 delivery bullet ('merges locally'), 2.9.2 integration worktree, 3.6 'Nothing in 1.0 pulls or merges in the person's checkout'",
+    "rewrite/design/state.md 1 and 2.3 (checkout never switched, pulled or committed to), 2.12 [delivery] mode, 2.16 story deliver row",
+    "rewrite/design/hooks.md 2.11.4 merge-guard",
+    "rewrite/BLUEPRINT.md 4.12 delivery.mode row"
+   ],
+   "problem": "In local mode (no remote) the integration branch is normally the branch checked out in the person's main checkout, because init reads the current branch names. Git will not check out the same branch in the tool's _integration worktree. Merging in the person's checkout breaks the stated rule and fails or mixes changes when that checkout is dirty. Moving the ref from elsewhere leaves the person's index and files out of step with their HEAD. The design picks neither, so the G4a builder must break a promise either way. The slice delivers in local mode.",
+   "proposed_resolution": "In local mode the integration branch is checked out only in .worktrees/_integration/, and story deliver merges there with git hooks running. vsdd init detects a person's checkout on that branch, setup offers the one command that moves it to another branch, and doctor reports it. Otherwise story deliver returns refused with that reason. Apply this in pipeline 2.9.1, state 2.12 and 2.16, hooks 2.11.4 and blueprint 4.12, and leave the slice sample's main checkout on a non-integration branch."
+  },
+  {
+   "id": "P3REQ-11",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.1 runSpike(), 2.8 who-asked table, 2.9.12",
+    "rewrite/design/state.md 2.16 spike open row",
+    "rewrite/design/hooks.md 2.11.6 'Who asked' row"
+   ],
+   "problem": "runSpike() always opens with 'spike open --run <id> --step <stepKey>', while the spike workflow (the person's entrance) must open with --run alone and read the question from the run record. Ported as written, the person's quick spike passes an empty or invented step key and is refused. hooks.md's 'Who asked' row names only the step record and the admission, so the H8 and S6 builders read different rules.",
+   "proposed_resolution": "runSpike() omits --step when the step key is empty, and the spike workflow calls it that way. hooks.md 2.11.6 adds the third source: the run record of a spike run, whose asker is the main session."
+  },
+  {
+   "id": "P3REQ-12",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/BLUEPRINT.md 6 Retention row",
+    "rewrite/design/pipeline.md 2.8 'Ledger and retention'",
+    "rewrite/design/state.md 2.10 --fix, 2.12 retain_days comment, 2.17 retention bullet"
+   ],
+   "problem": "Three texts remove spike worktrees older than 14 days, keeping only the branch of an open named spike. Only the configuration comment says 'finished'. A named spike spans many sessions, and its worktree holds .spike/STATE.md, .spike/TASKS.md and any hand-made work, so checkpoint or status --fix deletes it on day 15 while the spike is still open. Attaching is not said to recreate it.",
+   "proposed_resolution": "Count retention from the entry's verdict, or from delivery of the asking unit, and never remove an open named spike's worktree. Use the same wording in blueprint 6, pipeline 2.8 and state 2.10, 2.12 and 2.17."
+  },
+  {
+   "id": "P3REQ-13",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.8 condition table, unmounted row",
+    "rewrite/BLUEPRINT.md 7 fresh clone row",
+    "rewrite/design/state.md 2.3 'once per clone', 2.10 fresh clone row, 2.16 exit 2 outside an initialised project"
+   ],
+   "problem": "On a fresh clone the state branch exists but is not mounted, so hooks are 'inert and silent' and the session prints no briefing. vsdd status exits 2, so nothing tells the person or the model to run setup, against the requirement that the briefing says whether the project is initialised. The unmounted state can be recognised from .git/packed-refs or refs/remotes without starting a process, as the legacy line already does in shell.",
+   "proposed_resolution": "In brief mode the launcher recognises unmounted by that file read and prints one fixed line naming /vsdd-factory:setup, as for legacy. vsdd status reports unmounted with the same line instead of exiting 2. Apply this in hooks 2.8 and state 2.9, 2.10 and 2.16."
+  },
+  {
+   "id": "P3REQ-14",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/state.md 2.15 steps 1-3 and stories row",
+    "rewrite/design/packaging.md cutover apply step 1",
+    "rewrite/BLUEPRINT.md 4.1 worktrees row",
+    "rewrite/reference/old-workflows-packaging-map.md (old .worktrees/S-N.MM/ layout)"
+   ],
+   "problem": "The importer keeps story identifiers and brings in-flight stories back through queued requests, but it refuses only worktrees with uncommitted work. Clean pre-1.0 worktrees stay at .worktrees/S-N.MM/ on feature/ branches; two old projects have them today (prism S-3.09, pregolya S-1.02). Re-admitting such a story makes the worktree library create a path that already holds a worktree, so admission fails. Until then, the hook's path-based story mapping also misattributes the directory to that story.",
+   "proposed_resolution": "vsdd import removes every clean pre-1.0 story worktree under .worktrees/, keeps the branches, and lists them in its report and dry run. Apply this in state 2.15 and the cutover description in packaging."
+  },
+  {
+   "id": "P3BLD-01",
+   "severity": "blocker",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.7 item 2",
+    "rewrite/design/pipeline.md 2.10.3, 2.9.1 review row, 2.11.2 review() and delivery loop",
+    "rewrite/BLUEPRINT.md 4.10 Verdict row, 5.4",
+    "rewrite/design/state.md 2.8 Step record row and verdict paragraph",
+    "rewrite/design/packaging.md 2.6 layer 2b"
+   ],
+   "problem": "The tool must count a pass only when the stored agent type owns the pass's method. The step identity (run, workflow, name, subject, attempt) and the step record carry no method, so that rule cannot be applied.\n\nNothing defines how the verdict function rebuilds converge()'s inputs from step records: which records are passes, the items each pass had to account for, disputes, rulings, waivers and the cap.\n\nThe scoped review after a failed delivery restarts at pass 1. In the same run it writes review-<lens>-p1.1 and fix-<who>-p1.1, which overwrite the first loop's records.",
+   "proposed_resolution": "1. Add method (required) and loop to the step identity: in brief()'s Return step line, in 2.10.1 and stepSchema(), and in what the hook stores.\n2. Have story.js pass the loop to review(), and name steps review-<lens>-<loop>-p<k> and fix-<who>-<loop>-p<k>.\n3. Add a verdict-inputs paragraph to state.md 2.8:\n- passes are done records whose method is a review method of the perimeter, from the agent type that owns it, grouped by loop and pass, with the latest loop winning;\n- the items to account for are the story's acceptance criteria, or for a repair loop the delivery record's changed_files;\n- disputes come from fix-record resolutions, rulings from the arbitrate record, and waivers from finding decisions;\n- the cap is convergence.passes.\n4. Have G3 write fixtures for each input (or adopt P3BLD-27)."
+  },
+  {
+   "id": "P3BLD-02",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 story deliver bullet, 3.6",
+    "rewrite/design/state.md 1 Summary, 2.3 table, 2.16 story deliver row",
+    "rewrite/design/hooks.md 2.11.4",
+    "rewrite/BLUEPRINT.md 4.12 delivery.mode, 9.2 G4a"
+   ],
+   "problem": "Local mode 'merges locally' onto the integration branch, which is normally checked out in the person's checkout. Merging there touches that checkout, which state.md 1 and pipeline 3.6 forbid. Moving the branch elsewhere with update-ref leaves the person's index and tree stale.",
+   "proposed_resolution": "Specify the mechanism once:\n1. Make the merge commit in the detached integration worktree.\n2. Move the branch with update-ref <new> <old>.\n3. If the branch is checked out in a clean person's checkout, run 'git -C <root> merge --ff-only' as the one stated, announced exception.\n4. If that checkout is dirty, return awaiting_merge with 'commit or stash, then rerun'.\nState this in pipeline 2.9.1 and state.md 2.16, and refer to it from G4a and state.md 1/2.3."
+  },
+  {
+   "id": "P3BLD-03",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.7 condition 4, 2.10.2 note, 2.11.1 judge()",
+    "rewrite/design/hooks.md 2.11.7 item 3",
+    "rewrite/BLUEPRINT.md 5.4"
+   ],
+   "problem": "On the second return, the hook stores still-ungrounded findings as grounded:false (advisory). The script receives the agent's unmarked copy, so judge() treats them as blocking.\n\nThe script then loops fix rounds and may end blocked at the cap. Meanwhile the tool's stored verdict is converged, so the checkpoint opens no decision and the story is stuck until the next run. The conformance fixtures cannot catch this, because grounding exists only in Python.",
+   "proposed_resolution": "- On the second return, have step-results return updatedInput for the StructuredOutput call, marking the ungrounded findings grounded:false.\n- Make judge() and its Python copy treat grounded===false as not hard.\n- Add a conformance fixture, and add the StructuredOutput rewrite to probe 27.\n- Fallback if updatedInput is not honoured: block until the reviewer drops the finding or lowers it to low."
+  },
+  {
+   "id": "P3BLD-04",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 Details bullets 1, 3, 4",
+    "rewrite/design/state.md 2.16 gate red/green/demo rows",
+    "rewrite/design/hooks.md 2.11.4",
+    "rewrite/BLUEPRINT.md 3.3 steps 5, 6, 8; 9.2 G2"
+   ],
+   "problem": "Six facts the gates and the hook depend on are undefined:\n1. How a JUnit test case maps to its file (the file attribute is optional).\n2. Where the base commit's report comes from.\n3. How green-by-design and wiring exemptions are marked.\n4. What a stub marker is.\n5. Assertion failure versus build error. A Python stub that raises NotImplementedError is a JUnit error, so the slice's sample story would fail the red gate twice.\n6. How a criterion links to its tests for the demo table.\nG2 and H5 would each invent answers, and the answers need not agree.",
+   "proposed_resolution": "Add a gate-inputs list to pipeline 2.9.1, mirrored in state.md 2.16, with the agent-side half in the failing-tests method:\n1. Test identity is classname plus name. The file is the file attribute, else the classname mapped through the tests globs (init and doctor warn when neither exists).\n2. The base report is measured once in a temporary detached worktree and cached as evidence keyed by the base sha.\n3. A failure is <failure>, or an <error> of a constant list of not-implemented types; any other error fails the gate.\n4. The stub marker is the fixed string VSDD-STUB.\n5. A test is exempt when its name contains wiring or green_by_design.\n6. Test names carry ac<N>, and the red record keeps the criterion-to-test map that gate demo uses."
+  },
+  {
+   "id": "P3BLD-05",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1",
+    "rewrite/design/state.md 2.16 measuring commands, 2.8 Job record, 2.12 [commands]",
+    "rewrite/BLUEPRINT.md 4.13"
+   ],
+   "problem": "Gates bind evidence to the head commit but run the commands in the worktree as it stands. No rule covers uncommitted changes.\n\nUncommitted passing code can therefore earn green evidence for a head that fails, and delivery merges that head. Conversely, after an uncommitted edit, a gate run again on the same commit returns the old cached result.",
+   "proposed_resolution": "State that every story gate refuses a dirty worktree. Ignored files and untracked files under the report path do not count. The refusal is passed:false with the failure 'uncommitted changes: commit, then rerun'. Write this in pipeline 2.9.1 and state.md 2.16, and add a G2 fixture."
+  },
+  {
+   "id": "P3BLD-06",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/state.md 2.8 opening sentence",
+    "rewrite/design/pipeline.md 2.10",
+    "rewrite/BLUEPRINT.md 4.10, 9.1 C1",
+    "rewrite/design/hooks.md 5 S7"
+   ],
+   "problem": "state.md 2.8 says the record field lists are the pipeline's schemas, but pipeline 2.10 defines only result schemas. The run, closure, decision, cycle, evidence and job records have no schema, and C1 delivers none.\n\nThe red record's frozen-test list, the patch-id field and the run record's story list are therefore not settled. Yet S2a, S2b, S3, G2, G3, G4a, H5 and H7 are built in parallel against them.",
+   "proposed_resolution": "Have C1 also write run, closure, decision, cycle and evidence schemas, taken from the state.md 2.8 field lists. The evidence schema includes red frozen entries {id, file, sha256}, patch_id, sha and passed. state.md 2.8 then cites those files."
+  },
+  {
+   "id": "P3BLD-07",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.10 Step result row",
+    "rewrite/design/pipeline.md 2.10.8 Survey/Close/Delivery rows, 2.11.1 relay(), 2.11.2"
+   ],
+   "problem": "The survey, close and delivery output schemas are given as field lists only, with no required list and no JSON. The tool prints a short error object, and relay's fallback is {ok:false, error}.\n\nIf C1 requires every field, as the rule 'scripts read only required fields' implies, the clerk cannot return errors without inventing values. If C1 requires only ok, story.js reads non-required fields, against 4.10.",
+   "proposed_resolution": "- State that every tool output prints every field of its schema, with empty values on error, so all fields can be required.\n- Give relay() a fallback built from the schema: {...emptyOf(schema), ok:false, error}.\n- Write the survey, close and delivery schemas as JSON in 2.10."
+  },
+  {
+   "id": "P3BLD-08",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.6 layer 4",
+    "rewrite/BLUEPRINT.md 9.6 E1, E2",
+    "rewrite/design/pipeline.md 2.5 story preconditions",
+    "rewrite/design/state.md 2.3 Mounting, 2.12 detection"
+   ],
+   "problem": "The story-ready fixture is named once and defined nowhere. A standalone story needs a cycle, an approved spec decision with a matching digest, a contract, a story, and an admission in an open wave of a closed plan.\n\nBeyond that:\n- vsdd init cannot detect the sample's own JUnit runner;\n- copying an overlay cannot create the mounted factory-artifacts worktree (the condition would be partial, with state writes blocked);\n- the sample's bare origin makes init choose pr mode, while the slice uses local mode.",
+   "proposed_resolution": "1. Define the story-ready overlay in packaging 2.6:\n- factory.toml with commands and paths;\n- cycle.json with route standard;\n- an approved spec.json with its digest;\n- a closed plan.json with waves {W-01: [S-1.01]} and no wave closure;\n- one contract, an epic and S-1.01.md.\n2. Add tests/e2e/fixtures/load.py: it runs vsdd init, copies the overlay's .factory/ files onto the state branch, computes the digest, commits, and with --local removes the origin.\n3. Put the sample, its runner, the overlays and the loader in a new package E0 (depends on B3, S1), and make E1 depend on it."
+  },
+  {
+   "id": "P3BLD-09",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/STATE.md plan items for layers 1 and 2",
+    "rewrite/BLUEPRINT.md 9.1 B4a/B8/H1, 9.2 S1, 9.3 H7, 9.4 A1, 9.6 E1"
+   ],
+   "problem": "The slice's package list cannot be built in section 9's order:\n- layer 1 builds B4a without B6 (the roster that TIER, ROLE and OVERRIDE are generated from);\n- layer 2 builds S1 without C2, A1 without B8, and H7, which bundles decisions and so depends on S4;\n- H1's caller marker and the survey's hooks-alive check rest on unproven probe 27 (fallback 29), yet H1 does not depend on B8;\n- probe 10 decides whether the test-writer and implementer start at all, since they list MCP tools a strict run lacks;\n- probe 31 decides whether typed story arguments arrive;\n- the sample project exists only inside E1, which depends on H1 to H9, W1 and A6b.",
+   "proposed_resolution": "- Add B6 (the roster plus the slice's lints) and C2 to layer 1.\n- Run B8 for probes 10, 27, 28 and 31 (29 if 27 fails) before H1, and make H1 depend on B8.\n- Split H7 into H7a step-results (depends on H1, S2a, S3a) and H7b decisions (depends on H1, S4).\n- Add E0 (P3BLD-08).\n- Record the slice as a milestone in section 9, with the package depths given in the report."
+  },
+  {
+   "id": "P3BLD-10",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 9.5 W2, W3, W7, W11, W12; 9.4",
+    "rewrite/design/pipeline.md 2.11.2, 2.9.13",
+    "rewrite/design/packaging.md 2.6 universal tests 3 and 6, L-ROSTER, L-METHOD"
+   ],
+   "problem": "story.js names eight agents (the architect for arbitrate, the security-reviewer, devops, verifier, technical-writer, demo-recorder, test-writer and implementer). W2 does not depend on A2b, so its universal tests 3 and 6 cannot pass.\n\nOther workflows have the same gap: W3 lacks A2b, W7 lacks A2b and A6b, and W11 and W12 lack A6b.\n\nThe slice's four agents cannot run the full story.js, cannot pass L-ROSTER against a 20-agent roster, and reach a missing agent at the review cap.",
+   "proposed_resolution": "- Fix the 9.5 dependencies: A2b for W2 and W3, A2b and A6b for W7, A6b for W11 and W12.\n- State that roster.toml lists only the agents built so far and grows with the packages.\n- Have the slice ship every agent file story.js names, each with only the methods story.js uses: arbitrate, security-review, repo-setup, proofs, docs and demo."
+  },
+  {
+   "id": "P3BLD-11",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 9.2 S3, G4a, G5; 4.13",
+    "rewrite/design/pipeline.md 2.5 done test, 2.9.1",
+    "rewrite/design/state.md 2.6, 2.8 done-test bullets and checkpoint verdict"
+   ],
+   "problem": "S3 holds the survey and checkpoint semantics of all twelve workflows, an 18-row route, cycles and admission, which is too much for one builder. It also uses packages it does not list:\n- G2's diff patch writer and red records, for positions and patches;\n- G3's verdict, for the reviewed position and closure verdicts;\n- G5 and G6a gates, to measure missing evidence again.\nG5 itself depends on S3, which makes a cycle. And the story position that story.js skips on (ready, red, green, reviewed, evidenced, delivered) is defined nowhere.",
+   "proposed_resolution": "1. Split S3:\n- S3a: records, preconditions, the route and its fixtures, worktree library, admission, cycles; depends on S2a, S2b, C1.\n- S3b: positions, re-measurement through a gate registry that S2a defines and the G packages fill, and checkpoint mapping; depends on S3a, G2, G3.\n2. Make G5 depend on S3a and G4a on S3b.\n3. Define position in pipeline 2.9.1:\n- red: a passing red record in base..head;\n- green: green evidence for the head or for the same patch-id;\n- reviewed: the tool's verdict converged and covering the head's patch-id;\n- evidenced: demo evidence for the head, or no demo required;\n- delivered: the delivery closure exists."
+  },
+  {
+   "id": "P3BLD-12",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/hooks.md 2.5 Ctx story/cwd rows, 2.11.4 merge-guard, 2.11.10 lifecycle-log",
+    "rewrite/BLUEPRINT.md 4.13 Liveness, 10 item 28",
+    "rewrite/design/state.md 2.11"
+   ],
+   "problem": "A non-isolated workflow step starts every Bash call in the project root, so a builder commits with 'cd <worktree> && git commit' or 'git -C'. The payload's cwd is therefore the main checkout, which in local mode has the integration branch checked out.\n\nRead literally, merge-guard ('while the integration branch is checked out') then blocks every builder commit. Liveness by 'cwd inside a worktree the run owns', the fallback for probe 28, never fires for steps.",
+   "proposed_resolution": "- Define the effective directory of a Bash call in hooks.md 2.5: the last cd target or git -C path, else cwd. Use it for ctx.story, merge-guard, auto-allow's worktree tests and liveness; liveness also uses target for file tools.\n- Add two cases: 'cd <worktree> && git commit' with the main checkout on the integration branch is allowed; 'git commit' in the main checkout is blocked."
+  },
+  {
+   "id": "P3BLD-13",
+   "severity": "major",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/agents-skills.md 2.9 'Two consequences', 2.6 implementer row",
+    "rewrite/design/pipeline.md 2.11.2 implement stage, 2.9.1"
+   ],
+   "problem": "agents-skills 2.9 says the implementer reports a wrong frozen test under test_defects and 'the workflow sends it to test-writer'. story.js gives the implement step no data schema, never reads test_defects, and has no route to the test-writer before review.\n\nA wrong frozen test therefore blocks with kind gate, and becomes a stuck decision after two runs.",
+   "proposed_resolution": "- Give the implement step a data schema that requires test_defects (key, path, reason).\n- When the result is not green and test_defects is non-empty, run one test-writer test-fixes step ending with gate red --refreeze, then the implement step once more.\n- State this in pipeline 2.9.1, and add a harness scenario."
+  },
+  {
+   "id": "P3BLD-14",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 9.3 H9, 4.13",
+    "rewrite/design/state.md 2.11"
+   ],
+   "problem": "Lock refresh and the release at SessionEnd arrive only with H9 (lifecycle-log, which depends on S2c). Every workflow built earlier, the slice included, holds a lock that goes stale after 20 minutes. A long story review can then be taken over by a second session.",
+   "proposed_resolution": "Move the lock refresh and the session-end release into H1, using S2b's lock_seen and lock_release. Keep the agent records and log pruning in H9."
+  },
+  {
+   "id": "P3BLD-15",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md amendment 6, 2.10.8 Survey and Story unit rows, 2.11.2",
+    "rewrite/design/state.md amendment 16"
+   ],
+   "problem": "review_rules is stated as per unit (amendment 6), as a survey config field (2.10.8), and read as u.review_rules by story.js. A child receives only its unit, so under 2.10.8 every story reviewer is told 'Review rules: none'.",
+   "proposed_resolution": "Add review_rules to the Story unit fields in pipeline 2.10.8 and state.md amendment 16."
+  },
+  {
+   "id": "P3BLD-16",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2 review prompt, 2.10.6",
+    "rewrite/design/state.md 2.16 gate green"
+   ],
+   "problem": "Reviewers are given u.test_output from the survey, taken before any green gate ran. Each green result replaces the diff patch, but nothing replaces the test output path.",
+   "proposed_resolution": "Add test_output to the green gate result schema. Have story.js update it wherever it updates patch."
+  },
+  {
+   "id": "P3BLD-17",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2 survey early return, 2.5",
+    "rewrite/BLUEPRINT.md 4.13"
+   ],
+   "problem": "story.js returns without the checkpoint when s.ok is true and preconditions are met (so the lock is taken) but s.units is empty. The lock then leaks until it goes stale, against 'every return after a successful survey goes through the checkpoint'.",
+   "proposed_resolution": "Drop !s.units.length from the early-return test. The 'story is admitted' precondition already guarantees a unit."
+  },
+  {
+   "id": "P3BLD-18",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.2, 2.11.3",
+    "rewrite/BLUEPRINT.md 4.9 checkpoint row",
+    "rewrite/design/state.md 2.16 checkpoint row"
+   ],
+   "problem": "Both skeletons pass checkpoint --subject, but the command tables define only --run and --outcome.",
+   "proposed_resolution": "Remove --subject from the skeletons. The run record already holds the subject."
+  },
+  {
+   "id": "P3BLD-19",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.6 universal test 7",
+    "rewrite/design/pipeline.md 2.11.2, 2.11.3"
+   ],
+   "problem": "With every agent returning {status:'done'}, the survey stub is not ok, and the script correctly returns before the checkpoint. Universal test 7 can therefore never pass as written.",
+   "proposed_resolution": "Reword the test: with the survey stub returning a passing survey and every other agent returning done and empty data (and again with one agent throwing), the run ends with the checkpoint."
+  },
+  {
+   "id": "P3BLD-20",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.11.1 RUN.limits",
+    "rewrite/BLUEPRINT.md 4.12",
+    "rewrite/design/state.md 2.12 prelude-name table",
+    "rewrite/design/packaging.md 2.6 universal test 9"
+   ],
+   "problem": "The survey returns gate_minutes and ci_minutes under prelude names, but RUN.limits does not know them. Either every real survey fails universal test 9, or test 9 checks nothing.",
+   "proposed_resolution": "Add gate_minutes: 60 and ci_minutes: 30 to RUN.limits in the prelude."
+  },
+  {
+   "id": "P3BLD-21",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.5 table rows 2-3, --check list, prelude constraints",
+    "rewrite/BLUEPRINT.md 4.14"
+   ],
+   "problem": "The schema literals and the TIER, ROLE and OVERRIDE tables are 'a marked block inside the prelude', yet --check requires each stamped copy to equal workflow-lib/prelude.js byte for byte. The text does not say which file holds the generated blocks. And a 400-line cap cannot hold the full schema literals plus about 300 lines of functions.",
+   "proposed_resolution": "State the order: build.py regenerates the marked sub-blocks inside workflow-lib/prelude.js first, then stamps the file. The 400-line cap excludes the generated sub-blocks."
+  },
+  {
+   "id": "P3BLD-22",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.6 layer 4 sample project"
+   ],
+   "problem": "Inside a project, 'uv run python tools/junit_runner.py' creates .venv, writes or updates uv.lock (a manifests file), and may build the project, which needs a download that fails offline. build/junit.xml also lands in the story worktree. Together these leave the worktree dirty or put stray files in the story's diff.",
+   "proposed_resolution": "Use 'uv run --no-project python tools/junit_runner.py'. Give the sample a .gitignore with build/ and .venv/, and no [build-system]."
+  },
+  {
+   "id": "P3BLD-23",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/pipeline.md 2.9.1 admission paragraph",
+    "rewrite/design/state.md 2.8 Run record row, 2.16 survey row",
+    "rewrite/design/hooks.md 2.11.7 item 2"
+   ],
+   "problem": "Gates check that a story is recorded in the run, but only the admission commands are said to record stories. The survey of a standalone story is not. 'A live run', which step-results requires, is undefined, so records from runs without a lock (spike) may be dropped.",
+   "proposed_resolution": "- State that the survey records every story unit it returns in the run record's stories list.\n- Define a live run as one whose run record exists and has no checkpoint recorded."
+  },
+  {
+   "id": "P3BLD-24",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/design/packaging.md 2.5 [reveals] generation, 2.6 L-TEMPLATE",
+    "rewrite/BLUEPRINT.md 9.1 B4a, C2; 9.3 H7; 9.4 A1, A2a, A5; 9.6 T5",
+    "rewrite/design/hooks.md 2.11.7 item 3"
+   ],
+   "problem": "Several build items are owned by no package, or by two:\n- no package generates [reveals];\n- step-results needs unit_tree from S3, but H7 does not depend on S3;\n- T5 delivers assets/, which the A2a and A5 methods cite and L-TEMPLATE checks;\n- the shared block and severity table are delivered by both B4a and A1, and agent lint by both B6 and A1.",
+   "proposed_resolution": "- Give the [reveals] generator to B4a.\n- Make H7a depend on S3a.\n- Move scaffold/ and demo/ to A5 and design-system/ to A2a.\n- Leave the stamped texts in B4a and agent lint in B6, with A1 consuming both."
+  },
+  {
+   "id": "P3BLD-25",
+   "severity": "minor",
+   "on_slice_path": false,
+   "documents": [
+    "rewrite/design/hooks.md 2.11.10 caller markers, 2.16",
+    "rewrite/BLUEPRINT.md 10 items 7, 27, 30"
+   ],
+   "problem": "An updatedInput with no permissionDecision flows through normal permission evaluation of the rewritten command, which begins 'VSDD_CALLER=...'. A static allow rule such as Bash(vsdd:*) will not match it, so the D4 static-rule fallback would prompt on every vsdd call not permitted by auto-allow.",
+   "proposed_resolution": "- Add to probe 27 a check that a static allow rule still approves the rewritten command.\n- If it does not, have auto-allow return Permit with updatedInput for every vsdd call the caller's row grants."
+  },
+  {
+   "id": "P3BLD-26",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.7 Caller marker row, 4.9",
+    "rewrite/design/hooks.md 2.11.10",
+    "rewrite/design/state.md 2.11"
+   ],
+   "problem": "Simplification. The runner already rewrites every vsdd command, yet it also writes a one-time marker file that the tool reads and deletes. It could put the caller facts in the prefix directly, with the same forgery protection (gate-guard blocks typed VSDD_* assignments, and the prefix is added after the rules) and the same hooks-alive test.",
+   "proposed_resolution": "Prefix VSDD_CALLER_SESSION, VSDD_CALLER_AGENT, VSDD_CALLER_TYPE and VSDD_CALLER_CWD, quoted, instead of a marker key. This saves one record type, key generation, marker pruning and the read-delete race."
+  },
+  {
+   "id": "P3BLD-27",
+   "severity": "minor",
+   "on_slice_path": true,
+   "documents": [
+    "rewrite/BLUEPRINT.md 4.14 convergence row",
+    "rewrite/design/pipeline.md 2.10.3",
+    "rewrite/design/packaging.md 2.6 layer 2b"
+   ],
+   "problem": "Simplification. The merge guard needs one fact: the latest pass by its owning reviewers, at the head's patch-id, covered every item and left no blocking finding beyond arbiter dismissals (after a dispute) and waivers. Re-running a full Python port of converge() over every stored record is more than that fact needs.",
+   "proposed_resolution": "Define the tool's verdict as judge() in Python applied to the last pass, minus dismissals (the arbitrate record checked against fix-record disputes) and waivers, with rounds_used counted as the passes stored. This drops the Python converge() port, about half the conformance fixtures and most of P3BLD-01's reconstruction, while keeping every enforcement."
+  }
+ ]
+}

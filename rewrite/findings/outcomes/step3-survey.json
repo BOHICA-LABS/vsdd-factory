@@ -1,0 +1,68 @@
+[
+  {
+    "id": "P3COV-10",
+    "outcome": "fixed",
+    "what_was_done": "vsdd checkpoint takes an optional --subject that must equal the run record's subject (plan survey.md D1); a mismatch is exit 2 with nothing written, so a strict parser can never strand the lock.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_checkpoint.py, checkpoint.py; test next/tests/unit/test_checkpoint.py::test_checkpoint_subject_must_match_run"
+  },
+  {
+    "id": "P3SEAM-10",
+    "outcome": "fixed",
+    "what_was_done": "Same fix as P3COV-10: the checkpoint's optional --subject must equal the run record's, exit 2 otherwise, nothing written; W2 still settles what the story script sends (PL3-22).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_checkpoint.py, checkpoint.py; test next/tests/unit/test_checkpoint.py::test_checkpoint_subject_must_match_run"
+  },
+  {
+    "id": "P3BLD-23",
+    "outcome": "fixed",
+    "what_was_done": "The survey records every story unit it returns in the run record's stories (admission.admit calls runs.run_admit after the worktree exists), and 'a live run' is one whose run record exists with ended empty, which runs.run_require already refuses on (run_ended).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py; tests next/tests/unit/test_survey.py::test_survey_records_unit_in_run, next/tests/unit/test_admission.py::test_require_story_refusals"
+  },
+  {
+    "id": "P3REQ-07",
+    "outcome": "fixed",
+    "what_was_done": "On the story path: admit called again for a story whose closure carries admitted_by creates nothing new, records the story in the calling run and returns the same unit, so a re-survey in a new run satisfies the gates. The other surveys' re-admission of whole wave maps waits for S3 when widened.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py (admit); tests next/tests/unit/test_admission.py::test_admit_again_same_unit_new_run, next/tests/unit/test_survey.py::test_survey_delivered_story"
+  },
+  {
+    "id": "P3OPS-07",
+    "outcome": "fixed",
+    "what_was_done": "Same admission path as P3REQ-07: the membership check (runs.run_require with story=) is satisfied for a new run because admit re-records the story in the new run; the run live check is the ended field.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py; tests next/tests/unit/test_admission.py::test_admit_again_same_unit_new_run, next/tests/unit/test_admission.py::test_require_story_refusals"
+  },
+  {
+    "id": "P3OPS-08",
+    "outcome": "fixed",
+    "what_was_done": "Resolved for stories: position() and the evidence lookup read the evidence records of any run — they are written per subject and gate, with no run binding — so a story's position survives the death of its run and a takeover continues from disk. Non-story stages wait for S3 when widened.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (position), next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py (evidence, as built by records); test next/tests/unit/test_story_unit.py::test_position_survives_new_run"
+  },
+  {
+    "id": "P3REQ-02",
+    "outcome": "fixed",
+    "what_was_done": "No cycle base: admission reads the target branch's head at the moment of creation (target_head) and records it as delivery.base; a later story is cut from the head as it then stands. Readiness ordering (harness chores in wave 1) stays with G5 and the W-feature.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py (admit, record_base), worktrees.py (target_head); test next/tests/unit/test_admission.py::test_admit_base_is_target_head_at_creation"
+  },
+  {
+    "id": "P3OPS-10",
+    "outcome": "fixed",
+    "what_was_done": "On the story path: the survey's spec_approved precondition shows records' stale detail ('stale') after a hand edit, so the clerk's answer names it. The new route row and the new spec decision the survey opens are not at slice depth; S3 opens them when widened.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/preconditions.py, decisions.py (spec_approved, as built by records); test next/tests/unit/test_preconditions.py::test_spec_stale_after_edit"
+  },
+  {
+    "id": "D33-13",
+    "outcome": "fixed",
+    "what_was_done": "target_head in pr mode takes the remote from the target branch's upstream (git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)'), fetches refs/heads/<branch> under the branch's own name and reads the remote-tracking head; an upstream whose ref is not refs/heads/<branch>, and a missing upstream with zero or several remotes, raise WorktreeError('git') naming the branch and the correcting command. No remote name is in code; the test's remote is 'gitea'. Local mode is untouched.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (target_head, _remote_head); test next/tests/unit/test_worktrees.py::test_target_head_local_and_pr"
+  },
+  {
+    "id": "D33-21",
+    "outcome": "fixed",
+    "what_was_done": "This unit's part: the tracked records this unit writes (closure delivery.branch/base, delivery.run, admitted_by, stage entries) carry no machine-local path — branch names, commit ids and run ids only; the story unit's paths (worktree, story_path, review_rules, test_output) go into the survey's own command output, which may stay absolute. Delivery's closure detail texts are step 4's part.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py, checkpoint.py, story_unit.py; tests next/tests/unit/test_admission.py::test_admit_writes_closure_run_branch_worktree, next/tests/unit/test_checkpoint.py::test_checkpoint_closes_delivered_story"
+  },
+  {
+    "id": "D33-25",
+    "outcome": "fixed",
+    "what_was_done": "The assertion the entry reserves for the survey unit: create_story cuts the branch with git branch <name> <commit> (never from a remote-tracking name, never --track) and the test asserts git for-each-ref --format='%(upstream)' prints nothing for the new branch. No push is built; the slice changes nothing on a team.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (create_story); test next/tests/unit/test_worktrees.py::test_create_story_idempotent"
+  }
+]

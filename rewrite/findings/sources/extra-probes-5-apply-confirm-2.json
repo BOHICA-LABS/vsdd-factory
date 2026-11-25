@@ -1,0 +1,20 @@
+[
+  {
+    "id": "probes-5-apply-C2-1",
+    "origin": "probes-5-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/platform-proven-3.md (item 55, the last sentences of the tool_result bullet; item 52, the bullet 'The other records are left out')",
+    "problem": "The correction of probes-5-apply-C1-1 writes three things in both items. The reading rule: item 55 ends 'A reader of results takes the records of type: user only', and item 52's rule reads 'in their records of type: user only'. Its reason: item 55's 'a dedupe by id could keep the copy and lose the keys', and item 52's 'a reader that kept the copy would lose the key leg'. And the observation: item 55's 'No result of item 52's table with is_error: true has a copy', and item 52's 'No refusal was seen repeated'. The corrector's own design choice says item 55 holds only the fact that results are repeated and the rule is stated once, in item 52; the text does not do that. If a later probe sees a refused result repeated, two passages must change. Pass and fail do not change, and the plans cite item 52 only.",
+    "proposed_resolution": "Keep the facts in item 55: results repeated in api-request-blob records, the copy told apart by the record's type key and carrying none of item 52's keys, the lines where it was seen, and no result with is_error true repeated. Drop item 55's last sentence ('A reader of results takes ... lose the keys.'). Item 52 keeps the rule ('in their records of type: user only'). Its bullet shrinks to: 'Records of other types are left out: a result can be repeated in one with none of these keys (item 55), and the text leg would name a repeated refusal twice.' 'No refusal was seen repeated' is dropped. No plan change.",
+    "on_slice_path": false
+  },
+  {
+    "id": "probes-5-apply-C2-2",
+    "origin": "probes-5-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/platform-proven-3.md (item 52, the table's third row, column 'Transcript, line')",
+    "problem": "The new column gives leg A's a3338c7a916b05723 and rerun A's afbe9cef34f0bc21c as 'every result', with permissionDecision 'decision: accept'. Item 55 now says leg A's line 30 and rerun A's line 28 repeat two results each, and that a copy carries no permissionDecision. That is so: those api-request-blob records have only agentId, hash, message, sessionId and type. Read literally, 'every result' includes the four copies, and the row is wrong about them. The staged verify.py checks this row on type: user records only. Every other row of the column names lines, so this row is the one a reader checking the table cannot match line by line.",
+    "proposed_resolution": "In the third row, replace 'every result' with 'every result in a type: user record'. Or name the lines: leg A 17, 18, 19, 25, 27, 34, 39 and 45; rerun A 16, 17, 23, 25, 32, 37 and 43. The row stays under 400 characters and the file under 16 KB. Make the change in the same edit that cites step-transcripts/ for probes-5-apply-C1-2. No plan change.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,218 @@
+[
+ {
+  "id": "D33R-S-1",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/team-checks.toml",
+  "problem": "The design tells a lost race from a remote's rule by git's reason text, and git does not give that distinction. T-REMOTE says a push refused 'for a reason other than \"fetch first\"' is not retried and ends `refused`, as 'a rule of the remote that only a person can change'. T-PUBLISH retries only on 'fetch first', and any other failure means 'no claim and no run'. commands/sync.md repeats 'from the fetch on \"fetch first\"'. T-MINT repeats after 'a refused push'. topics/team-sync.md fact 1 says '[remote rejected]' marks a remote rule, 'so the two are told apart'. Tested with git 2.50.1 on a local bare repository and two clones. 'fetch first' appears only when the remote had already moved before the pushing clone connected. When two pushes are truly concurrent, both clients see the same advertised head, and the loser gets `[remote rejected] (failed to update ref)`, with 'cannot lock ref ... is at X but expected Y' on stderr. That happened in 40 rounds out of 40 with no hook, and again with a pre-receive hook that held both connections open. A rule-declined push shows `[remote rejected] (pre-receive hook declined)`. So under the rule as written, the loser of every real race is reported as blocked by a remote rule and is never retried. Two checkpoints at once leave one clone `refused`. A claim race for two different stories leaves the loser with no claim and no run, when it should have retried. The loser of a claim race for the same story does not name the holder, so proof scenario 1's end condition fails. Exclusivity still holds; the retry and the reported cause do not.",
+  "proposed_resolution": "Classify every refused push by measurement, never by its reason string. After any refusal, fetch the branch. If the remote head is no longer the commit the push was built on, the push lost a race: repeat from the fetch (T-PUBLISH, T-MINT, the sync). If the head is unchanged, the remote declined it: report `refused` with git's line. Correct team-sync fact 1, and add a fact for `[remote rejected] (failed to update ref)` in a concurrent push. M1's test makes the race deterministic with a pre-receive hook that sleeps, and asserts that the loser retries.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-2",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/claim-checks.toml",
+  "problem": "T-PUBLISH treats every failed push as 'no claim and no run', and its `unmeasured` cell says 'Nothing: the remote's answer to the push is the measurement'. The answer can be lost after the remote has acted on the push. Tested: a bare remote whose post-receive hook takes 5 s, and a client push run under a 2 s time limit, as the built helper (gitrun.py) runs every git call with a time limit. The client's push timed out, yet the remote branch held the client's claim commit. The same happens when a connection drops after the ref update. The clone then holds a claim it believes it lacks. For a `cycle` claim that blocks every other clone's wave, plan, verify and release in that cycle. `vsdd status --fix` removes only a run claim 'whose run has ended without a checkpoint', and this run never began. For T-MINT the command reports failure for an id the remote accepted. Running it again mints a second number, which leaves two change requests or two fix stories for one request.",
+  "proposed_resolution": "Measure the outcome whenever the answer did not arrive (a timeout, a dropped connection, any failure the refetch of D33R-S-1 does not explain). Fetch and test `git merge-base --is-ancestor <pushed commit> <remote head>`. If the commit is contained, the claim or id is held, and the command proceeds or returns it. If the fetch fails too, record the commit as `outcome_unknown` in the clone record and refuse new claims until a sync settles it. The briefing shows it. `status --fix` releases a claim of this clone that no run record names. Change both `unmeasured` cells to say this.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-3",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "topics/team-sync.md",
+  "problem": "Nothing detects that the state branch was rewound, force-pushed or deleted. The design's own rule, 'cannot measure is a failure', is not applied to the state branch: T-NOTICE covers only the target branch. Tested: a third copy force-pushed the state branch back past A's claim. On B, `git fetch upstream state` exited 0 and printed '(forced update)'. `git merge-tree --write-tree` of B's state and the rewound remote exited 0, and its tree held the dropped claim again, so the next sync silently undoes the rewind. A clone that fetched only after the rewind saw no claim and could claim the same story: double work. A deleted state branch makes `git fetch` exit 128, the same code as an unreachable remote, so the clone reports `unreachable`. Runs on held claims then start 'not refreshed', and the next push recreates the branch with exit 0 ('[new branch]'). T-PUBLISH's premise that 'only the holder removes its claim' is also unchecked. A claim file deleted with plain git by anyone else arrives as a change made on one side only and is taken silently; T-INCOMING only reports it.",
+  "proposed_resolution": "Make it a step of the sync. Before combining, test that the clone record's `remote_head` is an ancestor of the fetched head. If it is not, the state is a new state `rewritten`: nothing is combined or pushed, and both heads and the commits that vanished are named for a person. Tell a missing branch from an unreachable remote with `git ls-remote --exit-code <remote> refs/heads/<state branch>`, which exits 2 when the ref is absent (tested). The state is then `missing`, and nothing but T-SWITCH or init creates the branch. When a claim this clone holds disappears in a commit this clone did not make, report it and end the run as T-HOLD does. Add to T-REMOTE's `unmeasured` cell, and to the doctor, that the repository should forbid force-pushing and deleting the state branch. Add a proof scenario for each case.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-4",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/team-delivery-checks.toml",
+  "problem": "T-NEVER promises the tool never force-pushes over a person's commit, and its `unmeasured` cell says 'Nothing'. Delivery still 'pushes the story's own branch with --force-with-lease' after a rebase (commands/story-deliver.md), and T-NEVER allows rebasing a branch without a known hand commit. A bare --force-with-lease takes its lease from the remote-tracking ref, which any fetch moves, including an editor's background fetch or the person's own `git fetch`. Tested: holder A pushed story/S-1; teammate C pushed a hand commit to it; A fetched, rebased and pushed with a bare --force-with-lease. The push was accepted as a '(forced update)', and C's commit was no longer on the remote branch. The same push with --force-if-includes was refused with '[rejected] (remote ref updated since checkout)', and the hand commit stayed. The test T-NEVER plans, 'the hand commit's id is still on the branch afterwards', passes unless it fetches between the commit and the push.",
+  "proposed_resolution": "On a team, every forced push of a story branch names the expected value the tool itself last read and checked: `--force-with-lease=refs/heads/story/<id>:<sha>` together with `--force-if-includes`. Better still, once a story branch has been pushed, update it only by merging the target in, as T-NEVER already does for a branch with a hand commit, so that nothing is forced at all. Add a T-NEVER test that fetches between the teammate's push and the tool's push.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-5",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/team-delivery-checks.toml",
+  "problem": "T-BRANCH counts as hand commits all the commits the local branch lacks whenever 'the remote head is not this clone's head or an ancestor of it'. That also matches the holder's own commits after it rebases. Delivery rebases on a conflict, and T-NEVER allows a rebase of a branch with no hand commit; if the push that follows fails or the run ends, the local and remote heads diverge. Tested: A pushed story/S-1, the target moved, and A rebased locally. `merge-base --is-ancestor` of the remote head and the local head exited 1. The one commit the local branch lacked was A's own pre-rebase commit, with the same patch id as the rebased one. Merging it in as T-BRANCH says exited 0 and left the change twice in history. The holder's own commit is then recorded in `delivery.hand_commits`, made a `hand:` item for review, and may fail green as if a teammate had changed a frozen test.",
+  "proposed_resolution": "Record the head of each story branch the tool pushes, in the local store and in the closure. T-BRANCH treats as foreign only the commits on the remote branch that are not reachable from the last head this clone pushed, or fetched and checked. It drops any commit whose patch id is already on the local branch (`git cherry`). Add a T-BRANCH case: rebase locally, fail the push, then survey.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-6",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/claim-checks.toml",
+  "problem": "Read together, three passages deliver a story to the integration branch without a pull request. T-HANDOFF 'pushes the story branch to its upstream as a fast-forward'. T-REMOTE reads 'the upstream that git records for the branch (its remote and its ref)' before every push. team-sync fact 3 says `git worktree add --track -b` sets that upstream. A story branch is cut from the target's remote head. Tested: `git worktree add --track -b story/S-1 <path> shared/main` gave story/S-1 the upstream 'shared refs/heads/main'. A push to that ref was a fast-forward of main (`refs/heads/story/S-1:refs/heads/main`), and so was a plain `git push` under push.default=upstream. On a repository that does not protect main, the checkpoint would publish an unreviewed story onto the shared branch, against clause 4f. The slice's `create_story` creates the branch at a commit and so sets no upstream; the risk lies in what M1 and M3 add.",
+  "proposed_resolution": "T-REMOTE takes only the remote from a branch's upstream. A story branch is always pushed to `refs/heads/story/<id>`, named explicitly, and never to its upstream ref. Story branches are made with --no-track, and their upstream is set to `<remote>/story/<id>` at the first push. Correct fact 3 so that it does not suggest --track from the target. A test asserts that no checkpoint, release or claim release ever moves the integration branch.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-7",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/claim-checks.toml",
+  "problem": "T-PUBLISH builds the claim commit on the remote's head, and 'only after the remote accepted the commit is the mount moved to it'. That move is a fast-forward only when the mount holds nothing unpushed. T-FRESH refuses a new claim after `unreachable`, `diverged`, `blocked` or `refused`, but not after `unpushed` or `busy`, both of which leave unpushed commits in the mount. Tested: with one unpushed state commit in A's mount, a claim commit built on the remote head was pushed and accepted, and `git merge --ff-only <claim commit>` then failed ('Not possible to fast-forward'). A builder who moves the branch with update-ref instead orphans the unpushed state commits: a lost update. Also tested: `merge --ff-only` refuses over a modified tracked file even when its content equals the target's. So anything published must first be committed through the mount's own index, not only through a temporary one. T-FRESH also says nothing of a run on held claims after `diverged`, `blocked`, `unpushed` or `busy`.",
+  "proposed_resolution": "Before T-PUBLISH builds a claim commit, the mount's head must be the remote head (ahead 0). Otherwise it syncs first and refuses if that fails. Alternatively, it combines the accepted claim commit into the mount through T-COMBINE, never by update-ref. Add `unpushed` and `busy` to T-FRESH's refusals of a new claim, and state per outcome what a run on held claims does. State in team-sync that the flush commits through the mount's index, and that 'without touching the mount' applies to the merge only.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-8",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/claim-checks.toml",
+  "problem": "T-SETTLE and topics/team-records.md say 'nothing acts on a settlement before a sync has confirmed it: every survey syncs before it reads decisions'. A sync that fails confirms nothing, and T-FRESH lets a run on held claims start after `unreachable`. That survey reads decisions from the mount, which holds the local, unpublished settlement. Take A, offline, holding S-1, whose person settles `finding.S-1` as fix. Meanwhile B's person settles it as descope and pushes. A's run acts on fix. When A comes back online, T-SETTLE keeps B's descope and sets A's aside, but A's closure already records the work. The two answers have both taken effect, which team-records says cannot happen. No check enforces the sentence; it is advice.",
+  "proposed_resolution": "Make confirmation a property the decisions reader checks. A settlement counts as settled only when the state commit that settled it is contained in the clone record's last fetched `remote_head`. Until then it reads as open with the note 'settled here, not yet published'. A survey that started with `refreshed: false` therefore stops at such a decision. Add a proof scenario: settle offline, run on a held claim, and the run stops at the decision.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-9",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "topics/state-commits.md",
+  "problem": "The team section says the sync 'holds flush.lock, not the run lock', and ledger D33-3 adds that this is so 'no read-modify-write of a tracked record can straddle it'. The sync's fetch and push run under the git helper's time limit, 60 s by default in gitrun.py. Built code: `store.locked` waits 3 s for flush.lock and then raises `StoreBusy`; `settle_decision` takes flush.lock, and so does every closure write. While a sync is on the network, a decision a person types fails inside the hook's four-second deadline, and an agent's record write fails `busy`. The flush 'waits up to 5 seconds and then leaves the work to the holder'. When the holder is the decisions-and-claims-only sync, which runs while a run is live (T-SETTLE), the checkpoint's closures and claim removals are not in the commit that holder makes. Nothing says what a sync does when another sync of the same clone holds the lock. This is the failure for two sessions on one machine: one types a decision while the other's run checkpoints.",
+  "proposed_resolution": "The sync holds flush.lock only around its local steps: the flush commit, the combine and fast-forward, and writing the clone record. It never holds it across a fetch or a push. The network steps run unlocked, and the local step afterwards fails safe if the head moved meanwhile (update-ref with the expected old value, or ff-only). A flush that finds a sync holding the lock waits for that local step instead of leaving its work. A checkpoint's sync waits for another sync of the same clone, then runs its own. Add a test: settle while a sync's fetch is held open by a slow remote.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-10",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "topics/team-sync.md",
+  "problem": "Fact 8 and T-FRESH claim that because every git call 'runs with terminal prompts off and a time limit ... it fails ... Nothing waits'. GIT_TERMINAL_PROMPT=0 governs git's own prompts, not ssh's. Tested with OpenSSH 10.2 against a throwaway local sshd, in a terminal, with GIT_TERMINAL_PROMPT=0. `git ls-remote` over ssh printed the host-key question and waited. Run through subprocess.run with a 4 s time limit, as gitrun.py runs git (stdin inherited), git was killed at 4 s while the ssh child stayed alive and still held the prompt in the terminal. The same call with stdin from /dev/null in a new session (start_new_session) failed at once with 'Host key verification failed.' A Bash tool call here has no controlling terminal, so the case is a person's terminal: `vsdd sync`, `vsdd decide`, `vsdd claim take` (terminal only) and `vsdd claim release`.",
+  "proposed_resolution": "Run every git call that may reach the network with stdin from /dev/null, in a new session (no controlling terminal), and kill the whole process group at the time limit. Correct fact 8 to say what GIT_TERMINAL_PROMPT does and does not cover. M1's test runs a fetch over ssh to a local sshd with an unknown host key, from a terminal, and asserts an immediate failure and no leftover process.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-11",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "tables/team-checks.toml",
+  "problem": "Claims exclude each other only when every clone's state branch upstream is the same repository. Nothing in the design says so or checks it, and forks are not mentioned. Tested: a mirror of the shared repository, standing in for a fork. A clone of the shared repository and a clone of the copy both pushed a claim for S-1 as a fast-forward, and both were accepted. The shared repository held A's claim and the copy held B's. Both state branches have the same root commit, so git cannot tell two copies of one history apart. T-JOIN would admit B, because the copy's factory.toml says `team.enabled = true`. The result is the double work clause 4b forbids, and it is silent. It is also not said where story branches go in a fork workflow. T-BRANCH cannot see a teammate's fork, and a story base read from a fork's stale main is wrong.",
+  "proposed_resolution": "State the condition, since a program cannot measure it. In T-REMOTE's `unmeasured` cell, in setup and in the doctor, say that every clone's state branch and story branches must have the one shared repository as their upstream. When a clone has several remotes, setup asks the person which one is shared and sets the state branch's upstream there. The doctor lists, for each branch the factory uses, the remote's URL, so a person can compare clones. Say that a fork workflow pushes the state branch and story branches to the shared repository, or declare fork workflows out of scope for 1.0.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-12",
+  "origin": "decision D33, review (soundness)",
+  "severity": "major",
+  "where": "commands/release.md",
+  "problem": "On a team, stories reach the shared branch only through pull requests. Yet T-NEVER keeps 'the tool never pushes to a target branch outside a delivery or a release', and the release still moves target branches itself: the merge of `hotfix/<version>` back into the integration branch, and the release branch. Decision D33 expects the repository to enforce who may merge, and a repository set up that way protects the integration branch. Its rules then refuse the release's direct push. T-REMOTE reports `refused` and stops, and the design gives the release no other route, so a hotfix cannot be completed on the kind of repository D33 assumes. The 'integration lock' that the merge-back waits for is a file lock on one clone and serialises nothing with other clones' deliveries.",
+  "proposed_resolution": "In `pr` mode, and so on every team, the hotfix merge-back and any release commit on a branch the repository protects go through a pull request, using the same host module as delivery (ledger D33-18). Record the pull request and its merged sha in the release closure so that T-NOTICE recognises them. Drop the integration lock from the team path.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-13",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "topics/team-sync.md",
+  "problem": "T-COMBINE is right that a code-written record changed on both sides keeps the remote's version. But the git facts present `git merge-tree --write-tree` as the combining mechanism ('so do changes to different parts of one text file') without saying it must never decide a record. Tested: A changed `status` in a decision record and B changed `settled_on` and `note` further down the same file. `merge-tree` exited 0 and wrote a record neither side wrote, schema-valid, with status from A and settled_on and note from B. With nearer edits it exited 1 and still wrote a tree, with conflict markers inside the JSON. A modify/delete pair (a claim released here, taken over there) gave 'CONFLICT (modify/delete)'. A builder who trusts merge-tree's exit status merges two valid records into one that is wrong. Proof scenario 13 tests text only.",
+  "proposed_resolution": "State in team-sync, and in T-COMBINE, that the sync decides every path from the two diffs against the merge base before it builds the tree. A record takes the remote's blob, and only text paths go through merge-tree; its exit status is never the test for a record. Add a proof scenario: two edits to one decision record, far enough apart that git merges them; at the end the remote's version stands and the other is set aside.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-14",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/team-delivery-checks.toml",
+  "problem": "Shallow clones (common in CI) are not mentioned. Tested on a --depth 2 clone. `merge-base --is-ancestor` with a commit outside the shallow history exited 128, not 1. A first-parent count from the head gave 2 where the true count was 6. `merge-tree --write-tree` across the boundary failed with 'refusing to merge unrelated histories' (exit 128). T-NOTICE would then report `history_rewritten`, a wrong cause, or count too few hand commits; T-BRANCH would misjudge containment; the sync would fail with no named cause.",
+  "proposed_resolution": "Make it a refusal of the sync and a line of the doctor. When `git rev-parse --is-shallow-repository` is true, team use refuses, naming the shallow clone and `git fetch --unshallow`. T-NOTICE and T-BRANCH treat exit 128 from an ancestry test as cannot-measure, with its own reason.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-15",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/team-checks.toml",
+  "problem": "T-WHO, and team-sync fact 9, read `user.name` and `user.email` from git's configuration, but git stamps commits with GIT_AUTHOR_NAME and GIT_AUTHOR_EMAIL when they are set in the environment. Tested: with only environment identity, `git config user.name` exited 1, so T-WHO would refuse a clone that git commits from without trouble. With both set, the configuration named one person and the commit's author was the other, so a claim's `holder` and its state commit's author can disagree. The built helper passes GIT_AUTHOR_* through.",
+  "proposed_resolution": "Read the identity git will actually use: `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT` (and GIT_COMMITTER_IDENT). Tested: with nothing configured it exits 128 instead of inventing an identity from the system account, and with environment identity it returns that identity. Write the result into the claim, the decision and the delivery. Correct fact 9.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-16",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "topics/team-sync.md",
+  "problem": "The state branch's growth is not addressed. Every survey that takes a claim pushes a commit, every combine adds a merge commit, and team-claims makes the branch's history the record of who held what, so nothing is ever pruned from it. T-INCOMING checks 'every commit that arrives' file by file. A clone away for a month checks every intermediate commit, where the tree it will build on is what matters. Nothing measures the sync's cost as the history grows.",
+  "proposed_resolution": "State that the history is kept and grows by design. T-INCOMING checks the arriving tree once, plus the trailers of each arriving commit for the report. M5 measures a sync on a state branch with a large history (for example 50,000 commits), and the doctor reports the branch's size.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-17",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "topics/team-delivery.md",
+  "problem": "The design names no delivery state for a pull request that the host will merge later, as with a merge queue or a merge the repository's rules defer. Delivery's states are merged, awaiting_merge, ci_failed, conflict, review_stale, refused and checkout_dirty. `awaiting_merge` opens a `merge` decision for a person, which is wrong when nothing waits on a person. When the host merges, the commit it makes was built on a target head the tool never saw. T-DELIVERY's adoption rule then decides, and a changed patch id closes the story `unreviewed`. The design does not say this is the expected path for such repositories.",
+  "proposed_resolution": "Add a delivery state `queued`: the host has accepted the pull request and will merge it, no decision opens, and the next survey or delivery polls it. Say that the adoption rule of T-DELIVERY is how a merge made by the host is recorded, and that a patch id that differs makes the merge a hand commit for the wave's review.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-18",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/claim-checks.toml",
+  "problem": "T-HANDOFF pushes the story branch, so it carries only committed work. Uncommitted changes in the story worktree at a checkpoint, or at `vsdd claim release`, stay on the clone. Yet claim release frees the story as fully handed over, and team-records tells the next holder it continues from what was pushed. Work made before the checkpoint is then lost, where the design says only work made after the last checkpoint can be.",
+  "proposed_resolution": "T-HANDOFF reports uncommitted changes in a story worktree in the checkpoint result. `vsdd claim release` refuses while the story worktree has uncommitted changes, naming them.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-19",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "records/clone.md",
+  "problem": "A clone is named to people only by sixteen random hex characters. A person with two machines, the case of one person on two clones, sees on one machine that a claim is held by themselves on clone 5f0c2a9d81b3e746, and cannot tell which machine that is or whether it is gone. Clause 4b asks that everyone can see who is working on what.",
+  "proposed_resolution": "Give the clone record a label that the person gives when the clone joins or switches (defaulting to the host name), carry it in the claim beside the id, and print it in status and the briefing. The label is shown only and decides nothing.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-20",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/claim-scopes.toml",
+  "problem": "Two facts are defined twice and differently. (a) claim-scopes gives `open` as held 'act', 'for one command', while T-RELEASE has the checkpoint remove it. If the claim ends with the command, its removal can be published before the new cycle record: while a run is live, a sync started outside it (the detached decision sync, or `vsdd sync` from the main session) 'commits and pushes decision records and claims only'. A second clone then finds neither the claim nor an open cycle and opens a second cycle, the case the `open` claim exists to stop. (b) team-claims says a wave run 'takes each story it starts', while claim-scopes says the wave survey takes a claim 'for each story it returns as a unit'. Read the second way, one wave run holds every free story of the wave for as long as it runs.",
+  "proposed_resolution": "Define `held` in claim-scopes only. Make `open` held until the push that carries the new cycle record. A claims-only sync never publishes a claim removal while the records that claim covers are uncommitted. Say which story claims a wave survey takes.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-21",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/claim-checks.toml",
+  "problem": "T-CLAIM's store check refuses 'a write to a closure record ... for a unit whose claim in the mount does not name this clone'. Some units take no claim at all: `spike`, `discover` and a report-only `maintain`. Read literally, the check refuses their closures on a team. It also does not say what happens when two clones write the same unclaimed closure at once.",
+  "proposed_resolution": "Apply `claim_not_held` only to units that a scope in claim-scopes covers. Say that two clones writing one unclaimed closure end as T-COMBINE says: the remote's version stands, and the other is set aside and named.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-22",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "tables/team-checks.toml",
+  "problem": "T-INCOMING checks each arriving file against this plugin's registry. A newer plugin, still at or above `team.min_plugin`, that writes a path kind this plugin does not know therefore stops the unit on older clones as if its record were corrupt, with the route answer `human` and no word about versions. T-VERSION calls a newer writer only a report.",
+  "proposed_resolution": "When a file fails the registry check and its commit's `Plugin:` trailer is newer than this plugin, report it as 'written by plugin <v>; upgrade', distinct from a broken record. Say whether the unit stops; stopping is the safe answer, with the right cause given.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-23",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "registry.d/d33.toml",
+  "problem": "Package order. M2 delivers T-CLAIM, whose rows include a refusal of `vsdd story deliver`, a command package G4a builds, but M2 does not depend on G4a. M2 also delivers `vsdd claim release`, which must perform T-HANDOFF and refuse when it fails, but T-HANDOFF is built by M3, which depends on M2. M2's brief therefore cannot be completed as listed.",
+  "proposed_resolution": "Move T-CLAIM's delivery refusal to M4, which depends on G4a, or add G4a to M2's dependencies. Build claim release's hand-off with M3, or move T-HANDOFF into M2.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33R-S-24",
+  "origin": "decision D33, review (soundness)",
+  "severity": "minor",
+  "where": "topics/team-sync.md",
+  "problem": "`notes.json` is named as the one record that several clones write with no claim, and under T-COMBINE the remote's version stands. Any two notes that people on two clones add between syncs collide, and one person's note is set aside every time. That is noise and a lost write by design, for a file whose entries are independent.",
+  "proposed_resolution": "Store each note as a file of its own (for example `notes/<clone>-<n>.json`) and count the cap of five across the directory, so that two notes never collide.",
+  "on_slice_path": false
+ }
+]

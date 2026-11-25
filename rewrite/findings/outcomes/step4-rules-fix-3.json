@@ -1,0 +1,68 @@
+[
+  {
+    "id": "S4R-rules-7",
+    "outcome": "fixed",
+    "what_was_done": "The rule no longer enumerates spellings: shell.py now resolves wrappers (timeout, stdbuf, setsid, ionice, sudo added beside command/env/exec/nohup/time/nice, each with its option grammar), marks every env -S/--split-string spelling (separate, attached, --split-string=) as an opaque segment whose text carries the split string verbatim, and merge_guard judges a segment positively: git-bearing by its words, plain by program+literal words, else opaque_git unless position alone is harmless. write_targets/tests-first follow the same stance: an opaque segment whose text names a writer (write_unknown) is judged as the edit it could be, where a frozen test or product source could be the target. The four env -S spellings are tested (test_env_split_string_is_opaque), the unreadable write through sh -c and env -S in test_tests_first.py::test_unreadable_write_is_the_edit_it_could_be.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py; next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py; next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (write_unknown); next/tests/hooks/test_merge_guard.py; next/tests/hooks/test_tests_first.py"
+  },
+  {
+    "id": "S4R-rules-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "Point (2) of the new judgement: a git-bearing segment with a dollar sign or a backtick in any word outside a free-text option's value (-m/--message, -F/--file, separate or attached) is not plain; point (3) then decides by position. Every measured form blocks (test_substitutions_anywhere_are_not_plain, from the story worktree and the guarded checkout alike), and the plain forms beside them still pass: git commit -m 'costs $5', --message=\"costs $5\", -F $NOTEFILE, a heredoc message. The confirmation battery ran each against real git under sh and dash.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_impure, _free_text_attached, _harmless_or_block); next/tests/hooks/test_merge_guard.py"
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "Point (2) and (4): the project and the branch are found from the git directory when --git-dir or a same-segment GIT_DIR assignment names one — HEAD read from that directory itself, so <root>/.git judges the main checkout and <root>.git/worktrees/<name> judges the story branch (test_judged_at_a_linked_worktrees_git_dir, test_judged_at_the_git_directory). A segment whose own directory is in no factory project is judged when its git directory names a place inside one (the cd /elsewhere and -C /elsewhere cases). An export or bare assignment of GIT_DIR/GIT_WORK_TREE in an earlier segment makes every later git-bearing segment where_unknown (test_exported_git_dir_poisons_the_rest). --work-tree is never read for the branch.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_placement, _head_of_git_dir, _exports_git_environment, _unresolved); next/tests/hooks/test_merge_guard.py"
+  },
+  {
+    "id": "S4R-rules-C2-1",
+    "outcome": "fixed",
+    "what_was_done": "One table of git's separate-value global options lives in shell.py (GIT_GLOBAL_VALUE_OPTIONS: -C, -c, --git-dir, --work-tree, --namespace, --super-prefix, --config-env, --attr-source; --exec-path out, it takes no separate value) and merge_guard imports it for _git_words; shell's own -C threading uses the same table. git --namespace foo commit, git --config-env foo=bar commit and git --attr-source HEAD commit are judged (blocked on develop; test_global_option_table_is_one).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py; next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py"
+  },
+  {
+    "id": "S4R-rules-C2-2",
+    "outcome": "fixed",
+    "what_was_done": "The wrapper table grew timeout (with its leading duration operand), stdbuf, setsid, ionice and sudo, each with its option grammar, so the common runners are read and judged at the place git acts (test_wrappers_are_read_or_covered: blocked on develop, passing in the story worktree); a wrapper outside the table — flock, xargs — is a git-bearing segment that is not plain and is covered by the not-plain ruling: opaque_git on a guarded checkout, harmless in the story worktree. The class is closed, tested with flock and xargs. Real-git confirmation under sh and dash: no command that moves, commits on or pushes the guarded branch passes the rule.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_WRAPPER_PROGRAMS/_WRAPPER_FLAGS/_WRAPPER_VALUE_FLAGS/_WRAPPER_LEADING_OPERANDS); next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py"
+  },
+  {
+    "id": "S4R-rules-C2-3",
+    "outcome": "fixed",
+    "what_was_done": "-f removed from perl's value options (_VALUE_OPTIONS) and from _perl_scripted (standalone and bundled letters), and from the bundled-value tail list: perl -f -pi script.pl src/a.py lists src/a.py only, and perl -pi -f -e s/a/b/ src/a.py lists neither -f nor the script. Both commands are rows of test_write_targets_table.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py; next/tests/hooks/test_writes.py"
+  },
+  {
+    "id": "S4B-rules-2",
+    "outcome": "fixed",
+    "what_was_done": "A top-level subshell's segment carries the text it stands for — its own words and operators, quotes removed — instead of '()', and an empty subshell's text is ''. merge_guard's opaque ruling reads the segment's own text and no longer falls back to the whole command's; the caller check is untouched (test_caller.py and test_shell.py pass unchanged).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse, subshell segments); next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_chunks, _opaque)"
+  },
+  {
+    "id": "ORCH-6",
+    "outcome": "fixed",
+    "what_was_done": "The runner resolves ctx.project once, before any rule is selected or loaded; when the call belongs to no factory project, the runner's own selection chooses nothing and the call passes with exit 0, no output and no log write (_run_guarded: governing = ctx.project ahead of the selection). Decided at the top, not inside _rule_cfg. Explicit entries — the parameter the module documents as the tests' way to drive a rule's mechanics — are honoured as given, so test_runner.py's entries-driven tests keep their meaning without edits there. Tested through the launcher under sh, bash and dash and in process with the default registry, for a guarded-looking git command, an Edit and a StructuredOutput with a full step identity: exit 0, no output, no .factory and no events written (next/tests/hooks/test_hooks_inert.py, new file), with a project control that blocks. test_no_marker passes unchanged.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_run_guarded); next/tests/hooks/test_hooks_inert.py"
+  },
+  {
+    "id": "S4B-rules-4",
+    "outcome": "fixed",
+    "what_was_done": "test_rule_cases.py's _CASE_DIRS holds fixture_cases/ only, and its docstring says the per-rule tables are the rules unit's to run. test_gate_case_coverage keeps holding for the three rules by counting tests/hooks/cases/*.toml as data (rule_table_cases()) beside the probe cases, feeding gate_case_problems unchanged; test_rule_tables.py remains the one runner of those tables. Nothing else in the file changed.",
+    "where": "next/tests/hooks/test_rule_cases.py (_CASE_DIRS, rule_table_cases, test_gate_case_coverage)"
+  },
+  {
+    "id": "S4R-rules-12",
+    "outcome": "fixed",
+    "what_was_done": "(a) test_refused_bypass_forms_pass_unmarked_through_the_runner keeps its meaning: the fd-hugged push form is separated from the pass-through list and asserted blocked by merge-guard with push_to_guarded and still unmarked, in the new test_fd_hugged_push_is_blocked_by_merge_guard; every other form passes unmarked as before. (b) The two liveness tests send a StructuredOutput payload with the full step identity and shape a real step sends (run, workflow, subject, name, attempt, method; status, summary, head, data), so step-results stores it instead of refusing bad_identity; what the tests assert about the lock is unchanged.",
+    "where": "next/tests/hooks/test_caller.py; next/tests/hooks/test_liveness.py (_step)"
+  },
+  {
+    "id": "S4B-rules-1",
+    "outcome": "fixed",
+    "what_was_done": "rewrite/spec/rules/step-results.md carries the plan's rule where grounding is described: a finding that gives only one of line_start and line_end is read as that one line. No code change: vsdd.grounding._line_bounds already implements it. spec_lint passes.",
+    "where": "rewrite/spec/rules/step-results.md (Grounding paragraph)"
+  }
+]

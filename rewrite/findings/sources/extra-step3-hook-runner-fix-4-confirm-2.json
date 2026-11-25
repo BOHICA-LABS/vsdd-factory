@@ -1,0 +1,20 @@
+[
+  {
+    "id": "step3-hook-runner-fix-4-C2-1",
+    "origin": "step3-hook-runner-fix-4, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py (_CALL_TEXT_RE, program alternative); rewrite/spec/topics/caller-identity.md",
+    "problem": "The program alternative [A-Za-z0-9_@%+:,./-]+/vsdd lets the path start with '%', '-' or '+'. bash 3.2, bash 5.3, macOS /bin/sh and zsh 5.9 read a first word that starts with '%' as a job spec. So 'VSDD_CALLER=<key> %/vsdd survey' runs the fg builtin, not the path: the shell prints 'fg: no job control', or 'no such job' under set -m. Only dash runs the path. Through the runner, an agent's '%/vsdd survey' gets the caller marker, permissionDecision 'allow' and updatedInput for a command that does not run vsdd. No probe ran anything harmful, because a fresh shell has no job to resume. Still, this is the gap step3-hook-runner-fix-4-C1-1 closed for '=': the spec's reason there is that the shell must run the path. A path that starts with '-' or '+' does run, but bin/vsdd is a '#!/bin/sh' script. The kernel passes the path to sh as its first argument, and sh reads it as options ('-/: invalid option'). Such a call is approved and can never work. In a four-shell canary sweep of 1851 accepted texts, these were the only ones that did not run the vsdd canary exactly once.",
+    "proposed_resolution": "Let the program path start only with a letter, a digit, '_', '.' or '/', for example (?:vsdd|[A-Za-z0-9_./][A-Za-z0-9_@%+:,./-]*/vsdd). Say in caller-identity.md that the path does not start with '%', '-' or '+', and why. Add '%/vsdd survey', '%1/vsdd x', '-x/vsdd survey' and '+/vsdd survey' to REFUSED_CALLS, which the regex-alone test then covers, and to test_refused_bypass_forms_pass_unmarked_through_the_runner.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-hook-runner-fix-4-C2-2",
+    "origin": "step3-hook-runner-fix-4, confirmation",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_caller.py (LEDGER_BYPASS_FORMS, test_refused_bypass_forms_pass_unmarked_through_the_runner)",
+    "problem": "The unit's brief asks that every bypass command the ledger records for this unit become a test case. Each case must show that an agent's call in that form gets no caller marker and no permission decision. LEDGER_BYPASS_FORMS holds 31 forms, but only 11 go through the runner as an agent, in test_refused_bypass_forms_pass_unmarked_through_the_runner and test_decision_pairing. The other 20 are checked only through is_vsdd_call and the regex. They include forms the ledger says got the marker, 'allow' and updatedInput through the runner: 'vsdd survey \"${x:-\"'\"}\"$(id)''', 'vsdd survey \"${(e):-\\$(id)}\"', \"vsdd survey $'\\'';id;'x'\", 'vsdd survey ${x@P}' and 'vsdd survey [ && id ]'. The form S3R-hook-runner-C2-1 records exactly, 'vsdd survey $(echo pwned > /dev/null)$((1))', is not in the tests at all. In a scratch run, all 31 forms and that one passed through the runner as an agent with no marker and no output. The gap is in the tests, not in the code.",
+    "proposed_resolution": "Make test_refused_bypass_forms_pass_unmarked_through_the_runner send every LEDGER_BYPASS_FORMS entry through the gate as an agent, as well as its own list. Add 'vsdd survey $(echo pwned > /dev/null)$((1))' under S3R-hook-runner-C2-1.",
+    "on_slice_path": true
+  }
+]

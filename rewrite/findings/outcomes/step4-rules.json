@@ -1,0 +1,62 @@
+[
+  {
+    "id": "P3SEAM-15",
+    "outcome": "fixed",
+    "what_was_done": "tests-first takes the frozen set from the latest red or re-freeze record alone (evidence()); a re-freeze that lists the complete set keeps the earlier files frozen and freezes tests added in the fix. Proven by test_refrozen_set_stays_frozen (tests/hooks/test_tests_first.py).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py; next/tests/hooks/test_tests_first.py::test_refrozen_set_stays_frozen"
+  },
+  {
+    "id": "P3SEAM-07",
+    "outcome": "fixed",
+    "what_was_done": "step-results blocks run_not_live through records' run_live as store_step applies it (a run record with no ended stamp); a run that has ended is refused. Proven by test_ended_run_blocks (tests/hooks/test_step_results.py). Runs that take no lock remain H4/S3 when widened.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_ended_run_blocks"
+  },
+  {
+    "id": "P3BLD-23",
+    "outcome": "fixed",
+    "what_was_done": "Same resolution as P3SEAM-07, landed with the rules unit's share: the rule's identity check plus store_step's run-live refusal covers the survey-recorded story run; test_stores_with_agent_type_and_head stores against the surveyed run and test_ended_run_blocks refuses the ended one.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py"
+  },
+  {
+    "id": "P3BLD-24",
+    "outcome": "fixed",
+    "what_was_done": "step-results imports unit_tree from the survey unit's vsdd.state.worktrees (the code follows the corrected dependency H7a<-S3a); the tree grounds worktree paths and .factory paths and an unbuilt workflow is tree_unknown. Proven by test_grounding_uses_the_unit_tree. The brief's dependency line remains the spec steward's.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_grounding_uses_the_unit_tree"
+  },
+  {
+    "id": "P3OPS-21",
+    "outcome": "fixed",
+    "what_was_done": "An invalid result is blocked every time and never stored (decision D14): the rule surfaces the store's schema_invalid refusal (the hook sees the result before the platform's schema check, platform item 40). Proven by test_invalid_result_blocked_not_stored; over_cap and step_exists likewise in test_store_refusals_block. The identity names no data schema, so data validation before a record counts stays G3's.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py"
+  },
+  {
+    "id": "VSA-07",
+    "outcome": "fixed",
+    "what_was_done": "Grounding is decided once, at store time (decision D13): an agent-supplied grounded key is stripped and only the failing findings carry grounded: false; the verdict trusts the stored mark and never re-grounds. Proven by test_stored_mark_is_the_only_grounding.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_stored_mark_is_the_only_grounding"
+  },
+  {
+    "id": "VSA-11",
+    "outcome": "fixed",
+    "what_was_done": "The evidence record is looked up by subject, gate and sha through evidence_read; the entry's own path is never opened. Proven by the forged-path case in test_gate_entries (an entry whose evidence path points outside the store is judged by the lookup alone).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_gate_entries"
+  },
+  {
+    "id": "P3BLD-27",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the tool's verdict is G3's; this unit's merge-guard reads no verdict and blocks on branch position alone, per the plan. G3 (verdicts) must own the judge() shape when it builds convergence.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py"
+  },
+  {
+    "id": "AU-S2-11",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the pointer restatement is spec prose work; this unit built to the plan and touched no pointer lines. H7 owes nothing until the H7 spec files shrink to pointers.",
+    "where": "rewrite/spec/rules/tests-first.md, rewrite/spec/rules/merge-guard.md, rewrite/spec/rules/step-results.md"
+  },
+  {
+    "id": "AU-P2-17",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands: no vsdd step record command exists at slice depth and the rule stores through the hook (the dispatcher refuses the name). What remains is the finding's list of not-built commands going into topics/command-conventions.md, which is the spec steward's (documentation package).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; rewrite/spec/rules/step-results.md"
+  }
+]

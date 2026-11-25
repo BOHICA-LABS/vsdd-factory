@@ -1,0 +1,38 @@
+[
+  {
+    "id": "P3OPS-09",
+    "outcome": "fixed",
+    "what_was_done": "The tool's half: the verdict applies the settled waivers of finding.<subject> to every pass and reads reviewed when nothing else is open. Implemented in vsdd.state.verdicts.waivers (waive and waive-coverage choices) and the loop inputs of rebuild; conformance cases l14-waived, l16-waived-coverage, r08-waive-after-cap; unit test test_waivers_from_settled_decision. The direct-after-cap guidance and brief() halves stay with B4a, W2 and S3.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (waivers, _rebuild); next/tests/conformance/cases/l14-waived.json, l16-waived-coverage.json, r08-waive-after-cap.json; next/tests/unit/test_verdicts.py::test_waivers_from_settled_decision"
+  },
+  {
+    "id": "S5P-N9",
+    "outcome": "fixed",
+    "what_was_done": "Decision D3 implemented: items are accounted for by the lens that owns them, so only a method with accounts=True (review-story-diff) decides coverage_missing and a security reviewer's checked can hide nothing. Conformance case r04-lens-coverage; the same rule holds in replay's gap filter.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_coverage_missing); next/tests/conformance/cases/r04-lens-coverage.json"
+  },
+  {
+    "id": "VSA-03",
+    "outcome": "fixed",
+    "what_was_done": "The one definition of 'the files changed': vsdd.state.verdicts.changed_files(project, since, head) with --no-renames, sorted, None when git cannot say; a later loop's items are changed(previous verdict head, its own first pass's head), and a loop whose items cannot be computed has no ok pass. Conformance case r06-repair-new-file; unit test test_changed_files_and_later_loop_items; test_items_equal_unit_acs holds the items to story_unit's ACs. The gate --since result is G2's and the script half is W2's, both taking this function.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (changed_files, _rebuild rule 8); next/tests/conformance/cases/r06-repair-new-file.json; next/tests/unit/test_verdicts.py::test_changed_files_and_later_loop_items"
+  },
+  {
+    "id": "P3BLD-27",
+    "outcome": "rejected",
+    "what_was_done": "The shorter rule (judge the last pass only) was not adopted, per plan decision D1: a claim the next reviewer did not confirm keeps its finding open and a dismissal needs the dispute and the ruling, which only a replay of every recorded pass gives. Case l10-claim-not-confirmed is one the shorter rule gets wrong; the full replay is built and conforms.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/convergence.py (replay); next/tests/conformance/cases/l10-claim-not-confirmed.json"
+  },
+  {
+    "id": "VSA-05",
+    "outcome": "fixed",
+    "what_was_done": "Decisions D4 and D6 implemented: a fix record counts only when one of its gates passed at the record's own head, so the retry is the attempt that counts and the failed attempt is listed in skipped with gate; the resolutions join test-fixes first with the last entry per key winning. Conformance cases r07-fix-retry and r16-fix-order-last-wins (both ways round).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_classify fix branch, _rebuild resolution join); next/tests/conformance/cases/r07-fix-retry.json, r16-fix-order-last-wins.json"
+  },
+  {
+    "id": "VSA-07",
+    "outcome": "fixed",
+    "what_was_done": "Decision D5 implemented: the verdict trusts the stored grounded mark and runs no grounding check at count time; the spec sentence in topics/verdicts.md now says 'honours the stored grounding mark'. Unit test test_verdict_trusts_stored_mark; the store-side grounding check is the rules unit's (H7).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/convergence.py (judge reads grounded); next/tests/unit/test_verdicts.py::test_verdict_trusts_stored_mark; rewrite/spec/topics/verdicts.md"
+  }
+]

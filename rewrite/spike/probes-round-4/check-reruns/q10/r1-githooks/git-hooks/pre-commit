@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "[r1-githooks pre-commit] pwd=$(pwd) GIT_DIR=${GIT_DIR:-unset} GIT_INDEX_FILE=${GIT_INDEX_FILE:-unset} GIT_WORK_TREE=${GIT_WORK_TREE:-unset} git-dir=$(git rev-parse --git-dir 2>&1) toplevel=$(git rev-parse --show-toplevel 2>&1) tracked=[$(cat scripts/version 2>&1)] untracked=[$(cat data.gen 2>&1)]" >> /private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/chk4/q10/hooklog.txt
+if [ ! -f data.gen ]; then echo "[r1-githooks pre-commit] FAIL data.gen missing" >> /private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/chk4/q10/hooklog.txt; exit 1; fi
+exit 0

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cycle-record.schema.json",
+  "type": "object",
+  "description": "Fields of the cycle record (state.md#2.8), cycles/<cycle>/cycle.json.",
+  "properties": {
+    "id": {"type": "string", "description": "Slug of 2 to 40 lower-case characters, chosen when the cycle opens."},
+    "kind": {"type": "string", "enum": ["product", "feature", "hotfix", "maintenance"]},
+    "title": {"type": "string"},
+    "route": {
+      "type": "string",
+      "description": "standard from the opening when a brief opens the cycle; written by vsdd feature route when a change request opened it; empty for a maintenance cycle."
+    },
+    "opened": {"type": "string", "description": "ISO 8601, UTC."},
+    "baseline": {"type": "string", "description": "A release tag, an ingest or an import; empty for a first release."},
+    "request": {"type": "string", "description": "brief, or the id of the one request file, CR-<NNN>."},
+    "closed": {"type": "string", "description": "Added once closed. ISO 8601, UTC."},
+    "version": {"type": "string", "description": "Added once closed by the release checkpoint: the release version."},
+    "archive_commit": {
+      "type": "string",
+      "description": "Added once closed: the commit of the state branch just before pruning."
+    }
+  },
+  "required": ["id", "kind", "title", "route", "opened", "baseline", "request"]
+}

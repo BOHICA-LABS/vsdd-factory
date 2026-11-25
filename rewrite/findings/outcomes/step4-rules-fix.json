@@ -1,0 +1,170 @@
+[
+  {
+    "id": "S4R-rules-1",
+    "outcome": "fixed",
+    "what_was_done": "write_targets runs _has_script_option on the original argument list, before the -e/-f value pairs are removed, so sed's files survive the script rule; the in-place tests are likewise taken on the original args. Added test_writes cases for -i -e, --in-place -e, -i.bak -e, -i -f with two files, --in-place --expression=, and a tests-first case (sed -i -e on source before red is blocked, and passes after red).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py; next/tests/hooks/test_writes.py::test_write_targets_table; next/tests/hooks/test_tests_first.py::test_bash_writes; next/tests/hooks/cases/tests-first.toml"
+  },
+  {
+    "id": "S4R-rules-2",
+    "outcome": "fixed",
+    "what_was_done": "_is_frozen now measures each form (literal and realpath) against the worktree root that form's own spelling gives, and continues on ValueError instead of abandoning the other form. A symlinked-parent test drives the project through an aliased path: a frozen-test edit there is blocked red_test_frozen.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py; next/tests/hooks/test_tests_first.py::test_frozen_test_through_symlinked_parent"
+  },
+  {
+    "id": "S4R-rules-3",
+    "outcome": "fixed",
+    "what_was_done": "An opaque segment whose own program is git is now judged through _git with its parsed args (a heredoc-message commit behaves like the plain commit), and the parser hands a subshell its own text as the segment's text, so only the subshell's interior is scanned instead of the whole command. Restored the here-document commit cases in the story worktree (both the -m \"$(cat <<EOF ...))\" and -F - forms) and the (cd elsewhere && make) && git commit case as passing.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse); next/tests/hooks/test_merge_guard.py::test_opaque_git_segments"
+  },
+  {
+    "id": "S4R-rules-4",
+    "outcome": "fixed",
+    "what_was_done": "_guarded finds the segment's project with find_project_root(seg.where) alone — no fallback to cwd or session root — and returns None outside a factory project; the branch names come from that project's configuration. test_unrelated_repository_passes extended: unrelated repositories on develop and on main both pass, commit and push, without any fixture branch setting.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py::test_unrelated_repository_on_any_branch"
+  },
+  {
+    "id": "S4R-rules-5",
+    "outcome": "fixed",
+    "what_was_done": "For rebase off a guarded branch, the rewritten branch is the last positional (with --onto's value skipped), the earlier ones being only upstreams: git rebase <upstream> and git rebase <upstream> <unguarded> pass in the story worktree; naming a guarded branch as that positional blocks integrate_on_guarded. Passing cases for git rebase develop, git rebase origin/develop, --onto forms; blocking cases with the guarded branch named.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py::test_rebase_rewrites_the_branch_argument"
+  },
+  {
+    "id": "S4R-rules-6",
+    "outcome": "fixed",
+    "what_was_done": "On a guarded branch, a pull that names a refspec after the remote blocks integrate_on_guarded; a bare pull and a pull with a remote and no refspec pass (decision D6 unchanged). Tested for git pull origin story/S-9.01 and git pull . story/S-9.01.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py::test_pull_with_refspec_integrates"
+  },
+  {
+    "id": "S4R-rules-7",
+    "outcome": "fixed",
+    "what_was_done": "The shell parser resolves the segment's program through the wrappers command, env (whose assignments read as the assignments they are), exec, nohup, time and nice, chaining included, and both rules match programs by basename (/usr/bin/git is git). The helper lives once, in shell.py, as the finding offers; tests-first's program matching happens inside write_targets, so both rules are covered.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py; next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/plugins/vsdd-factory/py/vsdd/hooks/writes.py; next/tests/hooks/test_merge_guard.py::test_wrappers_do_not_hide_git; next/tests/hooks/test_writes.py::test_write_targets_table"
+  },
+  {
+    "id": "S4R-rules-8",
+    "outcome": "fixed",
+    "what_was_done": "_grounding returns failing findings as (position, key, reason) triples into the findings list, and _marked sets grounded: false by position; the key survives only in the block text. A failing finding with no key, an integer key, and two findings sharing a key are all stored marked. Test with all three shapes asserts the four marks.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_ungrounded_marks_by_position"
+  },
+  {
+    "id": "S4R-rules-9",
+    "outcome": "fixed",
+    "what_was_done": "The once-per-step marker is written and findings_ungrounded is appended beside the other blocks (walled, gate mismatch, tree_unknown), so one return carries the whole picture and no platform retry is spent on an extra round trip. Test: a gate mismatch and an ungrounded finding together return both codes with the marker set; repairing the gate entry stores the marked finding without another ungrounded round.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_ungrounded_returned_beside_other_blocks"
+  },
+  {
+    "id": "S4R-rules-10",
+    "outcome": "fixed",
+    "what_was_done": "With config_error set, tests-first blocks writes inside a story worktree with code config_invalid instead of passing unjudged with the empty default class table; test_invalid_config_relaxes_nothing now covers tests-first beside merge-guard.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py; next/tests/hooks/test_rules_fail_closed.py::test_invalid_config_relaxes_nothing"
+  },
+  {
+    "id": "S4R-rules-11",
+    "outcome": "fixed",
+    "what_was_done": "test_corrupt_evidence_blocks writes a red record first, asserts a record was actually corrupted, and asserts rule_error (exit 2) for both a source edit and a frozen-test edit; the old no_red_evidence escape is gone.",
+    "where": "next/tests/hooks/test_rules_fail_closed.py::test_corrupt_evidence_blocks"
+  },
+  {
+    "id": "S4R-rules-12",
+    "outcome": "fixed",
+    "what_was_done": "Account corrected: at review the suite carried ten failures, not six-in-one-file — six in tests/hooks/test_rule_cases.py and four step-3 tests: test_caller.py's bypass form 10>/dev/null git push --force origin main (merge-guard blocks it; main is a guarded branch) and test_no_marker (a call in a directory in no project now dies in _rule_cfg on the None project), and test_liveness.py's two lock-refresh tests (step-results refuses their payload as bad_identity: no workflow in the step identity). Owed fix runs, none of them files a step-4 unit may edit (ORDER section 6 forbids test_rule_cases.py outright): hook-runner — _rule_cfg treats a None project as inert (RuleConfig defaults) and the bypass-form expectation in test_caller.py is updated for the guarded names; hook-runner-b — the liveness payload in test_liveness.py carries a full step identity. Also recorded: the plan's section 4 stop condition (test_rule_cases.py reading tests/hooks/cases/) was met and not reported; that file picks up the unit's case tables and runs them against a fixture-less project, which is why fixture-dependent cases fail there while the unit's own test_rule_tables.py, which honours the project key, passes.",
+    "where": "next/tests/hooks/test_caller.py, next/tests/hooks/test_liveness.py, next/tests/hooks/test_rule_cases.py, next/plugins/vsdd-factory/py/vsdd/hooks/main.py (all step-3 files, for the orchestrator's fix runs); account in this file"
+  },
+  {
+    "id": "S4R-rules-13",
+    "outcome": "fixed",
+    "what_was_done": "The three sentences rewritten: item 3 now says the record is looked up in the evidence store by the entry's subject, gate and commit, never by the path the entry carries; item 5 now says the store validated the record before it was written and the tool honours the stored grounded mark without grounding again; the closing paragraph now says the store validates the step record and the rule surfaces its schema_invalid refusal, citing the hook-before-platform ordering.",
+    "where": "rewrite/spec/rules/step-results.md"
+  },
+  {
+    "id": "S4R-rules-14",
+    "outcome": "fixed",
+    "what_was_done": "Added test_forged_evidence_path_is_ignored: a forged matching record written inside the project at .factory/local/forged-evidence, named by the entry's evidence path, with the store empty — the lookup by subject, gate and sha still returns nothing and the call is blocked gate_result_mismatch, storing nothing. Following the path would have stored, so the test fails without the fix.",
+    "where": "next/tests/hooks/test_step_results.py::test_forged_evidence_path_is_ignored"
+  },
+  {
+    "id": "S4R-rules-15",
+    "outcome": "fixed",
+    "what_was_done": "P3BLD-24 reopened below as left-for-builder: the code half stands (step-results imports unit_tree from vsdd.state.worktrees, proven by test_grounding_uses_the_unit_tree), but packages/H7.md's dependency line still lacks S3, and the finding's other three bullets — the [reveals] generator owned by no package, assets/ delivered by T5 while the A2a and A5 methods cite it, and the shared block and severity table delivered twice (B4a and A1) with agent lint double-owned (B6 and A1) — are untouched. Ledger rebuilt with findings.py build.",
+    "where": "rewrite/findings/outcomes/step4-rules-fix.json (P3BLD-24 entry); rewrite/findings/ledger.json rebuilt"
+  },
+  {
+    "id": "S4R-rules-16",
+    "outcome": "fixed",
+    "what_was_done": "The red_test_frozen fix line is now 'Return blocked again, with data.test_defects naming <path>.' — no instruction to run vsdd gate red --refreeze from a row that gate-guard refuses. test_frozen_tests asserts data.test_defects and the test's path appear in the fix and that the Instead line says to return blocked.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py; next/tests/hooks/test_tests_first.py::test_frozen_tests"
+  },
+  {
+    "id": "S4R-rules-17",
+    "outcome": "fixed",
+    "what_was_done": "test_refrozen_set_stays_frozen makes a real commit in the story worktree between the first red record and the re-freeze, so the two records exist at different commits: the frozen set is the latest record's (evidence()'s newest-first lookup), and a lookup that answered the oldest record would leave the added test unfrozen and fail.",
+    "where": "next/tests/hooks/test_tests_first.py::test_refrozen_set_stays_frozen; next/tests/hooks/rule_projects.py::commit"
+  },
+  {
+    "id": "S4R-rules-18",
+    "outcome": "fixed",
+    "what_was_done": "test_source_before_and_after_red makes a real implementer commit before the later-commit assertion. The three spec cases are in cases/tests-first.toml: an implementer edit after its own commit passes (story-committed fixture), a test-writer source edit after red at a later commit is blocked (red_already_recorded), and the same sed -i after red passes; a story-committed fixture (red, then one commit) backs them in rule_projects.CASE_PROJECTS.",
+    "where": "next/tests/hooks/test_tests_first.py::test_source_before_and_after_red; next/tests/hooks/cases/tests-first.toml; next/tests/hooks/rule_projects.py"
+  },
+  {
+    "id": "S4R-rules-19",
+    "outcome": "fixed",
+    "what_was_done": "check memoises the per-story facts (red-gate reading and red record) in one dict passed down _one_path, so forty written paths of one story spend one lookups round, not forty. Flagged for the orchestrator: evidence() itself runs git subprocesses (rev-parse HEAD per story, merge-base per record check) beyond hook-runner.md's one-git-subprocess-per-rule budget; the memoising keeps it one round per story, not per path.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py"
+  },
+  {
+    "id": "S4R-rules-20",
+    "outcome": "fixed",
+    "what_was_done": "ground() returns 'file cannot be read: <path>' when the cited file cannot be read instead of letting the OSError fall to the catch-all and ground; and the project root answers a .factory path only when the resolved path stays under project_root/.factory — .factory/../src/x.py resolves against the reviewed tree. Both tested in test_grounding.py (an unreadable file; a .factory/../ path against a tree that holds the file and a project root that holds a decoy).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/grounding.py; next/tests/unit/test_grounding.py::test_unreadable_file_is_reported, test_factory_dotdot_paths_use_the_tree"
+  },
+  {
+    "id": "S4R-rules-21",
+    "outcome": "fixed",
+    "what_was_done": "_next_verb skips the separate value of git's global options (-C, -c, --git-dir, --work-tree, --super-prefix), so sh -c 'git -C /main commit' is judged and blocked as opaque_git; and a --git-dir or --work-tree redirect is judged at the branch that tree has checked out — transparently (the block code of the verb, e.g. commit_on_guarded) and inside opaque text (opaque_git, with an unresolvable target failing closed and a redirect outside every factory project passing, per D7). Tests for all three plus the transparent redirect from a story worktree.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py::test_opaque_global_values_and_trees"
+  },
+  {
+    "id": "S4R-rules-22",
+    "outcome": "fixed",
+    "what_was_done": "_reset_moves searches for a mode flag over every argument before any --, so git reset HEAD --hard on a guarded branch blocks like git reset --hard; the revision scan is unchanged after it. The case joined test_reset_forms' blocked list.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py; next/tests/hooks/test_merge_guard.py::test_reset_forms"
+  },
+  {
+    "id": "S4R-rules-23",
+    "outcome": "fixed",
+    "what_was_done": "write_targets parses perl's value-taking letters (a bundle ending in -e/-f eats the next word; -M/-F/-I eat the rest of their word, so -Mail is a module, never in place), touch's -r/--reference/-d/--date as value options, and cp's --target-directory in the = and separate spellings beside -t and --target-dir. Table cases added for each, plus the /usr/bin/ spellings.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py; next/tests/hooks/test_writes.py::test_write_targets_table"
+  },
+  {
+    "id": "S4R-rules-24",
+    "outcome": "fixed",
+    "what_was_done": "The Rewrite now carries the marked input (the agent's result with the grounded keys adjusted), not store_step's record; test_stored_mark_is_the_only_grounding asserts the rewrite's input carries no agent_type while the stored record does.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py; next/tests/hooks/test_step_results.py::test_stored_mark_is_the_only_grounding"
+  },
+  {
+    "id": "S4R-rules-25",
+    "outcome": "fixed",
+    "what_was_done": "One predicate: steps._under_holdout normalises dot segments (posixpath.normpath after backslash folding), walls the store's holdout/ spelling as before, and the rule imports it instead of its own divergent copy. .factory/./holdout/x is walled; .factory/holdout/../x is not.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py; next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (imports the store's predicate)"
+  },
+  {
+    "id": "S4R-rules-26",
+    "outcome": "fixed",
+    "what_was_done": "test_block_texts_survive_the_wrapper now wraps each stderr in the platform's framing (item 40's shape: the platform's notice around the hook's text) and asserts tag, Why: and Instead: inside it. test_import_error_blocks is parametrised over merge-guard, tests-first and step-results, each with the payload it guards and a nothing-stored assertion for step-results. test_not_applied gains the docs story and the spike worktree cases.",
+    "where": "next/tests/hooks/test_rules_fail_closed.py; next/tests/hooks/test_tests_first.py::test_not_applied"
+  },
+  {
+    "id": "S4R-rules-27",
+    "outcome": "fixed",
+    "what_was_done": "rewrite/spec/rules/merge-guard.md's second bullet lists git revert and git am beside merge, rebase and cherry-pick, with the note that each adds a commit, matching the code and plan D6.",
+    "where": "rewrite/spec/rules/merge-guard.md"
+  },
+  {
+    "id": "P3BLD-24",
+    "outcome": "left-for-builder",
+    "what_was_done": "Reopened as left-for-builder: the code half is done — step-results imports unit_tree from vsdd.state.worktrees (the corrected H7a<-S3a dependency in code), proven by test_grounding_uses_the_unit_tree — but the spec edits remain: packages/H7.md's depends_on line still reads [H1, S2a, S4] with no S3; no package owns the [reveals] generator (the finding gives it to B4a); T5 still delivers assets/ that the A2a and A5 methods cite and L-TEMPLATE checks, against the finding's move of scaffold/ and demo/ to A5 and design-system/ to A2a; and the shared block and severity table is still delivered by both B4a and A1 with agent lint in both B6 and A1. Those are the spec steward's edits, not a builder's.",
+    "where": "rewrite/spec/packages/H7.md, packages/A2a.md, packages/A5.md, packages/B4a.md, packaging/build-step.md (steward); next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (done)"
+  }
+]

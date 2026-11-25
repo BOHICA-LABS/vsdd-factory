@@ -1,0 +1,8 @@
+[
+  {
+    "id": "step3-survey-fix-3-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "Both named tests in test_story_ready.py now check the loaded configuration instead of the file text, covering every numbered part. (1) The never-failing `assert own != sample` text comparison is gone, replaced by assertions on the Config the project loads after the build. (2) [state] is now asserted: config.get('state', 'push') is False, with the sample's [state].push is True asserted beside it so the discrimination is provably real (delivery.mode 'local' vs the sample's 'pr' likewise). (3) test_product_directory_sets_paths_from_the_sample now asserts the whole table: config.get('paths') equals the sample's [paths] read with tomllib from tests/e2e/sample-project/.factory/factory.toml, all seven keys (tests, harness, ci, repo_config, manifests, docs, source) — not just tests and source. Verified by mutation in a scratch copy of the tree: applying the sample's [state] in _install_product fails test_product_directory_keeps_the_project_configuration on the push check; applying only the tests and source keys fails test_product_directory_sets_paths_from_the_sample on the table equality; the pre-fix wholesale copy of the sample's .factory fails three tests. The unmutated code passes all five tests of the file, and the nine survey-unit test files pass (94 tests). No product code changed; story_ready.py is untouched.",
+    "where": "next/tests/unit/test_story_ready.py (test_product_directory_keeps_the_project_configuration, test_product_directory_sets_paths_from_the_sample)"
+  }
+]

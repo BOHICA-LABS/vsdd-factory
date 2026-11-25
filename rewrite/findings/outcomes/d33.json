@@ -1,0 +1,206 @@
+[
+ {
+  "id": "D33-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M6 adds the keys as its first task, when the build widens past the thin slice. Until then a [team] section is refused as any unknown key is, which is the safe answer.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/config.py"
+ },
+ {
+  "id": "D33-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M6 adds the section when it adds the keys (D33-1).",
+  "where": "rewrite/spec/records/config-fingerprint.md"
+ },
+ {
+  "id": "D33-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M1 makes the change to the flush and builds the sync, with S2b's owner, when the build widens. The flush as built is right for one clone.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py"
+ },
+ {
+  "id": "D33-4",
+  "outcome": "left-for-builder",
+  "what_was_done": "Each package adds its command's line in the same change as the command, when the build widens: M1 sync, M2 claim take, M3 claim release. H6's owner keeps the person-only list where gate-guard reads it.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml"
+ },
+ {
+  "id": "D33-5",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M2 adds the fields when it builds the claim, with the build step of B4a.",
+  "where": "next/plugins/vsdd-factory/schemas/survey.schema.json"
+ },
+ {
+  "id": "D33-6",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M2 inserts the steps, with S3's owner and M1's sync, when the build widens. The unit being built now keeps the planned order; its steps are already separate calls, which is all the insertion needs.",
+  "where": "rewrite/plans/step-3/survey.md"
+ },
+ {
+  "id": "D33-7",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 adds the links and changes the functions, with the owners of S4 and S2a, when the build widens. On one clone the built ordering is right.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+ },
+ {
+  "id": "D33-8",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 adds the fields when the build widens. The keyword arguments default to empty, so no caller built for the slice changes.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+ },
+ {
+  "id": "D33-9",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the records unit to hold now: it adds the test in its fix stage or its next round. The orchestrating session puts this entry in the unit's notes.",
+  "where": "next/plugins/vsdd-factory/schemas/"
+ },
+ {
+  "id": "D33-10",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 makes the change, with S2a's owner, when the build widens. On one clone the id is unique.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py"
+ },
+ {
+  "id": "D33-11",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 builds it (T-HANDOFF), with G2's owner for the lookup, when the build widens. Nothing is built differently now: the slice has one clone and its evidence is always local.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py"
+ },
+ {
+  "id": "D33-12",
+  "outcome": "left-for-builder",
+  "what_was_done": "S1's owner makes the change when the build widens, before or with package M6, whose T-JOIN builds on it. The slice's sample has one remote named origin or none, so nothing it does changes.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/mount.py"
+ },
+ {
+  "id": "D33-13",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the survey unit to build now. The orchestrating session puts this entry in the unit's notes before it launches the unit.",
+  "where": "rewrite/plans/step-3/survey.md"
+ },
+ {
+  "id": "D33-14",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M6 builds it, with S1's owner, when the build widens. The slice initialises a project that has no state yet, which this does not touch.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py"
+ },
+ {
+  "id": "D33-15",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 moves the count, with S3's owner, when the build widens. The survey-2 unit builds the planned function.",
+  "where": "rewrite/plans/step-4/survey-2.md"
+ },
+ {
+  "id": "D33-16",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 adds the rule to each minting command as that command exists; S1's owner gives next_id the argument when it builds vsdd new. Nothing on the slice mints an id.",
+  "where": "rewrite/plans/step-3/state-core.md"
+ },
+ {
+  "id": "D33-17",
+  "outcome": "left-for-builder",
+  "what_was_done": "G4a builds pr mode with that one function and that push when the build widens; package M4 then adds the rows, the keys and the state, with W2's owner for the script. Local mode, which the slice builds, is unchanged.",
+  "where": "rewrite/plans/step-4/delivery.md"
+ },
+ {
+  "id": "D33-18",
+  "outcome": "left-for-builder",
+  "what_was_done": "G4a builds pr mode behind that module when the build widens. Not decided here: whether 1.0 supports a second host; it is an open question of decision D33 for the person.",
+  "where": "rewrite/spec/commands/story-deliver.md"
+ },
+ {
+  "id": "D33-19",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M6 adds the lines read from the clone record and M2 the claim lines, with S2c's owner, when the build widens.",
+  "where": "rewrite/spec/topics/briefing.md"
+ },
+ {
+  "id": "D33-20",
+  "outcome": "left-for-builder",
+  "what_was_done": "B8 runs the probe before package M3 builds the rule's part with H7's owner, when the build widens.",
+  "where": "rewrite/spec/rules/decisions.md"
+ },
+ {
+  "id": "D33-21",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the delivery unit and the survey-2 unit to build now. The orchestrating session puts this entry in their notes.",
+  "where": "rewrite/plans/step-4/delivery.md"
+ },
+ {
+  "id": "D33-22",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M6 builds the function when the build widens; T1's owner prints its lines and the rest when T1 is built.",
+  "where": "rewrite/spec/commands/doctor.md"
+ },
+ {
+  "id": "D33-23",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M4 builds it when the build widens, on G3, G6a, G6b and G7.",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml"
+ },
+ {
+  "id": "D33-24",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M5 builds the fixture when the build widens, with E1's owner for the double.",
+  "where": "rewrite/spec/packaging/proof-team.md"
+ },
+ {
+  "id": "D33-25",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the survey unit to build now: the assertion in the test of create_story. The orchestrating session puts this entry in the unit's notes. Package M3 builds the push when the build widens.",
+  "where": "rewrite/plans/step-3/survey.md"
+ },
+ {
+  "id": "D33-26",
+  "outcome": "left-for-builder",
+  "what_was_done": "S3's owner builds the function that way when it builds adoption, which is after the slice; package M4 adds the team branches.",
+  "where": "rewrite/spec/topics/run-lock.md"
+ },
+ {
+  "id": "D33-27",
+  "outcome": "left-for-builder",
+  "what_was_done": "G7's owner builds the pr form of the release that way when the build widens; package M4 adds the check and the scenario.",
+  "where": "rewrite/spec/commands/release.md"
+ },
+ {
+  "id": "D33-28",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M3 builds it, with S4's owner, when the build widens. With team use off there is no clone record and a settlement counts at once, as built.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+ },
+ {
+  "id": "D33-29",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M1 adds it, with S1's owner, when the build widens. The slice makes no network call.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/gitrun.py"
+ },
+ {
+  "id": "D33-30",
+  "outcome": "left-for-builder",
+  "what_was_done": "K1's owner leaves the passage out; package M5 adds it when the proof passes.",
+  "where": "rewrite/spec/skills/setup.md"
+ },
+ {
+  "id": "D33-31",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package M1 adds the field to the job specification and sets it for the sync, with G1's owner, when the build widens. Nothing built today is a sync, so the job layer as built is right for every command that uses it.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py"
+ },
+ {
+  "id": "D33-32",
+  "outcome": "left-for-builder",
+  "what_was_done": "B4a keeps the reserve readable when it builds runStories(), and package M2 builds the survey's batch function and its test, when the build widens. The slice runs one story and never calls runStories().",
+  "where": "rewrite/spec/tables/work-claim-scopes.toml"
+ },
+ {
+  "id": "D33-33",
+  "outcome": "left-for-builder",
+  "what_was_done": "For S3's owner when pr mode is built with G4a: the leading + and the two assertions. The slice runs local mode only and never reaches this fetch.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py"
+ },
+ {
+  "id": "P3OPS-13",
+  "outcome": "left-for-builder",
+  "what_was_done": "Decision D33 settles the design, and the lease this finding proposed is not built. The fetch before a survey is the opening sync, without which no run starts (T-FRESH, package M1). What stops two machines running one wave is the work claim: a file on the state branch, made by a push the remote accepts from one clone only, with no expiry and no refresh (T-CLAIM and T-PUBLISH, package M2). A push that is not taken is judged by a fetch and ends as the sync's outcome, not as a blocked decision (T-PUSH, T-COMBINE). Nothing on the slice pushes or fetches, so S2b and S3 build nothing for it now.",
+  "where": "rewrite/spec/topics/team-sync.md, rewrite/spec/topics/team-claims.md"
+ }
+]

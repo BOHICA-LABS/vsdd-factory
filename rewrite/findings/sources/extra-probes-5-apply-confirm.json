@@ -1,0 +1,20 @@
+[
+  {
+    "id": "probes-5-apply-C1-1",
+    "origin": "probes-5-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/platform-proven-3.md (item 55, the bullet 'A tool_result is in a record of type: user'; item 52's refusal rule)",
+    "problem": "Item 55 says some tool_use entries are repeated in api-request-blob records, and that 'A tool_result is in a record of type: user, with its tool_use_id and the keys of item 52'. The api-request-blob records repeat tool_result entries too, and those copies carry none of item 52's record keys (no permissionDecision, no toolDenialKind). Leg A's step transcript agent-a3338c7a916b05723.jsonl repeats at line 30 the tool_results of the Write and the Read (lines 25 and 27). The check's rerun A, agent-afbe9cef34f0bc21c.jsonl line 28, does the same. Item 52's rule reads a tool_result 'whose record has permissionDecision'. A reader that takes tool_results from every record finds no key on the repeated copy, and its text leg ('requires approval') names a repeated refusal twice. No check's pass or fail changes, but the record leaves out what the evidence shows, the gap PR5C-7 asked to close for tool_use entries.",
+    "proposed_resolution": "Item 55's tool_result bullet adds that some tool_results are repeated in api-request-blob records with none of item 52's keys. A reader of refusals takes the type: user records only, which carry those keys, or dedupes by tool_use_id. No plan change: first-run.md 3.6 cites item 52.",
+    "on_slice_path": false
+  },
+  {
+    "id": "probes-5-apply-C1-2",
+    "origin": "probes-5-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/platform-proven-3.md (item 52, the table of permissionDecision and toolDenialKind); rewrite/spike/probes-round-5/",
+    "problem": "Item 52's table, and the refusal rule that first-run.md 3.6 session_ended and 3.7 denied apply, rest on step transcripts that are in no evidence folder. As the item says, they are in the sessions' folders under ~/.claude/projects/ (legs A, B and D) and in the check's scratch ~/.vsdd-probes/round-5-check.Y3aUf7/platform/ (the reruns). Claude Code removes old session transcripts after its cleanup period (the cleanupPeriodDays setting, 30 days by default), and the scratch is outside the repository; round 4 kept its rerun logs in the repository. This check reread the transcripts and found every row right: R3CTRL is reject, config, bashMiss:no-rule-match, user-rejected; R5B is reject, hook, hook:PreToolUse, permission-rule; R2C is accept, hook, with is_error true five times; the 2-cent rerun's T1 has no permissionDecision and user-rejected. Once the transcripts are removed, nothing in the repository supports the rule a counted check uses.",
+    "proposed_resolution": "The orchestrating session copies the step transcripts item 52 reads into rewrite/spike/probes-round-5/: leg D's agent-a5caa4d535b10df94, agent-a4bd7d5edd93227d3 and agent-ac674367fa72bb811; leg A's agent-a3338c7a916b05723; the check's rerun A agent-afbe9cef34f0bc21c; and the 2-cent rerun's agent-aeb3de9ef0ed5cf90 (each .jsonl). Item 52 then cites them there, in place of 'not in the evidence folder'.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,52 @@
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoC/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoC/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[]
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoC/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoC/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[]
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoD/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoD/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoD/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=unset GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoD/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END
+hook: pwd=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: GIT_DIR=/private/tmp/pr4-q10.YhrECl/repoD/.git/worktrees/_integration GIT_WORK_TREE=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoD/.worktrees/_integration
+hook: tracked scripts/version=[1.0]
+hook: untracked data.gen=[cat: data.gen: No such file or directory]
+hook: FAILING - data.gen (a file from the main checkout) is missing
+END

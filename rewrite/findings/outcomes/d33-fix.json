@@ -1,0 +1,338 @@
+[
+ {
+  "id": "D33R-F-1",
+  "outcome": "fixed",
+  "what_was_done": "T-REMOTE now takes only the remote from an upstream and never a ref: every fetch and push names refs/heads/<branch> on both sides, a story branch is created at a commit id (no upstream), is pushed under its own name to the remote of its target, and gets its own name as upstream at that first push; an upstream that names another ref is refused. T-HANDOFF pushes under the branch's own name and a test asserts that no checkpoint, release of a claim or sync moves the remote's integration branch (also proof scenario 29). The upstream fact was rerun on git 2.34.1 and 2.50.1 and corrected (team-git-facts, fact 4). New ledger entry D33-25 for S3 (on the slice path: keep creating the branch at a commit id, and assert it has no upstream) and M3; D33-13 now fetches the target by its own name and refuses a differing upstream ref.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-F-2",
+  "outcome": "fixed",
+  "what_was_done": "The five checks of hand commits (T-NOTICE, T-BRANCH, T-ITEMS, T-GAP, T-NEVER) no longer read team.enabled. They run wherever the branch they read has an upstream, which is the only way a teammate reaches the product; with no remote none runs. It is the third exception in the head rule of team-checks and is stated at the head of team-delivery-checks; only T-WAVE and the two claim refusals of T-DELIVERY stay under team use. Proof scenario 38 runs the hand-commit scenarios with team.enabled false. Consequence stated in config/team.md: a project with one clone and a remote now has commits made by hand reviewed.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-F-3",
+  "outcome": "fixed",
+  "what_was_done": "T-JOIN no longer refuses while team use is off: vsdd init mounts as it did before D33 (decision D1 holds) and returns a notice that another clone wrote the state, which setup shows. The flag --only-clone is gone. T-SOLO stays as the guard, in the checkpoint's push and vsdd sync only (vsdd status --fix does not start pushing with team use off), names two ways on (turn team use on; or, for one person who moved machines, combine with git and push), and lets a clone join by itself when a team was formed around it. The one statement of the earlier design that changes with team use off, the unasked rebase and retry at the state push, is named in the Team use passages of state-commits.md, run-lock.md and records/lock.md. Ledger entries D33-14 (S1, M6) and D33-3 (S2b, M1) carry it.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-F-4",
+  "outcome": "fixed",
+  "what_was_done": "T-FRESH now refuses every survey unless the opening sync ended synced, also for a run whose claims the clone holds: there is no offline continuation and no refreshed field. Clause 4c is the user's and is kept as written; team-sync.md says what it costs. Proof scenario 5.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-F-5",
+  "outcome": "fixed",
+  "what_was_done": "T-SETTLE: a settlement counts only once the remote holds it. The function that settles lists the decision in sync.unpublished of the clone record under the lock it settles under, the sync removes it when the commit is contained in the remote's head, and until then every gate, survey, route and delivery reads the decision as open; status and the briefing show it as settled here, not yet published. Proof scenarios 25 (finding.<story> settled while the remote is out of reach) and 26 (during a live run). Ledger entry D33-28 (M3, S4).",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-6",
+  "outcome": "fixed",
+  "what_was_done": "The remedy is dropped. State commits stay unsigned on a team, as decision D2 decided, and team-sync.md (A remote with its own rules) now says what the factory needs of the repository: direct pushes of unsigned commits to the state branch, so a rule that requires a signature or a pull request there declines every push and is not supported; such a push ends refused with git's line (T-PUSH) and vsdd doctor says what is needed. The other option, signing, was not taken because it reverses D2. No ledger entry for S2b: the flush does not change.",
+  "where": "rewrite/spec/topics/team-sync.md"
+ },
+ {
+  "id": "D33R-F-7",
+  "outcome": "fixed",
+  "what_was_done": "Fixed by removing what needed protecting: vsdd init has no --only-clone flag any more (D33R-F-3), so there is nothing a model could run in a person's place. D33-4 says that only claim take joins the person-only list.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-F-8",
+  "outcome": "fixed",
+  "what_was_done": "command:sync now gives the order of the sync and says that flush.lock is held for the three local steps only and never across a listing, a fetch or a push; a local step that finds the mount's head moved repeats; whole syncs of one clone are serialised by local/sync.lock. state-commits.md and ledger entry D33-3 say the same, with the test (a settlement and a closure write succeed while a slow remote holds a sync's fetch open; proof scenario 14).",
+  "where": "rewrite/spec/commands/sync.md"
+ },
+ {
+  "id": "D33R-F-9",
+  "outcome": "fixed",
+  "what_was_done": "T-FRESH has one rule for every outcome (no run unless synced) and command:sync lists each outcome with what a person does. T-PUBLISH and T-MINT build an isolated commit on the remote's head, never write the file in the mount first, and the mount takes the accepted commit by a fast-forward or through T-COMBINE; the mounted branch is never moved to a commit that does not contain its head. Scenario 4 of the old proof is now scenario 5 and expects unreachable.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-10",
+  "outcome": "fixed",
+  "what_was_done": "T-HOLD ends no run and releases no lock. It withholds, sets aside and reports the loss; a live run meets claim_not_held at its next tracked write to the lost unit (T-CLAIM) and ends at its own checkpoint, and a run with other units goes on with them. So a sync a hook started changes no lock, which keeps the reason team-use.md gives for vsdd sync true.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-11",
+  "outcome": "fixed",
+  "what_was_done": "command:sync states the limits: 30 seconds for each network call, 60 for all of a sync's calls inside a foreground command, and T-FRESH gives the claim 30 more, which keeps the survey inside the Bash default; a clone too far behind runs vsdd sync, which is a job. Every network call runs with standard input from /dev/null in a session of its own, GIT_ASKPASS and core.askPass empty, SSH_ASKPASS_REQUIRE=never, credential.interactive=false, and the whole process group is killed at the limit (team-sync.md, Credentials; ledger entry D33-29). Checked against a throwaway sshd with git 2.34.1 and OpenSSH 8.9 (team-git-facts, fact 10); M1 keeps it as a test and the proof has it as scenario 16.",
+  "where": "rewrite/spec/commands/sync.md"
+ },
+ {
+  "id": "D33R-F-12",
+  "outcome": "fixed",
+  "what_was_done": "The floor is stated: git 2.34 (T-VERSION), refused below by the preflight, which the sync, init, status and doctor share. It is 2.34 and not 2.38 because the sync no longer uses git merge-tree --write-tree: it decides each path itself and merges a text file alone with git merge-file. All fourteen facts were run on Linux with git 2.34.1, and all but the ssh and askpass part of fact 10 on macOS with 2.50.1 as well (topics/team-git-facts.md); M1 keeps them as tests that CI runs at the floor.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-F-13",
+  "outcome": "fixed",
+  "what_was_done": "A workflow that runs child stories claims only the free stories within the first limits.stories_per_wave_run units, which are the ones runStories() can start; the rest stay free (work-claim-scopes, T-WAVE; proof scenario 33). team-use.md has a table of what runs in parallel and says that putting the cycle-level runs of one cycle in a row is a choice that costs no parallel work, because the pipeline's preconditions already let only one of them run at a time.",
+  "where": "rewrite/spec/tables/work-claim-scopes.toml"
+ },
+ {
+  "id": "D33R-F-14",
+  "outcome": "fixed",
+  "what_was_done": "The rule is stated once, at the head of work-claim-scopes.toml, with the exception: a workflow that takes no lock takes no claim for its run, and opening a cycle takes open whoever does it, discover included. team-claims.md no longer states it.",
+  "where": "rewrite/spec/tables/work-claim-scopes.toml"
+ },
+ {
+  "id": "D33R-F-15",
+  "outcome": "fixed",
+  "what_was_done": "T-CLAIM's write refusal now has two cases: a claim on the scope stands and names another clone; or the run's workflow takes that scope and this clone does not hold it. A workflow that takes no claim is refused in the first case only. The cycle scope no longer covers the units and decisions of spike and discover.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-16",
+  "outcome": "fixed",
+  "what_was_done": "T-COMBINE classifies each path by the write mode of its class in the shipped class table, not by lying under control, so holdout evaluations, research inputs, requests, ideas and spikes are records too. notes.json has a rule of its own: the remote's notes followed by those this clone added since the merge base, cut to the cap from the oldest end, with nothing set aside (proof scenario 13). One file per note was not taken: notes.json is a built record on the slice path.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-F-17",
+  "outcome": "fixed",
+  "what_was_done": "Each scope now has fields a program reads: file (a path only), workflows, held, covers_paths with not_paths, covers_new with not_new (files only the holder may create, which is how a decision is opened by the holder and settled by anyone), covers_branch and cycle_kinds. The prose covers column is gone, and T-CLAIM, T-HOLD and T-RELEASE read those fields. open.hotfix is a row of its own.",
+  "where": "rewrite/spec/tables/work-claim-scopes.toml"
+ },
+ {
+  "id": "D33R-F-18",
+  "outcome": "fixed",
+  "what_was_done": "T-ORDER: follows is stored only by a decision whose id carries no subject; a decision about a story or a wave stores none, because two clones open such decisions at once and nothing asks for the latest of them; a merge decision stores spec. Open cycles are ordered by kind and id. Proof scenario 27 opens two merge decisions at the same moment and expects no state problem. Ledger entry D33-7.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-F-19",
+  "outcome": "fixed",
+  "what_was_done": "The red record travels as a tracked record of its own, cycles/<cycle>/red/<story>.json, with the fields, the schema and the cap of the evidence record it copies, so a record that could be written locally always fits; it is no longer inside the closure. The evidence lookup reads it (records/evidence.md, evidence-lookup.md, T-HANDOFF; ledger entry D33-11). The path is not under units/, where the closure store would read it as a closure.",
+  "where": "rewrite/spec/records/evidence.md"
+ },
+ {
+  "id": "D33R-F-20",
+  "outcome": "fixed",
+  "what_was_done": "T-NOTICE has the gate write the patch of each hand commit beside its evidence as hand.<sha12>.patch, T-BRANCH does the same for a story branch, and T-ITEMS gives each hand: item to the reviewer with that path. The adversary's passage says it reads that file. Ledger entry D33-23.",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml"
+ },
+ {
+  "id": "D33R-F-21",
+  "outcome": "fixed",
+  "what_was_done": "The proof now has 39 scenarios and names in brackets the checks each runs; every one of the 28 checks is run by at least one. Added among others: a record edited by hand on the state branch (10), no identity (21), one machine's data (22), spec-gap from a hand commit (34), a pull request merged outside the tool (37).",
+  "where": "rewrite/spec/packaging/proof-team.md"
+ },
+ {
+  "id": "D33R-F-22",
+  "outcome": "fixed",
+  "what_was_done": "The sentence has a mechanism: the passage of the setup skill that offers team use is delivered by package M5 once the proof passes, K1 builds setup without it (ledger entry D33-30), and the documents packages come after M5 in the order of work. proof-team.md, skills/setup.md, config/team.md and the build plan say so.",
+  "where": "rewrite/spec/packaging/proof-team.md"
+ },
+ {
+  "id": "D33R-F-23",
+  "outcome": "fixed",
+  "what_was_done": "T-SWITCH refuses to turn team use on, and T-DELIVERY refuses a delivery on a team, while delivery.ci is not required. Clause 4f says pull requests and CI, and team-delivery.md gives the reason CI is required: on a team the target moves under teammates' merges, and the pull request's checks are what measures the merged result before it lands.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-24",
+  "outcome": "fixed",
+  "what_was_done": "Row 2 of the clause table now says that claims, decisions, state and hand-off travel only as fetches and pushes of branches, and that delivery opens and merges the pull request clause 4f asks for through one host module that carries nothing else. The head rule of team-checks names that module as the one exception. There is no configuration key for it, so nothing a program reads names a host: the tool asks the module whether it can serve the remote, and T-SWITCH, T-DELIVERY and the doctor refuse or report when it cannot (ledger entry D33-18, rewritten).",
+  "where": "rewrite/spec/topics/team-use.md"
+ },
+ {
+  "id": "D33R-F-25",
+  "outcome": "fixed",
+  "what_was_done": "multi-repo.md now says that decision D33 covers one repository only and that how team use combines with a hub is not designed and not proved. It is enforced: T-SWITCH refuses to turn team use on while factory.toml holds a [[repo]] entry (proof scenario 19).",
+  "where": "rewrite/spec/topics/multi-repo.md"
+ },
+ {
+  "id": "D33R-F-26",
+  "outcome": "fixed",
+  "what_was_done": "New ledger entry D33-26 for S3 and M4: adoption is built as one function that is given the story's claim state, and M4 supplies the team branches; M4's delivers names it and run-lock.md says why. It is not marked as on the slice path: the plans leave adoption of a remote story branch for the widening (step-3 survey.md, step-4 survey-2.md).",
+  "where": "rewrite/findings/sources/extra-d33.json"
+ },
+ {
+  "id": "D33R-F-27",
+  "outcome": "fixed",
+  "what_was_done": "D33-19 is triaged to S2c as well as M6 and M2. D33-7 now covers cycles_open (ordered by kind and id) with a test, and is triaged to S2a, S4 and M3.",
+  "where": "rewrite/findings/triage/d33.json"
+ },
+ {
+  "id": "D33R-F-28",
+  "outcome": "fixed",
+  "what_was_done": "long-commands.md has a Team use passage that lists vsdd sync as a job with its key rule: the command and the name of the state branch, with no commit. No ledger entry for G1 was needed: the built job layer already allows a key with an empty commit and requires only a subject, which the state branch's name is (jobs.py, job_key and _spec_problem).",
+  "where": "rewrite/spec/topics/long-commands.md"
+ },
+ {
+  "id": "D33R-F-29",
+  "outcome": "fixed",
+  "what_was_done": "The dependency on T1 is dropped: package M6 delivers one preflight function and T1 prints its lines when T1 is built (D33-22), and the build plan says so. M1 is split by adding package M6 (settings, the clone record, joining, the preflight and the report lines), built first, so M1 is the sync alone; a new id was used instead of renaming M1, so no brief or ledger entry had to move. T-FRESH has no claim clause any more, so M1 needs nothing of M2.",
+  "where": "rewrite/spec/registry.d/d33.toml"
+ },
+ {
+  "id": "D33R-F-30",
+  "outcome": "fixed",
+  "what_was_done": "Each repeated fact now has one place and the others link to it: local delivery in T-DELIVERY; the definition of a hand commit at the head of team-delivery-checks; who is recorded in T-WHO; what stays on the machine in the table of config/team.md; the path refusal in T-LOCAL; how a settlement is published in command:decide and rule:decisions, with T-SETTLE pointing to both; no expiry in T-TAKEOVER, explained once in team-claims.md. The topics were rewritten to give reasons and name the row that holds each rule.",
+  "where": "rewrite/spec/topics/team-delivery.md"
+ },
+ {
+  "id": "D33R-F-31",
+  "outcome": "fixed",
+  "what_was_done": "The two tables are renamed work-claim-checks and work-claim-scopes, the status field is work_claims, and the glossary says how the two senses are told apart. Not taken: renaming the commands vsdd claim take and vsdd claim release and the check T-CLAIM. No command or check of the other sense exists, so they cannot be confused, and the glossary says that in commands and T- names the word means a work claim.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-F-32",
+  "outcome": "fixed",
+  "what_was_done": "The D33 record now gives the eight clauses, and the seven items of clause 4, in the user's words.",
+  "where": "rewrite/spec/decisions-later.md"
+ },
+ {
+  "id": "D33R-S-1",
+  "outcome": "fixed",
+  "what_was_done": "New check T-PUSH: no push is judged by the reason git prints. After any push that did not report success the tool fetches and compares commits: contained in the remote's head is accepted; a remote head other than the one the push was built on is a lost race, repeated from the fetch; an unchanged head is refused with git's line. T-PUBLISH, T-MINT and the sync use it. Reproduced with git 2.34.1 and 2.50.1: the loser of 20 simultaneous pushes of 20 got [remote rejected] (failed to update ref) (team-git-facts, fact 1). Proof scenarios 1 to 3 make the race and the declined push happen every time with a hook on the bare repository.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-2",
+  "outcome": "fixed",
+  "what_was_done": "T-PUSH measures a push whose answer was lost: after a fetch, a pushed commit contained in the remote's head was accepted. If the fetch fails too the commit is recorded as sync.unknown in the clone record, the claim is not treated as held, nothing is minted again, no run starts, and the next sync settles it. T-RELEASE has every full sync remove a run claim of this clone whose run is not live, and a story claim under which nothing was begun, with no person asking. Both unmeasured cells are corrected. Reproduced (fact 3); proof scenario 4.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-3",
+  "outcome": "fixed",
+  "what_was_done": "New check T-HISTORY, a step of every sync. missing: the remote answers and has no state branch (git ls-remote --exit-code exits 2), and no sync creates it again. rewritten: the head the clone last saw is not contained in the fetched head while the mount still contains it; nothing is combined or pushed and both heads and the vanished commits are named. T-HOLD and T-INCOMING report a claim removed or changed by a commit that is not its holder's. team-sync.md and the doctor say the repository should forbid forced pushes and deletion of the state branch. Reproduced (fact 9); proof scenarios 7, 8 and 9.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-4",
+  "outcome": "fixed",
+  "what_was_done": "T-NEVER: the one push the tool forces, after its own rebase of a branch with no hand commit, names the head it expects, --force-with-lease=refs/heads/story/<id>:<delivery.pushed>, the head T-BRANCH just read and checked; a lease without that value is never used. When the remote refuses, the branch is put back at the head written down before the rebase and T-BRANCH brings in what arrived. Reproduced: the named lease was refused with stale info and the hand commit stayed, a bare one overwrote it (fact 12). The test fetches between the teammate's push and the tool's (proof scenario 36). Not taken: --force-if-includes, which the named value makes unnecessary, and never rebasing a pushed branch, which would change how the verdict's patch id is kept after a rebase in the delivery design.",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml"
+ },
+ {
+  "id": "D33R-S-5",
+  "outcome": "fixed",
+  "what_was_done": "The closure records delivery.pushed, the head the holder last pushed or last brought in and checked. T-BRANCH counts as arrived only the commits on the remote branch reachable from neither that head nor the local head, so the holder's own commits after an unpushed rebase are not taken for a teammate's (git rev-list <remote> --not <pushed> <local> gave none; fact 13). A remote branch that no longer contains delivery.pushed is a conflict for a person. Proof scenario 36 rebases, fails the push and surveys. git cherry is not needed: the tool always runs T-BRANCH before it rebases.",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml"
+ },
+ {
+  "id": "D33R-S-6",
+  "outcome": "fixed",
+  "what_was_done": "Same correction as D33R-F-1: only the remote is taken from an upstream, a story branch is created at a commit id and pushed as refs/heads/story/<id> to the remote of its target, an upstream that names another ref is refused, and a test asserts that no checkpoint, release of a claim or sync moves the integration branch. Fact 4 states what was reproduced, including that a plain push under push.default=upstream moved the integration branch.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-7",
+  "outcome": "fixed",
+  "what_was_done": "T-PUBLISH takes a claim only after a sync that ended synced, and the mount takes the accepted commit by a fast-forward or through T-COMBINE; T-COMBINE says the mounted branch is never moved to a commit that does not contain its head. T-FRESH refuses a run after every outcome but synced, unpushed and busy included. team-sync.md says that what a clone publishes is first committed by the flush through the mount's own index, that only the combined commit is built without touching the mount, and that a claim or a minted file is never written in the mount first because git refuses to fast-forward over a file with the same content (fact 7).",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-S-8",
+  "outcome": "fixed",
+  "what_was_done": "Same correction as D33R-F-5, and stricter than proposed where the proposal assumed a run could start offline: no run starts without a sync that ended synced (T-FRESH), and a settlement listed in sync.unpublished reads as open to every reader until the remote holds it (T-SETTLE). Proof scenario 25: settled out of reach on A, settled differently and pushed by B, and no run on A ever acted on A's answer.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-S-9",
+  "outcome": "fixed",
+  "what_was_done": "Same correction as D33R-F-8: flush.lock for the local steps only, never across the network; a local step that finds the head moved repeats, because the fast-forward fails without changing anything; one sync per clone through local/sync.lock, a second waiting and then running its own. A flush therefore waits no longer for a sync than for another flush and does its own work. Test and proof scenario 14.",
+  "where": "rewrite/spec/commands/sync.md"
+ },
+ {
+  "id": "D33R-S-10",
+  "outcome": "fixed",
+  "what_was_done": "Every network call runs with standard input from /dev/null in a session of its own and the whole process group is killed at the time limit; askpass programs and credential helpers are covered as well (team-sync.md, Credentials; ledger entry D33-29 for the git helper). Fact 10 says what GIT_TERMINAL_PROMPT does and does not cover, as reproduced with git 2.34.1 and OpenSSH 8.9 against a throwaway sshd from a pseudo-terminal. M1 keeps it as a test; proof scenario 16.",
+  "where": "rewrite/spec/topics/team-sync.md"
+ },
+ {
+  "id": "D33R-S-11",
+  "outcome": "fixed",
+  "what_was_done": "The condition is stated where it cannot be measured: T-REMOTE's unmeasured cell and team-sync.md (One shared repository) say that every clone pushes its state and story branches to the one repository the team shares, and that working through a fork a person alone can push to is not supported. When several remotes hold the state branch vsdd init mounts nothing until --remote names one, and setup asks the person which is the shared repository (T-JOIN, D33-12). The doctor prints the address each factory branch is pushed to, without any user or password part. Reproduced with a mirror (fact 14); proof scenario 18.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-12",
+  "outcome": "fixed",
+  "what_was_done": "In pr mode vsdd release moves no shared branch by a push of its own: the merge of hotfix/<version> back and a release commit go through pull requests opened and merged by the delivery's host module, each recorded in the release closure so that T-NOTICE does not count it; the integration lock is named as a lock of one clone (commands/release.md, T-NEVER). New ledger entry D33-27 for G7 and M4. Proof scenario 39 uses a bare repository that declines direct pushes to the integration branch. That hosts let a rule refuse direct pushes to a branch was confirmed in the hosts' documentation.",
+  "where": "rewrite/spec/commands/release.md"
+ },
+ {
+  "id": "D33R-S-13",
+  "outcome": "fixed",
+  "what_was_done": "T-COMBINE decides every path from the two diffs against the merge base before any tree is built: a record is taken whole from the remote, only a text path is merged, one file at a time with git merge-file, and no path is decided by the exit status of a merge of the whole tree, which the sync no longer runs. team-sync.md gives the reason and fact 6 the reproduction (two edits to one decision record merged with exit 0 into a record neither side wrote). Proof scenario 11.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-14",
+  "outcome": "fixed",
+  "what_was_done": "T-REMOTE, in the preflight, refuses team use in a shallow clone and names git fetch --unshallow. T-NOTICE fails with history_unmeasured, and T-BRANCH returns a conflict, when git cannot answer an ancestry test, and the head rule says an error where a yes or a no was asked is neither. Reproduced: exit 128 and a first-parent count of 2 for 27 (fact 8). Proof scenario 19.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-15",
+  "outcome": "fixed",
+  "what_was_done": "T-WHO reads the identity from git itself, git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT and the same for the committer, and writes that into the claim, the decision and the delivery, so a record and its commit name the same person. Fact 11 is corrected as reproduced. Ledger entry D33-8; proof scenario 21.",
+  "where": "rewrite/spec/tables/team-checks.toml"
+ },
+ {
+  "id": "D33R-S-16",
+  "outcome": "fixed",
+  "what_was_done": "team-sync.md says the state branch's history is kept and grows by design, and how the sync's cost is kept independent of its length: it lists before it fetches, T-INCOMING checks the tree that arrived once and not each commit, and the combine reads two diffs. Proof scenario 15 measures a sync on 50,000 commits, and the doctor reports the branch's length.",
+  "where": "rewrite/spec/topics/team-sync.md"
+ },
+ {
+  "id": "D33R-S-17",
+  "outcome": "fixed",
+  "what_was_done": "T-DELIVERY has the state queued for a pull request the host will merge by itself later: no decision opens, the run ends partial, the story keeps its claim and the next survey or delivery asks again. A merge the host made is adopted with merged_by.how = host when the patch id is the reviewed one and is closed unreviewed, as a hand commit for the wave's review, when it is not. Ledger entry D33-17 adds the state to the delivery data and the story script. That hosts offer a merge queue and a merge when checks pass was confirmed in their documentation.",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml"
+ },
+ {
+  "id": "D33R-S-18",
+  "outcome": "fixed",
+  "what_was_done": "T-HANDOFF lists in the checkpoint result each story worktree that holds uncommitted changes, and vsdd claim release refuses while the story's worktree holds any, naming them. The unmeasured cell says that changes never committed do not travel. Proof scenario 29.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-S-19",
+  "outcome": "fixed",
+  "what_was_done": "The clone record has label: the machine's host name unless the person gives another with vsdd init --label or vsdd sync --label, which setup offers when a clone joins. It is copied into each claim as holder.label and printed by status and the briefing beside the person; it is shown only and decides nothing. Because it is shared in claims, the record says that a person who does not want the host name shared gives another.",
+  "where": "rewrite/spec/records/clone.md"
+ },
+ {
+  "id": "D33R-S-20",
+  "outcome": "fixed",
+  "what_was_done": "held is defined only in work-claim-scopes.toml. open is held until the push, made by the command that opens the cycle, that carries the new cycle record, and is removed in that commit. T-RELEASE says a removal is committed only together with every change under the paths its scope covers, so a partial sync never publishes one ahead of its records (command:sync defines full and partial). A wave survey claims only the stories it can start (D33R-F-13). Proof scenario 31.",
+  "where": "rewrite/spec/tables/work-claim-scopes.toml"
+ },
+ {
+  "id": "D33R-S-21",
+  "outcome": "fixed",
+  "what_was_done": "Same correction as D33R-F-15, and T-CLAIM and T-COMBINE say what happens when two clones write one unclaimed closure: the remote's version stands and the other is set aside and named.",
+  "where": "rewrite/spec/tables/work-claim-checks.toml"
+ },
+ {
+  "id": "D33R-S-22",
+  "outcome": "fixed",
+  "what_was_done": "T-INCOMING: when a file fails its check and its commit carries a Plugin: trailer newer than this plugin, the cause given is that it was written by plugin <version> and this clone must be upgraded, not a broken record; the unit stops the same way, which is the safe answer. T-VERSION points to it. Proof scenario 20.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ },
+ {
+  "id": "D33R-S-23",
+  "outcome": "fixed",
+  "what_was_done": "The refusal of a delivery by a clone that does not hold the story is T-DELIVERY, built by M4, which depends on G4a. vsdd claim release is built by M3, with the hand-off it depends on (its registry entry and file name M3). M2 no longer lists either.",
+  "where": "rewrite/spec/registry.d/d33.toml"
+ },
+ {
+  "id": "D33R-S-24",
+  "outcome": "fixed",
+  "what_was_done": "Two notes added on two clones are both kept: T-COMBINE merges notes.json as the remote's notes followed by those this clone added since the merge base, cut to the cap from the oldest end, and sets nothing aside. One file per note was not taken, because notes.json is a built record on the slice path and its storage may not change. Proof scenario 13.",
+  "where": "rewrite/spec/tables/sync-checks.toml"
+ }
+]

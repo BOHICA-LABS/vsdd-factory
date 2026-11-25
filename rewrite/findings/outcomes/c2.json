@@ -1,0 +1,92 @@
+[
+  {
+    "id": "AU-P2-04",
+    "outcome": "fixed",
+    "what_was_done": "Struck the conversion commentary: code-reviewer.md's 'Replaces' sentence, test-writer.md's 'the first pass's separate stubs method' parenthetical, spike-bounds.md's 'No relay' history phrasing (the rule it states is kept), and the whole of tables/story-kinds.toml, whose body now points at the shipped policy table. A second sweep struck the rest a check had found: the 'Replaces' sentences in codebase-analyzer.md and holdout-evaluator.md, the P2LEAN-17 framing in run-lock.md, the first-pass and second-pass phrasings in event-log.md, caller-identity.md, rule-tuning.md and tests-conformance.md, and the conflicts-file pointers in state-layout.md and computed-status.md.",
+    "where": "rewrite/spec/agents/code-reviewer.md, rewrite/spec/agents/test-writer.md, rewrite/spec/agents/codebase-analyzer.md, rewrite/spec/agents/holdout-evaluator.md, rewrite/spec/rules/spike-bounds.md, rewrite/spec/tables/story-kinds.toml, rewrite/spec/topics/{run-lock,event-log,caller-identity,rule-tuning,state-layout,computed-status}.md, rewrite/spec/packaging/tests-conformance.md; checked by python3 rewrite/tools/spec_lint.py"
+  },
+  {
+    "id": "AU-P2-09",
+    "outcome": "fixed",
+    "what_was_done": "The vsdd-group and [reveals] links now point at [[table:walls]] in the six agent files, information-walls.md (twice), command-conventions.md, read-walls.md and gate-guard.md; gate-guard.md keeps [[table:callers]] only for the HUMAN_ONLY constants. The registry's [table.callers] summary now describes the constants only, and the package briefs were regenerated from it.",
+    "where": "rewrite/spec/agents/{codebase-analyzer,architect,story-writer,researcher,ux-designer,product-owner}.md, rewrite/spec/topics/{information-walls,command-conventions}.md, rewrite/spec/rules/{read-walls,gate-guard}.md, rewrite/spec/registry.toml, rewrite/spec/packages/*.md"
+  },
+  {
+    "id": "AU-S2-05",
+    "outcome": "fixed",
+    "what_was_done": "Every artifact kind file now links its [[table:artifacts]] row instead of restating the row's cells (path, identifier, frontmatter, writer, cap, lifecycle); only facts the row does not hold stay as prose. records/holdout-evaluation.md likewise, and a check-found remainder in artifacts/contract.md (it restated the whole row) and in artifacts/demo-evidence.md (the screenshot-cap restatement) was struck in the c2-b6-fix pass. The shipped registry under the plugin is the one copy.",
+    "where": "rewrite/spec/artifacts/*.md (31 files), rewrite/spec/records/holdout-evaluation.md, shipped at next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml; checked by python3 rewrite/tools/spec_lint.py and tests/unit/test_policy.py"
+  },
+  {
+    "id": "AU-S2-09",
+    "outcome": "left-for-builder",
+    "what_was_done": "This package's copies are settled: the exempt-kinds list is the shipped story-kind red_gate column (kind_has_red_gate reads it; rules/tests-first.md now links the rows instead of re-listing the exempt kinds), and the person-only and governed constants have one home in the design's tables/callers.toml until H6 ships vsdd/hooks/model.py, which reads them there; test_policy.py and tools/check.py read that one copy instead of repeating the values. The remaining second copies named by the earlier outcome (tier lines in agent files, event types, limits) are not this package's files.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/{artifacts,walls}.toml, rewrite/spec/tables/callers.toml, rewrite/spec/rules/tests-first.md, tests/unit/test_policy.py::TestStoryKinds and ::TestWallTableInvariants, tools/check.py::policy_tables_are_consistent; the rest is taken when B6 (roster), S1 (limits) and H1 (event types) build theirs"
+  },
+  {
+    "id": "AU-T2-08",
+    "outcome": "fixed",
+    "what_was_done": "Same sweep as AU-S2-05: the 31 artifact files keep only what the registry row does not hold and link the row. demo-evidence.md's divergent lifecycle line is resolved in the shipped row's favour, which now carries the cycle-close removal both texts agreed on, and its restated screenshot cap was struck in the c2-b6-fix pass, as was records/holdout-evaluation.md's restated lifecycle.",
+    "where": "rewrite/spec/artifacts/*.md, rewrite/spec/records/holdout-evaluation.md, next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml [demo-evidence]; checked by tests/unit/test_policy.py and spec_lint"
+  },
+  {
+    "id": "AU-T2-09",
+    "outcome": "fixed",
+    "what_was_done": "Settled on the registry's kind ids: the shipped [reveals] is keyed 'list holdout-scenario' (no 'list scenario'), and a policy test asserts every 'list <kind>' reveals key is an artifact kind in the shipped registry, so the two tables cannot drift again. read-walls.md's example reads 'vsdd list holdout-scenario'.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [reveals], tests/unit/test_policy.py::TestRegistryVocabularyAgrees, rewrite/spec/rules/read-walls.md"
+  },
+  {
+    "id": "P3REQ-09",
+    "outcome": "left-for-builder",
+    "what_was_done": "Carried the spike-runner row as the design gives it (own-worktree write grant, asker-derived read_deny). The walled-spike ledger (entry in the holdout-evaluations class, kept worktree denied to callers denied holdout, cached finding returned only to askers that may read holdout, universal test 10's marker in a spike question) needs the spike ledger and the probe runner, which the slice does not build.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [spike-runner]; taken by S6 (spike ledger, artifact.spike-ledger-entry) with H8 (spike-bounds) and the E1 probe pass"
+  },
+  {
+    "id": "P3SEAM-08",
+    "outcome": "fixed",
+    "what_was_done": "The shipped registry carries the full story-kind table (tests agent and default method, implement agent and default method, red gate) once; the former frontmatter key 'method' is split into impl_method and tests_method, and the surveys resolve kind plus override into the unit. The story.js skeleton in the design now reads the unit's resolved values instead of keeping its own KIND copy. In the c2-b6-fix pass the shipped story-unit schema was brought to the same shape: 'method' is renamed impl_method, tests_agent, impl_agent and red_gate added, all required, with the fixtures, the universal-test unit and the generated prelude literal regenerated, so a W2 port reads no undefined field.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml [[story-kind]], next/plugins/vsdd-factory/schemas/story-unit.schema.json, next/tests/unit/fixtures/schemas/story-unit/, next/tests/workflows/universal.test.mjs, next/workflow-lib/prelude.js, rewrite/spec/artifacts/story.md, rewrite/spec/topics/story-script.md; checked by tests/unit/test_schema_fixtures.py, tools/check.py and node --test tests/workflows/universal.test.mjs"
+  },
+  {
+    "id": "VSA-04",
+    "outcome": "fixed",
+    "what_was_done": "own-worktree is defined once, in the shipped classes.toml, by the caller's working directory or the open ledger entry's worktree, never by the call's effective directory, with the case spelled out that a spike runner writing into a story or integration worktree is blocked. rule-model.md's effective-directory sentence now excludes own-worktree and points at the definition; spike-bounds.md states the blocked case.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/classes.toml (computed classes), rewrite/spec/topics/rule-model.md, rewrite/spec/rules/spike-bounds.md; checked by tests/unit/test_policy.py::TestPathClasses"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "left-for-builder",
+    "what_was_done": "The walls part is settled: the spec walls table is a pointer and the shipped walls.toml states only the chosen text, with no conversion commentary or conflicts pointers. The command files that still give two syntaxes (env-stop, validate and the schema descriptions named in the earlier outcome) are other packages' files.",
+    "where": "rewrite/spec/tables/walls.toml, next/plugins/vsdd-factory/py/vsdd/policy/walls.toml; the command texts are taken by G1 (env-stop, validate) when it builds them"
+  },
+  {
+    "id": "P3SEAM-21",
+    "outcome": "fixed",
+    "what_was_done": "Moved --version into the read group of the shipped [callers], so a workflow step (smoke probe 6) may run vsdd --version; operator keeps doctor and the rest. Tests assert read carries --version and operator does not, and that no group carries a person-only subcommand.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [callers], tests/unit/test_policy.py, tools/check.py::policy_tables_are_consistent"
+  },
+  {
+    "id": "P3SEAM-22",
+    "outcome": "fixed",
+    "what_was_done": "Adopted the split: story-gate (gate red, green, demo) for the builders, spec-check (gate spec --only) for the planners, admit (gate plan --story) for the story-writer, refreeze still the test-writer's alone; measure stays as every gate and the clerk's row alone holds it. A policy test fails if any other row holds measure; the check in tools/check.py enforces the same over the shipped table.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [callers] and rows, tests/unit/test_policy.py::TestClerkRow, tools/check.py::policy_tables_are_consistent"
+  },
+  {
+    "id": "SL1-29",
+    "outcome": "left-for-builder",
+    "what_was_done": "Nothing owed to the classes table: the seven product classes are configured per project (classes.toml carries only their from_config keys and precedence), and layer 1 already put tools/** under source in the sample's factory.toml beside the fresh-copy script tests/e2e/make_sample_repo.sh. What remains is design text: packaging/sample-project.md (E1's file) does not yet name the script.",
+    "where": "next/tests/e2e/make_sample_repo.sh, next/tests/e2e/sample-project/.factory/factory.toml [paths]; the design-text naming is taken by E1"
+  },
+  {
+    "id": "SL1-49",
+    "outcome": "fixed",
+    "what_was_done": "config.py now validates [caps] against the shipped artifact registry: a cap name must be an artifact kind with a size limit, and a raised cap lies between 1 and twice its default. The test recorded as an xfail for exactly this is promoted and passes, with the boundary and unknown-name cases added.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (_artifact_caps, _apply_caps), next/tests/unit/test_config.py::TestUnknownKeys, loaded by next/plugins/vsdd-factory/py/vsdd/policy/__init__.py"
+  },
+  {
+    "id": "VSA-18",
+    "outcome": "left-for-builder",
+    "what_was_done": "Resolved by the first of the two proposed readings: the tool, not the walls, brings the integration head into the story branch before the repair step, so the builder rows keep their least-privilege git-commit and git-read grants and no new command family is needed. Carried the builder rows as the design gives them; the choice is now written into commands/story-deliver.md (Conflict repair), so G4a builds the repair step with it stated rather than facing the open question again.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml builder rows, rewrite/spec/commands/story-deliver.md; the repair step itself is taken by G4a (command:story-deliver)"
+  }
+]

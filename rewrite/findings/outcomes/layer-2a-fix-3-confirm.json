@@ -1,0 +1,8 @@
+[
+  {
+    "id": "AU-P2-12",
+    "outcome": "not-fixed",
+    "what_was_done": "The six files the CATCHUP-R10 confirmation named are repaired: rule-testing.md:11, risks-hooks.md:9, information-walls.md:74, e2e-story-tier.md:20,37, proof-greenfield.md:23-24 (the doc:platform items 6, 7, 21 and 22 are the right rows) and status.md:18. triage/d.json now routes those six files to E2, E3 and S2c with the corrected path. But that six-file list was incomplete, and AU-P2-12's own list is not done. topics/hook-runner.md:29 still reads 'The layout follows `packaging.md` section 2.3', which is the pointer P2-12 quotes (package H1; the link is [[packaging:python-package]]). rules/artifacts.md:49-50 still cites '`pipeline.md` guard G3', which zz-verify-slice-amend named under AU-P2-12 (package H4; the link is [[topic:spec-lock]]). Pointers of the same class remain in the files that were repaired: topics/rule-testing.md:56 ('the end-to-end tier of `packaging.md`'), topics/risks-hooks.md:22 ('`pipeline.md` risk R5'), topics/information-walls.md:18 ('blueprint 4.7 authoritative on names'), topics/hook-runner.md:87 ('the 400 ms ceiling in `packaging.md`') and rules/secrets.md:11 ('as `packaging.md` describes'). triage/d.json lists neither hook-runner.md nor artifacts.md, so no H1 or H4 by-package list carries the remainder. To fix: replace those pointers with their [[kind:id]] links now (spec text edits, no later package needed) and mark AU-P2-12 fixed, or have triage/d.json add topics/hook-runner.md (H1) and rules/artifacts.md (H4).",
+    "where": "rewrite/spec/topics/hook-runner.md:29; rewrite/spec/rules/artifacts.md:49-50; rewrite/findings/triage/d.json"
+  }
+]

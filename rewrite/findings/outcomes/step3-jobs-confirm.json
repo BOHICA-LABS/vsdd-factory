@@ -1,0 +1,14 @@
+[
+  {
+    "id": "S3R-jobs-14",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. Validating before the mkdir is done and test_bad_spec_is_refused pins it: moving the mkdir first makes the test fail. But two of the finding's three parts have no test. In a scratch copy, removing both the raise in _write_record and the product-record size check in env._launch left all 43 job and env tests passing. Add a test that _write_record raises once shedding args and error_shape still leaves the record over 4,000 bytes. Add a test that env.start refuses a run command whose product record would exceed the cap, leaving no record behind. The crash this raise now causes in the worker is filed separately as S3R-jobs-C1-3.",
+    "where": "next/tests/unit/test_jobs.py, next/tests/unit/test_env.py (missing tests for jobs._write_record and env._launch)"
+  },
+  {
+    "id": "S3R-jobs-20",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. The env-stop.md Syntax line now reads only 'vsdd env stop', and S3B-jobs-1's outcome is recorded (the ledger shows it fixed). But the ledger still records AU-S2-12 as fixed when it is not, which is what this finding was about. The fixer's new AU-S2-12 entry says 'genuinely fixed in both halves', treating the finding as only the two-syntax sentence. AU-S2-12's first sentence (conversion commentary and 'see conflicts/...' pointers inside design files) still holds in five of the lines it names: commands/cycle-close.md:22, idea-register.md:15, review-prepare.md:31, coverage.md:32 and defer-add.md:37 still say 'see rewrite/spec/conflicts/commands.md' (packages S3, S6, G3, S1). Record AU-S2-12 as not-fixed and name those files, until the pointers move to the conflicts file.",
+    "where": "rewrite/findings/outcomes/step3-jobs-fix.json (the AU-S2-12 entry); rewrite/spec/commands/cycle-close.md, idea-register.md, review-prepare.md, coverage.md, defer-add.md"
+  }
+]

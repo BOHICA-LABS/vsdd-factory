@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "work-claim.schema.json",
+  "type": "object",
+  "description": "Fields of a work claim (decision D33), cycles/<cycle>/claims/<scope>.json on the state branch. Built by package M2 when the build widens; not read on the thin slice path. The object stays open: a later version may add a field, and an older reader must not fail on it.",
+  "properties": {
+    "schema": {"type": "integer", "description": "Format version; 1."},
+    "scope": {
+      "type": "string",
+      "description": "The id of a row of tables/work-claim-scopes.toml: story.<id>, cycle, spec, open or open.hotfix. It equals the file's stem."
+    },
+    "cycle": {"type": "string", "description": "The cycle the file lies under; _standing for spec, open, open.hotfix and standing work."},
+    "workflow": {"type": "string", "description": "The workflow of the run that took the claim."},
+    "subject": {"type": "string", "description": "That run's subject, for example the wave a cycle claim is driving; empty when it has none."},
+    "holder": {
+      "type": "object",
+      "description": "Who holds the claim: the person as git would stamp a commit made in the holder's clone, and the clone.",
+      "properties": {
+        "name": {"type": "string"},
+        "email": {"type": "string"},
+        "clone": {"type": "string", "description": "The id in the holder's clone record."},
+        "label": {"type": "string", "description": "The label in the holder's clone record. Shown to people beside the id; no program decides anything by it."}
+      },
+      "required": ["name", "email", "clone"]
+    },
+    "run": {"type": "string", "description": "The run that took the claim, or entered it last. It names a run record on the holder's clone only. Empty when no run took it: a person took it over with vsdd claim take, or the clone claimed what it had in flight when it joined the team."},
+    "at": {
+      "type": "string",
+      "description": "ISO 8601, UTC, by the holder's clock. Shown to people; no program compares it with another clone's time."
+    },
+    "plugin": {"type": "string", "description": "The plugin version that wrote the claim."},
+    "taken_from": {
+      "type": "object",
+      "description": "Present after vsdd claim take: the holder the claim was taken from, as the record named them, and the note the person gave.",
+      "properties": {
+        "name": {"type": "string"},
+        "email": {"type": "string"},
+        "clone": {"type": "string"},
+        "label": {"type": "string"},
+        "at": {"type": "string"},
+        "note": {"type": "string"}
+      },
+      "required": ["name", "email", "clone"]
+    }
+  },
+  "required": ["schema", "scope", "cycle", "workflow", "subject", "holder", "run", "at", "plugin"]
+}

@@ -1,0 +1,30 @@
+# sources: decisions.md#D31
+# Built when the build widens past the thin slice (package F6). Not read by anything on the slice path.
+# The capability from end to end: [[topic:feature-flags]].
+#
+# The flag checks of release and maintenance. The rules every row follows, and the meaning of the columns,
+# are in the header of [[table:flag-checks]]. The `flags` check of `vsdd gate wave`, `vsdd gate release`
+# and `vsdd gate sweep` is these rows together with the rows of [[table:flag-story-checks]] whose `form`
+# names those jobs; package F6 builds that check from the module package F2 ships.
+
+[F-RUNBOOK]
+form = "A part of the baseline check of `vsdd gate release`, and of the `flags` check of `vsdd gate sweep`"
+runs = "Every round of `verify`; every sweep"
+reads = "`flags.runbook`"
+refuses = "A file that is missing, or that lacks a heading containing `Kill switch` or a heading containing `Verify a rollback`, each with text under it. The finding carries the owner `technical-writer` and becomes a fix story of kind `docs`"
+unmeasured = "Whether the steps work. The `kill_switch` contract and its tests cover the switch itself; nothing measures the verification steps"
+
+[F-REMOVE]
+form = "A part of the `flags` check of `vsdd gate sweep`, and a rule of `vsdd story new-fix --maintain`"
+runs = "Every sweep; whenever fix stories are written from a sweep"
+reads = "The records and their computed states, the closure records, the date, `flags.removal`, the definition entries at the integration head, the `merge` decisions about removals"
+refuses = """
+In the sweep it refuses nothing; it returns findings. A live temporary flag is due when its `remove_when`
+is met, it is on, no rejected removal of it carries an `until` that is still ahead, and no open story
+removes it ([[artifact:flag]]). A due flag is a fixable finding of category `code` with the key
+`code:<record path>:remove-due`. Where a definition pattern captures `value`, a flag whose entry at the
+integration head still serves its `default` is not on. A flag whose `remove_when` is met and which is not
+on, and a live flag whose `lifetime` is `unknown`, are findings of category `traceability` that are not
+fixable. When fix stories are written: while `flags.removal` is `human`, no cleanup story for a flag
+without an approved `merge` decision about its removal ([[topic:flag-lifecycle]])."""
+unmeasured = "Whether the flag is on for everyone in production. `on` is the repository's account of it. Where no definition pattern captures `value` it rests on the delivered story alone, and the gate reports `on state not measured`"

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "L2C-catchup-1",
+    "origin": "slice layer 2, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json (holdout_batches); rewrite/spec/topics/wave-script.md:82-83",
+    "problem": "wave-gate-data types holdout_batches as an array of objects (items: {type: object}), but wave-script.md treats each batch as a list of scenario ids: `g.holdout_batches.map((ids, i) => ... ids.join(', '))`. If the clerk returns objects, wave.js throws 'ids.join is not a function' at the holdout step. If it returns lists, the platform rejects the result. This was found next to the CATCHUP-R8 fix, which settled the same mismatch for `stories`. It was not caused by the fix: HEAD's hand-written literal already had `holdout_batches: { type: 'array', items: OBJ }`.",
+    "proposed_resolution": "Type holdout_batches as an array of arrays of strings (the scenario ids of each batch), or change wave-script.md to read a field of a batch object. Add a valid fixture with one batch, and an invalid fixture where a batch is not a list of strings.",
+    "on_slice_path": true
+  },
+  {
+    "id": "L2C-catchup-2",
+    "origin": "slice layer 2, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/delivery-data.schema.json (state); next/tests/unit/fixtures/schemas/delivery-data/",
+    "problem": "Nothing pins delivery-data's state enum. The catch-up reviewer listed dropping checkout_dirty from it as a mutation that survived every suite, and no fix covered it. I repeated the mutation in a scratch copy, and check.py, pytest, the node suite and build --check all still pass. The fixtures are one valid_minimal and one invalid_missing-field. story-deliver.md's per-state ok list (VSA-02) and story.js's delivery repair loop both depend on the exact set of states.",
+    "proposed_resolution": "Add a valid fixture for each state story-deliver.md lists (merged, awaiting_merge, ci_failed, conflict, review_stale, refused, checkout_dirty, and '') and an invalid fixture with an unknown state. Or add a check that the schema's state enum equals the states listed in story-deliver.md's Output section.",
+    "on_slice_path": true
+  }
+]

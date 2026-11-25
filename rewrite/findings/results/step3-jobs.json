@@ -1,0 +1,131 @@
+{
+ "logs": [
+  "Review of jobs: Not a base to build on yet: 10 major and 10 minor findings, no blocker. In normal use the code works and the unit's 32 tests pass, but several promised behaviours fail when probed. (1) env start retries on the same port, not the next one. (2) Concurrent env starts can be given the same port, because ports.lock is released before the record is written. (3) The loud 'kept dying' failure is served a second time without measuring. (4) The one-restart cap is per call, so a job that dies later than one call's wait is restarted forever. (5) The alarm backstop has no handler, so a runaway job is restarted instead of failing on the time limit. (6) The time-limit message gives the wrong number and unit. (7) The crash and time-limit errors do not name the log. (8) The worker and attach both read, change and rewrite the job record without a lock, so a result can be served twice. (9, 10) Two tests cannot fail: the semaphore test and the nonce test both passed against mutants that removed the behaviour. The builder's two reported departures: keeping the log after a failed start is right; the non-inheritable lock is only partly right (S3R-jobs-11). Outcomes: AU-S2-12 left-for-builder is reasonable; P3REQ-06 left-for-builder is not, because the spec has not adopted the resolution. Findings are in /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step3-jobs-review.json.. 20 findings, 10 blocker or major.",
+  "Round 1 for jobs: 18 of 20 fixes confirmed, 5 still open.",
+  "Round 2 for jobs: 3 of 6 fixes confirmed, 5 still open."
+ ],
+ "result": {
+  "unit": "step3-jobs",
+  "build": {
+   "summary": "Built G1: the job library (keyed detached workers, flock liveness, serve-once results, one-restart loss recovery, parallel_gates semaphore, gate_minutes limit, run_shell, JobContext with command_env scrubbing), stop_products/product_ports, and the env start/stop handlers; job_worker forks to detach with the lock handed over. 32 tests pass, including loud-failure tests (twice-dying job, time limit, markerless stop). All five event types proven landing. Closed plan findings P3REQ-06 and AU-S2-12 as left-for-builder; fixed one spec gap (port pool, settle rule, worktree choice, terminal-only stop) into env-start.md/env-stop.md. check.py 30/30, node harness clean, my tests green; remaining failures are in state-core/hook-runner/D31 files mid-write by concurrent units.",
+   "files_changed": 11,
+   "tests_passed": 32,
+   "tests_failed": 0,
+   "findings_fixed": 0,
+   "findings_left": [
+    "P3REQ-06 -> S3 second part (survey measurements as keyed jobs; job layer ready)",
+    "AU-S2-12 -> jobs-b closes it with test_cli_env_stop_rejects_subject; spec commentary removal is the orchestrator's"
+   ],
+   "new_findings": 1,
+   "departures_from_plan": [
+    "Plan 3.3 says the worker 'makes the lock descriptor non-inheritable'; the same invariant is achieved by the mechanism: pass_fds hands the descriptor to the worker, and PEP 446 defaults every other descriptor non-inheritable, so worker children (ctx.run, spawned with no pass_fds) never hold the lock (D3's observable contract holds).",
+    "Plan 3.5 implies nothing is left after a failed triple-port start; the implementation deliberately keeps the log file (deleting record and lock) so the error's log pointer names real evidence, and a later start truncates it."
+   ],
+   "spec_files_changed": [
+    "rewrite/spec/commands/env-start.md",
+    "rewrite/spec/commands/env-stop.md"
+   ],
+   "foreign_failures": [
+    "tests/lint/test_check.py::test_every_registered_check - intermittent: fails when a concurrent builder's probe leaves __pycache__ under the plugin tree; passes on a clean tree (check.py 30/30 verified right after cleaning)",
+    "tests/unit/test_artifacts.py (4), tests/unit/test_config_keys.py (2), tests/unit/test_mount.py (1) - state-core/C2 files, failing while that unit works",
+    "tests/hooks/test_runner.py (2) - hook-runner unit's file",
+    "python3 rewrite/tools/spec_lint.py - 9 problems, all in the concurrent D31 feature-flags workflow's in-progress files (tables/flag-story-checks.toml, tables/flag-release-checks.toml, config/flags.md, artifacts/flag.md); none in my files"
+   ],
+   "deferred": [
+    "Hub projects (--repo, .worktrees/_integration/<repo>/)",
+    "A readiness probe for a started product (D15) and the {port} check in init and doctor",
+    "Wiring by other packages: H9 calls stop_products on SubagentStop; H6 and the secrets rule call product_ports; S2c shows list_jobs and calls prune from status --fix",
+    "The survey's measurements as jobs (P3REQ-06; S3 second part)",
+    "Raising MAX_WAIT to 540 once E2 proves a ten-minute foreground call (D10)",
+    "A cap on the job log, and JSON Schema files for the job record and the env result (D19)",
+    "The env command module cmd_env.py and its command-line tests, owned by jobs-b"
+   ]
+  },
+  "review": {
+   "verdict": "Not a base to build on yet: 10 major and 10 minor findings, no blocker. In normal use the code works and the unit's 32 tests pass, but several promised behaviours fail when probed. (1) env start retries on the same port, not the next one. (2) Concurrent env starts can be given the same port, because ports.lock is released before the record is written. (3) The loud 'kept dying' failure is served a second time without measuring. (4) The one-restart cap is per call, so a job that dies later than one call's wait is restarted forever. (5) The alarm backstop has no handler, so a runaway job is restarted instead of failing on the time limit. (6) The time-limit message gives the wrong number and unit. (7) The crash and time-limit errors do not name the log. (8) The worker and attach both read, change and rewrite the job record without a lock, so a result can be served twice. (9, 10) Two tests cannot fail: the semaphore test and the nonce test both passed against mutants that removed the behaviour. The builder's two reported departures: keeping the log after a failed start is right; the non-inheritable lock is only partly right (S3R-jobs-11). Outcomes: AU-S2-12 left-for-builder is reasonable; P3REQ-06 left-for-builder is not, because the spec has not adopted the resolution. Findings are in /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step3-jobs-review.json.",
+   "tests_rerun": "From next/:\n- tools/check.py: 28/30. The two failures (nothing_generated_under_plugin, shipped_files_are_not_gitignored) are cpython-314 __pycache__ under py/vsdd/ and py/vsdd/state/, recreated at 16:29 by concurrent activity. No __pycache__ is under py/vsdd/gates/, so they are not this unit's.\n- pytest -q (whole suite, 44 s): 628 passed, 7 failed, 1 skipped. None of the failures is this unit's:\n  - tests/unit/test_artifacts.py: 2 (state-core)\n  - tests/unit/test_mount.py: 1 (state-core)\n  - tests/hooks/test_runner.py: 3 (hook-runner)\n  - tests/lint/test_check.py::test_every_registered_check: 1 (the same foreign __pycache__)\n- This unit's tests/unit/test_jobs.py and test_env.py: 32 passed (25.5 s).\n- node --test tests/workflows/universal.test.mjs: 27 pass, 0 fail.\n\nFrom the repository root:\n- rewrite/tools/spec_lint.py: 0 problems.\n- rewrite/tools/findings.py build: ran; 396 findings, by-package lists written.\n\nScratch-copy probes and mutants (outside the repo): port retry, concurrent port choice, loud-failure re-serve, restarts across calls, alarm backstop, time-limit and crash messages, events, record race, lock inheritability, worktree choice. Mutants: semaphore removed and nonce ignored; all 19 job tests passed against each.",
+   "interfaces_checked": 32,
+   "interfaces_as_promised": 24,
+   "outcomes_checked": 2,
+   "outcomes_confirmed": 1,
+   "findings": 20,
+   "blockers": 0,
+   "majors": 10
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fix": {
+     "summary": "Fixed all 20 review findings in the jobs/product-environment unit (G1) of vsdd-factory 1.0: port-retry exclusion, ports.lock held through the claim write, once-per-job loss cap, collected failure replay, SIGALRM backstop, true limit in timeout messages, one-line failures naming the log, done-gated result serving, semaphored-parallelism proof, run-count assertions, non-inheritable lock fd, lock-safe deletion/prune, story-only worktrees, spec validation before any store write, temporary pruning, the five-events test, helper deduplication, orphaned command-group kill, the P3REQ-06 ledger correction, and the env-stop spec syntax; each fix is covered by a test that fails without it, and every check passes except one foreign failure in state-core's test_init.py.",
+     "tests_passed": 695,
+     "tests_failed": 1,
+     "checks": "From next/: `uv run --no-sync python tools/check.py` prints '30/30 checks passed'. `uv run --no-sync python -m pytest -q` printed '695 passed, 1 skipped' with one failure, tests/unit/test_init.py::test_init_partial_refuses ('assert 1 == 2'); both suites for this unit pass (43 passed: 24 test_jobs, 19 test_env). `node --test tests/workflows/universal.test.mjs` printed 'pass 27, fail 0'. From the repo root: `python3 rewrite/tools/spec_lint.py` printed '0 problem(s)'; `python3 rewrite/tools/findings.py build` printed '485 findings: 260 fixed, 45 left-for-builder, 4 not-fixed, 175 open, 1 rejected' and applied the step3-jobs-fix.json statuses (P3REQ-06 -> not-fixed, S3B-jobs-1 -> fixed, AU-S2-12 -> fixed, verified by re-reading ledger.json). The init failure is in a file state-core owns and does not import anything from gates; it appeared twice across two full-suite runs separated by several minutes, so it is listed as foreign and left unfixed per instructions. ruff on the unit's files: 'All checks passed!'. Outcomes file written with the Write tool at /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step3-jobs-fix.json.",
+     "foreign_failures": [
+      "next/tests/unit/test_init.py::test_init_partial_refuses (assert 1 == 2: `vsdd init` into a partially initialised state directory returns 1 instead of 2). test_init.py and cmd_init.py are state-core's (S1) files per ORDER.md; the failure reproduces on two full-suite runs several minutes apart and involves no gates code, so it was left for that unit."
+     ],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/:\n- tools/check.py: 30/30 checks passed.\n- pytest -q (full suite): 4 failed, 701 passed, 1 skipped in 74.67s. None of the failures is in this unit:\n  - test_config_keys::test_init_writes_exactly_the_specs_keys (an extra 'project' key).\n  - test_config_keys::test_init_undetected_values_equal_specs_defaults ('main' == 'develop').\n  - test_init::test_init_partial_refuses (1 == 2).\n  - lint test_check::test_every_registered_check ('generated directory under the plugin: plugins/vsdd-factory/py/vsdd/__pycache__').\n  - state/cmd_init.py, mount.py, test_init.py and test_config_keys.py were being changed by someone else between 16:54 and 17:03, during the run. The stray __pycache__ holds only vsdd/__init__, config and project cpython-314 files; this unit's worker would also import events and gates. A hooks/__pycache__ has since appeared as well.\n- tests/unit/test_jobs.py plus test_env.py on their own: 43 passed in 48.16s. Seven timing-sensitive tests passed three more times in a scratch copy.\n- node --test tests/workflows/universal.test.mjs: 27 pass, 0 fail.\n\nFrom the repository root:\n- spec_lint.py: 0 problem(s).\n- findings.py build: '485 findings: 259 fixed, 45 left-for-builder, 5 not-fixed, 175 open, 1 rejected; open by severity: 2 blocker, 79 major, 144 minor; open on the slice path: 111'. The ledger shows P3REQ-06 not-fixed and AU-S2-12 and S3B-jobs-1 fixed.\n\nMutation checks were run in a scratch copy outside the repository. Each fix was reverted in turn, and its test failed every time for findings 1 to 13, 15, 16 and 18. The port race failed 6 of 6 runs. The nonce rule failed 3 of 4 runs (that test is probabilistic). Removing both record-cap checks (S3R-jobs-14) left all 43 tests passing.\n\nProbes of the fixed code:\n- attach SIGKILLed an unrelated process group named by a stale command_pgid.\n- A start call killed mid-settle left a product that no stop reaches and that blocks every later start of the subject.\n- A spec at the cap with empty args made the worker raise at its done write, so the job re-ran forever while every call answered pending.",
+     "checked": 20,
+     "confirmed": 18,
+     "still_open": 5
+    }
+   },
+   {
+    "round": 2,
+    "fix": {
+     "summary": "All five findings fixed in the G1 (jobs) unit plus the AU-S2-12 ledger correction. C1-1: attach's loss branch killpg of command_pgid is now gated on a per-key cmd.lock the worker holds and its commands inherit through pass_fds, so a reused group id or pre-reboot number is never killed; the field is documented in rewrite/spec/records/job.md (plans are frozen for builders). C1-2: env._launch holds a per-key settle lock never passed to the product and writes the pid right after Popen; stop_products and _held_answer treat a starting record with a free settle lock as stale (stop by pid), leave a live start call alone, and keep the record of a product whose lock survives the KILL so its port stays taken. C1-3: admission measures the queued record at RECORD_CAP - RECORD_HEADROOM (new exported constant 128) and the worker's and env._launch's record writes fall back to a minimal record instead of dying at the cap. S3R-jobs-14: the two missing tests added. S3R-jobs-20: the five 'see conflicts/commands.md' pointers moved out of the design files into conflicts/commands.md (gaps 14 and 15 extended). Interface changes other units see: store gains <key>.cmd.lock and <key>.settle.lock swept by prune/_delete_key; JobContext gains optional cmd_lock_fd; jobs exports RECORD_HEADROOM; admission bar sits at RECORD_CAP - RECORD_HEADROOM; stop_products semantics as above; near-cap record writes fall back to a minimal record. Outcome file written to rewrite/findings/outcomes/step3-jobs-fix-2.json and folded into the ledger. Tests: full suite 765 passed, 1 skipped, 0 failed; unit tests 51 passed (43 before, 8 new); every new test verified to fail without its fix by temporary perturbation of the code.",
+     "tests_passed": 765,
+     "tests_failed": 0,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> 30/30 checks passed (after removing generated __pycache__ bytecode under plugins/, which my pytest runs had produced); uv run --no-sync python -m pytest -q -> 765 passed, 1 skipped, 0 failed (test_jobs.py + test_env.py alone: 51 passed); node --test tests/workflows/universal.test.mjs -> 27 pass, 0 fail. From the repository root: python3 rewrite/tools/spec_lint.py -> 0 problem(s); python3 rewrite/tools/findings.py build -> ledger rebuilt, all six entries recorded from step3-jobs-fix-2.json (open by severity: 1 blocker, 64 major, 136 minor). The single full-suite failure seen mid-run (tests/lint/test_check.py::test_every_registered_check on the __pycache__ debris) was mine and disappeared after cleaning; no foreign-unit failures remained.",
+     "foreign_failures": [],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: tools/check.py printed \"30/30 checks passed\". pytest -q printed \"771 passed, 1 skipped in 95.02s\". node --test tests/workflows/universal.test.mjs printed \"tests 27, pass 27, fail 0\". From the repository root: spec_lint.py printed \"0 problem(s)\". findings.py build printed \"506 findings: 304 fixed, 50 left-for-builder, 16 not-fixed, 135 open, 1 rejected\"; that build ran before this confirmation's files existed.\n\nI broke the code in a scratch copy of next/ outside the repository, never in place, and reran the named tests:\n- Removing the raise in _write_record fails test_write_record_refuses_even_after_shedding.\n- Removing env's product-record size check fails test_start_refuses_an_oversize_product_record.\n- An unconditional kill in attach fails test_stale_command_group_survives_the_restart.\n- Not passing the cmd lock to commands fails test_lost_worker_restarts_once.\n- Skipping every 'starting' record fails the stale-starting and killed-mid-settle tests.\n- Not writing the pid right after Popen fails the killed-mid-settle test.\n- Dropping the held-after-KILL check fails the 'leave alone' test.\n- Removing the settle-free branch in _held_answer fails the killed-mid-settle test.\n- RECORD_HEADROOM = 0 fails the over-headroom test.\n- Removing the worker's fallback at the running write fails the fallback test.\n- Removing only the fallback at the done write is caught by no test. That is a second safety net the normal path cannot reach.\n\nProbes:\n- C1-3: a spec whose bulk is in the command field (which shedding cannot drop) at exactly 3,872 bytes was served three times with no ValueError. One byte more was refused and created no store.\n- C1-2: the start call was killed mid-settle with the real two-second settle. Stopping everything stopped the orphan, env stop from a terminal stopped it, and the next start succeeded in 2.15 s.\n- Post-KILL lock wait: products with heaps up to 3 GB released the lock within the 50 ms on macOS.\n- C1-1, escapee case: reproduced as described in still_open.\n- C1-2 fix, stale snapshot race: reproduced as described in still_open.\n\nFiles written: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step3-jobs-confirm-2.json (3 entries: C1-1, S3R-jobs-20, AU-S2-12) and /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step3-jobs-confirm-2.json (C2-1, C2-2).",
+     "checked": 6,
+     "confirmed": 3,
+     "still_open": 5
+    }
+   }
+  ],
+  "still_open": [
+   {
+    "id": "S3R-jobs-C1-1",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py",
+    "problem": "The case the finding probed is fixed and tested: a stale record whose cmd lock is free kills nothing, and command_pgid is documented in rewrite/spec/records/job.md. But the lock only proves that some process holding the inherited descriptor is alive, not that the recorded group is. A descendant that leaves the group with setsid() and keeps its descriptors holds <key>.cmd.lock after its group is gone. The next worker for that key then waits 5 s, runs without the lock, and still records command_pgid. At a later loss, the escapee's lock authorizes the SIGKILL. Probe: run 1's command started a child that forked, called setsid and slept. Run 2 of the same key, a 1-second command, took 6.3 s and recorded command_pgid. A stale running record naming an unrelated 'sleep 30' group then had that group killed (-9) on the next attach.",
+    "proposed_fix": "Give each attempt a fresh cmd lock: attach, while it holds the job lock and before it spawns the worker, unlinks <key>.cmd.lock (or the lock name carries the nonce). An earlier attempt's escapee then holds only an unlinked inode and can neither delay nor authorize anything. A worker that runs without the lock records no command_pgid. Before the kill, check that the group leader is the one recorded (for example its ps start time against the record's started), or narrow the claim in records/job.md. Add a test with a descendant that calls setsid and keeps the descriptor: an unrelated group named by a stale record survives, and a re-run of the key does not wait 5 s."
+   },
+   {
+    "id": "S3R-jobs-20",
+    "severity": "minor",
+    "file": "rewrite/findings/outcomes/step3-jobs-fix-2.json",
+    "problem": "The five pointers are moved, and conflicts/commands.md gaps 11-15 carry them. But the fixer re-recorded AU-S2-12 as fixed for the whole finding, and that is untrue. Lines AU-S2-12 names still carry conversion commentary or conflicts pointers: gate-red.md:70-72, gate-green.md:49, validate.md:14-16, topics/state-layout.md:60-63, topics/computed-status.md:27-31, artifacts/analysis.md:14, and the descriptions of the driver-flag, config-fingerprint and spike-admission schemas ('see conflicts/records.md').",
+    "proposed_fix": "Record AU-S2-12 as not-fixed, naming those lines (step3-jobs-confirm-2.json does this), until their commentary moves to the conflicts files."
+   },
+   {
+    "id": "AU-S2-12",
+    "severity": "minor",
+    "file": "rewrite/spec/commands/gate-red.md",
+    "problem": "Still holds outside the halves that are done (env-stop, validate's syntax, the five commands pointers). These lines remain: commands/gate-red.md:70-72 'The state design's own wording of the same rule' (G2); gate-green.md:49 'The state design's row adds' (G2); validate.md:14-16 'the state design's row. The row packaging.md printed ... is superseded' (S1); topics/state-layout.md:60-63 'BLUEPRINT.md#4.7 shows the same tree...'; topics/computed-status.md:27-31 'The blueprint states the same rule from the other side...'; artifacts/analysis.md:14 'recorded in the group's conflicts file' (C2); schemas driver-flag (C1), config-fingerprint (H1) and spike-admission (H8), whose descriptions end '(see conflicts/records.md)'.",
+    "proposed_fix": "Move the commentary into the conflicts files so each design file states only the chosen text. Record the finding fixed only once every line it names is clean."
+   },
+   {
+    "id": "S3R-jobs-C2-1",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/gates/env.py",
+    "problem": "New, from the C1-2 fix. start() reads the record before the lock probes, and _held_answer acts on that snapshot. If the first start call writes 'running' and releases its settle lock between the read and the settle probe, the second call treats the record as stale. stop_products(subject) then stops the healthy product the first call just reported, and a second product is started. Before the fix, the second call returned the first answer (D14). Probe: _held_answer given a 'starting' copy of a running record killed the product. Two concurrent env.start calls of one subject, with the read-to-probe window widened by a sleep, both returned 0 with different pids, and the first call's product was dead.",
+    "proposed_fix": "Decide on a record read after the settle probe. A live start call writes 'running' before releasing the settle lock, so only a record still 'starting' once the settle lock is free is stale. A record that now says 'running' takes the running branch. Add a test that hands _held_answer a 'starting' snapshot over a running product and asserts that the product survives and its answer is returned."
+   },
+   {
+    "id": "S3R-jobs-C2-2",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py",
+    "problem": "New, from the C1-3 fix. Admission now refuses above RECORD_CAP - RECORD_HEADROOM (3,872 bytes), but both refusals still say the cap was exceeded. attach raises 'the record would be 3873 bytes, over the 4000-byte cap', and env.start's refusal has the same form. That is untrue for any size between the bar and the cap.",
+    "proposed_fix": "Name the bar that was applied, for example 'over the 3872-byte limit (the 4000-byte cap less 128 bytes kept for later writes)', in both attach and env._launch_locked. Keep the cap in the text, and assert the message in test_record_over_the_headroom_is_refused_before_anything_is_written."
+   }
+  ]
+ }
+}

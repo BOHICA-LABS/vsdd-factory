@@ -1,0 +1,68 @@
+[
+  {
+    "id": "P3SEAM-15",
+    "outcome": "fixed",
+    "what_was_done": "The red gate's passing record and every re-freeze carry the complete frozen set with fresh SHA-256 hashes, the tests and the criteria map at the head, with refreeze: true; the re-freeze computes the set afresh from the base to the head and refuses with frozen test file removed when a frozen file vanished from the diff. evidence_write's refreeze_incomplete rule holds against it unchanged.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_refreeze, _red); tests: tests/unit/test_gate_refreeze.py::test_refreeze_records_changed_and_added, test_refreeze_refuses_removed_errored_skipped"
+  },
+  {
+    "id": "P3SEAM-16",
+    "outcome": "fixed",
+    "what_was_done": "The stub marker is the constant VSDD-STUB (built as \"VSDD-\" + \"STUB\" in gatelib.py), searched in every tracked source-class file at the head; a hit fails the green gate naming the file, before any command runs.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (STUB, stub_files); test: tests/unit/test_gate_green.py::test_stub_marker_fails"
+  },
+  {
+    "id": "VSA-12",
+    "outcome": "fixed",
+    "what_was_done": "The criterion regex is ac(\\d+)(?!\\d), so test_ac12 does not cover AC-1 (test_criteria_need_a_non_digit). The classname-to-file rule is the longest prefix of the classname that equals or ends the extension-less path of exactly one tests-class file, returning the file with its extension; two candidates give no file (test_file_from_attribute_then_classname). The e2e sample runner writes file on every testcase and type on failure/error nodes, so the red gate reads the attribute (test_sample_runner_writes_file_and_type). The spec file states the rule (commands/gate-red.md).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/junit.py (criteria_of, file_from_classname); next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (frozen_set, _file_of); next/tests/e2e/sample-project/tools/junit_runner.py"
+  },
+  {
+    "id": "P3BLD-16",
+    "outcome": "fixed",
+    "what_was_done": "The green gate result carries test_output, the absolute path of green.<sha12>.log holding every configured command's output, on the measured and on the cached path alike. gate-result.schema.json and wave-gate-data.schema.json gained test_output and changed_files (required on the wave schema), with the valid_green-since fixture; tools/build.py regenerated the prelude.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_measured, _cached); next/plugins/vsdd-factory/schemas/gate-result.schema.json; test: tests/unit/test_gate_green.py::test_green_passes_and_writes_patch"
+  },
+  {
+    "id": "AU-P2-07",
+    "outcome": "fixed",
+    "what_was_done": "The docs story's green gate runs docs_check as well as the other commands (the spec's 'instead' is gone), and a story with frontmatter ui needs ui_check; a missing required check is a static failure named in the result. The spec sentence now says 'as well as the others'.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_required_check_failures); rewrite/spec/commands/gate-green.md; test: tests/unit/test_gate_green.py::test_docs_and_ui_checks_required"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "The conversion commentary the finding flags is not in this package's spec files: commands/gate-red.md and commands/gate-green.md state only the chosen rule, and the doubled prose sits in conflicts/commands.md items 18-19, which belong to the other packages named there. Nothing was edited for that half. The code keeps one re-freeze rule (gatelib._refreeze): a changed frozen test may fail on an assertion — the half rule of the red gate does not apply to a re-freeze — while a skipped or harness-errored changed test refuses it; the refused re-freeze writes no record so the earlier one stands.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_refreeze); test: tests/unit/test_gate_refreeze.py::test_refreeze_accepts_a_failing_assertion"
+  },
+  {
+    "id": "AU-P2-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "No code owed: each pass condition the finding lists is one function in this unit (the gates read commands' configuration; nothing duplicates the decision-kinds or limits tables). The remaining duplicate prose is the spec steward's reduction, not a code change.",
+    "where": "the later spec pass named in the finding (spec steward)"
+  },
+  {
+    "id": "AU-S2-01",
+    "outcome": "left-for-builder",
+    "what_was_done": "No code owed: the red and green pass conditions live in gatelib's _red/_green/_refreeze and the workflow files' restatement is prose for the spec steward to collapse to links, as the finding's own resolution directs.",
+    "where": "the later spec pass named in the finding (spec steward)"
+  },
+  {
+    "id": "AU-P2-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the flaky list is always [] and the green gate applies no baseline comparison. The flaky rule is G7's to build (with the baseline fields); a cycle that names a baseline is measured strictly and says so (metrics.baseline is 'not applied', the result names it).",
+    "where": "package G7 (the baseline comparison); next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_green); test: tests/unit/test_gate_green.py::test_baseline_named_is_strict_and_says_so"
+  },
+  {
+    "id": "VSA-01",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: the red lookup after a rebase stays G4a's (delivery re-records delivery.base) with S2a's lookup change. The pieces the fix needs are in place: gatelib's cached record is read by exact head, evidence() looks up red by ancestry between base and head, and patch_id(tree, base, head) is computed per record.",
+    "where": "packages G4a and S2a (the rebase fixture and the lookup)"
+  },
+  {
+    "id": "D33-11",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth: evidence stays local in the slice, so the travelling red record (cycles/<cycle>/red/<story>.json) is M3's to add with G2's owner for the lookup fallback, when the build widens to team use (decision D33).",
+    "where": "package M3 (team hand-off), with G2 owning the lookup fallback"
+  }
+]

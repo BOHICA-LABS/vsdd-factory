@@ -1,0 +1,163 @@
+# sources: decisions.md#D31
+# Built when the build widens past the thin slice (package F2; the forms that run in the wave, release and
+# sweep jobs by F6). Not read by anything on the slice path. The capability from end to end:
+# [[topic:feature-flags]].
+#
+# The flag checks of a story's red and green gates and of its review, with the form each takes on the whole
+# tree in the `flags` check of the wave, release and sweep jobs. The rules every row follows, and the
+# meaning of the columns, are in the header of [[table:flag-checks]]. "The three jobs" below are
+# `vsdd gate wave`, `vsdd gate release` and `vsdd gate sweep`.
+
+[F-STATES]
+form = "A part of `vsdd gate red`, of its re-freeze and of `vsdd gate green`, for a story behind a flag. What it says of moved tests, missing tests and tests that have come back holds a story with `flag_change: enable` too, and its last paragraph is the red gate of a story that removes a flag"
+runs = "At each of the three"
+reads = """
+The JUnit reports of the head and of the story's base, the lines the diff adds to files of class `tests`,
+`flags.test_patterns`, the records, the story's acceptance criteria and its `flag_change` key.
+A test is in the state `on`, `off` or `default` when its name contains the token `flag_on_<k>`,
+`flag_off_<k>` or `flag_default_<k>`. A moved test is an existing test that now belongs to the off state
+only: its name is its own name with `__flag_old_<k>` or `__flag_pending_<k>` added
+([[table:flag-duties]]). A test has come back when the base report holds its name with one of those
+added. `<k>` is the encoded form of the story's flag key ([[table:flag-checks]]), and tokens are compared
+without case. No letter or digit comes directly before a token. After it comes the end of the name, `__`,
+or a character that is not a letter, a digit or `_`: a single `_` there would begin a longer key. A new
+test is one the base report lacks ([[command:gate-red]]) and that has not come back. A missing test is one
+the base report holds, with no token of the flag, that the head report lacks."""
+refuses = """
+At red: one of the three states with no new test; an `off`, `default` or moved test that does not pass,
+because it must describe the behaviour that exists before the change. None of those counts towards the red
+share, as a `green_by_design` test does not. At green: a test of the latest red or re-freeze record, in a
+state or moved, that does not pass. At all three: a new `off` or `default` test whose name names no
+criterion, or names one whose text lacks the words `flag off`, compared without case. For this refusal
+alone, a name names criterion `AC-<N>` when, once every token of the flag is taken out of it, it holds
+`ac<N>` with no letter or digit directly before it and no digit directly after it; the red gate's own map
+rule is unchanged ([[command:gate-red]]). Also refused at all three: a new moved test that the base report does not hold, under its own name or as a moved
+test; a missing test that the head report does not hold as a moved test, because a story behind a flag
+takes an existing test out of the suite only by moving it; an added line in which a test sets a key that
+has no record. A moved test, and a test that has come back, is evidence of no criterion: the record leaves
+both out of its criteria map, so a test of the behaviour that exists is never shown as evidence of the new
+one. Each records the test identities by state, the moved tests, the tests that have come back and the
+missing tests. A moved test is not held among the story's frozen tests, so a re-freeze may give it its own
+name back; its file is frozen like any other.
+For a story that removes a flag ([[artifact:flag]]), at red. With `flag_change: remove`: a `pending` test
+of the flag in the base report, because the product must keep what it asserts and the behaviour that
+stays lacks it; the message names each. With `flag_change: withdraw` the gate asks for no red test,
+applies no red share and maps no test to a criterion, because nothing the product does with no flag set
+changes, and its record says so; it refuses a moved test of the flag in the base report that has not come
+back."""
+unmeasured = """
+Whether an `off` test asserts anything that matters: a test that cannot fail is a review finding of
+category `test`. Whether a move, or a test's coming back, changed its assertions: the items `flag-off` and
+`flag-removed` cover that. A test that sets a flag in a way no test pattern matches."""
+
+[F-ON]
+form = "A part of `vsdd gate green`, for a story behind a flag and for a story with `flag_change: enable`"
+runs = "After the gate's own run of the suite has passed"
+reads = "`flags.override_env`, `commands.test`, the JUnit reports of this run and of the story's base, the baseline"
+refuses = """
+The suite runs once more with the override variable giving the story's flag as `true`. The comparison is
+the gate's own, against the baseline ([[command:gate-green]]), leaving out every `off`, `default` and moved
+test of that flag (F-STATES). It refuses three things. A new failure among the rest. A moved test of that
+flag that passes, because a test the on state does not break belongs in the suite under its own name. And,
+for a story with `flag_change: enable`, a `pending` test of that flag in the report, because a flag is not
+turned on while behaviour the product must keep is missing with it on. The message names each such test,
+and says of a failing one whether the base report holds it. Who then acts on an existing test is in the
+implementer's and the test-writer's duties ([[table:flag-duties]]). The counts go under
+`metrics.flags.on_suite`."""
+unmeasured = """
+Whether the suite's setup hands the override to the test double. When no `default` or moved test of the
+flag fails in this run, the gate reports `override not shown to reach the suite`. Whether a test moved as
+`old` asserts only what a criterion replaces: the item `flag-off` covers it. Two flags on together are run
+only where `vsdd env start` turns them on ([[topic:flag-lifecycle]])."""
+
+[F-REGISTERED]
+form = "A part of `vsdd gate green`, and of the `flags` check of the three jobs"
+runs = "At green on added lines; in the three jobs on the whole tree under test"
+reads = "`flags.read_patterns`, the files of class `source`, the records"
+refuses = """
+A read of a key that has no record, or whose record is dropped or removed. At green also an added unkeyed
+read. In the three jobs an unkeyed read is not refused: the gate reports their number and the first fifty
+places."""
+unmeasured = "A read no read pattern matches: a call the patterns do not describe, a read in generated code or in a file outside `source`. A pattern cannot tell code from a comment or a string, so a key written in one counts as a read"
+
+[F-INTERFACE]
+form = "A part of `vsdd gate green`, and of the `flags` check of the three jobs"
+runs = "At green on added lines; in the three jobs on the whole tree under test"
+reads = "`flags.bypass_patterns`, `flags.interface`"
+refuses = """
+At green: an added line that a bypass pattern matches in a file outside `flags.interface`, unless that line
+or the line before it carries the marker `VSDD-NOT-A-FLAG:` followed by a reason. The gate lists every
+marked line under `metrics.flags.not_a_flag`. In the three jobs it refuses nothing. It records the number of
+unmarked matches outside the interface under `metrics.flags.bypasses`, and in the sweep each is a fixable
+finding of category `code`, so `maintain` moves the read behind the interface."""
+unmeasured = "A way around the interface that no bypass pattern describes"
+
+[F-USED]
+form = "A part of `vsdd gate green` for the owning story of a flag, and of the `flags` check of the three jobs"
+runs = "At green on added lines and the head; in the three jobs on the whole tree under test"
+reads = "`flags.read_patterns`, `flags.bypass_patterns`, the definition entries, the records, the stories and their closure records"
+refuses = """
+At green, for the story a record names as its owner: no added line reads the flag, or no definition entry at
+the head has its key. In the three jobs: a live flag that nothing in the tree reads, through the interface
+or, for an inherited flag, around it. In a hub the tree is
+one repository's, and the flags expected there are those whose record names that repository in `repo` and
+those that a delivered story of that repository names."""
+unmeasured = "Whether the read guards the new behaviour. The review item `flag-off` covers that"
+
+[F-DEFINITION]
+form = "A part of `vsdd gate green`, and of the `flags` check of the three jobs"
+runs = "At green on the definition entries at the story's base and at its head; in the three jobs on the tree under test"
+reads = "`flags.definitions`, `flags.definition_patterns`, `flags.definitions_check`, `flags.test_patterns`, the JUnit report, the records, the story's `flag` and `flag_change` keys. An entry is the text one flag's definition occupies: a match of a definition pattern, whose group `key` is the flag; or, with no pattern, the whole of a definitions file, whose stem is the key"
+refuses = """
+At green: an entry added, removed or changed, in a story that is neither that flag's owner nor a story that
+names the flag with `flag_change`; a change to a definitions file outside every entry, in a story that
+names no flag; an entry whose captured `value` differs from the record's `default`, in the owning story,
+or equals it, in a story with `flag_change: enable`; a failing `flags.definitions_check`, which runs when
+the diff changes a definitions file. For a story that removes a flag ([[artifact:flag]]), at the head: a
+read of the key, a test that sets it, its entry, or a test whose name still carries a token of the flag
+(F-STATES), other than an `on` test where the story is `flag_change: remove`. In the three jobs: an entry
+whose key has no record."""
+unmeasured = "The value an entry serves, where no pattern captures `value`: the gate reports `definition value not measured`, and the review item `flag-off` is then the evidence. Whether a definitions file is well formed, where no command is configured: the gate reports `definitions not validated`. What the outside service holds"
+
+[F-DEFAULT]
+form = "A part of `vsdd gate green`, and of the `flags` check of the three jobs"
+runs = "At green on added lines; in the three jobs on the whole tree under test. Only where the matching read pattern has the named group `default`"
+reads = "The captured fallbacks and the record's `default`, compared without case and without quotes"
+refuses = """
+At green: an added read whose fallback differs from the record's `default`, or an added read of a flag
+whose record has none. In the three jobs it refuses nothing: a key whose fallbacks differ from one another or
+from its record is counted under `metrics.flags.defaults`, and in the sweep is a fixable finding of
+category `code`."""
+unmeasured = "A read whose pattern captures no `default`. The gate reports `fallback not measured at <n> reads`; the `default` tests of F-STATES are then the evidence"
+
+[F-KEY]
+form = "A part of every gate that runs a configured command, of `vsdd env start`, and of `vsdd gate green`"
+runs = "Whenever a configured command starts; at green on the story's added lines"
+reads = "`flags.key_env`, `flags.override_env`, `flags.key_patterns`, the diff patch. Never the value of a key variable"
+refuses = """
+Nothing at a command start. It removes the variables `flags.key_env` names from that command's environment
+and sets the override variable itself: to `{}` for a test command, to the story's flag for the run of F-ON,
+and for `vsdd env start` as [[topic:flag-lifecycle]] says. A value inherited from the shell is never passed
+on. At green: an added line that a key pattern matches."""
+unmeasured = """
+Whether the flag source has a secret key at all: where `key_env` is empty the gate removes nothing and
+reports `no key variable named`. A key whose shape no pattern describes: where `key_env` names a variable
+and `key_patterns` is empty the gate reports `key shape not measured`, and the scanner of the release
+baseline is then the first check.
+A program that an agent runs in its own shell and that reads a key variable by itself, which is why the
+briefing warns while one is set ([[config:flags]]). A tool connected to the session that reaches the flag
+service: the factory starts none."""
+
+[F-ITEMS]
+form = "Items of the verdict: the tool adds them to the items a story's review must account for ([[topic:verdicts]])"
+runs = "In the first review loop of the story. In a later loop the items `flag-off` and `flag-removed` are added again when the commits that loop reviews touch a file of class `source` or `tests`"
+reads = "The story's `flag` and `flag_change` keys, its contracts, `flags.contracts`, the green evidence"
+refuses = """
+A converged verdict, and so a delivery, while an item is not marked `checked`. `not_checkable` does not
+account for one of these items, because no other evidence covers what it asks: the item then counts as
+uncovered. The items: `flag-off:<key>` for a story behind a flag, and for a story with
+`flag_change: enable`, which may move a test; `flag-removed:<key>` for a story that removes a flag
+([[artifact:flag]]); `flag-system` for a story that cites a contract in `flags.contracts`; `not-a-flag`
+for a story whose green evidence lists a marked line. What each item asks is the duty of the reviewer that
+accounts for it, in [[table:flag-duties]]."""
+unmeasured = "Nothing: an item no reviewer accounts for keeps the verdict open"

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "release-result.schema.json",
+  "type": "object",
+  "description": "Output of vsdd release: ok, state, version, tag (state.md#2.16, release row: idempotent; each run does the next missing part). The design gives no types and no required list.",
+  "properties": {
+    "ok": {},
+    "state": {},
+    "version": {},
+    "tag": {}
+  }
+}

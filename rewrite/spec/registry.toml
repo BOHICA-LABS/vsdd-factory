@@ -1,0 +1,2412 @@
+# The registry of every thing in the 1.0 design. See README.md.
+
+# generated: packages start
+# Written by rewrite/tools/gen_packages.py from section 9 of the blueprint. Do not edit by hand.
+[package.B0]
+summary = "Rewrite-mode root"
+[package.B1]
+summary = "Manifest and shell"
+[package.B2]
+summary = "Launcher and entries"
+[package.B8]
+summary = "Platform probes"
+[package.R0]
+summary = "Marketplace install check"
+[package.B3]
+summary = "Shared core"
+[package.C1]
+summary = "Schemas"
+[package.C2]
+summary = "Policy tables"
+[package.B6]
+summary = "Lint and roster"
+[package.B4a]
+summary = "Prelude build"
+[package.B4b]
+summary = "Hook wiring build"
+[package.B5]
+summary = "Workflow harness"
+[package.B7]
+summary = "CI"
+[package.S1]
+summary = "State core"
+[package.S2a]
+summary = "Record stores"
+[package.S2b]
+summary = "Lock, caller identity and flush"
+[package.S3]
+summary = "Survey, checkpoint and route"
+[package.S2c]
+summary = "Status and briefing"
+[package.S4]
+summary = "Decisions"
+[package.S5]
+summary = "Importer"
+[package.S6]
+summary = "Registers"
+[package.G1]
+summary = "Jobs and product environment"
+[package.G2]
+summary = "Story gates"
+[package.G3]
+summary = "Verdicts"
+[package.G4a]
+summary = "Delivery"
+[package.G4b]
+summary = "Governed delivery and fix stories"
+[package.G5]
+summary = "Planning gates"
+[package.G6a]
+summary = "Wave gate"
+[package.G6b]
+summary = "Release gate"
+[package.G7]
+summary = "Remaining gates and release"
+[package.H1]
+summary = "Runner core"
+[package.H2]
+summary = "Safety rules"
+[package.H3]
+summary = "Walls"
+[package.H4]
+summary = "Artifacts"
+[package.H5]
+summary = "Delivery order"
+[package.H6]
+summary = "Gate guard and allow"
+[package.H7]
+summary = "Decisions and step results"
+[package.H8]
+summary = "Spike bounds"
+[package.H9]
+summary = "Session rules"
+[package.A1]
+summary = "Agent frame"
+[package.A2a]
+summary = "Product and UX agents"
+[package.A2b]
+summary = "Architecture and planning agents"
+[package.A3]
+summary = "Analysis and research agents"
+[package.A4]
+summary = "Builder agents"
+[package.A5]
+summary = "Delivery support agents"
+[package.A6a]
+summary = "Code-facing reviewers"
+[package.A6b]
+summary = "Product-facing reviewers"
+[package.K1]
+summary = "Control skills"
+[package.K2]
+summary = "Authoring skills"
+[package.K3a]
+summary = "Preview skill"
+[package.K3b]
+summary = "Tool skills"
+[package.W1]
+summary = "`spike`"
+[package.W2]
+summary = "`story`"
+[package.W3]
+summary = "`wave`"
+[package.W4]
+summary = "`spec`"
+[package.W5]
+summary = "`plan`"
+[package.W6]
+summary = "`feature`, with a scenario test for each fast route and for the amendment run"
+[package.W7]
+summary = "`verify` and `release` (the former W8: release is five steps and closes the cycle `verify` checked)"
+[package.W9]
+summary = "`ingest`"
+[package.W10]
+summary = "`discover`"
+[package.W11]
+summary = "`maintain`"
+[package.W12]
+summary = "`multi`, with `vsdd repos scan` (the former T4, which serves only multi-repository projects)"
+[package.T1]
+summary = "`vsdd doctor`"
+[package.T3]
+summary = "Events and observability"
+[package.T5]
+summary = "Export and render"
+[package.E1]
+summary = "Smoke tier"
+[package.E2]
+summary = "Story tier"
+[package.E3]
+summary = "The greenfield proof"
+[package.E4]
+summary = "The brownfield proof"
+[package.D2]
+summary = "Documents for users"
+[package.D3]
+summary = "Contributor documents"
+[package.R1]
+summary = "Release tooling"
+[package.CO1]
+summary = "Cutover tooling"
+[package.CO2]
+summary = "Cutover"
+# generated: packages end
+
+# Everything below is hand-written. One table per thing: [<kind>.<id>].
+# group names the extractor that writes the thing's file; sources are where it is mainly defined.
+
+# ---- doc (4)
+
+[doc.overview]
+summary = "What 1.0 is, its parts and how the layers check each other, with links to everything else."
+group = "index"
+sources = ["BLUEPRINT.md#1", "BLUEPRINT.md#3.1", "BLUEPRINT.md#3.2"]
+
+[doc.decisions]
+summary = "The record of the adopted decisions, as decided: D1 to D30, and those adopted since."
+group = "index"
+sources = ["BLUEPRINT.md#2", "BLUEPRINT.md#2.1", "BLUEPRINT.md#2.2", "BLUEPRINT.md#2.3"]
+
+[doc.conventions]
+summary = "Shared names, paths, model tiers and identifier rules; the authority on every shared name."
+group = "index"
+sources = ["BLUEPRINT.md#4", "BLUEPRINT.md#4.1", "BLUEPRINT.md#4.2", "BLUEPRINT.md#4.5", "BLUEPRINT.md#4.8"]
+
+[doc.platform]
+summary = "The platform facts the design relies on: what a probe has proven, what is still open, and the fallback for each."
+package = "B8"
+group = "index"
+sources = ["BLUEPRINT.md#10"]
+
+# ---- topic (85)
+
+[topic.decisions-built]
+summary = "Where each adopted decision is built, as links."
+group = "index"
+sources = ["BLUEPRINT.md#2.4"]
+
+[topic.glossary]
+summary = "The terms the design uses, each defined once or linked to the thing that defines it."
+group = "index"
+sources = ["BLUEPRINT.md#3.1", "pipeline.md#2.1", "state.md#2.1", "agents-skills.md#2.1", "hooks.md#2.1"]
+
+[topic.command-conventions]
+summary = "What every vsdd command shares: JSON output, exit codes, the -C option, behaviour outside an initialised project, and how the last column of the command table is enforced."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "packaging.md#2.10"]
+
+[topic.long-commands]
+summary = "How a gate that builds or tests, story deliver and release run as detached jobs that the same command re-attaches to."
+package = "G1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16"]
+
+[topic.worktrees]
+summary = "The one library that creates and removes story, integration and spike worktrees, and the commands that call it."
+package = "S3"
+group = "commands"
+sources = ["packaging.md#2.10", "state.md#2.16", "BLUEPRINT.md#4.1", "BLUEPRINT.md#4.6"]
+
+[topic.governed-delivery]
+summary = "When a delivered story waits for a person: protected paths, dependency changes, the merge decision, and the hotfix branch."
+package = "G4b"
+group = "commands"
+sources = ["BLUEPRINT.md#2.2", "BLUEPRINT.md#4.11", "BLUEPRINT.md#4.12", "state.md#2.8", "pipeline.md#2.9.1"]
+
+[topic.gates]
+summary = "What a gate is, the eleven gate names, and the checks that wave, release, ingest and sweep run as one job."
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.2"]
+
+[topic.machine-records]
+summary = "The kinds of record only code writes, which are tracked, how long each is kept, and why step records and evidence are not tracked."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[topic.evidence-lookup]
+summary = "Evidence as records: what a gate writes and which record each gate's lookup returns, including after a clean rebase."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.13", "state.md#2.8"]
+
+[topic.verdicts]
+summary = "How the tool computes a verdict from the stored passes: which passes count, grounding, and where the verdict is kept."
+package = "G3"
+group = "records"
+sources = ["pipeline.md#2.10.3", "state.md#2.8", "BLUEPRINT.md#4.10", "BLUEPRINT.md#4.13", "hooks.md#2.11.7"]
+
+[topic.digests]
+summary = "The digest an approval is bound to: how it is computed, which files a spec decision covers, and when a decision reads as stale."
+package = "S2a"
+group = "records"
+sources = ["state.md#2.6", "state.md#2.8", "BLUEPRINT.md#4.11"]
+
+[topic.decisions]
+summary = "Decisions as records: the grammar, how choices map to statuses, qualified identifiers, what settling writes, and approved dependencies."
+package = "S4"
+group = "records"
+sources = ["BLUEPRINT.md#4.11", "state.md#2.8", "BLUEPRINT.md#4.8"]
+
+[topic.project-configuration]
+summary = "The project configuration file: who may write it, the three cases in which code does, detection by init, and missing commands as a state."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12", "BLUEPRINT.md#4.6"]
+
+[topic.result-schemas]
+summary = "How the schema files are the single source for scripts, tool and hook runner, and the rules that apply across them."
+package = "C1"
+group = "records"
+sources = ["BLUEPRINT.md#4.10", "pipeline.md#2.10"]
+
+[topic.hook-runner]
+summary = "The hook runner: the Python layout, how one call is dispatched to the rules for its event and tool, and its time budgets."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#1", "hooks.md#2.4", "hooks.md#2.3", "BLUEPRINT.md#5.4"]
+
+[topic.hook-launcher]
+summary = "The launch chain from hooks.json through launch.sh and uv to the runner: modes, exit codes and why each part is there."
+package = "B2"
+group = "rules"
+sources = ["hooks.md#2.2", "BLUEPRINT.md#4.1"]
+
+[topic.hook-wiring]
+summary = "How hooks.json is generated and what it wires: the self-guarding command, the matcher, and the events deliberately left unwired."
+package = "B4b"
+group = "rules"
+sources = ["hooks.md#2.3", "BLUEPRINT.md#5.4"]
+
+[topic.hooks-inert]
+summary = "How the hooks stay silent in a project that is not initialised, and what they do on pre-1.0 state."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.8", "BLUEPRINT.md#2.2"]
+
+[topic.hook-failure]
+summary = "What each launch failure, rule crash and timeout turns into on each kind of event."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.9"]
+
+[topic.rule-model]
+summary = "What a rule is: its declared fields, the outcomes it may return and how they are delivered."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.5"]
+
+[topic.rule-tuning]
+summary = "How a project sets a rule's strength or turns it off, which rules are locked, and the two human-only escape switches."
+group = "rules"
+sources = ["hooks.md#2.6", "BLUEPRINT.md#2.1"]
+
+[topic.tool-call-approval]
+summary = "Decision D4 end to end: the setup question, where the answer is stored, what each scope approves and the fallback."
+group = "rules"
+sources = ["hooks.md#2.11.10", "BLUEPRINT.md#5.4", "BLUEPRINT.md#2.4"]
+
+[topic.event-log]
+summary = "The event log: where it is, who writes it, the common fields, hygiene, and explaining a block."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.12", "BLUEPRINT.md#4.1"]
+
+[topic.rule-testing]
+summary = "How the rules are tested: recorded payloads, case tables and the test layers."
+group = "rules"
+sources = ["hooks.md#2.14"]
+
+[topic.caller-identity]
+summary = "How the tool knows who is calling: the caller marker, the command rewrite, and what depends on it."
+package = "H1"
+group = "rules"
+sources = ["BLUEPRINT.md#4.9", "hooks.md#2.11.10", "BLUEPRINT.md#4.13"]
+
+[topic.information-walls]
+summary = "The walls as a whole: read walls, write scopes, dispatch and command scopes, the main-session wall, and the rules prompts must follow."
+group = "rules"
+sources = ["agents-skills.md#2.9", "BLUEPRINT.md#4.3", "hooks.md#2.11.2", "hooks.md#2.7"]
+
+[topic.hook-platform-facts]
+summary = "The platform facts the hook design relies on beyond those in the platform document: the status of each and what follows if it turns out false."
+group = "rules"
+sources = ["hooks.md#2.16"]
+
+[topic.seams-hooks]
+summary = "The interfaces the hook design provides to and needs from the other designs, each linked to the thing that now defines it."
+group = "rules"
+sources = ["hooks.md#4.1", "hooks.md#4.2", "hooks.md#5"]
+
+[topic.risks-hooks]
+summary = "The risks the hook design names and what mitigates each."
+group = "rules"
+sources = ["hooks.md#7"]
+
+[topic.model-tiers]
+summary = "How tiers reach agents and steps: the frontmatter each tier gives, aliases, the one override and cost context. The tier table itself is in the conventions."
+group = "agents"
+sources = ["agents-skills.md#2.3", "BLUEPRINT.md#4.2"]
+
+[topic.agent-design-rules]
+summary = "The rules that decided every entry in the agent and skill rosters."
+group = "agents"
+sources = ["agents-skills.md#1", "agents-skills.md#2.2"]
+
+[topic.tool-sets]
+summary = "The named tool sets, what the hook limits each to, and what each agent deliberately lacks."
+group = "agents"
+sources = ["agents-skills.md#2.5", "BLUEPRINT.md#4.3"]
+
+[topic.agent-file]
+summary = "The standard agent file: its frontmatter, sections, limits and a complete example."
+package = "A1"
+group = "agents"
+sources = ["agents-skills.md#2.7", "BLUEPRINT.md#5.3"]
+
+[topic.agent-shared-block]
+summary = "The block of text every agent file carries, stamped from one source and checked byte for byte."
+package = "A1"
+group = "agents"
+sources = ["agents-skills.md#2.7", "BLUEPRINT.md#4.1"]
+
+[topic.method-files]
+summary = "What a method file is, its limit, how a step or a skill names it, and why procedures are files and not skills."
+group = "agents"
+sources = ["agents-skills.md#2.8"]
+
+[topic.skill-file]
+summary = "The two shapes of skill file and why only one skill is visible to the model."
+group = "agents"
+sources = ["agents-skills.md#2.12"]
+
+[topic.research-and-browser-tools]
+summary = "How research and browser tools reach agents: the bundled servers, both tool spellings, keys, and what happens when a server is missing."
+group = "agents"
+sources = ["agents-skills.md#2.10", "BLUEPRINT.md#5.3", "packaging.md#2.4"]
+
+[topic.seams-agents]
+summary = "The interfaces the agents and skills design provides to and needs from the other designs, each linked to the thing that now defines it."
+group = "agents"
+sources = ["agents-skills.md#4", "agents-skills.md#5"]
+
+[topic.risks-agents]
+summary = "The risks the agents and skills design names and what mitigates each."
+group = "agents"
+sources = ["agents-skills.md#7"]
+
+[topic.trust-layers]
+summary = "Scripts steer, tools measure, hooks enforce: what each layer does and what it must not be trusted with."
+group = "workflows"
+sources = ["pipeline.md#2.2", "BLUEPRINT.md#3.2"]
+
+[topic.workflow-shape]
+summary = "The common shape of every workflow: survey, stages, checkpoint; what a step is given; what is on disk at each boundary; failure handling; nesting and locking."
+group = "workflows"
+sources = ["pipeline.md#1", "pipeline.md#2.5", "pipeline.md#2.9", "pipeline.md#2.3", "BLUEPRINT.md#5.1"]
+
+[topic.workflow-arguments]
+summary = "How a workflow takes its arguments as an object or as typed text, and how free text reaches the tool percent-encoded."
+group = "workflows"
+sources = ["pipeline.md#2.3", "BLUEPRINT.md#4.5"]
+
+[topic.story-life]
+summary = "How one story travels from a request to a merged change, and the positions it passes through."
+group = "workflows"
+sources = ["BLUEPRINT.md#3.3", "pipeline.md#2.9.1"]
+
+[topic.story-admission]
+summary = "How a story that does not come from the plan is admitted to a run by the tool."
+group = "workflows"
+sources = ["BLUEPRINT.md#4.6", "BLUEPRINT.md#5.1"]
+
+[topic.convergence]
+summary = "The review loop and the convergence rule: blocking finding, clean pass, converged, the loop, the cap, arbitration, and checks that are not reviews."
+group = "workflows"
+sources = ["pipeline.md#2.7", "BLUEPRINT.md#5.1"]
+
+[topic.holdout-findings]
+summary = "How findings are built from hidden-scenario scores so that they block."
+group = "workflows"
+sources = ["pipeline.md#2.7", "BLUEPRINT.md#4.10"]
+
+[topic.walled-findings]
+summary = "What makes a finding walled, where its full form lives, and what everything outside the holdout wall is shown."
+group = "workflows"
+sources = ["pipeline.md#2.7", "BLUEPRINT.md#4.10", "state.md#2.5"]
+
+[topic.human-stops]
+summary = "Decisions as a person meets them: the three routine stops, the exceptional ones, queuing, and how work is reopened."
+group = "workflows"
+sources = ["pipeline.md#2.6", "BLUEPRINT.md#4.11"]
+
+[topic.amendments]
+summary = "A specification gap found during a wave: the amendment request, the amendment run and what follows its approval."
+group = "workflows"
+sources = ["BLUEPRINT.md#4.11", "pipeline.md#2.6", "pipeline.md#2.9.4"]
+
+[topic.hotfix-cycle]
+summary = "A critical bug fix as a second cycle beside the main one: its branch, its lock, its next and the merge back."
+group = "workflows"
+sources = ["BLUEPRINT.md#4.11", "pipeline.md#2.4", "pipeline.md#2.5"]
+
+[topic.spikes]
+summary = "Research spikes: the protocol, who may ask and how each entrance starts one, what bounds a spike, and when one can run."
+group = "workflows"
+sources = ["BLUEPRINT.md#6", "pipeline.md#2.8", "agents-skills.md#2.11"]
+
+[topic.named-spikes]
+summary = "Named, human-led spikes that span sessions: their branch, worktree, files and commands."
+group = "workflows"
+sources = ["BLUEPRINT.md#6", "pipeline.md#2.8", "state.md#2.5"]
+
+[topic.prelude]
+summary = "The stamped prelude: its markers, generated tables and constants, the argument parser and the platform limits a script follows."
+package = "B4a"
+group = "workflows"
+sources = ["pipeline.md#2.11", "pipeline.md#2.11.1", "BLUEPRINT.md#4.14"]
+
+[topic.prelude-steps]
+summary = "The prelude functions that run a step: brief(), step(), gated() and relay()."
+package = "B4a"
+group = "workflows"
+sources = ["pipeline.md#2.11.1"]
+
+[topic.prelude-run-spike]
+summary = "runSpike(): the wrapper that runs a spike as a step of the same workflow and restarts the asking step."
+package = "B4a"
+group = "workflows"
+sources = ["pipeline.md#2.11.1", "pipeline.md#2.8"]
+
+[topic.prelude-run-stories]
+summary = "runStories(): how child stories are started and how budgets are shared between a parent and its children."
+package = "B4a"
+group = "workflows"
+sources = ["pipeline.md#2.11.1", "BLUEPRINT.md#4.12", "pipeline.md#2.5"]
+
+[topic.prelude-converge]
+summary = "judge() and converge(): the single source of the convergence rule as code."
+package = "B4a"
+group = "workflows"
+sources = ["pipeline.md#2.11.1", "pipeline.md#2.7", "BLUEPRINT.md#4.14"]
+
+[topic.story-script]
+summary = "The story.js skeleton."
+package = "W2"
+group = "workflows"
+sources = ["pipeline.md#2.11.2"]
+
+[topic.wave-script]
+summary = "The wave.js skeleton."
+package = "W3"
+group = "workflows"
+sources = ["pipeline.md#2.11.3"]
+
+[topic.resume]
+summary = "How workflows resume: when a stage is done, what the survey does on a new session or a fresh clone, and how work is reopened."
+group = "workflows"
+sources = ["BLUEPRINT.md#4.14", "pipeline.md#2.5", "state.md#2.8"]
+
+[topic.multi-repo]
+summary = "How work runs across several repositories: the hub, the repo argument and stories that cross repositories."
+group = "workflows"
+sources = ["pipeline.md#2.9.11", "BLUEPRINT.md#5.1", "BLUEPRINT.md#3.4"]
+
+[topic.brownfield]
+summary = "Existing code and finished builds: the routes for each starting point and how inherited debt is kept from blocking new work."
+group = "workflows"
+sources = ["BLUEPRINT.md#3.4", "pipeline.md#2.4", "BLUEPRINT.md#4.13"]
+
+[topic.seams-pipeline]
+summary = "The interfaces the pipeline design provides to and needs from the other designs, each linked to the thing that now defines it."
+group = "workflows"
+sources = ["pipeline.md#4", "pipeline.md#5.1", "pipeline.md#5.2", "pipeline.md#5.3", "pipeline.md#5.4"]
+
+[topic.risks-pipeline]
+summary = "The risks the pipeline design names and what mitigates each."
+group = "workflows"
+sources = ["pipeline.md#7"]
+
+[topic.state-directory]
+summary = "The state directory and its storage: why a separate branch, how it is mounted, and the five project conditions."
+package = "S1"
+group = "state"
+sources = ["state.md#1", "state.md#2.2", "state.md#decision-keep-the-separate-branch-and-take-every", "state.md#mounting", "BLUEPRINT.md#5.2"]
+
+[topic.state-layout]
+summary = "The layout of .factory/, tracked and local."
+group = "state"
+sources = ["state.md#layout", "BLUEPRINT.md#4.7"]
+
+[topic.state-commits]
+summary = "Who commits state and when: flush, its five points, what it does, and the push."
+package = "S2b"
+group = "state"
+sources = ["state.md#who-commits-state-and-when", "BLUEPRINT.md#5.2"]
+
+[topic.artifact-rules]
+summary = "The rules every artifact follows: one registry, flat frontmatter, one-way links, size caps, who may write, and deletion."
+group = "state"
+sources = ["state.md#2.4"]
+
+[topic.spec-lock]
+summary = "The specification lock: when the set is locked, the guidance files, and the kinds that stay frozen under an amendment."
+group = "state"
+sources = ["state.md#2.4", "BLUEPRINT.md#4.11", "BLUEPRINT.md#5.2"]
+
+[topic.computed-status]
+summary = "The status values an agent may write, and the ones read from the decision or closure record that decides them."
+group = "state"
+sources = ["state.md#2.4", "BLUEPRINT.md#4.7", "BLUEPRINT.md#5.2"]
+
+[topic.stored-and-derived]
+summary = "Which facts are stored and which are computed on demand."
+group = "state"
+sources = ["state.md#2.6"]
+
+[topic.status-report]
+summary = "The status report: computed from the records each time, its fields and limits, and what writes the records it reads."
+package = "S2c"
+group = "state"
+sources = ["state.md#2.7", "BLUEPRINT.md#5.2"]
+
+[topic.briefing]
+summary = "The session briefing: when it is printed, what it contains and its size limit."
+package = "S2c"
+group = "state"
+sources = ["state.md#2.9", "BLUEPRINT.md#7"]
+
+[topic.compaction-and-cold-start]
+summary = "What is on disk and what happens in each case: warm-up, compaction, a session that ends or crashes, a cold start, a fresh clone, a broken mount."
+group = "state"
+sources = ["BLUEPRINT.md#7", "state.md#2.10"]
+
+[topic.run-lock]
+summary = "The run lock and liveness: its scope, how it is taken and released, when it is stale, and two sessions at once."
+package = "S2b"
+group = "state"
+sources = ["state.md#2.11", "BLUEPRINT.md#4.13"]
+
+[topic.importer]
+summary = "Importing pre-1.0 state: what is converted, what the importer writes, and the dry run."
+package = "S5"
+group = "state"
+sources = ["state.md#2.15", "BLUEPRINT.md#5.2", "BLUEPRINT.md#2.1"]
+
+[topic.templates]
+summary = "Skeleton templates: one per agent-written kind, checked against the registry."
+package = "S1"
+group = "state"
+sources = ["state.md#2.13"]
+
+[topic.multi-repo-state]
+summary = "State for a multi-repository project: one state directory in the hub, member repositories, per-repository wave records."
+group = "state"
+sources = ["state.md#2.14", "BLUEPRINT.md#5.2"]
+
+[topic.cycles]
+summary = "Cycles: what opens one, the standing cycle, what closing one does, and what is pruned."
+package = "S3"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.8", "BLUEPRINT.md#5.2", "BLUEPRINT.md#4.7"]
+
+[topic.waves]
+summary = "Where a wave lives: its membership in the plan's closure record, and its progress and gate rounds in its own closure records."
+group = "state"
+sources = ["state.md#2.5", "state.md#2.14", "pipeline.md#2.9.5"]
+
+[topic.seams-state]
+summary = "The interfaces the state design provides to and needs from the other designs, each linked to the thing that now defines it."
+group = "state"
+sources = ["state.md#4", "state.md#5", "state.md#2.18"]
+
+[topic.risks-state]
+summary = "The risks the state design names and what mitigates each."
+group = "state"
+sources = ["state.md#7"]
+
+[topic.single-sources]
+summary = "Each generated or checked copy and the single source it comes from."
+group = "packaging"
+sources = ["BLUEPRINT.md#4.14", "packaging.md#2.5"]
+
+[topic.seams-packaging]
+summary = "The interfaces the packaging design provides to and needs from the other designs, each linked to the thing that now defines it."
+group = "packaging"
+sources = ["packaging.md#4", "packaging.md#from-the-hooks-design", "packaging.md#from-the-state-design", "packaging.md#from-the-agents-skills-design", "packaging.md#from-the-pipeline-design"]
+
+[topic.risks-packaging]
+summary = "The risks the packaging design names and what mitigates each."
+group = "packaging"
+sources = ["packaging.md#7"]
+
+# ---- command (62)
+
+[command.init]
+summary = "Creates or mounts the state branch and writes factory.toml by detection; converts nothing on pre-1.0 state."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#mounting", "state.md#2.12"]
+
+[command.import]
+summary = "Converts pre-1.0 state in place and writes what feature needs to start; the real import is person only."
+package = "S5"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.15"]
+
+[command.status]
+summary = "The read-only status report with the exact next command; with --fix, the safe repairs and a flush."
+package = "S2c"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.7", "state.md#2.10", "packaging.md#2.10"]
+
+[command.list]
+summary = "Derived catalogue of one artifact kind, showing computed statuses and leaving walled content out by default."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.6"]
+
+[command.refs]
+summary = "Derived reverse links for one identifier."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.6"]
+
+[command.coverage]
+summary = "Derived coverage and traceability view."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.6"]
+
+[command.path]
+summary = "Prints the path of an identified artifact."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.6"]
+
+[command.validate]
+summary = "Checks artifacts against the registry: path, identifier, frontmatter, references, caps and the lock."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "packaging.md#2.10"]
+
+[command.config]
+summary = "Prints the project configuration as data (config --json)."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.12"]
+
+[command.config-set]
+summary = "Changes one key of factory.toml; person only."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.12"]
+
+[command.new]
+summary = "Stamps an artifact skeleton with the next free identifier."
+package = "S1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.13", "state.md#2.4"]
+
+[command.note]
+summary = "Adds a note a person asked to keep to notes.json."
+package = "S2a"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.7"]
+
+[command.explain]
+summary = "Explains one block by its id, or the most recent block in the project."
+package = "H9"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "hooks.md#2.12", "hooks.md#2.13"]
+
+[command.rules]
+summary = "Prints the rule table with each rule's current strength in this project."
+package = "H9"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "hooks.md#2.13"]
+
+[command.hooks-selftest]
+summary = "Runs every gate's blocking case through the installed launcher and confirms it blocks."
+package = "H9"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "hooks.md#2.13", "hooks.md#2.14"]
+
+[command.events-schema]
+summary = "Prints the JSON Schema the event writer validates against."
+package = "T3"
+group = "commands"
+sources = ["hooks.md#2.12", "hooks.md#2.13"]
+
+[command.review-show]
+summary = "Renders a unit's stored review findings for a person; a walled finding shows as its walled key and severity unless the caller may read holdout."
+package = "G3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.5"]
+
+[command.review-prepare]
+summary = "For an on-demand review: writes the diff patch and returns the next free report path."
+package = "G3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "agents-skills.md#2.12"]
+
+[command.survey]
+summary = "First step of every workflow: checks the caller marker and preconditions, opens a run, takes the lock, makes worktrees and returns what is done."
+package = "S3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.5"]
+
+[command.checkpoint]
+summary = "Last step of every workflow: closes what the evidence supports, opens decisions, commits and pushes state, releases the lock and returns next."
+package = "S3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.5"]
+
+[command.checkpoint-brief]
+summary = "Opens the cycle and the brief decision when the person says the draft brief is ready; takes no run."
+package = "S3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16"]
+
+[command.gate-red]
+summary = "Measures that a story's new tests fail on assertions and freezes their identities; --refreeze records changed frozen tests."
+package = "G2"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.1"]
+
+[command.gate-green]
+summary = "Measures build, full suite, lint, format and unchanged frozen tests on a story's head commit and writes the diff patch."
+package = "G2"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.1"]
+
+[command.gate-demo]
+summary = "Records a story's demo evidence, or the criterion-to-test table when no recording is required."
+package = "G2"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.1"]
+
+[command.gate-spec]
+summary = "Checks the specification set, or one part of it with --only."
+package = "G5"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.3"]
+
+[command.gate-plan]
+summary = "Checks the plan; with --story checks one story and, when it passes, admits it to the run."
+package = "G5"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.5", "BLUEPRINT.md#4.6"]
+
+[command.gate-wave]
+summary = "Runs every due wave check on the integration head as one job: suite, lint, build, mutation, clone fidelity and UI."
+package = "G6a"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.2"]
+
+[command.gate-release]
+summary = "Runs the release checks as one job: baseline, formal, perf and ui."
+package = "G6b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.6"]
+
+[command.gate-ingest]
+summary = "Measures ingest coverage and the baseline record of an existing codebase."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.8"]
+
+[command.gate-contracts]
+summary = "The multi-repository contracts gate, run when a provider's published interface changed since its consumers were last built."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.11"]
+
+[command.gate-integration]
+summary = "The multi-repository integration gate: brings the services up together and runs cross-repository end-to-end tests."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.11"]
+
+[command.gate-sweep]
+summary = "Runs every measured maintenance sweep that is due as one job."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.10"]
+
+[command.feature-route]
+summary = "Derives a change request's route from the stored change analysis and writes it into cycle.json."
+package = "G5"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.4"]
+
+[command.plan-schedule]
+summary = "Computes waves, assigns scenarios, runs the plan gate, records the baseline check and estimates."
+package = "G5"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.5"]
+
+[command.story-deliver]
+summary = "The only merge onto the integration branch: verdict check, push, pull request, CI wait, merge and worktree removal."
+package = "G4a"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.1", "BLUEPRINT.md#4.13", "packaging.md#2.10"]
+
+[command.story-new-fix]
+summary = "Writes fix stories in E-0 from blocking findings and admits each with its worktree."
+package = "G4b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#4.6"]
+
+[command.release]
+summary = "One idempotent command that prepares and then publishes a release; the only route onto the release branch."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.7"]
+
+[command.env-start]
+summary = "Starts the product on its own port for a demo, a UI review or scenario evaluation, recorded with the caller."
+package = "G1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16"]
+
+[command.env-stop]
+summary = "Stops a product process that env start started."
+package = "G1"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16"]
+
+[command.spike-open]
+summary = "Opens a spike ledger entry after establishing who asked and checking the limits; with --name opens or attaches to a named spike."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#6", "pipeline.md#2.8"]
+
+[command.spike-record]
+summary = "Validates a spike finding and completes the ledger entry; --increment records one session of a named spike."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#6"]
+
+[command.spike-close]
+summary = "Records the final finding of a named spike and closes its entry."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#6"]
+
+[command.idea-register]
+summary = "Writes ideas into the idea registry."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.9"]
+
+[command.report-debt]
+summary = "Derived report of waivers, advisory findings, flaky inherited tests and the debt a baseline recorded."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#3.4"]
+
+[command.discover-collect]
+summary = "Runs each configured feedback source and stores its output under research/inputs/."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.9"]
+
+[command.repos-split]
+summary = "Creates member repositories after a spec decision and appends their entries to factory.toml."
+package = "G7"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.9.11", "state.md#2.14"]
+
+[command.defer-add]
+summary = "Adds an entry to the deferred-work register."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "agents-skills.md#2.12"]
+
+[command.defer-list]
+summary = "Lists the deferred-work register."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "agents-skills.md#2.12"]
+
+[command.retire]
+summary = "Deletes one file in a class that allows deletion (deferred, research) and refuses anywhere else."
+package = "S6"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.4"]
+
+[command.driver-on]
+summary = "Marks the driver active for this session in local/driver.json."
+package = "S2b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.4"]
+
+[command.driver-pause]
+summary = "Marks the driver paused at a decision."
+package = "S2b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.4"]
+
+[command.driver-off]
+summary = "Clears the driver flag."
+package = "S2b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "pipeline.md#2.4"]
+
+[command.lock-release]
+summary = "Releases the run lock; --force is person only."
+package = "S2b"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.11", "packaging.md#2.10"]
+
+[command.decide]
+summary = "Settles a decision by writing the decision record and nothing else; refused when called from an agent's tool call."
+package = "S4"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "BLUEPRINT.md#4.11", "state.md#2.8"]
+
+[command.cycle-close]
+summary = "Repairs a cycle that did not close; person only."
+package = "S3"
+group = "commands"
+sources = ["BLUEPRINT.md#4.9", "state.md#2.16", "state.md#2.5"]
+
+[command.doctor]
+summary = "Checks the machine and the project: uv, Python, git, gh, the Claude Code version, each sandbox need and hook liveness; --install-shim writes the terminal shim."
+package = "T1"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10", "BLUEPRINT.md#5.5"]
+
+[command.events]
+summary = "Canned queries, replay, reports and agent durations over the event log."
+package = "T3"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10"]
+
+[command.obs]
+summary = "Runs the observability stack: up, down, status, logs, dashboard, register, unregister, list, reset, telemetry."
+package = "T3"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10", "packaging.md#the-observability-stack"]
+
+[command.repos-scan]
+summary = "Finds the repositories of a multi-repository project and prints their dependency graph as JSON."
+package = "W12"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10"]
+
+[command.export-pdf]
+summary = "Converts a Markdown report to PDF."
+package = "T5"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10", "BLUEPRINT.md#2.1"]
+
+[command.render-diagram]
+summary = "Renders a Mermaid file to SVG or PNG, and exports Excalidraw and draw.io files when their tools are installed."
+package = "T5"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10", "BLUEPRINT.md#2.1"]
+
+[command.version]
+summary = "vsdd --version; one of the commands that run outside an initialised project."
+package = "B2"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.9", "packaging.md#2.10"]
+
+# ---- record (15)
+
+[record.cycle]
+summary = "cycle.json: what a cycle is (kind, title, route, baseline, request) and, once closed, its close fields."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.closure]
+summary = "One per unit: how far the unit has got, its stages, verdict, delivery and what closed it."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.baseline]
+summary = "The closure record of an ingest or an import, holding what was measured then; gates fail only on what is new against it."
+package = "G7"
+group = "records"
+sources = ["BLUEPRINT.md#4.13", "state.md#2.8", "pipeline.md#2.9.8"]
+
+[record.decision]
+summary = "A question only a person can answer, stored as a record and a packet a person can read."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8", "BLUEPRINT.md#4.11"]
+
+[record.notes]
+summary = "Up to five notes a person asked to keep, in the tracked notes.json."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.7"]
+
+[record.holdout-evaluation]
+summary = "Scenario scores, symptoms and the full form of walled findings for one unit, written by the checkpoint inside the holdout wall."
+package = "S3"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.5"]
+
+[record.run]
+summary = "run.json: one workflow run, its session, agent count, admitted stories and whether it holds an amendment."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.step]
+summary = "The stored copy of a step result, with the calling agent's type and the worktree head added by the hook."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8", "hooks.md#2.11.7"]
+
+[record.evidence]
+summary = "The file a gate writes for one gate and commit, with the raw output, JUnit report or diff patch beside it."
+package = "S2a"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.job]
+summary = "A detached gate or delivery job, or a started product, keyed by command, subject and commit."
+package = "G1"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.lock]
+summary = "The run lock: one per repository and branch a run can write."
+package = "S2b"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "BLUEPRINT.md#4.13", "state.md#2.11"]
+
+[record.driver-flag]
+summary = "Whether the driver is on or paused at a decision, and in which session."
+package = "S2b"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "state.md#2.8"]
+
+[record.caller-marker]
+summary = "The one-time marker the hook writes for each vsdd call, so the tool knows which session and agent called."
+package = "H1"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "BLUEPRINT.md#4.9", "hooks.md#2.11.10"]
+
+[record.spike-admission]
+summary = "The hook's record of which agent type dispatched a spike runner."
+package = "H8"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "BLUEPRINT.md#6", "hooks.md#2.11.6"]
+
+[record.config-fingerprint]
+summary = "The hook runner's fingerprint of every gate-bearing configuration section, used to announce a change."
+package = "H1"
+group = "records"
+sources = ["BLUEPRINT.md#4.7", "hooks.md#2.6", "BLUEPRINT.md#5.4"]
+
+# ---- schema (47)
+
+[schema.step-result]
+summary = "What every step returns."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.1", "BLUEPRINT.md#4.10"]
+
+[schema.finding]
+summary = "One defect reported by a reviewer or a gate."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.2", "BLUEPRINT.md#4.10"]
+
+[schema.verdict]
+summary = "The outcome of the convergence rule for one unit at one perimeter."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.3", "BLUEPRINT.md#4.10"]
+
+[schema.spike-request]
+summary = "The question a step returns when it needs a spike."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.4"]
+
+[schema.spike-finding]
+summary = "What a spike returns and the ledger records."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.5", "BLUEPRINT.md#4.10"]
+
+[schema.gate-result]
+summary = "What vsdd gate prints, including the pending state."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.6", "BLUEPRINT.md#4.10"]
+
+[schema.workflow-result]
+summary = "What every workflow returns to the main session or to its parent."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.7", "BLUEPRINT.md#4.10"]
+
+[schema.review-data]
+summary = "Step data a reviewer returns: reviewed commit, findings, claim checks and coverage."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.claim]
+summary = "The structured claim about one finding that is given to the next reviewer."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.fix-data]
+summary = "Step data a fixer returns: one resolution per finding."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.ruling-data]
+summary = "Step data the arbiter returns: one ruling per open finding."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.holdout-data]
+summary = "Step data the holdout-evaluator returns: scores and symptoms."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.pending-output]
+summary = "What a long command prints while its job runs."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.9"]
+
+[schema.delta-data]
+summary = "Step data of the feature delta step."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.route-data]
+summary = "Output of vsdd feature route."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "state.md#2.16"]
+
+[schema.story-draft-data]
+summary = "Step data of the feature story-draft step: the admitted story units."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.intake-data]
+summary = "Step data of the spec intake step: the stages its output covers."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.outline-data]
+summary = "Step data of the plan outline step: epics and their stories."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.module-map-data]
+summary = "Step data of the ingest map step."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.score-data]
+summary = "Step data of the discover scorers."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.sweep-data]
+summary = "Step data of a maintain sweep."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.survey]
+summary = "Output of vsdd survey: the survey object every workflow starts from."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "pipeline.md#2.5"]
+
+[schema.story-unit]
+summary = "The story unit a child story workflow is given."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.6"]
+
+[schema.wave-gate-data]
+summary = "Output of vsdd gate wave."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.delivery-data]
+summary = "Output of vsdd story deliver."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8", "BLUEPRINT.md#4.10"]
+
+[schema.checkpoint-result]
+summary = "Output of vsdd checkpoint: status, progress, decisions and next."
+package = "C1"
+group = "records"
+sources = ["pipeline.md#2.10.8"]
+
+[schema.release-result]
+summary = "Output of vsdd release: ok, state, version, tag."
+package = "C1"
+group = "records"
+sources = ["state.md#2.16"]
+
+[schema.env-result]
+summary = "Output of vsdd env start: ok, url, port, pid."
+package = "C1"
+group = "records"
+sources = ["state.md#2.16"]
+
+[schema.repos-split-result]
+summary = "Output of vsdd repos split: ok, repos."
+package = "C1"
+group = "records"
+sources = ["state.md#2.16"]
+
+[schema.cycle-record]
+summary = "Fields of the cycle record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.closure-record]
+summary = "Fields of the closure record; one schema serves every unit."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.baseline]
+summary = "The baseline object inside the ingest or import closure record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8", "BLUEPRINT.md#4.13"]
+
+[schema.decision-record]
+summary = "Fields of the decision record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.notes]
+summary = "Fields of notes.json."
+package = "C1"
+group = "records"
+sources = ["state.md#2.7"]
+
+[schema.holdout-evaluation]
+summary = "Fields of a holdout evaluation file."
+package = "C1"
+group = "records"
+sources = ["state.md#2.5", "BLUEPRINT.md#4.10"]
+
+[schema.run-record]
+summary = "Fields of the run record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.step-record]
+summary = "Fields of the step record: the step result plus what the hook adds."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8", "hooks.md#2.11.7", "BLUEPRINT.md#4.10"]
+
+[schema.evidence-record]
+summary = "Fields of an evidence record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.job-record]
+summary = "Fields of a job record."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.lock]
+summary = "Fields of lock.json."
+package = "C1"
+group = "records"
+sources = ["state.md#2.11"]
+
+[schema.driver-flag]
+summary = "Fields of driver.json."
+package = "C1"
+group = "records"
+sources = ["state.md#2.8"]
+
+[schema.status]
+summary = "The object vsdd status --json prints and the briefing renders."
+package = "S2c"
+group = "records"
+sources = ["state.md#2.7", "BLUEPRINT.md#4.10"]
+
+[schema.config]
+summary = "The schema of factory.toml: every section and key the loader accepts."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[schema.caller-marker]
+summary = "Fields of a caller marker."
+package = "H1"
+group = "records"
+sources = ["hooks.md#2.11.10"]
+
+[schema.spike-admission]
+summary = "Fields of a spike admission."
+package = "H8"
+group = "records"
+sources = ["hooks.md#2.11.6"]
+
+[schema.config-fingerprint]
+summary = "Fields of the configuration fingerprint."
+package = "H1"
+group = "records"
+sources = ["hooks.md#2.6"]
+
+[schema.event]
+summary = "One line of the event log."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.12"]
+
+# ---- config (22)
+
+[config.project]
+summary = "The schema key and [project]: name, languages, ui, layout."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.branches]
+summary = "[branches]: integration, release, protected, and the story and spike branch patterns."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.1"]
+
+[config.commands]
+summary = "[commands] and [commands.env]: the project's build, test, lint, run and measuring commands."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12", "BLUEPRINT.md#4.6"]
+
+[config.paths]
+summary = "[paths]: the globs of the seven product path classes."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12", "BLUEPRINT.md#4.7"]
+
+[config.delivery]
+summary = "[delivery]: mode, ci, merge, merge strategy, protected paths, dependency changes and the CI wait."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.convergence]
+summary = "[convergence]: review passes and rounds."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.limits]
+summary = "[limits]: agents, stories, attempts, delivery rounds, gate minutes, parallel gates, failed runs before stuck."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.spikes]
+summary = "[spikes]: per step, per run, per day, minutes, named spikes open, worktree retention."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12", "BLUEPRINT.md#6"]
+
+[config.holdout]
+summary = "[holdout]: scenario thresholds, rotation and batch size."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12", "pipeline.md#2.7"]
+
+[config.mutation]
+summary = "[mutation]: kill rate by module criticality."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "pipeline.md#2.7"]
+
+[config.stops]
+summary = "[stops]: when the plan decision opens."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.evidence]
+summary = "[evidence]: whether a demo is recorded at the wave gate and in the release UI review."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.maintain]
+summary = "[maintain]: which sweeps run and how many fixes a run delivers."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.release]
+summary = "[release]: version files, change log, tag format, publish commands, GitHub release."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.discover]
+summary = "[[discover.source]]: feedback and analytics sources pulled by vsdd discover collect."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[config.state]
+summary = "[state]: push, lock staleness, run retention, pruning of closed cycles."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.caps]
+summary = "[caps]: raised size caps and files waived after an import."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "state.md#2.4"]
+
+[config.notify]
+summary = "[notify]: channel and command."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.component]
+summary = "[[component]]: a repository with more than one toolchain."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.reference]
+summary = "[[reference]]: repositories studied during ingestion."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12"]
+
+[config.repo]
+summary = "[[repo]]: member repositories of a hub, each optionally with its own branches, commands, paths, release and delivery."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "state.md#2.14"]
+
+[config.hooks]
+summary = "[hooks] and [hooks.rules.<rule>]: the main-session wall, log retention, rule strengths and the auto-allow scope."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "hooks.md#2.6", "BLUEPRINT.md#4.12"]
+
+# ---- rule (17)
+
+[rule.gate-guard]
+summary = "Protects the gates themselves: plugin files, runner records, settings, person-only commands, and vsdd subcommands the caller's row does not grant."
+package = "H6"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.10", "BLUEPRINT.md#5.4"]
+
+[rule.secrets]
+summary = "Blocks reading, copying, archiving or printing secrets, and secret values in web calls and uploads."
+package = "H2"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.1", "BLUEPRINT.md#5.4"]
+
+[rule.read-walls]
+summary = "Blocks a read of a path class the caller's row denies, including through vsdd read commands, searches and file: addresses; checks dispatches and the final message."
+package = "H3"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.2", "BLUEPRINT.md#5.4", "BLUEPRINT.md#4.3"]
+
+[rule.write-scopes]
+summary = "Blocks a write outside the classes the caller's row may write, into code-only and read-only classes, and outside a spike's worktree."
+package = "H3"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.2", "BLUEPRINT.md#5.4", "BLUEPRINT.md#4.3"]
+
+[rule.artifacts]
+summary = "Blocks a write whose result is not a valid artifact of its kind: path, identifier, frontmatter, headings, references, size cap and the lock."
+package = "H4"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.3", "BLUEPRINT.md#5.4"]
+
+[rule.tests-first]
+summary = "In a story, product source is written by the implementer only after red evidence exists, and frozen tests stay frozen for other builders."
+package = "H5"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.4", "BLUEPRINT.md#5.4"]
+
+[rule.merge-guard]
+summary = "Refuses a direct merge, push or commit on the integration or release branch and names the governed command."
+package = "H5"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.4", "BLUEPRINT.md#5.4"]
+
+[rule.bash-destructive]
+summary = "Blocks destructive shell, git and GitHub commands."
+package = "H2"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.1"]
+
+[rule.bash-git]
+summary = "Blocks force push, --no-verify, AI attribution, git command families the caller lacks, and spike branches leaving their sandbox."
+package = "H2"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.1"]
+
+[rule.spike-bounds]
+summary = "Holds a spike runner to an open ledger entry, its time box, the asker's walls and a recorded finding."
+package = "H8"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.6", "BLUEPRINT.md#6", "BLUEPRINT.md#5.4"]
+
+[rule.decisions]
+summary = "Records the decision a person typed with /vsdd-factory:decide before any model reads it."
+package = "H7"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.5", "BLUEPRINT.md#4.11", "BLUEPRINT.md#5.4"]
+
+[rule.step-results]
+summary = "Checks that review findings are grounded, then stores the step result with the calling agent's type."
+package = "H7"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.7", "BLUEPRINT.md#5.4", "BLUEPRINT.md#4.10"]
+
+[rule.session-briefing]
+summary = "Composes and prints the session briefing at session start."
+package = "H9"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.8"]
+
+[rule.compaction]
+summary = "Flushes state before compaction and tells the summariser what to keep."
+package = "H9"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.9", "BLUEPRINT.md#5.4"]
+
+[rule.lifecycle-log]
+summary = "Records agent and session lifecycle, keeps the run lock alive, releases it at session end and stops products an agent left running."
+package = "H9"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.10", "BLUEPRINT.md#5.4"]
+
+[rule.purity-advice]
+summary = "Advises on side-effect patterns in files on configured pure-core paths."
+package = "H9"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.10"]
+
+[rule.auto-allow]
+summary = "Approves the plugin's own routine tool calls at the scope the project chose (off, core or extended), only when every other rule passes."
+package = "H6"
+group = "rules"
+sources = ["hooks.md#2.10", "hooks.md#2.11.10", "BLUEPRINT.md#5.4"]
+
+# ---- agent (20)
+
+[agent.product-owner]
+summary = "Planner. The brief's final text, domain specification, requirements, behavioral contracts and hidden scenarios; recovered contracts; intake of existing documents."
+package = "A2a"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.architect]
+summary = "Planner. Architecture, decision records, verification properties, assessments, dependencies, toolchain, conventions, change analysis and arbitration."
+package = "A2b"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.ux-designer]
+summary = "Planner. UX specification, flows, design system and design variants."
+package = "A2a"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.story-writer]
+summary = "Planner. Epics and stories with traced acceptance criteria and dependencies."
+package = "A2b"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.codebase-analyzer]
+summary = "Planner. Reads an existing codebase and records behaviour, architecture and conventions."
+package = "A3"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.researcher]
+summary = "Planner. Outside evidence with citations, market and discovery signals, retrospectives with improvement proposals."
+package = "A3"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.spike-runner]
+summary = "Planner. Runs one spike in an isolated worktree."
+package = "A3"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.test-writer]
+summary = "Builder. Failing tests with the stubs they need; regression, equivalence, UI and end-to-end tests; fixes to tests."
+package = "A4"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.implementer]
+summary = "Builder. Makes failing tests pass; fixes findings; ports; migrations; service clones."
+package = "A4"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.verifier]
+summary = "Builder. Builds verification harnesses in harness stories."
+package = "A4"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.demo-recorder]
+summary = "Builder. Records demo evidence by driving the built product."
+package = "A5"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.technical-writer]
+summary = "Builder. Documentation of current behaviour, release notes."
+package = "A5"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.devops]
+summary = "Builder. Chore stories: project scaffold, CI, repository and toolchain configuration; the observability stack."
+package = "A5"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.adversary]
+summary = "Reviewer. Attacks specifications, stories and implementations against the specification with fresh context."
+package = "A6a"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.code-reviewer]
+summary = "Reviewer. Reviews a diff with no access to specifications or factory state."
+package = "A6a"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.security-reviewer]
+summary = "Reviewer. Security review, triage of scanner output."
+package = "A6a"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.holdout-evaluator]
+summary = "Reviewer. Scores the running product against hidden scenarios without seeing source, tests or specifications."
+package = "A6b"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.ui-reviewer]
+summary = "Reviewer. Reviews the interface through a browser."
+package = "A6b"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.scenario-reviewer]
+summary = "Reviewer. Reviews hidden scenarios against the contracts; its output never reaches a builder."
+package = "A6b"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+[agent.clerk]
+summary = "Clerk. Runs one vsdd command and returns its JSON."
+package = "A1"
+group = "agents"
+sources = ["agents-skills.md#2.4", "agents-skills.md#2.5", "agents-skills.md#2.6", "agents-skills.md#2.8", "BLUEPRINT.md#4.3"]
+
+# ---- skill (13)
+
+[skill.status]
+summary = "The one model-visible skill: where the project stands, what is wrong, and the exact next command."
+package = "K1"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "state.md#2.10"]
+
+[skill.setup]
+summary = "Makes a project a factory project, mounts state on a fresh clone, or prepares the import of pre-1.0 state."
+package = "K1"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "state.md#mounting"]
+
+[skill.decide]
+summary = "The person's decision command; a hook records the decision and the skill relays what the hook returns."
+package = "K1"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "BLUEPRINT.md#4.11", "hooks.md#2.11.5"]
+
+[skill.drive]
+summary = "The low-touch driver: follows next from one workflow to the next until a person is needed."
+package = "K1"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "pipeline.md#2.4"]
+
+[skill.brief]
+summary = "Guided creation of the product brief, saved as a draft after each section."
+package = "K2"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.author]
+summary = "Has the owning specialist create or change one artifact."
+package = "K2"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.review]
+summary = "An on-demand independent review outside the pipeline."
+package = "K2"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.defer]
+summary = "Adds, lists or resolves an entry in the deferred-work register."
+package = "K2"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.preview]
+summary = "Starts or stops the local preview server for mockups and diagrams."
+package = "K3a"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.research]
+summary = "Researches a topic with cited sources and saves a dated report."
+package = "K3b"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "agents-skills.md#2.10"]
+
+[skill.retro]
+summary = "A retrospective of a run, with improvement proposals."
+package = "K3b"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5"]
+
+[skill.observe]
+summary = "Starts, stops and checks the local observability stack."
+package = "K3b"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "packaging.md#the-observability-stack"]
+
+[skill.export-pdf]
+summary = "Converts a Markdown report to PDF."
+package = "K3b"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.5", "packaging.md#2.10"]
+
+# ---- workflow (12)
+
+[workflow.ingest]
+summary = "Reads an existing codebase and records what it is, ending at the spec decision on the recovered baseline."
+package = "W9"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.8", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.discover]
+summary = "Scan: research opportunities and rank ideas. Assess: market check for one idea, brief or request."
+package = "W10"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.9", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.spec]
+summary = "Turns an approved brief into the specification set and reviews it to convergence."
+package = "W4"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.3", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.feature]
+summary = "Takes a change request for an existing product: analyses the delta, chooses the route, then delivers one story or evolves the specification."
+package = "W6"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.4", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.plan]
+summary = "Decomposes the approved specification into stories, schedules waves, assigns hidden scenarios and proves the toolchain and CI work."
+package = "W5"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.5", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.wave]
+summary = "Builds one wave: delivers its stories in parallel, then runs the wave gate to convergence."
+package = "W3"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.2", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.story]
+summary = "The one per-story playbook: failing tests, implementation, review to convergence, evidence, merge."
+package = "W2"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.1", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.verify]
+summary = "Checks the release candidate: suite and scans, system review, security, proofs, hidden scenarios, performance, UI, docs."
+package = "W7"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.6", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.release]
+summary = "Ships the authorised commit, records the new baseline and writes the retrospective."
+package = "W7"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.7", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.maintain]
+summary = "Runs maintenance sweeps and delivers the fixes that are mechanical."
+package = "W11"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.10", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.multi]
+summary = "Coordinates a project that spans several repositories."
+package = "W12"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.11", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+[workflow.spike]
+summary = "Runs one research spike for a person, or opens, advances or closes a named spike."
+package = "W1"
+group = "workflows"
+sources = ["pipeline.md#2.3", "pipeline.md#2.9.12", "pipeline.md#2.9.13", "BLUEPRINT.md#4.5", "BLUEPRINT.md#5.1"]
+
+# ---- artifact (31)
+
+[artifact.brief]
+summary = "The product brief."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.prd]
+summary = "The requirements document: goals, scope, non-goals, release slicing, success measures."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.domain-spec]
+summary = "The domain specification, one file per section, with identified items as headings."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.supplement]
+summary = "The requirement supplements: non-functional requirements, errors, interfaces."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.contract]
+summary = "A behavioral contract (BC-S.SS.NNN)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.4"]
+
+[artifact.architecture-overview]
+summary = "The architecture overview."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.subsystem]
+summary = "A subsystem file (SS-NN); the subsystem list is these files."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.module-map]
+summary = "modules.toml: modules with their paths, subsystem, criticality and purity."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.dependencies]
+summary = "dependencies.toml: the list of dependencies a spec decision approves."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.8", "state.md#layout", "BLUEPRINT.md#5.2"]
+
+[artifact.project-conventions]
+summary = "conventions.md: how code is written in this project; given to builders."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.4"]
+
+[artifact.review-rules]
+summary = "review-rules.md: the project's own rules for reviewers."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.4"]
+
+[artifact.adr]
+summary = "An architecture decision record (ADR-NNN); an amendment is a new record."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.verification-property]
+summary = "A verification property (VP-NNN)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.toolchain]
+summary = "toolchain.toml: the commands and path globs the project uses, approved with the specification."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "state.md#2.12", "BLUEPRINT.md#4.6"]
+
+[artifact.assessment]
+summary = "An assessment, one per topic: verification, service clones, a port, the impact of a change."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.ux-overview]
+summary = "The UX overview."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.screen]
+summary = "A screen (SCR-NNN)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.flow]
+summary = "A flow (FLOW-NNN)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.design-system]
+summary = "The project's design system files."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.asset]
+summary = "Diagrams and images beside the specification files."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.epic]
+summary = "An epic (E-N)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.story]
+summary = "A story (S-N.NN) with its kind, dependencies, contracts and acceptance criteria."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "BLUEPRINT.md#4.6"]
+
+[artifact.holdout-scenario]
+summary = "A hidden scenario (HS-NNN)."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.review-report]
+summary = "The report of an on-demand review; a pipeline review writes no file."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.demo-evidence]
+summary = "A story's demo evidence: script, text transcript, small screenshots."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5", "BLUEPRINT.md#2.2"]
+
+[artifact.analysis]
+summary = "A brownfield or port analysis file."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.research-report]
+summary = "A dated research report; a retrospective is one of its kinds."
+package = "C2"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.spike-ledger-entry]
+summary = "One spike in the project ledger (SP-NNN): the question, who asked, the walls it ran under and the answer."
+package = "S6"
+group = "state"
+sources = ["state.md#2.5", "BLUEPRINT.md#6"]
+
+[artifact.idea]
+summary = "One idea in the idea registry (ID-NNN)."
+package = "S6"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.deferred-item]
+summary = "One entry in the deferred-work register."
+package = "S6"
+group = "state"
+sources = ["state.md#2.5"]
+
+[artifact.change-request]
+summary = "A change request (CR-NNN), queued or running; the only copy of a request."
+package = "S2a"
+group = "state"
+sources = ["state.md#2.5", "BLUEPRINT.md#4.7"]
+
+# ---- table (21)
+
+[table.limits]
+summary = "Each limit: the name the survey returns it under, its factory.toml key, its default and what enforces it."
+package = "S1"
+group = "records"
+sources = ["BLUEPRINT.md#4.12", "state.md#2.12", "pipeline.md#2.5"]
+
+[table.config-keys]
+summary = "Every section and key of factory.toml with its type, default and owner; an unknown key is an error."
+package = "S1"
+group = "records"
+sources = ["state.md#2.12", "BLUEPRINT.md#4.12"]
+
+[table.identifiers]
+summary = "Every identifier scheme: the artifact, its pattern, an example and how it is allocated."
+package = "S1"
+group = "records"
+sources = ["state.md#2.4", "BLUEPRINT.md#4.8"]
+
+[table.decision-kinds]
+summary = "The nine decision kinds: when each opens, its choices, and the status each choice sets."
+package = "S4"
+group = "records"
+sources = ["BLUEPRINT.md#4.11", "state.md#2.8", "pipeline.md#2.6"]
+
+[table.walls]
+summary = "One row per caller: what it may not read, what it may write, whom it may dispatch, and which command families and vsdd groups it may run."
+package = "C2"
+group = "rules"
+sources = ["hooks.md#2.7", "agents-skills.md#2.9", "BLUEPRINT.md#4.3"]
+
+[table.path-classes]
+summary = "Every path class: its globs, how it may be written, who writes it, and the precedence among the seven product classes."
+package = "C2"
+group = "rules"
+sources = ["state.md#2.4", "hooks.md#2.7", "BLUEPRINT.md#4.7", "agents-skills.md#2.9"]
+
+[table.callers]
+summary = "The person-only and governed command lists, kept as constants in the tool's code; the vsdd subcommand groups and the reveals table are the wall table's."
+package = "C2"
+group = "rules"
+sources = ["hooks.md#2.7", "BLUEPRINT.md#4.9"]
+
+[table.events]
+summary = "Hook wiring: each wired event, its matcher, mode, timeout and the rules that run on it."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.3"]
+
+[table.event-types]
+summary = "Every event log type: when it is written and its extra fields."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.12"]
+
+[table.rules]
+summary = "The rule list: each rule's events and tools, the kind of result it gives, and whether a project may relax it."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.10"]
+
+[table.command-families]
+summary = "The git and GitHub command families and the callers each is allowed for."
+package = "H2"
+group = "rules"
+sources = ["hooks.md#2.11.1", "agents-skills.md#2.9"]
+
+[table.environment]
+summary = "Every environment variable the plugin reads or sets: what it does and who may set it."
+package = "H1"
+group = "rules"
+sources = ["hooks.md#2.2", "hooks.md#2.6", "hooks.md#2.11.10", "hooks.md#2.12", "hooks.md#2.14", "hooks.md#4.1", "BLUEPRINT.md#4.2", "state.md#2.12"]
+
+[table.roster]
+summary = "The roster as data: the platform floors, the tiers, each agent's tier, who may invoke each skill, what each workflow calls, overrides and budgets."
+package = "B6"
+group = "agents"
+sources = ["agents-skills.md#2.12", "BLUEPRINT.md#4.2", "BLUEPRINT.md#4.3", "agents-skills.md#2.4", "agents-skills.md#2.5"]
+
+[table.methods]
+summary = "Every method file and the agent that owns it."
+package = "B6"
+group = "agents"
+sources = ["agents-skills.md#2.8", "pipeline.md#2.9.13", "BLUEPRINT.md#4.4"]
+
+[table.severity]
+summary = "The four severities and their definitions; the one text stamped into every reviewer file."
+package = "A1"
+group = "agents"
+sources = ["BLUEPRINT.md#4.10", "pipeline.md#2.7", "agents-skills.md#2.7"]
+
+[table.routes]
+summary = "The route table: an ordered list of project states and the next command each gives."
+package = "S3"
+group = "workflows"
+sources = ["pipeline.md#2.4", "BLUEPRINT.md#5.1", "BLUEPRINT.md#4.14"]
+
+[table.preconditions]
+summary = "The named preconditions of each workflow, checked by the survey before it takes the lock."
+package = "S3"
+group = "workflows"
+sources = ["pipeline.md#2.5", "BLUEPRINT.md#5.1", "BLUEPRINT.md#4.14"]
+
+[table.story-kinds]
+summary = "The story kinds: the tests stage and implement stage of each, and whether it has a red gate."
+package = "C2"
+group = "workflows"
+sources = ["BLUEPRINT.md#4.6"]
+
+[table.step-methods]
+summary = "The agent and method of every step of every workflow; the table the scripts are written from."
+package = "B5"
+group = "workflows"
+sources = ["pipeline.md#2.9.13", "BLUEPRINT.md#4.14"]
+
+[table.artifacts]
+summary = "The registry: one row per artifact kind with its path, identifier, frontmatter keys, headings, cap, lock, writer and template."
+package = "C2"
+group = "state"
+sources = ["state.md#2.4", "state.md#2.5", "hooks.md#2.11.3"]
+
+[table.lint-checks]
+summary = "Every lint check by id and what it checks."
+package = "B6"
+group = "packaging"
+sources = ["packaging.md#layer-3-lint-over-every-shipped-file-pytest-test"]
+
+# ---- packaging (32)
+
+[packaging.rewrite-layout]
+summary = "The repository during the rewrite: the next/ staging root, where builders work and how the new plugin is tried."
+package = "B0"
+group = "packaging"
+sources = ["packaging.md#during-the-rewrite-branch-rewrite-v1", "BLUEPRINT.md#9"]
+
+[packaging.repo-layout]
+summary = "The repository after cutover: the plugin directory, what is not shipped, and the rules for the plugin directory."
+package = "B0"
+group = "packaging"
+sources = ["packaging.md#1", "packaging.md#after-cutover", "BLUEPRINT.md#4.1"]
+
+[packaging.cutover-deletions]
+summary = "What is deleted at cutover and what is kept."
+package = "CO2"
+group = "packaging"
+sources = ["packaging.md#deleted-at-cutover-and-kept", "BLUEPRINT.md#2.3"]
+
+[packaging.python-package]
+summary = "The one standard-library Python package: the shared core modules and the sub-packages."
+package = "B3"
+group = "packaging"
+sources = ["BLUEPRINT.md#4.1", "hooks.md#2.4", "packaging.md#after-cutover"]
+
+[packaging.cli-entry]
+summary = "How vsdd reaches the Bash tool's PATH: bin/vsdd, the launcher's cli entry and cli.py."
+package = "B2"
+group = "packaging"
+sources = ["packaging.md#2.10", "hooks.md#2.2"]
+
+[packaging.plugin-manifest]
+summary = "plugin.json: the complete file, every field and every field left out, and the hosts reached."
+package = "B1"
+group = "packaging"
+sources = ["packaging.md#2.4", "BLUEPRINT.md#2.3"]
+
+[packaging.plugin-assets]
+summary = "The files under <plugin>/assets/ that methods copy into a project: design-system, demo, scaffold."
+package = "T5"
+group = "packaging"
+sources = ["state.md#2.13", "BLUEPRINT.md#4.1"]
+
+[packaging.build-step]
+summary = "tools/build.py: what it generates, from what, where it lands, and the --check that fails on drift."
+package = "B4a"
+group = "packaging"
+sources = ["packaging.md#2.5", "BLUEPRINT.md#5.5"]
+
+[packaging.reference-pages]
+summary = "tools/gen_reference.py and the reference pages it generates from the shipped files."
+package = "D2"
+group = "packaging"
+sources = ["packaging.md#2.5", "packaging.md#2.11"]
+
+[packaging.check-command]
+summary = "tools/check.py: the one command that runs everything that does not cost money."
+package = "B0"
+group = "packaging"
+sources = ["packaging.md#2.6"]
+
+[packaging.tests-python]
+summary = "Test layer 1: pytest for the shared core, every vsdd subcommand and every rule, with the fixture tests."
+group = "packaging"
+sources = ["packaging.md#layer-1-python-tests-pytest-through-uv", "BLUEPRINT.md#5.5"]
+
+[packaging.tests-workflows]
+summary = "Test layer 2: the Node harness that runs workflow scripts with stubbed agents, and the universal tests."
+package = "B5"
+group = "packaging"
+sources = ["packaging.md#layer-2-workflow-tests-node-built-ins-only", "BLUEPRINT.md#5.5"]
+
+[packaging.tests-conformance]
+summary = "Test layer 2b: shared fixtures run through the convergence rule in Node and in Python."
+package = "G3"
+group = "packaging"
+sources = ["packaging.md#layer-2b-conformance-fixtures", "BLUEPRINT.md#5.5"]
+
+[packaging.tests-lint]
+summary = "Test layer 3: lint over every shipped file."
+package = "B6"
+group = "packaging"
+sources = ["packaging.md#layer-3-lint-over-every-shipped-file-pytest-test", "BLUEPRINT.md#5.5"]
+
+[packaging.tests-e2e]
+summary = "Test layer 4: headless end-to-end runs, their tiers, what each probes and what each costs."
+package = "E1"
+group = "packaging"
+sources = ["packaging.md#layer-4-end-to-end-headless", "BLUEPRINT.md#5.5"]
+
+[packaging.sample-project]
+summary = "The sample project the end-to-end tiers run on, with its JUnit runner, fixtures and the gh test double."
+package = "E1"
+group = "packaging"
+sources = ["packaging.md#layer-4-end-to-end-headless", "BLUEPRINT.md#5.5"]
+
+[packaging.e2e-story-tier]
+summary = "The story tier: one story delivered, the kills in the middle of a run, the eleven-minute gate and measured budgets."
+package = "E2"
+group = "packaging"
+sources = ["packaging.md#layer-4-end-to-end-headless", "BLUEPRINT.md#9.6", "BLUEPRINT.md#5.5"]
+
+[packaging.proof-greenfield]
+summary = "The greenfield proof: an empty repository and a brief through release, then one trivial feature."
+package = "E3"
+group = "packaging"
+sources = ["packaging.md#layer-4-end-to-end-headless", "BLUEPRINT.md#9.6", "BLUEPRINT.md#5.5"]
+
+[packaging.proof-brownfield]
+summary = "The brownfield proof: ingest, no tests and no CI, an import, and a two-repository hub."
+package = "E4"
+group = "packaging"
+sources = ["packaging.md#layer-4-end-to-end-headless", "BLUEPRINT.md#9.6", "BLUEPRINT.md#5.5", "BLUEPRINT.md#3.4"]
+
+[packaging.ci]
+summary = "Continuous integration: the jobs of ci.yml and the scheduled end-to-end workflow."
+package = "B7"
+group = "packaging"
+sources = ["packaging.md#2.7", "BLUEPRINT.md#2.3"]
+
+[packaging.plugin-release]
+summary = "How the plugin is released: an immutable tag, the marketplace pull request, tools/release.py and release.yml."
+package = "R1"
+group = "packaging"
+sources = ["packaging.md#2.8"]
+
+[packaging.install-check]
+summary = "The install check that runs in the marketplace repository."
+package = "R0"
+group = "packaging"
+sources = ["packaging.md#2.8", "packaging.md#2.13", "BLUEPRINT.md#9.1"]
+
+[packaging.cutover-steps]
+summary = "Cutover of the repository and the marketplace: steps X0 to X8."
+package = "CO2"
+group = "packaging"
+sources = ["packaging.md#the-repository-and-the-marketplace", "BLUEPRINT.md#2.3", "BLUEPRINT.md#9.6"]
+
+[packaging.cutover-projects]
+summary = "Cutover of the eight projects with tools/cutover.py."
+package = "CO1"
+group = "packaging"
+sources = ["packaging.md#the-eight-projects", "BLUEPRINT.md#2.3"]
+
+[packaging.terminal-shim]
+summary = "The ~/.local/bin/vsdd shim: how it finds the plugin version a project uses."
+package = "T1"
+group = "packaging"
+sources = ["packaging.md#2.10", "BLUEPRINT.md#4.1"]
+
+[packaging.sandbox-needs]
+summary = "What a sandboxed Bash tool must allow, each tested by vsdd doctor."
+package = "T1"
+group = "packaging"
+sources = ["packaging.md#2.10", "BLUEPRINT.md#5.5"]
+
+[packaging.observability-stack]
+summary = "The opt-in observability stack: what is ported, where its files live and how events reach it."
+package = "T3"
+group = "packaging"
+sources = ["packaging.md#the-observability-stack"]
+
+[packaging.documentation]
+summary = "The documentation set: each file, who it is for and what it contains."
+package = "D2"
+group = "packaging"
+sources = ["packaging.md#2.11", "BLUEPRINT.md#5.5"]
+
+[packaging.repo-claude-md]
+summary = "The replacement CLAUDE.md of this repository."
+package = "D3"
+group = "packaging"
+sources = ["packaging.md#the-replacement-claude-md"]
+
+[packaging.build-plan]
+summary = "How the build is ordered: package sizing, the staging root and the order of work."
+group = "packaging"
+sources = ["BLUEPRINT.md#9", "BLUEPRINT.md#9.1", "BLUEPRINT.md#9.2", "BLUEPRINT.md#9.3", "BLUEPRINT.md#9.4", "BLUEPRINT.md#9.5", "BLUEPRINT.md#9.6"]
+
+[packaging.packaging-decisions]
+summary = "The packaging design's own decisions, each with its reason in one line."
+group = "packaging"
+sources = ["packaging.md#2.2", "packaging.md#2.1"]
+
+[packaging.packaging-assumptions]
+summary = "The packaging assumptions not yet proven, how each is tested and its fallback."
+group = "packaging"
+sources = ["packaging.md#2.13"]

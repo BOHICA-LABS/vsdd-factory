@@ -1,0 +1,20 @@
+[
+ {
+  "id": "S3B-survey-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "Accepted for the slice: with every story of the open wave delivered, route row 16 keeps answering wave, which is the true state until the wave gate writes the wave closure. The slice delivers one story and stops there, so nothing on its path depends on the wave closing. For the package that builds the wave gate: when it writes the wave closure, add the scenario 'last story of a wave delivered, then survey' to its tests and remove the builder's note from tables/routes.toml row 16 if it no longer holds.",
+  "where": "rewrite/spec/tables/routes.toml; next/plugins/vsdd-factory/py/vsdd/state/route.py"
+ },
+ {
+  "id": "S3B-survey-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the second part of S3 (step 4 unit survey-2), which rewrites the survey: when factory.toml does not load, route.next_step's answer names the configuration fault and the file, in place of the guard's 'a route row that is not built yet'; one test that breaks factory.toml and asserts the reason names it. Given to that unit in its launch notes.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/route.py; next/tests/unit/test_route.py"
+ },
+ {
+  "id": "S3B-survey-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "For S3 when it widens, as a change to the two command files in the same commit as the next change to either command: one sentence in commands/survey.md and commands/checkpoint.md saying that on a usage refusal (exit 2) the whole result object is printed in the schema's empty form, with a link to the dispatcher's rule. The code already does this and its tests pin it; only the command files are silent.",
+  "where": "rewrite/spec/commands/survey.md; rewrite/spec/commands/checkpoint.md"
+ }
+]

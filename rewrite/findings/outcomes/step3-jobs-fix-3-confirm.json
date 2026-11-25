@@ -1,0 +1,14 @@
+[
+  {
+    "id": "AU-S2-12",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at the third confirmation. Nearly all of it is done. The 'own wording' paragraph is gone from commands/gate-red.md. The 'row adds' sentence is gone from gate-green.md. The 'same tree' paragraph is gone from topics/state-layout.md and the 'other side' paragraph from topics/computed-status.md. artifacts/analysis.md no longer points at the conflicts file. The driver-flag, config-fingerprint and spike-admission schema descriptions carry no conflicts pointer. The files on the finding's original list also grep clean: walls.toml, story-kinds.toml, command-families.toml, cycle-close, env-stop, review-prepare, coverage, idea-register, defer-add and run-record. spec_lint prints 0 problems. One spot is still wrong. commands/validate.md:14 keeps '— one syntax.' That is the head of the sentence the second confirmation quoted as commentary ('one syntax, the state design's row. The row packaging.md printed ... is superseded'), and the fixer's marker grep missed it. It says nothing about validate. It only says that the conversion picked one of two syntaxes, which conflicts/commands.md 3 already records. Fix: delete '— one syntax.' and leave the rest of the line as it is. Two smaller things can go in the same pass. First, conflicts/commands.md 18 calls the tail 'as at the red gate (the implementer then makes a failing one pass)' conversion commentary that 'stands only in this file'. In fact the tail is the state design's own row text (state.md#2.16), and the same fact also stands in topics/story-script.md:131. Reword the entry: the framing sentence was the commentary, and the tail is design text that gate-red.md leaves out. Second, the spike-admission schema description says 'spike_attach pairs the admission with the oldest unclaimed admission'. hooks.md#2.11.6 says it pairs the runner with it, and records/spike-admission.md and rules/spike-bounds.md both say 'pairs it'. rewrite/spec is untracked, so there is no way to tell whether this fix or the conversion wrote 'the admission'.",
+    "where": "rewrite/spec/commands/validate.md:14; rewrite/spec/conflicts/commands.md entry 18; rewrite/spec/schemas/spike-admission.schema.json"
+  },
+  {
+    "id": "S3R-jobs-20",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at the third confirmation. step3-jobs-fix-3.json records AU-S2-12 as fixed for the whole finding, and that is still not quite true. commands/validate.md:14 still carries '— one syntax.', left over from the commentary the second confirmation quoted for validate.md:14-16. Every other line AU-S2-12 names is clean. This finding closes with AU-S2-12: once that line is clean, record AU-S2-12 as fixed.",
+    "where": "rewrite/findings/outcomes/step3-jobs-fix-3.json (the AU-S2-12 entry)"
+  }
+]

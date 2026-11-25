@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "holdout-data.schema.json",
+  "description": "Pointer. The schema is delivered built by C1: its single source is next/plugins/vsdd-factory/schemas/holdout-data.schema.json in the repository, enforced by the shipped checker (py/vsdd/schema.py) and the fixtures under next/tests/unit/fixtures/schemas/holdout-data/."
+}

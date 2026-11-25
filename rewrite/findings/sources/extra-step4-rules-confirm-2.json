@@ -1,0 +1,29 @@
+[
+  {
+    "id": "S4R-rules-C2-1",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_GLOBAL_WITH_VALUE, _git_words, _next_verb); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_GLOBAL_VALUE_OPTIONS)",
+    "problem": "Some of git's global options that take a separate value are missing from both tables. merge_guard's _GLOBAL_WITH_VALUE lacks --namespace, --config-env and --attr-source. shell.py's _GLOBAL_VALUE_OPTIONS lacks --config-env and --attr-source, and lists --exec-path, which never takes a separate value. When an option is missing, its value is read as the verb, or the -C after it is missed. From the story worktree, merge-guard passes 'git --namespace foo -C <root> commit -m x' and 'git --attr-source HEAD -C <root> commit -m x', and real git 2.50 commits on develop with both. S4R-rules-21, whose status is fixed, asked for --namespace and --config-env.",
+    "proposed_resolution": "Keep one table of git's separate-value global options: -C, -c, --git-dir, --work-tree, --namespace, --super-prefix, --config-env and --attr-source, without --exec-path. Define it in shell.py and import it in merge_guard for _git_words and _next_verb. When an option git does not list comes before the verb position, block opaque_git. Add both commands to test_opaque_global_values_and_trees.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C2-2",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_WRAPPER_PROGRAMS, _WRAPPER_FLAGS, _WRAPPER_VALUE_FLAGS)",
+    "problem": "Programs that run their operand as a command still hide git when they are not among the six in _WRAPPER_PROGRAMS. On develop, merge-guard passes 'timeout 10 git commit -m x', and real git commits on develop through timeout (coreutils on Linux, Homebrew on macOS). stdbuf, setsid, ionice, flock and sudo work the same way. An agent guarding a slow push with 'timeout 60 git push origin develop' is a likely form.",
+    "proposed_resolution": "Add timeout, stdbuf, setsid, ionice and sudo to the wrapper table, each with its option grammar. For timeout that is -s/--signal SIG, -k/--kill-after DUR, --preserve-status, --foreground and -v, followed by the duration operand; for stdbuf, -i/-o/-e MODE. An option that cannot be parsed makes the segment opaque, as now. Add 'timeout 10 git commit -m x' to test_wrappers_do_not_hide_git.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C2-3",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (_VALUE_OPTIONS['perl'], _perl_scripted)",
+    "problem": "The S4R-rules-23 fix treats perl's -f as a script option that takes a value, but perl's -f takes no value: it skips sitecustomize.pl. As a result, 'perl -f -pi script.pl src/a.py' lists script.pl as written, and 'perl -pi -f -e s/a/b/ src/a.py' lists the -e script 's/a/b/' as a path. These are the S4R-rules-23 symptoms reached through another flag. The error only over-counts, so at worst it causes a false block.",
+    "proposed_resolution": "Remove -f from perl's value options and from _perl_scripted's script options. Add both commands as rows of test_write_targets_table.",
+    "on_slice_path": true
+  }
+]

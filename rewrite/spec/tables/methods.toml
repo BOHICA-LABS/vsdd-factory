@@ -1,0 +1,418 @@
+# Every method file (<plugin>/methods/<name>.md) and the agent that owns it.
+#
+# Sources: agents-skills.md#2.8, pipeline.md#2.9.13, BLUEPRINT.md#4.4
+# Built by package B6. The assignment of methods to the steps of every
+# workflow is the table step-methods; one step takes one method, and the
+# universal test 6 checks that the method exists and the agent file lists it.
+# Shared files are listed once, with every owner. There is no wave-plan and
+# no release method; the clerk has none.
+
+[[method]]
+name = "domain-spec"
+owner = ["product-owner"]
+description = "Also the project context after an ingest."
+
+[[method]]
+name = "requirements"
+owner = ["product-owner"]
+description = "Contracts, error taxonomy, interfaces, non-functional requirements, module criticality, revision after feasibility review."
+
+[[method]]
+name = "holdout-scenarios"
+owner = ["product-owner"]
+
+[[method]]
+name = "spec-delta"
+owner = ["product-owner"]
+description = "Feature-mode spec evolution, traceability, contract retirement."
+
+[[method]]
+name = "recover-contracts"
+owner = ["product-owner"]
+description = "Contracts recovered from the analysis of existing code, marked `origin: recovered`, with scenario seeds."
+
+[[method]]
+name = "brief"
+owner = ["product-owner"]
+description = "The final text of the brief, from the draft the `brief` skill saved."
+
+[[method]]
+name = "intake"
+owner = ["product-owner", "architect"]
+description = "Converting existing documents; returns `covers`."
+
+[[method]]
+name = "score-ideas"
+owner = ["product-owner", "architect", "adversary"]
+
+[[method]]
+name = "architecture"
+owner = ["architect"]
+description = "Including `dependencies.toml` and `toolchain.toml`, and after an ingest the recovered architecture."
+
+[[method]]
+name = "decision-record"
+owner = ["architect"]
+
+[[method]]
+name = "verification-properties"
+owner = ["architect"]
+
+[[method]]
+name = "feasibility"
+owner = ["architect"]
+
+[[method]]
+name = "clone-assessment"
+owner = ["architect"]
+description = "The old DTU assessment."
+
+[[method]]
+name = "port-assessment"
+owner = ["architect"]
+description = "The old gene-transfusion assessment."
+
+[[method]]
+name = "verification-assessment"
+owner = ["architect"]
+description = "The verification gap analysis of existing code."
+
+[[method]]
+name = "conventions"
+owner = ["architect"]
+description = "`conventions.md` and `review-rules.md`: writing them after an ingest, moving build conventions out of a project's `CLAUDE.md`, and adopting a retrospective's proposal."
+
+[[method]]
+name = "delta-analysis"
+owner = ["architect"]
+description = "Ends with `vsdd feature route`."
+
+[[method]]
+name = "data-model"
+owner = ["architect"]
+
+[[method]]
+name = "multi-repo-synthesis"
+owner = ["architect"]
+
+[[method]]
+name = "diagram"
+owner = ["architect"]
+
+[[method]]
+name = "arbitrate"
+owner = ["architect"]
+
+[[method]]
+name = "ux-spec"
+owner = ["ux-designer"]
+
+[[method]]
+name = "design-system"
+owner = ["ux-designer"]
+
+[[method]]
+name = "design-variants"
+owner = ["ux-designer"]
+
+[[method]]
+name = "decompose"
+owner = ["story-writer"]
+
+[[method]]
+name = "story"
+owner = ["story-writer"]
+description = "Create, refine, split; the completeness checklist; on a fast route it ends with `vsdd gate plan --story`, and it writes the readiness chore stories the route lists and one story per repository touched."
+
+[[method]]
+name = "ingest-broad"
+owner = ["codebase-analyzer"]
+description = "The module map."
+
+[[method]]
+name = "ingest-deepen"
+owner = ["codebase-analyzer"]
+description = "Per-module analysis, and corrections after validation."
+
+[[method]]
+name = "ingest-synthesis"
+owner = ["codebase-analyzer"]
+
+[[method]]
+name = "port-analysis"
+owner = ["codebase-analyzer"]
+description = "The old semport analysis."
+
+[[method]]
+name = "disposition"
+owner = ["codebase-analyzer"]
+
+[[method]]
+name = "research"
+owner = ["researcher"]
+
+[[method]]
+name = "market-intel"
+owner = ["researcher"]
+
+[[method]]
+name = "discovery"
+owner = ["researcher"]
+description = "Competitive monitoring, feedback and analytics signals read from `research/inputs/`, synthesis, idea briefs, post-feature validation."
+
+[[method]]
+name = "risk-sweep"
+owner = ["researcher"]
+
+[[method]]
+name = "retrospective"
+owner = ["researcher"]
+description = "One research report of kind `retrospective` with improvement proposals, each naming the line it would add to `conventions.md` or `review-rules.md`; it returns `superseded` and writes no lessons file."
+
+[[method]]
+name = "spike"
+owner = ["spike-runner"]
+
+[[method]]
+name = "failing-tests"
+owner = ["test-writer"]
+description = "A failing test for every criterion, with the stubs the tests need to build; the separate `stubs` method is merged into this one, because one step takes one method."
+
+[[method]]
+name = "regression-test"
+owner = ["test-writer"]
+
+[[method]]
+name = "equivalence-tests"
+owner = ["test-writer"]
+description = "Behavioural-equivalence tests against a reference implementation, for `port` stories."
+
+[[method]]
+name = "test-fixes"
+owner = ["test-writer"]
+description = "Fixing findings of category `test` or `coverage`: strengthening a test that cannot fail, adding the test for an uncovered criterion; it ends with `vsdd gate red --refreeze` and then runs the green gate, whose result it returns whether or not it passes: a strengthened test that fails on the current code is re-frozen, and the implementer makes it pass."
+
+[[method]]
+name = "ui-tests"
+owner = ["test-writer"]
+
+[[method]]
+name = "e2e-tests"
+owner = ["test-writer"]
+
+[[method]]
+name = "tdd"
+owner = ["implementer"]
+
+[[method]]
+name = "fix-findings"
+owner = ["implementer"]
+description = "Includes root-cause debugging."
+
+[[method]]
+name = "port-translation"
+owner = ["implementer"]
+
+[[method]]
+name = "ui-implementation"
+owner = ["implementer"]
+
+[[method]]
+name = "data-migration"
+owner = ["implementer"]
+
+[[method]]
+name = "sdk-generation"
+owner = ["implementer"]
+
+[[method]]
+name = "service-clone"
+owner = ["implementer"]
+
+[[method]]
+name = "proofs"
+owner = ["verifier"]
+
+[[method]]
+name = "fuzzing"
+owner = ["verifier"]
+
+[[method]]
+name = "mutation"
+owner = ["verifier"]
+
+[[method]]
+name = "security-scan"
+owner = ["verifier"]
+
+[[method]]
+name = "performance"
+owner = ["verifier"]
+
+[[method]]
+name = "clone-fidelity"
+owner = ["verifier"]
+
+[[method]]
+name = "demo"
+owner = ["demo-recorder"]
+
+[[method]]
+name = "docs"
+owner = ["technical-writer"]
+
+[[method]]
+name = "docs-drift"
+owner = ["technical-writer"]
+description = "The maintenance sweep: compares the documentation with the code and returns findings and which are mechanically fixable."
+
+[[method]]
+name = "claude-md"
+owner = ["technical-writer"]
+
+[[method]]
+name = "release-notes"
+owner = ["technical-writer"]
+
+[[method]]
+name = "repo-setup"
+owner = ["devops"]
+
+[[method]]
+name = "ci"
+owner = ["devops"]
+
+[[method]]
+name = "toolchain"
+owner = ["devops"]
+
+[[method]]
+name = "observability"
+owner = ["devops"]
+
+[[method]]
+name = "review-specs"
+owner = ["adversary"]
+
+[[method]]
+name = "review-stories"
+owner = ["adversary"]
+
+[[method]]
+name = "review-story-diff"
+owner = ["adversary"]
+
+[[method]]
+name = "review-wave"
+owner = ["adversary"]
+
+[[method]]
+name = "review-system"
+owner = ["adversary"]
+
+[[method]]
+name = "review-extraction"
+owner = ["adversary"]
+
+[[method]]
+name = "review-scenarios"
+owner = ["scenario-reviewer"]
+
+[[method]]
+name = "review-diff"
+owner = ["code-reviewer"]
+
+[[method]]
+name = "pattern-sweep"
+owner = ["code-reviewer"]
+description = "The maintenance sweep: reads the code against `conventions.md` for inconsistent patterns; it needs no diff."
+
+[[method]]
+name = "security-review"
+owner = ["security-reviewer"]
+description = "A diff, a system, or the triage of scanner and audit output."
+
+[[method]]
+name = "holdout-eval"
+owner = ["holdout-evaluator"]
+description = "Also the re-run half of the scenario-freshness sweep."
+
+[[method]]
+name = "ui-review"
+owner = ["ui-reviewer"]
+description = "Lenses: accessibility, visual, responsive, heuristics, completeness, design drift."
+
+# The provisional agent names of BLUEPRINT.md#4.4, and the roster agent and
+# method that replace each. Every workflow uses roster names, and each step names
+# a method file. agent and method are arrays; a cell that carries a qualifier keeps
+# it inside its one element.
+
+[[replaced-name]]
+pipeline_design_name = "business-analyst (domain stage of `spec`; project context in `ingest` and `multi`)"
+agent = ["product-owner"]
+method = ["domain-spec"]
+
+[[replaced-name]]
+pipeline_design_name = "business-analyst (synthesis and idea briefs in `discover`; assessment)"
+agent = ["researcher"]
+method = ["discovery", "market-intel"]
+
+[[replaced-name]]
+pipeline_design_name = "business-analyst (risks and assumptions sweep)"
+agent = ["researcher"]
+method = ["risk-sweep"]
+
+[[replaced-name]]
+pipeline_design_name = "research-agent"
+agent = ["researcher"]
+method = ["research", "market-intel", "discovery"]
+
+[[replaced-name]]
+pipeline_design_name = "data-engineer"
+agent = ["implementer"]
+method = ["data-migration"]
+
+[[replaced-name]]
+pipeline_design_name = "devops-engineer, dx-engineer"
+agent = ["devops (inside chore stories)"]
+method = ["ci", "repo-setup", "toolchain"]
+
+[[replaced-name]]
+pipeline_design_name = "formal-verifier, performance-engineer, dtu-validator"
+agent = ["verifier (inside harness stories; the measuring itself is the formal, perf and clone-fidelity checks of vsdd gate release and vsdd gate wave, run by a clerk)"]
+method = ["proofs", "fuzzing", "mutation", "performance", "clone-fidelity"]
+
+[[replaced-name]]
+pipeline_design_name = "e2e-tester (`ui-verify`)"
+agent = ["the ui check inside vsdd gate wave and vsdd gate release (the tests are written by test-writer)"]
+method = ["e2e-tests"]
+
+[[replaced-name]]
+pipeline_design_name = "spec-reviewer"
+agent = ["adversary (for specifications and stories)", "scenario-reviewer (for hidden scenarios)"]
+method = ["review-specs", "review-stories", "review-scenarios"]
+
+[[replaced-name]]
+pipeline_design_name = "validate-extraction"
+agent = ["adversary"]
+method = ["review-extraction"]
+
+[[replaced-name]]
+pipeline_design_name = "accessibility-auditor, visual-reviewer"
+agent = ["ui-reviewer"]
+method = ["ui-review (lens named in the task)"]
+
+[[replaced-name]]
+pipeline_design_name = "session-reviewer"
+agent = ["researcher"]
+method = ["retrospective"]
+
+[[replaced-name]]
+pipeline_design_name = "arbitration step"
+agent = ["architect"]
+method = ["arbitrate"]
+
+[[replaced-name]]
+pipeline_design_name = "idea scoring"
+agent = ["product-owner", "architect", "adversary"]
+method = ["score-ideas"]

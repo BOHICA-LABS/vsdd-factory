@@ -1,0 +1,8 @@
+[
+ {
+  "id": "layer-2a-fix-3-C1-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "Three rounds each closed the spellings named and the next check found others (an alias of RUN, Reflect.set, a quoted or computed tier key, member writes of model and effort, a template literal that hides a later call). A pattern lint over hand-written JavaScript cannot be made complete, so no fourth round is run. Decided by the orchestrating session: the lint stays as the first check for the ordinary forms, and the check that counts is behavioural. W2, and each later workflow package, asserts in its scenario tests that the model and effort of every step the workflow dispatches equal the roster's tier for that agent, so a spelling the lint misses is caught when it changes what is dispatched. B6's lint docstring must say which forms it catches and that the harness assertion is the authority, and must drop the claim that it cannot fail open; the test that fails when OBJECT_ASSIGN_RUN_RE alone is removed is added then.",
+  "where": "next/tests/lint/test_roster_lint.py; next/tests/workflows/universal.test.mjs; packages B6, B5 and W2"
+ }
+]

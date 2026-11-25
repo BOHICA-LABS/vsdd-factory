@@ -1,0 +1,62 @@
+[
+ {
+  "id": "PR4-2",
+  "files": [
+   "topics/long-commands.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "G1",
+   "E2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4-1",
+  "files": [
+   "packaging/sandbox-needs.md"
+  ],
+  "packages": [
+   "T1",
+   "S3",
+   "G4a"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4-3",
+  "files": [
+   "platform.md",
+   "topics/spikes.md"
+  ],
+  "packages": [
+   "E2",
+   "B8"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "probes-4-apply-C2-1",
+  "files": [
+   "topics/prelude-steps.md"
+  ],
+  "packages": [
+   "B4a",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "probes-4-apply-C2-3",
+  "files": [
+   "topics/long-commands.md",
+   "topics/agent-file.md"
+  ],
+  "packages": [
+   "A1",
+   "A4",
+   "A5"
+  ],
+  "on_slice_path": true
+ }
+]

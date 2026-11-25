@@ -1,0 +1,122 @@
+{
+ "logs": [
+  "Review of gates: Not ready to report: 1 blocker, 11 major, 9 minor. All the checks pass, but they miss these defects; 13 probes in the scratchpad reproduced them against the real code. The blocker: the registered demo function takes no wait or retry, so survey-2's call fn(root, story, run, wait=..., retry=...) raises TypeError. The demo gate also never returns its own passing record for the head, so a later failing call overwrites it. It can return passed false with no failure line, answers ok true when admission is refused, and never lists a criterion with no test. Green returns a cached pass even when its .xml copy is gone, so demo fails at that head with no way out. The base report is written in place and a cut-off copy is read silently as empty. Exempt red tests count toward the half rule. The re-freeze refuses because of unchanged tests, and crashes on an error with no type and on an over-cap record. Interfaces missing promised fields: the cached green result has no changed_files, the green record has no diff_patch, and sha is empty on refusals made after the story resolved. The six fixed findings hold. The five left-for-builder entries were right.. 21 findings, 12 blocker or major.",
+  "Round 1 for gates: 20 of 21 fixes confirmed, 3 still open.",
+  "Round 2 for gates: 3 of 3 fixes confirmed, 1 still open."
+ ],
+ "result": {
+  "unit": "step4-gates",
+  "build": {
+   "summary": "Built G2: junit.py (report reader, VSA-12 rules), diffpatch.py (range-named patches), gatelib.py (shapes, dirty_files, measure path, red/refreeze/green work bodies), gate_red/green_demo.py registering via filename, cmd_gate_story.py (three commands, --refreeze caller check), gate_project.py sample builder, 8 test files (62 tests), schema additions (test_output, changed_files, fixture), sample junit_runner writes file/type, spec updates (gate-red/green/demo, evidence). Ledger: 6 findings fixed, 5 left-for-builder, 1 new minor. All checks pass: check.py 30/30, build --check current, pytest 62/62, node 27/0, spec_lint 0, ruff clean, findings build OK. Re-freeze (D10/D11), stub marker (P3SEAM-16), caps (D15), --since changed_files via G3's verdicts.changed_files all verified against the real dispatcher and job layer.",
+   "files_changed": 37,
+   "tests_passed": 62,
+   "tests_failed": 0,
+   "findings_fixed": 6,
+   "findings_left": [
+    "AU-P2-03: spec prose reduction owed by the spec steward, no code owed",
+    "AU-S2-01: workflow-file restatement is the spec steward's, no code owed",
+    "AU-P2-06: flaky rule and baseline comparison are G7's; strict measurement with metrics.baseline = 'not applied' built",
+    "VSA-01: red lookup after a rebase is G4a's; head-exact cache and ancestry lookup already in place",
+    "D33-11: travelling red record is M3's (team use)"
+   ],
+   "new_findings": 1,
+   "departures_from_plan": [
+    "test_job_failure_keeps_gate_shape exercises D3's shape through gatelib.normalize on a synthetic job-layer failure rather than a live killed-worker scenario (dead-worker recovery is G1's test ground); the shape contract is unchanged",
+    "the D16 refusal for a kind without a red gate fires before the clean check and returns the ok-true measured-failure shape of the plan's case table row 3 (not not_attempted); the plan did not state the ordering",
+    "re-freeze metrics additionally carry 'added' beside 'changed' (D10 named only changed); harmless extra metric"
+   ],
+   "spec_files_changed": [
+    "rewrite/spec/commands/gate-red.md",
+    "rewrite/spec/commands/gate-green.md",
+    "rewrite/spec/commands/gate-demo.md",
+    "rewrite/spec/records/evidence.md"
+   ],
+   "foreign_failures": [],
+   "deferred": [
+    "Baseline comparison and flaky rerun (G7); flaky is always [] and a named baseline is measured strictly with metrics.baseline = 'not applied'",
+    "Feature-flag checks (F2, decision D31)",
+    "Hub projects and --repo",
+    "Identities for lint and format findings (P3OPS-11)",
+    "Red lookup after a rebase (VSA-01, G4a+S2a); commit.made event; init/doctor warnings for a report naming no files (S1)",
+    "Travelling red record cycles/<cycle>/red/<story>.json (D33-11, M3)",
+    "Wave/release/ingest/sweep and the other gates of the eleven"
+   ]
+  },
+  "review": {
+   "verdict": "Not ready to report: 1 blocker, 11 major, 9 minor. All the checks pass, but they miss these defects; 13 probes in the scratchpad reproduced them against the real code. The blocker: the registered demo function takes no wait or retry, so survey-2's call fn(root, story, run, wait=..., retry=...) raises TypeError. The demo gate also never returns its own passing record for the head, so a later failing call overwrites it. It can return passed false with no failure line, answers ok true when admission is refused, and never lists a criterion with no test. Green returns a cached pass even when its .xml copy is gone, so demo fails at that head with no way out. The base report is written in place and a cut-off copy is read silently as empty. Exempt red tests count toward the half rule. The re-freeze refuses because of unchanged tests, and crashes on an error with no type and on an over-cap record. Interfaces missing promised fields: the cached green result has no changed_files, the green record has no diff_patch, and sha is empty on refusals made after the story resolved. The six fixed findings hold. The five left-for-builder entries were right.",
+   "tests_rerun": "From next/: tools/check.py 30/30 passed (build_is_current included). Full pytest: 1238 passed, 10 failed, 1 skipped in 527s. All 10 failures are in tests/hooks (test_caller.py, test_liveness.py, test_rule_cases.py) and name the merge-guard and step-results rules of the rules unit (H5, H7), which was being built in this tree at the same time; none is in this unit's 8 test files, which all passed. Node harness: 27 passed, 0 failed. ruff on the unit's 16 files: clean. From the repository root: spec_lint 0 problems; findings.py build wrote 63 by-package lists. 13 reviewer probes, run from the scratchpad (/private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/probes/test_probe_gates.py) in pytest tmp directories, all reproduced the defects in the findings. No __pycache__ was left under next/plugins.",
+   "interfaces_checked": 24,
+   "interfaces_as_promised": 16,
+   "outcomes_checked": 11,
+   "outcomes_confirmed": 11,
+   "findings": 21,
+   "blockers": 1,
+   "majors": 11
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fix": {
+     "summary": "Fixed all 21 review findings of the step-4 gates unit (G2) in vsdd-factory 1.0: the demo gate now matches the registry contract and returns cached passing records, builds every result through gatelib.result/not_attempted, and reads the story's AC-<N> headings; gatelib gained the green .xml cache guard, robust base-report handling, the non-exempt half rule, a correctly scoped re-freeze, crash-proof error/cap handling, the diff_patch record field, honest refusals, single baseline lines, a working retention path and the shared new-cases helper; diffpatch writes atomically; the spec bullets and the AU-S2-12 outcome were corrected. Every fix has a test that was verified to fail without it (spot-reversal confirmed for the two cache fixes). Outcomes written to rewrite/findings/outcomes/step4-gates-fix.json. All repo checks pass; the 15 full-suite failures are in the rules, verdicts and survey-2 units' files, 9 of which already pass on re-run while 6 persist untouched by me.",
+     "tests_passed": 1250,
+     "tests_failed": 15,
+     "checks": "From next/: tools/build.py \u2192 \"build: 0 file(s) regenerated\"; tools/check.py \u2192 \"30/30 checks passed\"; whole pytest suite \u2192 \"15 failed, 1250 passed, 1 skipped\" (my files: test_gate_red, test_gate_refreeze, test_gate_green, test_gate_demo, test_gate_cli, test_gate_registry, test_junit, test_diffpatch all pass, 76 tests); node --test tests/workflows/universal.test.mjs \u2192 \"pass 27, fail 0\"; tools/build.py --check \u2192 \"all generated copies are current\". From the repository root: rewrite/tools/spec_lint.py \u2192 \"0 problem(s)\"; rewrite/tools/findings.py build \u2192 completed, \"by-package lists written: 62\". No __pycache__ under next/plugins (verified by find; all Python runs used PYTHONDONTWRITEBYTECODE=1). A re-run of the failing files a few minutes later showed 9 of the 15 (including tests/hooks/test_rule_cases.py and tests/unit/test_verdicts.py::test_closure_used_without_records) now passing as the other builders advanced; 6 remained and are listed under foreign_failures. Reversal spot-check: with the S4R-gates-2 and S4R-gates-5 fixes temporarily reverted, their two tests fail, confirming they catch the defects.",
+     "foreign_failures": [
+      "tests/hooks/test_caller.py::test_no_marker \u2014 hook gate exits 10 where the test expects 0 (unmarked call passthrough); hook-runner territory of the rules unit (H5/H7)",
+      "tests/hooks/test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner \u2014 same hook-runner area of the rules unit",
+      "tests/hooks/test_liveness.py::test_lock_refresh \u2014 AssertionError in the worker lock-refresh path the rules unit's writes/registry rows feed",
+      "tests/hooks/test_liveness.py::test_lock_refresh_belongs_by_run_and_story \u2014 same area",
+      "tests/unit/test_story_unit.py::test_position_ladder \u2014 position ladder gives 'green' where the test pins another stage; story_unit.py is survey-2's to edit per ORDER.md section 4",
+      "tests/unit/test_story_unit.py::test_position_reviewed_from_closure_verdict \u2014 same story-position area"
+     ],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: `uv run --no-sync python tools/check.py` printed '30/30 checks passed'. `uv run --no-sync python -m pytest -q` printed '12 failed, 1283 passed, 1 skipped in 597.44s'. All 12 failures are in tests/hooks: test_caller (test_refused_bypass_forms_pass_unmarked_through_the_runner, test_no_marker), test_liveness (test_lock_refresh, test_lock_refresh_belongs_by_run_and_story) and 8 cases of test_rule_cases::test_case_table_both_ways. They come from the step-results, merge-guard and tests-first rules and the step store; those files are newer than the gate code, so another unit is editing them now. One case shows unfilled '{sha}'/'{story}' placeholders. None of the failures goes through the gate code. Run alone, the 8 gate test files (test_gate_demo, test_gate_registry, test_gate_green, test_gate_red, test_gate_refreeze, test_diffpatch, test_junit, test_gate_cli) gave '79 passed in 187.42s'. `node --test tests/workflows/universal.test.mjs` gave 'tests 27, pass 27, fail 0'. From the repository root: `python3 rewrite/tools/spec_lint.py` gave '0 problem(s)'. `python3 rewrite/tools/findings.py build` gave '865 findings: 660 fixed, 125 left-for-builder, 1 not-fixed, 75 open, 4 rejected; open on the slice path: 81; by-package lists written: 63'. I ran that build before writing my two files and did not run it again. Mutation check, in rsync copies of next/ under the scratchpad (repository untouched, no __pycache__ left under next/plugins): 20 mutations each put back one fix (S4R-gates-1, 2, 3 three ways, 4 two ways, 5-14, 15, 16). Every one made its cited test fail except S4R-gates-15's: test_refreeze_drops_source_class_tests still passes with the source-class filter removed. Probes in the copy showed two more things. First, the sample runner never reports tally/test_in_src.py. Second, a cached red result now carries changed_files [].",
+     "checked": 21,
+     "confirmed": 20,
+     "still_open": 3
+    }
+   },
+   {
+    "round": 2,
+    "fix": {
+     "summary": "Fixed all three reopened findings of the gates unit (step 4, package G2) in /Users/jmagady/dev2/vsdd-factory on rewrite/v1. (1) S4R-gates-15: the shared gatelib._new_cases code was already in; the missing proof is now in place \u2014 the sample junit_runner discovers tests in the product package too (build_suite adds */test_*.py outside tests/), SOURCE_CLASS_TEST became a TestCase, and the red and re-freeze tests assert the source-class case really reaches both reports and is dropped from both records by the filter alone; both tests verified to fail with the filter removed. (2) S4R-gates-C1-1: gatelib._cached passes changed_files only for green, so a cached red keeps the red shape; test_passing_record_returned_without_measuring now asserts a cached red result has no changed_files and fails with the old line. (3) S4R-gates-C1-2: the shipped evidence-record schema declares diff_patch with a green fixture; new test asserts a real green record's fields are all declared, and fails when the schema entry is dropped. Ledger updated via rewrite/findings/outcomes/step4-gates-fix-2.json and rewrite/tools/findings.py build. Full checks pass except 12 tests owned by the concurrently building rules unit (tests/hooks/), still failing after a two-minute wait and re-run.",
+     "tests_passed": 1284,
+     "tests_failed": 12,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> 30/30 checks passed (includes build_is_current after tools/build.py regenerated 0 files). Whole pytest suite (PYTHONDONTWRITEBYTECODE=1): 1284 passed, 12 failed, 1 skipped in 593.56s. node --test tests/workflows/universal.test.mjs -> 27 pass, 0 fail. From the repository root: python3 rewrite/tools/spec_lint.py -> 0 problem(s); python3 rewrite/tools/findings.py build -> 867 findings rebuilt, with S4R-gates-15, S4R-gates-C1-1 and S4R-gates-C1-2 all recorded fixed from rewrite/findings/outcomes/step4-gates-fix-2.json (verified in ledger.json). No __pycache__ under next/plugins/ (bytecode writing disabled for every direct run; spot-checked). No interface changes: the plan's section 3 signatures are untouched; gatelib._cached's only change is that a cached red no longer carries the green-only changed_files key, which is the finding itself, and junit_runner.py (sample, E1-shared) gained the build_suite addition sanctioned by ORDER.md section 4. Outcomes file written: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step4-gates-fix-2.json.",
+     "foreign_failures": [
+      "tests/hooks/test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner",
+      "tests/hooks/test_caller.py::test_no_marker",
+      "tests/hooks/test_liveness.py::test_lock_refresh",
+      "tests/hooks/test_liveness.py::test_lock_refresh_belongs_by_run_and_story",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a commit on the integration branch is blocked]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[an entry that matches its record is stored]",
+      "tests/hooks/test_case_table_both_ways[a failing entry with no record is stored]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[product source before red is blocked by the implementer]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a sed on source before red is the edit it stands for]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a sed -i -e on source before red is the edit it stands for]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a redirect into a frozen test is blocked after red]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a test-writer source edit after red at a later commit is blocked]"
+     ],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: tools/check.py printed \"30/30 checks passed\". pytest -q printed \"12 failed, 1284 passed, 1 skipped in 585.28s\". All 12 failures are in tests/hooks: test_caller (test_no_marker, test_refused_bypass_forms_pass_unmarked_through_the_runner), test_liveness (test_lock_refresh, test_lock_refresh_belongs_by_run_and_story) and 8 cases of test_rule_cases::test_case_table_both_ways. They come from the hooks/rules unit, which is uncommitted and changing in this tree: merge-guard push_to_guarded, step-results bad_identity, and gate_result_mismatch from a case runner that never fills in {sha}/{story} or builds the live-run project. None of them touches the gates code or the gate tests. node --test tests/workflows/universal.test.mjs printed \"tests 27, pass 27, fail 0\". From the repository root: spec_lint.py printed \"0 problem(s)\". findings.py build printed \"871 findings: 661 fixed, 125 left-for-builder, 2 not-fixed, 79 open, 4 rejected\" and \"by-package lists written: 63\". Discrimination was tested in a scratch copy of next/, run with the repository's .venv python and deleted afterwards. (1) With the source-class filter removed from gatelib._new_cases, test_source_class_test_does_not_count and test_refreeze_drops_source_class_tests both failed (metrics.new 4 == 3). With the filter removed from the re-freeze path only, test_refreeze_drops_source_class_tests failed: the record's tests included tally.test_in_src.TestInsideSource::test_inside_source. (2) With _cached's unconditional changed_files=changed_files put back, test_passing_record_returned_without_measuring failed: the cached red result carried changed_files: []. (3) With diff_patch dropped from the shipped evidence-record schema, test_green_record_fields_are_declared_in_the_schema failed with ['diff_patch']. Interfaces next to the fixes still hold. The composed step-result gate entry and gate-result require only ok, gate, subject, passed, sha, evidence and failures, so a red result without changed_files is still valid. state/story_unit.py reads diff_patch from the green record, which matches the new schema entry. _head_report deletes the old report before it runs. No __pycache__ was left under next/plugins.",
+     "checked": 3,
+     "confirmed": 3,
+     "still_open": 1
+    }
+   }
+  ],
+  "still_open": [
+   {
+    "id": "S4R-gates-C2-1",
+    "severity": "minor",
+    "file": "next/tests/e2e/sample-project/tools/junit_runner.py",
+    "problem": "The S4R-gates-15 fix added build_suite, which loads each */test_*.py outside tests/ with loader.loadTestsFromModule(importlib.import_module(name)). An import error in such a file is not caught: the runner exits with a traceback and writes no build/junit.xml, even when tests/ holds tests it could report. A probe with tally/test_broken.py importing a missing module confirmed it: traceback, no build/ directory. The gate then reports 'the test command wrote no JUnit report' instead of the build or harness error. Discovery over tests/ turns the same import error into an ImportError test case. This breaks the runner's promise to write build/junit.xml after every run.",
+    "proposed_fix": "Load each source-tree module with loader.loadTestsFromName(name). A probe showed that it turns the import error into a unittest.loader._FailedTest case with type=\"ImportError\" and still writes the report. Add a unit test where a story commits an import-broken tally/test_*.py and red still reads a report."
+   }
+  ]
+ }
+}

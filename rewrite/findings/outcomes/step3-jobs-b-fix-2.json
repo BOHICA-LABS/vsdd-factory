@@ -1,0 +1,8 @@
+[
+  {
+    "id": "S3R-jobs-b-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "env-start.md's 'Output and failure cases' now gives the complete refusal list: the original five cases (no worktree for the subject, empty commands.run, no free port in 28100-28199, the run command exiting on three ports, the product lock staying held) plus the three the built env.start also answers negatively - ports.lock staying held while another start is choosing a port (env.py, 'another start is choosing a port; ports.lock stayed held'), the product record exceeding the job record's 4,000-byte cap less the 128 bytes kept for later writes (the '-byte limit' check in _launch_locked), and another start of the subject still settling after the five-second wait (_wait_for_running's deadline). The list stays closed rather than becoming examples: all eight refusals are now stated. Added three tests that drive the previously untested refusal paths in process (an in-process flock stands in for the competing holder, _STARTING_WAIT is shortened, the cap is shrunk to 200) and one parity test asserting the spec names all eight cases - with whitespace normalised so rewrapped prose still matches. The parity test fails against the pre-fix spec (verified before the edit: 1 failed, 3 drives passed); no plan section 3 interface was touched - the change is spec text plus this unit's own test file only.",
+    "where": "rewrite/spec/commands/env-start.md (Output and failure cases); next/tests/unit/test_cmd_env.py (test_start_refusal_ports_lock_stays_held, test_start_refusal_product_record_over_cap, test_start_refusal_another_start_still_settling, test_start_refusals_are_all_named_in_the_spec)"
+  }
+]

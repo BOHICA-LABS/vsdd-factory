@@ -1,0 +1,11 @@
+[
+  {
+    "id": "step4-gates-fix-3-C1-1",
+    "origin": "step4-gates-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/tools/junit_runner.py (function_cases)",
+    "problem": "function_cases wraps every module-level test_ member for which inspect.isfunction is true and signature.bind() succeeds, including async def coroutine functions and generator functions. FunctionTestCase calls such a function and gets back a coroutine that is never awaited, or a generator that is never iterated, so the case is reported as passed even though its body never ran. Probe on the current runner: tests/test_async.py holding 'async def test_ac1_async_red(): raise AssertionError(\"red\")' is reported as tests.test_async::test_ac1_async_red, passed, and the runner exits 0. Before fix 3 such a function vanished from the report. Now it is counted as a passing test, so the red gate sees a new test that already passes and the green gate accepts a pass where nothing was run. Stock unittest does the same for an async method on a plain TestCase; that is older behaviour and out of scope here.",
+    "proposed_resolution": "In function_cases, treat a member for which inspect.iscoroutinefunction, inspect.isasyncgenfunction or inspect.isgeneratorfunction is true the way a function with required parameters is treated: report an error case whose message says the runner runs plain synchronous test functions with no parameters. Add a test in test_sample_runner.py: an async def test_ac1_* in tests/ is reported as an error case, not as passed.",
+    "on_slice_path": true
+  }
+]

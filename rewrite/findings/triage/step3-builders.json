@@ -1,0 +1,88 @@
+[
+ {
+  "id": "S3B-hook-runner-1",
+  "files": [
+   "topics/rule-testing.md"
+  ],
+  "packages": [
+   "B2",
+   "H1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-hook-runner-3",
+  "files": [
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S3B-hook-runner-4",
+  "files": [
+   "topics/rule-model.md",
+   "topics/caller-identity.md"
+  ],
+  "packages": [
+   "H1",
+   "H6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-hook-runner-6",
+  "files": [
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S3B-state-core-1",
+  "files": [
+   "packaging/sample-project.md",
+   "topics/project-configuration.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-state-core-2",
+  "files": [
+   "topics/artifact-rules.md"
+  ],
+  "packages": [
+   "C2",
+   "G5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-state-core-3",
+  "files": [
+   "topics/state-api.md"
+  ],
+  "packages": [
+   "S1",
+   "S2a"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S3B-state-core-4",
+  "files": [
+   "commands/init.md"
+  ],
+  "packages": [
+   "S1"
+  ],
+  "on_slice_path": false
+ }
+]

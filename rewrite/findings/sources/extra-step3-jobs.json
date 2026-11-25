@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S3B-jobs-1",
+    "origin": "slice step 3, jobs, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/env-start.md, rewrite/spec/commands/env-stop.md",
+    "problem": "The spec files named the port placeholder ({port}, $VSDD_PORT) but not the port pool, the settle-and-retry rule, where the product runs, or which caller a markerless env stop honours - facts the code now carries, and the only places a reader could learn them were this unit's plan and code.",
+    "proposed_resolution": "Fixed while building: env-start.md now states the story-versus-integration worktree choice, the 28100-28199 pool chosen without a socket under ports.lock, the two-second settle with three attempts, and that ok means started, not yet listening; env-stop.md states that the command takes no argument, selects by caller marker, and stops everything only from a terminal. python3 rewrite/tools/spec_lint.py passes after the edit.",
+    "on_slice_path": true
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "S3R-jobs-C1-1",
+    "origin": "slice step 3, jobs, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, the loss branch: os.killpg(record['command_pgid'], SIGKILL); worker_main.note_command)",
+    "problem": "The S3R-jobs-18 fix makes attach SIGKILL whatever process group number a stale record names, with no proof that the group is still the job's command. D3 settled liveness on a file lock precisely so that nothing acts on a process id that may have been reused. A loss is found on the next attach, which can be days later or after a reboot (D6 names a reboot mid-gate as the case restarts exist for). By then the old command group has usually exited and its number can belong to any of the person's own process groups: a terminal, an editor, the Claude Code session. Probe: a record left 'running' with command_pgid set to an unrelated 'sleep 30' started in its own session, lock free, no result; one attach call SIGKILLed the unrelated sleep (returncode -9) and then ran the job. The fix also adds a field to the record list that plan 3.1 and D19 fix.",
+    "proposed_resolution": "Kill an orphaned command group only when it is proven to be the job's. For example, ctx.run hands the command a descriptor on a second per-key lock (<key>.cmd.lock) through pass_fds. At a loss, attach kills the recorded group only while that lock is still held, and never when it is free. Or record the group leader's start time and compare it (ps -o lstart= -p) before killing. Add a test in which a stale command_pgid names an unrelated live group, and assert the unrelated group survives the restart. Record command_pgid in plan 3.1's field list or move it out of the record.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-C1-2",
+    "origin": "slice step 3, jobs, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (stop_products, the 'starting' skip); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch writes no pid while starting; _held_answer)",
+    "problem": "The S3R-jobs-12 fix makes stop_products skip every product record in state 'starting', on the grounds that its start call is still settling. Nothing checks that the start call is still alive. If that call dies inside its settle window (a killed or interrupted tool call), its product runs on holding the lock (pass_fds). The record stays 'starting' with pid null forever. None of the three stops (env stop, the hook runner at SubagentStop, the checkpoint) can reach it, and every later env start of that subject fails with 'another start of this subject is still settling' for as long as the product lives. Probe: env.start in a child with a 30-second settle, the child SIGKILLed once the product was up. Then stop_products for the caller -> [], stop_products for everything -> [], the product still alive, and a new env start -> exit 1 'still settling' after 5.1 s. A related case: when a holder that escaped the group survives the KILL, stop_products still deletes the record and reports the product stopped. Its port then looks free to _pick_port, which scans records.",
+    "proposed_resolution": "Have the start call hold a lock of its own while it settles, one it does not pass to the product (for example <key>.starting.lock). Write the product's pid into the record right after Popen. stop_products then skips a 'starting' record only while that settle lock is held, and otherwise stops it by its recorded pid like a running one. _held_answer treats a 'starting' record whose settle lock is free as stale. When the product lock is still held after KILL, keep the record and do not report the product as stopped. Add a test that kills the start call mid-settle and asserts env stop then stops the product.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-C1-3",
+    "origin": "slice step 3, jobs, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach's size probe; worker_main's running and done writes; _write_record's new ValueError); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch's running write)",
+    "problem": "The S3R-jobs-14 fix makes _write_record raise ValueError over the cap. The worker's 'running' and 'done' record writes, and env._launch's 'running' write, do not catch that ValueError. attach's size probe measures the 'queued' record, which the later writes grow by about 40 bytes (started, finished, pid, command_pgid); shedding args and error_shape covers only part of that when they are small. Such a spec passes the probe. Then the worker writes its result, the final done write raises, and the worker dies, leaving a 'running' record beside a result. attach never serves that result (state is not done) and never counts it as a loss (a result exists). So every poll deletes it and starts the work again: the job is pending forever, re-running without end, and never loud. Probe: a 4,000-byte queued record with empty args. The log shows the result written, then 'ValueError: the record for db02af9516c601e0 is 4004 bytes, over the 4000-byte cap' at the done write. Three successive calls were all pending with the record back at queued. The trigger needs a very long command, so it is unlikely in practice, but nothing bounds it.",
+    "proposed_resolution": "Measure the probe with every field at its largest (timestamps set, pid and command_pgid filled, state 'running'), or refuse above a fixed margin under the cap. In the worker and in _launch, catch the ValueError at a record write and fall back to a minimal record that still carries key, kind, state, nonce, collected and starts, rather than dying. Add a test with a spec at the probe's limit and empty args that is served its result.",
+    "on_slice_path": true
+  }
+]

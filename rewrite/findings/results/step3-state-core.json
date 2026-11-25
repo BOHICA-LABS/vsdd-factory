@@ -1,0 +1,105 @@
+{
+ "logs": [
+  "Review of state-core: Not a base to build on yet: 15 major and 15 minor findings, no blockers. Every check passes, but the code differs from the plan in several places the next units depend on. (1) init is not restartable at two kill points, it writes the state branch with an update-ref that overwrites, it creates a branch and then crashes when .factory/ is non-empty, it mounts an unmounted legacy branch, and it exits 2 for partial where the plan says exit 1 with fields. (2) Records' flush relies on changed_paths, which mangles dotfiles and quoted names, and on check_paths, which silently passes files it cannot read. (3) Crashes still exit 1 (a deleted cwd; --version with a damaged manifest), and errors during command resolution print no JSON. (4) The body-line size_cap check is missing. (5) ensure_excludes corrupts an exclude file that has no trailing newline. (6) detection.py restates every SPECS default, and init writes the literal protected_paths, so the AU-T2-15 computed default never applies to an init'd project. Of the 13 findings marked fixed, 6 hold (P3SEAM-06, SL1-47, SL1-48, SL1-49, VSA-17, SL1-27): reverting each fix in a scratch copy fails its test. Seven overclaim: AU-S2-03, AU-T2-13, AU-T2-15, AU-P2-03, AU-S2-09, AU-S2-12, AU-P2-17. Of the 8 left-for-builder, 7 are right; the text of P3OPS-11 claims report keys were added, and they were not. Three tests in plan section 7 cannot fail for what they are named after (raw tokens, retry_command, class precedence); I broke each in a scratch copy and the suite stayed green. The fresh-clone mount from origin works when tried by hand but has no test. Foreign items seen: spec_lint reports topics/event-log.md line 41 (another unit's file). After my check.py run, cpython-314 bytecode appeared under next/plugins/vsdd-factory/py/vsdd/__pycache__ and vsdd/hooks/__pycache__ (config, project, hooks/shell, hooks/gitfs, written 16:41-16:42). My experiments ran Python 3.11 with -B and never imported the hooks modules, so this is a concurrent unit's (hook-runner). It would now fail nothing_generated_under_plugin; I left it in place. Findings file: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step3-state-core-review.json. 30 findings, 15 blocker or major.",
+  "Round 1 for state-core: 24 of 30 fixes confirmed, 13 still open.",
+  "Round 2 for state-core: 13 of 13 fixes confirmed, 1 still open."
+ ],
+ "result": {
+  "unit": "step3-state-core",
+  "build": {
+   "summary": "Built S1 to slice depth: the vsdd command dispatcher (Command/Invocation/Reply/Refuse, registration by file alone, -C, --json, --wait, relayed failure objects, exit 2 for crashes, decode_text, require_person); the lazy vsdd.state facade; gitrun, mount with the five conditions, ensure_excludes and mount_state; path_class and glob_regex; the artifact registry reader with all check reason codes; commands init, config --json, validate, path; the config changes (computed protected_paths, closed per-rule hook keys, hook_rules) and the find_project_root home default. 63 tests in seven new files pass; 13 ledger findings fixed, 8 left-for-builder, 4 new findings filed. Final battery: check.py 30/30, node 27/27, spec_lint 0 problems on my file, findings build OK, full pytest 679 passed with one foreign failure. Deferred: new/list, --hub/--fresh, command detection trials, toolchain key-fill, artifact_frozen.",
+   "files_changed": 27,
+   "tests_passed": 679,
+   "tests_failed": 1,
+   "findings_fixed": 13,
+   "findings_left": [
+    "AU-S2-11 \u2014 S1 prose pass",
+    "AU-P2-16 \u2014 S1 prose pass",
+    "P3COV-04 \u2014 S1, G5, G7",
+    "P3COV-06 \u2014 S3",
+    "P3OPS-11 \u2014 G2 (S1 added the report keys)",
+    "P3REQ-03 \u2014 G4a, S3",
+    "P3REQ-12 \u2014 S3, S5",
+    "SL1-22 \u2014 S1 documentation pass, W1"
+   ],
+   "new_findings": 4,
+   "departures_from_plan": [
+    "changed_paths returns project-relative paths prefixed .factory/ and passes -uall to git status, so untracked files are listed individually; the plan fixed neither the prefix nor the collapsing, and the module convention ('relative to the project root, starting .factory/') made the prefix the consistent choice.",
+    "find_project_root now also treats an empty HOME as unset (not only None), a one-line hardening inside the SL1-48 fix so a wiped environment variable cannot stop the walk at the working directory.",
+    "test_key_table_parity holds the shipped sample instance to SPECS (every sample key is in SPECS, sample loads clean) rather than demanding the sample repeat every section, because the sample omits [hooks]; filed as new finding S3B-state-core-1 instead of editing the sample, which is another package's file."
+   ],
+   "spec_files_changed": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/project-configuration.md"
+   ],
+   "foreign_failures": [
+    "tests/hooks/* (hook-runner unit, files in flight): the concurrent run's failures fell from 14 to 9 to 1 across three runs while I worked; at the last full run tests/hooks/test_caller.py::test_new_key_per_call_and_other_fields_kept still failed \u2014 not fixed by me per the ownership table",
+    "topics/event-log.md line 41 over the 400-character limit in spec_lint \u2014 a spec file another workflow touched; not mine to edit"
+   ],
+   "deferred": [
+    "vsdd new with skeleton templates and next_id, and vsdd list (nothing on the story path calls them)",
+    "init --hub, init --fresh; command detection (trial runs, the JUnit report, the {port} check); the unclassed-tracked-files list",
+    "config set, refs, coverage; P/schemas/config.schema.json (decision 5: no schema file ships)",
+    "in validate: the lock check, register-limit warnings, reference existence for kinds whose row has no id",
+    "filling unset keys from a toolchain file (S3, second part); story_kind and kind_has_red_gate (survey unit)",
+    "the artifact_frozen check (record stores, records unit)",
+    "the prelude's per-schema empty values for relayed commands (ORDER.md ledger item, W2/prelude)"
+   ]
+  },
+  "review": {
+   "verdict": "Not a base to build on yet: 15 major and 15 minor findings, no blockers. Every check passes, but the code differs from the plan in several places the next units depend on. (1) init is not restartable at two kill points, it writes the state branch with an update-ref that overwrites, it creates a branch and then crashes when .factory/ is non-empty, it mounts an unmounted legacy branch, and it exits 2 for partial where the plan says exit 1 with fields. (2) Records' flush relies on changed_paths, which mangles dotfiles and quoted names, and on check_paths, which silently passes files it cannot read. (3) Crashes still exit 1 (a deleted cwd; --version with a damaged manifest), and errors during command resolution print no JSON. (4) The body-line size_cap check is missing. (5) ensure_excludes corrupts an exclude file that has no trailing newline. (6) detection.py restates every SPECS default, and init writes the literal protected_paths, so the AU-T2-15 computed default never applies to an init'd project. Of the 13 findings marked fixed, 6 hold (P3SEAM-06, SL1-47, SL1-48, SL1-49, VSA-17, SL1-27): reverting each fix in a scratch copy fails its test. Seven overclaim: AU-S2-03, AU-T2-13, AU-T2-15, AU-P2-03, AU-S2-09, AU-S2-12, AU-P2-17. Of the 8 left-for-builder, 7 are right; the text of P3OPS-11 claims report keys were added, and they were not. Three tests in plan section 7 cannot fail for what they are named after (raw tokens, retry_command, class precedence); I broke each in a scratch copy and the suite stayed green. The fresh-clone mount from origin works when tried by hand but has no test. Foreign items seen: spec_lint reports topics/event-log.md line 41 (another unit's file). After my check.py run, cpython-314 bytecode appeared under next/plugins/vsdd-factory/py/vsdd/__pycache__ and vsdd/hooks/__pycache__ (config, project, hooks/shell, hooks/gitfs, written 16:41-16:42). My experiments ran Python 3.11 with -B and never imported the hooks modules, so this is a concurrent unit's (hook-runner). It would now fail nothing_generated_under_plugin; I left it in place. Findings file: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step3-state-core-review.json",
+   "tests_rerun": "From next/: tools/check.py printed '30/30 checks passed'. The full pytest run printed '680 passed, 1 skipped in 48.44s' (exit 0; no foreign failures at the time of my run). node --test tests/workflows/universal.test.mjs printed 'tests 27, pass 27, fail 0'. From the repository root: rewrite/tools/spec_lint.py printed '1 problem(s)', namely 'topics/event-log.md: line 41 is 558 characters (limit 400)', a file of another unit. rewrite/tools/findings.py build printed '426 findings: 238 fixed, 47 left-for-builder, 2 not-fixed, 138 open, 1 rejected ... by-package lists written: 56'. Extra runs: tests/unit/test_dispatch.py::test_import_error_exits_2 alone passed from next/. In a scratch copy with the SL1-49, P3SEAM-06, AU-T2-15 and SL1-48 fixes reverted, 4 tests failed, one per fix. In a scratch copy with retry_command, the raw split and class precedence broken, the matching tests still passed.",
+   "interfaces_checked": 48,
+   "interfaces_as_promised": 36,
+   "outcomes_checked": 21,
+   "outcomes_confirmed": 13,
+   "findings": 30,
+   "blockers": 0,
+   "majors": 15
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fix": {
+     "summary": "Fixed all 30 review findings for the state-core unit (S1) of vsdd-factory 1.0 on branch rewrite/v1. Source changes: detection.py renders factory.toml from SPECS alone (no hand-typed key copy, no frozen protected_paths, protected derived from the detected release branch); cmd_init.py restart-safe (excludes before mount and on the ready path, update-ref with empty old value, up-front refusal of a non-empty .factory for none and unmounted, unmounted legacy branch reported not mounted, partial exits 1 with next naming /vsdd-factory:status --fix); mount.py prunes dangling worktree registrations, clears an interrupted .factory/.git pointer mount, and writes the exclude file atomically with newline repair; cli.py guards the dispatch call and drops dead plugin_version; dispatch.py resolves the start directory inside the try (deleted-cwd safe, relative -C made absolute), handles --version inside the try, hoists --json parsing before command resolution, adds --help, RegistrationError for malformed registrations, command-word error labels, the condition in the un-initialised refusal, and find_spec-based package skipping; artifacts.py adds the 1,000-character body-line size_cap, unreadable-file Problems, a porcelain -z changed_paths that no longer mangles dotfile/space/non-ASCII names, both waived-path forms, compile-time validation of registry type cells and ref: targets, and the malformed AC-heading flag; gitrun.py strips repository-locating GIT_* variables, maps a missing git to GitError and decodes timeout stderr; globs.py makes '**/' match zero directories; cmd_validate.py counts only checked artifact files, refuses --changed with PATHs and missing PATHs, and uses the new public tree_rels. Ledger corrections in rewrite/findings/outcomes/step3-state-core.json (AU-S2-03, AU-T2-13, AU-P2-03, AU-S2-09, AU-P2-17 re-recorded left-for-builder with what remains; AU-T2-15 and AU-S2-12 finished; P3OPS-11 text corrected) plus the two spec-prose fixes (config/hooks.md rule count, commands/validate.md single syntax, topics/state-directory.md ready row). All work confined to the unit's own files; the records and survey units' future surfaces (check_paths, tree_rels, mounted) kept compatible.",
+     "tests_passed": 747,
+     "tests_failed": 0,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> \"30/30 checks passed\" (after removing __pycache__ dirs my scratch runs had generated under the plugin, which the repository check refuses); uv run --no-sync python -m pytest -q -> \"747 passed, 1 skipped\" (~82 s); node --test tests/workflows/universal.test.mjs -> \"pass 27, fail 0\". From the repository root: python3 rewrite/tools/spec_lint.py -> \"0 problem(s)\" (registry counts unchanged); python3 rewrite/tools/findings.py build -> \"triaged: 258 of 485; by-package lists written: 55\" and it consumed the new outcomes file without complaint. Transient failures in tests/hooks/ (hook-runner unit, files it owns) seen mid-run disappeared on re-run; the final full suite is green, so foreign_failures is empty. Outcome file written: rewrite/findings/outcomes/step3-state-core-fix.json (30 resolutions, all fixed).",
+     "foreign_failures": [],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: 'uv run --no-sync python tools/check.py' gave 30/30 checks passed on its own. Its first run, made while pytest ran at the same moment, showed 28/30: nothing_generated_under_plugin and shipped_files_are_not_gitignored failed on a short-lived plugins/vsdd-factory/py/vsdd/__pycache__ that was gone afterwards. 'uv run --no-sync python -m pytest -q' gave 747 passed, 1 skipped in 82s on its own. Its first run, in parallel with check.py, had 1 failure from the same race (tests/lint/test_check.py::TestRepositoryChecks::test_every_registered_check). 'node --test tests/workflows/universal.test.mjs' gave 27 pass, 0 fail. From the repository root: 'python3 rewrite/tools/spec_lint.py' gave 0 problems. 'python3 rewrite/tools/findings.py build' gave 485 findings: 316 fixed, 50 left-for-builder, 1 not-fixed, 117 open, 1 rejected; 55 by-package lists written. I also tried 42 single breaks in a scratch copy of next/ (/private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/m) and ran the named tests after each. 37 were caught. Five were not: update-ref without the empty old value (S3R-3), branches.protected not derived (S3R-23), the facade importing every sibling (S3R-13), and render_config dropping a key or writing a wrong default (S3R-1, two breaks). Removing --track was also not caught, but that is harmless because git sets up tracking for a remote start point by default. Reproductions: init deleted a nested repository at .factory/; a hyphenated first word fails to register; test_init_through_bin_vsdd fails when uv's directory holds no Python; test_init_origin_mount fails with no global git identity; a .factory plain file leaves the state branch behind.",
+     "checked": 30,
+     "confirmed": 24,
+     "still_open": 13
+    }
+   },
+   {
+    "round": 2,
+    "fix": {
+     "summary": "All 13 findings fixed in the state-core unit (7 re-fixes the confirmation kept open + 6 C1 findings from the second check), each with a test that demonstrably fails without its fix (verified by temporary revert-and-restore). No promised interface changed signature; the visible behaviour deltas are the intended repairs: hyphenated command families register, a foreign .factory is refused instead of cleared, a plain-file .factory is refused before anything is created, and registry ref errors name the row and key.",
+     "tests_passed": 771,
+     "tests_failed": 0,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> 30/30 checks passed (last: event_schema_is_the_shipped_file); uv run --no-sync python -m pytest -q -> 771 passed, 1 skipped, 0 failed in 98s; node --test tests/workflows/universal.test.mjs -> 27 pass, 0 fail. From repo root: python3 rewrite/tools/spec_lint.py -> 0 problem(s); python3 rewrite/tools/findings.py build -> 506 findings: 329 fixed, 50 left-for-builder, 2 not-fixed, 124 open, 1 rejected; by-package lists written, all 37 S3R-state-core findings recorded 'fixed'. The state-core test files were also run in isolation before the full suite (96 passed) and each fix was verified by proving its new test fails against a temporarily reverted source, then restoring.",
+     "foreign_failures": [],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/:\n- `uv run --no-sync python tools/check.py`: 30/30 checks passed.\n- `uv run --no-sync python -m pytest -q` (in the repository): 1 failed, 770 passed, 1 skipped. The one failure is tests/lint/test_check.py::TestRepositoryChecks::test_every_registered_check: \"generated directory under the plugin: plugins/vsdd-factory/py/vsdd/__pycache__\". That folder holds bytecode for vsdd/__init__, config, events, project, schema and vsdd/hooks/* (cpython-311 and cpython-314). It was written at 17:53 by a process outside this unit while other work ran in the tree. No state-core module is in it.\n- The same suite on a fresh, clean copy of next/ (scratchpad/sc-confirm2-statecore-3223/run): 771 passed, 1 skipped, exit 0, and no __pycache__ appeared under plugins/.\n- `node --test tests/workflows/universal.test.mjs`: 27 pass, 0 fail.\n\nFrom the repository root:\n- `python3 rewrite/tools/spec_lint.py`: 0 problem(s).\n- `python3 rewrite/tools/findings.py build`: 506 findings: 329 fixed, 50 left-for-builder, 2 not-fixed, 124 open, 1 rejected; 55 by-package lists written.\n\nBreak tests, each applied alone to a clean scratch copy and reverted afterwards:\n- S3R-1: four breaks, all caught. Dropping limits.gate_minutes, writing agents_per_run=999, writing protected_paths, and a hand-typed [project] tuple that leaves out layout.\n- S3R-3: two breaks, both caught. update-ref without the empty old value fails test_create_branch_twice_keeps_the_first_commit. Init ignoring a lost race fails test_init_losing_a_concurrent_create_mounts_the_winner.\n- S3R-13: two breaks, both caught. A facade that imports every sibling on the first lookup fails test_import_loads_no_submodule. A planted relayed command (output=survey, failure spikes_used='none') fails test_shipped_commands_register_cleanly, while the valid control passes. No shipped command declares an output today, so that loop runs zero times until one does.\n- S3R-23: deleting the branches.protected derivation fails only the master-only test.\n- S3R-28: reproduced the Linux layout with a folder holding only uv. Without the interpreter's folder on PATH it exits 2 with \"uv found no Python 3.11 or newer\". With it, init answers ready.\n- C1-1: a lenient _is_interrupted_mount fails both nested-repository tests. Removing the points-back check or the common-dir check leaves every test green. Those two are untested safeguards whose loss would cost only a pointer file. Interrupted mounts are still accepted with both absolute and relative worktree paths (worktree.useRelativePaths).\n- C1-2: the partition-based check fails the hyphen test. Exact-match only fails test_longest_words_win, so refinement modules are still covered.\n- C1-3: without the identity lines and with GIT_CONFIG_GLOBAL=/dev/null, test_init_origin_mount fails (KeyError 'state'). With them it passes.\n- C1-4: an is_dir-only refusal fails the plain-file test. Also probed: a dangling symlink and a symlink to a non-empty folder are refused with no branch left, and a symlink to an empty folder mounts ready.\n- C1-7: removing the wrap fails test_registry_compiles_cells_loudly.\n\nSpec and record items:\n- S3R-30: hooks-inert.md rows now match state-directory.md.\n- C1-5: the SL1-27 outcome now records exit 1, partial, and next naming status --fix.\n- C1-6: 'unreadable' is in the reason-code table of rules/artifacts.md. Plan 3.5 takes its codes from that table.",
+     "checked": 13,
+     "confirmed": 13,
+     "still_open": 1
+    }
+   }
+  ],
+  "still_open": [
+   {
+    "id": "S3R-state-core-C2-1",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py",
+    "problem": "The C1-7 fix pasted its comment twice. The five-line block 'A ref: target with no pattern anywhere is a compile-time fault ... (plan 3.5: the RegistryError names the row).' appears at lines 172-176 and again, word for word, at lines 177-181, just above the loop that re-raises with '[<row>].<key>: ...'. Behaviour is correct.",
+    "proposed_fix": "Delete one of the two identical comment blocks."
+   }
+  ]
+ }
+}

@@ -1,0 +1,1 @@
+{"agentType":"p5:worker","isBuiltIn":false,"description":"ONE","workflowPhase":"P","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true,"model":"sonnet","pickedEffortModel":"claude-sonnet-5-5","inWorkflowRun":true}

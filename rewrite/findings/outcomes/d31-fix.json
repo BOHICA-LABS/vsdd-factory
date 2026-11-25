@@ -1,0 +1,302 @@
+[
+ {
+  "id": "D31R-F-1",
+  "outcome": "fixed",
+  "what_was_done": "F-INTERFACE now also runs on the whole tree in the flags check of wave, release and sweep: it records the number of unmarked bypass matches outside the interface (metrics.flags.bypasses), and in the sweep each is a fixable finding of category code, so maintain moves the reads behind the interface within maintain.fixes_per_run. The release packet and vsdd report debt print the figure. The decision record needs the heading 'Existing flag reads' whenever detected is true (source existing, or named with a system found): every mechanism found, its fate, the count F-CHOICE measured and how the reads move. F-CHOICE refuses a record without it and counts keyed reads, unkeyed reads and bypasses for the spec packet. The story-writer plans the moves that need a design; the adversary checks them in review-stories.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml, rewrite/spec/topics/flag-system-choice.md, rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-F-2",
+  "outcome": "fixed",
+  "what_was_done": "The item flag-off now asks that the owning story's definition serves the default in every environment it defines, and the implementer's duty says so. Where a definition pattern captures the named group value, F-DEFINITION refuses an owning story's entry whose value differs from the record's default; where none does, the gate reports 'definition value not measured' and the item is the evidence.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml, rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-F-3",
+  "outcome": "fixed",
+  "what_was_done": "No story stops for a flag any more: the spec_gap path is removed. A project is in one of three computed states (off, requested, on). While flags are not on the story-writer names no flag and stops for none, and the plan gate lists under metrics.flags.would_require the stories the setting would have asked for. The standing answer is flags.enabled having a value: written by a person, or copied by the survey from the approved proposal (true with flags=<source>, false with flags=decline or a declined text). A false stands: the architect proposes a flag system only when the code has one, a person asks (brief, request, guidance) or the state is requested, and never again after a decline until a person asks.",
+  "where": "rewrite/spec/config/flags.md, rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-checks.toml, rewrite/spec/topics/human-stops.md"
+ },
+ {
+  "id": "D31R-F-4",
+  "outcome": "fixed",
+  "what_was_done": "A removal is asked once per flag and before anything is written. A flag is due only when its remove_when is met and it is on (a delivered flag_change: enable story whose cycle has closed), so a flag that ships off is never proposed. Where flags.removal is human the checkpoint opens one merge decision named for the flag (merge.flag-<stem>); approve lets the next maintain run write the cleanup story, which then merges as delivery.merge says; reject needs until=<date> (F-APPROVE) and the flag is not due again before that day. Where flags.removal is auto, which the proposal may say only where the repository's definitions are authoritative and the pipeline applies them, no person is asked. The delivery refusal and the always-wait at story deliver are gone. A person's own removal request waits for no decision.",
+  "where": "rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/tables/flag-release-checks.toml, rewrite/spec/tables/flag-checks.toml, rewrite/spec/topics/governed-delivery.md"
+ },
+ {
+  "id": "D31R-F-5",
+  "outcome": "fixed",
+  "what_was_done": "The approved settings have one source. factory.toml gets a table [flags.approved] that only the survey writes: a copy of the [flags] table of the toolchain file the latest approved spec decision covers, rewritten whenever the two differ and announced in the briefing with each key that changed. A check reads a key from [flags] when a person wrote it there and from [flags.approved] otherwise, so a superseding proposal reaches every gate at the next survey and no value a person set is rewritten. vsdd status, the briefing and the next spec packet list every override.",
+  "where": "rewrite/spec/config/flags.md, rewrite/spec/tables/flag-checks.toml (F-FILL), rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/topics/project-configuration.md"
+ },
+ {
+  "id": "D31R-F-6",
+  "outcome": "fixed",
+  "what_was_done": "'Enabled but not configured' is now the state requested: a person wrote enabled = true and no approved proposal names a system. In that state everything is as in off, so no flag check runs and no gate fails; a story that names a flag is refused at the plan gate; vsdd status, the briefing, every gate result and the release packet report it; and the architect proposes the system the next time it writes architecture. The amend path inside an open cycle was not added: nothing is blocked in that state, so the open cycle finishes and the change request for the flag system runs after it like any request. 'Cannot measure' stays a failure only while flags are on, where the cause is one key a person can correct in factory.toml.",
+  "where": "rewrite/spec/config/flags.md"
+ },
+ {
+  "id": "D31R-F-7",
+  "outcome": "fixed",
+  "what_was_done": "The decision record's 'Tests and local runs' heading must name the suite-wide setup that installs the test double for every test, whatever the environment holds, and gives it the values of the override variable. The new offline contract states that while the override variable is set the wiring opens no connection to the flag source. The items flag-off (no test reaches the flag service, flags set only through the test double) and flag-system (the suite's setup installs the double for every test) hold it, and the adversary's and security-reviewer's rows carry the text. F-KEY now sets the override variable itself for every command a gate runs ({} for a test command) and never passes on a value inherited from the shell.",
+  "where": "rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-story-checks.toml (F-KEY, F-ITEMS), rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-F-8",
+  "outcome": "fixed",
+  "what_was_done": "The 'Interface' heading must say, for each language of the product, whether an OpenFeature SDK exists. The architect's checked_by now has the adversary, in review-specs, check a standard other than openfeature against that statement, language by language.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/topics/flag-system-choice.md"
+ },
+ {
+  "id": "D31R-F-9",
+  "outcome": "fixed",
+  "what_was_done": "The story-writer writes criteria for both states: the new behaviour with the flag on, and a criterion containing the words 'flag off' for the behaviour that stays. F-REQUIRE refuses a story behind a flag with no such criterion. F-STATES refuses an off or default test whose name names no criterion (ac<N>), so the criterion-to-test map shows the off state.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-checks.toml (F-REQUIRE), rewrite/spec/tables/flag-story-checks.toml (F-STATES)"
+ },
+ {
+  "id": "D31R-F-10",
+  "outcome": "fixed",
+  "what_was_done": "Each fact now has one home. Limits are only in the unmeasured cells (the header no longer says 'here and in the topic'). The values of require are in config/flags.md, the headings and the four contracts in flag-system-choice.md, the record, its states and the after: condition in artifacts/flag.md (met when the stories are delivered and the cycle that delivered the last has closed), the key handling in config/flags.md and F-KEY, and the text of each review item in flag-duties.toml only. feature-flags.md is cut to the parts table, the path, one reason per choice with a link, and the clause table.",
+  "where": "rewrite/spec/topics/feature-flags.md, rewrite/spec/tables/flag-checks.toml, rewrite/spec/artifacts/flag.md"
+ },
+ {
+  "id": "D31R-F-11",
+  "outcome": "fixed",
+  "what_was_done": "The section is removed from the spec. rewrite/history/ is outside what this step may edit, so the mapping is recorded here. (1) The old delivery skill's line 'Feature flag wrapping recommended for high-risk changes' (plugins/vsdd-factory/skills/code-delivery/SKILL.md) is the setting flags.require, default high-risk, applied by F-REQUIRE. (2) The old pull request template's 'Rollback Instructions' (the revert, 'If feature-flagged' with its expected recovery time, 'Verification after rollback') is the Rollback section in every pull request body, with flags.kill_switch_seconds and the runbook heading 'Verify a rollback'. (3) Its 'Feature Flags' table (Flag, Controls, Default) is the Feature flags section. (4) Its checklist line 'Feature flag configured' is F-USED, and 'Rollback procedure validated' is the kill_switch contract's test with F-RUNBOOK.",
+  "where": "rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-F-12",
+  "outcome": "fixed",
+  "what_was_done": "Every delivers string in registry.d/d31.toml is now a multi-line string whose lines are under 120 characters, and the generated briefs follow. Having spec_lint check registry.d/ was not done: rewrite/tools/ is outside what this step may edit; it is a one-line change for the orchestrating session (drop the registry.d/ exclusion from the size and line check).",
+  "where": "rewrite/spec/registry.d/d31.toml"
+ },
+ {
+  "id": "D31R-F-13",
+  "outcome": "fixed",
+  "what_was_done": "The checks are now three packages and three tables: F5 builds the checks of choosing and planning (F-CHOICE, F-RECORD, F-REQUIRE, F-READY; table flag-checks), F2 the checks of a story's gates and review (table flag-story-checks; it keeps ledger entry D31-8), F6 the flags check of the wave, release and sweep jobs with F-RUNBOOK and F-REMOVE (table flag-release-checks). The pattern scanner (compile, bounded match, named groups, added lines) is in F1, so F-FILL and every later check share it. The ids F5 and F6 were added rather than renumbering, because the ledger's triage names F2, F3 and F4; the build plan gives the order F1, F5, F2, F6, F3, F4.",
+  "where": "rewrite/spec/registry.d/d31.toml, rewrite/spec/packaging/build-plan.md"
+ },
+ {
+  "id": "D31R-F-14",
+  "outcome": "fixed",
+  "what_was_done": "F4 now depends on W2, W5, W6, W11 and E2 as well. Its delivers text and the build plan's order of work say it needs only the first part of E1 and the story tier of E2, both of which the slice builds.",
+  "where": "rewrite/spec/registry.d/d31.toml, rewrite/spec/packaging/build-plan.md"
+ },
+ {
+  "id": "D31R-F-15",
+  "outcome": "left-for-builder",
+  "what_was_done": "The design is settled in the spec; the shipped artifact registry (next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml) and the artifact rule must follow it when package F1 is built, in the same change as D31-1. F1 adds: the stem cell of the [flag] row and the check that a record's path is its key percent-encoded (the id no longer equals the stem); the lock value removed (frozen once a delivered story names the flag with flag_change: remove); the fourth story key flag_irreversible and the record keys permanent_because and default_because, as artifacts/flag.md gives them; the [deferred-item] writer vsdd checkpoint, with the item named deferred/flag-<stem>.md; and a [toolchain] cap of 12,000 bytes. The spec side is done: artifacts/flag.md states the two format additions, flag-lifecycle.md and state-layout.md use <stem>, and artifacts/toolchain.md states the cap.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml, rewrite/spec/artifacts/flag.md"
+ },
+ {
+  "id": "D31R-F-16",
+  "outcome": "fixed",
+  "what_was_done": "rules/secrets.md has a section for decision D31: in a project that uses flags the variables flags.key_env names are secret variables whatever their names look like, and the rule blocks a shell segment that names one. The rule is not built yet, so the spec file is where its builder reads this; the section says it is built with package F2, whose delivers text and dependency on H2 carry it. No ledger entry is needed, because no shipped file has to change.",
+  "where": "rewrite/spec/rules/secrets.md, rewrite/spec/registry.d/d31.toml"
+ },
+ {
+  "id": "D31R-F-17",
+  "outcome": "not-fixed",
+  "what_was_done": "For the orchestrating session, not a choice of the user's. The fix is two edits to the designer's ledger files, which this step was not given to write: in rewrite/findings/triage/d31.json set \"packages\": [] for D31-7, and remove the D31-7 entry from rewrite/findings/outcomes/d31.json so that it reads as open until registry.toml's [doc.decisions] summary says D1 to D31. An entry in triage/d31-review.json cannot do it, because findings.py applies triage files in name order and d31.json comes after d31-review.json. What this step did: package F1's delivers text no longer lists D31-7.",
+  "where": "rewrite/findings/triage/d31.json, rewrite/findings/outcomes/d31.json"
+ },
+ {
+  "id": "D31R-F-18",
+  "outcome": "fixed",
+  "what_was_done": "F-ITEMS accepts only checked for its items; not_checkable does not account for one and the item then counts as uncovered. In a later review loop the items flag-off and flag-removed are added again when the commits that loop reviews touch a file of class source.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-ITEMS), rewrite/spec/topics/verdicts.md"
+ },
+ {
+  "id": "D31R-F-19",
+  "outcome": "fixed",
+  "what_was_done": "D31's term is now 'a story behind a flag' in every flag file, defined once in artifacts/flag.md and listed in the glossary. 'Flagged' is left to the existing use for a story's own boolean keys. No existing use was renamed, because those files are on the slice path.",
+  "where": "rewrite/spec/artifacts/flag.md, rewrite/spec/topics/glossary.md"
+ },
+ {
+  "id": "D31R-F-20",
+  "outcome": "fixed",
+  "what_was_done": "F-APPROVE refuses a plain approve of a specification that would accept the flag decision record: the person types approve flags=<source>, where the value is the proposal's source (existing, named, researched, home-built). For a system found in existing code, approve flags=decline -- <words> approves the specification and leaves flags off without a revise round. Declining a new system is still revise, because its contracts, decision record and dependency are in the set and approval changes no file.",
+  "where": "rewrite/spec/tables/flag-checks.toml (F-APPROVE), rewrite/spec/topics/flag-system-choice.md"
+ },
+ {
+  "id": "D31R-F-21",
+  "outcome": "fixed",
+  "what_was_done": "Inside the sweep's spec coherence check every refusal of F-CHOICE is an advisory finding for the next amendment: the set is locked there and no maintenance fix can change it. The 'patterns find reads' refusal is now 'with detected true, read and bypass patterns that between them match nothing', and it refuses only in vsdd gate spec, in a run that can change the proposal.",
+  "where": "rewrite/spec/tables/flag-checks.toml (F-CHOICE), rewrite/spec/commands/gate-sweep.md"
+ },
+ {
+  "id": "D31R-F-22",
+  "outcome": "fixed",
+  "what_was_done": "The story-writer plans a docs story for the runbook with the stories that build the flag system, and orders a story behind a flag after it. F-READY refuses a story behind a flag while the runbook is not on the integration head unless its depends_on chain reaches a docs story that cites the kill_switch contract.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-checks.toml (F-READY)"
+ },
+ {
+  "id": "D31R-F-23",
+  "outcome": "fixed",
+  "what_was_done": "The architect's duty no longer writes conventions.md. The rule that a flag is read only through the interface with its key as a literal is under the decision record's 'Interface' heading, which the spec decision approves, and in the implementer's own duty.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/topics/flag-system-choice.md"
+ },
+ {
+  "id": "D31R-F-24",
+  "outcome": "fixed",
+  "what_was_done": "flag-lifecycle.md and story-deliver.md now say the same: Rollback is in every pull request of every project, whatever its flag state, with a flag step only for a story that names a flag; Feature flags is for a story that names a flag. Package F3 adds both, because the body renderer of G4a is on the slice path and may not change before the build widens.",
+  "where": "rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/commands/story-deliver.md"
+ },
+ {
+  "id": "D31R-D-1",
+  "outcome": "fixed",
+  "what_was_done": "The story-writer keeps behind a flag nothing that turning it off cannot undo: that part is planned as an earlier story with no flag, in a form the old code accepts, or the story names what remains in the new key flag_irreversible. The item flag-off asks that nothing behind the flag has such an effect unless the key names it. For such a story the Rollback section and the release packet print the line and not the blanket sentence. Where the on path writes stored data, the test-writer writes an off test that turns the flag on, writes, turns it off and reads.",
+  "where": "rewrite/spec/artifacts/flag.md, rewrite/spec/tables/flag-duties.toml, rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-2",
+  "outcome": "fixed",
+  "what_was_done": "The decision record has the heading 'Where flags are evaluated' (server, or code that runs on a user's device, per component, and how the server enforces a flag evaluated on a device). The item flag-off asks, where the flag is read in code that runs on a user's device, that the server refuses the new behaviour too and that a check on the device is never the only guard. The item flag-system asks that a client cannot turn on what the server does not allow. flags.key_env names secret keys only, never a public identifier a client build must carry. A record field 'evaluated' was not added: where a read runs is visible in the diff the reviewer has, and a field would be a second copy an agent must keep right.",
+  "where": "rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-D-3",
+  "outcome": "fixed",
+  "what_was_done": "The hook rule secrets treats the names in flags.key_env as secret variables and blocks an agent's shell segment that names one; the gates remove them from what they run; vsdd status and the briefing warn while one is set in the session's environment. The sentences that said 'never' are replaced by what is enforced, and F-KEY's unmeasured cell states what is not: a program an agent runs that reads a key variable by itself, and a tool connected to the session. Refusing to start a run while a key is set was not taken: a person who runs the product locally keeps the key in their shell, and the block and the warning bound the risk without a stop. Dropping the variables from agent environments is not claimed, because the design has no verified platform fact that allows it.",
+  "where": "rewrite/spec/rules/secrets.md, rewrite/spec/config/flags.md, rewrite/spec/tables/flag-story-checks.toml (F-KEY)"
+ },
+ {
+  "id": "D31R-D-4",
+  "outcome": "fixed",
+  "what_was_done": "F-KEY no longer reads the value of a key variable. The new key flags.key_patterns holds the shape of the flag source's secret keys, chosen by the architect, and the green gate refuses an added line one matches. Where key_env names a variable and no pattern is configured the gate reports 'key shape not measured', which reaches the release packet. Running the general secret scanner at every green gate was not taken: that would change the green gate for every kind of secret, which D31 does not decide; the scanner stays in the release baseline.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-KEY), rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-D-5",
+  "outcome": "fixed",
+  "what_was_done": "Nothing is built before the question is answered: see D31R-F-4. A flag is due only when it is on, so an after: condition met while the flag ships off proposes nothing; the sweep reports such a flag as a finding that is not fixable. A reject carries until=<date> and the flag is not due again before it. artifacts/flag.md says after: states when the work is complete, not that the flag is on. F-RECORD refuses an after: that names a dropped story or an epic all of whose stories are dropped.",
+  "where": "rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/tables/flag-release-checks.toml (F-REMOVE), rewrite/spec/tables/flag-checks.toml (F-RECORD)"
+ },
+ {
+  "id": "D31R-D-6",
+  "outcome": "fixed",
+  "what_was_done": "The test-writer has a duty for a removal story: delete the flag's off and default tests and the test of its definition, take the flag setting out of its on tests, write the regression test. The three-state duty and F-STATES apply only to a story behind a flag (flag with no flag_change). F-DEFINITION's removal check also refuses a test that still sets the key, through the new key flags.test_patterns. The new item flag-removed:<key> has the adversary check that the code only the off state reached is deleted. F4's scenarios cover both.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-story-checks.toml (F-DEFINITION, F-ITEMS)"
+ },
+ {
+  "id": "D31R-D-7",
+  "outcome": "fixed",
+  "what_was_done": "A new flag is temporary unless its record carries permanent_because and default_because; F-RECORD refuses a permanent flag without them. The plan gate lists every permanent flag with its reasons and the release packet prints them. The adversary checks each lifetime in review-stories. The removal decision's packet prints the flag's title, lifetime, the story that turned it on and the release that shipped it, and asks whether it is a release flag that is now on for everyone.",
+  "where": "rewrite/spec/artifacts/flag.md, rewrite/spec/tables/flag-checks.toml (F-RECORD), rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-8",
+  "outcome": "fixed",
+  "what_was_done": "'Defaults and failure' now answers four cases: never reached since start, lost after start, slow, and a restart during an outage. flags.contracts is a table of four named contracts that F-CHOICE checks: fallback, startup (the product starts within a stated time while the source cannot be reached), kill_switch (a change takes effect within flags.kill_switch_seconds without a restart) and offline. The test-writer writes one test that runs the real source's client against a local address nothing listens on. The OpenFeature paragraph was checked against the specification and reworded: the default is required on abnormal execution; a provider may be STALE and a value may carry the reasons CACHED and STALE; the set-and-wait function returns when the provider is ready or in error, and the provider section sets no time limit on initialisation.",
+  "where": "rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-D-9",
+  "outcome": "fixed",
+  "what_was_done": "The new check F-ON runs the suite once more at the green gate of a story behind a flag, and of a story that turns a flag on, with the override variable giving that flag as true, and compares it with the baseline, leaving out the flag's off and default tests. The suite's setup must hand the override to the test double, and the gate reports when no default test changed its result. A story that turns a flag on is a feature story whose one new test reads the repository's definitions and fails until the entry serves the flag on, so it has a red gate; its green gate also runs F-ON and the definitions validation command. A kind without a red gate was not used: a docs, chore or harness story is built by an agent that may not write a file of class source, where definitions live, and facade is the kind for service clones.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-ON), rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-D-10",
+  "outcome": "fixed",
+  "what_was_done": "No new key was needed: a read pattern now matches every evaluation call and its group key is empty when the key is not a literal. Such an unkeyed read is refused on added lines and, on the whole tree, counted and listed (the first fifty places) under metrics.flags.unmeasured. F-CHOICE counts keyed reads, unkeyed reads and bypasses for the spec packet, and the adversary compares the patterns with the reads the analysis cites. F-FILL writes an inherited record for every key found on the integration head that has no record, at every survey, not only while the register is empty.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-REGISTERED), rewrite/spec/tables/flag-checks.toml (F-FILL, F-CHOICE), rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-D-11",
+  "outcome": "fixed",
+  "what_was_done": "The codebase-analyzer lists every flag mechanism in a module, hand-made switches included. The decision record's 'Existing flag reads' heading must give the fate of each: kept as the system, put behind the interface as a further source, or moved by stories. A bypass pattern may capture a key, and F-FILL then records that flag as inherited. The bypass count on the whole tree is in metrics.flags.bypasses, the release packet and vsdd report debt. The OpenFeature provider that wraps several providers behind one client is named as the way a second source is put behind the interface.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-story-checks.toml (F-INTERFACE)"
+ },
+ {
+  "id": "D31R-D-12",
+  "outcome": "fixed",
+  "what_was_done": "F-DEFINITION attributes a change by entry: a match of flags.definition_patterns, whose group key is the flag, or with an empty list the whole of a definitions file whose stem is the key. It compares the entries at the base and at the head, so a value changed lines away from its key is seen and a neighbouring comma is not an entry. Keys are compared as captured, never as substrings. A change outside every entry is refused in a story that names no flag. In the wave, release and sweep jobs an entry whose key has no record is refused.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-DEFINITION), rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-D-13",
+  "outcome": "fixed",
+  "what_was_done": "The meaning of flags.bypass_patterns now says a read that the project's flag convention names, never configuration reads in general, and the adversary checks that in review-specs. F-INTERFACE exempts an added line that carries the marker VSDD-NOT-A-FLAG: with a reason; the gate lists every marked line, and the new item not-a-flag has the adversary check each one.",
+  "where": "rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/tables/flag-story-checks.toml (F-INTERFACE, F-ITEMS), rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-D-14",
+  "outcome": "fixed",
+  "what_was_done": "F-DEFAULT also runs on the whole tree in the wave, release and sweep jobs: a key whose fallbacks differ from one another or from its record is counted, and in the sweep is a fixable finding. At green a read of a flag whose record has no default is refused. F-FILL writes an inherited record's default when every captured fallback agrees and reports the keys where they do not. The recommendation of one typed accessor per flag was not taken: it is advice that no check or reviewer would hold.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-DEFAULT), rewrite/spec/tables/flag-checks.toml (F-FILL)"
+ },
+ {
+  "id": "D31R-D-15",
+  "outcome": "fixed",
+  "what_was_done": "Two flags together: the item flag-off now asks, where the diff reads another flag, for a test that holds the new behaviour with that flag on and with it off; a missing one is a finding of category test. It is held by the reviewer and not by a gate, because the tests are frozen before the code that reads the second flag exists. F-ON runs the suite with the story's flag on, and vsdd env start runs wave and release with every live temporary flag on. Not taken: running the scenarios of existing behaviour a second time with the shipped defaults. The shipped state with the new flags off is the behaviour the baseline has, and the suite is compared against the baseline with no flag set at every green gate, every wave gate and the release baseline check; a second scenario evaluation would double the costliest check to measure the same thing. flag-lifecycle.md says so.",
+  "where": "rewrite/spec/tables/flag-duties.toml, rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-16",
+  "outcome": "fixed",
+  "what_was_done": "A temporary flag is boolean with the default false, so its safe value is checked by the plan gate. A permanent flag, which is the only kind that may have another type or default, must carry default_because: why its default is the value the product should run with when the source cannot be reached, a restart during an outage included. The adversary checks it in review-stories. 'Defaults and failure' in the decision record and the runbook both say what a restart during an outage does to a flag that was turned off. One line of reason was used instead of a field fails = open or closed, which would restate the default.",
+  "where": "rewrite/spec/artifacts/flag.md, rewrite/spec/tables/flag-checks.toml (F-RECORD), rewrite/spec/topics/flag-system-choice.md"
+ },
+ {
+  "id": "D31R-D-17",
+  "outcome": "fixed",
+  "what_was_done": "A test's state is now the token flag_on_<k>, flag_off_<k> or flag_default_<k>, where <k> is the story's flag key encoded, with no letter or digit directly before or after it, so flag_one, flag_offset and a tool's own flag tests do not count and a test name ties a state to a key. F-RECORD refuses a new key whose encoded form equals another record's. The new key flags.test_patterns matches a test setting a flag through the test double, and F-STATES refuses an added line in which a test sets a key that has no record.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES), rewrite/spec/tables/flag-config-keys.toml"
+ },
+ {
+  "id": "D31R-D-18",
+  "outcome": "fixed",
+  "what_was_done": "'Definitions and keys' in the decision record must say which is authoritative, the repository or the service, and how a difference is found. Where the pipeline applies definitions, the devops job fails on a dry run that shows a difference; the release packet lists the definition changes a person or the pipeline has still to apply. The new optional key flags.definitions_check is a command the green gate runs when a diff changes a definitions file; where it is empty the gate reports 'definitions not validated'.",
+  "where": "rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-duties.toml, rewrite/spec/tables/flag-story-checks.toml (F-DEFINITION), rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-19",
+  "outcome": "fixed",
+  "what_was_done": "The offline switch is the override variable itself, so there is one variable and it is always configured (F-CHOICE requires override_env). Its rule is the offline contract: while the variable is set, even to {}, the wiring takes flag values from it and opens no connection to the flag source, whatever keys the product or its setup could load. The gates set it for every test command and for vsdd env start, and a contract test asserts it.",
+  "where": "rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-story-checks.toml (F-KEY), rewrite/spec/config/flags.md"
+ },
+ {
+  "id": "D31R-D-20",
+  "outcome": "fixed",
+  "what_was_done": "The same change as D31R-F-18: only checked accounts for a flag item, and flag-off and flag-removed are added again in a later loop whose commits touch a file of class source.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-ITEMS)"
+ },
+ {
+  "id": "D31R-D-21",
+  "outcome": "fixed",
+  "what_was_done": "The wait is a project setting, flags.removal (human or auto; unset reads as human), which the proposal carries and a person approves with the specification, so it falls under D15's third item. governed-delivery.md now says a flag adds nothing to the deliveries that always wait. Where the setting is human the question is asked once per flag before the removal is built (D31R-F-4).",
+  "where": "rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/topics/governed-delivery.md, rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-22",
+  "outcome": "fixed",
+  "what_was_done": "In the sweep's spec coherence check every refusal of F-CHOICE is an advisory finding for the next amendment, so a toolchain file locked before F1 shipped, or brought in by import, fails no sweep. In vsdd gate spec it still refuses, in a run that holds an amendment and can add the key.",
+  "where": "rewrite/spec/tables/flag-checks.toml (F-CHOICE)"
+ },
+ {
+  "id": "D31R-D-23",
+  "outcome": "fixed",
+  "what_was_done": "The new key flags.kill_switch_seconds is the time the kill switch takes; the kill_switch contract's test asserts it, and the Rollback section and the release packet print it. The runbook must carry a heading containing 'Verify a rollback' beside 'Kill switch'; F-RUNBOOK checks both, and the Rollback section names both.",
+  "where": "rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/tables/flag-release-checks.toml (F-RUNBOOK), rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-D-24",
+  "outcome": "fixed",
+  "what_was_done": "flags.standard has three values: openfeature (every language of the product), partial and none. For partial and none the heading 'Why the interface is not OpenFeature' gives the reason for each language without it, the 'Interface' heading says for each language whether an SDK exists, and the adversary checks one against the other in review-specs. A value per component or repository was not added: no program reads it, and what clause 5 needs is the reason per language, checked by a reviewer.",
+  "where": "rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/topics/flag-system-choice.md, rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "D31R-D-25",
+  "outcome": "fixed",
+  "what_was_done": "The same change as D31R-F-19. The term is defined in artifacts/flag.md and listed in the glossary, which is where the design keeps its terms; conventions.md holds names, paths and tiers, and every slice builder reads it.",
+  "where": "rewrite/spec/artifacts/flag.md, rewrite/spec/topics/glossary.md"
+ },
+ {
+  "id": "D31R-D-26",
+  "outcome": "fixed",
+  "what_was_done": "config/flags.md has a section 'Patterns': the syntax is Python's re module, with (?P<key>...) for a named group; where each kind of pattern is matched; a match belongs to a story's added lines when its span includes a character of an added line; the loader compiles every pattern and a failure is a configuration error naming the key; the scan of one file is stopped after five seconds and reported as 'cannot measure', which the header of flag-checks.toml makes a failure. The scanner is built once, in F1.",
+  "where": "rewrite/spec/config/flags.md, rewrite/spec/tables/flag-checks.toml"
+ }
+]

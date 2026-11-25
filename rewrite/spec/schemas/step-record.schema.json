@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "step-record.schema.json",
+  "allOf": [
+    {
+      "$ref": "step-result.schema.json"
+    },
+    {
+      "type": "object",
+      "description": "The step record (state.md#2.8): the step result plus what the hook adds (hooks.md#2.11.7). store_step(project, result, agent_type, worktree_head).",
+      "properties": {
+        "agent_type": {
+          "type": "string",
+          "description": "The calling agent's type from the hook payload, stored by the step-results rule."
+        },
+        "worktree_head": {
+          "type": "string",
+          "description": "The head commit of the unit's worktree when the result was stored. Named apart from the step result's `head` (the commit the step left): one key must not carry two meanings."
+        }
+      },
+      "required": [
+        "agent_type",
+        "worktree_head"
+      ]
+    }
+  ]
+}

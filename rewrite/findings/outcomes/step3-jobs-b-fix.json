@@ -1,0 +1,32 @@
+[
+  {
+    "id": "S3R-jobs-b-1",
+    "outcome": "fixed",
+    "what_was_done": "_launch_cli passes stdin=subprocess.DEVNULL, so a launched vsdd is never on a terminal however the suite is run; a marked stop whose marker read fails can no longer be masked by the stop-everything branch. Also added the suggested defence in depth: test_cli_env_commands now performs a marked stop with another agent's marker (cmdenv0009, sess-other/agent-other) that must stop nothing, exit 1, and leave the product record in place before the matching stop runs.",
+    "where": "next/tests/unit/test_cmd_env.py (_launch_cli, test_cli_env_commands); bites: with _run_stop mutated to pass who=None the test fails with 'no caller marker: only a terminal stops every product' (verified by mutation)"
+  },
+  {
+    "id": "S3R-jobs-b-2",
+    "outcome": "fixed",
+    "what_was_done": "_run_stop computes terminal = inv.stdin_tty and inv.caller_key is None: a call carrying VSDD_CALLER is a tool call wherever its marker can be read (pruned, another -C root, already read) and never takes the stop-everything branch. New test test_stop_marked_call_without_marker_stops_nothing: VSDD_CALLER set, no marker file, stdin_tty=True gives exit 1, stopped=[], the record stays. The refinement of D3 is noted in rewrite/spec/commands/env-stop.md (plans are not editable by this unit). No interface change: the run(inv, args) -> Reply shape and env.stop(root, caller, terminal) signature are unchanged.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py (_run_stop); next/tests/unit/test_cmd_env.py (test_stop_marked_call_without_marker_stops_nothing); rewrite/spec/commands/env-stop.md; bites: with the guard removed the new test fails (exit 0, everything stopped) — verified by mutation"
+  },
+  {
+    "id": "S3R-jobs-b-3",
+    "outcome": "fixed",
+    "what_was_done": "Kept the private names _run_start, _run_stop, _configure_start, _configure_stop, which follow the codebase convention — every cmd_ module S1 and records built uses private _run/_configure helpers — and nothing under next/ references the public names (checked by grep; registration goes through COMMANDS). The departure from plan section 3's public names is recorded here because plans are not editable by this unit.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py (unchanged names); no test change needed — registration is exercised by test_env_commands_register"
+  },
+  {
+    "id": "S3R-jobs-b-4",
+    "outcome": "fixed",
+    "what_was_done": "env-start.md's 'Output and failure cases' now states the negative answer {ok: false, error, log}, exit 1, with its five cases (no worktree for the subject, empty commands.run, no free port in 28100-28199, the run command exiting on three ports, the product lock staying held) and that log names the product's log file; a subject outside the id grammar ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ is a usage error, exit 2.",
+    "where": "rewrite/spec/commands/env-start.md"
+  },
+  {
+    "id": "S3R-jobs-b-5",
+    "outcome": "fixed",
+    "what_was_done": "test_start_bad_subject_exits_2 now ends by asserting that store_of(project) holds no *.json, *.lock or *.log after the two calls (the directory itself may exist), replacing the trivially-true record_path assertion for a subject the test never starts.",
+    "where": "next/tests/unit/test_cmd_env.py (test_start_bad_subject_exits_2); bites: with env.start mutated to create a file before validating the subject the assertion fails on probe.lock — verified by mutation"
+  }
+]

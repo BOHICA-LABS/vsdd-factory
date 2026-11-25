@@ -1,0 +1,26 @@
+[
+  {
+    "id": "S3R-hook-runner-b-2",
+    "outcome": "fixed",
+    "what_was_done": "The ledger half is done this time: P3SEAM-24 is recorded left-for-builder — its entry below, in this file, which findings.py build processes after step3-hook-runner-b-fix.json and which therefore wins — naming H3 (Walls), the package whose rules consume ctx.classes and where D2's read-tool wiring lands, with the refresh half noted done there. Rebuilding the ledger puts P3SEAM-24 back into the active by-package lists, so no open fact is hidden behind a closed one.",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-b-fix-2.json (the P3SEAM-24 entry); rewrite/findings/ledger.json (rebuilt by rewrite/tools/findings.py build)"
+  },
+  {
+    "id": "S3R-hook-runner-b-6",
+    "outcome": "fixed",
+    "what_was_done": "When the literal matches no spelling of the resolved root, _anchored anchors it as Path(os.path.realpath(literal.parent)) / literal.name and returns it when that lands under the root: the ancestor symlinks collapse to the root and a symlink at the leaf stays literal. ctx.project.root is resolved (built from ctx.target), so the old spelled != root branch never fired and an ancestor-symlinked spelling got only the resolved form classed. test_spelling_through_symlinked_alias_classes_both_forms spells the brief through a symlinked alias of tmp_path (the portable spelling of the macOS /var case) and asserts ('brief', 'spec-product', 'source', 'project'); deleting the fallback fails it, as does spelling the alias through /var on macOS.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_anchored); next/tests/hooks/test_classes.py (test_spelling_through_symlinked_alias_classes_both_forms)"
+  },
+  {
+    "id": "S3R-hook-runner-b-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "The 'outside' drop is gone from _union: the union keeps every class of both forms, so an in-project symlink whose destination is outside the project, the plugin directory and tmp answers 'project' and 'outside' together, and a read-walls rule (H3) reading ctx.classes sees the destination's outside. The plan 3.1 interfaces keep their names and signatures (ctx.classes, ctx.classes_of, paths.classes_of); no per-form split is exposed — the literal and resolved classes are available separately only inside paths.py — because walls' read_allow shape is a step 4 question; expose it there if it is wanted. test_in_project_symlink_outside_stays_outside links src/wall-peek to /etc/hosts and asserts ('unclassified', 'project', 'outside'); restoring the drop fails it, and it was the only test noticing.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_union); next/tests/hooks/test_classes.py (test_in_project_symlink_outside_stays_outside)"
+  },
+  {
+    "id": "P3SEAM-24",
+    "outcome": "left-for-builder",
+    "what_was_done": "Outcome corrected from the earlier 'fixed', splitting it the way its own failure scenario demands. Done: the refresh half — liveness refreshes by the --run value of a vsdd segment (bare word or by path), tool_input.step.run of a StructuredOutput call, and the story of the call's worktree, from a second session as well as the holder's (test_lock_refresh, test_lock_refresh_belongs_by_run_and_story). Left for H3 (Walls), with D2's wiring of the read tools: the read-only reviewer half — a reviewer whose calls are Read/Grep, not wired in this slice — so a review over 20 minutes can still go stale. Until then a reviewer that only reads refreshes when it returns its StructuredOutput. The session-holding and step.run halves are not rebuilt in H3; only the Read/Grep wiring is.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (refresh half, unchanged); rewrite/spec/decisions.md D2 (the read wiring); rewrite/plans/step-3/hook-runner-b.md (D2)"
+  }
+]

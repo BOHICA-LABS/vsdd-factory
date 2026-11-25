@@ -1,0 +1,29 @@
+[
+  {
+    "id": "step3-records-fix-3-C1-1",
+    "origin": "step3-records-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "flush hands state paths to 'git add -A --', 'git rm --cached ... --' and 'git commit --only --' as pathspecs, and git reads a pathspec's glob characters (* ? [ ]) and a leading ':' as patterns and magic. So a valid file whose name has glob characters also stages and commits every file the pattern matches, including files flush just rejected. Probe (scratch copy, git 2.50): cycles/product-1/decisions/a.md is over PACKET_CAP and rejected (over_cap), and cycles/product-1/decisions/[ab].md is a valid packet. flush returns 'partial', with a.md listed in rejected and only [ab].md in files, but 'git show HEAD:cycles/product-1/decisions/a.md' succeeds and status is clean: the rejected file was committed through the '[ab].md' pathspec. The new 'rm --cached' staging of gone paths has the same exposure: deleting a glob-named file unstages whatever tracked files its pattern matches. This was already there before this round (add and commit --only already took pathspecs). It is reported here because S3R-records-C2-1 asked for an audit of every git command in commits.py for awkward file names, and that audit closed with 'paths go to git as argv members, nothing else needed changing'. Passing a path as an argument does not stop git reading it as a pattern. Also, test_flush_commits_a_renamed_name_with_space_and_accents only adds a file and stages its deletion; it never renames anything. A confirmer probe of a real rename of 'nächste Runde.md' to 'über nächste Runde.md' does commit both paths and the next flush is clean.",
+    "proposed_resolution": "Run the three path-taking git commands in _flush_locked with git's global '--literal-pathspecs' option (git --literal-pathspecs add / rm / commit; for commit it goes after the -c options and before 'commit'), or set GIT_LITERAL_PATHSPECS=1 in their env. In a scratch copy, this made the probe pass and test_state_commits.py still passed (19 of 19). Add a test: a rejected a.md next to a valid [ab].md, where flush must not commit a.md. Rename the space-and-accents test, or make it a real rename.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-records-fix-3-C1-2",
+    "origin": "step3-records-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py",
+    "problem": "The S3R-records-C2-2 fix attaches the partial success to StoreBusy as the attribute 'released'. The SessionEnd caller that hook-runner-b is building, liveness._released_under_busy, reads getattr(busy, 'entries', None) instead. Neither plan records.md 3, hook-runner-b.md 4 nor the spec names this attribute, so each unit picked its own name. Probe (scratch copy): session sess-A holds two lock entries; the first run_end succeeds and the second raises StoreBusy. lock_release raises with busy.released == [entry a:develop] and lock.json keeps only b:develop. liveness._released_under_busy(busy) returns [], so the 'lock.released' event for the entry that really was released is never logged. Separately, the lock_release docstring now ends '— a caller cannot distinguish busy from nothing matched (finding S3R-records-C2-2)'. That describes the problem that was fixed as if it were current behaviour.",
+    "proposed_resolution": "Settle on one attribute name and write it down where both units read it: StoreBusy.released, which records ships, in plan records.md 3 and topics/state-api.md (the orchestrator's files). Then have hook-runner-b's liveness read 'released'. Add a test that runs through both units: two entries, a busy second run_end, and SessionEnd logs lock.released for the first. Reword the docstring to say that the exception lets a caller tell busy from nothing matched.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-records-fix-3-C1-3",
+    "origin": "step3-records-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_lock.py",
+    "problem": "cmd_lock._run now catches every StoreBusy and reports 'a flush is running; the release could not end the runs of the entries it matched'. StoreBusy also comes from lock_release's own 'locked(project, \"lock.flock\", wait=3.0)' when another lock release or a run_begin holds lock.flock. Then no flush is involved and nothing was matched. Probe (scratch copy): with lock.flock held by another process, 'vsdd lock release --force' exits 1 after about 3 s with that flush error. The reported holder is also lock_entries()[0], which can be an unrelated session's entry rather than the entry kept because run_end was busy.",
+    "proposed_resolution": "Tell the two causes apart. Only the busy-run_end StoreBusy carries 'released', or lock_release can attach the kept entries as well. Report 'a flush is running' and name a kept-busy entry as holder only in that case. For a lock.flock timeout, say the run lock is busy because another release or survey holds it. Test both: flush.lock held and lock.flock held.",
+    "on_slice_path": true
+  }
+]

@@ -1,0 +1,30 @@
+# Severity: one definition and one text, stamped into every reviewer file.
+#
+# Sources: BLUEPRINT.md#4.10, pipeline.md#2.7, agents-skills.md#2.7
+# Built by package A1. The text below is the file workflow-lib/severity.md;
+# the build stamps it into every reviewer file, so lint compares bytes
+# against this one source. The blocking rules over these levels (anchors,
+# scope reach, grounding) are the pipeline design's, not the reviewers'.
+
+[[severity]]
+id = "critical"
+definition = "The change breaks a stated contract in normal use, loses or corrupts data, opens an exploitable security hole, or breaks the build or the suite."
+
+[[severity]]
+id = "high"
+definition = "A stated contract clause, acceptance criterion or listed edge case is unmet or untested, or a test cannot fail."
+
+[[severity]]
+id = "medium"
+definition = "A real defect with a concrete consequence that no contract covers."
+
+[[severity]]
+id = "low"
+definition = "Style, naming, wording, preference."
+
+[stamping]
+source_file = "workflow-lib/severity.md"
+heading = "## Severity"
+carried_by = "every reviewer file, checked byte for byte by lint"
+key_rule = "<category>:<path>:<symbol or clause>"
+key_rule_note = "the finding key rule, the same in every pass, stamped with the table"

@@ -1,0 +1,14 @@
+[
+ {
+  "id": "step3-jobs-fix-4-C2-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "No fifth round is run. Four rounds on the overlapping-starts logic of env start each closed the case named and the next check found another narrow race, all minor and none on the first story's path (it starts no product). Left for G1 when the build widens, with one instruction beyond the proposed fix: do not patch this branch again. Rewrite the held-state handling of env start as one loop with one rule, that a decision is taken only on a record read after the lock probe it depends on and is re-read before anything is stopped, and add a stress test that runs many overlapping starts of one subject and asserts that exactly one product is left and every call answers with it.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py"
+ },
+ {
+  "id": "step3-jobs-fix-4-C2-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "No fifth round is run. Four rounds on the overlapping-starts logic of env start each closed the case named and the next check found another narrow race, all minor and none on the first story's path (it starts no product). Left for G1 when the build widens, with one instruction beyond the proposed fix: do not patch this branch again. Rewrite the held-state handling of env start as one loop with one rule, that a decision is taken only on a record read after the lock probe it depends on and is re-read before anything is stopped, and add a stress test that runs many overlapping starts of one subject and asserts that exactly one product is left and every call answers with it.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py"
+ }
+]

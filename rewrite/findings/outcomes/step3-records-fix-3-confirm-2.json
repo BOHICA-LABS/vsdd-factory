@@ -1,0 +1,8 @@
+[
+  {
+    "id": "step3-records-fix-3-C1-3",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is right: cmd_lock._run tells the causes apart by StoreBusy.kept, the lock.flock timeout says 'the run lock is busy' with holder null (test_cmd_lock_release_while_the_run_lock_is_held fails when every busy is read as a flush), and the run_end case names _names(kept[0]). But no test pins that holder. test_cmd_lock_release_while_a_flush_holds_the_lock has one entry, so kept[0] and lock_entries()[0] are the same entry. In a scratch copy, putting the holder back to lock_entries(inv.root)[0] leaves test_state_cmds.py at 6/6 passing. Probe: lock.json [sess-other live on repo-a:develop, sess-mine on repo-b:develop], flush.lock held, 'lock release' with sess-mine's marker. The fixed code names sess-mine, the mutation names sess-other, and no test catches the difference. Still to do: add that two-entry test and assert holder.session == 'sess-mine' and the flush error.",
+    "where": "next/tests/unit/test_state_cmds.py"
+  }
+]

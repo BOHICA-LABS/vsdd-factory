@@ -1,0 +1,17 @@
+# The [callers] vsdd-subcommand groups and the [reveals] table ship inside the wall table, at
+# "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml" (package C2). The kinds exempt from
+# tests before code are not a list: the red_gate column of the shipped story-kind rows, read by
+# kind_has_red_gate. The shipped files and code are the single definition (README rule 7); this
+# pointer is kept valid TOML.
+#
+# The person-only (HUMAN_ONLY) and governed (GOVERNED) subcommand lists are constants of the
+# tool's code (vsdd/hooks/model.py once the hook rules ship, package H6), because they change only
+# when the tool's code changes. Until that module exists, the values live here, and this file is
+# the one copy that test_policy.py and tools/check.py read; neither repeats the lists.
+# Both are matched on the longest subcommand, so "import" is person-only while "import --dry-run"
+# is not. GOVERNED names the only routes onto the integration and release branches
+# ([[rule:merge-guard]]); HUMAN_ONLY is refused for every caller, the main session's model included.
+# Sources: hooks.md#2.7, hooks.md#2.11.10, BLUEPRINT.md#4.9.
+
+HUMAN_ONLY = ["decide", "config set", "cycle close", "lock release --force", "init --fresh", "import"]
+GOVERNED = ["story deliver", "release"]

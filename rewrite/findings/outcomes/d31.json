@@ -1,0 +1,44 @@
+[
+ {
+  "id": "D31-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "The design is settled in rewrite/spec/artifacts/flag.md, which carries the row to add, the stem cell, the lock value removed and the four story keys. Package F1 adds the row, the story keys and the two widened rows ([toolchain], [deferred-item]) to the shipped registry as its first task, when the build widens past the thin slice.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml"
+ },
+ {
+  "id": "D31-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "Package F1 adds the [reveals] entry and widens the three writer texts in the same change as D31-1, so the lint L-POLICY stays clean. The survey's writer text names [flags.approved] only (F-FILL). Nothing is needed before then: no flag record can exist until F1 ships the kind.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml, next/plugins/vsdd-factory/py/vsdd/policy/classes.toml"
+ },
+ {
+  "id": "D31-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "The rows are settled in rewrite/spec/tables/flag-config-keys.toml, and the two tables of factory.toml, the three states and the patterns in rewrite/spec/config/flags.md. Package F1 adds them to the loader, its tests, the configuration schema, the key table and the annotated example, when the build widens. Until then the loader rejects a [flags] section, which is the designed behaviour.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/config.py, rewrite/spec/tables/config-keys.toml, rewrite/spec/schemas/config.schema.json, rewrite/spec/topics/project-configuration.md"
+ },
+ {
+  "id": "D31-4",
+  "outcome": "left-for-builder",
+  "what_was_done": "The two changes are settled in rewrite/spec/topics/flag-system-choice.md (the flags value of a spec approval, for every source, and flags=decline) and rewrite/spec/topics/flag-lifecycle.md (the merge decision merge.flag-<stem> that the maintain checkpoint opens before a cleanup story is written, only while flags.removal = human, with a reject that needs until), as the checks F-APPROVE and F-REMOVE. Package F3 edits the two rows of the decision table when it builds those checks, after S4 and G4b are complete. Nothing waits at story deliver.",
+  "where": "rewrite/spec/tables/decision-kinds.toml"
+ },
+ {
+  "id": "D31-5",
+  "outcome": "left-for-builder",
+  "what_was_done": "The check is stated in the header of rewrite/spec/tables/flag-duties.toml. Package F4 adds the L-FLAG row and its test when it writes the Feature flags sections of the method files, after the agent packages are complete.",
+  "where": "rewrite/spec/tables/lint-checks.toml, next/tests/lint/"
+ },
+ {
+  "id": "D31-6",
+  "outcome": "left-for-builder",
+  "what_was_done": "The scheme is settled in rewrite/spec/artifacts/flag.md. Package F1 adds the row to the identifier table with the artifact kind.",
+  "where": "rewrite/spec/tables/identifiers.toml"
+ },
+ {
+  "id": "D31-8",
+  "outcome": "left-for-builder",
+  "what_was_done": "The items are settled as check F-ITEMS in rewrite/spec/tables/flag-story-checks.toml: four items, of which only checked counts, two added again in a later loop that touches source or tests, and one known only from the green evidence. Package F2 carries them to the reviewers and into the tool's verdict, widens the schema description, and proves with a harness scenario that a story behind a flag converges only when a reviewer marks flag-off checked.",
+  "where": "next/plugins/vsdd-factory/schemas/story-unit.schema.json, rewrite/spec/topics/verdicts.md"
+ }
+]

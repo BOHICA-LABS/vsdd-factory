@@ -1,0 +1,38 @@
+[
+ {
+  "id": "S4R-verdicts-C1-1",
+  "origin": "slice step 4, verdicts, confirmation",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py",
+  "problem": "The S4R-verdicts-15 fix (_rebuild's stored_used floor, fed by _closure_rounds_used in _compute) changes a story's verdict once the checkpoint stores summary() as the closure verdict. summary()'s rounds_used counts the loop's own passes, so the replay starts that loop as if those passes had been used before it, and the cap falls on an earlier pass. A probe in a scratch copy showed it. Three loop-1 passes, the finding disputed at pass 1, the arbiter's not_defect ruling at pass 3: verdict() is converged/clean with rounds_used 3, and covering() returns it. After closure.verdict = summary() the same records give blocked/cap with rounds_used 6 and the finding blocking, and covering() is None. The story stops reading reviewed and delivery refuses it. Two clean-converging passes go from rounds_used 2 to 4. Every story that converges through the arbiter would hit this at its first checkpoint once survey-2 writes the closure verdict.",
+  "proposed_resolution": "Remove the stored_used floor, so a loop 1's used is the loop-1 passes of earlier runs (plan verdicts.md 3.3 rule 9) and the full verdict keeps the script's used + pass (D13). Add a test_verdicts case that stores summary() into the closure after an arbiter-converged loop and asserts that verdict(), summary() and covering() are unchanged. The clone case of S4R-verdicts-15 then needs the used the run was given to be recorded (spec steward: S3/W2), not derived from the closure.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-verdicts-C1-2",
+  "origin": "slice step 4, verdicts, confirmation",
+  "severity": "minor",
+  "where": "next/tests/conformance/cases/r16-fix-order-last-wins.json",
+  "problem": "The S4R-verdicts-10 fix says r16's records are 'as steps_list returns them', but run r1 holds two byte-identical fix-x-l2-p3 attempt 1 records, and two arbitrate-u-l attempt 1 records (loops 1 and 2). The store keeps one record per run, workflow, subject and name.attempt (steps.py refuses 'already stored'), so no store holds this set and steps_list cannot return it. The expected skipped lists the same step twice. The D6 sort and gate-sha mutations are still caught, so the case does its job, but its input is not a stored record set (plan 3.5: records 'as records.md stores them').",
+  "proposed_resolution": "Keep one fix-x-l2-p3 record and one skipped entry for it. Name the two arbitrations apart (arbitrate-u-l1 and arbitrate-u-l2, as test_verdicts does) and keep path order. Optionally add a check to test_every_case_is_well_formed that no records case repeats (run, workflow, subject, name, attempt).",
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-verdicts-C1-3",
+  "origin": "slice step 4, verdicts, confirmation",
+  "severity": "minor",
+  "where": "next/tests/conformance/test_conformance.py",
+  "problem": "Left over from S4R-verdicts-4: rule 8's 'or no loop before it makes its passes not ok' is still untested. In a scratch copy, changing the branch `if previous_head is None or first_pass_head is None: items = None` to give [] passes all 87 tests in test_verdicts.py, test_conformance.py and test_state_gate_evidence.py. A later loop with no loop before it (or after a loop whose verdict has no head) would then converge on no items instead of failing.",
+  "proposed_resolution": "Add a records case whose run's only loop is loop 2 (no loop 1 before it), with a clean review, and expect failed/no_result with chain false.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-verdicts-C1-4",
+  "origin": "slice step 4, verdicts, confirmation",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py",
+  "problem": "The S4R-verdicts-7 fix edits story_unit.py, a step 3 file that survey-2 rewrites (ORDER.md section 4 gives verdicts only gate_evidence.py, and 'nothing outside this table is edited'). It renames _acs to acs, makes it skip fences, and has verdicts._story_acs import it. The fix report says '_acs kept as a thin alias', but no alias exists. Nothing calls _acs now, so nothing breaks today. But survey-2's builder is not told that story_unit.acs is now an import G3 relies on.",
+  "proposed_resolution": "The orchestrator records the edit as sanctioned (an ORDER.md section 4 row or a note in survey-2's brief): story_unit.acs is the one AC reader, it skips ``` and ~~~ fences, and verdicts imports it. test_items_equal_unit_acs guards it.",
+  "on_slice_path": true
+ }
+]

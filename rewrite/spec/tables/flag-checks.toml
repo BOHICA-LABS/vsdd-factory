@@ -1,0 +1,129 @@
+# sources: decisions.md#D31
+# Built when the build widens past the thin slice (package F5; F-FILL by F1, F-APPROVE by F3, the sweep
+# form of F-CHOICE by F6). Not read by anything on the slice path. The capability from end to end:
+# [[topic:feature-flags]].
+#
+# The rules every flag check follows, and the checks of choosing and planning. The checks of a story's gates
+# and its review are [[table:flag-story-checks]]; those of release and maintenance are
+# [[table:flag-release-checks]].
+#
+# `form` is what a check is in this design: a part of a gate, a refusal of a command, a step of the survey
+# or an item of the verdict. No check is a gate name of its own: the gate names stay eleven
+# ([[topic:gates]]). In the wave, release and sweep jobs the rows that name those jobs are one check,
+# `flags`, selectable with `--only flags`.
+#
+# Rules every row of the three tables follows.
+# - A check runs only while flags are on (the three states of [[config:flags]]). The exceptions are
+#   F-CHOICE, F-APPROVE, F-FILL and the first refusal of F-REQUIRE, which are what turn flags on, or keep a
+#   flag out while they are not on.
+# - "Cannot measure" is a failure. While flags are on, a check fails and names the key or the file when a
+#   key it reads is one that F-CHOICE requires and is empty, when a pattern does not compile, or when the
+#   scan of a file was stopped at its time limit. It never passes by default.
+# - Four keys may be empty, and F-CHOICE requires none of them: `key_env`, `key_patterns`,
+#   `definition_patterns` and `definitions_check`. A check that reads one of them empty does not fail. It
+#   does what its row says for that case, and the gate prints the report its `unmeasured` cell names.
+# - `unmeasured` is what a check cannot see even when it runs. That cell is the one place a limit is stated.
+#   A limit that depends on the run is printed by the gate in its result, under `metrics.flags.unmeasured`,
+#   and listed in the release packet ([[topic:flag-lifecycle]]); the rows that do this say "the gate reports".
+# - A read is a match of a read pattern in a file of the path class `source`. Its key is the named group
+#   `key`; a read whose `key` is empty is an unkeyed read. How patterns are matched, and when a match
+#   belongs to a story's added lines: [[config:flags]]. A record is a flag record, and planned, live, on and
+#   removed are its computed states; "a story behind a flag" and "a story that removes a flag" are defined
+#   with them ([[artifact:flag]]).
+# - A key's encoded form is the key in lower case, with each run of characters outside `a-z0-9` written as
+#   one `_` and no `_` at its start or end. Test names carry it (F-STATES), so no two keys that tests can
+#   name may share one (F-RECORD, F-REQUIRE).
+# - Evidence of a check is `metrics.flags` in the gate's evidence record ([[record:evidence]]).
+# - The package that builds a check ships one case that must fail and one that must pass for every clause
+#   of `refuses`.
+
+[F-CHOICE]
+form = "A part of `vsdd gate spec`, selectable as `--only flags`. Also inside the spec coherence check of `vsdd gate sweep`, where each refusal below is an advisory finding for the next amendment: the set is locked there and no maintenance fix can change it"
+runs = "When the toolchain file has a `[flags]` table, and always in a project that has an ingest closure. Findings carry the owner `architect`; a missing contract carries `product-owner`"
+reads = "The `[flags]` table of `specs/architecture/toolchain.toml`, the decision record it names, the `[paths]` lines, the contract files, the integration head"
+refuses = """
+After an ingest, a table with no `detected`, and `detected = true` with no `enabled`. `enabled = false` with
+no `declined`. With `enabled = true`: a missing or empty `source`, `decision`, `standard`, `interface`,
+`read_patterns`, `bypass_patterns`, `test_patterns`, `definitions`, `runbook`, `override_env` or
+`kill_switch_seconds`; `contracts` without one of its four names, or with an id that names no contract; a
+value outside the list for `source`, `standard` or `removal`; a `require`, which is a person's key and no
+part of a proposal; `detected = true` with a `source`
+other than `existing` or `named`; `source = "existing"` without `detected = true`; a `decision` that names
+no decision record, or one that lacks a heading [[topic:flag-system-choice]] requires or has no text under
+it; a pattern that does not compile; a read, test or definition pattern with no named group `key`; an
+`interface` or `definitions` glob that `[paths]` does not put in `source`; a `runbook` not in `docs`; and,
+with `detected = true`, read and bypass patterns that between them match nothing on the integration head.
+It also counts what the patterns find on the integration head: keyed reads, unkeyed reads and matches of a
+bypass pattern outside the interface. The `spec` packet prints the three numbers."""
+unmeasured = "Whether the patterns find every read, and whether a reason the record gives holds. The adversary checks both in `review-specs` ([[table:flag-duties]])"
+
+[F-APPROVE]
+form = "A refusal of `vsdd decide` and of the typed decide command, inside `settle_decision`"
+runs = "When a `spec` decision is settled `approve`, and when a `merge` decision about a flag's removal is settled `reject`. It reads one small file, so settling stays inside the hook's deadline"
+reads = "The toolchain file among the decision's `files`, and the decision's `accepted` list"
+refuses = """
+`approve` of a specification whose toolchain file says `enabled = true`, when the decision would accept the
+decision record that `flags.decision` names, unless it carries `flags=<source>` with that file's `source`,
+or `flags=decline` where the `source` is `existing`. The message gives the line to type. A `flags` value on
+any other approval. `reject` of a `merge` decision about a flag's removal without `until=<yyyy-mm-dd>`
+naming a day after today."""
+unmeasured = "Nothing"
+
+[F-FILL]
+form = "A step of `vsdd survey`, after it applies an approved toolchain file to `[commands]` and `[paths]`"
+runs = "In every survey. The scan of the tree is skipped when the integration head and the patterns are those of the last scan, which the local store remembers"
+reads = "The latest approved `spec` decision and the `spec` decision that accepted the flag decision record, the toolchain file, `factory.toml`, the register, the integration head"
+refuses = """
+It refuses nothing; it does two things, and the next briefing announces each.
+It keeps `[flags.approved]` of `factory.toml` equal to the `[flags]` table of the approved toolchain file,
+with one exception: `enabled` is true there only when the `spec` decision that accepted the flag decision
+record carries `flags=<source>`. It writes no other key of the file.
+While flags are on it writes one record for every key that a read pattern, or a bypass pattern with the
+group `key`, finds on the integration head and that has no record: the key as its title,
+`origin: inherited`, `type: unknown`, `lifetime: unknown`, the `default` when every captured fallback of
+that key agrees, and in a hub the `repo` it was found in. It reports the keys whose fallbacks disagree."""
+unmeasured = "A flag all of whose reads are unkeyed gets no record. F-REGISTERED counts those reads"
+
+[F-RECORD]
+form = "The registry row at every write (hook rule `artifacts`, `vsdd validate`), and a part of `vsdd gate plan`. Findings carry the owner `story-writer`"
+runs = "At each write of a record; at the plan gate, whole plan and `--story`"
+reads = "The flag records, the story files"
+refuses = """
+At the write: what the row of [[artifact:flag]] forbids. At the plan gate, for a record with `origin: new`:
+a key outside the tidy form, or one whose encoded form is another record's; no `story`, or a `story` that
+names no story or one that is not behind this flag; `type: unknown` or `lifetime: unknown`; no `default`, or one that does not parse as the `type`; a temporary
+flag whose `type` is not `boolean` or whose `default` is not `false`; a permanent flag without
+`permanent_because` and `default_because`; an active record whose owning story is dropped. For every
+record: `lifetime: temporary` without a `remove_when` in one of its two forms; an `after:` that names no
+story or epic, a dropped story, or an epic all of whose stories are dropped; `lifetime: permanent` with a
+`remove_when`. It lists every permanent flag with its two reasons under `metrics.flags.permanent`."""
+unmeasured = "Whether a lifetime, a removal condition or a permanent flag's default is the right one. The adversary checks each in `review-stories`"
+
+[F-REQUIRE]
+form = "A part of `vsdd gate plan`, whole plan and `--story`, so it also guards admission. Findings carry the owner `story-writer`"
+runs = "Always for its first refusal; otherwise while flags are on"
+reads = "The state of flags and `flags.require`, the story's frontmatter and criteria, the cycle's baseline, the records, the closure records"
+refuses = """
+While flags are not on: a story with `flag`, `flag_change`, `flag_exempt` or `flag_irreversible`. The gate
+then lists, under `metrics.flags.would_require`, the stories `flags.require` would ask to be behind a flag.
+While flags are on: `flag_change` or `flag_irreversible` without `flag`. A story that `flags.require` asks
+to be behind a flag with neither `flag` nor `flag_exempt`, and a story with both. A story behind a flag
+whose kind has no red gate, whose flag's `type` is not `boolean`, or which has no acceptance criterion whose
+text contains `flag off`, compared without case. A story with `flag_change: enable` whose kind is not
+`feature`, and a story that removes a flag and whose kind is not `fix`. A `flag` that names no record, a
+dropped record or a removed one. A story behind a flag whose encoded form is also another record's, as
+an inherited key's can be. A story that names a flag it does not own whose owning story is neither
+delivered nor in its `depends_on` chain. It lists every `flag_exempt` with its reason under
+`metrics.flags.exempt`."""
+unmeasured = "Whether an exemption is justified, and whether a story the setting does not require should be behind a flag. The adversary checks both in `review-stories`"
+
+[F-READY]
+form = "A part of `vsdd gate plan`, whole plan and `--story`. Findings carry the owner `story-writer`"
+runs = "While flags are on"
+reads = "The story graph, `flags.interface`, `flags.runbook`, `flags.contracts`, the integration head"
+refuses = """
+A story behind a flag whose `depends_on` chain does not reach what the integration head still lacks: where
+no file there matches `flags.interface`, a story that cites a contract in `flags.contracts`; where the file
+`flags.runbook` is not there, a `docs` story that cites the `kill_switch` contract. A story of a kind other
+than `docs` that cites a contract in `flags.contracts` without `security: true`."""
+unmeasured = "Whether the interface on the integration head is complete. The four contracts and their tests cover that"

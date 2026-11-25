@@ -1,0 +1,92 @@
+[
+  {
+    "id": "step4-rules-fix-3-C1-1",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block)",
+    "problem": "The position test takes an opaque or not-plain segment's directory to be known whenever the outer directory is. But the segment's own text can move: a cd inside an sh -c, bash -c or eval string, a substitution, or a program run through xargs or find -exec. Point (3) requires 'its directory is known'. The test checks for -C, --git-dir and GIT_DIR in the text, but not for cd, pushd or popd. Measured from the story worktree, each with exit 0, and real git under sh and dash commits on develop: sh -c 'cd <root> && git commit -m x'; bash -c '...'; eval \"cd <root>; git commit -m x\"; git commit -m \"$(cd <root> && git commit -m y)\"; nohup sh -c \"cd <root> && git commit -m x\"; find <root> -maxdepth 0 -exec sh -c 'cd \"$1\" && git commit -m x' _ {} \\;; echo <root> | xargs -I% sh -c \"cd % && git commit -m x\"; caffeinate -i sh -c '...'; script -q /dev/null sh -c '...'.",
+    "proposed_resolution": "In _harmless_or_block, a cd, pushd or popd word in the segment's text means the directory is not known, and the segment blocks opaque_git. Add these spellings as blocked cases from the story worktree.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-2",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_cut_heredocs, _build_segment); next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_bearing)",
+    "problem": "A here-document's body is cut out of the text of the segment that reads it. A shell that reads its commands from a here-document therefore carries no git word, is not git-bearing, and is not judged. Point (1) counts as git-bearing anything the parser does not enter whose text holds git, and an opaque segment must carry the text it stands for. Measured, both with exit 0, and real git under sh and dash moves develop: sh <<'EOF'\\ngit push origin develop\\nEOF on the main checkout pushes develop, and sh <<'EOF'\\ncd <root> && git commit -m x\\nEOF from the story worktree commits on develop. bash, dash, zsh and sh -s spellings work the same way.",
+    "proposed_resolution": "When a here-document feeds a program that runs its input as commands (sh, bash, dash, zsh, ksh by basename, with or without -s), its body is part of that segment's text for the git-bearing test and the position test. A body read by cat, tee or git commit -F - stays out, so the existing cat <<NOTE case still passes. Add both measured commands as blocked cases.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-3",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_branch, _switch, _checkout, _push, _positionals, _git update-ref)",
+    "problem": "A plain segment is judged by exact option words, so option spellings that git accepts pass. Each of these was measured with exit 0 while real git under sh and dash moved a guarded branch (main guarded with release = \"main\", develop for the push forms), all run from the story worktree unless noted. Attached values: git switch -Cmain, git switch --force-create=main, git checkout -Bmain. Abbreviated long options: git switch --force-c main, git branch --forc main HEAD, git push --mirr origin, git push --al origin. Bundled short options: git checkout -fB main, git branch -qf main HEAD. Operands after --: git branch -f -- main HEAD, git push -- origin HEAD:develop. Refs on stdin: printf 'update refs/heads/main HEAD\\n' | git update-ref --stdin. @ for HEAD: git push origin @ on the main checkout pushes develop. The rule should pass a command only on a positive reading, and these are not positive readings.",
+    "proposed_resolution": "Give each governed verb a table of its options. An option word not in that table makes the call not plain, so point (3) decides: an abbreviated long option, a bundle that holds a governed letter (f, C, B, d, D, m, M), or a value attached to -C, -B or --force-create. Read operands after --. Treat update-ref --stdin as not plain. Read @ as HEAD. Add every command above as a blocked case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-4",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_plain, _VERBS, _FAR_VERBS)",
+    "problem": "The plain path passes any verb outside _VERBS and ignores what configuration supplies, so git can be told to act on a guarded branch through config or through a plumbing verb. Measured with exit 0, and real git under sh and dash moves develop or main. Aliases: git -c alias.ci=commit ci -m x on the main checkout; git config alias.ci commit && git ci -m x on the main checkout; git -c 'alias.p=push origin HEAD:develop' p from the worktree. A push refspec from configuration: git -c remote.origin.push=HEAD:refs/heads/develop push origin; git config remote.origin.push HEAD:refs/heads/develop && git push origin; GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:refs/heads/develop git push origin. Plumbing that writes refs: git send-pack <remote> HEAD:refs/heads/develop, and printf 'reset refs/heads/main\\nfrom ...' | git fast-import.",
+    "proposed_resolution": "Read the verb positively. A verb outside a list of git's own commands (which an alias may be) is not plain, so position decides. So is a call whose -c, --config-env or GIT_CONFIG_* names alias.*, remote.*.push or push.*. Add send-pack, fast-import and filter-branch to the far verbs, and judge a git config that writes alias.* or remote.*.push like one. Add the measured commands as blocked cases.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-5",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_dir_option, _placement); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_minus_c, _cd_target)",
+    "problem": "The rule's idea of where git acts differs from git's in several cases. Each passed with exit 0 from the story worktree, and real git under sh and dash commits on develop. (a) Only the first -C and the first --git-dir are read, but git applies every -C in turn and uses the last --git-dir: git -C . -C ../.. commit -m x; git -C . -C <root> commit -m x; git --git-dir=<root>/.git/worktrees/S-9.01 --git-dir=<root>/.git commit -m x. (b) cd follows CDPATH: export CDPATH=<parent>; cd <rootname> && git commit -m x. (c) A git directory reached through a symbolic link is found in no project: ln -s <root>/.git <out>/g && git --git-dir=<out>/g commit -m x. (d) A directory created in the same command is in no project at parse time: git worktree add -f <out>/x develop && cd <out>/x && git commit -m x. (e) A shell function's git call is judged where it is defined, not where it runs: f() { git commit -m x; }; cd <root> && f.",
+    "proposed_resolution": "Thread every -C in order and take the last --git-dir. A cd while CDPATH is set or assigned, and a cd to a relative name that does not exist, is a place that cannot be known (where_unknown). Resolve a --git-dir or GIT_DIR value with realpath before finding its project. Treat a directory that does not yet exist as unknown. Treat a git call inside a function body (or a brace group defined before a later cd) as not plain. Add each command as a blocked case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-6",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_exports_git_environment)",
+    "problem": "Point (4) is checked only for an export, a set, or a bare assignment segment, so other ways of putting GIT_DIR into git's environment do not poison the segments after them. Measured from the story worktree, each with exit 0, and real git commits on develop: eval export GIT_DIR=<root>/.git; git commit -m x (sh and dash); GIT_DIR=<root>/.git : ; git commit -m x (the assignment before a special builtin persists, macOS /bin/sh); declare -x GIT_DIR=<root>/.git; git commit -m x (bash).",
+    "proposed_resolution": "Any segment that assigns or names GIT_DIR or GIT_WORK_TREE poisons the later git-bearing segments: an assignment before any program (special builtins included), export, readonly, declare, typeset or local naming either, and any opaque segment (eval, sh -c) whose text names either. Add the three commands as where_unknown cases.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-7",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_is_ref, _switch, _checkout, _branch)",
+    "problem": "Guarded names are compared case-sensitively. On macOS's case-insensitive file system, a loose ref spelled with other case is the same file, so these commands from the story worktree pass with exit 0 and real git under sh and dash moves main (with release = \"main\"): git branch -f Main HEAD, and git update-ref refs/heads/Main HEAD.",
+    "proposed_resolution": "Compare branch and ref names to the guarded names case-insensitively, at least on macOS. Add both commands as blocked cases.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-8",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_bearing, _chunks)",
+    "problem": "_git_bearing splits the segment's joined text on whitespace even when the parser has read the segment's words. A quoted argument that merely contains git, such as a search pattern or a message, therefore makes the segment git-bearing and not plain, and the far-verb scan then blocks it. Point (1) tests words after quote removal. Each of these is blocked opaque_git in a story worktree, and each is an ordinary builder command: grep -rn \"git push\" .; grep -n 'git checkout' README.md || true; grep -rn 'git branch -f' . || true; echo 'next: git rebase onto develop'. On a guarded checkout, any such grep or echo is blocked, whatever the pattern.",
+    "proposed_resolution": "For a segment the parser read (not opaque), test seg.program and seg.args as whole words: a word that is git or ends in /git. Scan whitespace-split text only for an opaque segment. Add the four commands as passing builder cases in test_builder_forms_pass_in_a_story_worktree.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-9",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (check, _unreadable); next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (write_unknown, _add)",
+    "problem": "tests-first's new stance is that a write it cannot read is the edit it could be. It covers only an opaque segment whose text names a writer. Measured in a story after red, as the implementer, each with exit 0, and the frozen tests/test_sample.py is changed under sh. (a) A wrapper that is not in the table hides the writer, because the segment is not opaque: flock /tmp/lk sed -i ... tests/test_sample.py; caffeinate -i sed -i ...; script -q /dev/null perl -pi -e ... tests/test_sample.py; find tests -name test_sample.py -exec sed -i ... {} +. (b) An opaque segment with a cd is judged at the outer directory: from the main checkout, (cd <wt> && sed -i ... tests/test_sample.py) and sh -c 'cd <wt> && sed -i ...'. (c) An expanded target is dropped, not treated as a write it cannot read: for f in tests/*.py; do sed -i ... \"$f\"; done, and F=tests/test_sample.py; sed -i ... $F. The opposite also happens: after red, the implementer's standard heredoc commit message is blocked red_test_frozen when it contains a writer word, for example git commit -m \"$(cat <<'EOF'\\nrefactor: rm the dead helper\\nEOF\\n)\" or 'fix: touch up the parser'.",
+    "proposed_resolution": "Read writes with the merge-guard stance. A segment whose program is not a known writer, but one of whose words is a writer program, is a write it cannot read. So is a writer whose path operand holds an expansion. An opaque segment whose text holds cd, pushd or popd is judged as a write in an unknown place: it blocks wherever a story could be the target. Exclude a free-text option's value (-m, -F), including a substitution lying wholly inside it, from write_unknown's scan. Add the measured commands to test_tests_first.py, the blocked ones and the passing commit message.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-rules-fix-3-C1-10",
+    "origin": "step4-rules-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_merge_guard.py; next/tests/hooks/test_rule_tables.py",
+    "problem": "Three parts of this round's judgement can be removed without any test failing (mutations run in a scratch copy). In _harmless_or_block, the clause that blocks a text naming -C, --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE can go (43 passed). So can the clause that blocks a text naming a guarded branch (43 passed). And point (5)'s fix line can be replaced with other text (43 passed). The existing -C and --work-tree opaque cases run on the guarded checkout, where position alone already blocks them.",
+    "proposed_resolution": "Add story-worktree cases that only these clauses decide: sh -c 'git -C <root> commit -m x', env -S 'git --git-dir=<root>/.git commit -m x', a not-plain call naming develop with no far verb (for example sh -c 'git merge-base HEAD develop' > /dev/null blocks). Add one assertion that a merge-guard block's fix line says to run the git command by itself, plainly, from the story worktree, and names vsdd story deliver and vsdd release.",
+    "on_slice_path": true
+  }
+]

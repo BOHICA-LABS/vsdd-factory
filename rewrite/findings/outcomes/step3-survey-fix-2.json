@@ -1,0 +1,14 @@
+[
+ {
+  "id": "S3R-survey-8",
+  "outcome": "fixed",
+  "what_was_done": "create_story's not_descendant refusal now names a remedy that works in the common case, with the story worktree standing: 'git worktree remove --force .worktrees/<id>; git branch -D <branch>; then admit the story again', stating that this discards the branch's commits and the worktree's uncommitted changes (git refuses 'branch -D' on a branch a worktree holds, which the checker had reproduced). The no-worktree branch keeps the branch-only remedy. Both remedies are executed for real: new test test_not_descendant_remedy_works_in_both_cases parses the commands out of the refusal, runs them with shlex, and admits the story again in both branches of create_story, asserting the recovery (fresh base == integration head, worktree verifies). No interface changed: same WorktreeError code 'not_descendant', same refusal conditions.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_not_descendant helper used by create_story); test next/tests/unit/test_worktrees.py::test_not_descendant_remedy_works_in_both_cases (fails without the fix), test_verify_story_refusals extended with the worktree-remove wording"
+ },
+ {
+  "id": "S3R-survey-C1-1",
+  "outcome": "fixed",
+  "what_was_done": "The build-fault handler around _success now releases the lock through _release(root, run_id) exactly as the failed-admission handler does: any release fault is appended to the error and run_id is cleared, so exit 1 names no run and leaves no lock entry, and the release ends the run. Interface unchanged (same object, same exit codes); only the post-fault state differs from leaving the run live. New test test_survey_releases_lock_when_the_answer_fails patches cycle_record_baseline (the first _success step, which the checker reproduced) to raise and asserts exit 1, ok false, error naming the fault, run_id '' , an empty lock list and an ended run; it fails without the fix (run_id non-empty, lock held, run live).",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py (run_survey build-fault handler); test next/tests/unit/test_survey.py::test_survey_releases_lock_when_the_answer_fails"
+ }
+]

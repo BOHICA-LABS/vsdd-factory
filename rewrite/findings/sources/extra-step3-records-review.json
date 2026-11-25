@@ -1,0 +1,290 @@
+[
+  {
+    "id": "S3R-records-1",
+    "origin": "slice step 3, records, review",
+    "severity": "blocker",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py",
+    "problem": "closure_update starts a new record with dict(_EMPTY_CLOSURE). That is a shallow copy, so every new closure shares one module-level 'stages' dict. A mutate that writes record['stages'][...] on a new record changes the template itself, and every later new closure in the same process starts with those stage entries. Probe: a new closure for story S-1 got stage 'draft', then a new closure for S-2 (mutate does nothing) was written with stages {'draft': ...}, and _EMPTY_CLOSURE['stages'] now holds 'draft'. A checkpoint that writes several units in one call, or any pytest session of the survey or checkpoint units, gets closure records with stages that never ran. Stage order is data (revise clears from a stage onward). No test creates two new closures.",
+    "proposed_resolution": "Build the fresh record inside closure_update ({'schema': 1, 'workflow': workflow, 'subject': subject, 'cycle': cycle, 'state': 'open', 'stages': {}}) or use copy.deepcopy. Add to test_closures: a new closure whose mutate adds a stage, then a second new closure that must have empty stages.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-2",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py",
+    "problem": "lock_seen reads lock.json without the file lock, updates 'seen' in that copy, then takes lock.flock and writes the old copy back without reading it again. Anything that changed the lock in between is lost. Probe 1: a lock_release(session=) that runs between the read and the write is undone. The released entry comes back with a fresh 'seen' and still points at the run that the release had ended. Probe 2: a stale takeover by another session's run_begin is overwritten. The lock names the old, ended run again, and the new run holds no entry. run_begin refuses any other session for 20 minutes, and the new run's checkpoint lock_release(run=) releases nothing. hook-runner-b will call lock_seen on every guarded call and lock_release on SessionEnd, so both can happen in normal use. The plan's 'reads once and takes no file lock' covers only the no-write path.",
+    "proposed_resolution": "Keep the unlocked read for deciding whether a write is due. When it is, read lock.json again under lock.flock and set 'seen' only on entries that still match by (scope, run). Never write back the unlocked copy. Add a test that monkeypatches the locked write to run a release or a takeover first, then checks that the release or takeover survives.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-3",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py; decisions.py; cycles.py; steps.py",
+    "problem": "D1 says flush.lock covers 'every read-modify-write'. records/lock.md and topics/run-lock.md say writes to machine records are atomic 'under flush.lock'. These read-modify-writes take no lock: run_admit, run_set and run_end (run.json), settle_decision (the decision record) and cycle_write (a tracked record). Two processes can therefore lose an update. For example, the survey's run_admit of a story races a run_set(agents=) or a run_end from a SessionEnd release, the story drops out of 'stories', and every gate then refuses story_not_in_run. Two settles of the same decision can both succeed. run_open checks path.exists() and then writes, so two lock-free runs (spike) opened in the same minute with the same random suffix overwrite each other. store_step's read-then-write collision check has the same gap. The builder did not report this departure.",
+    "proposed_resolution": "Do run_admit, run_set, run_end, settle_decision and cycle_write under store.locked(project, 'flush.lock') (run_end is called under lock.flock, which comes first, so the order holds). Create the run directory with mkdir(exist_ok=False) and retry with a new id on FileExistsError. Add a two-process test for run_admit against run_set.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-4",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py",
+    "problem": "decision_status and settle_decision check staleness against the file list stored in the record, not against the current spec file set. The plan says 'the kind's digest no longer matches', and topics/digests.md says 'the survey recomputes the digest'. Probe: approve spec, add .factory/specs/architecture/SS-02.md, and spec_approved still returns (True, ''), so an unapproved contract passes the survey precondition. Deleting a covered file makes decision_status, spec_approved and settle_decision raise digest_missing_file instead of reading 'stale' (probe: spec_approved raised). Because of this, test_spec_approved's check that a brief or guidance edit does not stale the approval cannot fail: those files are new after approval, and the stored list never contains them.",
+    "proposed_resolution": "For kind 'spec', compare record['digest'] with spec_digest(project)[0]. That covers added, removed and changed files. A missing file under the stored-list rule should read 'stale' rather than raise. Test an added contract file and a deleted one (both stale), and edit an existing brief.md and conventions.md that were present at approval (still approved).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-5",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py",
+    "problem": "The plan promises that KINDS limits topology to one of single or split, and that only key and item may repeat. settle_decision checks neither. Probe: 'spec approve topology=banana variant=a variant=b' settled as approved with values {'topology': 'banana', 'variant': 'a b'}. The survey and plan stages read topology and variant from an approved spec decision.",
+    "proposed_resolution": "Give Choice an allowed-values map (topology: {single, split}) and mark only key and item as repeatable. Refuse bad_key for a value outside the set and for a non-repeatable key given twice. Add both cases to test_settle.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-6",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py",
+    "problem": "The plan says KINDS carries 'for open-spike and skip the reason the decision must carry'. tables/decision-kinds.toml has 'open-spike name=<name> (for spike_limit)' and 'skip (for an optional environment check)'. Choice has no reason field, and settle_decision never compares the record's reason. Probe: a blocked decision with reason 'stuck' was settled with 'skip' as approved. decision_open's bad_reason only refuses an empty reason, so a blocked decision opened with reason 'nonsense-reason' was accepted. The record schema documents four reasons (spike_limit, environment, stuck, reviewer).",
+    "proposed_resolution": "Add Choice.reasons (open-spike: spike_limit; skip: environment), and have settle_decision refuse bad_choice, listing the choices valid for this reason, when the record's reason is not among them. decision_open should refuse bad_reason for a blocked reason outside the four. Test both.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-7",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py",
+    "problem": "resolve_decision's second pass, 'else the one record', searches every cycle directory, closed cycles included. The plan and topics/decisions.md say a bare id is sought in the open cycles and _standing, and is ambiguous only 'when two cycles are open'. Probe: with cycle product-0 closed and holding a settled 'release', a bare 'release' resolves to the closed cycle. Once product-1 also settles its 'release', decision_read(root, 'release') raises ambiguous [release@product-0, release@product-1]. Every cycle has brief, spec, plan and release decisions, so after the first cycle closes, bare-id reads and settles of settled decisions refuse ambiguous. That is the situation D9 was written to avoid.",
+    "proposed_resolution": "Restrict both passes to cycles_open(project) plus _standing. A qualified id@cycle still reaches a closed cycle. Add the closed-cycle case to test_resolve_prefers_open.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-8",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; rewrite/spec/topics/state-commits.md",
+    "problem": "The builder's spec edit says flush 'never raises: every failure comes back as the result', and the PR4C-08 outcome claims it. flush catches only StoreBusy and GitError. With run='' (the PreCompact hook's call), _live_lock_run reads lock.json and each run.json through read_record, and a corrupt or schema-failing file raises StoreCorrupt out of flush. Probe: a lock.json of '{broken' made flush raise StoreCorrupt. test_flush_never_raises only patches git.",
+    "proposed_resolution": "In _live_lock_run, treat StoreCorrupt as no live run (the trailer falls back to '-'). Also wrap _flush_locked so any unexpected exception becomes state 'failed' with the cause in error. Add the corrupt-lock case to test_flush_never_raises.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-9",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "D11 and flush's docstring say it stages deletions, but deletions are never committed. flush takes its changed set from S1's changed_paths, which keeps only '??' and M/A/T/C flags and drops 'D'. Probe: after a committed decision record and packet were deleted, git status showed ' D' for both, changed_paths returned [], and flush returned state 'clean'. A deleted tracked state file stays uncommitted indefinitely while flush reports a clean tree. No test deletes a tracked file.",
+    "proposed_resolution": "Have flush collect deletions as well, either from a deletions-aware helper agreed with state-core or by reading 'D' records itself through gitrun, and pass them to 'git add -A --'. Skip validation for deleted paths. Add a test that deletes a committed record, expects 'committed', and expects the file gone from HEAD.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-10",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "D11's fallback ('where git has no identity, vsdd-factory') never runs. The identity check is run_git(base, 'config', 'user.email'), and gitrun.git raises GitError on git's exit 1 when the key is unset. Probe: with no global or local identity, flush returned 'failed: git config user.email exited 1'. On a machine or CI runner with no git identity, every flush fails. The tests always have an identity, because _repo.make_project sets one.",
+    "proposed_resolution": "Call git(base, 'config', 'user.email', check=False), or catch GitError there and treat it as no identity. Add a test that unsets the identity (GIT_CONFIG_GLOBAL pointed at an empty file, GIT_CONFIG_NOSYSTEM=1, local keys unset) and expects 'committed' with author vsdd-factory.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-11",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py",
+    "problem": "P3SEAM-15 is marked fixed, but the completeness check has two holes. First, it skips earlier re-freeze records and compares only with the latest non-re-freeze red record, while the plan says 'the latest earlier red record' and the finding requires 'the tests added in the fix pass'. Probe: red(a,b), then refreeze(a,b,c), then refreeze(a,b) was accepted and c dropped out of the frozen set. Second, it compares with the latest earlier red record whatever its result, so a failing red record with no 'frozen' makes any re-freeze pass. Probe: red(a,b), then a failing red, then refreeze([]) was accepted.",
+    "proposed_resolution": "Compare with the latest earlier red record that is passing or a re-freeze (the set the lookup would return), including re-freezes. Add both sequences to test_refreeze_incomplete.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-12",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/store.py",
+    "problem": "The plan's error tree is StoreError with subclasses StoreRefused, StoreBusy, StoreCorrupt and DecisionRefused(StoreRefused). Only DecisionRefused is named as a StoreRefused. In the code StoreBusy and StoreCorrupt also subclass StoreRefused, so a consumer built to the plan that catches StoreRefused to report a refusal (exit 1) will also swallow a busy file lock or a corrupt store as an ordinary refusal. The builder did not report this departure.",
+    "proposed_resolution": "Make StoreBusy and StoreCorrupt subclass StoreError directly, and add an assertion of the tree to test_store_refusals. Alternatively, report the change and get the plan and the consuming units (survey, jobs-b, hook-runner-b) to agree to it.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-13",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py; next/tests/unit/test_state_steps.py",
+    "problem": "_has_holdout_finding refuses walled_not_built when any string anywhere in the result contains '.factory/holdout/', including summary, data and step. The plan says 'a finding under .factory/holdout/', and topics/walled-findings.md says a finding whose location lies under it. A builder whose summary says it did not read .factory/holdout/ cannot store its result, and the same retry is refused again. A finding located at 'holdout/...' (state-relative) is not caught. The test passes data={'evidence': '.factory/holdout/HS-001.md'}, which is not a finding location, so the test fixes the over-broad behaviour in place. The unused 'root' argument suggests a narrower check was intended.",
+    "proposed_resolution": "Check only finding locations: each finding in data.findings (and any other finding list the result schemas define) whose 'location' starts with '.factory/holdout/' or 'holdout/'. Test a summary that mentions the path (stored) and a finding located there (refused).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-14",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_state_gate_evidence.py",
+    "problem": "test_evidence_lookup does not cover two branches the plan lists ('green by head, then patch id'; red must 'descend from the closure's delivery.base'). In a scratch copy, replacing the red base-descent condition with True and the green patch-id match with False left every test in test_state_gate_evidence.py and test_state_locks.py passing. The test's own comment admits no green matches by patch id. Discovering gates from vsdd.gates.gate_*.py files is also untested: the test calls register_gate directly, though the plan's case is 'a function registered by a gate_x.py module comes back'.",
+    "proposed_resolution": "Add the following cases. A green record at head1 that matches after an amend or rebase gives the same diff (same patch_id, different sha). A passing red record on a commit before delivery.base, which is an ancestor of the head, must not be returned. A temporary vsdd.gates package with a gate_x.py that calls register_gate must come back through registered_gate('x').",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-15",
+    "origin": "slice step 3, records, review",
+    "severity": "major",
+    "where": "rewrite/findings/outcomes/step3-records.json",
+    "problem": "AU-S2-06, AU-P2-03 and AU-S2-04 are spec-duplication findings (the record or table should define, and the topics should link), but they are marked fixed for code structure (one module each; KINDS and resolve_decision as 'the one copy'). The duplication is still in the spec. records/lock.md 'Taking and releasing' and its closing atomic-writes paragraph repeat topics/run-lock.md almost word for word. topics/human-stops.md still lists the decision choices (lines 67 and 78). The <id>@<cycle> rule is written in conventions.md:152, topics/decisions.md:29, topics/hotfix-cycle.md:14 and commands/decide.md:31. AU-P2-03 also covers facts that belong to other packages (gates, spike limits, holdout thresholds, tier override). The builder's own AU-S2-04 text says the spec consolidation is still to come, and hook-runner.md already treats AU-S2-06 as spec text.",
+    "proposed_resolution": "Reset all three to open, or to left-for-builder naming the spec documentation pass, with a note that this unit's code holds one copy. Do not record them as fixed until the spec files are reduced to links.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-records-16",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-records.json",
+    "problem": "P3OPS-07 and P3REQ-07 are marked fixed, but this unit built only the store half: run_admit, run_open(stories=) and run_require, which are tested. The resolutions also need the surveys to re-record admitted, undelivered stories in the new run, plus a harness scenario that kills a fast route after admission. survey.md claims those parts (test_admit_again_same_unit_new_run) and has not been built. The builder's own text for P3REQ-07 says so.",
+    "proposed_resolution": "Mark both left-for-builder naming the survey (S3), and let the survey's outcome close them.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-17",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-records.json",
+    "problem": "AU-P2-11, AU-S2-15 and P3COV-11 are spec-text fixes (cite BLUEPRINT 11.2 and record the open offers; rewrite the stale mapping rows). They are marked left-for-builder, which means the design is settled and code must follow. No code follows from them, so the status takes them out of the open count while nothing has dealt with them.",
+    "proposed_resolution": "Leave the three open (or route them to the spec pass), not left-for-builder.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-records-18",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_state_steps.py",
+    "problem": "PR4C-05 is marked fixed partly for keeping the store's own schema check in store_step. No test would fail without it: in a scratch copy, removing schema='step-record' from store_step's write left test_state_steps.py and test_state_locks.py passing. The schema_invalid refusal of store_step is not exercised.",
+    "proposed_resolution": "Add a store_step case with an invalid status (or a missing summary) that expects schema_invalid and no file written.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-19",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; store.py",
+    "problem": "Decision ids are path segments but are never validated. A bare id in resolve_decision, decision_read and settle_decision, the id part of id@cycle, and the subject in decision_open all go straight into cycles/<c>/decisions/<id>.json. The plan's common rule says unsafe_id. Probe: decision_open(subject='../../../escape') wrote the record at cycles/product-1/escape.json, outside decisions/, then raised FileNotFoundError (not a StoreError) while writing the packet, leaving a partial write. 'decide ../../x' returns unknown rather than unsafe_id. safe_segment also allows '..' inside a segment, which the plan's 'without ..' excludes.",
+    "proposed_resolution": "Validate every dot-separated part of the id with safe_segment, or apply the regex to the whole id, before any path is built, in _decision_path and decision_open. Reject '..' inside a segment. Test the traversal case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-20",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; gate_evidence.py",
+    "problem": "Two writes can be left half done by a kill. decision_open writes the record atomically, then the packet with Path.write_bytes, which is neither atomic nor first. A kill in between leaves an open decision with no packet or a truncated one, and the briefing and the person then see a question with no context. evidence_write writes the .log with write_text and copies the .xml with copyfile, both in place and after the record.",
+    "proposed_resolution": "Write the packet first, through the same tmp-and-replace path as write_record, then the record, which is the commit point. Write .log and .xml through a tmp file and os.replace.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-21",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "flush calls check_paths(root, None, ...), which checks every artifact in the state tree on every flush. PL3-3 and the plan say check_paths(root, rels, ...), and topics/state-commits.md says 'validates each changed or new file'. Problems in unchanged files are computed and then thrown away. The spec's 'well under 2 seconds on the 2,000-contract corpus' assumes only the changed set is checked.",
+    "proposed_resolution": "Pass the changed state paths (the rels check_paths expects) instead of None.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-22",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "flush runs 'git add' on the valid paths and then a plain 'git commit', which commits the whole index. If a flush is killed after 'git add' and before the commit, the staged blobs stay in the index. If one of those files is then edited into an invalid state, the next flush rejects it but still commits the old staged blob. A file that was not checked in its final form gets committed, against 'a file that fails is left uncommitted'.",
+    "proposed_resolution": "Commit only the valid paths ('git commit --only -m ... -- <paths>' in chunks, or run 'git reset -q -- <rejected>' before committing). Test with a pre-staged file that is rejected.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-23",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_state_commits.py; test_state_decisions.py",
+    "problem": "Several tests cannot fail on the point they name. test_flush_partial_and_busy accepts state 'committed' when the flush lock is held, waits the real 5 s although its comment says it turns the wait down, and never checks that nothing changed. test_run_trailer_from_the_live_lock checks the trailer only if result['commit'] is set. test_flush says 'the product index and worktree were never touched' but checks git status of .factory, not the product repository. test_settle is described as 'every refusal code, in order', but it never gives a call that two refusals would hit, so the order is untested, and ambiguous and stale are not reached through settle_decision there.",
+    "proposed_resolution": "In the busy test, monkeypatch commits.FLUSH_WAIT, expect exactly 'busy', and check that HEAD and status are unchanged. Assert the commit unconditionally in the trailer test. Run git status on the product root. Add order cases: not_open together with a bad choice gives not_open, and stale together with a bad choice gives stale.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-24",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py",
+    "problem": "store_step refuses an unknown run with 'run_unknown', which is not among its promised codes (bad_identity, run_not_live, schema_invalid, over_cap, step_exists, walled_not_built). A run that does not exist is not live (run_live is false), and the step-results rule will map the promised codes. Separately, _replace_ok's 'identical content' test compares only step, status, summary, head and data. A second empty-agent_id write that differs in artifacts, gates, blocked, spike_request or grounded therefore counts as identical and replaces the record.",
+    "proposed_resolution": "Refuse an unknown run as run_not_live, naming 'no such run' in the message. Compare the whole record, apart from the fields the store adds, for the identical-content case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-25",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py",
+    "problem": "The note store goes past the slice and does not match the spec's shape. topics/status-report.md shows notes as objects {at, text}, and spec schemas/notes.schema.json infers the same shape. read_notes keeps only string entries and silently drops object entries. write_notes, which nothing calls because vsdd note is deferred, writes bare strings. The task asked only that {\"notes\": []} read as no notes.",
+    "proposed_resolution": "Keep read_notes but return the entries as stored (objects with at and text), and remove write_notes until vsdd note is built against the {at, text} shape.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-records-26",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py",
+    "problem": "patch_id returns git patch-id's whole output line, the patch id plus a zero commit id. Probe: 'e40938dd...cd6a 0000000000000000000000000000000000000000'. The lookup compares it with itself, so the lookup works. But the stored delivery.patch_id and evidence patch_id are not patch ids, and any writer that stores git's first field will never match.",
+    "proposed_resolution": "Return the first whitespace-separated field only, and describe it so in the evidence-record and closure-record schemas.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-27",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py",
+    "problem": "_ensure_gates_loaded swallows every ImportError from import_module('vsdd.gates'), including one raised inside an existing vsdd/gates/__init__.py, although the plan says only a missing vsdd.gates is swallowed. It also sets _GATES_LOADED before importing the gate modules, so if one gate_*.py raises, the first lookup raises and every later registered_gate call in that process silently returns None for the gates that were not loaded.",
+    "proposed_resolution": "Catch ModuleNotFoundError only when exc.name == 'vsdd.gates'. Set the loaded flag after every module has imported, or record the failure and raise it again on later lookups.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-28",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/run-record.schema.json; rewrite/spec/records/run.md",
+    "problem": "records/run.md (edited by the builder) lists 'the id itself' among the run record's fields, and run_open stores 'id'. runs_list, steps_list and flush all read record['id']. The schema has no 'id' property and does not require it. A run.json without id passes the schema, and steps_list then calls steps_dir(project, '') and raises unsafe_id.",
+    "proposed_resolution": "Add 'id' (pattern r-YYYYMMDD-HHMM-xx) to run-record.schema.json and to its required list, with a fixture.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-29",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_decide.py",
+    "problem": "tables/event-types.toml defines decision.refused with extra fields 'decision, choice'. cmd_decide logs it with 'reason' only, so the log cannot say which decision or choice was refused. A failure of the event log after a successful settle (EventError or OSError) would also crash the command after the record was written.",
+    "proposed_resolution": "Log decision.refused with decision=<id as typed>, choice=<choice> and the refusal code, and catch log failures after settling so the exit code reflects the settle.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-30",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/store.py",
+    "problem": "write_record treats a path as a local (compact) record when '.factory' and 'local' both appear anywhere in its parts, rather than when the path lies under .factory/local/. A tracked record in a cycle or unit named 'local' would be written compact, and the tracked-record indent rule would silently break for it.",
+    "proposed_resolution": "Decide compact by the part that follows the first '.factory' component being 'local'.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-records-31",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py",
+    "problem": "run_begin's refusal returns stale_at = the holder's last 'seen' (or 'taken'), not the time the holder becomes stale (seen plus state.lock_stale_minutes). The name and the briefing's purpose (telling the person when the lock can be taken over) suggest the latter, and the plan does not define it.",
+    "proposed_resolution": "Return the time the lock goes stale under stale_at (and keep seen in holder), or rename the field 'seen'. State which in the plan and in topics/run-lock.md.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-32",
+    "origin": "slice step 3, records, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; rewrite/spec/tables/decision-kinds.toml",
+    "problem": "KINDS restates tables/decision-kinds.toml by hand (D10). No check ties the two together. test_kinds_table hard-codes the verbs, so a change to the table, for example a new choice or a key, drifts silently from the code that enforces it. The same fact is now stated in two places.",
+    "proposed_resolution": "Add a lint or unit check that parses tables/decision-kinds.toml and compares each kind's choice lines (verb, keys, note marker, status list) with KINDS, or generate KINDS from the table with tools/build.py.",
+    "on_slice_path": false
+  }
+]

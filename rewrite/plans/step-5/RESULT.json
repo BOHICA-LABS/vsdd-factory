@@ -1,0 +1,172 @@
+{
+ "logs": [
+  "[stall] agent \"plan:agents\" stalled (no progress) after 3230s \u2014 retrying (1/5)"
+ ],
+ "result": {
+  "plan": {
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-5/agents.md",
+   "summary": "The step 5 plan is written at 23,950 bytes with the eight sections asked for. It covers ten agent files and fifteen method files: the six methods story.js names literally plus the default tests and implement method of each shipped story-kind row. Nothing under next/, rewrite/spec/, rewrite/findings/, rewrite/history/ or rewrite/tools/ was changed.\n\nThree defects in code already on disk would stop these files passing, so the plan has the builder correct them:\n- **Build:** `_stamp_agents` in `next/tools/build.py` compares the roster's tier name (\"reviewer\") with the reviewer tier's model (\"opus\"), so no rostered reviewer file ever gets its severity table or key rule, and B6's lint then reports drift.\n- **Lint, line count:** the 70-line whole-file check counts stamped text, so the 60-line body the spec allows can never pass.\n- **Lint, tool names:** `KNOWN_TOOLS` holds bare MCP tool names, so the two `mcp__...` spellings the spec requires in agent files are refused.\n\nB6's lint currently defers L-METHOD and L-KIND. The plan adds the slice of both in a new test file, `next/tests/lint/test_agent_files.py`, so B6's file is touched only for the two lint corrections.\n\nThe harness proof is a new toy, `toy-steps.js`, that calls every story step with the agent, method, closing command and data schema story.js uses. Universal tests 3 and 6 are extended to assert that the agent file exists, the method file exists and is listed by that agent, and the method's Result section names every required data field. Test 3 as written would fail as soon as `agents/` is partly filled, because toy-build calls two agents outside the ten; the plan scopes it.\n\nThe findings ledger has six open findings across A1, A4, A5 and A6a, and no file for A2b. Each has an outcome in section 6. Ten new seams found while planning are listed there for the orchestrator to record.",
+   "agents": [
+    "clerk (clerk (sonnet, low)): ",
+    "test-writer (builder (sonnet, xhigh)): failing-tests, regression-test, equivalence-tests, test-fixes",
+    "implementer (builder (sonnet, xhigh)): tdd, fix-findings, port-translation, service-clone",
+    "verifier (builder (sonnet, xhigh)): proofs",
+    "demo-recorder (builder (sonnet, xhigh)): demo",
+    "technical-writer (builder (sonnet, xhigh)): docs",
+    "devops (builder (sonnet, xhigh)): repo-setup",
+    "adversary (reviewer (opus, xhigh)): review-story-diff",
+    "security-reviewer (reviewer (opus, xhigh)): security-review",
+    "architect (planner (fable, xhigh)): arbitrate"
+   ],
+   "files": 35,
+   "findings_planned": 6,
+   "open_questions": [
+    "Demo evidence directory: story.js passes none and vsdd path has no id for it, so the evidence step blocks on any story with demo set. Should W2 pass it in the prompt, or S3 add it to the story unit?",
+    "runSpike() dispatches vsdd-factory:spike-runner, which step 5 does not build. Should the spike-runner be built before E2's first run, or is a needs_spike result accepted as a failure there?",
+    "The plan has the step-5 builder correct two B6 lint defects and one B4a build defect, and move the stamped-text variants into source files. Should those go back to the slice-layer-2a workflow instead?",
+    "story.js reads tests_agent, impl_agent and impl_method from the unit, but the built story-unit schema carries only kind, method and tests_method. W2 must take the agent from the kind row; confirm when W2 is planned.",
+    "No step-4 plan exists yet. The method files assume gate red --refreeze returns a gate result named red and gate green --since one named green; confirm when G2 is planned.",
+    "Whether the platform keeps undeclared keys in a step's data object is unproven; D13 assumes it may not.",
+    "Per-agent tool sets are not in the shipped roster.toml, so the tool-set equality check carries a ten-row table in the test. Should B6 add tools to the roster instead?",
+    "After a delivery conflict the worktree is reset and builders cannot merge or rebase (VSA-18), so a conflict repair will usually return blocked. W2 or G4a must settle how that repair works."
+   ]
+  },
+  "review": {
+   "verdict": "Build after changes. No blocker: E2's one story (feature, no demo, local mode) can reach delivery from these files. Four majors remain. The spike-runner (PL5-3) and how a shell-less reviewer finds a contract (PL5-2) need decisions outside step 5 before E2's first run. PL5-1 is a one-line fix that the slice's only story depends on. Confirmed: every step maps to an agent and method under the same names; the data schemas, tool sets and closing-command groups agree with the prelude, tool-sets.md and walls.toml; D6, D7 and D8 are real defects in the shipped build and lint.",
+   "findings": 18,
+   "blockers": 0,
+   "majors": 4
+  },
+  "integrated": {
+   "summary": "All 18 review findings are decided and the plan is corrected in place: /Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-5/agents.md, 23,989 bytes, still eight sections. Nothing else was written; nothing was committed.\n\nDecisions that need the orchestrator's eye:\n- PL5-3 (spike-runner): not added to step 5. The slice cannot serve a spike whatever step 5 builds, because `vsdd spike open/record` (S6) and the spike-bounds rule (H8) are outside steps 3 and 4, so a runner's first command would fail. The plan records that E2's first run has no spike scenario and counts a spike request as a failed run (D20, N7). If you want spikes in the slice, A3's spike-runner with `spike`, S6 and H8 all have to come in.\n- PL5-2 (contracts by id): one rule for state paths (given, printed by `vsdd path`, or a contract found by Glob under `<project dir>/.factory/specs`). The real fix is for S3's unit or W2's `where` to carry contract paths (N11); until then E2 needs a probe that a workflow-step Glob finds a contract (N12).\n- PL5-4 (demo): the method is rewritten, but every demo story stays blocked until S3 or W2 passes the evidence directory (N1). The screenshot route is marked unproven (N12).\n\nNew findings to record, from section 6:\n- N1 widened: no conventions path, demo directory, reference path or recording path reaches a step (S3, W2).\n- N7: no spike in the slice (A3, S6, H8).\n- N10: the fix step should use the kind's implement agent, named in the review task (W2).\n- N11: contracts should reach agents as paths (S3, W2).\n- N12: two unprobed platform behaviours, the Glob under `.factory/` and the browser screenshot into `demo/` (B8).\n- The old N10 is dropped as a duplicate of L2-c2-1; the step 3 review's PL3-10 is the same gap.\n\nStep 3 agreement: the plan uses `vsdd path <id>` (prints the path alone), `config.commands` and `config.paths` from `vsdd config --json`, `env start --subject <id> --json` giving `url`, and `vsdd.cli.dispatch.commands()` for the registered-subcommand test. G2 is not planned yet, so section 8 states two assumptions about `gate red --refreeze`: its result's `gate` is `red`, and it passes when no frozen test changed.\n\nTo fit about 4 KB of corrections under the limit, the plan was compacted without dropping a rule:\n- Section 1's table lost its agent column; each method's head in section 4 names its steps, and section 3 lists each agent's methods.\n- Section 3's tools table became a pointer to the \"Who gets what\" table of topics/tool-sets.md.\n- Eight short decisions (D2 to D4, D10, D12, D15, D17, D19) now sit where they apply, under their numbers.\n- List items wrap without a hanging indent. With the indent the file is 24,251 bytes, which is under 24 x 1024 but over 24,000.\n\n`rewrite/spec/topics/agent-file.md` changed while I worked: its example now has seven keys. D2 and the P3SEAM-17 row are worded to match.",
+   "resolutions": [
+    {
+     "id": "PL5-1",
+     "outcome": "fixed",
+     "what_was_done": "New common text M5 in section 2: until red exists a source edit is a stub only (a new symbol's signature, a not-implemented body, a VSDD-STUB comment) in the file where the symbol belongs, and existing behaviour does not change. `failing-tests` drops 'change existing source' and cites M5; `regression-test` and `equivalence-tests` cite M5 too."
+    },
+    {
+     "id": "PL5-2",
+     "outcome": "fixed",
+     "what_was_done": "One rule for both cases, in M1 and D14: a state path is given, or printed by `vsdd path`, or is a contract found by Glob under `<project dir>/.factory/specs`, the one state root an agent may search; no other state path is built. The adversary's Inputs (and the security-reviewer's, which reuse them) say contracts come as paths or as ids found as the method says. The preferred fix is recorded as N11 for S3 and W2, and the missing Glob probe as N12 for B8, required before E2's first run unless N11 lands first."
+    },
+    {
+     "id": "PL5-3",
+     "outcome": "fixed",
+     "what_was_done": "Decided as D20: step 5 does not build the spike-runner. A runner file alone cannot serve a spike, because `vsdd spike` (S6) and spike-bounds (H8) are outside steps 3 and 4, and a `spike` method naming unregistered commands would fail the plan's own subcommand test. E2's first run has no spike scenario and counts a spike request as a failed run (the story ends `failed`, or `blocked` with `spike_limit`). N7 names what must be scheduled before any run that has to survive a spike: A3's spike-runner with `spike`, S6 and H8."
+    },
+    {
+     "id": "PL5-4",
+     "outcome": "fixed",
+     "what_was_done": "`demo` is rewritten: no directory in the task is `blocked` (kind `other`); scripts are written with the Write tool into the directory and run from the worktree with output captured in the temporary directory; transcripts are written with Write, unchanged; the screenshot goes through the browser tool's `filename` argument, marked unproven (N12); Finish is M3 without its commit sentence, since evidence is state the tool commits; `head` stays the gate's `sha` (M4, D11). N1 now says the missing directory blocks every demo story (S3, W2). The demo-recorder's rule reads 'writes only demo evidence and temporary files (enforced)'."
+    },
+    {
+     "id": "PL5-5",
+     "outcome": "fixed",
+     "what_was_done": "M3 now ends: any other gate the task asks for is run once and returned as it is. `test-fixes` step 4 says to run the green command once, return its output as it is, and never act on a failing green, because it sends the implementer next."
+    },
+    {
+     "id": "PL5-6",
+     "outcome": "fixed",
+     "what_was_done": "D18 now says a conflict repair rests on G4a carrying out VSA-18: the tool brings the integration head into the story branch first, leaving the markers in the story worktree. `fix-findings` step 5 resolves every marker, runs `git add` and `git commit`, never aborts, and returns `blocked` (kind `conflict`) only when there is no marker."
+    },
+    {
+     "id": "PL5-7",
+     "outcome": "fixed",
+     "what_was_done": "The adversary entry no longer counts changes. It says: the opening, description and Rules of the complete example; all else is the frame of section 2, not the example. It then names the two bullets that matter (key bullet reworded, read bullet kept) and the Inputs addition."
+    },
+    {
+     "id": "PL5-8",
+     "outcome": "fixed",
+     "what_was_done": "The read bullet keeps the example's words (earlier reviews and holdout scenarios, enforced) with no list of classes. Section 3's first sentence keeps the row as the definition, never copied. AU-S2-22's outcome in section 6 now reads 'Linked: no reviewer file lists its denied classes; the row defines the wall.'"
+    },
+    {
+     "id": "PL5-9",
+     "outcome": "fixed",
+     "what_was_done": "The header no longer says B6 defers L-KIND. Section 7 item 3 keeps 'each story-kind row's agents list its methods' and drops the grants half, noting that the grants are B6's L-KIND."
+    },
+    {
+     "id": "PL5-10",
+     "outcome": "fixed",
+     "what_was_done": "Section 7 item 3 now reads: each method file is listed by at least one agent, and each agent's methods are exactly section 3's (a table in the test until the shipped tables carry them). Nothing requires exactly one owner."
+    },
+    {
+     "id": "PL5-11",
+     "outcome": "fixed",
+     "what_was_done": "Section 2 says 'never a bare MCP name'. D8's fix now makes an MCP entry known only in a spelling section 2 allows its server, with the tool in that server's set, so bare names leave the known tools. Section 7 item 2 adds a fixture in which a bare tool name fails."
+    },
+    {
+     "id": "PL5-12",
+     "outcome": "fixed",
+     "what_was_done": "Chosen: the architect file describes the whole role but names no `vsdd` subcommand, since its closing commands arrive in the task. The registered-subcommand check in section 7 stays whole over all 25 files, with no exemption."
+    },
+    {
+     "id": "PL5-13",
+     "outcome": "fixed",
+     "what_was_done": "Recorded as new finding N10 for W2: the fix step should use the kind's implement agent, named in the review task. The owner rule in `review-story-diff` (inherited by `security-review`) now reads: `test-writer` for category test or coverage, else the builder the task names, or `implementer` when it names none. That works with today's script and with the corrected one."
+    },
+    {
+     "id": "PL5-14",
+     "outcome": "fixed",
+     "what_was_done": "Section 1's review row now lists 'items not yet covered'. `review-story-diff` step 2 takes those items first and ends each `checked`, or `not_checkable` with the reason. `test-fixes` gains step 2, 'Advisory findings where cheap'."
+    },
+    {
+     "id": "PL5-15",
+     "outcome": "fixed",
+     "what_was_done": "Section 4's opening gives the input rule once: a port's reference and a facade's recording are at the path the story file gives; none given is `blocked`, `environment`; and the methods of a fix, port or facade story stay short. The four methods are one or two sentences each. `port-translation` now reads 'Reference and contract differ: stop, blocked, spec_gap'. The missing inputs are added to N1."
+    },
+    {
+     "id": "PL5-16",
+     "outcome": "fixed",
+     "what_was_done": "Frame item 2 adds: a rule that is neither enforced nor visible goes in a method's Do not. Bullets changed: test-writer, 'the summary names each frozen test changed, and why'; verifier, 'the summary names each property not built'; technical-writer, 'the summary says how each statement was checked'; demo-recorder, 'writes only demo evidence and temporary files (enforced)'. 'Current behaviour only' moved to `docs` Do not; 'weaken' stays in the Do not of `test-fixes` and `proofs`."
+    },
+    {
+     "id": "PL5-17",
+     "outcome": "fixed",
+     "what_was_done": "D16: a method not in the list, or a missing method file, is `blocked`, kind `other` unless M4 names another. M4: with no gate run, `head` is the worktree's commit, or empty with no shell; it also defines the kinds (`spec_gap`, `environment`, `conflict`, `reviewer_blocked` for any stop of a reviewer, else `other`). Section 8 states the G2 assumptions: the re-freeze result's `gate` is `red`, and it passes when no frozen test changed; `test-fixes` step 3 says the re-freeze runs even then."
+    },
+    {
+     "id": "PL5-18",
+     "outcome": "fixed",
+     "what_was_done": "The old N10 is removed; section 6 ends 'Not new: the unit lacks tests_agent, impl_agent and impl_method (L2-c2-1)'. Section 7 item 4 states the narrowing of test 3 as temporary: the other toys keep the roster check, and the test applies its file check to every toy again once `agents/` holds every roster agent."
+    }
+   ],
+   "files_to_build": [
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/clerk.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/test-writer.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/implementer.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/verifier.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/demo-recorder.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/technical-writer.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/devops.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/adversary.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/security-reviewer.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/agents/architect.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/failing-tests.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/regression-test.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/equivalence-tests.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/test-fixes.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/tdd.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/fix-findings.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/port-translation.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/service-clone.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/proofs.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/docs.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/repo-setup.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/demo.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/review-story-diff.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/security-review.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/plugins/vsdd-factory/methods/arbitrate.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/workflow-lib/finding-key.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/workflow-lib/agent-shared-clerk.md",
+    "/Users/jmagady/dev2/vsdd-factory/next/tools/build.py",
+    "/Users/jmagady/dev2/vsdd-factory/next/tools/check.py",
+    "/Users/jmagady/dev2/vsdd-factory/next/tests/lint/test_roster_lint.py",
+    "/Users/jmagady/dev2/vsdd-factory/next/tests/lint/test_build.py",
+    "/Users/jmagady/dev2/vsdd-factory/next/tests/lint/test_agent_files.py",
+    "/Users/jmagady/dev2/vsdd-factory/next/tests/workflows/toys/toy-steps.js",
+    "/Users/jmagady/dev2/vsdd-factory/next/tests/workflows/universal.test.mjs"
+   ]
+  }
+ }
+}

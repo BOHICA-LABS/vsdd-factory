@@ -1,0 +1,20 @@
+[
+  {
+    "id": "step4-gates-fix-3-C2-1",
+    "origin": "step4-gates-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/tools/junit_runner.py (_function_cases_of, build_suite)",
+    "problem": "A test module that raises SystemExit at import (sys.exit(3) at module level) still costs the whole report, in both trees. Probe on the current runner, Python 3.11.7 and the venv's 3.14.7: tests/test_exit.py or tally/test_exit.py holding 'import sys; sys.exit(3)' makes the runner exit 3 with no build/ directory. The gate would then say 'the test command wrote no JUnit report'. Over tests/ this is a regression from the function collection. Stock discovery catches the failure with a bare except and writes the report: with only the tests/ _function_cases_of loop removed, the same file becomes unittest.loader._FailedTest.tests::test_exit, type=ImportError, and the report is written. But _function_cases_of calls importlib.import_module again on a module that already failed, and catches only Exception, so the SystemExit escapes. build_suite's source-tree try/except Exception lets it through for the same reason. Meanwhile the runner docstring, build_suite's docstring, the sample README ('whatever the failure') and rewrite/spec/packaging/sample-project.md ('however it fails to import') all say an import-broken module never costs the report.",
+    "proposed_resolution": "In _function_cases_of, do not import a module again when it failed under discovery or loadTestsFromName: collect functions only from modules already in sys.modules (sys.modules.get(name)), so its error case stands and the module body runs once. In build_suite's source-tree loop, catch (Exception, SystemExit) rather than Exception, as discovery's bare except does, and leave KeyboardInterrupt alone. Add runner-level tests: a tests/test_*.py and a tally/test_*.py calling sys.exit(3) at import each leave build/junit.xml written with an ImportError case beside the tests that ran.",
+    "on_slice_path": true
+  },
+  {
+    "id": "step4-gates-fix-3-C2-2",
+    "origin": "step4-gates-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/tools/junit_runner.py (build_suite, _import_error_case)",
+    "problem": "The new source-tree try/except Exception turns a module-level unittest.SkipTest into an ImportError error, while discovery over tests/ reports the same module as skipped. Probe: tally/test_skip.py holding 'import unittest; raise unittest.SkipTest(\"needs a thing\")' is reported as tally.test_skip::import_error, error type=ImportError, and the runner exits 1. The gates' reader gives harness_error=True, so red says 'build or harness error' and green fails. The same file in tests/ is unittest.loader.ModuleSkipped.tests::test_skip, skipped, harness_error=False, exit 0. Before this fix the source-tree case crashed the runner, which was worse. But _import_error_case's docstring calls it 'the twin of the case discovery gives', and it is not for this idiom: a story whose source-tree test module skips itself, say on one platform, fails both gates with a misleading ImportError.",
+    "proposed_resolution": "In build_suite, catch unittest.SkipTest before the general handler and add one skipped case for the module, as discovery's loader._make_skipped_test does: a case whose body raises unittest.SkipTest(str(exc)), with no file attribute. Add a runner-level test: a tally/test_*.py raising unittest.SkipTest at import is reported as skipped, not as an error, and the runner exits 0 when nothing else fails.",
+    "on_slice_path": true
+  }
+]

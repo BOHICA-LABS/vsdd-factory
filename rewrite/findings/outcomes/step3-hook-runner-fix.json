@@ -1,0 +1,140 @@
+[
+  {
+    "id": "S3R-hook-runner-1",
+    "outcome": "fixed",
+    "what_was_done": "wiring() now writes the event's own fixed matcher for every wired event but PreToolUse (UserPromptExpansion gets ^vsdd-factory:decide$, SubagentStart and SubagentStop get ^vsdd-factory:|^workflow-subagent$), emits handler async: true when the event row's is_async is set, and gives PreToolUse the full TOOL_ATOMS matcher when any PreToolUse row names no atoms. The checked-in hooks.json is byte-identical (build.py --check passes) because at this depth only the two duties are wired. New lint test drives wiring from a fixture table covering every event plus an every-tool row, and checks reachability with re.fullmatch against sample tool names.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (wiring, _wire_entry); tests: next/tests/lint/test_hooks_wiring.py::test_wiring_generated_from_a_fixture_table, test_every_tool_row_gets_every_atom"
+  },
+  {
+    "id": "S3R-hook-runner-2",
+    "outcome": "fixed",
+    "what_was_done": "TOOL_ATOMS is now the 16 atoms declared explicitly, and EVENTS' PreToolUse matcher is '|'.join(TOOL_ATOMS) — never a split of the joined matcher, so the MCP groups stay whole. test_shape asserts the count of 16, that every atom compiles, and that the MCP atoms select their tools (mcp__tavily__search, mcp__context7__..., both playwright forms) and reject a foreign server.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (TOOL_ATOMS); tests: next/tests/lint/test_hooks_wiring.py::test_shape"
+  },
+  {
+    "id": "S3R-hook-runner-3",
+    "outcome": "fixed",
+    "what_was_done": "The runner_timeout Block is appended only in gate mode; every mode logs rule.timeout, and in brief the fallback context is appended. The fallback now fires from the crash and timeout flags themselves (a rule crash sets a flag through _run_rule's new (results, crashed) return), not from Block codes, so a crash in brief produces the fallback line. The crash-logging call inside the loop's except arm is guarded against a _Deadline striking mid-log, which now resolves as that rule's timeout instead of escaping the loop. New tests: deadline and crash in brief and in notify.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_run_guarded, _run_rule); tests: next/tests/hooks/test_runner.py::test_deadline_in_brief_and_notify, test_crash_in_brief_prints_the_fallback"
+  },
+  {
+    "id": "S3R-hook-runner-4",
+    "outcome": "fixed",
+    "what_was_done": "A new _rule_cfg(entry, ctx) forces RuleConfig('block', options) for a locked row, and both _applies and _run_rule go through it, so a locked rule is never skipped as off and never relaxed to advise. New lint testLockedRowsMatchConfig checks the locked rows against config._LOCKED_HOOK_RULES (subset both ways over shipped rows; vacuous-safe while RULES is empty, live when rules ship), and a behaviour test locks a fixture row and asserts block at strengths off and advise while the unlocked twin is relaxed.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_rule_cfg, _applies, _run_rule); tests: next/tests/hooks/test_runner.py::TestAppliesAndStrength::test_locked_rule_always_blocks, next/tests/lint/test_hooks_wiring.py::test_locked_rows_match_config"
+  },
+  {
+    "id": "S3R-hook-runner-5",
+    "outcome": "fixed",
+    "what_was_done": "head_sha resolves the refs: loose refs are sought first in the git dir and then in the common directory named by <gitdir>/commondir (normpath-normalised, absolute accepted), for both the loose ref and packed-refs, and peeled '^'-lines of packed-refs are skipped. New test creates a real linked worktree on a branch (git worktree add -b), asserts head_sha equals rev-parse before and after a commit, and again after pack-refs with an annotated tag present.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/gitfs.py (head_sha, _ref_dirs); tests: next/tests/hooks/test_gitfs.py::test_head_sha_on_an_attached_branch_in_a_worktree"
+  },
+  {
+    "id": "S3R-hook-runner-6",
+    "outcome": "fixed",
+    "what_was_done": "_Word gained a subst flag, set for $(...) spans, backtick spans and the same inside double quotes. _build_segment marks the segment opaque when any of its words carries one — the program word, an assignment value or a redirect target. New table test: '$(echo rm) -rf /', 'X=$(rm -rf /) ls' and 'echo > $(rm x)' are all opaque, while plain $HOME and glob words still are not.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_Word, _read_word, _build_segment); tests: next/tests/hooks/test_shell.py::test_substitution_in_any_word_is_opaque"
+  },
+  {
+    "id": "S3R-hook-runner-7",
+    "outcome": "fixed",
+    "what_was_done": "_resolve takes the word and returns \"\" for an expanded word, a leading tilde or '-', and cd threading now passes the word (the old code discarded _Word.expanded). A bare cd sets the later segments' where to \"\" (it goes home, not cwd); 'git -C ~/x' is unknowable too. The lexer now lexes &> and &>> as redirects of their segment (a bare & still joins). Leading POSIX reserved words (if, then, fi, !, ...) are stripped from the program position, so 'then git commit' judges git and the cd of an if-arm threads where. Table tests cover each case.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_lex, _build_segment, _resolve, _minus_c); tests: next/tests/hooks/test_shell.py::test_where_unknown_forms, test_ampersand_redirect_ops, test_leading_reserved_words_strip"
+  },
+  {
+    "id": "S3R-hook-runner-8",
+    "outcome": "fixed",
+    "what_was_done": "test_rule_cases loads tests/hooks/cases/*.toml beside tests/hooks/fixture_cases/*.toml (the cases directory now exists with a README giving the format, so step 4's tables run and are governed). test_gate_case_coverage iterates registry.RULES with kind gate and requires a blocking and an allowing launcher case per rule, and checks a case that names a module names the row's module. probe.toml gained an allowing launcher case for the marker rewrite.",
+    "where": "next/tests/hooks/test_rule_cases.py; next/tests/hooks/fixture_cases/probe.toml; next/tests/hooks/cases/README.md"
+  },
+  {
+    "id": "S3R-hook-runner-9",
+    "outcome": "fixed",
+    "what_was_done": "wiring() raises WiringError when a kind=gate row names an event whose is_async is set, checked against the real EVENTS — the old refusal compared event-spec fields and matched no row, so a gate rule on SubagentStart wired silently. test_generator_refusals now declares a real gate rule on SubagentStart and expects the refusal (the monkeypatched-EVENTS version is gone); it keeps the unknown-tool and unknown-event refusals.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (wiring); tests: next/tests/lint/test_hooks_wiring.py::test_generator_refusals"
+  },
+  {
+    "id": "S3R-hook-runner-10",
+    "outcome": "fixed",
+    "what_was_done": "One assertion each for the nine surviving mutations, in test_caller.py: a rewrite on a StructuredOutput call pairs with allow; a Permit beside the runner's vsdd rewrite pairs with allow for the main session; a blocking rule at a VSDD_FACTORY_ROOT of home or / stays 0/silent; vsdd -C <second project> writes the marker in the second project and none in the first; FOO=1 vsdd survey writes no marker and prints nothing; two seeded faults quarantine a non-crashing blocking rule (exit 0, silent); a rule.block inside a story worktree carries story=S-1.02.",
+    "where": "next/tests/hooks/test_caller.py (test_structured_output_rewrite_is_allowed, test_permit_plus_vsdd_call_is_allowed, test_root_at_home_with_a_blocking_rule_is_silent, test_marker_written_in_the_minus_c_project, test_leading_assignment_is_not_a_vsdd_call, test_quarantine_boundary_two_faults_skip_a_working_rule, test_block_event_carries_the_story)"
+  },
+  {
+    "id": "S3R-hook-runner-11",
+    "outcome": "fixed",
+    "what_was_done": "_deliver drops Context outcomes on PreToolUse (contexts stay additionalContext on SessionStart, UserPromptExpansion and SubagentStart and plain stdout on PreCompact); a PreToolUse with only a context now prints nothing. test_stdout_by_outcome's dead loop is replaced by that assertion; the SessionStart delivery is asserted next to it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (_deliver); tests: next/tests/hooks/test_emit.py::test_stdout_by_outcome"
+  },
+  {
+    "id": "S3R-hook-runner-12",
+    "outcome": "fixed",
+    "what_was_done": "The HD10 rewrites check now runs before the strength branch, so an unflagged rule's Rewrite is that rule's crash at advise strength too. The permissionDecisionReason is the chosen rewrite's own reason, prefixed (the fixed marker sentence is gone). A second rewrite is dropped with a rewrite.discarded log line (type added to tables/event-types.toml, constant EVENT_REWRITE_DISCARDED in model.py). Tests: reason equality and the drop log.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_run_rule); next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (_pre_tool_use_decision); tests: next/tests/hooks/test_emit.py::test_decision_reason_is_the_chosen_rewrite_reason, test_second_rewrite_dropped_and_logged, test_rewrite_from_unflagged_rule_is_its_crash"
+  },
+  {
+    "id": "S3R-hook-runner-13",
+    "outcome": "fixed",
+    "what_was_done": "New test_broken_emit_via_launcher breaks emit.py in the launch_copy tree and asserts exit 2 in gate, 0 in notify and the launcher's down briefing in brief, under sh, bash and dash (plan 7's broken-emit example; the old test's missing rule module remains covered by test_import_crash_blocks_via_launcher). launch_copy now keeps a row's module key in the injected RuleEntry instead of dropping it.",
+    "where": "next/tests/hooks/test_runner.py (test_broken_emit_via_launcher, test_import_crash_blocks_via_launcher); next/tests/hooks/runner_helpers.py (launch_copy)"
+  },
+  {
+    "id": "S3R-hook-runner-14",
+    "outcome": "fixed",
+    "what_was_done": "runner.slow is logged whenever a call takes over 300 ms, DEBUG or not (runner.call stays DEBUG-only). rule.would_block now carries id and the target/command where-facts, as event-types.toml lists. _bad_input logs rule.block in gate mode only, in the events directory the VSDD_EVENTS_DIR override names. Captures are named <tool>-<millisecond stamp>-<hex>.json so two calls of one tool no longer overwrite each other, and _meta.json gains version (from .claude-plugin/plugin.json) and captured_at. Tests: slow without DEBUG, capture uniqueness and stamped meta, gate-only logged bad input.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_debug, _capture, _bad_input, _version, _timestamp); tests: next/tests/hooks/test_runner.py (TestEnvSwitches, test_bad_input_logged_in_gate_only)"
+  },
+  {
+    "id": "S3R-hook-runner-15",
+    "outcome": "fixed",
+    "what_was_done": "_notices checks the [hooks.rules] ids against registry.RULES: unknown ids join the configuration notice (and the config.invalid event) as 'unknown rules: ...', and only registered ids are listed as relaxations, so a typo can no longer read as a working relaxation. Tests: unknown ids reported (the four-notices test) and a registered rule announced as the relaxation while an unknown neighbour stays a fault.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_notices); tests: next/tests/hooks/test_runner.py::TestSessionNotices"
+  },
+  {
+    "id": "S3R-hook-runner-16",
+    "outcome": "fixed",
+    "what_was_done": "test_current_and_drift builds a minimal next/-shaped tree in tmp_path (tools/build.py, workflow-lib, roster.toml, the toy workflows, the whole plugin tree) and simulates the drifted byte on the copy's hooks.json; the checked-in file is never written, so a killed run cannot leave it drifted and parallel check runs in the shared tree see no false DRIFT.",
+    "where": "next/tests/lint/test_hooks_wiring.py (test_current_and_drift, _copy_tree)"
+  },
+  {
+    "id": "S3R-hook-runner-17",
+    "outcome": "fixed",
+    "what_was_done": "The marker's temporary file is staged under <state>/local/hooks/tmp/<key>.json.tmp and renamed into calls/ (same filesystem, atomic), so a kill before the rename leaves nothing in calls/ for records' *.json prune to miss; documented in the caller.py and schema descriptions. The key gained the 32-character length bound in caller-marker.schema.json — the project's schema dialect has no pattern keyword (vsdd/schema.py's checked subset, which this unit does not own), so the hex character set is stated in the description while the length is enforced by minLength/maxLength; the valid fixture's 62-character key is corrected to the writer's 32-hex form.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py (_temporary_path, write_marker); next/plugins/vsdd-factory/schemas/caller-marker.schema.json; next/tests/unit/fixtures/schemas/caller-marker/valid_one.json"
+  },
+  {
+    "id": "S3R-hook-runner-18",
+    "outcome": "fixed",
+    "what_was_done": "topics/rule-model.md: the @rule decorator example is replaced by a RuleEntry registry row beside the check function (HD1); the main-loop skeleton is aligned with HD1/HD4/HD5 (per-event alarm raising a BaseException, applies inside the rule's try, timeout and crash outcomes, the brief fallback); 'raises four blocks of its own' now says three; the project object's bullet list moved below the field table instead of breaking it; the finding ids (P3COV-07, PR3-3) are struck from the prose. topics/hook-runner.md's layout line lists RuleEntry instead of the decorator.",
+    "where": "rewrite/spec/topics/rule-model.md; rewrite/spec/topics/hook-runner.md"
+  },
+  {
+    "id": "S3R-hook-runner-19",
+    "outcome": "fixed",
+    "what_was_done": "P3BLD-14's outcome text in step3-hook-runner.json described path classes, not the lock refresh the finding is about; the correction is recorded in this file's P3BLD-14 object: the lock refresh and session-end release are hook-runner-b's, on records' lock_seen and lock_release, with the agent records and log pruning in H9. The event types the runner writes are now one constant each in model.py (EVENT_RULE_BLOCK ... EVENT_POLICY_INVALID), as the plan's L2-catchup-fix-3 note says, and every call site in main.py and emit.py uses them; the new rewrite.discarded type is in the model constants and in tables/event-types.toml.",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-fix.json; next/plugins/vsdd-factory/py/vsdd/hooks/model.py (event-type constants)"
+  },
+  {
+    "id": "S3R-hook-runner-20",
+    "outcome": "fixed",
+    "what_was_done": "emit.__all__ no longer names the nonexistent RunnerCodes; the dead emit/main ROOT_AT_HOME_INERT constant, main.now_monotonic (time.monotonic inlined) and Ctx._env are removed, and registry's dead '_ = RuleEntry' re-export is gone. New lint test_all_names_exist walks the hooks modules and asserts every __all__ name exists on its module.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py, main.py, model.py, registry.py; tests: next/tests/lint/test_hooks_wiring.py::test_all_names_exist"
+  },
+  {
+    "id": "S3R-hook-runner-21",
+    "outcome": "fixed",
+    "what_was_done": "registry exposes guard_body(mode) — the guard without its sh -c wrapper, exported in __all__ (additive interface; guard_command still returns the wrapped form) — and test_guard runs that body directly under sh, bash and dash, so 'verified under dash' is really executed. The wrapped command is additionally asserted once under sh to agree with the body.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (guard_body); tests: next/tests/lint/test_hooks_wiring.py::test_guard"
+  },
+  {
+    "id": "L2-catchup-fix-3",
+    "outcome": "left-for-builder",
+    "what_was_done": "Supersedes the earlier outcome's wording: the runner's event types are not scattered literals at their call sites — each is one constant in model.py (EVENT_RULE_BLOCK, EVENT_RULE_ADVISE, EVENT_RULE_WOULD_BLOCK, EVENT_RULE_ERROR, EVENT_RULE_TIMEOUT, EVENT_RUNNER_CALL, EVENT_RUNNER_SLOW, EVENT_REWRITE_DISCARDED, EVENT_CONFIG_INVALID, EVENT_POLICY_INVALID), and main.py and emit.py reference only those. The mechanical two-list check stays with T3 ('vsdd events schema').",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/model.py; call sites in next/plugins/vsdd-factory/py/vsdd/hooks/main.py and emit.py"
+  },
+  {
+    "id": "P3BLD-14",
+    "outcome": "left-for-builder",
+    "what_was_done": "Correction of the outcome text recorded in step3-hook-runner.json, which described path classes (a different finding's subject): P3BLD-14 is the lock refresh and the session-end release. Its state is unchanged — left-for-builder: the refresh and release land with hook-runner-b on records' lock_seen and lock_release; the agent records and log pruning stay with H9. Recorded here because this fix pass rewrote the outcome entry.",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-fix.json; see also rewrite/findings/outcomes/step3-hook-runner.json"
+  }
+]

@@ -1,0 +1,32 @@
+[
+ {
+  "id": "probes-5-apply-C1-2",
+  "files": [
+   "topics/platform-proven-3.md"
+  ],
+  "packages": [
+   "B8"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "probes-5-apply-C2-1",
+  "files": [
+   "topics/platform-proven-3.md"
+  ],
+  "packages": [
+   "B8"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "probes-5-apply-C2-2",
+  "files": [
+   "topics/platform-proven-3.md"
+  ],
+  "packages": [
+   "B8"
+  ],
+  "on_slice_path": true
+ }
+]

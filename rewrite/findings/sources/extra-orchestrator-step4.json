@@ -1,0 +1,38 @@
+[
+ {
+  "id": "ORCH-5",
+  "origin": "orchestrating session, from the step 6 plan review (PL6-7; rewrite/plans/step-6/ORDER.md 8.1 row 2 and section 5 row 2)",
+  "severity": "minor",
+  "where": "next/tests/unit/gate_project.py",
+  "problem": "gate_project.make_project stages its own copy of the tally sample without .factory and sets [paths] by hand, a workaround for the story_ready defect PL6-7, which is now fixed. Nothing in it asserts that the project it builds has delivery.mode local, paths.tests = [tests/**] and paths.source = [tally/**, tools/**], so a regression of story_ready's product option would show up as a misread red gate, not as a loud failure. The step 6 first-run unit builds its scripted delivery on this project and lists the assertion as a precondition.",
+  "proposed_resolution": "gate_project.make_project passes the sample directory itself to story_ready.make_project(product=...), keeps only the settings the sample's own factory.toml cannot give (the test command through sys.executable), and asserts the three values on the loaded configuration before it returns, raising AssertionError naming the value that is wrong.",
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-6",
+  "origin": "orchestrating session, from the rules unit's account of the step 3 tests its rows broke (S4R-rules-12)",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_rule_cfg, _applies, _run_rule); next/tests/hooks/test_caller.py::test_no_marker",
+  "problem": "With a rule registered for Bash, a tool call made in a directory that is in no factory project reaches _rule_cfg with ctx.project None, raises AttributeError, and is treated as that rule's crash: a locked gate fails closed, so the call is blocked with a rule error. Outside a factory project the hooks must be inert (topics/hooks-inert.md; smoke probe 1): nothing blocked, nothing written. Until step 4 no rule was registered for Bash, so step 3's tests could not see it.",
+  "proposed_resolution": "In the runner, before any rule is selected or loaded: when the call belongs to no factory project, no rule runs and the call passes with no output and no log write. Test it through the launcher: a guarded-looking git command in a directory in no project exits 0 and prints nothing.",
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-7",
+  "origin": "orchestrating session, after three review rounds on merge-guard each found new spellings that pass",
+  "severity": "major",
+  "where": "rewrite/spec/rules/merge-guard.md; rewrite/spec/topics/rule-model.md",
+  "problem": "merge-guard reads the text of a Bash call. However strictly it reads, it cannot see git run by something else: a script, make, an interpreter's subprocess. So it stops the commands an agent writes directly and is not a guarantee that nothing but delivery moves the integration branch. Delivery's own checks guarantee that what is merged was reviewed; nothing in the slice detects a commit an agent made on the integration branch by another route.",
+  "proposed_resolution": "A decision for the person, because it adds a mechanism to the product's repository: guard the ref itself with git's reference-transaction hook, installed by vsdd init, which refuses a move of the integration or release branch unless the tool is making it, and leaves a person's own terminal alone. It would need a probe (how the hook tells an agent's shell from a person's), a rule for a project that already sets core.hooksPath, and git 2.28 or later. Until decided: the text rule as built, with its limit stated in rules/merge-guard.md, and the hand-commit listing that decision D33 designs for the wave and release gates (T-NOTICE) when team use is built.",
+  "on_slice_path": false
+ },
+ {
+  "id": "ORCH-8",
+  "origin": "orchestrating session, after the fourth confirmation of the rules unit found both new spellings that pass and ordinary commands that are blocked",
+  "severity": "major",
+  "where": "rewrite/spec/rules/tests-first.md; rewrite/spec/rules/merge-guard.md; rewrite/spec/topics/rule-model.md",
+  "problem": "The two rules that read Bash text were being pushed to treat every command they cannot read as the violation it could be. That cannot be made complete (each confirmation found more spellings) and it blocks ordinary work: grep -rn rm src, which sed, git mv and a commit message in a here-document were all blocked. For tests-first the stance is also unnecessary: the guarantee is measured, not parsed. The green gate fails on any frozen test that changed since the latest red or re-freeze record, by file hash, and the red gate fails when the new tests do not fail, so an edit by any route is caught before delivery.",
+  "proposed_resolution": "Decision of the orchestrating session, told to the user: a rule over command text blocks what it can positively read as a violation, and the guarantee is measured elsewhere. tests-first blocks a write whose target it reads as a frozen test, or as product source before red, in the plain forms an agent writes (a redirect, tee, sed -i, perl -pi, cp, mv, rm, touch, git checkout or restore of a path, the same through a known wrapper or cd); a command it cannot read passes, and rules/tests-first.md says that the green and red gates are the guarantee. merge-guard has no measured backstop yet (ORCH-7), so it keeps blocking a git-bearing command it cannot read wherever position does not show it harmless; spellings beyond the plain forms are left for H5 and lose their weight if the guard at the ref is adopted.",
+  "on_slice_path": true
+ }
+]

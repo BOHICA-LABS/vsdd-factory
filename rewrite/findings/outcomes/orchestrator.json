@@ -1,0 +1,8 @@
+[
+ {
+  "id": "ORCH-1",
+  "outcome": "fixed",
+  "what_was_done": "in_sandbox() in next/tests/lint/test_build.py now copies next/ without .venv, __pycache__, .pytest_cache, .ruff_cache and node_modules. The 14 tests in the file pass and take 42 seconds in all under load, down from about 125.",
+  "where": "next/tests/lint/test_build.py"
+ }
+]

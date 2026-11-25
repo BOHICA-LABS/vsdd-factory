@@ -1,0 +1,50 @@
+[
+  {
+    "id": "S3R-hook-runner-7",
+    "outcome": "not-fixed",
+    "what_was_done": "The listed forms are fixed and tested (~, $VAR, '-', a bare cd, &> and &>>, leading reserved words). Options to cd still give a wrong fact instead of \"\": 'cd -P /tmp && git status' gives the second segment where '/base/-P', and 'cd -- sub' and 'cd -L sub' give '/base/--' and '/base/-L', so merge-guard would judge that commit against the main checkout. pushd and popd move the directory but leave the later wheres at cwd. 'for f in a b; do ...' strips 'for' and takes the loop variable 'f' as the program. Fix: in the cd branch, skip leading option words (-P, -L, -e, -@) and treat '--' as the end of the options, or return \"\" for any option; make pushd and popd set the later wheres to \"\"; mark 'for' and 'case' headers opaque instead of stripping the reserved word. Add these cases to test_where_unknown_forms.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py"
+  },
+  {
+    "id": "S3R-hook-runner-8",
+    "outcome": "not-fixed",
+    "what_was_done": "Both case directories now load, and test_gate_case_coverage loops over registry.RULES. But no test fails without the fix: a scratch copy that drops tests/hooks/cases from _CASE_DIRS, or removes the 'no allowing launcher case' assertion, passes. RULES is empty and the loop is never run against a fixture row. The module check compares case.module with entry.module as written, and entry.module defaults to \"\". A case that names a correctly declared row's default module (vsdd.rules.<id>, the form tests/hooks/cases/README.md shows) would fail. Nothing checks that each vsdd/rules/*.py module has a row and that each row's module exists (plan 7: 'modules match rows'). Fix: compare against the module the row actually loads (entry.module or 'vsdd.rules.' + id with underscores). Add the modules-to-rows check. Factor the coverage check into a function, and test it with a monkeypatched RULES holding an uncovered gate row, a covered one, and a row whose module mismatches.",
+    "where": "next/tests/hooks/test_rule_cases.py"
+  },
+  {
+    "id": "S3R-hook-runner-10",
+    "outcome": "not-fixed",
+    "what_was_done": "Six of the eight named mutations are now caught. Two still leave tests/hooks and the wiring lint green, checked in scratch copies. (1) Removing the StructuredOutput branch of HD7: test_structured_output_rewrite_is_allowed uses payloads/PreToolUse/output-structured.json, which carries agent_id 'wf-step-3', so the agent_id branch allows anyway. With agent_id cleared in the test, the same mutation is caught. (2) Ignoring the spike exemption (_applies' 'entry.spike_exempt and ctx.in_spike' set to False): no runner test declares a spike_exempt rule. Fix: set payload['agent_id'] = '' and agent_type '' in the StructuredOutput test. Add a test where a spike_exempt=True blocking fixture rule runs in a make_project(story='spike-x') worktree and gives exit 0, while the same rule outside the spike gives exit 10.",
+    "where": "next/tests/hooks/test_caller.py"
+  },
+  {
+    "id": "S3R-hook-runner-12",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is fixed: the HD10 check runs before the strength branch, the reason is the chosen rewrite's own, and the discard is logged. Those last two are tested. The HD10-at-advise part has no test. Reintroducing the bug in a scratch copy (skip the check when cfg.strength == 'advise') leaves the whole hooks suite green. test_rewrite_from_unflagged_rule_is_its_crash runs at the default strength only. Fix: repeat that test with factory.toml setting [hooks.rules.probe] strength = 'advise', and assert rule_error and no updatedInput.",
+    "where": "next/tests/hooks/test_emit.py"
+  },
+  {
+    "id": "S3R-hook-runner-14",
+    "outcome": "not-fixed",
+    "what_was_done": "runner.slow without DEBUG, the bad-input events directory and the unique capture names with version and captured_at are fixed and tested. The rule.would_block fields have no test: removing id, or removing the target/command fields, from the would_block log in a scratch copy leaves the hooks suite green. test_advise_converts_block_and_logs_would_block checks only the type. Fix: in that test, assert that the would_block event has an id matching ^b-[0-9a-f]{6}$ and command == 'echo' (the Bash call's command).",
+    "where": "next/tests/hooks/test_runner.py"
+  },
+  {
+    "id": "S3R-hook-runner-15",
+    "outcome": "not-fixed",
+    "what_was_done": "Unknown ids are reported in the configuration notice and logged as config.invalid, and that is caught by test_four_notices. Only registered rules are listed as relaxations, but nothing tests this: removing the 'rule_id not in registered' filter in a scratch copy leaves test_runner green. test_registered_rules_are_announced_as_relaxations asserts the substring '...this session: soft-rule (off)', which still matches the unfiltered line '... soft-rule (off), typoo (advise). ...'. Fix: assert the exact relaxation sentence, or assert 'typoo (advise)' not in context.",
+    "where": "next/tests/hooks/test_runner.py"
+  },
+  {
+    "id": "S3R-hook-runner-17",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is changed: the marker is staged under <state>/local/hooks/tmp/ and renamed into calls/. The schema bounds key to 32 characters (the dialect has no pattern keyword, and vsdd/schema.py's SUPPORTED_KEYWORDS confirms that). Neither change is tested. In scratch copies, staging the temporary file in calls/ again passes tests/hooks, the wiring lint and test_schema_fixtures, and so does removing minLength/maxLength from the schema. The only invalid fixture's 8-character key is masked by the missing 'ts' (the expect file is matched as a substring). Fix: add a test that makes os.replace raise (simulating a kill before the rename) and asserts calls/ holds no *.tmp file. Add an invalid fixture whose only fault is a 31-character key, with an expect file naming the key's length error.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py"
+  },
+  {
+    "id": "S3R-hook-runner-19",
+    "outcome": "not-fixed",
+    "what_was_done": "P3BLD-14's text is corrected, and every event the runner writes uses a model.py constant. But the fix outcome's claim that 'main.py and emit.py reference only those' is not true. main._recent_rule_faults, which the quarantine depends on, still matches the literals 'rule.error' and 'rule.timeout' (main.py lines 306-307), so renaming a constant would silently disable the quarantine. Fix: use EVENT_RULE_ERROR and EVENT_RULE_TIMEOUT there, or correct the outcome text.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py"
+  }
+]

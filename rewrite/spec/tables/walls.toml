@@ -1,0 +1,4 @@
+# The wall table ships at "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml" (package C2): one
+# row per caller, with the [callers] vsdd-subcommand groups and the [reveals] table in the same
+# file. The shipped file is the single definition (README rule 7); this pointer is kept valid TOML.
+# Sources: hooks.md#2.7, agents-skills.md#2.9, BLUEPRINT.md#4.3, BLUEPRINT.md#4.9.

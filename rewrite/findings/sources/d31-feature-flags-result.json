@@ -1,0 +1,251 @@
+{
+ "logs": [
+  "D31 reviews: 50 findings, 20 blocker or major."
+ ],
+ "result": {
+  "design": {
+   "summary": "D31 is written into rewrite/spec/ as one capability threaded through existing gates, decisions and agents: no new workflow, agent, skill, command, gate name, hook rule or decision kind. Eight new design files hold the facts (an end-to-end topic, the choice of flag system, the flag lifecycle, the [flags] config group and its key table, the flag record, a table of 16 checks, a table of agent duties); 46 existing files gained a short linked passage under a heading that says \"built when the build widens\". Four packages F1 to F4 are registered in registry.d/d31.toml, briefs generated, and build-plan.md updated (78 packages; F after the workflows, before the proofs; none on the slice). Eight ledger entries record changes to shipped tables, schemas and the loader that I did not edit; each appears in its package's by-package list. All four checks exit 0. Nothing under next/, plugins/, crates/, rewrite/history, rewrite/tools, rewrite/plans, registry.toml, or any existing table or schema was edited. One stale line remains outside my remit: registry.toml still summarises decisions.md as \"D1 to D30\" (ledger D31-7).",
+   "files_created": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/feature-flags.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/flag-system-choice.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/flag-lifecycle.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/config/flags.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/artifacts/flag.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/tables/flag-config-keys.toml",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/tables/flag-checks.toml",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/tables/flag-duties.toml",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/registry.d/d31.toml",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/packages/F1.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/packages/F2.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/packages/F3.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/packages/F4.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-d31.json",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/d31.json",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/triage/d31.json",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/by-package/F1.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/by-package/F2.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/by-package/F3.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/by-package/F4.md"
+   ],
+   "files_edited": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/decisions.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/decisions-built.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/packaging/build-plan.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/overview.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/architect.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/story-writer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/test-writer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/implementer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/adversary.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/security-reviewer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/codebase-analyzer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/product-owner.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/technical-writer.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/agents/devops.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/artifacts/story.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/artifacts/toolchain.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/artifacts/adr.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/artifacts/deferred-item.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/story.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/spec.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/ingest.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/feature.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/plan.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/wave.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/verify.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/workflows/maintain.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-spec.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-plan.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-red.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-green.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-wave.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-release.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/gate-sweep.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/story-deliver.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/survey.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/decide.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/checkpoint.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/env-start.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/story-new-fix.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/report-debt.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/commands/release.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/gates.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/human-stops.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/governed-delivery.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/brownfield.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/project-configuration.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/verdicts.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/state-layout.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/skills/author.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/config/repo.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/ledger.json (regenerated by findings.py)",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/ORDER (appended by findings.py)"
+   ],
+   "packages": [
+    "F1 Flag settings and records: the [flags] keys in the loader and schema, the toolchain file's [flags] table, the survey step F-FILL, the flag artifact kind, three story keys. Depends on S1, C1, C2, S3, H4. Takes D31-1, -2, -3, -6, -7.",
+    "F2 Flag checks: every check of tables/flag-checks.toml except F-FILL and F-APPROVE as one module the gates call, key variables removed from command environments, vsdd env start setting the override; one failing and one passing case per refusal. Depends on F1, G1, G2, G3, G5, G6a, G6b, G7. Takes D31-8.",
+    "F3 Flag lifecycle: flags=home-built at settling (F-APPROVE), flag lines of the spec and release packets, the two pull request sections, change log lines, the deferred item per temporary flag, cleanup stories and the merge decision a removal waits for, report-debt lines. Depends on F1, F2, S4, S6, G4a, G4b, G7. Takes D31-4.",
+    "F4 Flag duties and their proof: the Feature flags section of each method file tables/flag-duties.toml names, lint L-FLAG, the author skill's flag type, four harness scenarios, the story-flagged fixture and one story-tier run. Depends on F1, F2, F3, A2a, A2b, A3, A4, A5, A6a, B5, B6, K2, E1. Takes D31-5."
+   ],
+   "checks": [
+    "F-CHOICE: a part of vsdd gate spec (--only flags; also in sweep's spec coherence). Refuses a toolchain [flags] proposal with no detected after an ingest, a found system neither kept nor declined in the person's words, missing source/decision/standard/contracts/patterns/paths, a decision record lacking a required heading, a pattern that does not compile or lacks the key group, paths in the wrong class, and for an existing system patterns that find no read.",
+    "F-APPROVE: a refusal of vsdd decide / settle_decision. Refuses approve on a spec decision whose toolchain says source = home-built unless it carries flags=home-built (and refuses the value when it does not apply).",
+    "F-FILL: a step of vsdd survey. Fills unset [flags] keys from an approved toolchain file, never overwriting a set key; while the register is empty writes a record for each flag the code already reads; reports 'enabled, not configured'.",
+    "F-RECORD: the registry row at every write (hook rule artifacts, vsdd validate) plus a part of vsdd gate plan. Refuses a new record without owning story, type, default or tidy key, a temporary flag without a machine-evaluable removal condition, a permanent one with one, a temporary boolean whose default is not false.",
+    "F-REQUIRE: a part of vsdd gate plan (whole plan and --story). Refuses any flag key on a story while the project has not opted in; a story flags.require asks to be flagged with neither flag nor flag_exempt; a flag naming no live record; a flagged story of a kind with no red gate; a story behind a flag whose owner is neither delivered nor a dependency. Lists every exemption.",
+    "F-READY: a part of vsdd gate plan. Refuses a flagged story while no file matches flags.interface on the integration head unless it depends on a story citing a flag-system contract; refuses such a story without security: true.",
+    "F-STATES: a part of vsdd gate red and green for a flagged story. Refuses at red a missing flag_on, flag_off or flag_default test, or an off/default test that does not pass before the change; at green any of them failing. Records test identities by state.",
+    "F-REGISTERED: a part of vsdd gate green (added lines) and of the flags check in the wave, release and sweep jobs (whole tree). Refuses a read of a key with no active record. Fails with 'cannot measure' when patterns are empty or do not compile.",
+    "F-INTERFACE: a part of vsdd gate green. Refuses an added line matching a bypass pattern outside the flags.interface files.",
+    "F-USED: a part of vsdd gate green for a flag's owning story and of the flags check in wave, release and sweep. Refuses an owning story whose diff adds no read of its flag or whose key is in no definitions file; refuses a live flag nothing in the tree reads.",
+    "F-DEFINITION: a part of vsdd gate green. Refuses a change to a definitions-file line holding a registered key by a story that neither owns, enables nor removes that flag; for a removal story, any remaining read or definition of the key.",
+    "F-DEFAULT: a part of vsdd gate green. Refuses a read whose captured fallback differs from the record's default; where the pattern captures none, the gate reports 'fallback not measured' and the flag_default tests are the evidence.",
+    "F-KEY: a part of every gate that runs a configured command, of vsdd env start, and of vsdd gate green. Removes the flags.key_env variables from each command's environment; refuses a diff containing the value of one of them.",
+    "F-RUNBOOK: a part of the baseline check of vsdd gate release and of the sweep's flags check. Refuses a missing runbook or one with no 'Kill switch' heading with text; becomes a docs fix story.",
+    "F-REMOVE: a part of the sweep's flags check and a refusal of vsdd story deliver. Returns a fixable finding for a live temporary flag whose removal condition is met (and an unfixable one for unknown lifetime); refuses to merge a removal story without an approved merge decision.",
+    "F-ITEMS: items of the verdict. Refuses a converged verdict, and so delivery, until a reviewer accounts for flag-off:<key> on a flagged story (new code reachable with the flag off, hidden reads, anything changing a flag in an outside service) and flag-system on a story that builds the flag system."
+   ],
+   "design_choices": [
+    "Opt-in: flags.enabled is false until a person approves a spec decision whose toolchain file proposes flags, or edits factory.toml; the architect and ingest may propose, no agent can opt in, nothing asks at setup. A story needing a flag before opt-in is refused at the plan gate and the agent returns spec_gap, so the existing spec-gap decision (amend / not-a-gap / descope) decides.",
+    "When a story must be flagged: flags.require = marked | high-risk | existing | all, default high-risk (a feature or port story of critical or high criticality once the product exists). The story-writer applies it; vsdd gate plan holds it; an exemption needs flag_exempt with a reason that the adversary reviews and the release packet prints.",
+    "Where things live: the flag record is on the state branch at .factory/stories/flags/<key>.md in the existing stories class (same writer and readers as stories, so no new class or wall); definitions are product files at flags.definitions written in the story's worktree. Same for new and existing code; for existing code the survey writes inherited records.",
+    "Finding reads without a parser: project-configured regular expressions (read_patterns capturing the key, bypass_patterns, interface globs) approved with the toolchain file. Stated limits: literal keys only, comments count as reads, only source-class files, no proof of guarding. A blind pattern cannot pass: an existing system's patterns must find reads before approval, and an unseen flag fails as unused.",
+    "Both states: test names carry flag_on, flag_off, flag_default; off and default tests must pass at red (proving they describe existing behaviour) and all pass at green; the rest of the suite runs unflagged against the baseline. Tests set flags through the decision record's test double; gates strip the key variables. Evidence is test identities by state in the red and green records.",
+    "Source unreachable: every read passes the record's default as fallback; for a temporary boolean flag the plan gate requires false. Tested per story by flag_default tests and for the system by its own contract; compared at the read site where the pattern captures it, reported as not measured where it does not.",
+    "Lifetime: temporary or permanent; a temporary flag needs remove_when as date:<day> or after:<story or epic>, and has one deferred item while live (written and retired by the checkpoint, statelessly). The sweep opens a cleanup story when the condition is met; its merge always waits for a person. Only a person turns a flag on: in the service themselves, or in repository definitions via a change request (flag_change: enable).",
+    "More than one component: one flag system and one register per project; pattern and glob lists are unions across toolchains; in a hub a member repository may carry its own flags paths and patterns, and tree checks expect only that repository's flags.",
+    "Keys: only variable names are configured (flags.key_env). Existing means do the rest: the secrets hook rule, .env* as a protected path, the release baseline's scanner, the blocked/environment decision. D31 adds stripping those variables from every gate command and searching the diff for their values.",
+    "Outside service: the factory writes files only (definitions in the service's own file format, runbook, rollout plan when asked, test double wiring, and the pipeline job if the decision record says the pipeline applies definitions). It never creates or changes anything in the service, never holds its key, never tests against it, never ramps or targets.",
+    "Rolling our own: last resort, needs flags=home-built on the spec approval (refused otherwise) and a 'Why no established system fits' heading in the decision record. It must answer the same six soundness headings as any system, sits behind OpenFeature as a provider where an SDK exists, and its behaviour is contracts with tests."
+   ],
+   "ledger_entries": 8,
+   "open_questions": [
+    "A story that removes a flag always waits for your merge approval, because the factory cannot know whether the flag is on for everyone. This adds a fourth thing that always waits for you beyond the three D15 lists. Confirm, or say whether a project may set removals to merge automatically.",
+    "F1 to F4 are ordered after the workflows and before the proofs E3 and E4, so the proofs run on the tool as it will ship. That puts them on the path to cutover. Say if they should instead be built after cutover.",
+    "F4 builds a story-flagged fixture and runs it once through the story tier. It is not added to the story tier that CI runs at each release and weekly, which would roughly double that tier's cost. Say if you want it in CI.",
+    "The default for flags.require is high-risk (critical or high criticality, once the product exists). Your clause says flags matter most for features added to existing code; the value existing would instead flag every feature story on an existing product. Say if you want that as the default."
+   ]
+  },
+  "reviews": [
+   {
+    "lens": "fit",
+    "verdict": "Fit: the design delivers 15 of D31's 16 clauses; it needs fixes before it is built, and no blocker. Nothing on the thin slice changes, no workflow, agent, skill, gate name, hook rule or decision kind is added, no program reads a vendor name, and the old system's two flag touches are ported. 24 findings: 7 major, 17 minor. The clause not delivered is clause 7's 'no code reads a flag outside the one interface': it is checked only on lines a story adds, so reads that existing code makes straight through a vendor library are never reported or moved behind the interface. The other majors: (1) no check or reviewer item holds the definition's served value to off; (2) in a project that has not opted in, the story-writer can open a spec-gap stop on every story, and the person's 'no' is never recorded; (3) a rejected flag removal is rebuilt and re-asked in every maintenance run; (4) changing the flag system later never reaches factory.toml, because the survey never overwrites a key it filled itself; (5) setting flags.enabled by hand fails every story's green gate, and the stated remedy cannot run inside the open cycle; (6) builders run tests in their own shells with the key present, so tests can reach the live service. Package dependencies all exist and there is no cycle; F2 is too large for one builder, and F4 does not list the workflows and story tier it tests. Findings written to /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-d31-review-fit.json.",
+    "clauses_covered": 15,
+    "clauses_total": 16,
+    "findings": 24,
+    "blockers": 0,
+    "majors": 7
+   },
+   {
+    "lens": "domain",
+    "verdict": "Not yet sound for a real product: 13 major and 13 minor findings, no blockers. Nothing contradicts D31 and nothing is on the thin slice path. Opt-in, the order of choice, approval of a home-built system and the record are well built. The failures fall where production flag systems usually fail. Each failure in the brief, and what stops it today:\n- Temporary flag never removed: a check (F-REMOVE plus the deferred item), but three gaps. A flag recorded as permanent escapes it (D-7). An after: condition naming a dropped story is never met. A reject is proposed again, and rebuilt, in every run (D-5).\n- Dead code left by a removal: not at all for the old off path or the flag's tests (D-6).\n- Permanent and temporary confused, either way: not at all (D-7).\n- Two reads of one flag with different defaults: a check only on added lines where the pattern captures the default; never across the whole tree and never for inherited flags (D-14).\n- Mistyped key: a check at reads; not in tests or definitions (D-12, D-17).\n- Flag not recorded, or recorded and unused: a check, except for keys that are not literals and for existing reads found after the register has records (D-10).\n- Flag renamed in one place: a check in code; in definitions only when the key is on the changed line (D-12).\n- New code reachable with the flag off: a named duty (adversary) held by the verdict item, weakened by not_checkable and by later review loops (D-20).\n- Off path untested, or baseline changed with the flag off: a check (F-STATES plus the baseline comparison). Adequate.\n- On path untested: a check for the new behaviour only. The existing suite never runs with the flag on (D-9).\n- Two interacting flags: not at all (D-15).\n- Tests reaching the live service: a check that strips key variables. Not for sources that need no key or for keys loaded from files (D-19).\n- Source slow or unreachable: a contract for 'unreachable', tested only through the test double. Start-up and slowness: not at all (D-8).\n- Default failing open where it should fail closed: a check for temporary boolean flags only (D-16).\n- Change that flipping cannot undo: not at all, and the pull request and release text promise that flipping undoes it (D-1).\n- Flag evaluated in a client: not at all (D-2).\n- Keys committed: a check that works only when the gate holds the key, which the design says never happens; otherwise only the release scanner (D-4).\n- Factory calling the service: covered for gate commands and diffs; not for agents' own shells (D-3).\n- Definitions drifting from the service: not at all (D-18).\n- More than one flag system in existing code: not at all (D-11).\n- Existing system that ingest misses: a named duty with a named reviewer, plus F-CHOICE forcing an explicit flags.detected. Adequate.\n- Home-built system chosen without approval: a check (F-APPROVE). Its required properties are checked as headings, but start-up and stale-cache behaviour are missing (D-8).\nCan the checks work as specified? Project regular expressions work in any language only for literal keys. When patterns are empty or do not compile, the checks fail as they should. But four places pass when they cannot measure: F-KEY's value search, F-FILL, F-CHOICE's existing-read test, and reads whose key is not a literal. F-INTERFACE, F-DEFINITION (in nested formats such as the flagd definitions file), F-STATES' substring markers and substring key matching will raise false alarms, with no way to clear them short of a person editing configuration.\nFacts: every OpenFeature statement in the design checked out, namely typed evaluation with a key, a default and an optional context (Requirement 1.3.1.1); the default returned on abnormal execution (Requirement 1.4.10 and the note on Requirement 2.2.7); the no-op provider; the in-memory provider as a SHOULD (Appendix A); a CNCF project (incubating, per CNCF's project page, which the design rightly does not state). One sentence goes further than the specification: 'the flag system returns [the default] when the source fails'. OpenFeature defines a STALE provider status and the CACHED and STALE resolution reasons, so a provider may answer from cached values instead (D-8). No vendor is named in any file a program reads. Findings are written to rewrite/findings/sources/extra-d31-review-domain.json.",
+    "clauses_covered": 6,
+    "clauses_total": 9,
+    "findings": 26,
+    "blockers": 0,
+    "majors": 13
+   }
+  ],
+  "integrate": {
+   "summary": "All 50 findings are decided: 48 fixed in the design, 1 left for package F1 (D31R-F-15), 1 not fixed because its fix is in ledger files this step was not given to write (D31R-F-17, for the orchestrating session). Spec lint reports 1 problem, in topics/event-log.md, which this step did not touch; coverage, package generation and the ledger build are clean.\n\nOne judgment call to confirm: I read \"do not edit any existing file under rewrite/spec/tables/\" as the tables that predate D31. The three flag tables the designer created (flag-checks, flag-config-keys, flag-duties) are the design under correction and were rewritten. No pre-D31 table, no schema and not registry.toml was edited by hand; briefs were regenerated by gen_packages.py. In slice-path files only the section headed \"Feature flags (decision D31...)\" changed.\n\nMain changes to the design:\n- **Opt-in:** a project is off, requested or on. No story stops for a flag (the spec-gap path is gone), and \"enabled but not configured\" is a reported state, not a failing gate. A \"no\" stands until a person asks.\n- **Confirmation:** `spec approve` needs `flags=<source>`; `flags=decline` is allowed for a system found in existing code.\n- **Settings:** the survey mirrors the approved toolchain `[flags]` table into `[flags.approved]`, which only code writes; a person's override is a separate, listed line.\n- **Removal:** proposed only for a flag that is on in the repository. Where `flags.removal` is `human`, a person is asked once per flag before anything is built; a reject carries `until=<date>`. `story deliver` gains no wait.\n- **Checks:** split into three tables. New or widened: F-ON (suite rerun with the flag on), whole-tree bypass and fallback counts, definitions attributed by entry, key patterns, unkeyed reads, state tokens that carry the key, review items that only `checked` satisfies.\n- **Record and story keys:** a temporary flag is boolean with default false; a permanent one must give two reasons; new story key `flag_irreversible`.\n- **Packages:** F5 (spec and plan checks) and F6 (job checks) added; build order F1, F5, F2, F6, F3, F4; the pattern scanner moved to F1.\n\nOpenFeature statements were checked against the specification (flag evaluation, providers, types, glossary, appendix A) and reworded. No program-read key holds a vendor name.\n\nFor the orchestrating session:\n- D31R-F-17: set `\"packages\": []` for D31-7 in triage/d31.json and remove its entry from outcomes/d31.json.\n- D31R-F-12: making spec_lint check registry.d/ is a one-line change in rewrite/tools/, which this step may not edit.\n- D31-1 in the ledger still says three story keys; D31R-F-15's entry for F1 carries the fourth and the other registry changes.",
+   "not_fixed": [
+    {
+     "id": "D31R-F-15",
+     "outcome": "left-for-builder",
+     "what_was_done": "Package F1, with D31-1. The design is settled in the spec; the shipped artifact registry (next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml) and the artifact rule must add: the stem cell and its check, the lock value removed, the story key flag_irreversible, the record keys permanent_because and default_because, vsdd checkpoint as a writer of deferred items named flag-<stem>, and a [toolchain] cap of 12,000 bytes. Triage entry in rewrite/findings/triage/d31-review.json; it appears in rewrite/findings/by-package/F1.md."
+    },
+    {
+     "id": "D31R-F-17",
+     "outcome": "needs-the-user",
+     "what_was_done": "Not fixed, and for the orchestrating session to do, not a design choice. The fix is in the designer's ledger files, which this step was not given to write: set \"packages\": [] for D31-7 in rewrite/findings/triage/d31.json and remove its entry from rewrite/findings/outcomes/d31.json. An entry in triage/d31-review.json cannot override it, because findings.py applies triage files in name order and d31.json comes later. Package F1's delivers text no longer lists D31-7. Is the orchestrating session to make those two edits?"
+    }
+   ],
+   "lint": "python3 rewrite/tools/spec_lint.py: exit 1, \"1 problem(s)\": topics/event-log.md line 41 is 558 characters (limit 400). This step did not touch that file; another workflow changed it at 16:29 on 2026-11-24 while this step ran (the same happened to topics/rule-model.md a minute earlier and was fixed by its writer). The full lint printed \"0 problem(s)\" at 16:27, after the last structural change of this step. Run with --only on each file or folder this step wrote or edited, it prints \"0 problem(s)\" for every one. Registry: 80 packages, 26 tables. No line in registry.d/d31.toml is over 120 characters.",
+   "coverage": "python3 rewrite/tools/sections.py coverage: exit 0. \"sections: 240; cited by a spec file: 181; retired: 39; uncovered: 0\". python3 rewrite/tools/gen_packages.py: exit 0, \"80 package briefs written to rewrite/spec/packages\". python3 rewrite/tools/findings.py build: exit 0, \"400 findings: 233 fixed, 34 left-for-builder, 2 not-fixed, 131 open\"; D31R-F-15 appears in by-package/F1.md; D31R-F-17 is not-fixed and in no package list."
+  },
+  "confirm": {
+   "checks_rerun": "Ran all four from the repository root, twice. First run: spec_lint printed 1 problem, \"topics/event-log.md: line 41 is 558 characters (limit 400)\". That file is not a D31 file and has no flag content; it is untracked and another workflow was writing it at 16:29. When I ran spec_lint again after that workflow's next edit, it printed \"0 problem(s)\" (registry: 20 agent, 32 artifact, 62 command, 23 config, 4 doc, 80 package, 32 packaging, 15 record, 17 rule, 48 schema, 13 skill, 26 table, 90 topic, 12 workflow). sections.py coverage, both runs: \"sections: 240; cited by a spec file: 181; retired: 39; uncovered: 0\". gen_packages, both runs: \"80 package briefs written to rewrite/spec/packages\". findings.py build, before my files: \"427 findings: 238 fixed, 47 left-for-builder, 2 not-fixed, 139 open, 1 rejected\"; open by severity 1 blocker, 64 major, 123 minor; 56 by-package lists. Mapped to no spec file included D31R-F-12, D31R-F-13 and D31R-F-17. After I wrote rewrite/findings/outcomes/d31-confirm.json and rewrite/findings/sources/extra-d31-confirm.json, the build printed \"434 findings: 235 fixed, 47 left-for-builder, 5 not-fixed, 146 open, 1 rejected\" with 57 by-package lists, and spec_lint still printed 0 problems. Outcome files apply in recorded order, so d31-confirm.json is applied after d31-fix.json and its not-fixed entries take effect. Other workflows were still editing spec files during the check, rules/secrets.md among them (16:42); I re-read its D31 section afterwards and it was unchanged. D31R-F-15 (left-for-builder) is confirmed: it can only be settled in the shipped next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml (which still caps [toolchain] at 4000 bytes) and in the artifact rule. It is listed in rewrite/findings/by-package/F1.md. Two judgment calls hold: the parts of D31R-D-15 and D31R-D-24 that were not taken have sound reasons.",
+   "checked": 50,
+   "confirmed": 46,
+   "still_open": [
+    {
+     "id": "D31R-F-10",
+     "severity": "minor",
+     "file": "rewrite/spec/topics/feature-flags.md",
+     "problem": "Some facts are still stated in more than one file. The reason the record is on the state branch and the definition in the product tree is in both feature-flags.md and artifacts/flag.md ('Where it lives, and why there'). How the gates handle the key and override variables is in F-KEY, again in config/flags.md 'Keys and local runs', and again in feature-flags.md. The default of flags.require is in flag-config-keys.toml, again as '(default)' in config/flags.md's value table (README rule 5), and again in feature-flags.md.",
+     "proposed_fix": "Keep each fact in its home: the record's place in artifacts/flag.md, the variable handling in F-KEY, the default in flag-config-keys.toml. In feature-flags.md and config/flags.md, replace the restatements with a one-line reason and a link."
+    },
+    {
+     "id": "D31R-F-17",
+     "severity": "minor",
+     "file": "rewrite/findings/triage/d31.json",
+     "problem": "Not fixed; the integrator passed it to the orchestrating session. D31-7 is still triaged to F1 and marked left-for-builder, so by-package/F1.md asks the F1 builder for a registry.toml edit that no builder may make. registry.toml still says 'D1 to D30'.",
+     "proposed_fix": "The orchestrating session either changes the [doc.decisions] summary and records D31-7 fixed, or sets packages [] for D31-7 in triage/d31.json (or adds a triage file that sorts after it) and reopens its outcome. Then it rebuilds the ledger."
+    },
+    {
+     "id": "D31R-F-19",
+     "severity": "minor",
+     "file": "rewrite/spec/registry.d/d31.toml",
+     "problem": "F4's delivers text still names the fixture overlay `story-flagged`. That is the colliding word, now in an identifier F4 will build, and it reads as a story flagged security.",
+     "proposed_fix": "Rename the overlay, for example `story-behind-flag`, and regenerate the briefs."
+    },
+    {
+     "id": "D31R-D-25",
+     "severity": "minor",
+     "file": "rewrite/spec/registry.d/d31.toml",
+     "problem": "Same residue as D31R-F-19: the `story-flagged` overlay name. Putting the term's definition in the glossary is fine.",
+     "proposed_fix": "The same rename closes both findings."
+    },
+    {
+     "id": "D31R-C-1",
+     "severity": "major",
+     "file": "rewrite/findings/sources/extra-d31.json",
+     "problem": "The open ledger entries still describe the design as it was before the corrections. D31-4 (F3) says a removal story always opens a merge decision and that the spec row gains only flags=home-built. That would put back the always-wait that D31R-F-4 and D31R-D-21 removed, and it contradicts F-APPROVE, which now takes flags=<source> for every source or flags=decline. The merge row (opened when a delivered story waits; approve performs the merge; reject closes the pull request) does not fit a pre-build question with the id merge.flag-<stem> and a reject that needs until=<date>. D31-8 points F2 at F-ITEMS in flag-checks.toml, but it now lives in flag-story-checks.toml with four items. D31-2 says the survey fills [flags], but it now writes [flags.approved].",
+     "proposed_fix": "Rewrite the text of D31-4, D31-8 and D31-2, or add triage notes that apply after triage/d31.json. D31-4, spec row: approve flags=<source> | flags=decline -- <words>. D31-4, merge row: opened by the maintain checkpoint before any cleanup story, only while flags.removal = human; approve lets the next maintain run write the story; reject needs until; nothing waits at deliver. D31-8: the right file and the four items. D31-2: [flags.approved]."
+    },
+    {
+     "id": "D31R-C-2",
+     "severity": "major",
+     "file": "rewrite/spec/tables/flag-story-checks.toml",
+     "problem": "F-ON reruns the suite with the flag on and refuses any new failure against the baseline, leaving out only tests that carry the flag's off or default token. Existing tests that assert behaviour the on state replaces carry no token, so they fail and F-ON refuses the main D31 use case, a feature added to existing code. No duty moves those tests to the off state, and the implementer may not edit tests.",
+     "proposed_fix": "Test-writer duty: move each existing test of replaced behaviour to the off state (set the flag off through the test double, rename it with flag_off_<k> and the flag-off criterion). Then F-ON leaves it out and the removal story deletes it. F-ON's refusal names each failing existing test. The adversary's flag-off item checks that each moved test asserted only replaced behaviour."
+    },
+    {
+     "id": "D31R-C-3",
+     "severity": "minor",
+     "file": "rewrite/spec/tables/flag-checks.toml",
+     "problem": "The header rule says a check fails when a key it reads is empty and never passes by default. But key_env, key_patterns, definition_patterns and definitions_check can validly be empty, and the F-KEY and F-DEFINITION rows treat that as a report. The two instructions contradict each other.",
+     "proposed_fix": "Limit the rule to the keys F-CHOICE requires, patterns that do not compile and scans that time out. Name the four keys that may be empty, and let the row's unmeasured cell say what the gate reports."
+    },
+    {
+     "id": "D31R-C-4",
+     "severity": "minor",
+     "file": "rewrite/spec/registry.d/d31.toml",
+     "problem": "F5 delivers F-CHOICE inside gate sweep's spec coherence check (built by G7), but it depends only on F1 and G5. This is the same class of problem D31R-F-14 fixed for F4.",
+     "proposed_fix": "Add G7 to F5's depends and regenerate the briefs."
+    },
+    {
+     "id": "D31R-C-5",
+     "severity": "minor",
+     "file": "rewrite/spec/tables/flag-story-checks.toml",
+     "problem": "A state token may be followed by an underscore, so flag_off_checkout matches inside flag_off_checkout_v2_..., a test of another tidy key. F-ON then leaves out the other flag's tests, and F-STATES can count them as its own. F-RECORD refuses only equal encoded keys.",
+     "proposed_fix": "End the token with a fixed terminator (for example '__' or the end of the name), or have F-RECORD refuse a new key whose encoded form followed by '_' begins another key's."
+    },
+    {
+     "id": "D31R-C-6",
+     "severity": "minor",
+     "file": "rewrite/spec/config/flags.md",
+     "problem": "In the requested state, every gate result and the release packet are to print 'flags requested, flag system not chosen'. But no flag check runs in that state, flag-lifecycle's release list leaves the line out, and no package's delivers text names it (F1 covers status and the briefing only).",
+     "proposed_fix": "Name the line in F1's delivers as a helper every gate result calls and add it to flag-lifecycle's release list, or drop 'every gate result'."
+    },
+    {
+     "id": "D31R-C-7",
+     "severity": "minor",
+     "file": "rewrite/spec/tables/flag-config-keys.toml",
+     "problem": "flags.enabled is set_by person, which the header defines as 'by nothing else'. Yet the proposal carries enabled and F-FILL writes it into [flags.approved]. project-configuration.md says [flags.approved] is 'equal to' the toolchain table, without the enabled exception.",
+     "proposed_fix": "Make enabled set_by proposal with override = true. Have project-configuration.md link to config:flags instead of restating what [flags.approved] holds."
+    }
+   ]
+  }
+ }
+}

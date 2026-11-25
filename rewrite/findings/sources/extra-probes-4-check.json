@@ -1,0 +1,164 @@
+[
+ {
+  "id": "PR4C-01",
+  "origin": "platform probes, round 4, independent check (Q1)",
+  "severity": "minor",
+  "where": "step-4 ORDER.md \u00a77 P1; verdicts.md PL4-22; rules.md \u00a73.4 promises",
+  "problem": "What the probe showed for Q1 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Mark P1 answered: a typed step's payload carries agent_type exactly '<plugin>:<agent>', and an untyped step 'workflow-subagent'. agent_id is stable across a step's calls. Main-session payloads lack these keys, so read them with a default. Keep G3's loud 'skipped' listing until one marketplace-installed copy is checked, since only --plugin-dir was probed.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-02",
+  "origin": "platform probes, round 4, independent check (Q2)",
+  "severity": "major",
+  "where": "step-4 ORDER.md P2; rules.md \u00a73.4 step 6 / D13; C1 schemas (finding.schema.json, review-data and any prelude-inlined copy)",
+  "problem": "What the probe showed for Q2 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Mark P2 answered and close the step-4 RESULT.json open item: no optional grounded is needed in the open finding schema. Add a test or lint that no schema embedding findings sets additionalProperties:false on a finding, unless it declares grounded. Otherwise the rule's rewrite fails the platform's check and the step fails.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-03",
+  "origin": "platform probes, round 4, independent check (Q3)",
+  "severity": "minor",
+  "where": "step-3 RESOLUTIONS.md (records' VSDD_CALLER probe; hook-runner's default-mode probe); step-4 ORDER.md P3; hook-runner.md HD7",
+  "problem": "What the probe showed for Q3 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Answered yes, in the default mode inside a step, for Bash and StructuredOutput. HD7 stands as written; mark the probes done.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-04",
+  "origin": "platform probes, round 4, independent check (Q4)",
+  "severity": "major",
+  "where": "step-3 RESOLUTIONS.md hook-runner question; hook-runner.md HD7 and test_decision_pairing; spec item 39",
+  "problem": "What the probe showed for Q4 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "A rewrite with no decision IS applied, but the pairing cannot be dropped. The rewritten 'VSDD_CALLER=... vsdd ...' matches no allow rule, so without allow it waits for approval. Keep HD7. State that a rewrite without a decision changes what runs (no rule may return one as advisory), add that test case, and rewrite item 39.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-05",
+  "origin": "platform probes, round 4, independent check (Q5)",
+  "severity": "minor",
+  "where": "step-3 records.md D4 and schema_invalid; H7 block texts and step-5 prompts that quote gate messages",
+  "problem": "What the probe showed for Q5 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "The hook sees invalid results before the platform's check, and the platform checks the rewritten input afterwards. Keep the store's own schema check, and keep D4's same-agent_id replacement rather than a flat step_exists refusal, so the agent's corrected retry is accepted. Write block messages to stand inside the platform's wrapper (hook command line before, plugin line after); never rely on them being the first characters.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-06",
+  "origin": "platform probes, round 4, independent check (Q6)",
+  "severity": "major",
+  "where": "spec/packaging/sandbox-needs.md and the T1 doctor; PR4-1",
+  "problem": "What the probe showed for Q6 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Add rows: write access to .git/worktrees/ (every linked worktree's index, HEAD and logs) and, where commits are signed, the gpg home and agent socket. The doctor must test a commit inside an existing linked worktree, not only worktree add. The person should decide a sandbox-off default for factory runs until a working allowance is shown; excludedCommands was not shown to help.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-07",
+  "origin": "platform probes, round 4, independent check (Q6)",
+  "severity": "major",
+  "where": "step-3 survey.md (admit)",
+  "problem": "What the probe showed for Q6 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "With the sandbox on, 'git worktree add -b' creates the branch, then fails. admit must detect a branch it created whose worktree is missing (delete it, or reuse it with 'worktree add <path> <branch>') and name the sandbox as the cause when git reports Operation not permitted.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-08",
+  "origin": "platform probes, round 4, independent check (Q6)",
+  "severity": "minor",
+  "where": "step-3 records.md commits.flush (D11)",
+  "problem": "What the probe showed for Q6 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "A flush run from a sandboxed Bash call cannot commit in .factory (the index.lock is refused) and ends failed. Give failed a cause that names the sandbox, and note that hooks (not sandboxed) still flush.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-09",
+  "origin": "platform probes, round 4, independent check (Q6)",
+  "severity": "minor",
+  "where": "step-4 delivery.md D6/D7/D10; step-5 agents.md (implementer, test-writer, fix-findings step 5)",
+  "problem": "What the probe showed for Q6 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Sandbox on: every commit, merge and merge-in in .worktrees/<story> or .worktrees/_integration is refused. D7's refused text should name the sandbox, and agents' commit steps cannot work sandboxed.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-10",
+  "origin": "platform probes, round 4, independent check (Q10)",
+  "severity": "major",
+  "where": "step-4 delivery.md D6, D7, D10",
+  "problem": "What the probe showed for Q10 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "The 'merge' strategy (git merge --no-ff -F) runs pre-merge-commit and commit-msg, not pre-commit; 'squash' runs pre-commit. Either state per strategy which hooks run, or use --no-commit plus git commit -F for both. D7 should say that hooks there run with cwd = the worktree and GIT_DIR=.git/worktrees/_integration, and see tracked files only: a hook that needs untracked or generated files (.env, node_modules, virtualenvs) fails and the story is refused. The same holds for D10's merge-in commit.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-11",
+  "origin": "platform probes, round 4, independent check (Q7)",
+  "severity": "minor",
+  "where": "step-3 jobs.md D10; RESOLUTIONS.md G1",
+  "problem": "What the probe showed for Q7 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "MAX_WAIT may go from 240 to 540: a 590 s foreground call with timeout 600000 ran to its end in a step.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-12",
+  "origin": "platform probes, round 4, independent check (Q7)",
+  "severity": "major",
+  "where": "Every headless driver: E2's run (step-4 ORDER.md \u00a77-8), the story-ready fixture and W2 (step 6), the scheduler recipe (item 25), probe harnesses",
+  "problem": "What the probe showed for Q7 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 (or a larger value). Headless claude -p kills background workflows ten minutes after the last turn, so a factory run dies with no result. Nothing in spec or plans mentions it.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-13",
+  "origin": "platform probes, round 4, independent check (Q8)",
+  "severity": "minor",
+  "where": "step-3 jobs.md D1/D2; RESOLUTIONS.md G1; spec/topics/long-commands.md; PR4-2",
+  "problem": "What the probe showed for Q8 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "G1 is answered for macOS: the double-forked setsid worker survives, sandbox off and on; Linux is still open. Correct the premise: a call past its timeout is backgrounded, then killed at the step's final response, so detachment is necessary. Revise PR4-2: the platform does reap at the step's end. Job-command step prompts should say to re-run the same command when a call is moved to the background, not to poll its output.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-14",
+  "origin": "platform probes, round 4, independent check (Q9)",
+  "severity": "minor",
+  "where": "step-5 RESOLUTIONS.md PL5-2 / N12",
+  "problem": "What the probe showed for Q9 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "N12 is answered for a project-root cwd. A reviewer whose cwd is a story worktree, using an absolute <project dir>/.factory/specs path, is still unprobed; it is a cheap B8 follow-up if N11 does not land.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-15",
+  "origin": "platform probes, round 4, independent check (Q11)",
+  "severity": "minor",
+  "where": "step-3 RESOLUTIONS.md (workflow survives /clear); step-3 ORDER.md \u00a77 (P3OPS-20 clear half); hook-runner-b.md (lock_release on every reason)",
+  "problem": "What the probe showed for Q11 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "Still open: round 4 tested SIGTERM, not reason clear. It needs an interactive (tmux) probe; the release-on-every-reason choice stays unproven.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-16",
+  "origin": "platform probes, round 4, independent check (Q11)",
+  "severity": "minor",
+  "where": "Typed-command gates (item 2, K1 decide) and headless drivers",
+  "problem": "What the probe showed for Q11 differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "A blocked prompt reports is_error:false, subtype success, num_turns 0. Detect a block by num_turns 0 plus the result text.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-17",
+  "origin": "platform probes, round 4, independent check (side finding)",
+  "severity": "minor",
+  "where": "PR4-3; spec/topics/spikes.md; the headless drivers",
+  "problem": "What the probe showed for side finding differs from, or adds to, what the plans and design assume. Full evidence: rewrite/spike/probes-round-4/CHECK.md.",
+  "proposed_resolution": "A typed skill does not guarantee the named workflow runs. Add a PreToolUse rule that refuses a Workflow call carrying 'script' in driver sessions, or have the driver verify the run record's scriptPath against the plugin file.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PR4C-R1",
+  "origin": "platform probes, round 4, independent check (the record)",
+  "severity": "major",
+  "where": "topics/platform-proven-2.md; topics/platform-proven.md; platform.md; rewrite/findings/sources/extra-probes-4.json",
+  "problem": "The record the prober wrote misstates or omits several results. Item 39 says a rewrite with no decision is ignored in the default mode; it is applied, and the rewritten command then meets the ordinary permission check. Item 43 and PR4-2 say a call past its timeout runs on unreaped; it is moved to the background and killed when the step agent gives its final response, and the detached worker survives that. Item 37 claims a leg (the key declared optional) that was not run, and omits that a finding schema closed with additionalProperties false makes the rewrite unreturnable. Item 41 and PR4-1 understate the sandbox result: every write under .git/worktrees/ is refused, so commits fail in story worktrees, the integration worktree and the .factory mount, and a refused worktree add has already created its branch. Missing altogether: headless claude -p stops background workflows ten minutes after the last turn unless CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS is set; a blocked typed command reports is_error false; an automatic merge runs pre-merge-commit, not pre-commit; hook payloads carry effort.level; the /clear question was not tested (SIGTERM was). platform.md still says item 27 is auto mode only and has no index rows for items 36 to 46. The whole list is the problems section of rewrite/spike/probes-round-4/CHECK.md and of rewrite/findings/results/probes-round-4.json (result.check.problems).",
+  "proposed_resolution": "Rewrite the items so that each says exactly what the checker's reruns support, add the missing facts as items, correct the texts of PR4-1, PR4-2 and PR4-3 in extra-probes-4.json, and bring platform.md's index up to date. Say for each item which permission mode and platform version it was seen in, and that only a --plugin-dir install was probed.",
+  "on_slice_path": true
+ }
+]

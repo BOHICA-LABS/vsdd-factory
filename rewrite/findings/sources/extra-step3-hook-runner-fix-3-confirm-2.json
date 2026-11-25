@@ -1,0 +1,20 @@
+[
+  {
+    "id": "step3-hook-runner-fix-3-C2-1",
+    "origin": "step3-hook-runner-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_read_word, the unquoted '$' branch)",
+    "problem": "This gap is older than this fix round; the confirmation found it. _read_word reads '$'' as a literal '$' followed by a POSIX single-quoted string that ends at the next quote. bash (also when it runs as macOS /bin/sh) and zsh read $'...' as ANSI-C quoting, where a backslash escapes a quote. So \"\\'\" does not end the string, and the two readings disagree on where the string stops. Two forms parse as one segment, not opaque, with is_vsdd_call True: \"vsdd survey $'\\'' ; id #'\" and \"vsdd survey $'\\'';id;'x'\". The parser reads ' ; id #' as quoted text, while the shells end the string at the second quote and run id as a separate command. Both ran id under /bin/sh, /bin/bash 3.2, bash 5.3 and zsh; dash reads the POSIX way and did not. Through the runner, an agent's call got the caller marker, permissionDecision 'allow' and updatedInput, which HD8 forbids.",
+    "proposed_resolution": "Count any $' outside double quotes as a substitution, because the shells disagree on where it ends. A narrower option is to read it as ANSI-C text and count it only when its content holds a backslash. Add \"vsdd survey $'\\'' ; id #'\" and \"vsdd survey $'\\'';id;'x'\" to test_shell.py as opaque, and the first to the agent cases of test_decision_pairing (no marker, no decision).",
+    "on_slice_path": true
+  },
+  {
+    "id": "step3-hook-runner-fix-3-C2-2",
+    "origin": "step3-hook-runner-fix-3, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_PARAM_PLAIN_CHARS, _parameter_plain)",
+    "problem": "This fix round added _parameter_plain, whose plain-character set includes '@', so ${name@P} reads as plain. In bash 4.4 and later, @P expands a variable's value as a prompt string, and prompt expansion runs any $(...) in it. No setter is needed: under bash -c, BASH_EXECUTION_STRING holds the command text itself. So \"vsdd survey '$(id)' ${BASH_EXECUTION_STRING@P}\" parses as one non-opaque vsdd call, and bash 5.3 runs the single-quoted $(id). It then recurses through the same expansion until killed. Inside an eval wrapper like the Bash tool's, it ran the hidden command 966 times in five seconds. Through the runner, an agent's call got the caller marker, permissionDecision 'allow' and updatedInput. macOS /bin/bash 3.2 has no @P, but a bash user on Linux does. '!' is also on the list: ${!x} is indirect expansion, which bash evaluates through array subscripts. Once the double-quoted ${...} hole in S3R-hook-runner-C2-1 is closed, only an inherited value can feed ${!x}.",
+    "proposed_resolution": "Drop '@' from _PARAM_PLAIN_CHARS. Then ${@} and ${#@} read as opaque, which is safe. Alternatively, treat any '@' after the parameter name as not plain. Consider dropping '!' as well. Add \"vsdd survey '$(id)' ${BASH_EXECUTION_STRING@P}\" and 'vsdd survey ${x@P}' to test_shell.py as opaque, and the first to the agent cases of test_decision_pairing. A scratch sketch that dropped '@' kept all 130 tests under tests/hooks passing.",
+    "on_slice_path": true
+  }
+]

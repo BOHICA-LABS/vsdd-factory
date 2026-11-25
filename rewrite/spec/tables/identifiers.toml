@@ -1,0 +1,217 @@
+# sources: state.md#2.4, BLUEPRINT.md#4.8
+# Every identifier scheme: the artifact, its pattern, an example and how it is allocated.
+# A path is a function of its identifier, identifiers are never reused, and nothing stores a
+# reverse link, a count or a version. An example cell is filled only where the originals give one:
+# state.md#2.4 gives one example per table row, so split rows carry none, and BLUEPRINT.md#4.8 gives
+# the decision examples.
+
+[[identifier]]
+artifact = "Capability"
+pattern = "CAP-NNN"
+example = "CAP-012"
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Entity"
+pattern = "ENT-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Invariant"
+pattern = "DI-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Domain event"
+pattern = "EVT-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Domain edge case"
+pattern = "DEC-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Assumption"
+pattern = "ASM-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Risk"
+pattern = "R-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Failure mode"
+pattern = "FM-NNN"
+example = ""
+allocation = "Sequential; headings inside a domain file"
+
+[[identifier]]
+artifact = "Non-functional requirement"
+pattern = "NFR-NNN"
+example = ""
+allocation = "Sequential; headings inside a supplement"
+
+[[identifier]]
+artifact = "Error code"
+pattern = "E-<AREA>-NNN"
+example = "E-NET-001"
+allocation = "Sequential; headings inside a supplement"
+
+[[identifier]]
+artifact = "Subsystem"
+pattern = "SS-NN"
+example = "SS-03"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Behavioral contract"
+pattern = "BC-S.SS.NNN"
+example = "BC-2.03.007"
+allocation = "Sequential within the group S.SS; equals the file stem and the frontmatter id"
+
+[[identifier]]
+artifact = "Verification property"
+pattern = "VP-NNN"
+example = "VP-031"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Decision record"
+pattern = "ADR-NNN"
+example = "ADR-012"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Screen"
+pattern = "SCR-NNN"
+example = "SCR-004"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Flow"
+pattern = "FLOW-NNN"
+example = ""
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Epic"
+pattern = "E-N"
+example = "E-7"
+allocation = "Sequential; E-0 is the standing epic for fixes and chores"
+
+[[identifier]]
+artifact = "Story"
+pattern = "S-N.NN, where N is the epic"
+example = "S-7.03"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Acceptance criterion"
+pattern = "AC-N"
+example = "AC-2"
+allocation = "Local to the story or the contract"
+
+[[identifier]]
+artifact = "Edge case"
+pattern = "EC-N"
+example = ""
+allocation = "Local to the story or the contract"
+
+[[identifier]]
+artifact = "Holdout scenario"
+pattern = "HS-NNN"
+example = "HS-014"
+allocation = "Sequential"
+
+[[identifier]]
+artifact = "Idea"
+pattern = "ID-NNN"
+example = ""
+allocation = "Sequential, by vsdd"
+
+[[identifier]]
+artifact = "Spike"
+pattern = "SP-NNN"
+example = "SP-007"
+allocation = "Sequential, by vsdd"
+
+[[identifier]]
+artifact = "Wave"
+pattern = "W-NN"
+example = "W-02"
+allocation = "Per cycle, by vsdd plan schedule"
+
+[[identifier]]
+artifact = "Cycle"
+pattern = "a slug of 2 to 40 lower-case characters"
+example = "auth-sso"
+allocation = "Chosen when the cycle opens"
+
+[[identifier]]
+artifact = "On-demand review report"
+pattern = "reviews/<yyyy-mm-dd>-<lens>-<n>.md"
+example = "reviews/2026-11-26-security-2.md"
+allocation = "vsdd review prepare <lens> returns the next free report path"
+
+[[identifier]]
+artifact = "Holdout evaluation"
+pattern = "holdout/evaluations/<cycle>/<unit>-<n>.json"
+example = ""
+allocation = "The checkpoint numbers evaluations. A pipeline review has no file and no identifier: it is a step record"
+
+[[identifier]]
+artifact = "Finding"
+pattern = "the key from the pipeline design's finding schema: <category>:<path>:<symbol or clause>"
+example = ""
+allocation = "The reviewer; the same defect has the same key in every pass"
+
+[[identifier]]
+artifact = "Walled finding (outside the holdout class)"
+pattern = "walled: plus the first 12 hex characters of the SHA-256 of the key"
+example = ""
+allocation = "Derived; the key itself holds the scenario's path"
+
+[[identifier]]
+artifact = "Finding built from scenario scores"
+pattern = "holdout:<HS id>, or holdout:<unit>:mean, or holdout:<unit>:spread"
+example = "holdout:HS-014"
+allocation = "Built by the tool, never by an agent"
+
+[[identifier]]
+artifact = "Decision"
+pattern = "the kind (brief, spec, release, plan, ideas), or <kind>.<subject>"
+example = ["finding.S-7.04", "merge.S-7.04", "blocked.S-7.04"]
+allocation = "Opened by the checkpoint"
+
+[[identifier]]
+artifact = "Decision in a second open cycle"
+pattern = "<id>@<cycle>"
+example = "release@hotfix-1.2.1"
+allocation = "Written when two open cycles hold a decision with the same identifier"
+
+[[identifier]]
+artifact = "Change request"
+pattern = "CR-NNN"
+example = ""
+allocation = "Sequential, by vsdd"
+
+[[identifier]]
+artifact = "Step"
+pattern = "run, workflow, subject, name and attempt"
+example = ""
+allocation = "Given in the prompt, returned unchanged"
+
+[[identifier]]
+artifact = "Research, analysis, deferred item, assessment"
+pattern = "the file's slug"
+example = "research/2026-11-23-uv-startup"
+allocation = "The writer"
+

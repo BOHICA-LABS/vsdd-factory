@@ -1,0 +1,194 @@
+[
+  {
+    "id": "S3R-records-1",
+    "outcome": "fixed",
+    "what_was_done": "closure_update builds the fresh closure record inline (literal dict with its own stages) instead of copying the module-level _EMPTY_CLOSURE, which is gone. No new closure can inherit a predecessor's mutation.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py; next/tests/unit/test_state_cycles.py::test_two_new_closures_are_independent (two new closures in one process; the second must have empty stages, both orders)"
+  },
+  {
+    "id": "S3R-records-2",
+    "outcome": "fixed",
+    "what_was_done": "lock_seen now takes lock.flock when a write is due, reads lock.json again under it, and refreshes seen only on the entries still matching by run, story or session; the unlocked read is a pre-check only. A concurrent release or stale takeover is never written back over.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; next/tests/unit/test_state_locks.py::test_lock_seen_refresh_does_not_undo_a_concurrent_release and ::test_lock_seen_refresh_does_not_undo_a_stale_takeover (the race is injected after the unlocked read, before the file lock)"
+  },
+  {
+    "id": "S3R-records-3",
+    "outcome": "fixed",
+    "what_was_done": "run_admit, run_set, run_end, settle_decision and cycle_write hold store.locked(project, 'flush.lock') around their read-modify-writes (ordering lock.flock then flush.lock, as D1 says). run_open creates the run directory with mkdir(exist_ok=False) and retries on collision. store_step keeps no lock: its records are written once by rename (D1: a step never waits on a flush), and the collision check judges the stored file, which a rename cannot tear. store_step's refusal for an unknown run moved to run_not_live (see S3R-records-24).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/{runs,decisions,cycles}.py; next/tests/unit/test_state_runs.py::test_concurrent_admits_from_real_processes (four real subprocesses, twenty-four admits, every story present)"
+  },
+  {
+    "id": "S3R-records-4",
+    "outcome": "fixed",
+    "what_was_done": "Staleness is computed by one helper, _stale: a spec decision is compared against spec_digest(project)[0], the current specification file set, and a missing covered file reads as stale (caught StoreRefused), never as digest_missing_file; other kinds digest the stored list as before. decision_status and settle_decision share it. brief and guidance stay outside the set, so the former unfalsifiable check can now fail.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; next/tests/unit/test_state_decisions.py::test_spec_staleness_follows_the_current_set (an added contract stales; a deleted file stales at status and at settle; brief and guidance edits do not)"
+  },
+  {
+    "id": "S3R-records-5",
+    "outcome": "fixed",
+    "what_was_done": "Choice gained values (allowed values per key); spec approve carries topology=(single, split). settle_decision refuses a value outside its key's set with bad_key, and a repeated key whose mode is not _REPEAT (only key and item repeat) with bad_key, both before note_required.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; next/tests/unit/test_state_decisions.py::test_topology_values_and_repetition (topology=banana variant=a variant=b refuses; key= repeats; variant= does not)"
+  },
+  {
+    "id": "S3R-records-6",
+    "outcome": "fixed",
+    "what_was_done": "Choice gained reasons; KINDS gates open-spike on spike_limit and skip on environment (the annotations the table carries). settle_decision refuses bad_choice when the record's reason does not allow the choice. decision_open refuses bad_reason for a blocked decision whose reason is not one of spike_limit, environment, stuck, reviewer (BLOCKED_REASONS).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; next/tests/unit/test_state_decisions.py::test_blocked_reason_gates (a stuck decision refuses skip and open-spike; a nonsense reason refuses at open; skip settles on environment)"
+  },
+  {
+    "id": "S3R-records-7",
+    "outcome": "fixed",
+    "what_was_done": "resolve_decision's bare-id search covers the open cycles and _standing only, both passes; closed cycles never enter the candidate list, so a bare read of brief, spec, plan and release stays unambiguous after a cycle closes (D9). Qualified id@cycle reads are untouched and still reach closed cycles.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; next/tests/unit/test_state_decisions.py::test_closed_cycles_are_not_searched (a bare id only in a closed cycle is unknown; one open among two closed resolves; settled closed copies never make it ambiguous)"
+  },
+  {
+    "id": "S3R-records-8",
+    "outcome": "fixed",
+    "what_was_done": "_live_lock_run treats StoreCorrupt from lock.json or any run.json as no live run (the trailer falls back to '-'), and flush wraps its whole locked body so an unexpected exception comes back as state failed, never a raise. The spec (as edited) already said flush never raises; no spec change was needed.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py::test_flush_with_corrupt_lock_json ('{broken' in lock.json, then in run.json) and ::test_flush_surprise_is_a_failure (a RuntimeError inside the flush body)"
+  },
+  {
+    "id": "S3R-records-9",
+    "outcome": "fixed",
+    "what_was_done": "commits gained _deleted_paths, which reads git status --porcelain -z in the state worktree for the D records changed_paths leaves out (artifacts.py is S1's file and was not edited); the union feeds the check and the add -A staging, so a deletion ends committed. Agreed with S1 by report rather than by editing its helper.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py::test_flush_commits_deletions (a committed notes.json deleted, then flushed: the deletion is in HEAD and the tree clean)"
+  },
+  {
+    "id": "S3R-records-10",
+    "outcome": "fixed",
+    "what_was_done": "The identity probe runs git config user.email with check=False: exit 1 is the answer (no identity), and flush continues with the vsdd-factory -c overrides. The unreachable fallback is reachable.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py::test_flush_without_git_identity (local unset, GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pointed at empty files; the commit is authored vsdd-factory <vsdd-factory@example.invalid>)"
+  },
+  {
+    "id": "S3R-records-11",
+    "outcome": "fixed",
+    "what_was_done": "The re-freeze completeness check compares against the latest earlier red record that is passing or a re-freeze, re-freezes included; failing red records are skipped, and the walk stops at that record instead of skipping earlier re-freezes.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py; next/tests/unit/test_state_gate_evidence.py::test_refreeze_chaining (red(a,b), refreeze(a,b,c), then refreeze(a,b) refuses naming tests/c.py; red(a,b), a failing red, then refreeze([]) refuses naming tests/a.py)"
+  },
+  {
+    "id": "S3R-records-12",
+    "outcome": "fixed",
+    "what_was_done": "StoreBusy and StoreCorrupt now subclass StoreError directly, as the plan's error list has it; only StoreRefused (and DecisionRefused under it) is a refusal. Consumers that must react to busy or corrupt catch them by name (locks, commits already did). Interface change, plan-conforming: code that caught StoreRefused to also swallow busy or corrupt must catch StoreError.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/store.py; next/tests/unit/test_state_store.py::test_error_tree (the tree asserted: Busy and Corrupt are StoreErrors, not StoreRefused)"
+  },
+  {
+    "id": "S3R-records-13",
+    "outcome": "fixed",
+    "what_was_done": "The walled check reads only findings' locations: a finding dict whose location.path lies under .factory/holdout/ or holdout/ (both spellings) refuses walled_not_built; summaries and other strings anywhere in the result no longer trip it, so a step that mentions the wall stores.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py; next/tests/unit/test_state_steps.py::test_store_step (located findings refuse in both spellings; a summary and a data note mentioning holdout store; the old over-broad fixture rewritten)"
+  },
+  {
+    "id": "S3R-records-14",
+    "outcome": "fixed",
+    "what_was_done": "Added the mutation-catching tests: green matches by patch_id after an amend (tree identical, commit id moved); a red record on a commit before the base is rejected while a record on the base counts; and discovery through vsdd.gates.gate_*.py (a stub package registers at import and registered_gate finds it; a failing gate module is loud and leaves the loaded mark unset).",
+    "where": "next/tests/unit/test_state_gate_evidence.py::test_green_matches_by_patch_id_after_amend, ::test_red_before_base_is_rejected, ::test_gate_modules_are_discovered, ::test_gate_modules_discover_broken_gate_is_loud"
+  },
+  {
+    "id": "S3R-records-15",
+    "outcome": "fixed",
+    "what_was_done": "AU-S2-06, AU-P2-03 and AU-S2-04 reset from fixed to left-for-builder naming the spec pass: the code halves stand, but records/lock.md, human-stops.md and the four id@cycle statements are still duplicated, and only the spec pass can reduce them to links.",
+    "where": "rewrite/findings/outcomes/step3-records.json"
+  },
+  {
+    "id": "S3R-records-16",
+    "outcome": "fixed",
+    "what_was_done": "P3OPS-07 and P3REQ-07 moved from fixed to left-for-builder naming S3 (survey): the store half is built and tested, the re-recording of admitted stories in a new run (test_admit_again_same_unit_new_run) is the survey's.",
+    "where": "rewrite/findings/outcomes/step3-records.json"
+  },
+  {
+    "id": "S3R-records-17",
+    "outcome": "fixed",
+    "what_was_done": "AU-P2-11, AU-S2-15 and P3COV-11 moved from left-for-builder back to open, so the spec-text fixes stay in the open count until the spec pass takes them.",
+    "where": "rewrite/findings/outcomes/step3-records.json"
+  },
+  {
+    "id": "S3R-records-18",
+    "outcome": "fixed",
+    "what_was_done": "The kept schema check has its test: a result whose status the step-record schema refuses is stored by no one, and the step directory is unchanged after the refusal.",
+    "where": "next/tests/unit/test_state_steps.py::test_store_step (status 'hardly' refuses schema_invalid; before == after for the run's step files)"
+  },
+  {
+    "id": "S3R-records-19",
+    "outcome": "fixed",
+    "what_was_done": "Every decision id part (cycle, bare id, kind.subject) passes _segment: safe_segment and, beyond it, '..' refused anywhere in the part. Applied in _decision_path, _decisions_dir and decision_open, so reads, listing and writes all path-validate. resolve_decision('../../x') and a qualified id with traversal refuse unsafe_id, not unknown.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py; next/tests/unit/test_state_decisions.py::test_decision_ids_are_path_segments (a traversal subject writes nothing and escapes nowhere; 'a..b' refuses)"
+  },
+  {
+    "id": "S3R-records-20",
+    "outcome": "fixed",
+    "what_was_done": "store gained write_via_tmp (temporary file in .factory/local/tmp, fsync, os.replace), and write_record is now its caller. decision_open writes the packet first through it and makes the record the commit point; evidence_write writes .log and .xml through it, so a kill leaves whole side files.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/{store,decisions,gate_evidence}.py; exercised by every record test in next/tests/unit/test_state_*.py"
+  },
+  {
+    "id": "S3R-records-21",
+    "outcome": "fixed",
+    "what_was_done": "flush passes the changed rels to check_paths instead of None; deleted paths, which have no text to judge, are excluded from that check and handled by the deletion staging. PL3-3 holds: only changed files are checked.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; covered by next/tests/unit/test_state_commits.py::test_flush and ::test_flush_rejects_invalid_story"
+  },
+  {
+    "id": "S3R-records-22",
+    "outcome": "fixed",
+    "what_was_done": "flush commits with commit --only -- <the valid paths>, so the whole index no longer rides along: a blob staged by a killed flush whose file was since rejected stays out of the next commit.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py::test_flush_leaves_a_now_rejected_stale_blob_out (the story staged valid, broken in the worktree, then flushed: not in HEAD, the note beside it committed)"
+  },
+  {
+    "id": "S3R-records-23",
+    "outcome": "fixed",
+    "what_was_done": "The busy test patches FLUSH_WAIT to 0.2 s, expects state busy with commit '' and HEAD unchanged, and waits no real 5 s. The trailer test asserts state committed and reads the log unconditionally. The product-unouched check snapshots and compares the PRODUCT root's status (git -C root), not the state tree's. test_settle gained combined-refusal cases: not_open before bad_choice, stale before bad_choice, bad_choice before bad_key, bad_key before note_required.",
+    "where": "next/tests/unit/test_state_commits.py (test_flush_partial_and_busy, test_run_trailer_from_the_live_lock, test_flush); next/tests/unit/test_state_decisions.py::test_settle"
+  },
+  {
+    "id": "S3R-records-24",
+    "outcome": "fixed",
+    "what_was_done": "store_step refuses run_not_live for an unknown run too (an unknown run is not a live run; run_not_live is a promised store_step code). _replace_ok compares the whole record for identical content - artifacts, grounded and data included - beside the hook's own additions, which must still match.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py; next/tests/unit/test_state_steps.py::test_store_step_unknown_run_is_run_not_live and ::test_step_collision (identical whole record replaces across hook fields; one differing field refuses)"
+  },
+  {
+    "id": "S3R-records-25",
+    "outcome": "fixed",
+    "what_was_done": "read_notes returns the entries as stored, so the {at, text} objects the status report shows survive; write_notes is removed (unused beyond its own test, and beyond the slice until vsdd note is built). Interface change: cycles.write_notes is gone.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cycles.py; next/tests/unit/test_state_cycles.py::test_notes_entries_as_stored and rewritten ::test_notes_empty_form"
+  },
+  {
+    "id": "S3R-records-26",
+    "outcome": "fixed",
+    "what_was_done": "patch_id returns the first whitespace-separated field of git patch-id --stable, the id alone, and '' for empty output.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py; exercised by next/tests/unit/test_state_gate_evidence.py::test_green_matches_by_patch_id_after_amend, which equates patch ids across an amend"
+  },
+  {
+    "id": "S3R-records-27",
+    "outcome": "fixed",
+    "what_was_done": "_ensure_gates_loaded catches ModuleNotFoundError only when the name is vsdd.gates, lets every other import error out, and sets the loaded mark after the imports succeed, with a re-entrancy guard so a gate module importing during discovery cannot recurse; a failing gate module stays loud on the lookup.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py; next/tests/unit/test_state_gate_evidence.py::test_gate_modules_are_discovered and ::test_gate_modules_discover_broken_gate_is_loud"
+  },
+  {
+    "id": "S3R-records-28",
+    "outcome": "fixed",
+    "what_was_done": "run-record.schema.json requires id (string, minLength 1, described shape r-<YYYYMMDD>-<HHMM>-<2 of [0-9a-z]>). The shipped checker has no pattern keyword and its registry refuses one, so the shape is stated in the description and enforced by the store's _new_id; both valid fixtures and the two invalid fixtures now carry id, and a new invalid_missing-id fixture pins the requirement.",
+    "where": "next/plugins/vsdd-factory/schemas/run-record.schema.json; next/tests/unit/fixtures/schemas/run-record/*; next/tests/unit/test_schema_fixtures.py"
+  },
+  {
+    "id": "S3R-records-29",
+    "outcome": "fixed",
+    "what_was_done": "cmd_decide logs decision.refused with decision, choice and code (the parse-error path infers id and choice from the tokens), decision.recorded with decision and choice, as tables/event-types.toml defines; every log call is guarded, so a log failure after a settle returns the reply anyway.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_decide.py; next/tests/unit/test_state_cmds.py::test_cmd_decide (both event types still written, session terminal)"
+  },
+  {
+    "id": "S3R-records-30",
+    "outcome": "fixed",
+    "what_was_done": "write_record decides compactness by the component that follows .factory (helper _under_local), so a project directory merely named local no longer flips a tracked record to compact form.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/store.py; next/tests/unit/test_state_store.py::test_compact_only_under_factory_local (a root named local: tracked indented, .factory/local compact)"
+  },
+  {
+    "id": "S3R-records-31",
+    "outcome": "fixed",
+    "what_was_done": "run_begin's refused take returns stale_at as seen plus state.lock_stale_minutes, the moment the holder expires, not the last-seen time (an unreadable stamp reads back as itself); the minutes factored into lock_stale_minutes. topics/run-lock.md now states it. The plan file under rewrite/plans/ is outside this task's editable set, so the plan sentence is recorded here instead of edited.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; rewrite/spec/topics/run-lock.md; next/tests/unit/test_state_locks.py::test_run_begin_stale_at_is_the_expiry (12:20 expiry at the default, 12:30 with lock_stale_minutes=30)"
+  },
+  {
+    "id": "S3R-records-32",
+    "outcome": "fixed",
+    "what_was_done": "test_kinds_match_the_shipped_table loads rewrite/spec/tables/decision-kinds.toml with tomllib and holds KINDS to it row by row: the nine kinds, the verbs per status in order, the keys each choice line shows with bracketed optional, repeated repeatable, note-required exactly where the line shows a note, and the (for <reason>) annotations equal to the reason gates. The table and the enforcing code can no longer drift silently.",
+    "where": "next/tests/unit/test_state_decisions.py::test_kinds_match_the_shipped_table, against next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+  }
+]

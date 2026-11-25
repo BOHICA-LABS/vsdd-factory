@@ -1,0 +1,152 @@
+[
+  {
+    "id": "S3R-survey-1",
+    "outcome": "fixed",
+    "what_was_done": "run_checkpoint now wraps the product stops, every _close_story and the flush in try/except, appending each fault to errors, and calls the release path (_release_path: run_set(agents), lock_release, run_end) in a finally; next is computed after the release. A corrupt closure and a StoreBusy closure_update now answer ok:false, exit 1, with an empty lock and an ended run, instead of escaping as exit 2 'internal error' with the lock held.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py; tests next/tests/unit/test_checkpoint.py::test_checkpoint_corrupt_closure_still_releases, ::test_checkpoint_busy_store_still_releases"
+  },
+  {
+    "id": "S3R-survey-2",
+    "outcome": "fixed",
+    "what_was_done": "survey story refuses with exit 2 when project.layout is hub, when the one open cycle's kind is hotfix (its stories are cut from hotfix/<version>, not the integration head), and when --subject is empty (a usage refusal, not 'story  is not in the open wave' at exit 1). The --cycle refusal no longer indexes an empty cycle list: '--cycle X' with no cycle open is a usage refusal too.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py; test next/tests/unit/test_survey.py::test_survey_unbuilt_is_exit_2_with_whole_object (hub, hotfix, missing --subject, --cycle with none open)"
+  },
+  {
+    "id": "S3R-survey-3",
+    "outcome": "fixed",
+    "what_was_done": "Every 'worktree add' in the library (create_story, set_integration, detached) now runs 'git worktree prune' first, so a worktree directory removed outside git no longer leaves a registration that wedges every later add. Re-admission after a by-hand rmtree and set_integration after a by-hand rmtree both succeed.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_worktree_add); tests next/tests/unit/test_worktrees.py::test_removed_worktree_directory_does_not_block, next/tests/unit/test_admission.py::test_admit_after_by_hand_removal"
+  },
+  {
+    "id": "S3R-survey-4",
+    "outcome": "fixed",
+    "what_was_done": "Classified as not_permitted only when git's stderr contains 'Operation not permitted'; the word 'sandbox' in the command's path arguments no longer misclassifies an ordinary failure, which answers code 'git'. The not_permitted message still carries the word 'sandbox' and git's own line (ORDER.md rule 11).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_classified); test next/tests/unit/test_worktrees.py::test_git_failure_with_sandbox_in_path_is_code_git"
+  },
+  {
+    "id": "S3R-survey-5",
+    "outcome": "fixed",
+    "what_was_done": "Re-recorded P3REQ-07, P3OPS-07, P3OPS-08, P3REQ-02, P3OPS-10 and D33-21 as left-for-builder, each naming the story-path part that is done and the remainder with its owning package (other surveys G5/S2a; non-story stages S3 widened; readiness ordering G5/W6; the route row and new spec decision S3 widened and S4; delivery.detail and packets G4a). findings.py build rerun; the by-package lists carry them again.",
+    "where": "rewrite/findings/outcomes/step3-survey-fix.json (six entries below); regenerated rewrite/findings/ledger.json and rewrite/findings/by-package/"
+  },
+  {
+    "id": "S3R-survey-6",
+    "outcome": "fixed",
+    "what_was_done": "New test: the story admitted in run A is refused by require_story(root, B, story) with reason story_not_in_run while a second live run B holds nothing and the closure, base and worktree exist. Dropping the story= argument from run_require fails this test (the refusal disappears).",
+    "where": "next/tests/unit/test_admission.py::test_require_story_checks_run_membership"
+  },
+  {
+    "id": "S3R-survey-7",
+    "outcome": "fixed",
+    "what_was_done": "Both cited tests now assert that json.dumps(closure) holds no str(root): the admission closure test and the checkpoint's closes-delivered-story test.",
+    "where": "next/tests/unit/test_admission.py::test_admit_writes_closure_run_branch_worktree, next/tests/unit/test_checkpoint.py::test_checkpoint_closes_delivered_story"
+  },
+  {
+    "id": "S3R-survey-8",
+    "outcome": "fixed",
+    "what_was_done": "The correcting command is now 'git branch --set-upstream-to=<remote>/<branch> <branch>' (no branch named twice, which git refuses with 'too many arguments to set new upstream'), and the test parses the command out of the message and runs it. create_story's not_descendant advice now names a remedy that works: delete the branch (git branch -D <branch>) and admit the story again, which cuts it from the target head and records that base; verify_story's rewritten-history message points at restoring the commits or recording the rewritten base as delivery does after a rebase.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_remote_head, create_story, verify_story); test next/tests/unit/test_worktrees.py::test_target_head_local_and_pr (runs the printed command), ::test_verify_story_refusals (asserts the branch -D remedy)"
+  },
+  {
+    "id": "S3R-survey-9",
+    "outcome": "fixed",
+    "what_was_done": "The survey admits an open-wave story with admitted_by='plan'; a run id in admitted_by means an out-of-plan admission through gate plan --story or story new-fix. admit itself only writes admitted_by on a fresh closure, so a re-survey does not overwrite an earlier admission's value. Test asserts the closure's admitted_by is 'plan' after a survey.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py; test next/tests/unit/test_survey.py::test_survey_story_ready"
+  },
+  {
+    "id": "S3R-survey-10",
+    "outcome": "fixed",
+    "what_was_done": "Route row 15 now lists the decision ids in args.decisions (D10), not only in the reason text, and 'could run' is preconditions.check(root, 'story', subject, cycle, hooks_alive=None) — a story whose depends_on are undelivered no longer counts as runnable, so an open decision on another story still fires the decisions row. Tests assert args.decisions and the dependency case.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/route.py (_wave_state, _could_run, the row 15 answer); tests next/tests/unit/test_route.py::test_row_waiting_on_decisions, ::test_row_waiting_counts_only_runnable_stories_as_runnable"
+  },
+  {
+    "id": "S3R-survey-11",
+    "outcome": "fixed",
+    "what_was_done": "story_path and integration_path derive from classify_worktree (ORDER rule 7), and story_path refuses ids outside the story grammar; story_unit.position, story_unit.build and checkpoint._head_of call story_path instead of rebuilding root/.worktrees/<story>; the criticality enum in admission comes from the policy's [story.frontmatter] row.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (story_path, integration_path), story_unit.py, checkpoint.py (_head_of), admission.py (_criticalities); test next/tests/unit/test_worktrees.py::test_story_path_refuses_ids_outside_the_grammar"
+  },
+  {
+    "id": "S3R-survey-12",
+    "outcome": "fixed",
+    "what_was_done": "With no open cycle, the cycle-scoped precondition rows answer 'no cycle is open' without the cycle-scoped reads (a story with depends_on no longer crashes with exit 2 'internal error: StoreRefused'); '--cycle X' with no cycle open is worded without indexing; checkpoint maps StoreRefused from run_read to the unknown-run refusal ('no run ...'), so checkpoint --run ../x is exit 2 with the whole object.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/preconditions.py, survey.py (--cycle wording), checkpoint.py (run_read); tests next/tests/unit/test_preconditions.py::test_no_open_cycle_names_it_and_skips_the_reads, next/tests/unit/test_survey.py::test_survey_unbuilt_is_exit_2_with_whole_object, next/tests/unit/test_checkpoint.py::test_checkpoint_unusable_run_id_is_a_refusal"
+  },
+  {
+    "id": "S3R-survey-13",
+    "outcome": "fixed",
+    "what_was_done": "story_unit._gate no longer swallows every exception: only the absence of evidence is None, a corrupt record or a faulty registered gate rises out of position(), and the survey reports the fault at exit 1 with ok:false ('the story could not be admitted' / 'the survey could not build the story unit', naming the corrupt record) instead of silently lowering the position and rerunning stages.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (_gate), survey.py (the build fault handler); test next/tests/unit/test_story_unit.py::test_corrupt_evidence_rises"
+  },
+  {
+    "id": "S3R-survey-14",
+    "outcome": "fixed",
+    "what_was_done": "A run with no stories reports status 'partial', on the live path and on the ended-run read path (D8); all([]) no longer reads as done. Tested on both paths.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py; tests next/tests/unit/test_checkpoint.py::test_checkpoint_run_without_stories_is_partial, ::test_checkpoint_ended_run_without_stories_is_partial"
+  },
+  {
+    "id": "S3R-survey-15",
+    "outcome": "fixed",
+    "what_was_done": "Added the test the plan's section 7 names, test_position_reviewed_from_closure_verdict (a demo story whose converged verdict covers the head is reviewed; a verdict that does not cover the head leaves the story at green), and test_kind_without_red_gate_starts_at_red for D6's other half.",
+    "where": "next/tests/unit/test_story_unit.py::test_position_reviewed_from_closure_verdict, ::test_kind_without_red_gate_starts_at_red"
+  },
+  {
+    "id": "S3R-survey-16",
+    "outcome": "fixed",
+    "what_was_done": "remove_story(delete_branch=True) deletes by the configured branch name ([branches].story through branch_name), pruning the stale registration first, so a call killed between the worktree removal and 'branch -D' deletes the branch on the retry; the test rmtrees the worktree by hand and then deletes the branch.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (remove_story); tests next/tests/unit/test_worktrees.py::test_remove_story_deletes_branch_after_worktree_gone, ::test_remove_story_keeps_branch"
+  },
+  {
+    "id": "S3R-survey-17",
+    "outcome": "fixed",
+    "what_was_done": "Settled the target-branch meaning: the schema's delivery.branch description now says the branch the story is delivered to — the target branch, require_story's 'target' — which admission records and delivery re-records after a rebase (the code and topics/worktrees.md already said this).",
+    "where": "next/plugins/vsdd-factory/schemas/closure-record.schema.json (delivery.branch description)"
+  },
+  {
+    "id": "S3R-survey-18",
+    "outcome": "fixed",
+    "what_was_done": "records/run.md now says the survey records each story unit it returns in the run record's stories (with P3BLD-23 named), and commands/survey.md's Writes says it beside the run record.",
+    "where": "rewrite/spec/records/run.md, rewrite/spec/commands/survey.md (Writes)"
+  },
+  {
+    "id": "S3R-survey-19",
+    "outcome": "fixed",
+    "what_was_done": "The checkpoint writes the delivered closure's closed field as the ISO stamp of the checkpoint (not a boolean), and records/closure.md says so: a story's closed is the stamp of the checkpoint that closed it, while the cycle record's closed is the close date. The test asserts a Z-stamped string.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py (_close_story); rewrite/spec/records/closure.md; test next/tests/unit/test_checkpoint.py::test_checkpoint_closes_delivered_story"
+  },
+  {
+    "id": "P3REQ-07",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done on the story path — admit called again for a story whose closure carries admitted_by creates nothing new, records the story in the calling run and returns the same unit (test_admit_again_same_unit_new_run). Remainder, with the owning package: the other surveys return and record every undelivered admitted story of the cycle, and the feature deliver stage takes its units from the survey — G5 and S2a when S3 widens.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py (admit); rewrite/findings/outcomes/step3-survey-fix.json"
+  },
+  {
+    "id": "P3OPS-07",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done on the story path — the membership check (runs.run_require with story=) is satisfied for a new run because admit re-records the story in the calling run (test_admit_again_same_unit_new_run, test_require_story_checks_run_membership). Remainder, with the owning package: the same re-admission for the other surveys and for non-story stages — G5 and S2a when S3 widens.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py; rewrite/findings/outcomes/step3-survey-fix.json"
+  },
+  {
+    "id": "P3OPS-08",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done for stories — position() and the evidence lookup read the evidence records of any run, so a story's position survives the death of its run (test_position_survives_new_run). Remainder, with the owning package: the done test over non-story stages (spec, plan, ingest) — S3 when widened.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (position); rewrite/findings/outcomes/step3-survey-fix.json"
+  },
+  {
+    "id": "P3REQ-02",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done — there is no cycle base; admission reads the target branch's head at the moment of creation and records it as delivery.base (test_admit_base_is_target_head_at_creation). Remainder, with the owning package: readiness ordering, so the harness chore lands before the stories whose red gate needs it — G5 and the W-feature.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py (admit, record_base); rewrite/findings/outcomes/step3-survey-fix.json"
+  },
+  {
+    "id": "P3OPS-10",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done on the story path — the survey's spec_approved precondition shows records' stale detail after a hand edit (test_spec_stale_after_edit). Remainder, with the owning packages: the route row for a stale latest spec decision and the new spec decision the survey opens — S3 when widened, with S4 for the decision wording.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/preconditions.py; rewrite/findings/outcomes/step3-survey-fix.json"
+  },
+  {
+    "id": "D33-21",
+    "outcome": "left-for-builder",
+    "what_was_done": "Half-built, recorded again after review: done — the tracked records the survey unit writes (closure delivery.branch/base, delivery.run, admitted_by, stage entries) carry no machine-local path, asserted in both cited tests (test_admit_writes_closure_run_branch_worktree, test_checkpoint_closes_delivered_story). Remainder, with the owning package: delivery.detail texts and the packets of blocked decisions — G4a.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/admission.py, checkpoint.py, story_unit.py; rewrite/findings/outcomes/step3-survey-fix.json"
+  }
+]

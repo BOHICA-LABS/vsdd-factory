@@ -1,0 +1,7 @@
+{"type":"launched"}
+{"type":"started","key":"v2:5cbd590e366a27a3189567503690aa4d6f8b50b8ebfedc12722545c11eba2017","agentId":"ad0deb011575a5452","label":"T1","phase":"P"}
+{"type":"result","key":"v2:5cbd590e366a27a3189567503690aa4d6f8b50b8ebfedc12722545c11eba2017","agentId":"ad0deb011575a5452","result":{"n":1,"t":"T1"},"remoteControlDeviceReport":false,"toolsUsed":["StructuredOutput"],"sessionId":"654e64c3-4863-4d4f-af29-556e11e815f9"}
+{"type":"started","key":"v2:b9d591e676a201a9c4bf589db571d520acb255ffce4c4c7ee692fdbfa34acbf4","agentId":"a28faed1c370905c9","label":"T2","phase":"P"}
+{"type":"result","key":"v2:b9d591e676a201a9c4bf589db571d520acb255ffce4c4c7ee692fdbfa34acbf4","agentId":"a28faed1c370905c9","result":{"n":2,"t":"T2"},"remoteControlDeviceReport":false,"toolsUsed":["StructuredOutput"],"sessionId":"654e64c3-4863-4d4f-af29-556e11e815f9"}
+{"type":"started","key":"v2:599323745e14dd50bb846543be2fc3b8edaa1859632feec26137b1d6f6f10d09","agentId":"a704d8b165fb5936c","label":"T3","phase":"P"}
+{"type":"result","key":"v2:599323745e14dd50bb846543be2fc3b8edaa1859632feec26137b1d6f6f10d09","agentId":"a704d8b165fb5936c","result":{"n":3,"t":"T3"},"remoteControlDeviceReport":false,"toolsUsed":["StructuredOutput"],"sessionId":"654e64c3-4863-4d4f-af29-556e11e815f9"}

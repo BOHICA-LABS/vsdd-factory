@@ -1,0 +1,11 @@
+[
+  {
+    "id": "step3-survey-fix-3-C1-1",
+    "origin": "step3-survey-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/unit/test_story_ready.py (test_product_directory_keeps_the_project_configuration, test_product_directory_sets_paths_from_the_sample)",
+    "problem": "Some of the new tests' configuration checks prove less than they look. (1) `assert own != sample` (the project's factory.toml text differs from the sample's) can never fail: set_keys always rewrites factory.toml after the copy, which drops the comments and reorders keys, so even the pre-fix code, which copied the sample's .factory over the project's, passes this line. (2) [state] is never checked, although the module docstring and the fix both say the project keeps its own [state]. A version of _install_product that also applies the sample's [state] (push = true) passes all five tests (checked in a scratch copy). (3) Only the tests and source keys of [paths] are checked. A version that applies only those two keys passes all five, leaving repo_config = [] and docs = [README.md, CLAUDE.md] instead of the sample's [.gitignore] and [README.md]. The code under test is correct today. The gap is that these sub-parts of PL6-7 have no test that would fail if they regressed.",
+    "proposed_resolution": "In test_story_ready.py, replace the text comparison with assertions on the loaded configuration: config.get(\"state\", \"push\") is False and delivery.mode is local. Assert that config.get(\"paths\") equals the sample's [paths] table key for key (tests, harness, ci, repo_config, manifests, docs, source), read with tomllib from tests/e2e/sample-project/.factory/factory.toml.",
+    "on_slice_path": true
+  }
+]

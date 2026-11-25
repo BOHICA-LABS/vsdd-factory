@@ -1,0 +1,26 @@
+[
+  {
+    "id": "D31R-F-10",
+    "outcome": "not-fixed",
+    "what_was_done": "Some facts are still stated in more than one file. (1) The reason the record lives on the state branch and the definition in the product tree (planned before code, tied by the key, compared by the gates) is in topics/feature-flags.md ('The record is on the state branch and the definition in the product tree') and in artifacts/flag.md ('Where it lives, and why there'). (2) What the gates do with the key and override variables (strip the key_env variables from every command, set override_env for test commands and env start, never pass on a value from the shell) is in the F-KEY row of tables/flag-story-checks.toml, again in config/flags.md 'Keys and local runs', and again in topics/feature-flags.md ('The tool never needs the service or its key'). (3) The default of flags.require is in tables/flag-config-keys.toml and again as '(default)' in the value table of config/flags.md, which README rule 5 forbids, and feature-flags.md repeats it. Fix: keep each fact in its home (the reason for the record's place in artifacts/flag.md, the variable handling in F-KEY, the default in flag-config-keys.toml), and have the other files give a one-line reason with a link.",
+    "where": "rewrite/spec/topics/feature-flags.md, rewrite/spec/config/flags.md"
+  },
+  {
+    "id": "D31R-F-17",
+    "outcome": "not-fixed",
+    "what_was_done": "Still open. rewrite/findings/triage/d31.json still triages D31-7 to F1, and rewrite/findings/outcomes/d31.json still marks it left-for-builder, so rewrite/findings/by-package/F1.md asks the F1 builder for a registry.toml edit that no builder may make. registry.toml still reads 'D1 to D30'. The integrator passed this to the orchestrating session. Fix: the orchestrating session either makes the one-line [doc.decisions] summary change and records D31-7 fixed, or sets packages [] for D31-7 in triage/d31.json (or adds a triage file that sorts after it) and reopens its outcome; then it rebuilds the ledger.",
+    "where": "rewrite/findings/triage/d31.json"
+  },
+  {
+    "id": "D31R-F-19",
+    "outcome": "not-fixed",
+    "what_was_done": "The prose now says 'a story behind a flag' throughout, but F4's delivers text in registry.d/d31.toml still names the fixture overlay `story-flagged`. That is the colliding word, written into an identifier that F4 will build and that is costly to rename later; it reads as a story flagged security. Fix: rename the overlay, for example `story-behind-flag`, and regenerate the briefs.",
+    "where": "rewrite/spec/registry.d/d31.toml"
+  },
+  {
+    "id": "D31R-D-25",
+    "outcome": "not-fixed",
+    "what_was_done": "This is the same residue as D31R-F-19: F4's delivers text in registry.d/d31.toml names the fixture overlay `story-flagged`. Defining the term in the glossary rather than in conventions.md holds. The one rename closes both findings.",
+    "where": "rewrite/spec/registry.d/d31.toml"
+  }
+]

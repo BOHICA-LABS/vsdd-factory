@@ -1,0 +1,29 @@
+[
+ {
+  "id": "ORCH-1",
+  "origin": "orchestrating session, 2026-11-24",
+  "severity": "minor",
+  "where": "next/tests/lint/test_build.py",
+  "problem": "Every test in test_build.py copied the whole of next/ into a temporary folder, including the 42 MB virtual environment, which cost about eight seconds a test and made the suite take four minutes. Every builder, reviewer and fixer runs the suite several times.",
+  "proposed_resolution": "Leave .venv and the caches out of the copy; they are not build inputs.",
+  "on_slice_path": false
+ },
+ {
+  "id": "ORCH-2",
+  "origin": "orchestrating session, 2026-11-24, after four rounds on the hook runner's shell parser",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py (is_vsdd_call); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py; rewrite/plans/step-3/hook-runner.md HD8",
+  "problem": "The runner approves an agent's vsdd call, with the rewrite that carries the caller marker, when the shell parser finds the command to be one plain segment that is not opaque. That makes the parser a security boundary built as a deny-list: it must recognise every construct that could run something else. Four review rounds each found new ways through (a substitution beside arithmetic, quotes nested in a parameter expansion, $[ ] inside double quotes, ANSI-C quoting, ${name@P}), in each case getting an arbitrary command approved without a prompt. A deny-list over shell syntax cannot be shown complete across sh, bash, dash and zsh.",
+  "proposed_resolution": "Decide approval by an allow-list on the raw command text, in addition to the parsed shape. A command is a plain vsdd call only if the whole text is: the program (vsdd, or a path of safe characters ending /vsdd), then arguments separated by spaces or tabs, each either a bare word made only of ASCII letters, digits and _ @ % + = : , . / - or a single-quoted string that starts after whitespace or after = at the end of a bare word, ends before whitespace or the end of the text, and holds no single quote and no control character. Nothing else: no double quote, dollar, backtick, backslash, semicolon, ampersand, pipe, angle bracket, parenthesis, brace, bracket, star, question mark, tilde, hash, exclamation mark, newline or carriage return anywhere outside a single-quoted string. Any other command that runs vsdd passes unmarked and unapproved, as HD8 already says. The parser's 'not opaque' is never by itself a reason to approve anything.",
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-3",
+  "origin": "orchestrating session, 2026-11-24, from ORCH-2",
+  "severity": "major",
+  "where": "rules/auto-allow.md; topics/tool-call-approval.md",
+  "problem": "The auto-allow rule (H6) will approve build and test commands and a few git commands without a prompt. If it decides by parsing the command and finding nothing dangerous, it inherits the weakness ORCH-2 describes.",
+  "proposed_resolution": "Have auto-allow approve only on an allow-list match of the raw command text: the project's configured command strings compared exactly, or the plain-call grammar of ORCH-2 with a fixed program and subcommand. State it in rules/auto-allow.md and test it with the bypass forms recorded under S3R-hook-runner-C2-1 and step3-hook-runner-fix-3-C1-1, -C2-1 and -C2-2.",
+  "on_slice_path": false
+ }
+]

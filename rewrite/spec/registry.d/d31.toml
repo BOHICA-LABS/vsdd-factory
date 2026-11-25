@@ -1,0 +1,129 @@
+# Registrations added by decision D31 (feature flags in the software the factory builds), adopted 2026-11-24.
+# Same format as rewrite/spec/registry.toml. None of these is on the thin slice path; they are built when
+# the build widens (packaging/build-plan.md). The order of work is F1, F5, F2, F6, F3, F4.
+
+[package.F1]
+summary = "Flag settings, records and the pattern scanner"
+delivers = """
+The `[flags]` and `[flags.approved]` keys in the loader and the configuration schema. In `vsdd status` and
+the briefing: the three states, each override, and the warning while a key variable is set in the session.
+The toolchain file's `[flags]` table and the survey step F-FILL. The
+pattern scanner every flag check uses: compile, match within the time limit, named groups, added lines.
+The `flag` artifact kind with its skeleton and `[reveals]` entry, and the four story keys.
+Takes ledger entries D31-1, D31-2, D31-3, D31-6 and D31R-F-15"""
+depends = "S1, C1, C2, S2c, S3, H4"
+source = "decisions.md#D31"
+
+[package.F2]
+summary = "Flag checks of a story's gates and review"
+delivers = """
+The checks of the table flag-story-checks as one module, in their story forms: in `vsdd gate red`, its
+re-freeze and `vsdd gate green`, at every command a gate starts and in `vsdd env start`, and as the
+review items. The hook rule `secrets` treating the names in `flags.key_env` as secret variables.
+One failing and one passing case per refusal. Takes ledger entries D31-8 and d31-fix-2-C1-2"""
+depends = "F1, G1, G2, G3, H2"
+source = "decisions.md#D31"
+
+[package.F3]
+summary = "Flag lifecycle"
+delivers = """
+The `flags` value at the settling of a `spec` decision and `until` at the rejection of a removal
+(F-APPROVE). The flag lines of the `spec` and `release` packets. The Rollback section of every pull
+request body, its Feature flags section, and the change log lines. The deferred item of each temporary
+flag. The `merge` decision a removal waits for and the cleanup stories of the sweep. The flag lines of
+`vsdd report debt`. Takes ledger entry D31-4"""
+depends = "F1, F2, F5, F6, S4, S6, G4a, G4b, G7"
+source = "decisions.md#D31"
+
+[package.F4]
+summary = "Flag duties and their proof"
+delivers = """
+The `Feature flags` section of each method file the table flag-duties names, and the lint check L-FLAG.
+The `flag` type of the `author` skill. Harness scenarios: a story behind a flag through `story`, with an
+existing test moved once the run with the flag on has named it; a required story refused at the plan
+gate; a plain approval of a proposed flag system refused; a turn-on story, and one refused while a
+`pending` test remains; a removal that waits for a person and one that does not, each with its tests
+deleted and its off code reviewed; a withdrawal, with no red test and each moved test back under its own
+name. The fixture overlay `story-behind-flag` and one story-tier run of it.
+It needs the first part of E1 and the story tier of E2, both built for the slice. Takes ledger entry D31-5"""
+depends = "F1, F2, F3, F5, F6, A2a, A2b, A3, A4, A5, A6a, B5, B6, K2, W2, W5, W6, W11, E1, E2"
+source = "decisions.md#D31"
+
+[package.F5]
+summary = "Flag checks of choosing and planning"
+delivers = """
+The checks F-CHOICE, F-RECORD, F-REQUIRE and F-READY of the table flag-checks, in the planning gates:
+`vsdd gate spec` and `vsdd gate plan`, whole plan and `--story`. One failing and one passing case per
+refusal"""
+depends = "F1, G5"
+source = "decisions.md#D31"
+
+[package.F6]
+summary = "Flag checks of the wave, release and sweep jobs"
+delivers = """
+The `flags` check of `vsdd gate wave`, `vsdd gate release` and `vsdd gate sweep`: the whole-tree forms of
+the rows of flag-story-checks, called from the module F2 ships, with their counts and fixable findings;
+F-RUNBOOK in the release baseline check and the sweep; F-REMOVE's findings in the sweep; F-CHOICE, from
+the module F5 ships, as advisory findings in the sweep's spec coherence check.
+One failing and one passing case per refusal"""
+depends = "F1, F2, F5, G6a, G6b, G7"
+source = "decisions.md#D31"
+
+[topic.feature-flags]
+summary = "Feature flags in the software the factory builds (decision D31), end to end: the parts, the path from opt-in to removal, why each choice was made, and where each clause is enforced."
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[topic.flag-system-choice]
+summary = "How the product's flag system is proposed, confirmed by a person in the spec decision and recorded once: the order of preference, what the decision record must answer, and what a home-built system needs."
+package = "F4"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[topic.flag-lifecycle]
+summary = "The life of a flag after planning: delivered off, the deferred item, who turns it on, the pull request and release sections, and removal once it is on and due."
+package = "F3"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[config.flags]
+summary = "[flags]: whether the product uses feature flags, when a story must ship behind one, and where the checks look."
+package = "F1"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[artifact.flag]
+summary = "One flag record: its key, type, default, owning story, lifetime and removal condition."
+package = "F1"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[table.flag-config-keys]
+summary = "Every [flags] key with its type, default and meaning, and who gives it its value: a person, or an approved proposal."
+package = "F1"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[table.flag-checks]
+summary = "The rules every flag check follows, and the checks of choosing and planning: the form each takes, when it runs, what it reads, what it refuses and what it cannot measure."
+package = "F5"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[table.flag-story-checks]
+summary = "The flag checks of a story's red and green gates and its review, with the form each takes on the whole tree in the wave, release and sweep jobs."
+package = "F2"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[table.flag-release-checks]
+summary = "The flag checks of release and maintenance: the runbook, and when a flag is due for removal."
+package = "F6"
+group = "flags"
+sources = ["decisions.md#D31"]
+
+[table.flag-duties]
+summary = "Each agent's flag duty by method, the text of each review item, and the check or reviewer that holds the agent to the duty."
+package = "F4"
+group = "flags"
+sources = ["decisions.md#D31"]

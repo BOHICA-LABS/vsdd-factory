@@ -1,0 +1,177 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M4). Not read by anything on the slice path.
+# The capability from end to end: [[topic:team-use]].
+#
+# The checks of delivery on a team, of commits made by hand, and of a wave whose stories several clones
+# hold. The rules every row follows are at the head of [[table:team-checks]]; the explanation is
+# [[topic:team-delivery]].
+#
+# A hand commit is a commit to the product that the factory did not make. On a target branch (the
+# integration branch, or `hotfix/<version>`) it is a commit on the branch's first-parent line that no
+# delivery and no release recorded. On a story branch it is a commit that reached the remote branch from
+# somewhere other than the clone that holds the story. Who made it, and with what tool, is not asked.
+# This paragraph is the definition; no other file repeats it.
+#
+# Which of these rows act while team use is off, and why, is stated once, at the head of
+# [[table:team-checks]]. With no remote there is no teammate and none of them runs.
+
+[T-DELIVERY]
+form = "A refusal of `vsdd story deliver`; states and fields of the delivery"
+runs = "At every delivery in `pr` mode. The two refusals that read the claim and the mode run only while team use is on"
+reads = "`delivery.mode` and `delivery.ci`; the story's claim after the delivery's opening sync; whether the host module can serve the remote; the pull request's state, checks and merged head, through that module ([[command:story-deliver]])"
+refuses = """
+While team use is on: a delivery in `local` mode or with `delivery.ci = "none"`, for the reason T-SWITCH
+gives; and a delivery of a story whose claim does not name this clone, which answers `refused` with the
+holder. Local delivery remains for a project with no remote, for a project with one clone that chooses
+it, and for the thin slice.
+A delivery through a host the module cannot serve: `refused`, naming the remote.
+It records who merged: `delivery.merged_by` holds the person and clone whose delivery performed the
+merge and how (`gates`, or the id of the `merge` decision a person approved). With team use off there
+is no clone record, so it holds no clone, and the person only where git has one to give.
+A pull request the host has accepted and will merge by itself later (it queues merges, or holds one
+until its own checks pass) gives the state `queued`. Nothing waits for a person, so no decision opens:
+the story's run ends `partial`, the story keeps its claim, and the next survey or delivery asks the
+module again.
+A pull request merged by the host that way, or by anybody outside the tool, is adopted as the story's
+delivery only when the change that landed has the patch id the converged verdict covers; `merged_by.how`
+is then `host` or `outside`. Otherwise the story is closed with `merged_by.how = "unreviewed"`, and
+T-NOTICE counts what landed as a hand commit, so the wave's review must account for it."""
+unmeasured = "What the project's CI checks, and whether the repository requires a review or a current branch before a merge. The repository's rules decide; a merge the remote refuses is reported with its own message and waits for a person"
+
+[T-NOTICE]
+form = "A step of `vsdd survey` (a report), and a part of `vsdd gate wave` and `vsdd gate release` (binding)"
+runs = "Wherever the target branch has an upstream: in every survey, after the fetch of the target branch where the delivery mode makes one; in the wave and release gates on the head they measure"
+reads = """
+The first-parent line of the target branch from the head the cycle's previous perimeter covered to the
+head in hand. For a cycle's first perimeter that start is the baseline's head, or with no baseline the
+base of the cycle's stories that is an ancestor of all the others. Also `delivery.merged_sha` and
+`delivery.landed` of every story closure not marked `unreviewed`, and the commits and pull requests
+`vsdd release` recorded in its closure"""
+refuses = """
+The survey refuses nothing: it lists the hand commits in its result, and `vsdd status` and the briefing
+give their count with the authors. The gates put them in the gate result as `hand_commits` (commit,
+author, files by path class), write the patch of each beside the gate's evidence as
+`hand.<sha12>.patch`, make each an item of the review (T-ITEMS) and print them in the wave's and the
+release's packet.
+Either gate fails when it cannot measure the range: with `history_rewritten` when the head the previous
+perimeter covered is not an ancestor of the head in hand, and with `history_unmeasured` when git cannot
+answer the ancestry test, as in a shallow clone, where the message names `git fetch --unshallow`. The
+unit is blocked with the reason `environment`, and a person decides.
+A recorded baseline is never changed. A test, lint or scanner failure that a hand commit brought is not
+in the baseline, so the next green or wave gate fails on it as on any new failure; the gate result names
+the hand commits in range beside the failure, and the remedy is a fix story, never a revert."""
+unmeasured = "A hand commit that a later delivery's strategy folded into its own commit. `delivery.landed` lists what each delivery put on the branch, so the case needs a history edited by hand, which `history_rewritten` reports"
+
+[T-BRANCH]
+form = "A step of `vsdd survey` for each story this clone holds, and of `vsdd story deliver`"
+runs = """
+With team use on or off, where this clone has a reason to look for the story branch on the remote: the
+story's closure records `delivery.pushed`, or the local branch has an upstream. Both are read without
+the network: the first from tracked state, the second from git's own configuration
+(`%(upstream:remotename)` of `git for-each-ref`; [[topic:team-git-facts]], fact 21). The branch is then
+looked for on the remote (the listing rule at the head of [[table:team-checks]]): where it is there
+it is fetched and the check reads what the fetch brought, and where it is not, nothing arrived. A
+story branch with neither has no push on record: the remote is not asked about it, so a project in
+`local` mode makes no network call here, and its first push is judged as every push is, which finds
+whatever is there. This cell is the one place the condition is stated. With team use off the one
+clone is the holder"""
+reads = "The remote story branch's head and this clone's; `delivery.pushed`, the head the remote last took from the holder, or the head the holder last brought in and checked; `delivery.hand_commits`; the red record's frozen files"
+refuses = """
+Dropping or overwriting what arrived, and taking the holder's own commits for somebody else's. What
+arrived is the commits on the remote branch that are reachable from neither `delivery.pushed` nor this
+clone's head. After the tool's own rebase that is not pushed yet there are none, although the remote
+head is then no ancestor of the local one. Where the remote head contains this clone's head but not
+`delivery.pushed`, a push of this clone was accepted and only its answer or its record was lost: that
+is no replaced branch, and `delivery.pushed` is set to the remote head once what arrived, if anything,
+is brought in. A holder whose branch is behind `delivery.pushed`, or that has none yet because it took
+the story from another clone, takes that head first: it fast-forwards to it, or creates the branch at
+that commit id, so that the branch has no upstream until its first push (T-REMOTE).
+Those commits are hand commits: the tool records them in the story's closure as
+`delivery.hand_commits`, writes the patch of each as T-NOTICE does, brings them into the story branch
+under their own ids, by a fast-forward or a merge commit, and sets `delivery.pushed` to the head it
+checked. When something arrived, the remote head does not contain this clone's head and this clone's
+branch does not contain `delivery.pushed`, that branch holds a rebase of the tool that the remote never
+took (T-NEVER). It is put back at `delivery.pushed` before anything is brought in, since a merge into
+it would leave each of the holder's commits in the history twice ([[topic:team-git-facts]], fact 17),
+and only when `git cherry` shows that every commit this drops has its patch in `delivery.pushed`. The
+story's position then falls back as it does for any new commit
+([[topic:story-life]]): green is measured again, and a hand commit that changed a frozen test fails it
+with the test and the commit named, which sends the test to the test-writer's `test-defects` step and
+its re-freeze ([[workflow:story]]).
+Nothing is merged or pushed, and the unit is returned blocked with kind `conflict`, naming the commits
+and their authors, in five cases: the merge conflicts; the remote head contains neither
+`delivery.pushed` nor this clone's head, so somebody replaced the branch there; putting the branch
+back would drop a commit whose patch `delivery.pushed` lacks; the branch is not on the remote and
+this clone does not hold the commit `delivery.pushed` names, so what was pushed cannot be read; or
+git cannot answer an ancestry test.
+A push of the story branch that did not report success is judged by the measurement of T-PUSH
+([[table:sync-checks]]), at a checkpoint, a release of the claim and a delivery alike: the tool fetches
+the branch and compares. The pushed head contained in the remote head was accepted, and
+`delivery.pushed` becomes it. A remote head equal to `delivery.pushed` was not taken: `refused`, with
+git's line. Any other head means something arrived, which the steps above bring in. When the fetch
+fails as well, nothing is recorded or put back, the result lists the story as not pushed, and the next
+survey measures."""
+unmeasured = "A hand commit made in the story's worktree on the holder's own clone. It is a commit of that story like any other, and the review loop covers it as new commits"
+
+[T-ITEMS]
+form = "Items of the verdict: the tool adds them to the items a review must account for ([[topic:verdicts]])"
+runs = "At the story perimeter, in the loop that reviews the commits a story's hand commits arrived with; at the wave and release perimeters, in the first round"
+reads = "`delivery.hand_commits` of the story; `hand_commits` of the wave or release gate result; the patch file of each"
+refuses = """
+A converged verdict, and so a delivery, a closed wave or a release decision, while an item
+`hand:<12 hex>` is not marked `checked`. Each item is given to the reviewer with the path of that
+commit's patch, which is how a reviewer without a shell reads it. `not_checkable` does not account for
+one: no other evidence covers a commit nobody reviewed. What the item asks of the reviewer that accounts
+for it is in [[agent:adversary]]. At a wave's cap an item still open is an uncovered item, which opens
+`finding` for a person as any uncovered item does ([[topic:human-stops]])."""
+unmeasured = "Nothing: an item no reviewer accounts for keeps the verdict open"
+
+[T-GAP]
+form = "A blocked result of kind `spec_gap` from the reviewer that accounts for a `hand:` item"
+runs = "When that reviewer finds that a hand commit changes behaviour a contract fixes, or adds behaviour no contract covers"
+reads = "The hand commit's patch, the contracts of the modules it touches"
+refuses = """
+Closing the perimeter as if the specification still described the code. The checkpoint opens `spec-gap`
+for the unit, as it does for any such result ([[topic:human-stops]]). `amend` brings the specification up
+to the code through an amendment run ([[topic:amendments]]); the kind's other choices are its own. None of
+them removes the commit. The `release` packet lists every hand commit of the cycle with its author, the
+perimeter whose item covered it and any `spec-gap` decision it led to."""
+unmeasured = "Whether a hand commit changed specified behaviour. It is a reviewer's judgment; the program holds the reviewer to an answer for every item"
+
+[T-NEVER]
+form = "A rule of the delivery library and the worktree library, held by tests on real repositories"
+runs = "At every git command the tool runs on a branch that is on the remote"
+reads = "`delivery.pushed` and `delivery.hand_commits`; the target branch's hand commits"
+refuses = """
+Rewriting or undoing a person's commit. The tool never rebases, amends, squashes away, reverts or
+force-pushes over one. A story branch that holds a hand commit is brought up to date by merging the
+target into it and is pushed as a plain push.
+A story branch that holds none may still be rebased by the tool ([[command:story-deliver]]), and only
+from the head the remote holds: the tool pushes first, so `delivery.pushed` is the head before the
+rebase and needs no other note. The push after that rebase is the one push that may replace commits on
+the remote, and it names the head it expects there:
+`--force-with-lease=refs/heads/story/<id>:<delivery.pushed>`, the head T-BRANCH has just read and
+checked. A lease without that value is never used: it trusts the remote-tracking ref, which any fetch
+moves, and so overwrites a commit a teammate pushed in between. The tool puts the branch back at
+`delivery.pushed` only when a fetch shows that the remote did not take the push, never because the
+push did not report success (T-BRANCH, which then brings in what arrived).
+No fix story is written as a revert of a hand commit: it changes the code forward.
+In `pr` mode the tool moves no target branch by a push of its own. A story, the merge of a hotfix
+branch back into the integration branch and a release commit each reach one through a pull request
+([[command:release]])."""
+unmeasured = "Nothing: each test asserts that the hand commit's id is still on the branch afterwards, and one of them fetches between the teammate's push and the tool's"
+
+[T-WAVE]
+form = "A step of the `wave` survey, and a refusal of `vsdd gate wave`"
+runs = "In every `wave` run while team use is on"
+reads = "The wave's stories; their claims and closures after the opening sync; the limits the survey returns"
+refuses = """
+The survey returns as units the wave's stories that are free or that this clone holds, lists the rest
+in `elsewhere`, and claims the free ones in the batch the run's first call of `runStories()` will
+start, which [[table:work-claim-scopes]] defines; it claims no story the run will not start.
+`vsdd gate wave` puts a story that another clone holds and has not delivered in `pending` with its
+holder, never moves it with `--settle`, and does not measure while one is pending. A run with nothing
+left but stories held elsewhere checkpoints and returns `partial`; its `next` is of kind `human` and
+names each story with its holder. The wave's gate is run by whichever clone holds the `cycle` claim
+when every story of the wave is delivered, descoped or moved."""
+unmeasured = "When the holder of a pending story will finish. Nothing waits inside a run; the next `wave` run looks again. And agents that a script other than `wave` spends between its survey and its first batch: they can lower the fit, and a story claimed and not started then stays claimed until that run's checkpoint removes it (T-RELEASE)"

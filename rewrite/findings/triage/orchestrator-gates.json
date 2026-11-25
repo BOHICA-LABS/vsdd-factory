@@ -1,0 +1,54 @@
+[
+ {
+  "id": "ORCH-5",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "G2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-gates-C2-1",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "G2",
+   "E1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4B-gates-1",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "G2",
+   "E1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-gates-fix-3-C2-1",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "step4-gates-fix-3-C2-2",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": true
+ }
+]

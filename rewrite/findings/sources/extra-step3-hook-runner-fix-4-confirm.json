@@ -1,0 +1,11 @@
+[
+  {
+    "id": "step3-hook-runner-fix-4-C1-1",
+    "origin": "step3-hook-runner-fix-4, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py (_CALL_TEXT_RE, program alternative); rewrite/spec/topics/caller-identity.md",
+    "problem": "The program alternative of the allow-list is (?!=)[SAFE]+/vsdd, and SAFE holds '='. So a first word shaped like an assignment matches, for example 'FOO=/vsdd id' or 'a=b/vsdd survey'. A shell reads that word as an assignment, and the command it runs is the next word ('id', 'survey'), not vsdd. The text grammar alone therefore does not make sure the program is vsdd. Only the parser's check for a leading assignment refuses these today. The spec repeats the gap: 'a path of safe characters that ends in /vsdd' allows '='.",
+    "proposed_resolution": "Leave '=' out of the program's characters, for example (?:vsdd|[A-Za-z0-9_@%+:,./-]+/vsdd). Say in caller-identity.md that the program path holds no '='. Add 'FOO=/vsdd id' and 'a=b/vsdd survey' to the refused table, and assert that caller._CALL_TEXT_RE.fullmatch refuses them on its own.",
+    "on_slice_path": true
+  }
+]

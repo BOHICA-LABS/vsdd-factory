@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S3R-records-C2-1",
+    "origin": "slice step 3, records, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "New, caused by the S3R-records-9 fix. flush now commits only the rels listed by 'git diff --cached --name-only -z'. That command detects renames by default (diff.renames, git 2.9+), and --name-only then prints only the new name. So when one tracked state file is deleted and a similar one added in the same flush (a story or spec file renamed or renumbered, or any delete plus add over 50% similar), the deleted path drops out of commit_rels. The commit carries only the new file, and the deletion stays staged ('D '). Every later flush then returns state 'failed', because 'git add -A -- <path>' refuses a path that is in neither the index nor the worktree ('pathspec ... did not match any files'). No state file can be committed until someone runs git by hand in .factory. Probe (git 2.50.1): commit stories/E-1/S-1.01.md, rename it to S-1.02.md. The second flush is 'committed' with files ['stories/E-1/S-1.02.md'], status 'D  stories/E-1/S-1.01.md'. The third flush is 'failed'. Before the filter (commit_rels = state_rels) the same probe committed both paths and the next flush was clean. A deletion staged by a killed flush hits the same add failure; that was there before this round, and the same change fixes it.",
+    "proposed_resolution": "Pass --no-renames to the 'git diff --cached --name-only' that builds commit_rels. Stage existing paths with 'git add -A --' and paths gone from the worktree with 'git rm --cached -q --ignore-unmatch --', so a deletion that is already staged is not refused. Tried in a scratch copy: the rename probe commits both paths and the next flush is clean; a killed flush's staged deletion commits; test_state_commits.py still passes. Add tests for (a) a committed story renamed to a similar file: state committed, both paths in HEAD's change, tree clean, next flush clean; (b) a committed file deleted and its deletion staged by hand before flush: state committed, tree clean.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-C2-2",
+    "origin": "slice step 3, records, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; next/plugins/vsdd-factory/py/vsdd/state/cmd_lock.py",
+    "problem": "New, caused by the S3R-records-C1-1 fix. When flush.lock is busy, lock_release now keeps the entry and returns normally, without StoreBusy. Plan records.md 3 says 'StoreBusy after wait, which bounds the whole call', and the docstring was rewritten to match the new behaviour. Callers can no longer tell 'released nothing because flush.lock was busy' from 'nothing matched'. cmd_lock misreports both ways. Probe: with another process holding flush.lock, 'vsdd lock release --force' took 3.02 s and exited 0 with {ok: true, released: [], holder: null, error: ''}, while lock.json still held the entry and its run was not ended. Without --force, the caller's own session entry is kept and reported as 'another session's live run holds the lock', exit 1. The SessionEnd caller (wait=0.5, PL3-8) gets the same silent result and has nothing to log.",
+    "proposed_resolution": "Keep the bounded per-entry wait. After writing the kept entries, raise StoreBusy when any matching entry was kept because its run_end was busy, carrying the entries that were released (for example exc.released), so lock.json and the run records still agree. In cmd_lock, catch StoreBusy and exit 1 with an error that says a flush is running and to retry, never holder null. Test: with flush.lock held, lock_release(session=..., wait=0.5) raises StoreBusy within about 0.6 s with lock.json unchanged, and 'vsdd lock release --force' exits non-zero naming the busy flush.",
+    "on_slice_path": true
+  }
+]

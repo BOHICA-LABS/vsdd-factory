@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evidence-record.schema.json",
+  "type": "object",
+  "description": "Fields of an evidence record (state.md#2.8): one record per gate and commit, at local/evidence/<subject>/<gate>.<sha12>.json. Beside it sit the raw output (.log, cut to 256 KB), the JUnit report, or the diff (diff.<sha12>.patch).",
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "description": "Format version; 1."
+    },
+    "gate": {
+      "type": "string",
+      "enum": [
+        "red",
+        "green",
+        "demo",
+        "spec",
+        "plan",
+        "wave",
+        "release",
+        "ingest",
+        "contracts",
+        "integration",
+        "sweep"
+      ]
+    },
+    "subject": {
+      "type": "string"
+    },
+    "sha": {
+      "type": "string",
+      "description": "The full id of the commit the gate measured."
+    },
+    "patch_id": {
+      "type": "string",
+      "description": "git patch-id of the subject's diff from its base to sha; empty for a subject with no diff."
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "at": {
+      "type": "string",
+      "description": "ISO 8601, UTC."
+    },
+    "run": {
+      "type": "string",
+      "description": "The run the gate was given."
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 400
+      },
+      "maxItems": 20
+    },
+    "flaky": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Identities of inherited tests that failed and then passed on the second run."
+    },
+    "refreeze": {
+      "type": "boolean",
+      "description": "Red only: true for a re-freeze record."
+    },
+    "frozen": {
+      "type": "array",
+      "description": "Red only: the frozen test files.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "sha256"
+        ]
+      }
+    },
+    "tests": {
+      "type": "array",
+      "description": "Red only: the new tests.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "<classname>::<name>."
+          },
+          "file": {
+            "type": "string",
+            "description": "Empty when the report names none and none was found."
+          },
+          "red": {
+            "type": "boolean"
+          },
+          "exempt": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "file",
+          "red",
+          "exempt"
+        ]
+      }
+    },
+    "criteria": {
+      "type": "object",
+      "description": "Red only: acceptance criterion (AC-<N>) to the identities of the tests that cover it.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "diff_patch": {
+      "type": "string",
+      "description": "Green and wave: path of the patch the gate wrote."
+    }
+  },
+  "required": [
+    "schema",
+    "gate",
+    "subject",
+    "sha",
+    "patch_id",
+    "passed",
+    "at",
+    "run",
+    "failures"
+  ]
+}

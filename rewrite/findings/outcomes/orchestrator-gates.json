@@ -1,0 +1,14 @@
+[
+ {
+  "id": "step4-gates-fix-3-C2-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the step 6 unit first-run (E1's part), which edits the sample project and gets this in its launch notes: in tools/junit_runner.py, _function_cases_of collects functions only from modules already in sys.modules and never imports a module again; the source-tree loop catches (Exception, SystemExit) as discovery's bare except does and leaves KeyboardInterrupt alone. Runner-level tests: a tests/ module and a tally/ module that call sys.exit(3) at import each still give a report, with an ImportError case beside the tests that ran.",
+  "where": "next/tests/e2e/sample-project/tools/junit_runner.py; next/tests/unit/test_sample_runner.py"
+ },
+ {
+  "id": "step4-gates-fix-3-C2-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "For the step 6 unit first-run (E1's part), in the same change as step4-gates-fix-3-C2-1: build_suite catches unittest.SkipTest before the general handler and adds one skipped case for the module, with no file attribute, as the loader's own skipped test does. Runner-level test: a tally/test_*.py that raises SkipTest at import is reported as skipped and the runner exits 0 when nothing else fails.",
+  "where": "next/tests/e2e/sample-project/tools/junit_runner.py; next/tests/unit/test_sample_runner.py"
+ }
+]

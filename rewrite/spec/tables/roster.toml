@@ -1,0 +1,7 @@
+# The roster ships as data, at "next/tests/lint/roster.toml" (package B6): its [platform], [tiers],
+# [agents], [skills], [workflows], [overrides] and [budgets] tables are the single definition
+# (README rule 7). Consumers: tools/build.py generates the prelude's TIER, ROLE and OVERRIDE tables
+# from it, and the lint suite (tests/lint/test_roster_lint.py) holds every shipped agent, skill,
+# workflow and the manifest to it. This pointer is kept valid TOML.
+# Sources: agents-skills.md#2.12, BLUEPRINT.md#4.2, BLUEPRINT.md#4.3, BLUEPRINT.md#4.5,
+# packaging.md#layer-3-lint-over-every-shipped-file-pytest-test, agents-skills.md#2.4, agents-skills.md#2.5.

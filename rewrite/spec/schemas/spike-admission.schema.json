@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "spike-admission.schema.json",
+  "type": "object",
+  "description": "Fields of a spike admission (hooks.md#2.11.6, BLUEPRINT.md#6): the hook records the session and the dispatching caller's agent type (empty for the main session) when it sees the dispatch of a spike runner, and spike_attach pairs the runner with the oldest unclaimed admission",
+  "x-note": [
+    "of that session when the runner starts."
+  ]
+}

@@ -1,0 +1,290 @@
+[
+  {
+    "id": "D33R-F-1",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/claim-checks.toml (T-HANDOFF); tables/team-checks.toml (T-REMOTE); topics/team-sync.md (git fact 3)",
+    "problem": "A story branch would be pushed onto the integration branch. T-HANDOFF pushes 'the story branch to its upstream as a fast-forward'. T-REMOTE reads a branch's push target as its upstream (%(upstream:remotename) %(upstream:remoteref)). Fact 3 names `git worktree add --track -b` as the way that upstream is set. But a story branch is cut from the remote head of the integration branch (team-delivery.md: 'a story's base is the remote head read when its branch is created'), and git gives a branch made that way the integration branch as its upstream. Run in a scratch repository with git 2.50.1: `git worktree add --track -b story/S-1 ../wt shared/develop` gives story/S-1 the upstream `shared refs/heads/develop`. Pushing story/S-1 to that upstream ref was accepted as a fast-forward and moved the remote's develop. Git's default branch.autoSetupMerge does the same without --track. So every checkpoint on a team would put unreviewed story commits on the shared branch, outside a pull request and CI (clause 4f). That breaks T-NEVER ('never pushes to a target branch outside a delivery or a release'), and only a protected branch stops it. A clone with two remotes (a fork layout) has no rule at all for a story branch's first push: T-REMOTE refuses a branch with no upstream.",
+    "proposed_resolution": "Say that a story branch's push destination is always `<remote of the integration branch's upstream>` plus `refs/heads/story/<id>`. Never use the story branch's recorded upstream ref. The worktree library creates story branches with --no-track. The first push uses `push -u <remote> story/<id>`. T-REMOTE refuses any push of a story branch whose destination ref name differs from the branch name. Correct fact 3: --track sets the start point as upstream. Add a ledger entry for S3's worktree library, which is being built now, and for M3: create story branches without tracking, and push them by explicit refspec. Add a test that the remote's integration branch is unchanged after a checkpoint pushes a story branch.",
+    "on_slice_path": true
+  },
+  {
+    "id": "D33R-F-2",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/team-checks.toml (the rule 'A check runs only while team use is on'); tables/team-delivery-checks.toml; tables/team-config-keys.toml (team.enabled)",
+    "problem": "Clause 6 (cope with teammates who commit by hand, without the plugin) is delivered only when team.enabled is true. T-NOTICE, T-BRANCH, T-ITEMS, T-GAP and T-NEVER follow the head rule of team-checks.toml: a check runs only while team use is on. The key's meaning is 'True when more than one clone runs the factory on this repository'. The most common case of clause 6 is one person running the factory while teammates commit by hand. That project correctly leaves team.enabled false, by the key's own definition, and so gets none of these checks. Its hand commits are not listed or made review items. A story branch that holds one may still be rebased, because T-NEVER is a team check.",
+    "proposed_resolution": "Make the hand-commit checks independent of team.enabled. Run T-NOTICE, T-ITEMS, T-GAP and T-NEVER whenever the target branch has a remote, or always, since the first-parent check needs no remote. Keep only the claim-dependent half of T-BRANCH (commits from another clone) under team use. Say so in the head rule as a third exception beside T-JOIN and T-SOLO, and in team-delivery.md. Add a scenario to proof-team.md with team.enabled false and C committing by hand.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-3",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/team-checks.toml (T-JOIN, T-SOLO); config/team.md (On and off); topics/state-directory.md (Team use)",
+    "problem": "T-JOIN and T-SOLO force new behaviour on projects that do not use team use, and they conflict with the existing design. (a) A person working alone who clones the project on a new machine is refused by `vsdd init` and must type `vsdd init --only-clone` in a terminal. D1 says it 'costs you one /vsdd-factory:setup per clone'. state-directory.md says 'A fresh clone: one command mounts the state' and that init 'With a state branch on the remote ... mounts that'. compaction-and-cold-start.md and resume.md describe a fresh clone resuming after setup alone. (b) A solo user who alternates two machines must turn team use on. T-SWITCH refuses that in local delivery mode, so a solo local-mode user cannot use a second machine at all. The old design allowed it: run-lock.md and lock.md say the second machine fetches, rebases and retries. (c) With team use off, `vsdd status --fix` now pushes state and the push stops instead of rebasing. The designer lists (a) as open question 1, but team-use.md, config/team.md and state-directory.md state it as decided.",
+    "proposed_resolution": "Leave solo mounting as it is. With team.enabled not true, T-JOIN mounts and prints one line: the state was written by another clone, and if that clone is still in use, turn team use on. T-SOLO remains the guard at the push. Alternatively keep T-JOIN and mark it in team-use.md and config/team.md as awaiting the person's answer to open question 1, and do not present it as decided. In either case, say which of the existing statements (D1's cost, state-directory Mounting, compaction-and-cold-start's fresh clone, lock.md 'Two machines') change, and record the change for S1 and S2b in the ledger.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-4",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/team-checks.toml (T-FRESH); topics/team-sync.md (Freshness)",
+    "problem": "Clause 4c requires that 'a run starts from what the team has already pushed, not from a stale local copy'. T-FRESH lets a run start when the remote cannot be reached, if this clone already holds all its claims, marked refreshed: false. Such a run starts from a local copy that may be stale. It cannot see a teammate's settlement of the unit's decisions, a take-over of the claim, or a change to factory.toml such as a raised team.min_plugin. The design states this allowance as decided. It is not among the open questions, although it relaxes a clause the user wrote. Git's limits allow a refusal here, which is what the clause asks for.",
+    "proposed_resolution": "Default to the clause: with the outcome unreachable, refuse every survey that would write tracked state, and keep only report-only runs. If offline continuation is wanted, make it an open question for the person, and mark it in team-use.md as an exception to 4c awaiting the answer. Fix D33R-F-5 in either case.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-5",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/claim-checks.toml (T-SETTLE); topics/team-records.md (A decision opened on one clone and settled on another)",
+    "problem": "The guarantee 'No run ever acts on a settlement that a sync has not confirmed, so the two answers cannot both take effect' (T-SETTLE: 'every survey syncs before it reads decisions') is false under T-FRESH. A decision typed in a session is settled on the clone with no network. If clone A is offline, its person settles finding.<story> for a story A holds while B's person settles it differently and pushes. A's next survey ends unreachable, starts anyway because A holds the claim, and reads A's own unpublished settlement as settled. A's run acts on it. A's later sync sets that settlement aside, but its effect has already happened. Proof scenario 6 tests only a merge decision, and delivery needs the network, so the gap is not exercised.",
+    "proposed_resolution": "In T-SETTLE and the survey: a settlement listed in the clone record's sync.unpublished counts as open, not settled, for every survey whose outcome is not synced. The run returns needs_human, naming the unpublished settlement, until a sync confirms it. Add to proof-team.md: A offline settles finding.<story>, B settles it differently online, and no work on A's answer reaches tracked state.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-6",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "topics/team-sync.md (When someone edits state by hand); tables/team-checks.toml (T-INCOMING unmeasured); topics/state-commits.md (What flush does, step 4)",
+    "problem": "The remedy the design names for what it cannot measure would stop the factory. team-sync.md and T-INCOMING say that 'a repository that needs more protects the state branch and requires signed commits there'. The flush commits state 'without signing' (state-commits.md step 4). The sync's merge commit, the claim commit of T-PUBLISH and the mint commit are built with commit-tree, and the design says nothing about signing them. On a remote that requires signed commits on the state branch, every state push is declined with [remote rejected]. T-REMOTE then reports refused and does not retry, so no claim can be taken and team use cannot run.",
+    "proposed_resolution": "Choose one. (a) With team use on, the flush and every commit the sync builds sign when the clone's git configuration asks for it (commit.gpgsign and a signing key), with a time limit and no prompt, and doctor checks signing. Add a probe for signing inside a hook and a detached job. (b) Drop the signed-commit remedy from team-sync.md and T-INCOMING, and say that a state branch requiring signed commits is not supported. Either way, add a ledger entry for S2b, because the flush is built.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-7",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "tables/team-checks.toml (T-JOIN); ledger entry D33-4",
+    "problem": "T-JOIN says `vsdd init --only-clone` is a flag 'which only a person may run', but nothing makes it person-only. init is run by the setup skill, so the main session's model calls it. HUMAN_ONLY (tables/callers.toml, matched on the longest subcommand) has 'init --fresh' but not 'init --only-clone'. D33-4 adds only sync, claim release and claim take. A model that meets the `solo` answer can run --only-clone itself. That mounts a second clone's state with team use off, which is exactly the unannounced second writer that T-JOIN exists to stop.",
+    "proposed_resolution": "Extend D33-4, or add an entry for H6 and M1: add 'init --only-clone' to HUMAN_ONLY. Pin it in the lint. Add a case: the main session's `vsdd init --only-clone` is refused by gate-guard, and the same flag typed in a terminal mounts the state. As claim take does, the command should also refuse a call that carries a caller marker or has no terminal.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-8",
+    "origin": "decision D33, review (fit)",
+    "severity": "major",
+    "where": "topics/state-commits.md (Team use: 'it holds flush.lock'); ledger entry D33-3",
+    "problem": "The sync is specified as holding flush.lock, with no limit on what it does while holding it. Every writer of tracked records takes the same lock with a 3-second wait in the built store (store.locked; decisions.py settle_decision, cycles.py, runs.py, gate_evidence.py). The flush waits 5 seconds. The sync makes git calls with a 60-second time limit each (gitrun.py), and a push can be tried five times. A sync that holds flush.lock across the network therefore makes concurrent writers fail with StoreBusy while it runs. These include the settlement in the decisions rule, which has a 4-second deadline and fails closed, and evidence and run-record writes in a live run. T-SETTLE runs exactly that case: a detached sync during a live run.",
+    "proposed_resolution": "Say that the sync holds flush.lock only for the local steps: flush, building the combined or isolated commit, and the fast-forward of the mount. The fetch and the push run outside it, because a push of a commit id needs no lock. After the push, the mount is moved under the lock again. Put this in team-sync.md and D33-3, with a test: a settlement typed while a sync waits on a slow remote succeeds.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-9",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/team-checks.toml (T-FRESH); tables/claim-checks.toml (T-PUBLISH); commands/sync.md; packaging/proof-team.md (scenario 4)",
+    "problem": "The sync's outcomes do not fully map to what may run. (a) T-FRESH names unreachable, diverged, blocked and refused, but not unpushed or busy. It says what a run on claims already held does only for unreachable. (b) T-PUBLISH says that after acceptance 'the mount is moved to it'. The claim commit is built on the remote's head, and the mount may hold commits that were never pushed: a PreCompact flush in the middle of a run, an earlier unpushed outcome, or a mint inside a live run (T-MINT). A fast-forward is then impossible. The step needed is to combine with the claim commit, which the text does not say. T-MINT does not say its commit is built alone on the remote's head, as T-PUBLISH's is. (c) Scenario 4 expects the checkpoint to end 'unpushed' with the remote out of reach, but sync.md defines that case as unreachable, because the fetch fails first.",
+    "proposed_resolution": "Give T-FRESH one line per outcome (synced, unpushed, unreachable, diverged, blocked, refused, busy), each saying both whether new claims are allowed and whether a run on held claims may start. In T-PUBLISH and T-MINT, say that the commit holds only the claim or the new file, is built on the remote's head, and is merged into the mount by the sync's merge, built without touching the mount and then fast-forwarded. Make scenario 4's end condition match sync.md.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-10",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-checks.toml (T-HOLD); topics/team-use.md (What is new)",
+    "problem": "T-HOLD runs 'At every sync' and ends 'A run of this clone on that unit', releasing its lock. That includes the detached sync that the decisions rule starts from a hook. team-use.md justifies `vsdd sync` as a separate command because `status --fix` 'also releases locks ..., which a job started by a hook must not do'. The lock is scoped to the repository and branch, not to the unit. So ending 'the run on that unit' ends a whole wave run because one of its stories was taken over. T-CLAIM's write-path refusal (claim_not_held) already stops the run from writing to that unit.",
+    "proposed_resolution": "Have T-HOLD, in a sync started outside a survey or checkpoint, only set aside and record the loss. The run's own later writes then fail through claim_not_held, and its checkpoint releases the unit. Only the survey and checkpoint syncs end a run, and only one that works on nothing but the lost unit. A wave run continues with its other stories.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-11",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-sync.md (Freshness; git fact 8); tables/team-checks.toml (T-FRESH)",
+    "problem": "The claim that nothing waits rests on two unstated limits. (a) The survey is a foreground command, not a job. Its opening sync plus a claim push, at 60 s per git call (gitrun.py) and with up to five push attempts, can pass the Bash tool's 2-minute default. A call past its timeout is moved to the background and killed at the step's final response (platform-proven-2, item 43), possibly between the accepted claim push and the lock or the mount move. (b) GIT_TERMINAL_PROMPT=0 stops only git's own terminal prompt. ssh host-key and passphrase prompts, and credential helpers that open a window or a browser, are outside it and are bounded only by the time limit. Fact 8 was checked only for a missing remote.",
+    "proposed_resolution": "State the network time limit of one sync, and choose it so that a survey stays inside the Bash default with its other work. Alternatively make the opening sync a job the survey re-attaches to. Run the tool's git calls with ssh in batch mode (core.sshCommand with BatchMode=yes, unless the person set their own) and with credential helpers non-interactive. Add a probe with an ssh remote that wants a passphrase, from a hook and from a Bash call.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-12",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-sync.md (The git facts this rests on); commands/doctor.md (Team use)",
+    "problem": "The sync rests on `git merge-tree --write-tree`, which first appeared in git 2.38. The facts were checked on macOS with git 2.50.1 only, while the design supports macOS and Linux (platform.md: Linux open). Ubuntu 22.04 LTS ships git 2.34, which cannot run the combine. The design leaves 'the oldest git it supports' to M1, so whether team use works on a supported Linux is not known until M1 is built.",
+    "proposed_resolution": "State the git floor in team-sync.md now: at least 2.38 for merge-tree --write-tree, checking the exit status and output form named in fact 5 against that version. Have doctor and T-VERSION refuse team use below it. Run the nine facts once on a Linux git at the floor, as the platform probes do.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-13",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-claims.md (A wave on a team); tables/claim-scopes.toml (story.<id>, cycle)",
+    "problem": "Clause 4a asks that two people can work on different stories 'or different stages' without blocking each other. (a) team-claims.md says a wave run 'takes each story it starts'. claim-scopes.toml says the wave's survey claims 'each story it returns as a unit'. The wave survey returns every free story, so one wave run claims the whole wave at once and a teammate can take none of its stories until that run's checkpoint. (b) Every cycle-level workflow (spec, plan, feature, wave, verify, release, multi, ingest, maintain) takes the one cycle claim. In one cycle, an amendment cannot run while another clone drives the wave. That may be the right choice, but it is not stated as a choice against 4a.",
+    "proposed_resolution": "Make the two texts agree. Prefer claiming only the stories the run will start (up to its story limit), and keep the rest free for a standalone story run elsewhere. In team-use.md's 'What was decided', say which stages run in parallel on a team, which are serialized by the cycle claim, and why.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-14",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-claims.md (What can be claimed); tables/claim-scopes.toml (header and the open row)",
+    "problem": "The rule 'a workflow that takes the lock takes a claim; spike, discover and a report-only maintain, which take no lock, take none' is stated twice: in team-claims.md and in the header of claim-scopes.toml. The open row of the same table contradicts it: the open claim is taken by 'the discover assess checkpoint'.",
+    "proposed_resolution": "State the rule once, in claim-scopes.toml, with the stated exception: discover takes the open claim when its assess checkpoint opens a cycle. Have team-claims.md link to it.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-15",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-checks.toml (T-CLAIM, the write-path clause)",
+    "problem": "T-CLAIM refuses 'A write to a closure record ... for a unit whose claim in the mount does not name this clone'. The head rule says 'Cannot measure is a failure'. Read together, a unit with no claim file at all is refused, which covers the standing closures of spike, discover and a report-only maintain, workflows that take no claim. On a team those workflows' checkpoints would fail with claim_not_held.",
+    "proposed_resolution": "Word the clause as: refused when a claim file covering the unit exists and names another clone, or when the unit's workflow takes a claim and this clone holds none. Units of claimless workflows are written as on one clone. Add the passing case for a report-only maintain.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-16",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/team-checks.toml (T-COMBINE); topics/team-sync.md (How two clones' pushes combine)",
+    "problem": "(a) T-COMBINE treats a path as a code-written record when it is in 'class control and the classes inside it'. Other code-written classes are outside control: holdout-evaluations, research-inputs and requests (write = code in the shipped classes.toml). These fall to git's text merge, which can combine two JSON records line by line into one that neither clone wrote. (b) notes.json, the one record team-sync.md says several clones write with no claim, keeps the remote's version and sets the other aside. That drops a note a person asked to keep from shared state, although the same file says 'A person's words are never dropped by a program'.",
+    "proposed_resolution": "Classify by the class's write mode from classes.toml (code versus agent or person), not by containment in control. Merge notes.json as a union of notes up to its cap of five, with the overflow set aside, or make each note its own file.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-17",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-scopes.toml; schemas/work-claim.schema.json (scope)",
+    "problem": "README rule 5 says to be machine-readable where a program reads the table. T-HOLD reads 'the covers of each scope ([[table:claim-scopes]])', but covers is prose ('The story's branch on the remote; its closure record; the opening of its decisions; ...'). The file column mixes a path with prose in parentheses. The schema lists scope ids story.<id>, cycle, spec, open and open.hotfix, while the table has four rows and gives open.hotfix only as a parenthetical file name.",
+    "proposed_resolution": "Give each row machine-readable fields: covers_paths (globs relative to .factory/), covers_acts (decision kinds whose opening it covers, cycle creation, wave moves) and file plus a standing_file. Add open.hotfix as a row or a variants field. Leave the prose in why.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-18",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/team-checks.toml (T-ORDER); topics/team-records.md (Order without clocks)",
+    "problem": "T-ORDER makes follows universal: each decision record names 'the decision of its kind that was latest when it was opened'. 'The latest decision of a kind is the one no other record follows; two such records are reported as a state problem and the route answers human'. Decisions of per-story kinds (merge, finding.<story>, blocked.<story>) are opened legitimately at the same time by two clones holding two stories. Both follow the same earlier record, which gives two heads and a false state problem wherever anything asks for the latest of such a kind.",
+    "proposed_resolution": "Store a follows chain only for kinds opened under one exclusive claim (spec, brief, plan, release, ideas), and the spec link only on a merge decision. Say that per-story kinds have no 'latest' and that no code asks for one.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-19",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-checks.toml (T-HANDOFF); records/closure.md (cap 16,000 bytes)",
+    "problem": "T-HANDOFF copies the red record (commit, frozen files, tests, criteria) into the story's closure, whose cap is 16,000 bytes, beside its stages, verdict, flaky list and the new delivery fields. A story with many tests or frozen files can pass the cap. T-HANDOFF then refuses the release, and the story can never be handed on. Clause 3's 'continues from what has been pushed' then fails for exactly the larger stories.",
+    "proposed_resolution": "Carry the red copy in a record of its own, for example cycles/<cycle>/units/story.<id>.red.json, in class control, with its own cap sized from the evidence record's. Have the evidence lookup read that file.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-20",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "agents/adversary.md (Team use); tables/team-delivery-checks.toml (T-ITEMS)",
+    "problem": "The adversary 'reads that commit's diff' for each hand:<12 hex> item, but it has no shell (READ, REPORT, SPAWN, RESULT) and is given only 'the latest diff patch'. Nothing says who writes one patch per hand commit, where, or how it is given. The wave's range diff mixes the hand commit with delivered stories.",
+    "proposed_resolution": "Have the gate that lists hand_commits (T-NOTICE) write one diff patch per hand commit beside its evidence. Add the patch path to each hand: item in the review's given inputs, and say so in T-ITEMS and in the item's text.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-21",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "packaging/proof-team.md; tables/team-checks.toml (header: 'the proof runs the check on two clones')",
+    "problem": "The head rule says the proof runs every check on two clones. Several checks are in no scenario: T-INCOMING (C edits a record on the state branch by hand, the case clause 6 also implies for state), T-WHO (a clone with no git identity), T-LOCAL (a path under local/, or an absolute path in factory.toml), T-GAP (a hand commit that changes specified behaviour) and T-DELIVERY's adoption of a pull request merged outside the tool.",
+    "proposed_resolution": "Add one scenario for each, with its end condition. Alternatively reword the head rule to say which checks only the package's own cases hold.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-22",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "packaging/proof-team.md (What it gates); skills/setup.md (Team use); config/team.md",
+    "problem": "proof-team.md says team use 'is not offered by setup ... until this proof passes', but no mechanism holds that. setup.md and config/team.md make setup show the two lines that turn it on, and they are built with K1 and M1 before M5.",
+    "proposed_resolution": "Make setup's team lines part of M5's delivery (or of a step after M5), and say so in the build plan. Alternatively drop the sentence and let the user documents carry the warning.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-23",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-checks.toml (T-SWITCH); tables/team-delivery-checks.toml (T-DELIVERY)",
+    "problem": "Clause 4f says stories reach the shared branch 'through pull requests and CI'. T-SWITCH and T-DELIVERY require delivery.mode = pr but accept delivery.ci = none. With that setting, a team's pull requests merge without the factory waiting for any CI.",
+    "proposed_resolution": "Either refuse team use with delivery.ci = none, naming the line, or state in team-delivery.md why a team may run without CI, which clause 5 would leave to the repository. In that case, list it as a point for the person.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-24",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-use.md (clause table, row 2); tables/team-checks.toml (header rule on Git hosts); ledger entry D33-18",
+    "problem": "(a) Row 2 says the shipped Python imports no network module, 'so git is the only way out'. But pr mode, which team use requires, runs the host's command-line tool. notify.command can run anything, and T-DELIVERY reads pull-request state from the host. (b) The head rule says 'Nothing a check reads names a Git host, a vendor or a remote', yet T-DELIVERY reads through the delivery library, which is bound to one vendor until D33-18 is built. D33-18 then proposes 'one configuration key' naming the implementation, which conflicts with that rule and with team-config-keys' 'No key holds ... the name of a Git host'. (c) T-SWITCH checks only delivery.mode, so a team on a host with no implementation fails at its first delivery instead of at the switch.",
+    "proposed_resolution": "Reword row 2: coordination goes only through git, and delivery also reaches the host's pull-request service through one module (D33-18). State in the head rule that the host module is the one exception and that no other check reads a host. Say where the implementation key lives (delivery, not team), or detect the host from the module's own probe. Have T-SWITCH and doctor ask the module whether it can serve the remote.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-25",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/multi-repo.md (Team use)",
+    "problem": "Clause 7 says the multi-repository layout is not meant by D33. multi-repo.md nevertheless asserts how the two combine ('The two combine at the hub: the state branch, and so the claims, are the hub's ...'). No check, package duty or proof scenario backs this, and member repositories' hand commits, story branches and remotes under T-NOTICE, T-BRANCH and T-REMOTE are not designed.",
+    "proposed_resolution": "Replace the passage with: team use with the multi-repository layout is outside D33 and is not supported until it is designed and proved. Alternatively raise it as an open question.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-26",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/run-lock.md (A story branch on the remote; Team use); topics/resume.md",
+    "problem": "The step-3 survey plan, which S3 is building now, includes 'adoption of a remote story branch and the conflict unit'. On a team that rule 'gives way to the claim', and a remote branch with unknown commits becomes T-BRANCH's hand commits instead of a conflict. No ledger entry tells S3 to keep adoption replaceable, and none tells M2 or M4 to replace it. M4's delivers does not name it either.",
+    "proposed_resolution": "Add a D33 ledger entry for S3 (on the slice path) to keep 'adoptable or owned elsewhere' behind one function of the survey that takes the claim state as an argument, changing nothing on one clone. Add it to M4's delivers (or M2's) to replace that function's team branch with the claim and T-BRANCH.",
+    "on_slice_path": true
+  },
+  {
+    "id": "D33R-F-27",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "ledger entries D33-19 and D33-7 (rewrite/findings/triage/d33.json, outcomes/d33.json)",
+    "problem": "Ledger bookkeeping. D33-19's outcome says 'with S2c's owner', but its triage lists only M1 and M2, so S2c's by-package list has no D33 entry, although S2c owns the briefing and the status report. D33-7's where names cycles.py ('cycles_open sorts by opened'), but its resolution addresses only decision ordering. cycles_open still orders two tracked records by time, which T-ORDER refuses.",
+    "proposed_resolution": "Add S2c to D33-19's packages. Extend D33-7's resolution to cycles_open, for example ordering by the main cycle and then hotfix cycles by kind, or saying the order is only for display, and give it a test.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-28",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "commands/sync.md (Syntax); topics/long-commands.md",
+    "problem": "sync.md makes `vsdd sync` 'A job command keyed sync', but long-commands.md, which lists the commands that run as jobs and defines the key as 'a hash of the command, its subject and the commit', neither lists sync nor allows a key without a subject or commit. long-commands.md has no Team use passage.",
+    "proposed_resolution": "Add sync to the list in long-commands.md with its key rule (command only, so a second call attaches), in a Team use passage. Add a ledger entry for G1's job layer.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-29",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "packaging/build-plan.md (Order of work, items 6 and 7); registry.d/d33.toml (M1)",
+    "problem": "(a) Item 6 says 'T1 is therefore built before M1', but item 7, which comes after item 6, lists T1 among the operator tools, so the order is self-contradictory. (b) M1 is large for one builder. It carries the whole sync engine (fetch, incoming checks, merge-tree combine by path class, isolated commits, the push loop) plus eight checks, the clone record, the loader keys, init with --only-clone, doctor, status and briefing lines, and seven and a half ledger entries. The precedent D31R-F-13 flagged F2 for less. T-FRESH, which M1 builds, needs claims, which M2 builds.",
+    "proposed_resolution": "Move T1 into item 6 ahead of M1, or drop T1 from M1's dependencies and give the doctor lines to a later package. Split M1: one package for the sync engine and T-COMBINE, T-INCOMING and T-REMOTE, and one for the setting, the clone record, T-JOIN, T-SOLO, T-VERSION, T-LOCAL, init, doctor, status and briefing. Move T-FRESH's claim clause to M2.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-30",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "topics/team-delivery.md; topics/team-records.md; config/team.md; topics/team-use.md; tables/team-delivery-checks.toml; tables/team-checks.toml; tables/claim-checks.toml",
+    "problem": "README rule 1, one fact in one place, is broken in several places. 'Local delivery remains for a project with no remote, for a project with one clone that chooses it, and for the thin slice' appears word for word in team-delivery.md and T-DELIVERY. The definition of a hand commit is in team-delivery.md and in the header of team-delivery-checks.toml. The table of where each act is recorded (team-records.md) restates T-WHO's refuses cell. The list of what stays on the machine is in config/team.md, team-records.md and T-LOCAL. The refusal of absolute paths in factory.toml is in config/team.md and T-LOCAL. The detached-sync settlement is in T-SETTLE, team-records.md and rules/decisions.md. 'No claim expires because git has no liveness' is in six files. team-use.md says each fact is 'in the file the table names, and nowhere else'.",
+    "proposed_resolution": "Keep each fact in its check row (or in the one topic named), and replace the other statements with a link and a reason. For example, team-delivery.md keeps why local delivery stays and links T-DELIVERY for when.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-31",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "tables/claim-checks.toml; tables/claim-scopes.toml; commands/claim-take.md; commands/claim-release.md; topics/glossary.md (Claim)",
+    "problem": "'Claim' already means a fixer's claim about a finding: schema:claim, and claim_checks in the adversary's review data, the story and wave scripts and prelude-converge. The record was named work-claim to avoid that, but the table claim-checks, the check T-CLAIM, the table claim-scopes and the commands `vsdd claim take` and `vsdd claim release` reuse the bare word. claim-checks (checks of work claims) and claim_checks (a reviewer's checks of fixer claims) are near-identical names for different things, which builders and reviewers will confuse.",
+    "proposed_resolution": "Use work-claim throughout the new names: tables work-claim-scopes and work-claim-checks, the check T-WORK-CLAIM or T-HOLDER, and commands `vsdd work take` and `vsdd work release`, or keep the commands and rename only the tables. Update the glossary entry.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-F-32",
+    "origin": "decision D33, review (fit)",
+    "severity": "minor",
+    "where": "decisions-later.md (D33)",
+    "problem": "The record of D33 shortens clause 4 to labels ('parallel work, no double work, current state (...), shared decisions, attribution, ... matching setups') and drops the user's definitions that the design is mapped against: 'different stories, or different stages, without blocking each other or corrupting shared state'; 'everyone can see who is working on what, and two machines cannot both take the same story, wave or specification change'; 'can be seen and answered by a teammate on another machine'; 'which person started a run, approved a specification, settled a decision or merged'; 'a compatible plugin version and the same project settings'. A decision record is the fixed text later reviews check against, and the labels are weaker than the clauses.",
+    "proposed_resolution": "Write clause 4's seven items into Decided as the user gave them, one short sentence each, keeping the rest of the record.",
+    "on_slice_path": false
+  }
+]

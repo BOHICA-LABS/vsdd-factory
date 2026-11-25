@@ -1,0 +1,11 @@
+[
+  {
+    "id": "L2-b6-1",
+    "origin": "slice layer 2, b6",
+    "severity": "minor",
+    "where": "next/tests/lint/test_roster_lint.py (METHOD_WRITE_NEEDS and TESTS_WRITE_NEEDS); next/tools/build.py (the marker-guard allowlist); rewrite/spec/tables/lint-checks.toml (L-KIND, the prose whose second statement the need rows are)",
+    "problem": "The L-KIND check encodes, as data in the lint, what each stage agent's method output needs (the implementer source and manifests; the test-writer tests; devops ci, repo-config, manifests and, for repo-setup, new files in source and tests; the verifier harness and tests; the technical-writer docs). That is a second statement of a fact the lint-checks table holds as prose, so a later widening of an agent's methods that forgets the lint table turns a correct walls.toml red (the message names the agent and says to extend the lint).",
+    "proposed_resolution": "Acceptable at slice depth, where the seven shipped kinds are exactly the story path: the lint failing loudly is the design goal. When the agent packages widen a method set, update the need rows in the same change; if a third consumer of the need table appears, lift it into a policy TOML next to walls.toml and point the lint at it.",
+    "on_slice_path": true
+  }
+]

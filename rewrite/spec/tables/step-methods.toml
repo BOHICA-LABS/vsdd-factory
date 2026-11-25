@@ -1,0 +1,302 @@
+# The agent and method of every step of every workflow; the table the scripts are written from.
+# Sources: pipeline.md#2.9.13, BLUEPRINT.md#4.14.
+# step() takes a required `method`, and universal test 6 checks that the method exists and that the
+# step's agent file lists it. Clerk steps have no method. Where a stage has more than one agent step,
+# each is listed. Rows whose `note` says "positional" pair agents[n] with methods[n].
+# Methods with no pairing of their own are grouped in the note, as in the source table.
+# Outside the workflows, the `brief` skill uses `brief` (product-owner) and the `author` skill uses
+# `conventions` (architect). `stubs` is merged into `failing-tests`, because one step takes one method.
+
+[[step]]
+workflow = "story"
+stage = "tests"
+agents = ["test-writer"]
+methods = []
+note = "By story kind: failing-tests (feature; it includes the stubs), regression-test (fix), equivalence-tests (port); ui-tests or e2e-tests when the story's tests_method key says so. No tests stage for facade, docs, chore, harness"
+
+[[step]]
+workflow = "story"
+stage = "implement"
+agents = []
+methods = []
+note = "By story kind: tdd (implementer, feature), fix-findings (implementer, fix), port-translation (implementer, port), service-clone (implementer, facade), docs (technical-writer, docs), repo-setup, ci or toolchain (devops, chore), proofs, fuzzing, mutation, performance or clone-fidelity (verifier, harness); or the story's impl_method key"
+
+[[step]]
+workflow = "story"
+stage = "review"
+agents = ["adversary", "security-reviewer"]
+methods = ["review-story-diff", "security-review"]
+note = "positional"
+
+[[step]]
+workflow = "story"
+stage = "fix"
+agents = ["test-writer", "implementer"]
+methods = ["test-fixes", "fix-findings"]
+note = "positional; test-fixes is for findings of category test or coverage and ends with vsdd gate red --refreeze"
+
+[[step]]
+workflow = "story"
+stage = "test-defects"
+agents = ["test-writer"]
+methods = ["test-fixes"]
+note = "positional; runs once when the implementer returns blocked with test_defects, and ends with vsdd gate red --refreeze"
+
+[[step]]
+workflow = "story"
+stage = "arbitrate"
+agents = ["architect"]
+methods = ["arbitrate"]
+note = "positional"
+
+[[step]]
+workflow = "story"
+stage = "evidence"
+agents = ["demo-recorder"]
+methods = ["demo"]
+note = "positional"
+
+[[step]]
+workflow = "story"
+stage = "repair after a failed delivery"
+agents = ["implementer"]
+methods = ["fix-findings"]
+note = "positional"
+
+[[step]]
+workflow = "wave"
+stage = "integration review; security; hidden scenarios; UX review; arbitrate"
+agents = ["adversary", "security-reviewer", "holdout-evaluator", "ui-reviewer", "architect"]
+methods = ["review-wave", "security-review", "holdout-eval", "ui-review", "arbitrate"]
+note = "positional"
+
+[[step]]
+workflow = "spec"
+stage = "intake"
+agents = ["product-owner", "architect"]
+methods = ["intake"]
+note = "both agents, method intake"
+
+[[step]]
+workflow = "spec"
+stage = "domain"
+agents = ["product-owner"]
+methods = ["domain-spec"]
+note = "positional"
+
+[[step]]
+workflow = "spec"
+stage = "contracts"
+agents = ["product-owner"]
+methods = ["requirements"]
+note = "positional"
+
+[[step]]
+workflow = "spec"
+stage = "architecture"
+agents = ["architect"]
+methods = ["architecture", "verification-properties"]
+note = "two steps: architecture, then verification-properties"
+
+[[step]]
+workflow = "spec"
+stage = "feasibility"
+agents = ["product-owner", "architect"]
+methods = ["requirements", "feasibility"]
+note = "positional"
+
+[[step]]
+workflow = "spec"
+stage = "assessments"
+agents = ["architect"]
+methods = ["clone-assessment", "port-assessment"]
+note = "one step each, only when the product has external services or a reference implementation"
+
+[[step]]
+workflow = "spec"
+stage = "scenarios"
+agents = ["product-owner"]
+methods = ["holdout-scenarios"]
+note = "positional"
+
+[[step]]
+workflow = "spec"
+stage = "ux"
+agents = ["ux-designer"]
+methods = ["ux-spec", "design-system", "design-variants"]
+note = "ux-spec; then design-system when none exists and design-variants for complex screens, one step each"
+
+[[step]]
+workflow = "spec"
+stage = "fixes after checks or review"
+agents = []
+methods = []
+note = "The owning planner; the method that wrote the artifact"
+
+[[step]]
+workflow = "spec"
+stage = "review"
+agents = ["adversary", "ui-reviewer", "scenario-reviewer"]
+methods = ["review-specs", "ui-review", "review-scenarios"]
+note = "positional; the scenario-reviewer runs its own loop"
+
+[[step]]
+workflow = "feature"
+stage = "delta and route"
+agents = ["architect"]
+methods = ["delta-analysis"]
+note = "positional"
+
+[[step]]
+workflow = "feature"
+stage = "story-draft"
+agents = ["story-writer"]
+methods = ["story"]
+note = "positional"
+
+[[step]]
+workflow = "feature"
+stage = "evolve"
+agents = ["product-owner", "architect", "ux-designer"]
+methods = ["spec-delta", "architecture", "ux-spec"]
+note = "One step per method. product-owner: spec-delta, then holdout-scenarios when the delta needs new hidden scenarios. architect: architecture, then verification-properties when properties change, and clone-assessment or port-assessment when a new external service or reference implementation appears. ux-designer: ux-spec"
+
+[[step]]
+workflow = "feature"
+stage = "checks and review"
+agents = []
+methods = []
+note = "As spec; as spec"
+
+[[step]]
+workflow = "plan"
+stage = "outline; write and fixes"
+agents = ["story-writer"]
+methods = ["decompose", "story"]
+note = "decompose outlines; story writes, one step per epic"
+
+[[step]]
+workflow = "plan"
+stage = "review"
+agents = ["adversary"]
+methods = ["review-stories"]
+note = "positional"
+
+[[step]]
+workflow = "verify"
+stage = "adversarial; security; scenarios; UI review; arbitrate"
+agents = ["adversary", "security-reviewer", "holdout-evaluator", "ui-reviewer", "architect"]
+methods = ["review-system", "security-review", "holdout-eval", "ui-review", "arbitrate"]
+note = "positional"
+
+[[step]]
+workflow = "release"
+stage = "retro"
+agents = ["researcher"]
+methods = ["retrospective"]
+note = "positional"
+
+[[step]]
+workflow = "ingest"
+stage = "map; analyze and corrections"
+agents = ["codebase-analyzer"]
+methods = ["ingest-broad", "ingest-deepen"]
+note = "ingest-broad maps; ingest-deepen analyses and corrects"
+
+[[step]]
+workflow = "ingest"
+stage = "validate"
+agents = ["adversary"]
+methods = ["review-extraction"]
+note = "positional"
+
+[[step]]
+workflow = "ingest"
+stage = "synthesize"
+agents = ["architect", "architect", "product-owner", "security-reviewer", "product-owner"]
+methods = ["architecture", "verification-assessment", "recover-contracts", "security-review", "domain-spec"]
+note = "positional"
+
+[[step]]
+workflow = "ingest"
+stage = "review"
+agents = ["adversary"]
+methods = ["review-specs"]
+note = "positional"
+
+[[step]]
+workflow = "ingest"
+stage = "disposition; port-analysis"
+agents = ["codebase-analyzer", "codebase-analyzer"]
+methods = ["disposition", "port-analysis"]
+note = "positional; run when as: reference"
+
+[[step]]
+workflow = "discover"
+stage = "research; synthesize; briefs"
+agents = ["researcher"]
+methods = ["market-intel", "discovery", "discovery"]
+note = "research is market-intel or discovery; synthesize and briefs are discovery"
+
+[[step]]
+workflow = "discover"
+stage = "score"
+agents = ["product-owner", "architect", "adversary"]
+methods = ["score-ideas"]
+note = "each scoring agent runs score-ideas"
+
+[[step]]
+workflow = "discover"
+stage = "research and synthesis (assess)"
+agents = ["researcher"]
+methods = ["market-intel"]
+note = "positional"
+
+[[step]]
+workflow = "maintain"
+stage = "dependency triage; docs drift; pattern consistency"
+agents = ["security-reviewer", "technical-writer", "code-reviewer"]
+methods = ["security-review", "docs-drift", "pattern-sweep"]
+note = "positional"
+
+[[step]]
+workflow = "maintain"
+stage = "scenario freshness"
+agents = ["holdout-evaluator", "scenario-reviewer"]
+methods = ["holdout-eval", "review-scenarios"]
+note = "positional; two steps split along the wall"
+
+[[step]]
+workflow = "maintain"
+stage = "accessibility; design drift"
+agents = ["ui-reviewer"]
+methods = ["ui-review"]
+note = "lens accessibility; lens design drift"
+
+[[step]]
+workflow = "maintain"
+stage = "risks and assumptions; post-release signals"
+agents = ["researcher", "researcher"]
+methods = ["risk-sweep", "discovery"]
+note = "positional"
+
+[[step]]
+workflow = "multi"
+stage = "synthesize"
+agents = ["architect", "product-owner"]
+methods = ["multi-repo-synthesis", "domain-spec"]
+note = "positional"
+
+[[step]]
+workflow = "multi"
+stage = "integrate reviews"
+agents = ["adversary", "security-reviewer", "holdout-evaluator"]
+methods = ["review-system", "security-review", "holdout-eval"]
+note = "positional"
+
+[[step]]
+workflow = "spike"
+stage = "every spike"
+agents = ["spike-runner"]
+methods = ["spike"]
+note = "positional"

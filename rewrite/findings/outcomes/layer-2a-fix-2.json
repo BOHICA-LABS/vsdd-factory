@@ -1,0 +1,92 @@
+[
+ {
+  "id": "CATCHUP-R5",
+  "outcome": "fixed",
+  "what_was_done": "emptyOf() now recurses into object-typed required members (a nested required field is filled by the same empty-by-type rule), and the relayed-output enums admit '': status of checkpoint-result and workflow-result, and next.kind of checkpoint-result, workflow-result and survey, with the composition checks in check.py unchanged because all composed copies were widened together. The dictated error object of relay() — the schema's empty object with error set — is therefore valid for every schema a clerk is bound to. A universal test relays all four schemas through a clerk that does exactly what the prompt says and the harness's validateValue accepts each answer; the mutation (old flat emptyOf) fails it. prelude-steps.md carries the same function.",
+  "where": "next/workflow-lib/prelude.js emptyOf(); next/plugins/vsdd-factory/schemas/{checkpoint-result,workflow-result,survey}.schema.json; rewrite/spec/topics/prelude-steps.md; next/tests/workflows/universal.test.mjs 'the dictated no-JSON answer is a valid result of every relayed schema' (and the next:{kind:\"\"} assertions of tests 7 and 14 updated to the valid shape)"
+ },
+ {
+  "id": "CATCHUP-R10",
+  "outcome": "fixed",
+  "what_was_done": "--subject dropped from the four spec script texts (topics/story-script.md, topics/wave-script.md, workflows/story.md, workflows/wave.md); the toys pass --outcome failed only on failure, which the signature alone admits. The three false outcomes in catchup-fix.json (P3SEAM-10, P3COV-10, SL1-51) are corrected, and AU-P2-12 is reopened there as left-for-builder naming the H, E2 and S2c packages. The gated-stage pin is a new universal test whose mutation (dropping the stage passthrough) flips the retry to the planner tier.",
+  "where": "rewrite/spec/topics/{story-script,wave-script}.md; rewrite/spec/workflows/{story,wave}.md; next/tests/workflows/toys/{toy-build,toy-story}.js; next/tools/check.py checkpoint_calls_match_the_signature (mutation: re-added --subject fails it); next/tests/workflows/universal.test.mjs 'a retried gated step keeps its stage and its override tier'; rewrite/findings/outcomes/catchup-fix.json"
+ },
+ {
+  "id": "CATCHUP-R3",
+  "outcome": "fixed",
+  "what_was_done": "VSA-14 is split in zz-catchup.json: the survey part (20 required fields) and story-unit part (32 required fields) fixed and pinned by relayed_outputs_require_every_property and the fixtures; the release-result part recorded left-for-builder for the release-workflow package, which must type ok, state, version and tag and require all four. The stale field counts (19 and 29) in the outcome text are corrected.",
+  "where": "rewrite/findings/outcomes/zz-catchup.json (VSA-14 entry)"
+ },
+ {
+  "id": "CATCHUP-R17",
+  "outcome": "fixed",
+  "what_was_done": "The design choice is made in topics/verdicts.md: the covering rule drops the from-commit condition and relies on the recorded loop order and subject, stating that no review pass stores the commit the loop before it converged on. VSA-06 is recorded fixed in zz-catchup.json with the untaken alternative (from-commit in the review-step identity and step-result.schema.json) named.",
+  "where": "rewrite/spec/topics/verdicts.md (the covering rule); rewrite/findings/outcomes/zz-catchup.json (VSA-06 entry)"
+ },
+ {
+  "id": "L2C-catchup-1",
+  "outcome": "fixed",
+  "what_was_done": "holdout_batches is typed as an array of arrays of scenario-id strings, matching the ids.join(', ') the wave script runs on each batch, with a description saying so. New fixtures: valid_holdout-batches-of-scenario-ids.json (two batches of ids) and invalid_batches-are-not-objects.json (a batch as an object), the latter with its expect sidecar taken from the shipped validator.",
+  "where": "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json; next/tests/unit/fixtures/schemas/wave-gate-data/{valid_holdout-batches-of-scenario-ids.json,invalid_batches-are-not-objects.json,invalid_batches-are-not-objects.expect.txt}"
+ },
+ {
+  "id": "L2C-catchup-2",
+  "outcome": "fixed",
+  "what_was_done": "A valid delivery-data fixture per state of story-deliver.md's list (state-empty with ok false, awaiting-merge, ci-failed, conflict, review-stale with ok true, refused and checkout-dirty with ok false, beside the existing merged), plus invalid_unknown-state.json with an expect sidecar showing the enum refusal. Dropping a state from the enum, or adding one, now fails the fixture run.",
+  "where": "next/tests/unit/fixtures/schemas/delivery-data/valid_state-*.json; next/tests/unit/fixtures/schemas/delivery-data/{invalid_unknown-state.json,invalid_unknown-state.expect.txt}"
+ },
+ {
+  "id": "B6-R7",
+  "outcome": "fixed",
+  "what_was_done": "The lint strips comments and string literals (a position-preserving scanner) before the agent(, model:/effort: and table-assignment scans, and allows exactly the skeleton's RUN.tier adoption form: `RUN.tier = <member chain> || null`, with no quoted literal — `RUN.tier = 'planner'` and the TIER/ROLE/OVERRIDE assignments stay rejected. Two new lint tests run the spec's own skeletons (topics/story-script.md, topics/wave-script.md) through workflow_problems and expect no problems, and a third asserts the toys raise no 'tier settings are the roster's' problem.",
+  "where": "next/tests/lint/test_roster_lint.py (_strip_comments_and_strings, TIER_KEY_RE/TIER_TABLE_ASSIGN_RE/RUN_TIER_ADOPTION_RE, TestSpecSkeletons)"
+ },
+ {
+  "id": "B6-R4",
+  "outcome": "fixed",
+  "what_was_done": "The call scan allows whitespace before the parenthesis, and every workflow( call whose first argument is not one complete quoted literal (concatenation, interpolation, bare name) is reported as non-literal — the argument is read from the original body at the scanner's offset. The backtick test is now a forbidden edge: wave calling `vsdd-factory:release` with backticks is rejected.",
+  "where": "next/tests/lint/test_roster_lint.py (WORKFLOW_CALL_OPEN_RE, WORKFLOW_LITERAL_ARG_RE, workflow_problems; tests test_a_backtick_call_of_a_forbidden_edge_is_rejected, test_a_space_before_the_parenthesis_is_still_a_call_edge, test_a_non_literal_quoted_first_argument_is_reported)"
+ },
+ {
+  "id": "B6-R12",
+  "outcome": "fixed",
+  "what_was_done": "absence_problems(plugin, roster) implements the roster-side half of L-ROSTER next to membership_problems. Fixture tests prove it: a fully populated temporary plugin passes, and removing an agent file, a skill directory or a workflow file each fails. The live-tree test against the PLUGIN constant is written and stays skip-marked only until E1 part 2 fills agents/, skills/ and workflows/ — switching it on is deleting the decorator.",
+  "where": "next/tests/lint/test_roster_lint.py (absence_problems; TestRosterMembership test_a_populated_plugin_leaves_nothing_absent, test_a_missing_agent_file_is_reported, test_a_missing_skill_directory_and_workflow_are_reported, test_nothing_in_the_roster_is_absent_from_disk)"
+ },
+ {
+  "id": "C2-R2",
+  "outcome": "fixed",
+  "what_was_done": "Three new policy pins close the surviving mutations: the six non-list [reveals] entries (refs --include-walled, coverage --include-walled, review show, review show --include-walled) are asserted exactly; the [other] row is pinned cell for cell with the holdout twin of the holdout-reader invariant; test_shell_less_rows_deny_outside gained the code-reviewer and adversary, and every reviewer-tier row must deny 'reviews'.",
+  "where": "next/tests/unit/test_policy.py (TestOtherRow, test_the_non_list_reveals_are_pinned_exactly, test_shell_less_rows_deny_outside, test_every_reviewer_row_denies_reviews)"
+ },
+ {
+  "id": "C2-R8",
+  "outcome": "fixed",
+  "what_was_done": "The third restatement of own-worktree in topics/rule-model.md now links the definition instead of repeating the old either-or wording: 'answers where this caller may work and is defined in that table ([[rule:spike-bounds]])'.",
+  "where": "rewrite/spec/topics/rule-model.md (The effective directory)"
+ },
+ {
+  "id": "C2-R11",
+  "outcome": "fixed",
+  "what_was_done": "artifacts/story.md now says the @<method> suffix matches 'the resolved method of the caller's own stage', linking [[rule:write-scopes]], the wording walls.toml, artifacts.toml and write-scopes.md carry.",
+  "where": "rewrite/spec/artifacts/story.md"
+ },
+ {
+  "id": "L2C-c2-b6-1",
+  "outcome": "fixed",
+  "what_was_done": "The header's claim is now earned: the [contract] row has a test class pinning glob, id, dir, cap, writer, lock, template and the eight frontmatter keys with their types, and all seven [[story-kind]] rows have their stage cells (tests and implement agent and method) and red_gate pinned exactly, harness included (verifier/proofs). The harness implement_agent mutation verifier->implementer now fails the suite.",
+  "where": "next/tests/unit/test_policy.py (TestContractArtifactKind, TestStoryKinds.test_all_seven_kinds_stage_cells_and_red_gate_are_pinned)"
+ },
+ {
+  "id": "L2C-c2-b6-2",
+  "outcome": "fixed",
+  "what_was_done": "The duplicated Model tiers paragraph in conventions.md is gone: the section states 'tests/lint/roster.toml is the single source.' once before the table and keeps the fuller paragraph with the [[table:roster]] link after it, deleting the repeated three sentences.",
+  "where": "rewrite/spec/conventions.md (Model tiers)"
+ },
+ {
+  "id": "L2C-c2-b6-3",
+  "outcome": "fixed",
+  "what_was_done": "The walls.toml closing note now matches callers.toml: the HUMAN_ONLY and GOVERNED values stay in the design's tables/callers.toml until H6 writes them as code constants in vsdd/hooks/model.py, which is then the one copy the tests and check.py read; shipped code never reads a file under rewrite/.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml (closing note)"
+ }
+]

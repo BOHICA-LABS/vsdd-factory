@@ -1,0 +1,111 @@
+[
+ {
+  "id": "D31-1",
+  "files": [
+   "artifacts/flag.md",
+   "artifacts/story.md",
+   "artifacts/toolchain.md",
+   "artifacts/deferred-item.md",
+   "tables/artifacts.toml"
+  ],
+  "packages": [
+   "F1"
+  ],
+  "on_slice_path": false,
+  "note": "Add the [flag] kind row with its stem cell and the lock value removed, the four story keys and the two widened rows to the shipped artifact registry; then shrink artifacts/flag.md to a pointer. Same change as D31R-F-15."
+ },
+ {
+  "id": "D31-2",
+  "files": [
+   "artifacts/flag.md",
+   "config/flags.md",
+   "tables/flag-checks.toml",
+   "tables/walls.toml",
+   "tables/path-classes.toml"
+  ],
+  "packages": [
+   "F1"
+  ],
+  "on_slice_path": false,
+  "note": "Add \"list flag\" to [reveals] and widen three writer texts in classes.toml (the survey writes [flags.approved] only); no class, row or grant changes."
+ },
+ {
+  "id": "D31-3",
+  "files": [
+   "config/flags.md",
+   "tables/flag-config-keys.toml",
+   "tables/config-keys.toml",
+   "schemas/config.schema.json",
+   "topics/project-configuration.md"
+  ],
+  "packages": [
+   "F1"
+  ],
+  "on_slice_path": false,
+  "note": "Add [flags], [flags.approved] and repo.flags to the loader, its tests, the schema, the key table and the annotated example, with set_by deciding which table accepts a key; mind the 16 KB limit of the two spec files."
+ },
+ {
+  "id": "D31-4",
+  "files": [
+   "tables/decision-kinds.toml",
+   "commands/decide.md",
+   "tables/flag-checks.toml",
+   "tables/flag-release-checks.toml",
+   "topics/flag-system-choice.md",
+   "topics/flag-lifecycle.md"
+  ],
+  "packages": [
+   "F3"
+  ],
+  "on_slice_path": false,
+  "note": "Spec row: approve takes flags=<source> for every source, or flags=decline -- <words>. Merge row: the maintain checkpoint opens merge.flag-<stem> before a cleanup story, only while flags.removal = human; reject needs until; nothing waits at story deliver."
+ },
+ {
+  "id": "D31-5",
+  "files": [
+   "tables/flag-duties.toml",
+   "tables/lint-checks.toml"
+  ],
+  "packages": [
+   "F4"
+  ],
+  "on_slice_path": false,
+  "note": "Add the lint check L-FLAG and ship the duty table as data."
+ },
+ {
+  "id": "D31-6",
+  "files": [
+   "artifacts/flag.md",
+   "tables/flag-checks.toml",
+   "tables/identifiers.toml"
+  ],
+  "packages": [
+   "F1"
+  ],
+  "on_slice_path": false,
+  "note": "Add the flag key to the identifier table; point at the header of tables/flag-checks.toml for its encoded form."
+ },
+ {
+  "id": "D31-7",
+  "files": [
+   "decisions.md"
+  ],
+  "packages": [],
+  "on_slice_path": false,
+  "note": "The orchestrating session changes the [doc.decisions] summary in registry.toml; builders do not edit that file."
+ },
+ {
+  "id": "D31-8",
+  "files": [
+   "tables/flag-story-checks.toml",
+   "tables/flag-duties.toml",
+   "topics/verdicts.md",
+   "schemas/story-unit.schema.json"
+  ],
+  "packages": [
+   "F2"
+  ],
+  "on_slice_path": false,
+  "note": "Carry the four F-ITEMS review items to reviewers: through the unit's acs for those the story's keys decide, from the green result for not-a-flag, and again in a later loop that touches source or tests; use a field of their own if a consumer reads acs as criteria only."
+ }
+]

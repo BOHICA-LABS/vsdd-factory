@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notes.schema.json",
+  "type": "object",
+  "description": "Notes.json (state.md#2.7): free text a person asked to keep, through vsdd note. No required list is given.",
+  "additionalProperties": true,
+  "x-notes": [
+    "The design gives no example of the file itself; the shape is inferred from the status report's notes list ({\"at\": ..., \"text\": ...}).",
+    "Stated limit: 5 entries of 200 characters, the oldest dropped. No top-level wrapping key is named by the design and none is imposed here."
+  ]
+}

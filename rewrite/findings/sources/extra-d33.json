@@ -1,0 +1,308 @@
+[
+ {
+  "id": "D33-1",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/config.py (the one key list, SPECS); rewrite/spec/tables/config-keys.toml; rewrite/spec/topics/project-configuration.md (the annotated example)",
+  "problem": "Decision D33 adds the section [team] with two keys, team.enabled and team.min_plugin. The loader's one key list has no such section, so a factory.toml that turns team use on is rejected as holding an unknown key, on every clone. The key table and the annotated example do not list the keys, and the meaning of state.push (\"State is pushed only by vsdd checkpoint\") stops being true: the survey, a settlement and the claim commands also push.",
+  "proposed_resolution": "Add the two rows of rewrite/spec/tables/team-config-keys.toml to config.SPECS, to the key table and to the example, each with its default (false, empty), and reword state.push. Leave the cross-key refusals (team use with state.push false, with delivery.mode local, with delivery.ci none, with a [[repo]] entry, or with no remote) to the sync, T-SWITCH: the loader cannot see a remote.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-2",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/records/config-fingerprint.md (the list of gate-bearing sections); the hook runner's fingerprint code when H1 widens",
+  "problem": "The hook runner announces a change to a gate-bearing section of factory.toml that arrives from another clone. [team] is not in its list, so a teammate who turns team use off, or lowers team.min_plugin, changes every clone's behaviour unannounced.",
+  "proposed_resolution": "Add [team] to the fingerprinted sections, with a case: the section changes in an arriving commit and the next session announces it once.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-3",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py (flush); next/plugins/vsdd-factory/py/vsdd/state/store.py (locked: flush.lock with a wait of 3 s); rewrite/spec/topics/state-commits.md (Push); rewrite/plans/step-3/records.md D11; rewrite/plans/step-3/survey.md D19",
+  "problem": "The flush and the state push were built and planned for one writer. (a) Where the clone has no git identity the flush commits as vsdd-factory <vsdd-factory@example.invalid>, which on a team hides who acted. (b) Its commit carries Run: and Code-Head: but neither the clone nor the plugin version, so nothing says which clone or version wrote state. (c) Code-Head: is the local integration branch's head, which in pr mode lags the remote. (d) It commits every changed file, with no way to publish a settlement or a claim alone while a run is live. (e) The push is designed as a rebase of the mounted state branch, allowed only while the run lock is held; a sync must also run outside a run and while an agent has uncommitted files in the mount, where a rebase cannot run. (f) The record stores and the function that settles a decision take flush.lock with a wait of three seconds, and a second flush waits five and then leaves its work to the holder; a sync that held that lock across a fetch or a push would make a typed settlement and a record write in a live run fail busy, and would leave a checkpoint's closures out of the commit.",
+  "proposed_resolution": "When the sync is built: the flush takes an optional path filter; with team use on it refuses a clone for which git has no identity (T-WHO) and adds the trailers Clone: and Plugin:; Code-Head: becomes the fetched head of the target branch; state commits stay unsigned (decision D2). The push is vsdd.state.sync (rewrite/spec/commands/sync.md): it builds the combined commit path by path with a temporary index, never by a merge of the whole tree, and fast-forwards the mount. It takes flush.lock for its local steps only (the flush; the check, combine, fast-forward and clone record; the outcome) and never across a listing, a fetch or a push; a local step that finds the mount's head moved repeats. Whole syncs of one clone are serialised by local/sync.lock: a second sync waits for the first inside its own time budget (in a foreground command 60 seconds for the wait and all network calls together) and answers busy at its end, having changed nothing; a command that takes a claim, mints an id or opens a cycle holds the lock for its whole act. Every fetch goes into the remote-tracking ref (git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>) and never into a local branch, and every push of the state branch names the head it was built on (--force-with-lease=refs/heads/<branch>:<that head>), so that it only adds to that head (T-REMOTE, T-PUSH). A branch is looked for on the remote by its exact ref name, through one function, because git ls-remote matches a pattern at the end of a name (the listing rule at the head of rewrite/spec/tables/team-checks.toml). sync.remote_head is the last head of the remote whose arrivals the clone checked and took into its mount: it is written only after the mount holds the commit, by the local step that checked what arrived and fast-forwarded the mount (to the fetched head) and when a push of the clone is accepted (to the pushed commit, not to the remote's head); a fetch made to judge a push writes nothing, so after a lost race the repeated sync checks every commit between the push's base and the new head (T-HISTORY, T-INCOMING). The sync ends synced without a fetch only when the listed head is sync.remote_head, the mount's head is that commit too, sync.unknown is empty and, in a full sync, the clone holds no claim that T-RELEASE has a sync remove (rewrite/spec/commands/sync.md, step 3). With team use off the push changes only as the head of rewrite/spec/tables/team-checks.toml lists: T-SOLO, where a push that finds the remote moved stops where it used to rebase and retry, and T-REMOTE's choice of remote and refs. The slice builds no push, so nothing is built differently now. Tests: a settlement and a closure write succeed while a slow remote holds a sync's fetch open; a survey that starts while a sync job holds the lock answers busy inside its budget; a state branch rewound between a fetch and a push is answered rewritten and the removed commits are not pushed back; a record that fails its check, pushed by the clone that beat this clone's push, is reported by the repeated sync before the mount takes it; a listing answered only by a branch whose name ends in the state branch's ref name is read as missing.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-4",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml ([callers]); the person-only list (HUMAN_ONLY, carried by rewrite/spec/tables/callers.toml until H6 moves it)",
+  "problem": "Three new subcommands have no group in the wall table: sync, claim release and claim take. A subcommand in no group cannot be run by any caller, and claim take must be refused for every caller, the main session's model included, because taking a claim over is a person's act.",
+  "proposed_resolution": "Add sync and \"claim release\" to the group author, which the main row holds, and \"claim take\" to the person-only list that gate-guard reads. Nothing else joins that list: vsdd init has no person-only flag for team use. Extend the lint pins and add one case each: the main session runs sync; an agent's claim take is refused.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-5",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/survey.schema.json, checkpoint-result.schema.json; rewrite/spec/schemas/status.schema.json; workflow-lib/prelude.js (generated from them)",
+  "problem": "The survey object has no place for elsewhere (stories another clone holds, with their holders) or hand_commits; the checkpoint result has none for the sync's outcome, for a story branch the remote did not accept and for a story worktree that holds uncommitted changes; the status object has none for work claims and the sync. The shipped schemas are open, so the fields would validate, but the prelude carries the survey schema as a literal and an undeclared field is not part of the contract a script may read.",
+  "proposed_resolution": "Add the fields, all optional with empty defaults, with fixtures, and run tools/build.py so the prelude is regenerated: elsewhere and hand_commits in the survey object; sync, not_pushed and uncommitted in the checkpoint result; work_claims and sync in the status object (named in full, because claims already means a fixer's claims in review data). There is no field for a run that started without a fetch: none does. No workflow script needs to read them: a story held elsewhere is simply not among the units.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-6",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/plans/step-3/survey.md 3.1 and 3.2 (the order of the survey and of the checkpoint); rewrite/spec/commands/survey.md (\"Order of the checks\")",
+  "problem": "The survey is planned as: caller marker, every precondition, flush, lock, admission. On a team the preconditions must be read on fetched state, so a sync comes before them, and a claim comes after the lock; the checkpoint gains the hand-off and the removal of claims before its push. The planned order (preconditions, then flush) is right for one clone and wrong for two: a stale clone would pass \"the story is admitted\" for a story a teammate has delivered.",
+  "proposed_resolution": "When team use is built the survey becomes: marker, sync (a full one: flush, list, fetch, combine, push), and only if it ended synced (T-FRESH): preconditions, lock, claim (T-CLAIM, through T-PUBLISH), admission. The checkpoint becomes: map results, hand-off (T-HANDOFF), remove claims (T-RELEASE), sync, release the lock; it ends the run whatever the sync's outcome. With team use off the order stays as planned.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-7",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py (latest_decision sorts by opened; spec_approved reads it); next/plugins/vsdd-factory/py/vsdd/state/cycles.py (cycles_open sorts by opened); rewrite/spec/topics/decisions.md (\"every approved merge decision that is newer than the latest approved spec decision\")",
+  "problem": "The latest decision of a kind is found by comparing the opened times of records, open cycles are ordered by their opened times, and dependency detection is specified as a comparison of a merge decision's time with a spec decision's. On a team those times are written by different machines whose clocks need not agree, so \"the specification is approved\" can be read from the wrong record and two open cycles can come out in the wrong order. The 90-day retention of settled decisions in the standing cycle compares a record's time with the local clock in the same way.",
+  "proposed_resolution": "A decision whose id carries no subject stores follows: the decision of its kind in the same cycle that was latest when it was opened. A decision whose id carries a subject (a story or a wave) stores none: two clones open such decisions at the same moment, and nothing asks for the latest of them. A merge decision stores spec, the spec decision in force. latest_decision returns the record that no other follows, and two such records are a reported state problem. cycles_open orders by the cycle's kind and then its id. Retention by age may keep reading times: pruning early or late changes no decision. Each ordering function, cycles_open included, gets a test whose times contradict the links.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-8",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py (settle_decision, decision_open); next/plugins/vsdd-factory/schemas/decision-record.schema.json (settled_by is session, terminal or import; settled_by_session)",
+  "problem": "A decision record says how it was settled (session or terminal) and in which session, and nothing about who: no person and no clone. A session id means something on one machine only. Decision D33 requires the record to say which person approved a specification or settled a decision.",
+  "proposed_resolution": "settle_decision takes the person and the clone's id as keyword arguments with empty defaults and writes settled_by_person and settled_on; the terminal command and the decisions rule pass them. The person is the identity git itself gives for a commit made in that clone (git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT), not the two configuration keys, because git takes the identity from the environment first. Nothing compares them with anything.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-9",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/decision-record.schema.json, closure-record.schema.json, cycle-record.schema.json (built by the records unit, in its fix stage)",
+  "problem": "Decision D33 adds fields to tracked records: settled_by_person, settled_on, follows and spec to a decision; delivery.pushed, delivery.merged_by, delivery.landed and delivery.hand_commits to a closure. On a team a newer plugin writes them and an older one on another clone reads them, inside one schema number of factory.toml. The three schemas are open today. If a review round closes one with additionalProperties: false, every older clone will refuse the record as corrupt and its flush will refuse to commit it. An earlier finding (AU-T2-14) asked for exactly that tightening on the configuration schema, so the risk is real.",
+  "proposed_resolution": "Keep the three tracked record schemas open, at the top level and inside stages, verdict and delivery, and pin it with a test beside the schema fixtures, as the rules unit pins the finding schema. Say in each schema's description that a later version may add a field. This changes nothing the slice does.",
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-10",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/runs.py (_new_id: r-<date>-<minute>-<2 of 36>); the closure's admitted_by and delivery.run (rewrite/plans/step-4/delivery.md 3.4); the Run: trailer of a state commit",
+  "problem": "A run id is unique on one clone: the store retries until the directory name is free there. Two clones can mint the same id in the same minute (one chance in 1,296 for each pair of runs). The id is written into tracked closures (admitted_by, delivery.run) and compared for equality: the checkpoint reads delivery.state where delivery.run is its own run, so a collision makes one clone read another's delivery outcome as its own.",
+  "proposed_resolution": "When team use is built, every tracked field that names a run stores the clone's id beside it, and the comparisons use both. The alternative, four characters of the clone's id inside the run id, is one function (_new_id); the schema gives the id no pattern, so either can be done at any time.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-11",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py (the red lookup reads local records only); next/plugins/vsdd-factory/py/vsdd/state/commits.py (record_kinds); rewrite/plans/step-4/gates.md; rewrite/plans/step-4/ORDER.md section 7 (\"red evidence cannot be restored at an earlier commit\")",
+  "problem": "Evidence is local. A clone that continues another clone's story past its red gate has no red record: the story's position reads ready, the tests-first rule blocks every write to source, the green gate fails with \"no red record\", and the red gate cannot pass again on a branch whose tests already pass. So a story cannot be handed on once it is past red, which decision D33 requires (\"picking up work that was begun on another machine continues from what has been pushed\"). The record cannot ride inside the story's closure: a story with many tests would pass the closure's cap of 16,000 bytes and could then never be handed on.",
+  "proposed_resolution": "The checkpoint and vsdd claim release write the story's latest passing red or re-freeze record to a tracked record of its own, cycles/<cycle>/red/<story>.json, with the fields, the schema and the cap of the evidence record it copies (8,000 bytes), so a record that could be written locally can always travel. The flush's record_kinds registers it in the same step. evidence(project, \"red\", subject) falls back to it when no local record exists, under the same rule: its commit lies between the story's base and its head. The tests-first rule and the green gate already read through that lookup. Green, demo and the review's cover are measured again as designed.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-12",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/mount.py (detect reads refs/remotes/origin/factory-artifacts; mount_state adds origin/factory-artifacts); next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_branch_tip); rewrite/spec/topics/state-directory.md (the table of conditions)",
+  "problem": "A remote is named in code. On a clone whose remote has another name, detect answers none where the truth is unmounted, and vsdd init creates a second, unrelated state branch instead of mounting the one on the remote. Two histories of state then exist that no push or merge can combine. A team's clones need not agree on what they call the remote.",
+  "proposed_resolution": "detect and init look for the state branch under every remote: the loose ref refs/remotes/<any>/factory-artifacts and the matching lines of packed-refs, still by file reads only. When more than one remote holds it, init mounts nothing and lists them, and the option --remote <name>, which setup passes after asking the person which is the repository the team shares, says which to use. The mount sets the state branch's upstream to that remote, which is all the sync reads afterwards (T-REMOTE). The test mounts from a remote that is not called origin, and from a clone with two.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-13",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/plans/step-3/survey.md 3.3 (target_head: \"in pr mode it runs git fetch origin <branch> and reads the remote head\"); its test test_target_head_local_and_pr",
+  "problem": "The worktree library, which is about to be built, is planned to fetch the target branch from a remote named in code. Every later caller (story admission, delivery in pr mode, the wave gate) reads the target through this one function, so the name would be built into all of them.",
+  "proposed_resolution": "Build target_head so that in pr mode it takes the remote from the branch's upstream (git for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' refs/heads/<branch>), fetches refs/heads/<branch> from that remote into the remote-tracking ref refs/remotes/<remote>/<branch>, never into the local branch, and reads that ref (T-REMOTE in rewrite/spec/tables/sync-checks.toml). It takes only the remote from the upstream: an upstream whose ref is not refs/heads/<branch> raises a WorktreeError that names the branch and the git command that corrects it. With no upstream and exactly one remote it uses that remote; otherwise it raises a WorktreeError that names the branch and the git command that sets the upstream. The pr case of the test uses a remote that is not called origin. Local mode, which is all the slice runs, is untouched. The leading + of the refspec and two further assertions are entry D33-33.",
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-14",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (mounts an existing remote state branch on any clone); rewrite/spec/skills/setup.md",
+  "problem": "vsdd init mounts a state branch it finds on the remote without a word about the clone that wrote it. That is how a second clone starts writing a project's state unannounced, which is the case decision D33 exists for. Refusing the mount would change what a project with one clone does (decision D1: one setup per clone), so the clone is told, and the first push that finds a second writer is what stops.",
+  "proposed_resolution": "T-JOIN: when the state branch is on a remote and not local, init reads team.enabled from the remote's factory.toml without mounting. True: it runs the preflight, mounts, and writes the clone record with how = joined and the label of --label. Otherwise it mounts as it does today and returns a notice, which setup shows: this state was written on another clone, and if both are going to run the factory, team use is turned on first on the clone that has the project. There is no flag that only a person may pass. T-SOLO, in the sync, is the guard at the first push.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-15",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/plans/step-4/survey-2.md 3.5 and D5 (failed_runs: runs that began after the newest settled time of the unit's decisions; a stage entry's at inside a run's start and end)",
+  "problem": "The count that opens blocked with the reason stuck is planned as a comparison of times: a run's start against a decision's settled time, and a stage entry's time against a run's span. On a team the decision may have been settled, and the stage entry written, on another machine with another clock, and a clone that took a story over has none of the earlier run records. The count is then wrong in either direction.",
+  "proposed_resolution": "When team use is built, the checkpoint keeps the count in the unit's closure record: it adds one for a run with no new stage entry and no decision, and sets it to zero on progress or on a settlement. No time is compared and the count travels with the unit. For the slice, with one clone and one clock, the planned function is right.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-16",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/plans/step-3/state-core.md section 1 (vsdd new with next_id, left for the widening); rewrite/spec/tables/identifiers.toml (\"Sequential, by vsdd\"); the commands new, story new-fix, spike open, review prepare and the idea register",
+  "problem": "An id is minted as the next free number in the local tree, and the command file says why that is safe: \"there is one state directory\". On a team there is one per clone. Two clones mint the same id: S-0.07 in the standing epic from a wave's fix round and from a critical fix beside it; the same CR number for two queued requests; the same spike id; the same report path. Git then sees one path added twice, and for a story two cycles hold closures for one id.",
+  "proposed_resolution": "With team use on, a command that mints an id which more than one claim could mint (an epic, a story of the standing epic, a change request, an idea, a spike, an on-demand review report) does so inside a sync (T-MINT): it takes the next free number in the fetched tree, builds one commit on the remote's head that adds the new file alone, and pushes it as a claim is pushed; the file reaches the mount with that commit. The push is judged by T-PUSH: a lost race repeats from the sync with the number taken again. After an answer that was lost the clone record lists the commit with its request, the SHA-256 of the kind of id and of every value the caller gave for the new file and of nothing the tool adds (rewrite/spec/records/clone.md), computed by one function for every minting command. The opening sync of any later command settles the commit, so nothing is minted while it is unknown. A command whose own request equals a settled entry's is given the id back when the remote took the commit, and mints when it did not; either way it removes the entry. A command with any other request mints as usual and leaves the entry, so a lost answer does not become two files for one request and a second request of the same kind is never answered with the first one's id. next_id takes the tree to scan as an argument, so a caller can pass the fetched one. Ids of the specification classes are minted only under the spec claim, and the stories of an epic belong to the run that holds its cycle; they need nothing. A number an agent picks for itself is caught at the sync as one path added twice (diverged).",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-17",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/plans/step-4/delivery.md (pr mode left for the widening: push, rebase with --force-with-lease; 3.3 the refusal list; 3.4 the closure's delivery keys); rewrite/spec/commands/story-deliver.md; next/plugins/vsdd-factory/schemas/closure-record.schema.json and delivery-data.schema.json; the story script's delivery loop",
+  "problem": "Delivery in pr mode is not built yet, and decision D33 makes it the only delivery a team has. When it is built it must carry what D33 adds. Refusals: this clone does not hold the story's claim; local mode or delivery.ci = none on a team; a host the module cannot serve. Closure keys: delivery.pushed, delivery.merged_by, delivery.landed, delivery.hand_commits. A state for a pull request the host will merge by itself later, queued, which opens no decision. The rule for a pull request merged by the host or outside the tool. The story branch pushed under its own name to the remote of its target, never to an upstream ref. No rebase or forced push of a story branch that holds a hand commit. And the planned bare --force-with-lease after a rebase is unsafe: it trusts the remote-tracking ref, which any fetch moves, so it overwrites a commit a teammate pushed in between (checked with git 2.34.1 and 2.50.1).",
+  "proposed_resolution": "G4a builds pr mode so that: every push of a story branch names refs/heads/story/<id> on both sides; \"bring the story branch up to date\" is one function with the two forms, rebase and merging the target in; the tool rebases only a branch whose head is delivery.pushed, pushing first where it is not, so that the head before a rebase needs no other note; the one push that may replace commits on the remote, after the tool's own rebase of a branch with no hand commit, is --force-with-lease=refs/heads/story/<id>:<delivery.pushed>; a push of a story branch that did not report success is judged by a fetch into the remote-tracking ref and a comparison of commits, as a push of state is (T-PUSH, T-BRANCH), and the branch is put back at delivery.pushed only when that fetch shows the remote did not take the push. Package M4 then adds the refusal rows to the one refusal list (checks.py), the keys to the closure, queued to the delivery data and to the story script's delivery loop (the run ends partial), and T-BRANCH, which looks for a story branch on the remote only where the closure records delivery.pushed or the local branch has an upstream, both read without the network, so that a branch never pushed costs no network call and local mode makes none; which reads delivery.pushed to tell what arrived from the holder's own commits, treats a remote head that contains this clone's head as this clone's own push, and puts a rebase the remote never took back at delivery.pushed, under a git cherry guard, before it brings in a teammate's commit, and returns the unit blocked where the branch is gone from the remote and the clone does not hold the commit delivery.pushed names. All of it but the two claim refusals runs with team use off as well.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-18",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/spec/commands/story-deliver.md and topics/governed-delivery.md (the merge through one vendor's command-line tool); next/plugins/vsdd-factory/py/vsdd/policy/walls.toml (the command family for it); rewrite/spec/rules/merge-guard.md; rewrite/spec/commands/doctor.md; rewrite/spec/packaging/sandbox-needs.md and plugin-manifest.md (one vendor's hosts)",
+  "problem": "Delivery in pr mode is specified through one vendor's command-line tool, which the design, the wall table, a hook rule, the doctor and the list of hosts all name. Git has no notion of a pull request, so some host-specific step is unavoidable; but decision D33 makes pr mode the only delivery a team has, and under it nothing a program reads may depend on the name of a Git host. As specified, a team whose repository is on another host has no delivery at all, and finds out at its first delivery.",
+  "proposed_resolution": "G4a puts the operations on the host (find or open the pull request of a branch; read its state, merged head and checks; merge it at a named head; close it; and answer whether it can serve a given remote) behind one module with one implementation. Nothing else in the tool calls or names the vendor's tool; the rules and the doctor ask that module what to guard and what to check. No configuration key names the module or a host: the tool asks the module whether it can serve the remote, and T-SWITCH, T-DELIVERY and the doctor refuse or report when it cannot. vsdd release uses the same module (D33-27). Whether a second implementation is built for 1.0 is a question for the person.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-19",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/briefing.md (computed from file reads with no subprocess; 12 lines); rewrite/spec/topics/status-report.md; rewrite/spec/schemas/status.schema.json",
+  "problem": "The briefing and the status report have no place for what a teammate needs to see: which work claims this clone holds and which others hold, with a name a person can tell machines apart by; whether state is behind or unpublished; a decision settled here that the remote does not hold yet; a claim this clone lost; what a sync set aside; a push whose lost answer a sync has since settled; and how many hand commits were noticed. The briefing may not fetch: it runs inside a hook's time limit and is specified as file reads only.",
+  "proposed_resolution": "Add two lines to the briefing (\"Yours:\", \"Elsewhere:\", each claim with its person and its clone's label) and entries to \"State problems\", all read from .factory/cycles/*/claims/ and .factory/local/clone.json; list a decision that is settled here and not yet published as that, and not under \"Waiting on you\"; add work_claims and sync to the status object. The limit stays, so lines still drop from the bottom.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-20",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/rules/decisions.md (the rule runs on UserPromptExpansion with a four-second deadline and runs no git); rewrite/spec/platform.md",
+  "problem": "A decision typed in a session is settled by a hook that cannot reach the network inside its deadline. To publish it at once the rule would start a sync as a detached job of its own, keyed by the command and settle:<decision id> (rewrite/spec/topics/long-commands.md). Whether a hook on that event can leave a detached job behind has not been tried: the proven case is a job started from a Bash call.",
+  "proposed_resolution": "Probe it (a hook on UserPromptExpansion starts the job layer's detached worker and returns; the worker finishes after the hook). If it holds, the rule starts the job. If it does not, the next sync publishes the settlement. The design is correct either way: a settlement is listed as unpublished from the moment it is written, and nothing acts on it until the remote holds it (D33-28).",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-21",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/plans/step-4/delivery.md 3.3 and 3.4 (the closure's delivery.detail holds the refusal text, which names the checkout, the worktree path and the job log); rewrite/plans/step-4/survey-2.md 3.6 (the packet of a blocked decision quotes it)",
+  "problem": "Text that names paths of one machine is planned to be stored in tracked records: delivery.detail in a story's closure and the packet of a blocked decision carry the absolute path of the person's checkout, of the integration worktree and of a job log under .factory/local/. Tracked state is shared, so a teammate reads paths that do not exist on their machine, and a file under local/ is named in a shared record.",
+  "proposed_resolution": "Where a path goes into a tracked record or a packet, write it relative to the project root (.worktrees/_integration, .factory/local/jobs/<key>.log), and name a checkout as \"the main checkout\" or by its path relative to the root. The command's own output and error may stay absolute. Only the stored text changes; what the slice does on one machine does not.",
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-22",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/commands/doctor.md; rewrite/spec/packaging/sandbox-needs.md (\"Network to the git remote\")",
+  "problem": "vsdd doctor checks git and nothing about the remote. On a team, a clone that cannot list the remote, has no git identity, is shallow, has a git below the floor, or runs a plugin below team.min_plugin fails at its first survey with no earlier warning; and nothing lets people see that two clones push to two different repositories, which no program can measure.",
+  "proposed_resolution": "Package M6 delivers one preflight function that returns a line for each check: git at 2.34 or newer, this plugin's version against team.min_plugin, not a shallow clone, the identity git would use, the upstream of each factory branch, and whether the remote answers a listing inside the time limit. The sync, vsdd init, vsdd status and the doctor all call it, so they cannot disagree, and M6 does not wait for T1. With team use on the doctor prints those lines, the address each factory branch is pushed to with any user or password part removed, the length of the state branch, and what the factory needs of the repository's rules (direct pushes of unsigned commits to the state branch; no forced push or deletion there). Whether the clone may push stays unmeasured and is said so.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-23",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json and gate-result.schema.json; rewrite/spec/topics/verdicts.md (\"Items to account for\"); rewrite/spec/commands/gate-wave.md, gate-release.md and release.md; rewrite/spec/agents/adversary.md",
+  "problem": "A commit made by hand reaches no gate today. The wave gate's data has no list of the commits in its range that no delivery recorded; the verdict's items are a story's criteria or a gate's own items, with none for an unreviewed commit; a reviewer has no shell and is given one diff patch, so it cannot read a single hand commit; the release closure is not specified to hold what vsdd release puts on a target branch, so that would be taken for hand commits; and nothing reports a range that cannot be measured because history was rewritten or the clone is shallow.",
+  "proposed_resolution": "Add hand_commits (commit, author, files by path class) to the wave and release gate results; write the patch of each hand commit beside the gate's evidence as hand.<sha12>.patch; add the items hand:<12 hex> to the verdict's items at the story, wave and release perimeters, each given to the reviewer with the path of its patch, for which only checked counts; have vsdd release record its commits and pull requests in the release closure; fail the gate with history_rewritten when the previous perimeter's head is not an ancestor of the head in hand, and with history_unmeasured when git cannot answer. These run wherever the target branch has an upstream, with team use on or off. One harness scenario per perimeter.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-24",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/packaging/sample-project.md (\"Its origin is a local bare repository\"; the pull request double); rewrite/plans/step-3/state-core.md section 2 (tests/unit/_repo.make_project(tmp_path, *, remote=False))",
+  "problem": "Every fixture builds one clone, and where it has a remote the remote is called origin. The pull request double keeps its records where one clone sees them. The proof of team use needs two clones of one bare repository whose remotes have other names, two identities and two clocks, a third working copy without the plugin, a double both clones share, and a way to make a race, a declined push and a lost answer happen every time.",
+  "proposed_resolution": "Add a fixture on top of _repo.make_project that makes the bare repository and two clones with remotes named shared and upstream, two git identities and an injected clock for each, and a third working copy that commits with plain git; keep the double's store in a directory beside the bare repository; let a test put a hook on the bare repository that delays, declines or outlasts a push; and add a builder for a long state history and a local sshd for the prompt scenario. The existing one-clone fixtures stay as they are.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-25",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/plans/step-3/survey.md 3.3 (create_story: \"creates the branch at exactly base\"); rewrite/spec/topics/worktrees.md",
+  "problem": "A story branch must not get an upstream by accident. Git gives a branch cut from a remote-tracking branch that branch as its upstream, with git branch as with git worktree add --track -b (checked with git 2.34.1 and 2.50.1), and a push to that upstream, or a plain git push under push.default=upstream, then moved the integration branch. On a team a checkpoint pushes story branches, so it would land unreviewed story commits on the shared branch. The planned create_story creates the branch at a commit id, which gives it no upstream, but nothing pins that.",
+  "proposed_resolution": "S3 keeps creating the story branch at the commit id, never from a remote-tracking name and never with --track, and its test asserts that the new branch has no upstream (git for-each-ref --format='%(upstream)' prints nothing for it). That changes nothing the slice does. When the build widens, a story branch is pushed as refs/heads/story/<id>:refs/heads/story/<id> to the remote of the branch it will be delivered to, with -u at the first push; T-REMOTE refuses an upstream that names another ref; and a test asserts that no checkpoint, release of a claim or sync moves the remote's integration branch.",
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-26",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/run-lock.md (\"A story branch on the remote\"); rewrite/spec/commands/survey.md (Adoption); rewrite/plans/step-4/survey-2.md (adoption and the conflict unit, left for the widening)",
+  "problem": "When S3 builds the adoption of a remote story branch, the rule decides from the pull request's trailer, the local run records and ancestry whether the branch is adoptable or owned elsewhere, and reports the second as a blocked unit of kind conflict. On a team the claim decides instead: a story this clone holds is continued and what arrived on its branch is brought in (T-BRANCH), and a story another clone holds is listed as held elsewhere, not as a conflict. If the rule is built into the survey's body, team use has to take it apart.",
+  "proposed_resolution": "S3 builds the decision as one function that is given the story's claim state (no claims in use, held here, held elsewhere) and is called with the first until claims exist. Package M4 passes the claim and supplies the two team branches. One test per branch.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-27",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "rewrite/spec/commands/release.md (Publish: the merge of hotfix/<version> back into the integration branch, which waits for the integration lock); rewrite/spec/topics/governed-delivery.md (The hotfix branch)",
+  "problem": "vsdd release moves shared branches itself: it merges hotfix/<version> back into the integration branch under an integration lock, and may put a release commit on the integration or release branch. A repository set up as decision D33 expects protects those branches, so the direct push is declined and a hotfix cannot be completed there. The integration lock is a file lock on one clone and orders nothing between two clones.",
+  "proposed_resolution": "In pr mode G7 makes each of those a pull request through the delivery's host module (D33-18), records the commit and the pull request in the release closure, and opens the merge decision on a conflict as today. Local mode keeps the merge in the integration worktree. Package M4 adds T-NOTICE's reading of those records and the scenario with a bare repository that declines direct pushes to the integration branch.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-28",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/decisions.py (settle_decision; decision_open, latest_decision, spec_approved and every other reader of a decision's status); rewrite/spec/rules/decisions.md; rewrite/spec/records/decision.md",
+  "problem": "A settlement is acted on as soon as it is written on the clone. On a team another person may settle the same decision differently and push first. The sync then keeps theirs and sets this clone's aside, but a run here may already have acted on its own answer, so both answers take effect. A settlement must count only once the remote holds it.",
+  "proposed_resolution": "With team use on, settle_decision adds the decision's id to sync.unpublished in the clone record inside the lock it already holds, and the sync removes it when the commit that carries the settlement is contained in the remote's head. Every reader of a decision's status goes through the decision store, which answers open for a listed id; vsdd status and the briefing show it as settled here, not yet published. No code reads a decision file's status directly. Tests: a settlement made while the remote cannot be reached, and one made during a live run.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-29",
+  "origin": "decision D33, design",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/gitrun.py (one helper: inherited standard input, the caller's session, a time limit that kills git alone)",
+  "problem": "The git helper is right for local calls. For a call that reaches the network it is not enough. GIT_TERMINAL_PROMPT=0 does not govern ssh, which asks about an unknown host key or a password on the terminal; an askpass program or a credential helper may open a window; and when git is killed at the time limit its child stays, still holding the prompt (checked with git 2.34.1 and OpenSSH 8.9: a call started from a terminal waited until it was killed and left ssh running, and a waiting credential helper outlived git on Linux and on macOS).",
+  "proposed_resolution": "Package M1 adds a network form of the helper and uses it for every listing, fetch and push: standard input from /dev/null, a session of its own so that there is no terminal to ask on, GIT_ASKPASS and core.askPass empty, SSH_ASKPASS_REQUIRE=never, credential.interactive=false, and at the time limit a kill of the whole process group. The existing form is unchanged for local calls, so nothing the slice runs changes. Test: a fetch over ssh to a local sshd with an unknown host key, started from a pseudo-terminal, fails at once and leaves no process; a credential helper that waits is gone after the limit.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-30",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/skills/setup.md; rewrite/spec/config/team.md (Who writes it)",
+  "problem": "The setup skill is built with K1, long before the team proof. If its text showed the line that turns team use on, people would be offered a capability that has not been proved on two clones.",
+  "proposed_resolution": "K1 builds setup without that passage. Package M5 adds it when the proof passes. The documents packages come after M5 in the order of work and describe team use only if the proof has passed.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-31",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, _serves); rewrite/spec/topics/long-commands.md (Team use); rewrite/spec/commands/sync.md",
+  "problem": "The job layer serves a finished result that nobody collected to the next call with the same key (_serves: not collected, or the caller's own nonce). That is right for a gate, whose result belongs to a commit. vsdd sync is keyed by the command and the state branch with no commit, so a sync that the decisions rule started detached, or one whose caller did not come back after a pending answer, would hand its old outcome to a later vsdd sync, and no sync would run.",
+  "proposed_resolution": "Package M1 adds one field to the job specification, with G1's owner: the worker marks its own result as collected when it writes it. A call that started the job, or attached while it ran, is still given the result through its nonce; any later call starts a new sync. Only the sync sets the field, so no gate or delivery changes. The sync the decisions rule starts is a job of its own, keyed by the command and settle:<decision id>, which also names the one record its flush may commit. Test: a commit pushed to the remote after a detached sync has ended is in the mount after the next vsdd sync; a settlement typed while a vsdd sync job runs is published by its own job.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-32",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/prelude-run-stories.md (runStories: fit, CLOSE_RESERVE); workflow-lib/prelude.js when B4a builds it; rewrite/spec/tables/work-claim-scopes.toml (story.<id>, when)",
+  "problem": "runStories() starts min(the agent fit, limits.stories_per_wave_run) stories, where the fit is floor((agents - RUN.agents - CLOSE_RESERVE) / story_agents). With team use on the survey claims the free stories of that batch and no others, so it must work out the same number, and CLOSE_RESERVE is a constant that exists only in the prelude. With the default limits the fit (about 21) is already below the story limit (24), so a survey that used the story limit alone would claim stories the run does not start.",
+  "proposed_resolution": "B4a keeps the reserve where the survey can read it (one value the build writes into the prelude and Python reads, or a lint test that pins the two equal). Package M2 gives the survey one function that returns N = min(limits.stories_per_wave_run, floor((limits.agents_per_run - limits.step_attempts - reserve) / limits.agents_per_story)), claims the free stories among the first N units the script would start, and returns N to the script as the limit stories_per_run, so the script starts no story outside the batch. Test: on a table of limits and unit lists, the stories runStories() starts are the ones claimed or already held. With team use off the survey returns the configured limit as before.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-33",
+  "origin": "decision D33, design",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_remote_head: git fetch <remote> refs/heads/<branch>:refs/remotes/<remote>/<branch>); next/tests/unit/test_worktrees.py (test_target_head_local_and_pr); rewrite/spec/tables/sync-checks.toml (T-REMOTE)",
+  "problem": "target_head, as built for pr mode, fetches the target branch into its remote-tracking ref, which is the right destination, but its refspec has no leading +. After the remote branch was rewound by a forced push that fetch exits 1 with [rejected] (non-fast-forward) and leaves the remote-tracking ref where it was (git 2.34.1 and 2.50.1; rewrite/spec/topics/team-git-facts.md, fact 9), so target_head raises where the wave and release gates are meant to measure the rewind and answer history_rewritten (T-NOTICE). Its test also does not assert the property the destination was chosen for: that the person's local integration branch is where it was after the call.",
+  "proposed_resolution": "Write the refspec as T-REMOTE gives it, +refs/heads/<branch>:refs/remotes/<remote>/<branch>. Add two assertions to the pr case of the test: the local integration branch, checked out and not checked out, is at the same commit after target_head; and after the remote branch is forced back, target_head returns the remote's new head. Local mode, which is all the slice runs, never reaches this code, so nothing the slice does changes.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-34",
+  "origin": "d33-fix-2, second pass (seen while correcting d33-fix-2-C1-2)",
+  "severity": "minor",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml (T-BRANCH, T-NOTICE); rewrite/spec/tables/sync-checks.toml (T-FRESH); rewrite/spec/commands/survey.md (Team use)",
+  "problem": "T-FRESH says the opening sync (60 seconds) and the claim (30 seconds) together keep the survey inside the Bash tool's default limit of two minutes. The survey makes more network calls than those two: in pr mode the fetch of the target branch (T-NOTICE), and for each story the clone holds whose branch was pushed a listing and a fetch (T-BRANCH). Each has the time limit of a network call, but nothing bounds them together, so on a slow remote a clone that holds several pushed stories passes the limit, and the survey is not a job. Nor does any row say what the survey does with a story whose branch could not be listed or fetched: the head rule only says that it is `unreachable` and never 'nothing arrived'.",
+  "proposed_resolution": "Give those calls one stated budget and one outcome. Either list every held story branch in one call (git ls-remote <remote> 'refs/heads/story/*', read by exact ref name) and fetch those that moved in one fetch with several refspecs, or give the calls a shared budget inside what the opening sync and the claim leave. A story whose branch could not be read inside it is not worked on in this run: its unit is returned blocked with the reason `environment`, the others go on, and the next survey measures again. State this in T-BRANCH and correct the sentence of T-FRESH. Test: a survey on a clone that holds five pushed stories, against a remote that delays every call, returns inside the limit and names the stories it could not read.",
+  "on_slice_path": false
+ }
+]

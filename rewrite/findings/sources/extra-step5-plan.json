@@ -1,0 +1,83 @@
+[
+ {
+  "id": "S5P-N1",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "rewrite/plans/step-5/agents.md; topics/story-script.md; workflows/story.md",
+  "problem": "No conventions path, demo evidence directory, reference path or recording path reaches a step: story.js passes none and `vsdd path` has no id for them. The missing demo directory blocks the evidence step of every story with demo set (plan review PL5-4, PL5-15).",
+  "proposed_resolution": "Have the first part of S3 put these paths in the story unit, or have W2 pass them in each step's prompt; give `vsdd path` an id for each.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N2",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "minor",
+  "where": "rewrite/spec/agents/",
+  "problem": "Agent rows in the design name `data` fields that no shipped schema has.",
+  "proposed_resolution": "Make each agent file's data fields those of the step data schema the prelude uses, and drop the others.",
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N6",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "next/tests/workflows/universal.test.mjs",
+  "problem": "Universal test 3 fails as soon as agents/ is partly filled, because toy-build calls two agents outside the ten the slice ships.",
+  "proposed_resolution": "Scope the file check to the calls of toy-steps.js and of files in workflows/ until agents/ holds every roster agent, as section 7 of the step 5 plan says.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N7",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "rewrite/plans/step-5/agents.md D20; topics/prelude-run-spike.md",
+  "problem": "The thin slice cannot serve a research spike: runSpike() dispatches the spike-runner, which step 5 does not build, and `vsdd spike open` and `vsdd spike record` (S6) and the spike-bounds rule (H8) are outside steps 3 and 4. The first story run has no spike scenario and counts a spike request as a failed run.",
+  "proposed_resolution": "Build A3's spike-runner with its `spike` method, S6 and H8 when the build widens, then add a spike scenario to the story tier.",
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N8",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/schemas/step-result.schema.json",
+  "problem": "The step result's text about `head` contradicts what gated() does.",
+  "proposed_resolution": "Make the schema's description say what gated() does.",
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N9",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "topics/story-script.md",
+  "problem": "Review coverage is taken as a union over lenses, so a security reviewer's `checked` hides an adversary's `skipped` for the same item.",
+  "proposed_resolution": "Compute coverage per lens in the story script and stop when any lens skipped an item it owns.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N10",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "topics/story-script.md",
+  "problem": "The fix step always dispatches the implementer, which cannot fix a docs, chore or harness story (plan review PL5-13).",
+  "proposed_resolution": "Use the story kind's implement agent for the fix step and name it in the review task.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N11",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "topics/story-script.md",
+  "problem": "Contracts reach agents by id, not by path, and a reviewer has no shell to resolve an id (plan review PL5-2). Until the unit or the step prompt carries contract paths, an agent must find a contract by Glob under the project's .factory/specs.",
+  "proposed_resolution": "Have S3's story unit, or W2's `where` text, carry the contract paths.",
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N12",
+  "origin": "slice step 5, plan (rewrite/plans/step-5/agents.md section 6)",
+  "severity": "major",
+  "where": "rewrite/spec/platform.md",
+  "problem": "Two platform behaviours the slice's agents rely on are unprobed: a Glob run by a workflow step finding a file under .factory/, and a browser screenshot saved into demo/.",
+  "proposed_resolution": "Probe both before the first story run (B8) and record the result in platform.md.",
+  "on_slice_path": true
+ }
+]

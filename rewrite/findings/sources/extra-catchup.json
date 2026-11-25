@@ -1,0 +1,20 @@
+[
+  {
+    "id": "L2-catchup-1",
+    "origin": "slice layer 2, catchup",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/events.py (EVENT_SCHEMA); rewrite/spec/schemas/event.schema.json",
+    "problem": "The event schema lives only as the EVENT_SCHEMA dict inside events.py; there is no built schemas/event.schema.json, so 'vsdd events schema' prints a schema that is not among the delivered files and cannot drift-check against rewrite/spec/schemas/event.schema.json (which carries format: date-time and no pattern, while the code carries a regex pattern the shipped checker does not enforce). Every other shape C1 delivers is a file.",
+    "proposed_resolution": "Ship the event schema as schemas/event.schema.json and have events.py load it (or have a check compare the printed schema with the file), settling the pattern/format wording in one place.",
+    "on_slice_path": false
+  },
+  {
+    "id": "L2-catchup-2",
+    "origin": "slice layer 2, catchup",
+    "severity": "minor",
+    "where": "next/tests/workflows/universal.test.mjs (doneResult); rewrite/spec/packaging/tests-workflows.md (the 4, 5 and 7 preamble)",
+    "problem": "The doneResult step stub synthesises the step identity from the agent label and the prompt's Method line instead of echoing the prompt's 'Return step = {...}' line as the amended universal-test preamble states, so its echo drops loop and pass and pins attempt to 1. A future story.js bug that corrupts the echoed identity's loop or pass would be invisible to the tests that use this stub (identityStub-based tests do catch it).",
+    "proposed_resolution": "Make doneResult parse and echo the prompt's Return-step identity exactly, as identityStub already does, so every step stub upholds the same echo contract.",
+    "on_slice_path": true
+  }
+]

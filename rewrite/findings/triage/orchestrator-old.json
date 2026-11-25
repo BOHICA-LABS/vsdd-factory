@@ -1,0 +1,172 @@
+[
+ {
+  "id": "VSA-05",
+  "files": [
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "G3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-07",
+  "files": [
+   "rules/step-results.md",
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "G3",
+   "H7"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-09",
+  "files": [
+   "commands/story-deliver.md",
+   "commands/checkpoint.md",
+   "topics/human-stops.md"
+  ],
+  "packages": [
+   "G4a",
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-10",
+  "files": [
+   "commands/story-deliver.md"
+  ],
+  "packages": [
+   "G4a"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-11",
+  "files": [
+   "rules/step-results.md"
+  ],
+  "packages": [
+   "H7"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-12",
+  "files": [
+   "commands/gate-red.md"
+  ],
+  "packages": [
+   "G2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "VSA-15",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "L2-b6-1",
+  "files": [
+   "tables/lint-checks.toml"
+  ],
+  "packages": [
+   "B6",
+   "A4"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "L2-c2-b6-fix-1",
+  "files": [
+   "topics/agent-file.md",
+   "topics/research-and-browser-tools.md"
+  ],
+  "packages": [
+   "A1",
+   "A3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "L2-c2-1",
+  "files": [
+   "topics/story-script.md",
+   "schemas/story-unit.schema.json"
+  ],
+  "packages": [
+   "C2",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "L2-c2-2",
+  "files": [
+   "rules/read-walls.md",
+   "topics/information-walls.md"
+  ],
+  "packages": [
+   "H3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "L2-catchup-fix-1",
+  "files": [
+   "schemas/survey.schema.json",
+   "topics/wave-script.md"
+  ],
+  "packages": [
+   "C1",
+   "W2",
+   "W3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "L2-catchup-fix-2",
+  "files": [
+   "packaging/tests-workflows.md"
+  ],
+  "packages": [
+   "B5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "PR3-1",
+  "files": [
+   "packaging/build-plan.md",
+   "skills/setup.md",
+   "topics/compaction-and-cold-start.md"
+  ],
+  "packages": [
+   "E1",
+   "E2",
+   "K1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PR3-4",
+  "files": [
+   "topics/research-and-browser-tools.md",
+   "topics/tool-sets.md"
+  ],
+  "packages": [
+   "A3",
+   "E1"
+  ],
+  "on_slice_path": false
+ }
+]

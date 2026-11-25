@@ -1,0 +1,14 @@
+[
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "Closed the finding's env-stop half at the command layer, as the first part's handler left it to this part: `vsdd env stop` has the one syntax (D13, the handler takes no subject), and a subject after the words is a usage error, exit 2. Test: test_cli_env_stop_rejects_subject runs `vsdd -C <dir> env stop --subject S-1.01 --json` through the dispatcher in process and asserts exit 2 with the refusal naming --subject in both the stderr line and the printed object, the handler never reached (its nothing-running answer would be exit 1). Verified to bite: a mutated module that presented a subject option fails the test, and the pre-fix crash path ('internal error' instead of the Refuse conversion) fails test_start_bad_subject_exits_2 the same way.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py (_configure_stop); next/tests/unit/test_cmd_env.py::test_cli_env_stop_rejects_subject"
+  },
+  {
+    "id": "P3SEAM-20",
+    "outcome": "fixed",
+    "what_was_done": "Covered the code side the catch-up's spec fix left to this unit: --wait is a global option owned by the dispatcher's frame, so the env commands, which are not jobs, accept it and ignore it. Test: test_cli_env_commands runs `sh py/launch.sh cli -C <dir> env start --subject S-1.01 --json --wait 540` through the real launcher (540 being the wait the prelude's closing commands send) and asserts one JSON object with exit 0 - the command neither errors on the option nor spends it as a job wait; a second run of the same command through `env stop --json` completes the pair.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py; next/tests/unit/test_cmd_env.py::test_cli_env_commands"
+  }
+]

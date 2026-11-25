@@ -1,0 +1,106 @@
+{
+ "logs": [
+  "Review of hook-runner-b: Not ready to build on: 6 major and 6 minor findings. The checks pass and the wiring is right, and refresh and release work in the main cases. But there are four problems. (1) The StoreBusy seam reads busy.entries, while records sets busy.released, so entries released under a busy flush are never logged as lock.released and release() returns []. The test mocks a StoreBusy shape records never raises. (2) The tmp class is wrong. On macOS it never matches, because gettempdir() is not resolved, so temporary paths are classed 'outside'. Where the temporary directory is not a symlink, it overlaps the project's own classes, and two test_classes tests then fail on Linux; I reproduced that with a resolved TMPDIR. (3) A broken classes.toml gives rule_error, not the promised policy_invalid, on product paths. (4) Classes are matched on the resolved path only. The design says both the literal and the resolved path, and classes_of resolves its input, so no rule can get the literal path's classes. On the outcomes: P3BLD-14 is confirmed by mutation. P3SEAM-24 and the refresh half of P3OPS-20 are in the code, but test_lock_refresh cannot fail without them: every case uses the holder's own session id, and dropping run and story kept all 7 liveness tests green. P3OPS-20 is also marked fixed while its clear half stays with B8.. 12 findings, 6 blocker or major.",
+  "Round 1 for hook-runner-b: 15 of 17 fixes confirmed, 3 still open.",
+  "Round 2 for hook-runner-b: 2 of 3 fixes confirmed, 2 still open."
+ ],
+ "result": {
+  "unit": "step3-hook-runner-b",
+  "build": {
+   "summary": "Built hook-runner-b: path classes and lock liveness. New paths.classes_of (state classes of classes.toml innermost first via S1's glob_regex, S1's path_class elsewhere, the four computed classes) behind ctx.classes/ctx.classes_of; new liveness.refresh/release as core duties wired beside the marker (PreToolUse atoms Bash|StructuredOutput, SessionEnd notify), calling records' lock_seen/lock_release with facts only (--run, step.run, story; session release at wait 0.5, StoreBusy logged with the entries released). Faults log runner.liveness_error and never block. hooks.json regenerated; wiring and ctx tests updated; 4+7 new tests including loud-failure and flush-lock-held cases; latency median under threshold. Closed P3BLD-14, P3SEAM-24, P3OPS-20 (refresh half; clear half to probe B8). Updated run-lock.md, rule-model.md, event-types.toml; spec_lint clean; outcomes recorded; findings.py build confirmed.",
+   "files_changed": 15,
+   "tests_passed": 926,
+   "tests_failed": 0,
+   "findings_fixed": 3,
+   "findings_left": [
+    "P3OPS-20 clear half: whether a workflow survives /clear is unproven; SessionEnd releases whatever the reason; a probe (B8) decides whether reason clear keeps the lock; the release reads the reason only to log it, so either behaviour is a one-line change"
+   ],
+   "new_findings": 2,
+   "departures_from_plan": [
+    "Model.py's ContextUnavailable wording and the spec rows it cites were updated rather than left, because the plan built ctx.classes and the owning spec row (rule-model.md) still said it raises; the plan's promised signatures were kept exactly.",
+    "The StoreBusy seam of liveness.release follows the concurrent records fix round's contract as the task note stated (StoreBusy carrying the released entries) instead of the plan's silence on it; test_release_logs_a_busy_store pins the shape."
+   ],
+   "spec_files_changed": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/run-lock.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/rule-model.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/tables/event-types.toml"
+   ],
+   "foreign_failures": [
+    "rewrite/findings/outcomes/step3-hook-runner-fix-5-2.json (hook-runner part-1 fix round) was truncated (missing closing bracket) for about 20 minutes, which made rewrite/tools/findings.py build crash with a JSONDecodeError; it healed on the last recheck and the ledger build was then confirmed working",
+    "tests/unit/test_state_commits.py::test_flush_refuses_an_unclaimed_record_file (records fix round's file) failed once in a mid-work full-suite run and passed on immediate rerun, alone and in the final full run"
+   ],
+   "deferred": [
+    "The refresh on Edit/Read calls (plan D2): ctx.story already carries them once a rule wires those atoms; wiring Read now would put a launch on every read for liveness alone",
+    "Of lifecycle-log (H9): the agent records, the pruning of event files and stopping an agent's products",
+    "The clear question of D3/P3OPS-20: probe B8, then H9",
+    "The reference-class gap of S3B-hook-runner-b-1: with write-scopes (H5), teach the elsewhere branch to answer .reference/** or fold it into path_class",
+    "Everything hook-runner.md lists for when the build widens (the rules, the edits model, records.py)"
+   ]
+  },
+  "review": {
+   "verdict": "Not ready to build on: 6 major and 6 minor findings. The checks pass and the wiring is right, and refresh and release work in the main cases. But there are four problems. (1) The StoreBusy seam reads busy.entries, while records sets busy.released, so entries released under a busy flush are never logged as lock.released and release() returns []. The test mocks a StoreBusy shape records never raises. (2) The tmp class is wrong. On macOS it never matches, because gettempdir() is not resolved, so temporary paths are classed 'outside'. Where the temporary directory is not a symlink, it overlaps the project's own classes, and two test_classes tests then fail on Linux; I reproduced that with a resolved TMPDIR. (3) A broken classes.toml gives rule_error, not the promised policy_invalid, on product paths. (4) Classes are matched on the resolved path only. The design says both the literal and the resolved path, and classes_of resolves its input, so no rule can get the literal path's classes. On the outcomes: P3BLD-14 is confirmed by mutation. P3SEAM-24 and the refresh half of P3OPS-20 are in the code, but test_lock_refresh cannot fail without them: every case uses the holder's own session id, and dropping run and story kept all 7 liveness tests green. P3OPS-20 is also marked fixed while its clear half stays with B8.",
+   "tests_rerun": "From next/: tools/check.py printed 30/30 checks passed (exit 0). pytest -q printed 926 passed, 1 skipped in 183.63s. node --test tests/workflows/universal.test.mjs printed 27 tests, 27 pass, 0 fail. tools/build.py --check printed 'all generated copies are current'. From the repository root: spec_lint.py printed 0 problem(s) (registry: 20 agent, 32 artifact, 65 command, ...). findings.py build printed '676 findings: 419 fixed, 100 left-for-builder, 1 not-fixed, 155 open, 1 rejected; by-package lists written: 62'. No test in a file another unit owns failed during my runs. All bytecode was suppressed, and no __pycache__ remains under next/plugins. Mutations and probes ran only in a scratch copy, now deleted. (1) Dropping run and story from the lock_seen call: test_liveness stayed green. (2) Disabling lock_seen, removing the release call, or removing the StructuredOutput duty: the relevant tests failed, as they should. (3) A real-shaped StoreBusy carrying .released: no lock.released was logged. (4) A file in the real gettempdir() was classed ('unclassified', 'outside'). (5) A resolved TMPDIR made test_state_classes_innermost_first and test_product_class_by_precedence fail. (6) classes.toml unreadable on a product path: the rule was blocked as rule_error. (7) A symlinked brief.md was classed ('unclassified', 'project').",
+   "interfaces_checked": 10,
+   "interfaces_as_promised": 7,
+   "outcomes_checked": 3,
+   "outcomes_confirmed": 1,
+   "findings": 12,
+   "blockers": 0,
+   "majors": 6
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fix": {
+     "summary": "Fixed all 12 review findings for unit hook-runner-b (path classes and lock liveness) on branch rewrite/v1. paths.py now separates regions (project, then tmp, then outside) against a resolved temporary root, refuses broken policy tables with PolicyInvalid on every branch, and classes both the literal-anchored and resolved forms of a path, returning their union; liveness.py reads the released attribute of StoreBusy, matches vsdd programs by basename, and passes the story of the first Bash segment whose effective directory sits in a story worktree; Ctx.classes feeds the literal target; registry.py's docstring names the four wired duties. Each fix is pinned by a test that fails without it (seven single-mutation reversions verified). Outcomes recorded in rewrite/findings/outcomes/step3-hook-runner-b-fix.json: 12 review findings fixed, P3SEAM-24 reworded, P3OPS-20 recorded left-for-builder (refresh half done; clear half waits for probe B8/H9, probe carried by PR4C-15), and S3B-hook-runner-b-2 closed on the name 'released'. Interface note: Ctx.classes now reads target_literal and paths.classes_of returns the literal-plus-resolved union (signatures unchanged); hooks/__init__.py is not this unit's file, so its owner must add the two module lines for paths and liveness. spec_lint exits 1 with 25 pre-existing problems confined to topics/team-*.md, untouched by this round.",
+     "tests_passed": 953,
+     "tests_failed": 0,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> 30/30 checks passed (re-run after the spec edits). uv run --no-sync python -m pytest -q -> 934 passed, 1 skipped in 188.61 s, no failures anywhere in the suite. node --test tests/workflows/universal.test.mjs -> 27 pass, 0 fail. From the repository root: python3 rewrite/tools/spec_lint.py -> 25 problems, all in rewrite/spec/topics/team-*.md (see foreign_failures; none in the two files this round touched). python3 rewrite/tools/findings.py build -> 700 findings: 439 fixed, 101 left-for-builder, 1 not-fixed, 158 open, 1 rejected; all 15 entries of step3-hook-runner-b-fix.json landed (12 review findings fixed, P3SEAM-24 fixed, P3OPS-20 left-for-builder, S3B-hook-runner-b-2 fixed). Own test files: tests/hooks/test_classes.py + test_liveness.py, 16 passed. No __pycache__ left under next/plugins/.",
+     "foreign_failures": [
+      "spec_lint.py exits 1 with 25 problems, all in rewrite/spec/topics/team-delivery.md, team-git-facts.md, team-records.md and team-sync.md (links pointing at nothing in the registry, and files not in registry.toml). None of the problems involve rule-model.md or rules/spike-bounds.md, which this round edited; the failures persisted across a repeat run and are in files no step-3 unit owns, so they are reported, not fixed."
+     ],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: `tools/check.py` reported 30/30 checks passed. `pytest -q` (PYTHONDONTWRITEBYTECODE=1) reported 934 passed, 1 skipped. `node --test tests/workflows/universal.test.mjs` reported 27 pass, 0 fail.\n\nFrom the root: `rewrite/tools/spec_lint.py` reported 27 problems. None is in this unit's files: they are links to [[table:claim-checks]]/[[table:claim-scopes]], packages/M6.md missing, and two table lines over 400 characters. `rewrite/tools/findings.py build` reported 700 findings (440 fixed, 101 left-for-builder, 1 not-fixed, 157 open, 1 rejected). The ledger now shows P3OPS-20 left-for-builder and P3SEAM-24, S3B-hook-runner-b-2 and S3R-hook-runner-b-1..12 fixed.\n\nExtra runs:\n- test_classes, test_liveness and test_ctx with a resolved TMPDIR (the Linux shape): 23 passed. test_classes with a custom TMPDIR: 7 passed.\n- Mutations, run in a scratch copy of next/ outside the repository. These fail at least one test:\n  - liveness reads .entries instead of .released (2 tests fail)\n  - run_of answers ''; story ''; story taken from the cwd only; program == 'vsdd'\n  - unresolved gettempdir\n  - no early return for project paths (4 tests fail)\n  - no PolicyInvalid wrap in _product_classes\n  - Ctx.classes on the resolved target; _forms resolved-only\n- These survive: removing the tables() warm-up (acceptable, the wrap pins the product case) and removing the 'outside' drop in _union (see C1-1).\n- Probes: src/link -> /etc/hosts gives ctx.classes ('source','project','unclassified'), while the resolved target gives ('unclassified','outside'). A brief.md symlink whose path is spelled through /var gives ('source','project'), with no brief.\n- Timing: the session end takes about 0.60 s with flush.lock held and about 0.15 s free.\n\nNo __pycache__ under next/plugins before or after.",
+     "checked": 17,
+     "confirmed": 15,
+     "still_open": 3
+    }
+   },
+   {
+    "round": 2,
+    "fix": {
+     "summary": "Fixed all three reopened findings for unit hook-runner-b (H1 second part). In next/plugins/vsdd-factory/py/vsdd/hooks/paths.py: removed the 'outside' drop from _union (S3R-hook-runner-b-C1-1, major) so the literal/resolved form union keeps every class \u2014 an in-project symlink to an outside destination now classes project and outside together; and _anchored gained a fallback (S3R-hook-runner-b-6) that anchors a literal spelled under no spelling of the resolved root as realpath(literal.parent)/literal.name (collapsing ancestor symlinks, keeping a leaf symlink literal) \u2014 ctx.project.root is resolved, so the old spelled != root branch never fired. Plan 3.1 interfaces kept their names and signatures; no per-form classes split was added (conditional on walls/H3 wanting one in step 4). Ledger: P3SEAM-24 recorded left-for-builder for H3 (Walls, per D2) in the new outcome file with the refresh half noted done, closing the bookkeeping defect (S3R-hook-runner-b-2). Both new tests fail under mutation (each fix individually reverted) and all checks pass. Outcome file: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step3-hook-runner-b-fix-2.json.",
+     "tests_passed": 942,
+     "tests_failed": 0,
+     "checks": "From next/: uv run --no-sync python tools/check.py \u2014 30/30 checks PASS; uv run --no-sync python -m pytest -q \u2014 942 passed, 1 skipped (3:04); node --test tests/workflows/universal.test.mjs \u2014 27 pass, 0 fail; uv run --no-sync python tools/build.py --check \u2014 all generated copies are current. From repository root: python3 rewrite/tools/spec_lint.py \u2014 0 problem(s); python3 rewrite/tools/findings.py build \u2014 708 findings (495 fixed, 108 left-for-builder, 2 not-fixed, 102 open, 1 rejected), ledger and by-package lists regenerated. Owned test files (test_classes.py, test_ctx.py, test_liveness.py) all pass. No __pycache__ left under next/plugins/. No foreign failures observed during the full-suite run.",
+     "foreign_failures": [],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/: tools/check.py gave 29/30. The one failure is schema_fixtures_exist_and_round_trip: cycle-record valid_future-fields.json, \"$.reopened_on: unknown property\". pytest gave 948 passed, 2 failed, 1 skipped. Both failures are that same cycle-record fixture: test_valid_fixture_passes[cycle-record/valid_future-fields.json] and test_tracked_record_store_round_trip_keeps_unknown_fields. ORDER.md gives that schema and fixture to the `records` unit, and they were edited at 21:42\u201321:45, so this is not hook-runner-b's failure. node --test tests/workflows/universal.test.mjs gave 27/27 passed. From the repo root: spec_lint.py reported 0 problems. findings.py build reported 708 findings (495 fixed, 108 left-for-builder, 2 not-fixed, 102 open, 1 rejected); ledger.json came out byte-identical to the copy taken before the build. Mutations, run in a scratch copy of next/: removing the realpath(parent) fallback in _anchored fails only test_spelling_through_symlinked_alias_classes_both_forms. Restoring the 'outside' drop in _union fails only test_in_project_symlink_outside_stays_outside, with 159 of tests/hooks passing. My commands created no __pycache__ under next/plugins.",
+     "checked": 3,
+     "confirmed": 2,
+     "still_open": 2
+    }
+   }
+  ],
+  "still_open": [
+   {
+    "id": "S3R-hook-runner-b-6",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py",
+    "problem": "Fixed for the probe the finding named: brief.md -> src/main.rs spelled via /var, or via a tmp_path alias, now gives ('brief','spec-product','source','project'), and a mutation confirms the new test catches it. Not fixed in general. The fallback anchors at os.path.realpath(literal.parent), which collapses every directory symlink, not only the root's spelling. A path through an in-project directory symlink, spelled through an alias of the root, anchors outside the root; _anchored then answers None and only the resolved form is classed. That is the finding's own failure. Portable probe with src/dirlink -> /etc: <project>/src/dirlink/hosts gives ('source','project','unclassified','outside'), but <alias>/factory-project/src/dirlink/hosts gives ('unclassified','outside'). On macOS the same happens with /var and /tmp spellings.",
+    "proposed_fix": "Before the realpath(parent) fallback, walk literal.parents and anchor at the first ancestor whose realpath equals the resolved root: root.joinpath(literal.relative_to(ancestor)). Keep the current fallback after the walk. Prototyped in a scratch copy: both spellings then give ('source','project','unclassified','outside') and all 160 tests in tests/hooks pass. Add the alias-spelled src/dirlink/hosts case to test_classes.py."
+   },
+   {
+    "id": "S3R-hook-runner-b-C2-1",
+    "severity": "minor",
+    "file": "rewrite/findings/outcomes/step3-hook-runner-b-fix-2.json",
+    "problem": "P3SEAM-24 is now left-for-builder and its outcome says the read-only reviewer half is 'Left for H3 (Walls)'. But an outcome cannot set packages: rewrite/findings/triage/a.json routes P3SEAM-24 to S2b and H1 only. It therefore appears in by-package/H1.md and S2b.md but not H3.md, so the H3 builder who wires Read/Grep is never asked to test the Read refresh or to close the finding. The entry also cites 'rewrite/spec/decisions.md D2 (the read wiring)'. decisions.md D2 is the decision about committing and pushing the state branch. The read-wiring D2 is in rewrite/plans/step-3/hook-runner-b.md section 5.",
+    "proposed_fix": "Add H3 to P3SEAM-24's packages in rewrite/findings/triage/a.json, or open a separate entry for the read-only reviewer half triaged to H3. Its acceptance: a Read or Grep in the locked run's story worktree, from a second session with an agent id, refreshes the lock. Correct the D2 pointer to the plan's section 5 D2."
+   }
+  ]
+ }
+}

@@ -1,0 +1,23 @@
+[
+ {
+  "id": "S3R-hook-runner-b-6",
+  "files": [
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H4",
+   "H1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-hook-runner-b-1",
+  "files": [
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H5"
+  ],
+  "on_slice_path": false
+ }
+]

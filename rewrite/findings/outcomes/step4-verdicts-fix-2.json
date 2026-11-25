@@ -1,0 +1,32 @@
+[
+  {
+    "id": "S4R-verdicts-15",
+    "outcome": "fixed",
+    "what_was_done": "The stored_used floor is gone, reverting the earlier fix's mechanism: _rebuild lost the stored_used parameter and the last-loop-1 max(used, stored_used), and _compute no longer passes _closure_rounds_used(). A loop 1's used is again only the loop-1 passes of earlier runs (plan 3.3 rule 9); the stored closure count cannot move the arbiter because it cannot tell an earlier run's passes from this run's own. _closure_rounds_used survives as rounds_used()'s floor for the closure form only (decision D13). The residual clone case stands as a spec-steward item, outside this unit's files: the used the script was given should ride the run record when the survey hands rounds_used to the script (S3/W2); until then a clone with no or short run records follows the closure's stored verdict through covering() (decision D8). The flawed test test_replay_uses_the_used_the_script_was_given (it never stored summary() after the passes and asserted the floor) is replaced by test_storing_the_summary_moves_nothing.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_rebuild, _compute); next/tests/unit/test_verdicts.py::test_storing_the_summary_moves_nothing"
+  },
+  {
+    "id": "S4R-verdicts-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "Same removal as S4R-verdicts-15 (the regression's cause): no stored_used floor in _rebuild or _compute. New test_storing_the_summary_moves_nothing runs the exact regression setup — loop-1 passes with the finding disputed at pass 1 and the arbiter ruling not_defect at pass 3, cap 3 — asserts converged/clean with rounds_used 3 and covering() answered, then stores summary() into the closure as survey-2's checkpoint will and asserts verdict(), summary(), covering() and the replay input (used 0, rule 9) are all unchanged. With a floor re-added the test fails exactly as the check described: the verdict turns blocked/cap with rounds_used 6 and code:a blocking (verified by mutation).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py; next/tests/unit/test_verdicts.py::test_storing_the_summary_moves_nothing"
+  },
+  {
+    "id": "S4R-verdicts-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "r16 now holds one fix-x-l2-p3 attempt-1 record (the store keeps one record per (run, workflow, subject, name, attempt), so steps_list could never return the byte-identical pair) and its expect.skipped lists the gate-less step once. The two arbitrations are named arbitrate-u-l1 and arbitrate-u-l2 (loops 1 and 2) and keep their positions, which stay the stored path order (arbitrate-u-l1 < arbitrate-u-l2 < fix-...). test_every_case_is_well_formed now refuses a records case that repeats a (run, workflow, subject, name, attempt) identity; every existing case passes it. The case's expected verdicts are unchanged (names are not read by the rebuild), and the whole conformance file passes.",
+    "where": "next/tests/conformance/cases/r16-fix-order-last-wins.json; next/tests/conformance/test_conformance.py::test_every_case_is_well_formed"
+  },
+  {
+    "id": "S4R-verdicts-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "New records case r21-loop-two-without-loop-one: run r1's only loop is loop 2 (no loop 1 before it) holding one clean review whose reviewer marks AC-1 checked; expect failed/no_result with head empty, chain false and passes_used 0. It discriminates the rule-8 branch: with the no-loop-before items mutated from None to [] the case alone fails (the pass turns ok and converges, coverage marked), the other 49 conformance cases still passing (verified by mutation).",
+    "where": "next/tests/conformance/cases/r21-loop-two-without-loop-one.json; next/tests/conformance/test_conformance.py::test_records_case[r21-loop-two-without-loop-one]"
+  },
+  {
+    "id": "S4R-verdicts-C1-4",
+    "outcome": "fixed",
+    "what_was_done": "The dependency is now stated in the code, the test and this file; the ORDER.md row itself is the orchestrator's to write (rewrite/plans/ is outside this unit's write scope). Facts corrected and recorded: story_unit.acs is the one reader of the ### AC-N headings and skips ``` and ~~~ code fences; verdicts._story_acs imports it inside the function (no module-level cycle); there is no _acs alias and none is needed — the earlier fix report's alias claim was wrong, and nothing references one. test_items_equal_unit_acs guards the pairing and its docstring now tells a story_unit.py builder (survey-2 rewrites it) to keep the fence-skipping acs. For ORDER.md section 4, the row to add: verdicts | P/py/vsdd/state/story_unit.py | acs stays the one AC reader, skipping code fences, and verdicts._story_acs delegates to it (test_items_equal_unit_acs holds the two together) | S4R-verdicts-7.",
+    "where": "rewrite/findings/outcomes/step4-verdicts-fix-2.json (the sanction record); next/plugins/vsdd-factory/py/vsdd/state/verdicts.py::_story_acs; next/tests/unit/test_verdicts.py::test_items_equal_unit_acs"
+  }
+]

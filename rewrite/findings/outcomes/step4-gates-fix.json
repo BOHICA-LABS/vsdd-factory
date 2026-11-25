@@ -1,0 +1,128 @@
+[
+  {
+    "id": "S4R-gates-1",
+    "outcome": "fixed",
+    "what_was_done": "The registered demo function is now measure(project, subject, run, *, wait=None, retry=''): the keyword arguments of the registry contract are taken and ignored (demo is direct, never a job). test_demo_is_direct no longer pins the absence of 'wait' in the signature; it calls registered_gate('demo')(root, STORY, run, wait=0, retry='x') and asserts a result with no pending state.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure); test: tests/unit/test_gate_registry.py::test_demo_is_direct"
+  },
+  {
+    "id": "S4R-gates-2",
+    "outcome": "fixed",
+    "what_was_done": "measure reads evidence_read(project, subject, 'demo', head) first and returns the passing record for the head unmeasured, so a later failing measurement (whose evidence_write would replace the record at the same name) can never overwrite it. The docstring now says so.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure); test: tests/unit/test_gate_demo.py::test_passing_record_returned_unmeasured (the green report copy is deleted, so a measurement would fail, and the record's mtime stands)"
+  },
+  {
+    "id": "S4R-gates-3",
+    "outcome": "fixed",
+    "what_was_done": "Every demo result is built by gatelib.result or gatelib.not_attempted; the hand-built _shape is gone. A failing table carries its failures into the result (error is the first line, the cap holds); the admission refusal is ok false with one 'admission refused' line, no doubled prefix; the evidence-write refusal is not_attempted at the head.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure, _demo); tests: tests/unit/test_gate_demo.py::test_failing_table_carries_its_failures, ::test_demo_refusal_is_not_attempted, ::test_over_twenty_bad_demo_files_are_capped (21 bad files, 20 lines, 'and 2 more', gate-result schema holds)"
+  },
+  {
+    "id": "S4R-gates-4",
+    "outcome": "fixed",
+    "what_was_done": "The demo gate reads the story's '### AC-<N>' headings. In table mode uncovered is the headings minus the criteria keys of the red record, and each uncovered criterion is a table row that does not fail. In recorded mode an AC-<k> file must name a criterion of the story, and a screenshot must be AC-<k>.png of one; any other .png and any criterion the story lacks is a failure line.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (_story_criteria, _table_record, _recording_checks); tests: tests/unit/test_gate_demo.py::test_uncovered_criterion_is_listed_and_passes, ::test_recording_files_must_name_a_story_criterion"
+  },
+  {
+    "id": "S4R-gates-5",
+    "outcome": "fixed",
+    "what_was_done": "The cached green record is served only when green.<sha12>.xml still exists beside it: a lost report (a kill between the .json and .xml writes, a removed copy) is measured again instead of green passing forever at that head and demo failing on the missing copy.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_cached); test: tests/unit/test_gate_green.py::test_green_xml_lost_is_measured_again"
+  },
+  {
+    "id": "S4R-gates-6",
+    "outcome": "fixed",
+    "what_was_done": "The kept base report is written by rename (store.write_via_tmp) and read back through read_report; a kept report that does not parse is deleted and the base measured again — never read silently as an empty base set, which made every inherited test new.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_base_cases); test: tests/unit/test_gate_red.py::test_unparsable_base_report_is_measured_again"
+  },
+  {
+    "id": "S4R-gates-7",
+    "outcome": "fixed",
+    "what_was_done": "The half rule counts only non-exempt red tests (red_non_exempt * 2 < non_exempt), while 'at least one red' still ranges over all new tests. One passing non-exempt test beside one failing wiring test now fails the red gate.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_red); test: tests/unit/test_gate_red.py::test_half_rule_and_exemptions (third case: red 1, exempt 1, new 2, 0 of 1 non-exempt red)"
+  },
+  {
+    "id": "S4R-gates-8",
+    "outcome": "fixed",
+    "what_was_done": "The re-freeze keeps 'still reported' for every earlier identity, and applies the skip and harness checks only to an earlier identity of a changed file, or one with no file; the new-test check likewise covers changed, added and unknown files, not every frozen file. The contradictory 'Made exact' bullet of rewrite/spec/commands/gate-red.md is rewritten to match the quote above it and D10.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_refreeze); rewrite/spec/commands/gate-red.md (Re-freezing); test: tests/unit/test_gate_refreeze.py::test_refreeze_ignores_unchanged_frozen_errors"
+  },
+  {
+    "id": "S4R-gates-9",
+    "outcome": "fixed",
+    "what_was_done": "The re-freeze worker no longer crashes on either input: an <error> of no type is named 'build or harness error in <id>: unknown' (the guard _red already had), and the over-cap message counts len(record['tests']) instead of indexing metrics['new'], so D15's 'split the story' is given for a re-freeze too. The dead 'if record is None' branch is removed.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_measured, _refreeze); tests: tests/unit/test_gate_refreeze.py::test_refreeze_names_an_error_that_has_no_type, ::test_refreeze_over_cap_is_loud"
+  },
+  {
+    "id": "S4R-gates-10",
+    "outcome": "fixed",
+    "what_was_done": "A cached green result without --since carries changed_files: [] as plan 3.1 promises (the list starts empty in _cached and is filled only by the --since branch). test_cached_green_rewrites_patch asserts it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_cached); test: tests/unit/test_gate_green.py::test_cached_green_rewrites_patch"
+  },
+  {
+    "id": "S4R-gates-11",
+    "outcome": "fixed",
+    "what_was_done": "The whole base-to-head patch is written before the green record and its path stored in the record's diff_patch field (the evidence-record schema allows it), always base to head even after --since. test_since_patch_leaves_whole_patch asserts the record carries the whole patch.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_measured); test: tests/unit/test_gate_green.py::test_since_patch_leaves_whole_patch"
+  },
+  {
+    "id": "S4R-gates-12",
+    "outcome": "fixed",
+    "what_was_done": "measure passes the resolved head into not_attempted on the commands.test/test_report and --since refusals, so sha is '' only when the story could not be resolved. Asserted on the --since refusal and in a new test_report refusal.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (measure); tests: tests/unit/test_gate_green.py::test_since_not_an_ancestor_refused, ::test_report_refusal_carries_the_head"
+  },
+  {
+    "id": "S4R-gates-13",
+    "outcome": "fixed",
+    "what_was_done": "The duplicated baseline failure block in the green path is gone; a failing green with a baseline named carries the line exactly once.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_measured); test: tests/unit/test_gate_green.py::test_baseline_failure_line_appears_once"
+  },
+  {
+    "id": "S4R-gates-14",
+    "outcome": "fixed",
+    "what_was_done": "Retention reads the job's own <root>/.factory/factory.toml (the path arithmetic stood one directory short of the project root) and narrows the fallback to ConfigError, so state.retain_runs_days is honoured instead of silently 30.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_retain_old_base_reports); test: tests/unit/test_gate_red.py::test_retention_reads_the_state_setting (a base report aged 3 days goes at retain_runs_days = 1)"
+  },
+  {
+    "id": "S4R-gates-15",
+    "outcome": "fixed",
+    "what_was_done": "Red and the re-freeze take their new tests from one helper, gatelib._new_cases (base identities out, source-class files dropped), so the two agree on which tests are new and a re-freeze record no longer resurrects tests red dropped.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_new_cases, _red, _refreeze); test: tests/unit/test_gate_refreeze.py::test_refreeze_drops_source_class_tests"
+  },
+  {
+    "id": "S4R-gates-16",
+    "outcome": "fixed",
+    "what_was_done": "write_patch writes through the store's write_via_tmp: the temporary name is unique per writer and the rename atomic, so two writers at once never collide on a fixed .tmp and a kill leaves no debris in the evidence directory.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/diffpatch.py; test: tests/unit/test_diffpatch.py::test_parallel_writers_do_not_collide (two writers synchronized at the rename)"
+  },
+  {
+    "id": "S4R-gates-17",
+    "outcome": "fixed",
+    "what_was_done": "test_sample_runner_writes_file_and_type builds its copy of the sample project under tmp_path; the repository's tests/unit/fixtures/junit directory is no longer written or left dirty by a concurrent or killed run.",
+    "where": "next/tests/unit/test_junit.py::test_sample_runner_writes_file_and_type"
+  },
+  {
+    "id": "S4R-gates-18",
+    "outcome": "fixed",
+    "what_was_done": "test_through_launcher runs py/launch.sh's cli entry as a subprocess twice, once expecting exit 1 (demo's negative answer) and once exit 0 after red and green pass, so exit codes through the launcher are tested and not merely the in-process dispatcher.",
+    "where": "next/tests/unit/test_gate_cli.py::test_through_launcher"
+  },
+  {
+    "id": "S4R-gates-19",
+    "outcome": "fixed",
+    "what_was_done": "'with the file of each' / 'each new test with its file' is dropped: rewrite/spec/records/evidence.md now says the red record carries 'tests, the new test identities', and rewrite/spec/commands/gate-red.md says the record lists each frozen file with its SHA-256 'and the new test identities'.",
+    "where": "rewrite/spec/records/evidence.md; rewrite/spec/commands/gate-red.md"
+  },
+  {
+    "id": "S4R-gates-20",
+    "outcome": "fixed",
+    "what_was_done": "The demo caps are loaded once from the [demo-evidence] row of policy/artifacts.toml — script, transcript and screenshot parsed from its cap_note, the story total from max_bytes — instead of a second hard-coded copy of the numbers.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (_caps); test: tests/unit/test_gate_demo.py::test_demo_result_is_built_by_the_shared_builder (constants equal the policy row)"
+  },
+  {
+    "id": "S4R-gates-21",
+    "outcome": "fixed",
+    "what_was_done": "The AU-S2-12 entry of rewrite/findings/outcomes/step4-gates.json now states what the finding asked about: the conversion commentary sits in conflicts/commands.md items 18-19, and commands/gate-red.md and commands/gate-green.md are clean, so no spec file of this package was edited for it. The other packages' files are left to their owners.",
+    "where": "rewrite/findings/outcomes/step4-gates.json (AU-S2-12 entry)"
+  }
+]

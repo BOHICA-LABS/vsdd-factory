@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "outline-data.schema.json",
+  "type": "object",
+  "description": "Step data of the plan outline step. Field list from pipeline.md#2.10.8. The design gives this field list but no JSON types and no required list; types are stated only where the design states them.",
+  "properties": {
+    "epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {},
+          "title": {},
+          "contracts": {},
+          "stories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {},
+                "title": {},
+                "depends_on": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

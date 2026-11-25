@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config-fingerprint.schema.json",
+  "type": "object",
+  "description": "Fields of the configuration fingerprint (hooks.md#2.6): the runner keeps a fingerprint of every section that bears on a gate ([hooks], [commands], [paths], [branches], [delivery], [convergence], [holdout], [mutation], [limits], [[component]], [stops], [release], [spikes],",
+  "x-note": [
+    "[caps]), and a change since the previous session is announced once."
+  ]
+}

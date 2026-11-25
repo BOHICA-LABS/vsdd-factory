@@ -1,0 +1,8 @@
+[
+ {
+  "id": "S3R-survey-8",
+  "outcome": "not-fixed",
+  "what_was_done": "The D33-13 upstream command is fixed: it prints 'git branch --set-upstream-to=<remote>/<branch> <branch>' and test_target_head_local_and_pr runs it. The not_descendant remedy is still unworkable in the common case, where the story worktree exists (create_story's path-exists branch, lines 262-268). There it prints 'delete the branch (git branch -D story/<id>), then admit the story again', and git refuses: reproduced in a scratch copy, 'error: cannot delete branch 'story/S-9.01' used by worktree at .../.worktrees/S-9.01', exit 1. test_verify_story_refusals only asserts the text is present and never runs it. The remedy works only in the no-worktree branch (lines 270-276).",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (create_story, not_descendant with the worktree present); next/tests/unit/test_worktrees.py::test_verify_story_refusals"
+ }
+]

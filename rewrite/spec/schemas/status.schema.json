@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "status.schema.json",
+  "type": "object",
+  "description": "The object vsdd status --json prints and the briefing renders (state.md#2.7, whose example and field table this shape is copied from). The lists are shortened so that the rendered object stays under 8,192 bytes. The object holds only what the briefing prints and what the hook",
+  "x-note": [
+    "rules test. The design gives no required list."
+  ],
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "description": "Format version; 1 in the design's example."
+    },
+    "updated": {
+      "type": "string",
+      "description": "When it was computed. ISO timestamp; the design gives no tighter type."
+    },
+    "project": {
+      "type": "string",
+      "description": "Project name."
+    },
+    "cycle": {
+      "description": "The active cycle, or null; one.",
+      "properties": {
+        "id": {},
+        "kind": {},
+        "title": {},
+        "opened": {},
+        "units": {
+          "description": "State of each non-story unit: open, closed, blocked, failed; one entry per workflow."
+        },
+        "waves": {
+          "description": "Gate status of each wave: open, gating, passed, failed. passed is the only passing value. Up to 60 waves."
+        },
+        "wave": {
+          "description": "Counts for the open wave: id, stories, delivered, blocked."
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "description": "Open decisions: identifier, kind, one line, packet path. 12 listed, then a count.",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {},
+          "kind": {},
+          "question": {},
+          "packet": {}
+        }
+      }
+    },
+    "spikes": {
+      "type": "array",
+      "description": "Open named spikes; 8 listed.",
+      "maxItems": 8,
+      "items": { "type": "string" }
+    },
+    "others": {
+      "type": "array",
+      "description": "One line each for a second cycle in flight (a critical fix), with its qualified decision identifiers; 3 listed.",
+      "maxItems": 3,
+      "items": { "type": "string" }
+    },
+    "requests_queued": {
+      "description": "How many change requests wait for the cycle to close."
+    },
+    "driver": {
+      "description": "Whether the driver is on, paused (and at which decision) or off, and in which session.",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "on",
+            "paused",
+            "off"
+          ]
+        },
+        "at": {
+          "description": "The decision paused at, or null."
+        }
+      }
+    },
+    "next": {
+      "description": "The object {kind, command, args} from the route table. kind is workflow, human or done. For the second of two open cycles args carries cycle. The briefing renders it as text of at most 200 characters.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "workflow",
+            "human",
+            "done"
+          ]
+        },
+        "command": {},
+        "args": {}
+      }
+    },
+    "notes": {
+      "type": "array",
+      "description": "Free text a person asked to keep, through vsdd note; 5 entries of 200 characters, the oldest dropped.",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": {},
+          "text": { "maxLength": 200 }
+        }
+      }
+    }
+  }
+}

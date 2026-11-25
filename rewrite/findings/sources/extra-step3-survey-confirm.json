@@ -1,0 +1,11 @@
+[
+ {
+  "id": "S3R-survey-C1-1",
+  "origin": "slice step 3, survey, confirmation",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py (run_survey, the build-fault handler added for S3R-survey-13)",
+  "problem": "The S3R-13 fix added a handler around _success that returns ok false and exit 1 when the survey cannot build its answer after admission. Unlike the failed-admission handler (plan 3.1: 'the lock is released first, which ends the run'), it releases nothing. The answer carries a run_id while the lock entry stands and the run stays live. Reproduced in a scratch copy by making cycle_record_baseline raise: exit 1, ok false, run_id r-..., lock_entries() still holding the run, run.ended ''. A script that stops on ok false leaves the lock to another session until it goes stale. Nothing tests this handler: test_corrupt_evidence_rises reaches the admission handler instead, because admit builds the unit first.",
+  "proposed_resolution": "In the build-fault handler, release the lock through _release(root, run_id) as the admission handler does, add any release fault to the error, and clear run_id, or else say in commands/survey.md that this exit 1 leaves the run live. Add a test that patches a _success step to raise and asserts exit 1, ok false, an empty lock and an ended run.",
+  "on_slice_path": true
+ }
+]

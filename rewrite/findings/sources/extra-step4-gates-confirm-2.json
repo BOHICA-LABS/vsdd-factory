@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S4R-gates-C2-1",
+    "origin": "slice step 4, gates, confirmation",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/tools/junit_runner.py",
+    "problem": "The S4R-gates-15 fix added build_suite, which loads each */test_*.py outside tests/ with loader.loadTestsFromModule(importlib.import_module(name)). An import error in such a file is not caught: the runner exits with a traceback and writes no build/junit.xml, even when tests/ holds tests it could report. A probe with tally/test_broken.py importing a missing module confirmed it: traceback, no build/ directory. The gate then fails with 'the test command wrote no JUnit report' instead of naming the build or harness error. Discovery over tests/ turns the same import error into an ImportError test case. This breaks the runner's own promise that it writes build/junit.xml after every run.",
+    "proposed_resolution": "Load each source-tree module with loader.loadTestsFromName(name). A probe showed that it turns the import error into a unittest.loader._FailedTest case with type=\"ImportError\" and still writes the report. Add a unit test where a story commits an import-broken tally/test_*.py and red still reads a report.",
+    "on_slice_path": true
+  }
+]

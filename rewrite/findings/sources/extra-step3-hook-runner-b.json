@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S3B-hook-runner-b-1",
+    "origin": "slice step 3, hook-runner-b, builder",
+    "severity": "minor",
+    "where": "rewrite/plans/step-3/hook-runner-b.md section 3.1; next/plugins/vsdd-factory/py/vsdd/hooks/paths.py",
+    "problem": "The plan's classes_of has two branches only: in the state directory the matching classes of classes.toml, elsewhere S1's path_class or unclassified. The reference class (.reference/**, a globs class that is neither a state-directory class nor one of the seven product classes) falls through the elsewhere branch and answers unclassified, which is the class the design reserves for a product path that matches no [paths] glob, with the block message pointing at a [paths] line that would not help.",
+    "proposed_resolution": "When write-scopes (H5) is built, either teach path_class to return reference for .reference/** paths matched relative to the project root, or have the elsewhere branch of paths.classes_of add the non-product, non-state glob classes of classes.toml beside path_class's answer. Nothing on the slice reads the class yet.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-hook-runner-b-2",
+    "origin": "slice step 3, hook-runner-b, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (the StoreBusy seam with the records fix round)",
+    "problem": "The records fix round in flight changes lock_release to raise StoreBusy carrying the entries it did release, instead of returning quietly. The attribute those entries travel under is not agreed anywhere the builder could read; liveness.release reads store.StoreBusy.entries (a list of the released lock entries, dictionaries) and falls back to logging the busy alone if the carrier is named differently, in which case a partially released session's entries would be released without a lock.released line.",
+    "proposed_resolution": "Agree the attribute name entries on the StoreBusy of lock_release in the records fix round, and have its test assert it; liveness.release and test_release_logs_a_busy_store already read that shape.",
+    "on_slice_path": true
+  }
+]

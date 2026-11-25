@@ -1,0 +1,484 @@
+[
+ {
+  "id": "D33-1",
+  "files": [
+   "config/team.md",
+   "tables/team-config-keys.toml",
+   "tables/config-keys.toml",
+   "topics/project-configuration.md"
+  ],
+  "packages": [
+   "M6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-2",
+  "files": [
+   "records/config-fingerprint.md",
+   "config/team.md"
+  ],
+  "packages": [
+   "M6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-3",
+  "files": [
+   "topics/state-commits.md",
+   "commands/sync.md",
+   "tables/sync-checks.toml",
+   "topics/team-sync.md"
+  ],
+  "packages": [
+   "M1",
+   "S2b"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-4",
+  "files": [
+   "commands/sync.md",
+   "commands/claim-take.md",
+   "commands/claim-release.md",
+   "tables/walls.toml",
+   "tables/callers.toml",
+   "rules/gate-guard.md"
+  ],
+  "packages": [
+   "M1",
+   "M2",
+   "M3",
+   "H6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-5",
+  "files": [
+   "schemas/survey.schema.json",
+   "schemas/checkpoint-result.schema.json",
+   "schemas/status.schema.json",
+   "commands/survey.md",
+   "commands/status.md",
+   "commands/checkpoint.md"
+  ],
+  "packages": [
+   "M2"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-6",
+  "files": [
+   "commands/survey.md",
+   "commands/checkpoint.md",
+   "commands/sync.md",
+   "tables/work-claim-checks.toml",
+   "tables/sync-checks.toml"
+  ],
+  "packages": [
+   "M2",
+   "S3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-7",
+  "files": [
+   "topics/decisions.md",
+   "records/decision.md",
+   "records/cycle.md",
+   "tables/team-checks.toml"
+  ],
+  "packages": [
+   "S2a",
+   "S4",
+   "M3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-8",
+  "files": [
+   "records/decision.md",
+   "topics/team-records.md",
+   "tables/team-checks.toml"
+  ],
+  "packages": [
+   "S4",
+   "M3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-9",
+  "files": [
+   "schemas/decision-record.schema.json",
+   "schemas/closure-record.schema.json",
+   "schemas/cycle-record.schema.json",
+   "topics/team-records.md"
+  ],
+  "packages": [
+   "S2a",
+   "C1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-10",
+  "files": [
+   "records/run.md",
+   "records/closure.md",
+   "topics/team-records.md"
+  ],
+  "packages": [
+   "S2a",
+   "M3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-11",
+  "files": [
+   "records/evidence.md",
+   "records/closure.md",
+   "topics/evidence-lookup.md",
+   "tables/work-claim-checks.toml",
+   "topics/state-layout.md"
+  ],
+  "packages": [
+   "M3",
+   "G2"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-12",
+  "files": [
+   "topics/state-directory.md",
+   "commands/init.md",
+   "tables/team-checks.toml",
+   "tables/sync-checks.toml"
+  ],
+  "packages": [
+   "S1",
+   "M6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-13",
+  "files": [
+   "topics/worktrees.md",
+   "tables/sync-checks.toml"
+  ],
+  "packages": [
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-14",
+  "files": [
+   "commands/init.md",
+   "skills/setup.md",
+   "tables/team-checks.toml",
+   "records/clone.md"
+  ],
+  "packages": [
+   "M6",
+   "S1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-15",
+  "files": [
+   "tables/team-checks.toml",
+   "records/closure.md"
+  ],
+  "packages": [
+   "S3",
+   "M3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-16",
+  "files": [
+   "tables/work-claim-checks.toml",
+   "tables/sync-checks.toml",
+   "tables/identifiers.toml",
+   "commands/new.md"
+  ],
+  "packages": [
+   "M3",
+   "S1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-17",
+  "files": [
+   "commands/story-deliver.md",
+   "tables/team-delivery-checks.toml",
+   "tables/sync-checks.toml",
+   "records/closure.md",
+   "workflows/story.md"
+  ],
+  "packages": [
+   "M4",
+   "G4a",
+   "W2"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-18",
+  "files": [
+   "commands/story-deliver.md",
+   "topics/governed-delivery.md",
+   "topics/team-delivery.md",
+   "commands/doctor.md",
+   "tables/team-checks.toml"
+  ],
+  "packages": [
+   "G4a"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-19",
+  "files": [
+   "topics/briefing.md",
+   "topics/status-report.md",
+   "commands/status.md",
+   "records/clone.md"
+  ],
+  "packages": [
+   "M6",
+   "M2",
+   "S2c"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-20",
+  "files": [
+   "rules/decisions.md",
+   "tables/work-claim-checks.toml"
+  ],
+  "packages": [
+   "M3",
+   "H7",
+   "B8"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-21",
+  "files": [
+   "commands/story-deliver.md",
+   "records/closure.md",
+   "records/decision.md",
+   "config/team.md"
+  ],
+  "packages": [
+   "G4a",
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-22",
+  "files": [
+   "commands/doctor.md",
+   "tables/team-checks.toml",
+   "tables/sync-checks.toml",
+   "packaging/sandbox-needs.md"
+  ],
+  "packages": [
+   "M6",
+   "T1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-23",
+  "files": [
+   "topics/verdicts.md",
+   "commands/gate-wave.md",
+   "commands/gate-release.md",
+   "commands/release.md",
+   "agents/adversary.md",
+   "tables/team-delivery-checks.toml"
+  ],
+  "packages": [
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-24",
+  "files": [
+   "packaging/proof-team.md",
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "M5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-25",
+  "files": [
+   "topics/worktrees.md",
+   "tables/sync-checks.toml",
+   "tables/work-claim-checks.toml"
+  ],
+  "packages": [
+   "S3",
+   "M3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "D33-26",
+  "files": [
+   "topics/run-lock.md",
+   "topics/resume.md",
+   "commands/survey.md",
+   "tables/team-delivery-checks.toml"
+  ],
+  "packages": [
+   "S3",
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-27",
+  "files": [
+   "commands/release.md",
+   "topics/governed-delivery.md",
+   "workflows/release.md",
+   "tables/team-delivery-checks.toml"
+  ],
+  "packages": [
+   "G7",
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-28",
+  "files": [
+   "rules/decisions.md",
+   "records/decision.md",
+   "records/clone.md",
+   "tables/work-claim-checks.toml",
+   "topics/decisions.md"
+  ],
+  "packages": [
+   "M3",
+   "S4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-29",
+  "files": [
+   "topics/team-sync.md",
+   "topics/team-git-facts.md",
+   "commands/sync.md"
+  ],
+  "packages": [
+   "M1",
+   "S1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-30",
+  "files": [
+   "skills/setup.md",
+   "config/team.md",
+   "packaging/proof-team.md"
+  ],
+  "packages": [
+   "K1",
+   "M5"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-31",
+  "files": [
+   "topics/long-commands.md",
+   "commands/sync.md",
+   "rules/decisions.md"
+  ],
+  "packages": [
+   "M1",
+   "G1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-32",
+  "files": [
+   "tables/work-claim-scopes.toml",
+   "tables/team-delivery-checks.toml",
+   "topics/prelude-run-stories.md"
+  ],
+  "packages": [
+   "M2",
+   "B4a"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-33",
+  "files": [
+   "tables/sync-checks.toml",
+   "topics/worktrees.md",
+   "topics/team-git-facts.md"
+  ],
+  "packages": [
+   "S3",
+   "G4a"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D33-34",
+  "files": [
+   "tables/team-delivery-checks.toml",
+   "tables/sync-checks.toml",
+   "commands/survey.md"
+  ],
+  "packages": [
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "P3OPS-13",
+  "files": [
+   "topics/team-sync.md",
+   "topics/team-claims.md",
+   "commands/survey.md",
+   "commands/sync.md",
+   "topics/state-commits.md"
+  ],
+  "packages": [
+   "M1",
+   "M2"
+  ],
+  "on_slice_path": false,
+  "note": "Superseded in design by decision D33: the opening sync of every survey and the work claim. No lease."
+ }
+]

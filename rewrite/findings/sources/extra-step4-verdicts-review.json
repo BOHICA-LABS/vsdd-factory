@@ -1,0 +1,146 @@
+[
+  {
+    "id": "S4R-verdicts-1",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (covering, the stored-closure branch); next/tests/unit/test_verdicts.py::test_closure_used_without_records",
+    "problem": "Plan 3.3 says covering falls back to 'the closure record's verdict when that is converged and covers head', and it defines cover on the verdict's own head: that commit, or the same non-empty patch_id from delivery.base. The code tests the stored verdict against closure.delivery.head and closure.delivery.patch_id instead. The builder did not report this departure. Nothing writes delivery.head before a merge: admission writes only base and branch, and delivery (plan 3.4) writes head and patch_id only on a merge. (a) A closure whose verdict is summary()'s form at the worktree head, with no run records (a clone, or D8's 'a clone with old or no records follows a newer closure'), gives covering None. My probe confirmed this. (b) Once delivery.head moves past the verdict's head, the old verdict covers a commit nobody reviewed. My probe: verdict converged at H1, a new commit H2, delivery.head = H2, and covering(H2) returns the H1 verdict. test_closure_used_without_records sets delivery.head and patch_id by hand, which no real writer does, so it passes only under the code's rule.",
+    "proposed_resolution": "In the stored branch, test cover with _covers(tree, base, str(stored.get('head') or ''), head), the same rule as for the computed verdict. Rewrite test_closure_used_without_records to store verdicts.summary()'s form with no delivery.head. Add the stale case (verdict at H1, delivery.head H2, so covering(H2) is None). Update the review case of records' test_evidence_lookup to the same rule, as plan section 4 allows.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-2",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (changed_files)",
+    "problem": "changed_files parses plain `git diff --name-only` output, which C-quotes unusual paths. My probe: files 'café.py' and 'q\"uote.py' come back as ['\"caf\\\\303\\\\251.py\"', '\"q\\\\\"uote.py\"']. This is the one definition of 'the files changed'. It gives a later loop's items, G2's --since changed_files (gates/gatelib.py imports it) and delivery's review_stale list. A reviewer's coverage entry names the real path and never matches the quoted item. A later loop that touches such a file can then never converge, and nothing reports why.",
+    "proposed_resolution": "Run `git -c core.quotePath=false diff --name-only -z --no-renames <since> <head>` and split on NUL. Add a non-ASCII name and a name containing a double quote to test_changed_files_and_later_loop_items.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-3",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_chain, covering); next/tests/conformance/cases/; next/tests/unit/test_verdicts.py",
+    "problem": "No test covers the chain rule: every loop from the last back to the nearest loop 1 must be converged, which is the condition topics/verdicts.md sets for cover. Two mutations each pass all 77 tests of conformance, test_verdicts and test_state_gate_evidence: _chain returning only 'the last loop converged', and covering ignoring rebuilt['chain']. No case has a loop that did not converge followed by a converged later loop. In r05 the last loop failed. In r06 and r15 both loops converged. In r16 the last loop is blocked. A clean later loop could therefore cover a story whose loop 1 never converged, and no test would notice.",
+    "proposed_resolution": "Add a records case where loop 1 ends blocked/cap and loop 2 converges. Expect chain false, with the unit's verdict converged. Add a test_verdicts test in which covering is None for that story.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-4",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/tests/conformance/cases/r06-repair-new-file.json; next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_rebuild, rule 8)",
+    "problem": "No test covers rule 8's later-loop items, nor D10's rule that items git cannot compute make the loop's passes not ok. Two mutations pass every test: items = [] for a later loop, and items = changed(...) or [] (which accepts None). r06 is VSA-03's fixture, but its loop-2 reviewer marks brand_new.py checked. A tool that asked for no items converges on r06 just the same. The fixture catches only 'too many items' and never 'the new file is required'.",
+    "proposed_resolution": "Add a variant of r06 in which the later loop's reviewer does not account for brand_new.py: the coverage gap is open and the verdict is not converged. Add a case whose changed map lacks the later loop's range: changed returns None, the passes are not ok, and the verdict is failed/no_result.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-5",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_compute); next/tests/conformance/cases/r08-waive-after-cap.json; next/tests/unit/test_verdicts.py",
+    "problem": "P3OPS-09 is marked fixed, but no test fails when verdict() ignores the settled waivers: replacing waived=waivers(project, subject) with waived=[] in _compute passes all 77 tests. waivers() is tested alone (test_waivers_from_settled_decision). rebuild is tested only with waived passed in directly. Nothing tests the wiring between them. r08-waive-after-cap is also a single pass at cap 3, which never reaches the cap, so it is the same as l14-waived. The code itself is right: my probe of a real after-cap record set (four passes, blocked/cap without the waiver) gives converged/clean once code:a is waived. No test holds it there.",
+    "proposed_resolution": "Make r08 a real after-cap case: passes 1 to 4 with code:a open and an arbitration at the cap give blocked/cap; with code:a waived the verdict is converged. Add a test_verdicts test that stores a finding through store_step, settles 'waive key=code:a' on finding.<subject>, and asserts that verdict() is converged and covering() is not None.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-6",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_verdicts.py::test_verdict_trusts_stored_mark",
+    "problem": "VSA-07 is marked fixed with test_verdict_trusts_stored_mark, but that test cannot tell trusting the mark apart from grounding again at count time, which is the defect VSA-07 names. The test stores grounded: false itself, and a re-grounding verdict also reads that finding as advisory. I made _compute mark grounded: false on every finding whose path is missing from the current worktree, and all 77 tests still pass. No test stores an unmarked blocking finding whose file a later commit removed.",
+    "proposed_resolution": "Add a test that stores an unmarked high finding on a path that exists at the reviewed commit, then removes or renames that file in a later commit (as a fix would), and asserts that the finding is still in blocking.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-7",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_story_acs); next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (_acs); next/tests/unit/test_verdicts.py::test_items_equal_unit_acs",
+    "problem": "The two AC readers disagree. verdicts._story_acs skips headings inside code fences, as D9 says. story_unit._acs, whose list the script hands to reviewers as the items, does not skip them. My probe added a fenced '### AC-9' to the story: the unit's acs were ['AC-1', 'AC-9'] and the verdict's items were ['AC-1']. test_items_equal_unit_acs is meant to hold the two together (D9), but its fence contains no heading ('no headings here'), so it cannot fail. With such a story the tool and the script require different items, and their verdicts can differ either way.",
+    "proposed_resolution": "Give both one reader: a small shared helper that both call (it must not import the verdict, which would create a cycle), or story_unit skipping fences the same way (its owner's edit). Put a '### AC-9' heading inside the test's fence.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-8",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "major",
+    "where": "next/tests/conformance/test_conformance.py (SPEC_ROWS); next/plugins/vsdd-factory/py/vsdd/state/convergence.py (replay, the walk-on after a converged pass)",
+    "problem": "packaging/tests-conformance.md has the row 'A loop whose records go on after a pass with nothing open: the verdict is the one the last recorded pass gives (Python only)'. SPEC_ROWS maps it to r11-cut-off-after-fix, which stops after a fix and never goes on past a clean pass. test_spec_rows_have_cases therefore claims a coverage that does not exist. No test covers the walk-on branch after a converged pass: making the converged case keep the old claims instead of `claims = []` passes every test. The builder's S4B-verdicts-1 covers only the case where a blocked review is followed by another pass.",
+    "proposed_resolution": "Add a records case: pass 1 is clean (converged), and pass 2 of the same loop has a hard finding with no fix. Expect the last pass's verdict, not the first. Map the row to that case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-9",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/tests/conformance/test_conformance.py (SPEC_ROWS)",
+    "problem": "SPEC_ROWS maps the two holdout-score rows ('A must-pass scenario at 0.5 (floor 0.6)' and 'A mean of 0.8 (threshold 0.85)') to j04-holdout-needs-no-location. j04 is a judge() case on a hand-built holdout finding and does not exercise holdoutFindings() scoring. The plan (section 1) defers both cases to G6a, so the table claims a coverage that does not exist.",
+    "proposed_resolution": "List the two rows as deferred (for example a DEFERRED_ROWS map naming G6a) rather than mapping them to j04. Have test_spec_rows_have_cases check that every spec row is either mapped or deferred.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-10",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/tests/conformance/cases/r16-fix-order-last-wins.json, r07-fix-retry.json",
+    "problem": "r16 lists the test-writer's fix records before the implementer's. steps_list returns records in path order, which puts fix-implementer-... before fix-tw-..., so the case's order is not the stored order. Dropping D6's method sort and joining in stored order therefore passes every test. Only the reversed sort is caught. Rule 4's 'a passing gate whose sha equals the record's head' is not tested either: removing the sha comparison passes every test.",
+    "proposed_resolution": "Order r16's records as steps_list would (implementer first by path). Add to r07 a fix record whose only passing gate is at another sha, and expect it in skipped with why 'gate'.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-11",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (public_verdict)",
+    "problem": "public_verdict replaces walled findings in blocking, advisory and deferred, but leaves dismissed untouched. A walled finding that the reviewer withdraws, or the arbiter dismisses, keeps its key in clear, plus the arbiter's reason. My probe of a withdrawn holdout finding gave dismissed [{'key': 'holdout:HS-9', 'by': 'reviewer', ...}]. Nothing reaches this today, because records refuses to store a walled finding.",
+    "proposed_resolution": "Map dismissed entries whose key is walled to the walled key, and drop the reason. Extend test_public_verdict_hides_walled with a withdrawn walled finding.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-verdicts-12",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/convergence.py (replay, the cap check after arbitration)",
+    "problem": "Suppose the arbiter has been applied at the cap and the loop converged, and the records go on with findings open. replay then neither arbitrates nor caps: extra is 0 and arbitrated is true, so the code falls through to the fixer on every later pass. The loop ends failed/no_result rather than blocked/cap. My probe: cap 2, a dismissal at pass 2, findings open at passes 3 to 5. The fixer was asked at 3, 4 and 5, and the verdict was failed/no_result.",
+    "proposed_resolution": "At the cap with the arbitration already spent, set the outcome to blocked/cap, as the script's break would. Pin this with a records case once the walk-on cases of S4R-verdicts-8 exist.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-verdicts-13",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/closure-record.schema.json (verdict); rewrite/spec/records/closure.md",
+    "problem": "The two sources name the closure verdict's fields differently. records/closure.md and the shipped schema's verdict list `commit`, which nothing writes. summary() writes head, patch_id and rounds_used. rounds_used() reads the stored rounds_used, and cover (once S4R-verdicts-1 is fixed) reads head and patch_id. The spec schema's own description already says 'head is the commit the verdict covers'.",
+    "proposed_resolution": "Spec steward and records: rename `commit` to `head` and add patch_id and rounds_used to the verdict properties of the schema and to records/closure.md.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-14",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/tests/conformance/conformance.test.mjs",
+    "problem": "Plan section 7 asks for one Node test per judge and loop case. The runner has one test that loops over every case. The first failing case stops the loop, and the report names a single test, so a second disagreement stays hidden until the first is fixed. The builder did not report this departure.",
+    "proposed_resolution": "Compute the results once (top-level await, or a before() hook) and register one test() per case, named by its file stem.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-verdicts-15",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py (_rebuild, used for a loop 1); rewrite/plans/step-4/verdicts.md 3.3 rule 9",
+    "problem": "For a loop 1, the replay's `used` counts the loop-1 passes of earlier runs in the local records. The script was given rounds_used(), which also counts the closure's stored rounds_used (D13), and the survey caps it after a direct. Take a clone with no earlier run records whose closure carries a count, say 2 with cap 3. The script arbitrates at pass 1 and can dismiss a disputed finding, giving converged. The replay with used 0 asks for a fix at pass 1 and ends failed/no_result. The tool's verdict then refuses a story the script converged.",
+    "proposed_resolution": "Replay each run's loop 1 with the `used` the script was given. Record it in the run record or in the review step's identity, or derive it as rounds_used() does (the larger of the earlier-run passes and the stored closure count).",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-verdicts-16",
+    "origin": "slice step 4, verdicts, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/ORDER; rewrite/findings/ledger.json (P3BLD-27)",
+    "problem": "This unit rejected P3BLD-27 in step4-verdicts.json, and the rejection is right: under the last-pass-only rule, case l10-claim-not-confirmed converges at pass 2, while the replay keeps the finding open. But outcomes/ORDER applies step4-rules.json after step4-verdicts.json, and the rules file records P3BLD-27 as left-for-builder with 'G3 (verdicts) must own the judge() shape when it builds convergence'. After findings.py build, the ledger shows P3BLD-27 still waiting for G3.",
+    "proposed_resolution": "The orchestrator re-records the rejection after step4-rules.json (or reorders ORDER), so the ledger shows P3BLD-27 as rejected with case l10.",
+    "on_slice_path": false
+  }
+]

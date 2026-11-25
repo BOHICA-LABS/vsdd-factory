@@ -1,0 +1,190 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M2; a row names its package where it differs).
+# Not read by anything on the slice path. The capability from end to end: [[topic:team-use]].
+#
+# The checks of taking, releasing and taking over a work claim, of hand-off, of ids the tool mints and of
+# a decision settled on two clones. The rules every row follows are at the head of [[table:team-checks]].
+# What can be claimed is [[table:work-claim-scopes]]; the record is [[record:work-claim]]. In these rows
+# "claim" always means a work claim, never a fixer's claim about a finding ([[schema:claim]]).
+
+[T-CLAIM]
+form = "A refusal of `vsdd survey`, of the two admission commands and of `vsdd feature route`; and a refusal of the stores' write path"
+runs = "After the opening sync of a survey, for each scope the run needs; at each admission; at each tracked write a run makes"
+reads = "The claim files as the sync left them in the mount; the clone record's `id`; the scopes and what each covers ([[table:work-claim-scopes]])"
+refuses = """
+A run whose own scope another clone holds: `ok: false`, nothing written, and an error that names the
+holder's person, clone and label, the time the holder wrote and the three ways on (wait; ask the holder
+to run `vsdd claim release`; a person takes it over with `vsdd claim take`). A child story another clone
+holds is no refusal: it is left out of `units` and listed in the survey object's `elsewhere` with its
+holder. A scope this clone holds is entered again, and the claim is rewritten with the new run. A free
+scope is taken. Both go through T-PUBLISH, and the run starts only if that succeeds.
+A tracked write by a run to a path a scope covers, in two cases: a claim on that scope stands in the
+mount and names another clone; or the run's workflow is one that takes that scope and this clone does
+not hold it. The error is `claim_not_held` with the holder, so a code path that skipped the survey, and
+a run whose unit was taken over, cannot write another clone's unit. A workflow that takes no claim is
+refused in the first case only; where two clones write one unclaimed unit at once, T-COMBINE decides.
+The refusal of a delivery is T-DELIVERY ([[table:team-delivery-checks]])."""
+unmeasured = "Work a person does by hand on a unit a clone holds. On the product it is a hand commit ([[table:team-delivery-checks]])"
+
+[T-PUBLISH]
+form = "The one way a claim is taken or changed: a function of the claim store"
+runs = "Whenever T-CLAIM takes a scope or enters one again, T-SWITCH claims, or `vsdd claim take` changes a holder"
+reads = "The remote's state branch head after a sync that ended `synced`; the claim file at that head"
+refuses = """
+Holding a claim that the remote has not accepted, and building one on a head that is not the remote's:
+every caller syncs first, with a partial sync when it is not a survey, and goes on only from `synced`.
+The tool builds one commit on the remote's head, with a temporary index, that adds or changes the claim
+files and nothing else, and pushes it by its id as T-PUSH pushes ([[table:sync-checks]]). The claim
+file is not written in the mount first: git refuses to fast-forward over a file that is already there,
+even one with the same content. The caller holds `local/sync.lock` from that sync until the mount has
+the commit ([[command:sync]]).
+T-PUSH judges the push. `accepted`: the mount takes the commit, by a fast-forward or, when the mount
+has moved meanwhile, through T-COMBINE, and the claim is held. A lost race: the caller syncs again and
+reads the claims that arrived. A scope another clone now holds is lost and is not retried; otherwise it
+builds the commit again. Every other answer means no claim and no run. One commit may carry several
+story claims; after a lost race the tool keeps those still free."""
+unmeasured = "Nothing once the remote answers. A claim whose answer was lost is listed as unknown until the next sync settles and reports it (T-PUSH); if the remote had taken it, the claim is this clone's with no live run, and T-RELEASE says which full sync removes it"
+
+[T-RELEASE]
+form = "A step of `vsdd checkpoint` and of every full sync; the command `vsdd claim release` (package M3)"
+runs = "At every checkpoint and full sync; when a person or the main session gives a claim up"
+reads = "The run record; the closures the checkpoint just wrote; the claims this clone holds and the `run` each names; which of its runs are live; the branch and closure of each story it holds; the cycle records in the mount and on the remote"
+refuses = """
+Keeping a claim nobody is working under, and publishing a removal ahead of the work it covered.
+A story is begun when its branch on this clone holds a commit beyond the base its closure records, or
+its closure records a pushed head (`delivery.pushed`) other than that base. Nothing else defines it.
+The checkpoint removes its run's `cycle` and `spec` claims whatever the run's outcome, the claim of each
+story it closed (delivered or descoped), and the claim of each story the run took or entered that is
+not begun. It keeps the claim of a begun story, whatever that story waits for.
+A full sync also removes, with no person asking, what a run that ended without a checkpoint, a command
+that died or a push whose answer was lost left behind:
+- a claim held for a run (`held = "run"`) whose `run` names a run that is not live in this clone;
+- a story claim whose `run` names such a run, when the story is not begun;
+- an `open` claim (`held = "act"`) when the mount holds no cycle record of the scope's kinds that the
+  remote lacks: the opening never wrote one. No opening is in progress then, because the command that
+  opens a cycle holds `local/sync.lock` for its whole act and this sync holds it now. Where the mount
+  holds such a record, the claim is removed in the commit that adds it.
+A claim whose `run` is empty names no run, so the first two never match it. A person took it with
+`vsdd claim take`, or the clone claimed it when it joined the team, and it stays until a run enters it
+and writes its own id there, or until it is released.
+A removal is committed only together with every change this clone holds under the paths its scope
+covers. It therefore travels in a full sync, or in a partial one whose caller names those paths
+([[command:sync]]), and never reaches the remote ahead of the records it covered. When the push fails
+the removal stays pending, the next sync publishes it, and `vsdd status` says so until then.
+`vsdd claim release` refuses a claim another clone holds, and one whose unit has a live run in this
+clone. Before it removes a story's claim it does T-HANDOFF for that story, and refuses if that fails."""
+unmeasured = "Whether the person meant to stop. A released story is free for the next survey on any clone"
+
+[T-TAKEOVER]
+form = "The command `vsdd claim take`, person only, in a terminal"
+runs = "When a person decides that a claim's clone is gone, or agrees a hand-over with its holder"
+reads = "The claim as the remote has it after a sync; standard input being a terminal and no caller marker"
+refuses = """
+A call from a tool call, a session or an unattended run: git gives no sign that a clone is alive, so no
+program ever decides that one is dead, and no claim expires or goes stale. A claim that changed between
+what the person was shown and the push: the command shows the new holder and stops. Otherwise it
+rewrites the claim with this clone as holder, an empty `run` and the old holder in `taken_from`, and
+publishes it as T-PUBLISH says. The old holder's clone learns at its next sync (T-HOLD). Any person may take any claim."""
+unmeasured = "Whether the old clone was really gone. If it was not, T-HOLD withholds what it writes to the unit from its next sync on, and nothing it did after the take is shared"
+
+[T-HOLD]
+form = "A step of the sync, after the combine"
+runs = "At every sync"
+reads = "The claims in the combined tree; the claims this clone held before the sync; the paths its unpushed commits changed; `covers_paths` and `covers_new` of each scope ([[table:work-claim-scopes]])"
+refuses = """
+Publishing a change to a path a scope covers while the combined tree's claim on that scope names another
+clone: the remote's version of each such path stands, and this clone's is set aside and listed as
+T-COMBINE lists a record. A decision's settlement is never withheld.
+A claim this clone held that the combined tree no longer gives it, because it was taken over, or removed
+or changed by a commit this clone did not make, is lost: the sync result, the briefing and `vsdd status`
+name the scope, the commit, its author and the holder now.
+It ends no run and releases no lock, because a sync may be one a hook started. A live run on the lost
+unit meets `claim_not_held` at its next tracked write (T-CLAIM), reports the unit as held elsewhere and
+ends at its own checkpoint; a run with other units goes on with those. The checkpoint pushes no branch
+of a story this clone no longer holds (T-HANDOFF). The old holder's own push of that branch is not a
+fast-forward once the new holder has pushed, so git refuses it, and the tool does not force."""
+unmeasured = "Nothing on the state branch. On the product, commits the old holder made after the take stay on that clone, reported, until a person moves them"
+
+[T-SWITCH]
+form = "A step of the first sync that reads `team.enabled = true` on a clone with no record"
+runs = "Once, on the clone whose own unpushed change turns team use on. A clone with no record where the remote already has team use on is not switching: it joins, and claims as this row says (T-SOLO), or its record was lost ([[record:clone]])"
+reads = "`state.push`, `delivery.mode`, `delivery.ci`, any `[[repo]]` entry, the preflight, the answer of the delivery's host module for the remote of the integration branch, the open closure records, the story branches and worktrees of this clone"
+refuses = """
+Turning on while `state.push` is false; while `delivery.mode` is not `pr` or `delivery.ci` is not
+`required`, since on a team a story reaches the shared branch through a pull request and CI; while the
+state branch has no upstream on a remote; while the preflight refuses; while the host module answers
+that it cannot serve that remote, so that a team does not find out at its first delivery; or while
+`factory.toml` holds a `[[repo]]` entry, since team use together with the multi-repository layout is
+not designed ([[topic:multi-repo]]). The message names the line or the command.
+Otherwise it writes the clone record with `how = "switched"` and claims, in one commit and with an empty
+`run`, every undelivered story whose branch here holds a commit beyond its base. A story another clone
+already claimed is reported for a person and not taken."""
+unmeasured = "Nothing"
+
+[T-HANDOFF]
+built_by = "M3"
+form = "A step of `vsdd checkpoint` and of `vsdd claim release`"
+runs = "For each undelivered story whose claim this clone holds"
+reads = "The story's latest passing red or re-freeze record in the local evidence store; its branch and its worktree"
+refuses = """
+Leaving a checkpoint, or a release, with a story's work only on this clone. It writes the red record to
+its tracked copy ([[record:evidence]]), pushes the story branch under its own name (T-REMOTE), and
+records the head the remote took as `delivery.pushed` in the story's closure. It lists in the result
+each story worktree that holds uncommitted changes: they are not on the branch and do not travel.
+A push the remote did not take, as T-BRANCH judges it and not by its exit status, is reported in the
+result: the checkpoint still ends the run, and a release is refused. `vsdd claim release` also refuses while the story's worktree holds uncommitted
+changes, and names them.
+No checkpoint, release of a claim or sync moves a target branch: a test asserts that the remote's
+integration branch is where it was.
+A clone that has no local red record reads the tracked copy, under the rule a local one is read under
+([[topic:evidence-lookup]]). Green, demo and the review's cover are measured again by the survey at the
+head, as on any clone that lacks the evidence ([[topic:resume]]); a closed unit is never measured again."""
+unmeasured = "Commits made after the last checkpoint on a clone that is lost, and changes that were never committed. Neither was pushed, and the next holder continues from the checkpoint"
+
+[T-MINT]
+built_by = "M3"
+form = "A rule of every command that mints an id which more than one claim could mint"
+runs = "When `vsdd` gives its id to a new epic, a story of the standing epic `E-0`, a change request, an idea, a spike or an on-demand review report"
+reads = "The fetched tree after a sync; the files of that kind; this command's request, and `settled` in the clone record"
+refuses = """
+Returning an id that the remote has not accepted, giving one request two ids, and giving two requests
+one. The command syncs and, from `synced` only, takes the next free number in the fetched tree, builds
+one commit on the remote's head that adds the new file and nothing else, and pushes it as T-PUBLISH
+pushes a claim; the file reaches the mount with that commit. A lost race repeats from the sync with
+the number taken again, so two clones never hold two files under one id. Every other answer refuses
+the command.
+After `unknown` the clone record lists the commit with its request, a digest of what the caller asked
+for ([[record:clone]]), and the opening sync of any later command settles it (T-PUSH), so nothing is
+minted while it is unknown. That command then looks in `settled` for its own request. An entry the
+remote took is the lost answer: the command returns that id, removes the entry and mints nothing. An
+entry the remote did not take is removed, and the command mints. A command with another request mints
+as usual and leaves the entries, so a second idea is never answered with the first one's id.
+Three kinds of id need no rule. A story of an epic that a run minted this way is written only by the
+run that holds that cycle. Ids of contracts, properties, decision records, subsystems, screens, flows
+and hidden scenarios are minted only by the run that holds `spec`. Ids inside one file belong to that
+file's writer."""
+unmeasured = """
+A number an agent picks for itself, which the artifact rule allows when it is free in the agent's own
+mount. If another clone used it too, the sync finds one path added on both sides and ends `diverged`
+(T-COMBINE); a person renames one. Nor whether a request worded differently after a lost answer is
+the same one: it is minted again, and the settled entry stays listed"""
+
+[T-SETTLE]
+built_by = "M3"
+form = "A rule of every reader of a decision; a step of `vsdd decide`, of the `decisions` rule and of the sync"
+runs = "At a settlement; at every sync; wherever a run reads whether a decision is settled"
+reads = "The decision record at the merge base, on this clone and on the remote; `sync.unpublished` in the clone record"
+refuses = """
+Acting on a settlement the remote does not hold. The function that settles writes the decision's id into
+`sync.unpublished`, under the lock it settles under, and the sync takes it out when the commit that
+carries the settlement is contained in the remote's head. While it is listed, every gate, survey, route
+and delivery reads the decision as open, and `vsdd status` and the briefing show it as "settled here,
+not yet published" and not as waiting for an answer. Of two answers given on two clones, only the
+published one is ever acted on.
+A second settlement of a decision the remote already holds settled: the remote's stands, because it was
+pushed first; this clone's is set aside; and the person is told, in the sync result, the briefing and
+`vsdd status`, who settled it, on which clone, and both choices.
+How each of the two ways of settling publishes is in its own file: [[command:decide]] for the terminal
+and [[rule:decisions]] for a decision typed in a session. Either way the sync that carries a settlement
+while a run is live on this clone is partial, and carries the decision record alone ([[command:sync]])."""
+unmeasured = "How long a settlement typed on a clone that cannot reach the remote stays unseen. It is listed as unpublished there, and acted on nowhere, until it is pushed"

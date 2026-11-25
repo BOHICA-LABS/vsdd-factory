@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S3R-hook-runner-b-C1-1",
+    "origin": "slice step 3, hook-runner-b, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py",
+    "problem": "The S3R-hook-runner-b-6 fix's _union drops 'outside' whenever project, own-worktree or tmp is present. The literal form enters _forms only when it is anchored under the project root, and _classify then returns before tmp or outside. So the literal form never yields 'outside', and the drop fires in one case only: a symlink inside the project whose destination is outside. There it removes the destination's real 'outside'. Probe: src/link -> /etc/hosts gives ctx.classes ('source', 'project', 'unclassified'), while ctx.classes_of(ctx.target) gives ('unclassified', 'outside'). Before the fix, ctx.classes gave ('unclassified', 'outside'). walls.toml denies 'outside' to the architect, ux-designer and story-writer, and spike-bounds denies it to the spike runner. A read-walls rule (H3) reading ctx.classes would let such an agent read any file outside the project through a symlink in the project, or in the spike's own worktree, where the runner may create one. That contradicts rule-model's 'class matching tests both the literal and the resolved path' and the paths.py docstring's 'judged by its destination'. No test pins the drop: removing it keeps all 7 test_classes tests green.",
+    "proposed_resolution": "Remove the 'outside' drop from _union, so the union keeps every class of both forms. Add a test case: a symlink in the project pointing outside the project, the plugin directory and tmp, asserting 'outside' is in ctx.classes. If walls need per-form answers (read_allow's 'a class that contains the path'), also expose the literal and the resolved classes separately for step 4.",
+    "on_slice_path": true
+  }
+]

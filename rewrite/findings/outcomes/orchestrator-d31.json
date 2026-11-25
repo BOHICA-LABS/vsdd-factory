@@ -1,0 +1,20 @@
+[
+ {
+  "id": "D31-7",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session changed the registry's summary of decisions.md to 'The record of the adopted decisions, as decided: D1 to D30, and those adopted since.' It no longer needs an edit for each later decision.",
+  "where": "rewrite/spec/registry.toml [doc.decisions]"
+ },
+ {
+  "id": "D31R-F-17",
+  "outcome": "fixed",
+  "what_was_done": "D31-7 is triaged to no package (triage/d31.json), its left-for-builder outcome is removed from outcomes/d31.json, and the registry summary it asked for is changed, so no builder's list carries it.",
+  "where": "rewrite/findings/triage/d31.json; rewrite/findings/outcomes/d31.json"
+ },
+ {
+  "id": "D31R-F-12",
+  "outcome": "fixed",
+  "what_was_done": "The integrator shortened the two delivers strings. The orchestrating session also made spec_lint apply the 400-character line limit to files in registry.d/, which it used to skip.",
+  "where": "rewrite/tools/spec_lint.py"
+ }
+]

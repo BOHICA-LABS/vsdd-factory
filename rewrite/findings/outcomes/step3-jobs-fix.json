@@ -1,0 +1,140 @@
+[
+  {
+    "id": "S3R-jobs-1",
+    "outcome": "fixed",
+    "what_was_done": "_launch keeps the set of ports already tried and passes it to the scan, now _pick_port(store, exclude); a product that exits within SETTLE_SECONDS is really retried on the next port. Verified by reverting: test_start_retries_on_the_next_port fails with the old behaviour (the command that exits on 28100 is served 28100 three times) and passes with the fix.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch, _pick_port); next/tests/unit/test_env.py::test_start_retries_on_the_next_port"
+  },
+  {
+    "id": "S3R-jobs-2",
+    "outcome": "fixed",
+    "what_was_done": "ports.lock is now taken in _launch and held from the port scan until the 'starting' record naming the port is written, so a concurrent start scanning under the lock sees the claim; the scan itself is _pick_port, which takes no lock. test_concurrent_starts_claim_distinct_ports starts four products in four threads and asserts four distinct ports; with the release moved back before the record write the test failed twice in four runs.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch, _pick_port); next/tests/unit/test_env.py::test_concurrent_starts_claim_distinct_ports"
+  },
+  {
+    "id": "S3R-jobs-3",
+    "outcome": "fixed",
+    "what_was_done": "The 'lost its worker twice' failure is written with collected: True, so the next call re-measures instead of being served the stale failure; waiters still receive it through the nonce. The loud-failure test counts runs through a file: exactly two runs for the first call, and a second attach runs the work again.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, loud-failure branch); next/tests/unit/test_jobs.py::test_job_that_keeps_dying_fails_loudly"
+  },
+  {
+    "id": "S3R-jobs-4",
+    "outcome": "fixed",
+    "what_was_done": "The loss branch also caps from the record: a loss with record.starts >= 2 writes the failure result, so a job that dies later than any one call's wait is still restarted only once in its life. test_loss_cap_comes_from_the_record drives three wait=1 calls against a worker that dies two seconds in: starts reaches 2 and the third call is loud, not pending.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, loss branch); next/tests/unit/test_jobs.py::test_loss_cap_comes_from_the_record"
+  },
+  {
+    "id": "S3R-jobs-5",
+    "outcome": "fixed",
+    "what_was_done": "worker_main installs a SIGALRM handler (the margin is the module constant ALARM_MARGIN = 30, overridable per payload for tests): it kills the running command's group, writes the time-limit failure naming the log, writes done, emits job.done and exits. test_alarm_backstop_ends_an_overrun_outside_ctx_run runs worker_main through the helper with run_sleep (a work function that never calls ctx.run), limit 1 and margin 1: the worker ends in seconds and the result file carries the exact limit failure. Reverting the registration made the test fail.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main, ALARM_MARGIN, run_sleep); next/tests/unit/_jobs_helper.py (worker mode); next/tests/unit/test_jobs.py::test_alarm_backstop_ends_an_overrun_outside_ctx_run"
+  },
+  {
+    "id": "S3R-jobs-6",
+    "outcome": "fixed",
+    "what_was_done": "The job's limit_seconds is carried into JobContext and _limit_message is built from it, so a 1-second limit says 'ran longer than 1 seconds (limits.gate_minutes)' and a 60-minute gate says minutes; ctx.run no longer reports the seconds that happened to be left when its command started. The time-limit test asserts the exact failure text, and _limit_message(3600) is pinned to 'ran longer than 60 minutes (limits.gate_minutes)'.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (JobContext, worker_main); next/tests/unit/test_jobs.py::test_time_limit_stops_the_job"
+  },
+  {
+    "id": "S3R-jobs-7",
+    "outcome": "fixed",
+    "what_was_done": "Every job-layer failure now goes through _job_failure: newlines collapsed, and the text ends with '; log: <path>'. The time-limit, crash and lost-twice failures all name the log; the time-limit and crash tests assert the path and that the error is one line.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_job_failure, worker_main, attach); next/tests/unit/test_jobs.py::test_time_limit_stops_the_job, ::test_work_crash_keeps_command_shape, ::test_job_that_keeps_dying_fails_loudly"
+  },
+  {
+    "id": "S3R-jobs-8",
+    "outcome": "fixed",
+    "what_was_done": "A result is served only from a record whose state is 'done' - the worker's last write, which is the last word on collected and nonce. With that ordering, attach's collected write happens after the worker's final write and can no longer be undone, and no stale read is written back over a done record. test_result_is_served_only_when_done holds the key lock, writes the result file while the record still says running, and asserts the result is not served until the record turns done (reverting the gate made it fail).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_serves, attach); next/tests/unit/test_jobs.py::test_result_is_served_only_when_done"
+  },
+  {
+    "id": "S3R-jobs-9",
+    "outcome": "fixed",
+    "what_was_done": "test_semaphore_caps_running_jobs now runs both jobs to completion on two threads with parallel_gates = 1 and asserts, while the first runs, that the second's record never says running, and that second.started >= first.finished. The old assertions (pending plus a queued record attach writes before any slot is taken) are gone; with _take_slot a no-op the new assertions trip.",
+    "where": "next/tests/unit/test_jobs.py::test_semaphore_caps_running_jobs"
+  },
+  {
+    "id": "S3R-jobs-10",
+    "outcome": "fixed",
+    "what_was_done": "Both tests count runs through a file. test_two_waiters_get_one_result asserts exactly one run behind the two results (breaking the nonce rule makes the second waiter start a new job - two runs); test_same_command_twice_starts_one_job asserts the command ran exactly once.",
+    "where": "next/tests/unit/test_jobs.py::test_two_waiters_get_one_result, ::test_same_command_twice_starts_one_job"
+  },
+  {
+    "id": "S3R-jobs-11",
+    "outcome": "fixed",
+    "what_was_done": "The worker payload carries lock_fd and worker_main calls os.set_inheritable(lock_fd, False); the module docstring now says the descriptor arrives inheritable through pass_fds against PEP 446's default and that close_fds is what shields child commands. The helper gained a worker mode, and test_worker_marks_the_lock_non_inheritable passes the descriptor through pass_fds and asserts the worker left it non-inheritable.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (worker_main, _spawn_worker, module docstring); next/tests/unit/_jobs_helper.py; next/tests/unit/test_jobs.py::test_worker_marks_the_lock_non_inheritable"
+  },
+  {
+    "id": "S3R-jobs-12",
+    "outcome": "fixed",
+    "what_was_done": "_delete_key removes the record, log and result files, then takes the lock file (flock) before unlinking it (_unlink_lock_if_free), so a held lock is never removed under a live holder; prune re-checks the lock at unlink time and skips the key if a re-attach took it; stop_products leaves records in state 'starting' alone - the start call that holds the lock is still settling and cleans up after itself. Tested: stop_products with a starting record leaves record and lock intact, and a stop with the lock held by another process removes the record but not the lock file.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_delete_key, _unlink_lock_if_free, prune, stop_products); next/tests/unit/test_env.py::test_stop_products_leave_a_starting_record_and_a_held_lock_alone"
+  },
+  {
+    "id": "S3R-jobs-13",
+    "outcome": "fixed",
+    "what_was_done": "_worktree_dir uses the classified worktree only when its kind is 'story'; anything else, a named spike included, runs in the integration worktree, as env-start.md and D17 say. test_start_runs_a_story_in_its_worktree pins the story path (started.txt lands in .worktrees/S-9.01 and not in _integration); test_start_runs_anything_but_a_story_in_the_integration_worktree pins spike-x in the integration worktree.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (_worktree_dir); next/tests/unit/test_env.py::test_start_runs_a_story_in_its_worktree, ::test_start_runs_anything_but_a_story_in_the_integration_worktree"
+  },
+  {
+    "id": "S3R-jobs-14",
+    "outcome": "fixed",
+    "what_was_done": "attach validates the spec and the record cap before creating the store directory, so a refused spec writes nothing at all, and _write_record raises ValueError when the record is over the 4,000-byte cap even after shedding the optional fields (products included: _launch measures the product record first and answers negatively). test_bad_spec_is_refused asserts the store directory does not exist after the refusals.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach, _write_record); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch); next/tests/unit/test_jobs.py::test_bad_spec_is_refused"
+  },
+  {
+    "id": "S3R-jobs-15",
+    "outcome": "fixed",
+    "what_was_done": "_key_paths no longer skips dot-names of the _atomic_write temporary form (.'key'.json.<rand> and .'key'.result.json.<rand>): they count towards their key's newest mtime, so prune removes them, alone or beside their key. test_prune_removes_abandoned_temporaries asserts an eight-day-old temporary is removed and a fresh one kept.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_key_paths, _TEMP_RE, prune); next/tests/unit/test_jobs.py::test_prune_removes_abandoned_temporaries"
+  },
+  {
+    "id": "S3R-jobs-16",
+    "outcome": "fixed",
+    "what_was_done": "test_the_five_job_events_are_written drives attach (job.started, job.done), a killed worker (job.lost), env start and env stop with one session id and reads the EventLog back: all five D21 types present, each line carrying session_id, id, command and detail. A schema drift that makes _emit drop events now fails the test.",
+    "where": "next/tests/unit/test_env.py::test_the_five_job_events_are_written"
+  },
+  {
+    "id": "S3R-jobs-17",
+    "outcome": "fixed",
+    "what_was_done": "The store path is stated once: jobs.store_of(root) is exported (beside root_of) and env.py's _store_of is gone; env.py reuses jobs' _append_line instead of its own _append; stop_products is in jobs.__all__ as the plan's 3.4 always promised. Interface note for other units: jobs.py additionally exports store_of, run_sleep and ALARM_MARGIN.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (__all__, store_of); next/plugins/vsdd-factory/py/vsdd/gates/env.py (imports)"
+  },
+  {
+    "id": "S3R-jobs-18",
+    "outcome": "fixed",
+    "what_was_done": "The job record gains a command_pgid field, written by the worker when ctx.run starts the command (through a JobContext on_command hook); attach's loss branch killpg's it SIGKILL before restarting, so no second copy of the gate command runs on in the worktree. test_lost_worker_restarts_once now asserts the record names the group and that the group is dead shortly after the restart while its own sleep still had seconds to run. Interface note: the record's field list grows by command_pgid (null until a command runs).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_job_record, JobContext.on_command, worker_main.note_command, attach); next/tests/unit/test_jobs.py::test_lost_worker_restarts_once"
+  },
+  {
+    "id": "S3R-jobs-19",
+    "outcome": "fixed",
+    "what_was_done": "P3REQ-06 is reset to not-fixed: the left-for-builder marking was premature because the design is not settled - topics/long-commands.md does not list the survey among the long commands and commands/survey.md has no pending answer. The recorded outcome now says the job layer it needs is delivered (attach is reusable unchanged) and the marking stands only after the spec amendment, which stays with S3's second part and the orchestrator. The amended entry is in the extra-objects section of this file, so the ledger shows it as active for the survey unit.",
+    "where": "rewrite/findings/outcomes/step3-jobs-fix.json (P3REQ-06 entry); rewrite/spec/topics/long-commands.md and rewrite/spec/commands/survey.md remain as found - the amendment is the orchestrator's"
+  },
+  {
+    "id": "S3R-jobs-20",
+    "outcome": "fixed",
+    "what_was_done": "The Syntax section of env-stop.md now reads only 'vsdd env stop' - the two-syntax commentary is gone, so AU-S2-12 is genuinely fixed for both halves (validate was state-core's, env-stop is this one). spec_lint passes after the edit. S3B-jobs-1's outcome is recorded below; the orchestrator need only file it.",
+    "where": "rewrite/spec/commands/env-stop.md (Syntax); rewrite/findings/outcomes/step3-jobs-fix.json (S3B-jobs-1 and AU-S2-12 entries)"
+  },
+  {
+    "id": "P3REQ-06",
+    "outcome": "not-fixed",
+    "what_was_done": "Reset from left-for-builder at review (S3R-jobs-19): the design is not settled - topics/long-commands.md does not list the survey, commands/survey.md has no pending answer - so the finding stays active for S3's second part. What the jobs unit delivered regardless: attach takes no command-line input, is keyed by (command, subject, commit), returns the pending answer to any caller and serves a result once, so the survey can re-attach unchanged once the spec amendment lands.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach); next/tests/unit/test_jobs.py::test_collected_result_is_not_served_again"
+  },
+  {
+    "id": "S3B-jobs-1",
+    "outcome": "fixed",
+    "what_was_done": "env-start.md already states the story-versus-integration worktree choice, the 28100-28199 pool chosen without a socket under ports.lock, the two-second settle with three attempts and that ok means started, not yet listening. env-stop.md now states the one syntax ('vsdd env stop'), that the command takes no argument, selects by caller marker and stops everything only from a terminal. spec_lint passes.",
+    "where": "rewrite/spec/commands/env-start.md; rewrite/spec/commands/env-stop.md"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "Now genuinely fixed in both halves: validate's single syntax came from state-core (step3-state-core.json), and the env-stop half is closed by this unit's edit - the Syntax line reads only 'vsdd env stop' with the commentary removed (S3R-jobs-20).",
+    "where": "rewrite/spec/commands/env-stop.md; next/plugins/vsdd-factory/py/vsdd/state/cmd_validate.py (unchanged, state-core's)"
+  }
+]

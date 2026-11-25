@@ -1,0 +1,20 @@
+[
+ {
+  "id": "S4R-gates-15",
+  "outcome": "fixed",
+  "what_was_done": "The test half is now in, beside the code half from the first fix. The sample runner (tests/e2e/sample-project/tools/junit_runner.py, which the gates unit owns per ORDER.md section 4) grew build_suite: after discovering tests/, it adds every test_*.py beside the product's own package (tally.test_in_src among them), so a source-class test really reaches the JUnit report with its file attribute — previously the runner discovered tests/ only and the case never appeared, which is why the old assertions held with the filter removed. SOURCE_CLASS_TEST became a unittest.TestCase (a bare function is invisible to loadTestsFromModule, a second reason the probe found no case). test_source_class_test_does_not_count and test_refreeze_drops_source_class_tests now assert the case is in the red and the re-freeze report (file=\"tally/test_in_src.py\"), that red's metrics.new is 3, and that neither the red record's tests nor the re-freeze record's tests hold a test_in_src identity. Both verified to fail with the source-class filter of gatelib._new_cases removed (metrics 4 == 3 fails; the identity shows in the records), and pass with it.",
+  "where": "next/tests/e2e/sample-project/tools/junit_runner.py (build_suite); next/tests/unit/test_gate_red.py::test_source_class_test_does_not_count; next/tests/unit/test_gate_refreeze.py::test_refreeze_drops_source_class_tests"
+ },
+ {
+  "id": "S4R-gates-C1-1",
+  "outcome": "fixed",
+  "what_was_done": "gatelib._cached passes changed_files to the result builder only for green (changed_files=changed_files if gate == 'green' else None), so a cached red result no longer carries changed_files: [] and has the shape of a freshly measured red — changed_files stays the green field of plan 3.1 and the gate-result schema. Green's cached behaviour is unchanged (with --since the computed list, without it []), as test_cached_green_rewrites_patch still asserts. test_passing_record_returned_without_measuring now asserts 'changed_files' not in the cached red result, and also on the fresh one; verified to fail with the old unconditional changed_files=changed_files restored.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_cached); test: next/tests/unit/test_gate_red.py::test_passing_record_returned_without_measuring"
+ },
+ {
+  "id": "S4R-gates-C1-2",
+  "outcome": "fixed",
+  "what_was_done": "The shipped evidence-record schema declares diff_patch (a string: green records — the absolute path of the patch file the gate wrote, the whole base-to-head patch, also after --since; a range patch lives beside it), matching the spec's rewrite/spec/schemas/evidence-record.schema.json and what the green gate has written since the S4R-gates-11 fix. The valid green fixture carries diff_patch. New test test_green_record_fields_are_declared_in_the_schema: a real passing green record must have no field the shipped schema leaves undeclared; verified to fail with diff_patch dropped from the schema (reports ['diff_patch']).",
+  "where": "next/plugins/vsdd-factory/schemas/evidence-record.schema.json; next/tests/unit/fixtures/schemas/evidence-record/valid_green.json; test: next/tests/unit/test_gate_green.py::test_green_record_fields_are_declared_in_the_schema"
+ }
+]

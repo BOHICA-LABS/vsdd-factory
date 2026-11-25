@@ -1,0 +1,65 @@
+[
+  {
+    "id": "D31R-C-1",
+    "origin": "decision D31, confirmation",
+    "severity": "major",
+    "where": "rewrite/findings/sources/extra-d31.json (D31-4, D31-8, D31-2); rewrite/findings/by-package/F3.md",
+    "problem": "The open ledger entries that guide the F builders still describe the design as it was before the corrections. D31-4, left for F3, says 'a story that removes a feature flag always opens a merge decision' and that the spec row gains only flags=home-built, 'only accepted when ... source = home-built'. Both contradict the corrected design: F-APPROVE now requires flags=<source> for every source and accepts flags=decline -- <words> for an existing system; the removal question is no longer a wait at story deliver; and the question is asked only while flags.removal = human, before any story exists. The merge row itself (opened when a delivered story waits; approve performs the merge; reject closes the pull request and descopes the story) does not fit a decision opened by the maintain checkpoint with no story or pull request, with the id merge.flag-<stem> and a reject that needs until=<date>. D31-8 points F2 at F-ITEMS in tables/flag-checks.toml, but the check now lives in tables/flag-story-checks.toml and has four items that come back in later loops. D31-2 says the survey fills [flags] keys, but it now writes only [flags.approved]. An F3 builder following D31-4 would put back the always-wait that D31R-F-4 and D31R-D-21 removed.",
+    "proposed_resolution": "Rewrite the problem and proposed-resolution text of D31-4, D31-8 and D31-2, or add triage notes that apply after triage/d31.json. D31-4, spec row: approve [variant] [topology] [flags=<source> | flags=decline -- <words>], required when the decision would accept the flag decision record. D31-4, merge row: opened by the maintain checkpoint before a cleanup story is written, only while flags.removal = human; id merge.flag-<stem>; approve lets the next maintain run write the cleanup story; reject needs until=<yyyy-mm-dd>; nothing waits at story deliver. D31-8: F-ITEMS is in tables/flag-story-checks.toml, with the items flag-off, flag-removed, flag-system and not-a-flag. D31-2: the survey writes [flags.approved].",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-2",
+    "origin": "decision D31, confirmation",
+    "severity": "major",
+    "where": "rewrite/spec/tables/flag-story-checks.toml (F-ON); rewrite/spec/tables/flag-duties.toml (test-writer)",
+    "problem": "F-ON reruns the whole suite with the story's flag on and refuses any new failure against the baseline. It leaves out only tests whose names carry that flag's off or default token. A feature behind a flag usually replaces behaviour that existing tests assert; this is the case D31 says matters most, features added to existing code. With the flag on, those existing tests fail, they carry no token, and the baseline lists them as passing, so F-ON refuses the story. No duty tells the test-writer to put those tests in the off state, the implementer may not edit tests, and the only way out written in the design is flag_exempt, which drops the flag.",
+    "proposed_resolution": "Add to the test-writer's duty for a story behind a flag: each existing test that asserts behaviour the on state replaces is moved to the off state. It sets the flag off through the test double and is renamed with the flag_off_<k> token and the flag-off criterion, so F-ON leaves it out and the removal story deletes it. Have F-ON's refusal name each failing existing test, so the repair goes to the tests stage. Add to the adversary's flag-off item that every test moved to off asserted only replaced behaviour.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-3",
+    "origin": "decision D31, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-checks.toml (header rule 'Cannot measure is a failure')",
+    "problem": "The header rule says that while flags are on a check fails when a key it reads is empty, and never passes by default. The corrections added keys whose empty value is a valid choice that the rows treat as a report, not a failure. key_env is empty for a source with no secret key. key_patterns empty gives 'key shape not measured' (F-KEY). definition_patterns empty means one file per flag (F-DEFINITION). definitions_check empty gives 'definitions not validated'. F-CHOICE does not require any of the four. A builder who follows the header fails every green gate of a project with no key, or with no definitions command.",
+    "proposed_resolution": "Narrow the header rule to the keys F-CHOICE requires, plus patterns that do not compile and scans that time out. State that key_env, key_patterns, definition_patterns and definitions_check may be empty, and that the row's unmeasured cell gives what the gate then reports.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-4",
+    "origin": "decision D31, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/registry.d/d31.toml (package F5)",
+    "problem": "F5's delivers text includes F-CHOICE as advisory findings in the spec coherence check of vsdd gate sweep, but F5 depends only on F1 and G5. gate-sweep is built by G7, so F5's generated brief does not name the package it extends. This is the same class of problem D31R-F-14 fixed for F4.",
+    "proposed_resolution": "Add G7 to F5's depends and regenerate the briefs.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-5",
+    "origin": "decision D31, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES, F-ON)",
+    "problem": "The state token is flag_on_<k>, flag_off_<k> or flag_default_<k>, with no letter or digit directly before or after it. Test names go on after the token with an underscore, so for the tidy keys checkout and checkout-v2 (encoded checkout_v2), the token flag_off_checkout also matches inside test_ac2_flag_off_checkout_v2_keeps_old_page. F-ON for checkout then leaves out checkout-v2's off and default tests, and F-STATES for a checkout story counts such a test as its own. F-RECORD refuses only keys whose encoded forms are equal, so the prefix collision that D31R-D-12 and D31R-D-17 closed for definitions comes back for tests.",
+    "proposed_resolution": "End the token with a fixed terminator, for example the token followed by a double underscore or by the end of the name, and say so in F-STATES and in the test-writer's duty. The alternative is for F-RECORD to refuse a new key whose encoded form followed by '_' begins another record's encoded form.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-6",
+    "origin": "decision D31, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/config/flags.md (state 'Requested'); rewrite/spec/registry.d/d31.toml",
+    "problem": "config/flags.md says that in the requested state 'every gate result and the release packet' print 'flags requested, flag system not chosen'. The flag-checks header says no flag check runs while flags are not on. The release list in topics/flag-lifecycle.md does not include the line. No package's delivers text names it either: F1 delivers the states only in vsdd status and the briefing. The line that replaced the F-6 deadlock therefore has no builder in gate results, and probably none in the release packet.",
+    "proposed_resolution": "Name the line in F1's delivers as one helper that every gate result calls, add it to the release list of topics/flag-lifecycle.md (built by F3), or drop 'every gate result' from config/flags.md.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D31R-C-7",
+    "origin": "decision D31, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-config-keys.toml (flags.enabled); rewrite/spec/topics/project-configuration.md",
+    "problem": "flags.enabled has set_by = \"person\", which the table's header defines as 'written by a person in [flags], and by nothing else'. Yet the proposal carries enabled, F-CHOICE requires it, and F-FILL writes it into [flags.approved] with an exception. topics/project-configuration.md also restates that the survey keeps [flags.approved] 'equal to' the toolchain table and leaves out that exception. An F1 builder who writes the schema from set_by could reject enabled in [flags.approved] or in the toolchain file.",
+    "proposed_resolution": "Make flags.enabled set_by = \"proposal\" with override = true, which is the existing meaning: a person's value in [flags] wins. Have project-configuration.md link to config:flags for the contents of [flags.approved] instead of restating them.",
+    "on_slice_path": false
+  }
+]

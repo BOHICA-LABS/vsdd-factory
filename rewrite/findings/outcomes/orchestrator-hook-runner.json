@@ -1,0 +1,8 @@
+[
+ {
+  "id": "step3-hook-runner-fix-6-C2-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for package H1 when the build widens; no seventh round, because the regular expression is right on every code point (the confirmer swept all 1,113,984 code points from U+0080 at nine positions and found no disagreement) and the gap is in what the tests pin. Resolution for the H1 builder, in next/tests/hooks/test_caller.py only: add one test that takes every code point c from U+0080 to U+10FFFF and asserts caller._CALL_TEXT_RE refuses c in each of '<c>x/vsdd survey', './a<c>b/vsdd survey', 'vsdd survey a<c>b', \"vsdd survey a<c>='x'\", 'vsdd<c>survey', '<c>vsdd survey', 'vsdd survey<c>' and \"vsdd survey 'x'<c>\", and accepts one text holding every such code point inside a single quoted span; and send U+017F, U+212A, U+0130 and U+0131 in a bare word through is_vsdd_call and assert refusal, which catches a gate compiled case-insensitively. The confirmer's scratch version of this test adds about 4.6 seconds, passes on the code as built and fails all 68 surviving mutants. If the time is not wanted, extend DIFFERENTIAL_CHARACTERS with one code point per Unicode general category, every Zs, Zl, Zp and Cf code point, a surrogate, an astral code point and the four case-folding letters, and rerun the non-ASCII mutants.",
+  "where": "next/tests/hooks/test_caller.py"
+ }
+]

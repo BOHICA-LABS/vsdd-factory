@@ -1,0 +1,29 @@
+[
+  {
+    "id": "L2C-c2-b6-1",
+    "origin": "slice layer 2, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml (header, 'Slice depth' paragraph); next/tests/unit/test_policy.py",
+    "problem": "The header written for C2-R12 says 'the [contract], [story], [[story-kind]] and [_unknown] rows are pinned by tests/unit/test_policy.py'. No test reads the [contract] row. In a scratch copy, changing its glob, raising max_bytes to 80000, adding 'approved' to its status enum, or changing lock from 'spec' to 'done' each passed every suite and tools/check.py. The [[story-kind]] rows are only partly pinned: port's tests_method, facade's implement_method, and harness's implement_agent (verifier changed to implementer) also passed, and L-KIND does not catch the last one because the implementer holds source and manifests. The header claims coverage that does not exist, for the rows that P3SEAM-08 made the single source of the kind table.",
+    "proposed_resolution": "Add a TestContractArtifactKind that pins the contract row's glob, id, dir, frontmatter, writer, lock, headings and max_bytes, and pin all seven story-kind rows' four stage cells and red_gate exactly. Otherwise narrow the header to the rows that are actually pinned.",
+    "on_slice_path": true
+  },
+  {
+    "id": "L2C-c2-b6-2",
+    "origin": "slice layer 2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/conventions.md (Model tiers section)",
+    "problem": "The B6-R8 edit left the same three sentences twice in the Model tiers section: lines 108-110 and lines 119-122 ('tests/lint/roster.toml is the single source. Agent files must match it (lint), and the build generates the tier and role tables in the workflow prelude from it. Every workflow step sets both model and effort from the generated table, because it is unverified that a step inherits the agent file's effort.').",
+    "proposed_resolution": "Delete the second copy, after the 'Tier | Used for' table, and keep the sentence that points at [tiers] for model, effort and colour.",
+    "on_slice_path": false
+  },
+  {
+    "id": "L2C-c2-b6-3",
+    "origin": "slice layer 2, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml (closing Notes, the HUMAN_ONLY/GOVERNED bullet)",
+    "problem": "The shipped walls.toml says the HUMAN_ONLY and GOVERNED values 'are carried by the design's tables/callers.toml until the hook rules ship, and vsdd/hooks/model.py reads them from there at build time'. rewrite/spec/tables/callers.toml and rules/gate-guard.md say instead that H6 moves them into vsdd/hooks/model.py as constants of the code. Shipped code cannot read a file under rewrite/, which does not ship. H6 could read the note as an instruction to make model.py, or the build, load the design file.",
+    "proposed_resolution": "Reword the note to match callers.toml: the values live in the design's tables/callers.toml until H6 writes them as constants in vsdd/hooks/model.py, and from then that module is the one copy, which test_policy.py and tools/check.py should read.",
+    "on_slice_path": true
+  }
+]

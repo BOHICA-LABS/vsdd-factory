@@ -1,0 +1,334 @@
+{
+ "probes": {
+  "summary": "Ran platform probes round 3 for the 1.0 rewrite: 16 headless Claude Code sessions (2.1.331) against the extended spike plugin, settling every item the thin slice needs (6, 10, 27-31, 34 per P3COV-03) plus 9, 13, 32, 35 and the standing /tmp-CLAUDE.md observation. All slice-critical behaviours were proven: hooks can rewrite Bash calls and StructuredOutput fields through updatedInput in the main session, a dispatched agent and a workflow step (nested hookSpecificOutput.updatedInput is the honoured spelling); session_id is uniform across step subagents; the claude process is visible in the ancestor walk on macOS; hook allows admit Workflow calls not in allowedTools; typed slash-command text reaches the script's args as a verbatim string; and the four deviations (fail-open missing launchers, rewrite+ask dropping calls headless, WebFetch refusing localhost, /tmp project roots losing their CLAUDE.md) are filed as PR3-1..PR3-4 with the design's fallbacks confirmed or refined.",
+  "results": [
+   {
+    "item": "1 (step result in the hook)",
+    "question": "Does the hook on the StructuredOutput call see the whole step result, and does a block make the agent correct it and return again?",
+    "result": "proven",
+    "evidence": "Round 2 (recorded in rewrite/STATE.md): hook receives the whole result as tool_input; block made the agent return with the corrected quote. Re-confirmed incidentally in round 3 by the rewrite probe operating on StructuredOutput payloads.",
+    "consequence_for_the_design": "None; the step-record fallback stays removed from the design."
+   },
+   {
+    "item": "2 (typed decision command)",
+    "question": "Does UserPromptExpansion fire for a typed /vsdd-factory:decide, carry the arguments, and does a block keep the text from the model, headless?",
+    "result": "proven",
+    "evidence": "Round 2, headless: event fired with command_name and command_args; a block ended the prompt with zero model turns.",
+    "consequence_for_the_design": "None; the weaker prompt-submit fallback stays unused."
+   },
+   {
+    "item": "3 (refused stop)",
+    "question": "Does a refused stop keep an agent running?",
+    "result": "partly",
+    "evidence": "Round 2: holds a text-returning agent, not one that already returned a schema result.",
+    "consequence_for_the_design": "Unchanged: block the result call for workflow steps; refuse the stop only for session-dispatched agents."
+   },
+   {
+    "item": "4 (skill starts a workflow)",
+    "question": "Can a skill make the main session start a plugin workflow, headless, and does the model start one unprompted?",
+    "result": "proven",
+    "evidence": "Round 2, headless: a person-invoked skill started the workflow and relayed the result; the model never started a workflow on its own judgment.",
+    "consequence_for_the_design": "topic:spikes stays written to model-dispatched agents."
+   },
+   {
+    "item": "5 (plugin bin on PATH)",
+    "question": "Is <plugin>/bin on PATH in the main session, a subagent, a workflow step and headless mode?",
+    "result": "proven",
+    "evidence": "Round 2, headless, all three contexts. Person-typed `! vsdd` remains untested (needs an interactive person).",
+    "consequence_for_the_design": "Prompts may name the tool by the plugin root; the shim still covers the person."
+   },
+   {
+    "item": "6 (long Bash calls, detached jobs)",
+    "question": "Does a Bash call inside a step accept a ten-minute timeout, and does a detached job outlive its starting call?",
+    "result": "partly",
+    "evidence": "Round 3, logs/r1-result.json (P6): a step ran `sleep 240 && echo LONGDONE` with the Bash timeout parameter at 600000 and reported LONGDONE. Round 2: detached job outlived its call. The literal ten-minute call is E2's.",
+    "consequence_for_the_design": "The 600000 ms ceiling is accepted by the tool; the wait-slice fallback is not needed so far, and the full ten-minute proof stays where the design already put it (E2)."
+   },
+   {
+    "item": "7 (hook permission approval)",
+    "question": "Is a hook's permission approval honoured for calls inside agents, so default-mode waves raise no prompts?",
+    "result": "proven",
+    "evidence": "Round 2, default mode, main session, dispatched agent and workflow step: approved command ran, control refused; in auto mode the control was allowed anyway. Wave-scale count stays with E3.",
+    "consequence_for_the_design": "Decision D4 stands; static allow-rule fallback not needed."
+   },
+   {
+    "item": "8 (tool lists)",
+    "question": "Does an agent that lists the Agent tool still have none as a workflow step, and can a Bash-only agent return a schema result?",
+    "result": "proven",
+    "evidence": "Round 2: both behaved as the design assumes.",
+    "consequence_for_the_design": "Clerk tool lists unchanged."
+   },
+   {
+    "item": "9 (hooks fire for MCP tools and WebFetch)",
+    "question": "Do hooks fire for MCP tools and WebFetch when the matcher names them?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r5.jsonl: PreToolUse fired for mcp__tiny__ping from the main session, a dispatched agent and a workflow step, and for a WebFetch call. New fact: WebFetch refuses undotted hostnames outright ('WebFetch cannot fetch localhost... use Bash with curl instead'), R5.",
+    "consequence_for_the_design": "Walls can gate MCP and WebFetch traffic. Localhost fixtures for walled agents must use 127.0.0.1 or the shell - filed as PR3-4 (minor, off slice path)."
+   },
+   {
+    "item": "10 (MCP tool lists)",
+    "question": "Can agents listing an MCP tool call it, and is an unresolved name dropped silently?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r5-result.json and r5b: an explicit tool list naming mcp__tiny__ping could call it from main session, dispatch and workflow step (server via --mcp-config); mcp__nosuchserver__ping in the same list was dropped silently - exactly one mcp tool visible, calls fine. Forked-skill leg not exercised.",
+    "consequence_for_the_design": "MCP-capable agents (and only those) can keep inherited session tools; both fallback variants in the design hold, so the stronger one is adopted."
+   },
+   {
+    "item": "11 (agent frontmatter)",
+    "question": "Are isolation: worktree and omitClaudeMd honoured in a plugin agent's frontmatter, and can a forked skill name a plugin agent?",
+    "result": "proven",
+    "evidence": "Round 2: isolation honoured for dispatches, ignored for workflow steps; omitClaudeMd honoured; forked skill names a plugin agent.",
+    "consequence_for_the_design": "Steps that need isolation pass it themselves, as designed; the holdout-evaluator CLAUDE.md wall rides on omitClaudeMd."
+   },
+   {
+    "item": "12 (compaction hooks inside a step)",
+    "question": "Does compaction fire the pre-compaction hook inside a step agent?",
+    "result": "not-testable-headless",
+    "evidence": "Not run: a headless probe cannot force compaction on demand; nothing in -p mode triggers it deterministically in a short run.",
+    "consequence_for_the_design": "Unchanged; the repeated identity in the prompt remains the only guaranteed protection until a long E2 step observes it."
+   },
+   {
+    "item": "13 (missing hook launcher)",
+    "question": "Does the platform's block-on-failure behaviour cover a missing hook file, including on the prompt-expansion event?",
+    "result": "disproven",
+    "evidence": "Round 3, logs/r6-result.json: with every hook command pointing at a missing file (sh exits 127), the headless session ran normally - the model answered in one turn, stderr clean, all hooks silently absent. Fail-open, not blocking.",
+    "consequence_for_the_design": "The self-guarding launcher of topic:hook-wiring is load-bearing, exactly as the design's fallback states; item 13 corrected in platform.md. Filed as PR3-2 (minor)."
+   },
+   {
+    "item": "14 (search tools and git exclude)",
+    "question": "Does the search tool skip a directory listed in .git/info/exclude?",
+    "result": "proven",
+    "evidence": "Round 2: Grep skipped the excluded directory.",
+    "consequence_for_the_design": "Ancestor searches stay walled for walled callers without extra machinery."
+   },
+   {
+    "item": "15 (hook working directory)",
+    "question": "Is the hook payload's working directory the worktree for an isolated agent?",
+    "result": "proven",
+    "evidence": "Round 2; round 3's isolated dispatch (logs/r2-result.json) also ran in .claude/worktrees/agent-<hash> on a worktree-<hash> branch.",
+    "consequence_for_the_design": "Spike worktree detection by target path works as designed."
+   },
+   {
+    "item": "16 (worktree commands and the state mount)",
+    "question": "Do platform worktree commands disturb a mounted .factory worktree, and can a hook run git in the state worktree before compaction within its time limit?",
+    "result": "partly",
+    "evidence": "Round 3, logs/r2-result.json plus post-run `git worktree list`: an isolation: worktree dispatch created its worktree under .claude/worktrees/ and the .factory worktree stayed listed, mounted and intact (sentinel readable). The compaction-timing leg needs a real compaction and stays open.",
+    "consequence_for_the_design": "The mount-survival assumption is proven; the flush-before-compaction budget remains guarded by the design's existing fallback (flush inside vsdd commands; vsdd status --fix remounts)."
+   },
+   {
+    "item": "17 (fixed cost of an agent start)",
+    "question": "What is the fixed per-agent context cost, and do agents without the Skill tool receive skill listings?",
+    "result": "proven",
+    "evidence": "Round 2 measurement: about 2,700-3,400 tokens with an explicit tool list, about 19,000 unrestricted.",
+    "consequence_for_the_design": "Explicit tool lists everywhere; no need to document plugin-disabled sessions."
+   },
+   {
+    "item": "18 (survey tier override)",
+    "question": "Can cheap models be forced for tests through the survey's tier override?",
+    "result": "not-run",
+    "evidence": "Skipped: the survey is product code (VSDD_TEST_TIER), not platform behaviour; needs the built tool.",
+    "consequence_for_the_design": "Fallback unchanged (smoke tier costs several times more)."
+   },
+   {
+    "item": "19 (packaging assumptions N2-N8)",
+    "question": "Do version floor, CI credentials, tag pins, claude plugin tag, keyless servers, stale agent setting and cache migration behave as assumed?",
+    "result": "not-run",
+    "evidence": "Skipped: needs the marketplace installer and CI (install-check, step X0).",
+    "consequence_for_the_design": "Each keeps its named fallback in packaging:packaging-assumptions."
+   },
+   {
+    "item": "20 (Node harness conformance)",
+    "question": "Does the Node harness match the platform's workflow rules, including the shared agent counter?",
+    "result": "not-run",
+    "evidence": "Skipped: tests the harness against the platform; runs in the weekly conformance tier when the harness exists.",
+    "consequence_for_the_design": "Fix-the-harness fallback unchanged."
+   },
+   {
+    "item": "21 (perimeter yield)",
+    "question": "Does one clean pass per perimeter let through few enough defects?",
+    "result": "not-run",
+    "evidence": "Skipped: measured in E3 over a real delivery.",
+    "consequence_for_the_design": "Raise-cap-or-add-lens fallback (D9) unchanged."
+   },
+   {
+    "item": "22 (agent-start budgets)",
+    "question": "Does a realistic story cost 8-12 agent starts and a six-story wave 70-90?",
+    "result": "not-run",
+    "evidence": "Skipped: measured in E2 and E3.",
+    "consequence_for_the_design": "Budgets set from measured numbers when measured."
+   },
+   {
+    "item": "23 (JUnit report detection)",
+    "question": "Can JUnit reports be detected for the toolchains in use?",
+    "result": "not-run",
+    "evidence": "Skipped: needs vsdd init on the eight sample projects.",
+    "consequence_for_the_design": "Blocked-decision fallback (reason environment) unchanged."
+   },
+   {
+    "item": "24 (PDF and diagram engines)",
+    "question": "Do the PDF and diagram engines work through npx?",
+    "result": "not-run",
+    "evidence": "Skipped: first task of T5.",
+    "consequence_for_the_design": "Decision D14 (drop the skill) remains the named exit."
+   },
+   {
+    "item": "25 (scheduled headless commands)",
+    "question": "Do maintain and discover start from a scheduled headless command?",
+    "result": "not-run",
+    "evidence": "Skipped: needs the scheduler (launchd or cron) that hosts the recipe; a synthetic detached run would not test the scheduling path itself.",
+    "consequence_for_the_design": "On-demand-only fallback unchanged."
+   },
+   {
+    "item": "26 (step inherits agent effort)",
+    "question": "Does a step inherit the agent file's effort?",
+    "result": "not-testable-headless",
+    "evidence": "Not run: no observable carries effort out of a step (also the round-2 conclusion).",
+    "consequence_for_the_design": "Every step sets effort explicitly, so nothing relies on the answer."
+   },
+   {
+    "item": "27 (hook rewrite through updatedInput)",
+    "question": "Can a hook rewrite a Bash command through updatedInput in the main session, a dispatched agent and a workflow step, and rewrite a step's StructuredOutput field - and which spelling is honoured?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r1-result.json, r2-result.json, r11: probe.sh printed CALLER=ticket-42 (the hook-injected value; unrewritten it prints CALLER=unset) in the main session, a dispatched agent and a workflow step; the StructuredOutput rewrite changed one schema field (ORIGVAL -> ORIGVAL-HOOKREWRITE) and the awaited step result carried the rewritten value. R11 proved the nested hookSpecificOutput.updatedInput slot alone is honoured.",
+    "consequence_for_the_design": "The caller-marker rewrite (rule:step-results, topic:caller-identity) works as designed in all three contexts; the hash-based fallback for a lost rewrite is not needed on today's evidence. The P3COV-07 ask-branch does not work unattended - see PR3-3."
+   },
+   {
+    "item": "28 (session id inside steps)",
+    "question": "Do hook payloads for tool calls inside workflow steps carry the main session's session id?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r1.jsonl: all 29 events of the run - including PreToolUse, StructuredOutput, SubagentStart/Stop inside workflow-step subagents - carry the same session_id.",
+    "consequence_for_the_design": "Run-lock refresh by session-keyed calls works as designed (topic:run-lock); the stale-lock fallback is not needed on today's evidence."
+   },
+   {
+    "item": "29 (platform process among ancestors)",
+    "question": "Can a long-lived Claude Code process be found among the ancestors of a hook and a Bash call, on macOS and Linux, with the Bash sandbox on?",
+    "result": "partly",
+    "evidence": "Round 3, logs/r1-result.json (P29): walking ps -axo pid,ppid,comm upward from a workflow-step command reached claude (step) -> claude (headless session) -> login shell -> iTerm2 -> launchd, uninterrupted. macOS proven; no Linux machine in the round.",
+    "consequence_for_the_design": "The macOS leg supports the offered lock-liveness cut; the Linux leg remains for the platform that cut targets (topic:run-lock) - nothing else depends on it."
+   },
+   {
+    "item": "30 (hook approval for Workflow)",
+    "question": "Is a hook's permission approval honoured for the Workflow tool?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r3-result.json: with Workflow absent from --allowedTools in default mode, the hook's allow on the PreToolUse event for tool Workflow let the call through; the workflow ran and returned PERM30-WORKFLOW-RAN.",
+    "consequence_for_the_design": "The driver needs no static allow rule in attended default-mode setups; the one-static-rule fallback stays available for restrictive setups."
+   },
+   {
+    "item": "31 (typed workflow arguments)",
+    "question": "Does text typed after /plugin:<workflow> reach the script's args, as a string or as an object?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r4-result.json: /fspike:args ARGTEXT-XYZZY-42 hello world delivered args as the verbatim string \"ARGTEXT-XYZZY-42 hello world\" (typeof string, no tokenising or wrapping).",
+    "consequence_for_the_design": "The prelude parser accepting both a string and an object is sufficient; person-facing entrances need no object adapter."
+   },
+   {
+    "item": "32 (forked skill dispatches)",
+    "question": "Does a forked skill's agent hold the Agent tool and can it dispatch the spike runner?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r7-result.json: the fork's agent (tool list: Agent) dispatched another plugin agent and its reply (DISPATCH-OK-77) came back as the skill's result; the fork returned synchronously in the same run.",
+    "consequence_for_the_design": "research and retro skills can fork and dispatch as designed; the main-session-dispatch fallback is not needed. The synchronous return also settles the third P3COV-09 assumption."
+   },
+   {
+    "item": "33 (bundled and user browser servers)",
+    "question": "What happens to the bundled browser server when the user runs their own, and does the pinned server refuse file: addresses with no option set?",
+    "result": "not-run",
+    "evidence": "Skipped: needs an interactive browser session and a second configured server; out of headless probe scope.",
+    "consequence_for_the_design": "The hook's address check covering both spellings and browser_tabs remains the design's guard; related new fact in PR3-4 (WebFetch rejects localhost)."
+   },
+   {
+    "item": "34 (encodeURIComponent)",
+    "question": "Does encodeURIComponent exist in the workflow script runtime?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r1-result.json: encodeURIComponent('a b&c/d') returned a%20b%26c%2Fd (also exercised in r3).",
+    "consequence_for_the_design": "No hexadecimal prelude encoder needed; the percent-encoder of B4a keeps the runtime primitive."
+   },
+   {
+    "item": "35 (runner-dispatch pairing)",
+    "question": "Can the hook pair a spike runner with the dispatch that started it, for concurrent dispatches by different agent types?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r2b.jsonl: two concurrent Agent-tool dispatches (fspike:plain, fspike:rewriter) produced two SubagentStart events with the session's session_id, distinct agent_type and distinct agent_id each; workflow-step parallel steps behave the same (r1). In both logs each SubagentStart precedes that agent's first guarded call (weak, racy timing evidence for the P3COV-08 ordering case).",
+    "consequence_for_the_design": "Admission pairing keys on (session_id, agent_type, agent_id); the union-of-walls fallback stays for the unresolved ordering corner."
+   },
+   {
+    "item": "observation (project CLAUDE.md under /private/tmp)",
+    "question": "Was the round-2 observation - a project CLAUDE.md under /private/tmp not loaded headless - real, and why?",
+    "result": "proven",
+    "evidence": "Round 3, logs/r9a-r9c-result.json: project CLAUDE.md at a /private/tmp root (direct and via /tmp symlink) absent from context - the model named the global user CLAUDE.md as the only one present; the same project under $HOME had it loaded and quoted verbatim.",
+    "consequence_for_the_design": "Location-dependent behaviour is real: unattended fixtures live under $HOME, and nothing that must reach a headless session travels only in a project CLAUDE.md (hook briefings stay the carrier). Filed as PR3-1 (major, on the slice path through E2's first run)."
+   }
+  ],
+  "evidence_dir": "/Users/jmagady/dev2/vsdd-factory/rewrite/spike/probes-round-3",
+  "spec_files_changed": [
+   "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/platform.md",
+   "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/platform-proven.md",
+   "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/registry.d/probes.toml",
+   "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-probes.json"
+  ],
+  "cost_note": "16 headless claude sessions (model sonnet, agents at effort low with explicit tool lists; one plugin-copy probe reused across runs). Measured total_cost_usd on 8 of them sums to $1.69 (largest single run $0.44); the remaining prompt-only and short runs were individually under $0.15, giving an estimated all-in of roughly $2.50-$3.50. Largest non-money cost was wall-clock: one ~5-minute run carried a deliberate 240-second sleep step for the timeout probe."
+ },
+ "check": {
+  "verdict": "Mostly supported, with four results unsupported as written and two findings overstated. Of 17 results examined, 13 are supported (several with caveats). The 4 not supported are items 6, 9, 29 and 30. Every round-3 session ran in the auto permission mode, not the default mode, which matters for items 27 and 30 and for PR3-3. Item 6: the 600000 ms call was refused by the platform's sleep guard and re-run as a detached job plus a 236 s poll loop with timeout 300000, so the 600000 ms ceiling was never shown to be accepted. Item 9: the probe used a matcher-less hook, but the question asks about matchers that name the tools. Item 29 misreads the process chain and skipped the hook and sandbox-on legs. Item 30 ran in auto mode with no refused control. I reran two probes in a scratch project outside the repository, in real default mode. C30: without the hook, the Workflow call is refused ('Review dynamic workflow before running'); with the hook's allow, it runs, so item 30's conclusion now holds on the rerun's evidence. C9: regex and design-style alternation matchers fire for mcp__tiny__ping and WebFetch, and the controls stay silent (main session only). The same run refutes PR3-4's proposed fix: WebFetch to http://127.0.0.1 is upgraded to HTTPS and fails with 502. Several correct results cite the wrong evidence. Items 13, 31 and 35 and the CLAUDE.md observation are actually shown by session transcripts that are not in the repository (item 35 by r5, not r2b). The r9 probe asked about a marker that the CLAUDE.md file does not contain. Full report with verbatim excerpts: /Users/jmagady/dev2/vsdd-factory/rewrite/spike/probes-round-3/CHECK.md",
+  "checked": 17,
+  "supported": 13,
+  "problems": [
+   {
+    "item": "6 (long Bash calls)",
+    "problem": "Contradicted by the step transcript. The Bash call with timeout 600000 was refused by the platform's sleep guard ('Blocked: sleep 240 followed by: echo LONGDONE ... use run_in_background'). The agent re-ran it detached and polled it with an until-loop at timeout 300000, which ran 236 s. So 'the 600000 ms timeout is accepted' and '240 s call ran in a step' are unsupported, and 'the wait-slice fallback is not needed' is the reverse of what happened. New fact: commands that begin with `sleep N &&` are refused."
+   },
+   {
+    "item": "9 (hooks fire for MCP tools and WebFetch)",
+    "problem": "The question asks about matchers that name the tools, but the probe's PreToolUse hook had no matcher. The design depends on regex alternation over MCP names (hook-wiring.md). Rerun C9 (default mode, main session only): 'mcp__tiny__.*' and 'Bash|Read|mcp__(plugin_fspike_)?tiny__ping|WebFetch' fired; the controls 'mcp__nosuchserver__.*' and 'Bash' did not. Still untested: the plugin-bundled spelling, and the dispatch and step contexts under a named matcher."
+   },
+   {
+    "item": "PR3-4 / item 9 consequence (use 127.0.0.1)",
+    "problem": "Refuted by rerun C9. WebFetch to http://127.0.0.1:8139 was upgraded to HTTPS: the plain-http server logged a TLS ClientHello, and the tool returned 'HTTP 502 Bad Gateway'. A plain-http loopback fixture cannot be reached through WebFetch. The shell route was not tested either."
+   },
+   {
+    "item": "29 (platform process among ancestors)",
+    "problem": "The chain is misread. Workflow steps run inside the session process: PID 10651 is the headless session, and 21191 is the long-lived interactive session that launched the probe. Only a Bash call was walked, not a hook, and the sandbox was off, yet platform.md places the sandbox-on condition only in the Linux leg. 'Proven on macOS' overstates it."
+   },
+   {
+    "item": "30 (hook approval for Workflow)",
+    "problem": "The r3 transcript records permissionMode 'auto', not default, and no control without the hook's allow was run, so r3 shows nothing about the hook. Rerun C30 in real default mode supports the conclusion: without hooks, Workflow is refused and listed in permission_denials; with the hook's allow, it ran. The citation must be replaced with C30."
+   },
+   {
+    "item": "PR3-3 (rewrite with ask)",
+    "problem": "Says the call fails 'in either the default or the auto permission mode', but all three r10 sessions ran in auto mode. The failure itself is direct (the rewritten command is in permission_denials, and the side-effect file was never created); the claim about default mode is unsupported."
+   },
+   {
+    "item": "27 (hook rewrite through updatedInput)",
+    "problem": "Supported, with caveats. Allow plus rewrite was shown only in auto mode. The runner preserved in plugin-additions is the r11 version (modified 10:04:53, after r10c). It emits only the nested slot, despite a docstring saying both, so 'R1 to R2 emitted both' cannot be checked from the preserved files."
+   },
+   {
+    "item": "13 (missing hook launcher)",
+    "problem": "The disproof holds, but the cited r6-result.json and the empty stderr do not show the hooks ran. The transcript does: hook_non_blocking_error with exit code 127 on SessionStart and UserPromptSubmit. The hooks were therefore not 'silently absent'. UserPromptExpansion, named in the question, never fired (the prompt was plain text), and PreToolUse never fired."
+   },
+   {
+    "item": "31 (typed workflow arguments)",
+    "problem": "The arguments reached the script through the model. The expansion told it to run `Invoke: Workflow({ name: \"fspike:args\", args: \"...\" })`, and the model copied that. 'Verbatim, no tokenising' therefore depends on the model copying the text and is untested for quotes, newlines or long input. 'The object form is what the Workflow tool receives programmatically' has no evidence."
+   },
+   {
+    "item": "35 (runner-dispatch pairing)",
+    "problem": "The cited r2b dispatches did not overlap: the first agent handed back before the second dispatch's PreToolUse fired. In r1 the mixed-type pair failed ('fspike:plain not found'). The real evidence is r5, where three background dispatches interleave. SubagentStart has no tool_use_id and agent_id exists only once the agent has started, so the pending side can be keyed only on (session_id, agent_type), not on the triple as written."
+   },
+   {
+    "item": "CLAUDE.md observation / PR3-1",
+    "problem": "The probe asked about CLAUDEMD-PROJ-MARKER-123, which the file does not contain, so every answer was NO whatever was loaded. The cited result files rest on the model's description of its own context; the transcripts' injected-context lists do show the behaviour. Both /private/tmp runs were inside /private/tmp/claude-501/ (Claude Code's own temp tree), so 'under /private/tmp' in general, and 'through /tmp' as a separate case, were not shown."
+   },
+   {
+    "item": "11 (omitClaudeMd, round 2)",
+    "problem": "The round-2 transcripts show that omitClaudeMd removes the injected user-level CLAUDE.md. That project was under /private/tmp, where no project CLAUDE.md is loaded, so withholding a project CLAUDE.md (the leg the holdout-evaluator wall relies on) was never observable. platform.md states it as honoured without this caveat."
+   },
+   {
+    "item": "16 (state mount)",
+    "problem": "Supported for one cleanly removed isolated worktree. The post-run `git worktree list` the result cites is not in logs/; this check re-ran it (.factory still listed, sentinel reads FACTORY-SENTINEL-42). A dispatch whose worktree is kept was not exercised."
+   },
+   {
+    "item": "10 (MCP tool lists)",
+    "problem": "Supported, but 'exactly one mcp tool visible' is the agent's own account of its tool list. The main-session leg is a session with no tool list, not an explicit list. The reported consequence ('MCP-capable agents can keep inherited session tools') confuses the design's fallback with the result, which shows that listing both spellings works."
+   },
+   {
+    "item": "platform-proven.md intro",
+    "problem": "'Every result below rests on a logged hook line or the run's result JSON in that directory' is false. Round-2 results have no logs in the repository (raw outputs survive only in the scratchpad), and several round-3 conclusions (items 6, 13, 31 and 35, and the observation) depend on session transcripts kept only in ~/.claude/projects."
+   }
+  ]
+ }
+}

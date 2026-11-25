@@ -1,0 +1,65 @@
+[
+  {
+    "id": "S4R-rules-C1-1",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py",
+    "problem": "The S4R-rules-3 fix sends every opaque segment whose program is git to _git, so a substitution inside git's own arguments is now read as a literal word. Before the fix such a segment blocked opaque_git; now these pass (exit 0) on develop in the main checkout: 'git push origin $(git branch --show-current)', the same quoted, 'git push origin $(echo develop)', 'git push origin HEAD:$(echo develop)', 'git branch -f $(echo develop) HEAD' and 'git update-ref refs/heads/$(echo develop) abc'. In a story worktree 'git rebase origin/develop $(echo develop)' also passes. The first is a natural command and pushes develop. spec rules/merge-guard.md says a guarded verb the parser cannot see into (a substitution among them) blocks opaque_git. A plain expansion has the same hole, which was there before the fix: 'B=develop; git push origin $B' passes.",
+    "proposed_resolution": "In _git, when the verdict depends on an argument (push and fetch/pull refspecs, the names given to branch, update-ref, symbolic-ref, switch -C and checkout -B, the rebase branch argument) and that argument holds '$' or a backtick, block (opaque_git, or where_unknown with a fix naming the literal form). Keep heredoc-only opacity on the parsed path, so the S4R-rules-3 commit cases still pass. Add these commands to test_opaque as blocked cases.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py",
+    "problem": "The S4R-rules-21 fix judges the branch at the tree that --work-tree names (_redirected_tree). But git reads HEAD from the git directory, which --work-tree does not change: it is found from the cwd, or from --git-dir or GIT_DIR. The result is a bypass. Measured in the main checkout on develop, all passing (exit 0): 'git --work-tree=/tmp commit --allow-empty -m x', 'git --work-tree=/tmp merge story/S-9.01', 'git --work-tree=/tmp reset --hard HEAD~1', 'git --work-tree=/tmp push', and 'git --work-tree=<story worktree> commit ...'. Real git, run the same way, moved develop. A GIT_DIR assignment is not judged at all: from the story worktree, 'GIT_DIR=<root>/.git git commit ...' and 'env GIT_DIR=... git commit ...' pass and commit on develop. In opaque text, _opaque_redirected returns None for a redirect outside every factory project, so the plain scan blocks it after all. That contradicts the account and the test's comment ('one outside every factory project is not judged'). A scratch copy that removes _opaque_redirected passes test_opaque_global_values_and_trees.",
+    "proposed_resolution": "Judge the branch at --git-dir's repository, or at a GIT_DIR assignment (seg.assignments, env's included), when one is given; otherwise at seg.where. Never take it from --work-tree. Block where_unknown when that git directory cannot be resolved. Add the --work-tree=/tmp commit, merge, reset and push cases and the GIT_DIR cases as blocked. Either make the opaque 'outside every project' pass real and test it, or drop _opaque_redirected and the claim.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-3",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py",
+    "problem": "The fixes edit two step 3 files outside ORDER.md section 4, which says nothing outside its table is edited and gives the rules unit only registry.py and test_hooks_wiring.py. The two files are hook-runner's shell.py (wrapper skipping, and a subshell's own text, for S4R-rules-3 and -7) and records' state/steps.py (_under_holdout, for S4R-rules-25). The account does not report either as a departure, though it cites the same ownership rule to leave test_caller.py, test_liveness.py and test_rule_cases.py to fix runs. The owners' own tests (test_shell.py, test_state_steps.py) still pass in the full run.",
+    "proposed_resolution": "The orchestrator records the two edits as sanctioned exceptions, which the review's proposed fixes invited (shell.parse, 'the state layer'), or hands them to hook-runner and records fix runs. The owners' plans should then note the changed Segment.program and Segment.text meaning, and the shared predicate.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-4",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/tests-first.md",
+    "problem": "The S4R-rules-10 fix adds a fourth tests-first block code, config_invalid, which blocks every write inside a red-gated story worktree while factory.toml is invalid. Neither rules/tests-first.md nor plan 3.2 or 3.6 names it. The plan's 3.6 row still reads 'Invalid factory.toml: Defaults: full strength'.",
+    "proposed_resolution": "The steward adds config_invalid and its scope (any write in a story worktree whose kind has a red gate) to rules/tests-first.md, beside the invalid-configuration behaviour of topics/hook-failure.md.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-5",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/step-results.md",
+    "problem": "Item 4 still says 'the updatedInput is the stored record'. After the S4R-rules-24 fix the rewrite carries the marked input, not store_step's record with agent_type, worktree_head and agent_id added, and test_stored_mark_is_the_only_grounding asserts exactly that. Read literally, the spec now describes the departure the fix removed.",
+    "proposed_resolution": "Reword item 4: the updatedInput is the result as stored, the agent's result with its grounded keys removed and the failing findings marked, without the runner's own record fields.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-6",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_rule_cases.py",
+    "problem": "The suite now has 12 failures, not the 10 the corrected S4R-rules-12 account gives. Eight are in test_rule_cases.py and four are the step 3 tests the account names. The two new tests-first cases this fix round added ('a sed -i -e on source before red is the edit it stands for', 'a test-writer source edit after red at a later commit is blocked') also fail there. That step 3 runner reads tests/hooks/cases/ against a bare project, so every new case that needs a fixture adds a red test until the hook-runner fix run lands.",
+    "proposed_resolution": "Record the current count (12: eight in test_rule_cases.py, two each in test_caller.py and test_liveness.py) in the outcome account. Add to the owed hook-runner fix run that test_rule_cases.py reads fixture_cases/ only (ORDER.md R5), or skips cases that carry a project key.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-C1-7",
+    "origin": "slice step 4, rules, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py",
+    "problem": "This one predates the fix round; it was found beside the rebase and pull fixes. A fetch or pull refspec with no colon names only a source, so it writes no local branch. _refspec_destination still returns the word itself, so in a story worktree 'git fetch origin develop' and 'git pull origin develop' block moves_guarded_branch, with a fix line that sends the builder to the tool. These are the usual steps before 'git rebase origin/develop', which S4R-rules-5 now allows. 'git fetch origin' passes.",
+    "proposed_resolution": "For fetch and pull, take a destination only from a refspec with a colon (src:dst, +src:dst). Keep the pull-with-refspec integrate_on_guarded block for a guarded branch that is checked out. Add 'git fetch origin develop' and 'git pull origin develop' in the story worktree as passing cases.",
+    "on_slice_path": true
+  }
+]

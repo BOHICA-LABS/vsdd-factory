@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S3R-state-core-1",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. The code half holds: render_config walks SPECS, writes no delivery.protected_paths, and the AU-T2-15 control (writing protected_paths again) is caught by test_init_writes_exactly_the_specs_keys. Two gaps remain. (1) The tests the finding asked for are missing. test_init_writes_exactly_the_specs_keys compares only the set of section names, and test_init_undetected_values_equal_specs_defaults checks only the commands.* keys. In a scratch copy, making render_config drop limits.gate_minutes, or write limits.agents_per_run = 999, left test_config_keys.py and test_init.py passing (27 passed each). (2) The [project] section is still written from a hand-typed tuple (\"name\", \"languages\", \"ui\", \"layout\"), not from SPECS[\"project\"]. Fix: iterate SPECS[\"project\"]. Add a test that, for every fixed section, the written keys equal SPECS[section] minus protected_paths and rules, and that every key absent from 'detected' equals its SPECS default.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/detection.py (render_config); next/tests/unit/test_config_keys.py"
+  },
+  {
+    "id": "S3R-state-core-3",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. The code is right: calling _create_branch twice in a scratch repository returned True and then False, and the branch tip did not change. But no test fails without the fix. test_init_concurrent_creation_keeps_the_first_branch creates the branch first and then runs init, which reads 'unmounted' and takes the mount path, so the update-ref call is never reached. In a scratch copy, removing the empty old value from update-ref left all 17 test_init.py tests passing. Fix: add a test that calls _create_branch twice and asserts False with the tip unchanged. Also add one that patches _branch_tip to return None on its first call, so init's losing path (created false, mount of the winner) runs.",
+    "where": "next/tests/unit/test_init.py::test_init_concurrent_creation_keeps_the_first_branch"
+  },
+  {
+    "id": "S3R-state-core-13",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. Fixed and catching breaks in a scratch copy: the exact raw tokens, the exact retry_command text, path_class precedence with a real overlap (reversing the precedence fails it), and the relayed objects validated against the schema with a ConfigError case (dropping empty_of fails it). Still open: (1) test_import_loads_no_submodule never reads sys.modules after the lookup. The 'loaded' it prints was taken before it. Making the facade import every sibling module on the first lookup left test_state_facade.py passing (5 passed), though the fixer's report says this check was added. (2) test_shipped_commands_register_cleanly still checks only that the failure keys are a subset of empty_of. It does not validate the failure object against the schema, as plan section 7 asks. Fix: after 'fn = vsdd.state.detect', assert that the vsdd.state.* entries in sys.modules are exactly mount and the modules mount imports (gitrun). Validate {**empty_of(output), **failure, ok: false, error: 'x'} with vsdd.schema for each shipped relayed command.",
+    "where": "next/tests/unit/test_state_facade.py::test_import_loads_no_submodule; next/tests/unit/test_dispatch.py::test_shipped_commands_register_cleanly"
+  },
+  {
+    "id": "S3R-state-core-23",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. detect_values now derives branches.protected from the detected release branch. But test_init_detection cannot fail without that: the sample repository releases from main, which is also the SPECS default ['main']. In a scratch copy, deleting the line that sets branches.protected left test_init.py and test_config_keys.py passing (27 passed). Fix: add a detection case on a repository whose release branch is master, or a lone current branch such as develop, and assert branches.protected == [that branch].",
+    "where": "next/tests/unit/test_init.py::test_init_detection"
+  },
+  {
+    "id": "S3R-state-core-28",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. test_import_error_exits_2 is fixed: it puts the directories of uv and sys.executable on PATH and runs from tmp_path. test_init_through_bin_vsdd is not: it adds only the directory of uv (the fixer's own outcome text says so, though the returned report says both), and it sets HOME to the project, which hides uv's managed Pythons. In a scratch copy, with uv on PATH from a directory holding only a uv symlink (the Linux ~/.local/bin layout) and /usr/bin/python3 at 3.9, test_init_through_bin_vsdd failed: the launcher said 'uv found no Python 3.11 or newer', exit 2. test_import_error_exits_2 passed in the same run. Fix: add the directory of sys.executable to the PATH in test_init_through_bin_vsdd, as test_import_error_exits_2 does.",
+    "where": "next/tests/unit/test_init.py::test_init_through_bin_vsdd"
+  },
+  {
+    "id": "S3R-state-core-30",
+    "outcome": "not-fixed",
+    "what_was_done": "Checked at confirmation. The ready row of topics/state-directory.md now matches the code: the file exists and the mount test passes, and an invalid file is reported by the loader. But the same conditions table in topics/hooks-inert.md still says 'Partial: factory.toml parses with schema = 1, and the mount test fails' and 'Ready: The configuration parses and the mount test passes'. The spec still contradicts itself and the code. Fix: change both rows of topics/hooks-inert.md to the existence-plus-mount-test wording, and keep the sentence that an invalid file is the loader's report, not a condition.",
+    "where": "rewrite/spec/topics/hooks-inert.md"
+  }
+]

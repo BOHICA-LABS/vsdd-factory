@@ -1,0 +1,191 @@
+[
+ {
+  "id": "PL6-1",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "A4",
+   "A5",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-2",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2",
+   "A3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-3",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2",
+   "G3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-4",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "B8",
+   "E2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-7",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "S3",
+   "G2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-5",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "E2",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-6",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "E2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-8",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "A1",
+   "B4a",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-9",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2",
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-10",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2",
+   "G2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-11",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "E2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-12",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2",
+   "G2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-13",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-14",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "E2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-15",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-16",
+  "files": [
+   "workflows/story.md",
+   "packaging/e2e-story-tier.md"
+  ],
+  "packages": [
+   "S3",
+   "G4a"
+  ],
+  "on_slice_path": true
+ }
+]

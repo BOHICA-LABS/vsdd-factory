@@ -1,0 +1,470 @@
+[
+ {
+  "id": "CATCHUP-R1",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "blocker",
+  "where": "rewrite/spec/topics/story-script.md",
+  "problem": "The design texts that later packages port still name literals the built prelude no longer defines. story-script.md uses `data: S_IMPLEMENT`, `S_REVIEW`, `S_FIXES` and `S_RULINGS`. wave-script.md uses `S_REVIEW`, `S_HOLDOUT` and `S_RULINGS`. prelude.md lists `S_REVIEW, S_FIXES, S_RULINGS, S_IMPLEMENT, S_HOLDOUT` as the prelude's literals. This unit deleted the composites S_REVIEW/S_FIXES/S_RULINGS/S_HOLDOUT and generates only S_REVIEW_DATA, S_FIX_DATA, S_RULING_DATA, S_HOLDOUT_DATA and S_IMPLEMENT_DATA. It renamed the uses in toy-build.js but not in the spec. A B6/W2/W3 port of story.js or wave.js as written throws ReferenceError.",
+  "proposed_resolution": "Pick one naming and apply it everywhere: either rename the spec uses in story-script.md, wave-script.md and prelude.md to the generated names, or map those files to the spec names in build.py LITERAL_NAMES. Then add a lint that every S_* identifier appearing in a spec code block or a workflow body is a key of the generated set.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R2",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/tools/build.py",
+  "problem": "SL1-06 is marked fixed, but the guard the design requires is absent. result-schemas.md says `tools/build.py --check` fails on an S_* literal that was not generated. build() only regenerates the region between the generated:schemas markers. Adding `const S_HANDMADE = {...}` to prelude.js's hand-written region (or to a workflow body) passes build --check, check.py 24/24 and the node suite (verified by mutation). LITERAL_NAMES is also a hand list that nothing ties to the shipped schema files. check.py's set is a second hand list. A schema added to both the directory and check.py, but not to LITERAL_NAMES, silently gets no literal.",
+  "proposed_resolution": "In build() (and therefore --check), scan prelude.js outside the generated blocks, and every workflow file outside its stamped region, for /^\\s*const\\s+S_[A-Z0-9_]+\\s*=/m, and report each hit as a problem. Assert that LITERAL_NAMES' keys equal the set of shipped *.schema.json files, so a missing mapping is an error. Add test_build.py cases for both.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R3",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/survey.schema.json",
+  "problem": "VSA-14 and P3SEAM-11 are marked fixed, but the relay rule (every field of a relayed output is required) is not applied.\n- survey.schema.json declares 20 properties and requires 19. The missing one is rounds_used, which is the field VSA-14 names and which wave-script.md reads (`used: s.rounds_used`).\n- wave-gate-data leaves error, findings, flaky, state, metrics and unit out of required, while wave-script.md reads g.error and g.findings.\n- release-result is deferred inside an entry marked fixed.\n\nNothing tests the rule: each new schema has one invalid fixture for one field. Removing review_rules from story-unit's required list (P3BLD-15), retry from pending-output's (SL1-46) or method from step-result's all pass every suite.",
+  "proposed_resolution": "Add rounds_used to survey's required list, and error, findings, flaky, metrics and unit (or drop the ones wave.js never reads) to wave-gate-data's. Add a check.py assertion that set(required) == set(properties) for every relayed output schema (survey, checkpoint-result, delivery-data, story-unit, wave-gate-data, pending-output). Add an invalid_missing-method fixture for step-result. Split VSA-14 so the release-result part is recorded as left-for-builder for the release package rather than fixed.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R4",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/workflow-lib/prelude.js",
+  "problem": "step() does not follow the amended prelude-steps.md.\n- The spec rejects a result whose `r.step.method !== o.method`, and tests-workflows.md says step() rejects any identity other than the one given. The built step() checks only name and subject.\n- The spec sets `loop: o.loop || 1` whenever pass is given. The built code adds loop only when o.loop is passed, so a review step given only pass carries no loop. It also adds loop without pass.\n- converge()'s amended `c.arbitrate(open, pass)` is untested: dropping pass passes every suite.\n- Adding the spec's method check changes no test result, so nothing pins the echo contract.",
+  "proposed_resolution": "Build the identity exactly as prelude-steps.md does: `...(o.pass ? { loop: o.loop || 1, pass: o.pass } : {})`. Add `|| r.step.method !== o.method` to the unusable-result test. Add tests: a stub that echoes a different method is retried and then fails; a step given pass alone carries loop 1; toy-verdict's converge arbitrate stub records the pass it received and the test asserts it.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R5",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/workflow-lib/prelude.js",
+  "problem": "relay() only half-adopts the amendment (\"relay() uses the empty-object fallback\"). The final fallback returns emptyOf(schema), but the clerk is still told `If it prints no JSON, return {\"ok\": false, \"error\": \"<what it printed>\"}`. The amended spec says to return `JSON.stringify(emptyOf(schema))` with error set to what the command printed. The partial object fails the schema it is bound to; for example survey requires 19 fields. On the platform the clerk's result is then rejected and retried, so the printed error is lost and the run reports 'The clerk step returned nothing, twice.' Test 14 covers only a dead clerk.",
+  "proposed_resolution": "Use the spec's prompt text, which embeds JSON.stringify(emptyOf(schema)) with error set. Add a universal test that the clerk prompt for S_SURVEY and S_CLOSE carries the full empty object.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R6",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/tests/workflows/universal.test.mjs",
+  "problem": "SL1-36 is marked fixed ('the relay assertions match checkpoint rather than vsdd checkpoint'), but test 7 still filters on `c.prompt.includes('vsdd checkpoint')` (both assertions). It passes only because okStub's survey leaves project_dir empty, so relay() adds no `-C <dir>`. That is exactly the defect the finding describes. Setting project_dir to '/proj' in okStub makes test 7 fail (verified in scratch).",
+  "proposed_resolution": "Match `/ checkpoint toy-build /` or 'checkpoint', as the later tests do, and give test 7's survey stub a non-empty project_dir so the assertion is exercised with -C present.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R7",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/events.py",
+  "problem": "Admitting null in EVENT_SCHEMA also opened the Python writer to null, which nothing reports. build() refuses only `not str(self.session_id).strip()`, and str(None) is 'None', so `EventLog(dir, None).build('session.start')` now returns session_id None and log() writes it. HEAD's events.py refused the same call ('$.session_id: expected string, got null'). event-log.md and the spec event schema say null appears 'only on a line the launcher wrote'. The outcome claims the writer keeps its strict non-empty session id, but test_writer_session_id_stays_a_string only reads the fixture's 'sess-1'. _fit's slim path would write the string 'None'.",
+  "proposed_resolution": "In build(), refuse `not isinstance(self.session_id, str) or not self.session_id.strip()`. In _fit, keep the value as a string without calling str() on None. Add a test that EventLog(d, None).build(...) raises EventError.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R8",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json",
+  "problem": "The delivered wave-gate-data, now the single source with the spec file reduced to a pointer, types `pending` as a boolean ('True while the wave gate's CI job still runs'). gate-wave.md says the command 'reports any story that still blocks the gate in pending', and wave-script.md does `g.pending.length` and `g.pending.join(', ')`. With a boolean, `.length` is undefined, so wave.js's 'Stories not yet delivered' stop never fires and nothing reports it; with a real list, the platform rejects the clerk's output. `pending` also duplicates `state: pending`. `stories` items are full story-unit objects while wave-script.md builds its prompt with `g.stories.join(', ')`.",
+  "proposed_resolution": "Type pending as an array of story ids (required, [] when none) and let `state` carry the job state. Settle the item type of `stories` with wave-script.md (ids, or change the script text to map u.id). Add valid and invalid fixtures for both.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R9",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/checkpoint-result.schema.json",
+  "problem": "Compositions the old prelude kept in one place (S_CLOSE built from S_WORKFLOW_RESULT.properties.*, S_WAVE_GATE from ...S_GATE.properties) are now copied by hand:\n- checkpoint-result repeats workflow-result's status, progress, decisions and next.\n- survey.next repeats workflow-result.next.\n- wave-gate-data repeats all 14 gate-result properties.\n\nThey agree today (verified), but nothing fails when one side changes. P3BLD-16 is already set to add test_output to gate-result, and wave-gate-data will not follow.",
+  "proposed_resolution": "Either have build.py compose them (for example a whole-document $ref plus an extension the build flattens for both the prelude and the checker's registry), or add a check.py assertion that each copied property equals its source property, descriptions ignored.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R10",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "rewrite/findings/outcomes/zz-catchup.json",
+  "problem": "The brief required every finding in the by-package lists for B2, B3, B4a, B5 and C1. 20 of them, all triaged before this unit ran, have no outcome:\n- B2: AU-P2-12, SL1-37.\n- B4a: AU-P2-08, AU-S2-07, P3OPS-09, P3BLD-24, P3BLD-27, P3COV-10, P3OPS-22, P3REQ-11, P3SEAM-10, P3SEAM-14, P3SEAM-18, P3SEAM-20, SL1-51.\n- B5: P3REQ-09, AU-S2-23, SL1-54.\n- C1: SL1-19, AU-T2-22.\n\nSome are already met by the code and only need closing: SL1-51 (gated() keeps o.stage) and SL1-54 (test 3 checks exact ROLE membership). Others are live defects in files this unit edited: converge() still drops dispute notes before arbitrate (P3SEAM-14); toy-story.js still calls `checkpoint ... --subject` (P3SEAM-10, P3COV-10); brief() still adds `--wait 540` to every closing command (P3SEAM-20). The unit's edits widened AU-P2-08: see R12.",
+  "proposed_resolution": "Record an outcome for each one: fix it, close it with evidence (SL1-51, SL1-54, SL1-19), or mark it left-for-builder naming the responsible package. Fix the code-level ones in prelude.js and the toys within this unit.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R11",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "rewrite/spec/records/baseline.md",
+  "problem": "AU-S2-02 is left for a later package on a false premise. The outcome says 'the flaky-inherited-test rule's copies currently agree (verified)'. They do not: records/baseline.md reads 'An inherited test that passed at the baseline and ...', while commands/gate-green.md and tests-python.md read 'an inherited test that fails and then passes'. Consolidating them is a spec edit in C1's own scope; no code waits for it. The delivered gate-result.schema.json (and its copy in wave-gate-data) still describes flaky with a pointer into the old documents, '(section 2.9.8)'.",
+  "proposed_resolution": "Keep one statement in records/baseline.md, worded per BLUEPRINT.md#4.13, and link to it from gate-green.md, ingest.md and tests-python.md. Correct RR10's 'Used' line. Replace '(section 2.9.8)' in both schemas with a reference to record:baseline. Mark AU-S2-02 fixed only after that.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R12",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/prelude.md",
+  "problem": "prelude.md (edited by this unit for safe()) still shows a stale copy of the built prelude:\n- stepSchema's identity is required without method.\n- RUN.limits has no gate_minutes or ci_minutes. P3SEAM-12 is marked fixed, but its proposed resolution targeted exactly this copy.\n- parseArgs uses `[a-z_]+` where the built code has `[a-z_-]+`, although SL1-24 says 'no drift remains'.\n- It says 'at most 400 lines', while build-step.md (also edited by this unit) now says the cap is measured with the generated sub-blocks stripped. The duplicate AU-P2-08 named now disagrees with itself.",
+  "proposed_resolution": "B4a is built, so per README rule 7 reduce prelude.md's code block to a pointer at next/workflow-lib/prelude.js. Keep the constraints only in packaging/build-step.md and link to them from prelude.md. That closes AU-P2-08 and makes P3SEAM-12 true.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R13",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/spec/topics/prelude-converge.md",
+  "problem": "SL1-33's contradiction persists between spec and code. The built judge() exempts category holdout from the spec_ref||repro condition. The amended prelude-converge.md judge() still requires `Boolean(f.spec_ref || f.repro)` for every finding, which is the point SL1-33 raised. Switching the built judge() to the spec's form passes every suite.",
+  "proposed_resolution": "Make prelude-converge.md's judge() match the built one (holdout exempt from both conditions, as holdout-findings.md says). Add a test in which a holdout finding with empty spec_ref and repro blocks.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R14",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "major",
+  "where": "next/tests/workflows/universal.test.mjs",
+  "problem": "Fixes recorded as verified have no test that fails without them:\n- safe()'s first-character guard (SL1-55): loosening it to admit '-C' passes all suites. This is the guard that keeps a typed identifier from becoming a vsdd option.\n- gate_minutes and ci_minutes in LIMIT_KEYS (P3BLD-20, P3SEAM-12): removing them passes, because no test survey carries them.\n- launch.sh's bare-name `here=.` guard (SL1-13): removing it passes.\n- The SL1-05 tests validate a hand-built dict. TestEventLogSchema checks only that fields are present, never the line launch.sh actually writes against EVENT_SCHEMA.",
+  "proposed_resolution": "Add tests:\n- safe('-C/x') === '' and safe('S-1.01') === 'S-1.01'.\n- A survey with limits {gate_minutes: 60, ci_minutes: 30} runs without error.\n- Run `sh launch.sh cli ...` with cwd=py/.\n- In test_launcher.py, validate every launcher-written event line with vsdd.schema.validate against EVENT_SCHEMA and the ts pattern.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R15",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/spec/conflicts/tables-repair.md",
+  "problem": "The catch-up record makes false statements:\n- It says the gate-output to pending-output rename left 'the union shape (a gate result, or the pending output) ... unchanged'. The union was dropped: SL1-46's own outcome says so, and valid_gate-result.json was deleted.\n- Its one-fact section says 'the writer validates against' the x-documented-types of schemas/event.schema.json. The writer validates against EVENT_SCHEMA in events.py, which has no x-documented-types, a different type rule (dot required, hyphens allowed), a ts pattern instead of format date-time, and a different detail type.\n\nThe builder filed this event-schema split as L2-catchup-1 instead of fixing it.",
+  "proposed_resolution": "Correct both sentences. Ship event.schema.json as a built file under <plugin>/schemas/ that events.py loads, with a check that `vsdd events schema` prints it, and reduce the spec file to a pointer. That closes L2-catchup-1.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R16",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/schemas/gate-result.schema.json",
+  "problem": "After SL1-46 split the pending output into its own schema, gate-result still carries `state` with enum ['done','pending'], described as 'pending: the job is still running; run the same command again'. A gate result is never the pending output now, so the pending state is defined in three places: gate-result.state, pending-output, and wave-gate-data's state plus its pending boolean.",
+  "proposed_resolution": "Remove 'pending' from gate-result.state (or remove the field and describe state only in pending-output). Mirror that in wave-gate-data, and add a fixture showing that a pending object is not a valid gate result.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R17",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/findings/outcomes/zz-catchup.json",
+  "problem": "Three left-for-builder statuses are wrong. Left-for-builder means the design is settled and only code must follow.\n- VSA-06 offers two unchosen options (pass the from-commit, or drop the condition).\n- VSA-08 is a spec rename in step-record.schema.json that no code waits for.\n- VSA-03's first part, defining changed_files as the files changed from reviewed_sha to the delivered head, is a description in delivery-data.schema.json, which this unit delivered. changed_files still has no description.",
+  "proposed_resolution": "Write the changed_files definition into delivery-data.schema.json now. Settle VSA-06 in topics/verdicts.md, or keep it open for a design decision. Do VSA-08's rename in the spec, or mark it open rather than left-for-builder.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R18",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "next/tests/workflows/universal.test.mjs",
+  "problem": "The SL1-23 outcome says test 3 checks file existence once <plugin>/agents/ is populated. The built test 'and 3' only ever checks membership in the ROLE table. When package A1 populates agents/, the spec's check (every agentType has an agent file) silently never runs.",
+  "proposed_resolution": "In test '2 and 3', when <plugin>/agents/ contains .md files, also assert that agents/<name>.md exists for every agentType.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R19",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/spec/packaging/build-step.md",
+  "problem": "Only half of SL1-52 is closed. build-step.md and prelude.md still show the provenance text on the opening marker line ('// >>> stamped:prelude  (generated from ...)'). build.py writes it on the closing marker, and _replace_between treats anything after the opening marker as part of the region, so a workflow written per the spec example is rewritten and reported as drift.",
+  "proposed_resolution": "Show the closing-marker form in both examples, and say that nothing may follow the opening marker on its line.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R20",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/spec/commands/story-deliver.md",
+  "problem": "The per-state ok list (VSA-02) is now stated twice: in story-deliver.md's Output section and in full in delivery-data.schema.json's ok description. story-deliver.md calls the schema's text 'the schema's one-line rule', but that text lists every state.",
+  "proposed_resolution": "Keep the per-state list in one place, for example story-deliver.md. Reduce the schema's description to the one-line rule ('false only when the command did not reach an actionable state') plus a link.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R21",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "next/tests/workflows/toys/toy-build.js",
+  "problem": "The builder filed L2-catchup-2 (doneResult does not echo loop and pass) as a new open finding instead of fixing a few lines of the test helper in this unit's own file. toy-build.js, described as 'the shape of a real workflow', passes no loop or pass to its review and fix steps and reuses the name 'fix' on every pass. It therefore does not model the amended identity, which says names include the loop so a re-review overwrites nothing.",
+  "proposed_resolution": "Make doneResult parse and echo the prompt's 'Return step = {...}' identity as identityStub does. Give toy-build's converge review and fix steps loop and pass, and names in the review-<lens>-l<n>-p<k> form.",
+  "on_slice_path": true
+ },
+ {
+  "id": "CATCHUP-R22",
+  "origin": "slice layer 2, catch-up, review",
+  "severity": "minor",
+  "where": "rewrite/findings/outcomes/zz-catchup.json",
+  "problem": "The record files do not match the brief: the outcome file is named zz-catchup.json, not catchup.json. The builder's summary reports findings_fixed 25, but the file holds 26 entries marked fixed.",
+  "proposed_resolution": "Confirm that the zz- prefix is the ordering convention findings.py expects (as zz-verify-slice-amend.json suggests), or rename the file. Correct the count in the unit summary.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R1",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "rewrite/spec/tables/callers.toml",
+  "problem": "The HUMAN_ONLY list is gone from the design. callers.toml was its single home (audit-2-structure row 32: 'HUMAN_ONLY | tables/callers.toml'). Its body is now a pointer that says 'the design carries them with the gate-guard rule'. But rules/gate-guard.md carries no list: it says 'the HUMAN_ONLY constant, see [[table:callers]]', so each file points at the other. The values (decide, config set, cycle close, lock release --force, init --fresh, import, with import --dry-run allowed) now appear only in history/, in conflicts/commands.md, and as hard-coded literals in two test files (tests/unit/test_policy.py and tools/check.py). The registry still describes [table.callers] as holding these lists. C2 did not ship these constants, so the brief's 'pointer for each table you now ship' did not apply to them. H6 would build gate-guard from the circular pointer.",
+  "proposed_resolution": "Put the HUMAN_ONLY and GOVERNED values back into callers.toml, or into gate-guard.md and say so there, until H6 ships vsdd/hooks/model.py. Have test_policy.py and check.py read one copy of the list instead of repeating it.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R2",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "next/tests/unit/test_policy.py",
+  "problem": "The slice rows and classes are only partly pinned. Each of these edits, made one at a time in a scratch copy, passed every test and check.py: test-writer or implementer read_deny without 'holdout'; implementer or test-writer commands gaining 'git-other' or '*'; adversary gaining commands '*' or vsdd ['author','pipeline']; clerk gaining 'author' or losing 'reviews'; main commands set to ['git-read'] or dispatch set to []; [reveals] 'list holdout-scenario' = [] or 'review show' = []; the holdout, stories, reviews or runs glob mistyped; [tests] from_config pointing at 'paths.source'; story-gate gaining 'gate wave', which brings back the hazard P3SEAM-22 was about; spec-check widened to 'gate spec'; story status gaining 'done'; story contracts loosened to 'list[str]'. The builders' holdout wall, the main premise of the walls, has no test. test_reads_no_pipeline_output_but_the_reviews_class asserts nothing about reviews. test_shell_less_rows_deny_outside skips the four planners, the adversary and the code-reviewer, so the header's 'tool_only rows deny outside' rule is unchecked.",
+  "proposed_resolution": "Assert every key of the five slice rows exactly: read_deny, write, dispatch, commands, vsdd, story_only, tool_only. Add a whole-table invariant that holdout is readable only by the product-owner, scenario-reviewer and holdout-evaluator (and main only through relaxed_by). Pin the globs of the slice classes and every [callers] group's members. Assert from_config is 'paths.' plus the class name with '-' turned into '_'. Assert that each [reveals] value equals the class its kind's glob falls in, and that tool_only rows deny outside. Pin the story status enum and the contracts type.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R3",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "rewrite/findings/outcomes/c2.json",
+  "problem": "AU-P2-04 is marked fixed, but most of the passages it lists are still there. 'Replaces' remains at agents/codebase-analyzer.md:10 and agents/holdout-evaluator.md:10. P2LEAN-17 remains at topics/run-lock.md:70. First-pass and second-pass phrasing remains at topics/event-log.md:20, topics/caller-identity.md:17, topics/rule-tuning.md:47 and packaging/tests-conformance.md:44. Pointers to the conflicts files remain at topics/state-layout.md:63 and topics/computed-status.md:31. The finding is shared with A4, A6a and H8, and the 'fixed' status has removed it from their by-package lists, so nobody will act on the rest.",
+  "proposed_resolution": "Change the outcome to left-for-builder and list the remaining files for A4, A6a and H8, or strike those passages and keep it as fixed.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R4",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "rewrite/spec/artifacts/contract.md",
+  "problem": "AU-S2-05 and AU-T2-08 are marked fixed with the claim that every artifact file now links its row. contract.md still restates the whole row: Path, Identifier, Frontmatter keys, Writer, 'Cap: 8,000 bytes' and Lifecycle. artifacts/demo-evidence.md still restates the screenshot cap ('capped at 300 KB'). records/holdout-evaluation.md still restates the row's lifecycle ('Write-once ... removed only when the cycle closes').",
+  "proposed_resolution": "Sweep contract.md the way the other 30 files were swept, keeping only facts the row does not hold. Drop the restated cap and lifecycle sentences from demo-evidence.md and holdout-evaluation.md.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R5",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/schemas/story-unit.schema.json",
+  "problem": "P3SEAM-08 is marked fixed, but the old single 'method' key is still in use. The shipped story-unit schema, which is the single source and requires every property, has 'method' ('The story's method key') and 'tests_method'. It has no tests_agent, impl_agent, impl_method or red_gate. Yet topics/story-script.md, which C2 rewrote, sets 'const K = u' and reads K.tests_agent, K.impl_agent and K.impl_method from the unit. A W2 port run against the shipped schema would read undefined tests_agent and skip the tests stage without saying so. Other stale copies: tests/workflows/universal.test.mjs:67 uses method: 'tdd' in its unit; workflows/story.md:162 says 'A story's optional `method` key'; tables/step-methods.toml:22 says 'or the story's method key'; rules/write-scopes.md:35 and :56 and agents/devops.md:39 say 'a story whose method is'. New finding L2-c2-1 covers only the skeleton side. It says a unit 'would have' carried method, though the shipped schema already does.",
+  "proposed_resolution": "Update story-unit.schema.json: replace method with impl_method and add tests_agent, impl_agent and red_gate, all required. Update its fixtures and the universal-test unit, and regenerate the S_* literals. Fix the stale prose in story.md, step-methods.toml, write-scopes.md and devops.md. Otherwise reopen P3SEAM-08 as left-for-builder for C1/W2 and reword L2-c2-1 to name the schema.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R6",
+  "origin": "slice layer 2, C2, review",
+  "severity": "major",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml",
+  "problem": "The story row's frontmatter cannot be checked by code. 12 of its 19 keys have \"\" as the type (cycle, depends_on, properties, points, security, ui, demo, screens, repo and others). impl_method, tests_method and source hold prose descriptions where the type goes. No key is marked required or optional, although the format has an optional marker: the contract row uses 'ref:contract?' and 'list[str]?'. The artifacts rule (H4) checks 'a required key absent or of the wrong type' and cannot do that from this row, which is the single definition. test_nineteen_frontmatter_keys_with_the_stage_methods_split pins the prose string as the expected value.",
+  "proposed_resolution": "Give every story key a type, for example cycle 'str', depends_on 'list[ref:story]?', points 'int?', security/ui/demo 'bool?', screens 'list[ref:screen]?', impl_method/tests_method 'str?'. Mark optional keys with '?' and move the descriptions into comments. Test the types and which keys are required.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R7",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml",
+  "problem": "[reveals] has 'list' entries for only three kinds: holdout-scenario, story and contract. Its own comment says 'one entry per artifact kind whose command reveals walled content', and L-POLICY in tables/lint-checks.toml requires one entry per artifact kind. Kinds whose class some caller is denied have no entry: review-report (reviews), holdout-evaluation, spike-ledger-entry (spikes), analysis, research-report, epic (stories), adr and subsystem (spec-arch). A kind with no entry counts as revealing every walled class, so the tool over-blocks: the test-writer cannot run 'vsdd list epic' and the code-reviewer cannot run 'vsdd list project-conventions'. L2-c2-2 records only the project-conventions case.",
+  "proposed_resolution": "Write, or generate, one entry per artifact kind from the class its glob falls in. Add a test that every kind has an entry equal to that class, so the comment and L-POLICY hold.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R8",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "rewrite/spec/rules/spike-bounds.md",
+  "problem": "Part of VSA-04 is still open. own-worktree is defined in two places, with different meanings. classes.toml says 'the caller's working directory or, for a spike runner, the worktree its open ledger entry records, whichever applies' (one or the other). spike-bounds.md says 'the worktree that holds the caller's working directory, and also the worktree recorded in the caller's open ledger entry' (both). The proposed write-scopes case (a spike runner writing into a story worktree is blocked) is not in the case table of rules/write-scopes.md. test_own_worktree_is_the_callee_scoped_definition only checks that the comment contains the words 'spike runner' and 'story worktree'. When I rewrote the definition back to the effective directory and kept those words, the test still passed.",
+  "proposed_resolution": "Keep one wording (the union, as spike-bounds has it) in classes.toml and have spike-bounds link to it. Add the spike-runner/story-worktree case to write-scopes.md. Drop the word test, or label it as documentation-only.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R9",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "next/tools/check.py",
+  "problem": "The docstring of policy_tables_are_consistent says a row may name only 'classes, vsdd groups and command grants the other tables define'. The check never reads the 'commands' key, and no shipped table defines the family names. Writing 'git-comit' into the implementer row passed both the check and the tests. Dispatch targets are also not checked against existing rows, apart from the fixed spike-runner list.",
+  "proposed_resolution": "Ship the command-family names, or keep a list of them in the check, and validate every row's commands against it. Otherwise correct the docstring.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R10",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "rewrite/spec/config/paths.md",
+  "problem": "Some prose still restates the shipped tables. config/paths.md restates the product precedence. rules/tests-first.md:47-48 restates the exempt kinds (facade, docs, chore, harness), although the c2 outcome for AU-S2-09 says 'no second list'. The 'Who holds what' comment in tables/command-families.toml restates every row's commands. agents/clerk.md, adversary.md, ui-reviewer.md and code-reviewer.md restate their read_deny lists; clerk.md's 'holdout, reviews' leaves out runs.",
+  "proposed_resolution": "Replace each restatement with a link to [[table:path-classes]], [[table:story-kinds]] or [[table:walls]]. Correct the AU-S2-09 outcome text.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R11",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml",
+  "problem": "The meaning of @<method> is ambiguous. The header says it applies 'only in a story whose resolved method for the stage written (the kind's, or the story's tests_method / impl_method) is that one'. Take devops writing tests under 'tests:create@repo-setup' in a chore story. If 'the stage written' means the tests stage, the method resolves to tests_method, which is '' because a chore has no tests stage, so the scaffold's test files are blocked. If it means the caller's own stage, it resolves to impl_method = repo-setup. No test covers either reading.",
+  "proposed_resolution": "Define the suffix as matching the resolved method of the stage the caller runs in that story (for devops, impl_method). Add a policy test or a write-scopes case for tests:create@repo-setup.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R12",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml",
+  "problem": "The artifact rows outside the slice carry prose placeholders, not globs. Examples: 'SS-<NN>.md', 'supplements/nfr.md, errors.md, interfaces.md', 'AC-<k>.(tape, spec.ts, sh), AC-<k>.txt, ...'. They also have no id patterns. A loader that matches globs would send every write to these kinds to [_unknown], which blocks it. demo-evidence's max_bytes = 1,500,000 is the per-story total. The per-file caps (script 8,000; transcript 20,000; screenshot 300,000) are only in cap_note prose, so a per-file check would allow 1.5 MB per file, and [caps] accepts demo-evidence = 3,000,000. The builder's deferred list names the untested wall rows but not these artifact rows.",
+  "proposed_resolution": "Say in the file header which artifact rows are design placeholders and untested. Otherwise give them real globs and id patterns, and split the demo-evidence caps per file type.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R13",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "rewrite/findings/outcomes/c2.json",
+  "problem": "The VSA-18 outcome says it was 'Resolved by the first of the two proposed readings' (the tool merges the integration head into the story branch before the repair step). That choice appears nowhere in the spec: commands/story-deliver.md and topics/story-script.md do not mention it. G4a will meet the same open question.",
+  "proposed_resolution": "Write the choice into commands/story-deliver.md, or word the outcome as a recommendation to G4a.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R14",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "rewrite/spec/registry.toml",
+  "problem": "registry.toml assigns [table.identifiers] to package C2 and the C2 brief lists it under Implements, but C2 deferred it to an S-package. Anything that reads the registry will count C2 as having delivered the identifiers table.",
+  "proposed_resolution": "Reassign table:identifiers to the S-package that allocates ids, or add a Notes line to packages/C2.md stating the deferral.",
+  "on_slice_path": true
+ },
+ {
+  "id": "C2-R15",
+  "origin": "slice layer 2, C2, review",
+  "severity": "minor",
+  "where": "next/plugins/vsdd-factory/py/vsdd/policy/classes.toml",
+  "problem": "The shipped tables do not say how a grant or a denial applies to classes nested inside it. Read literally, classes.toml's 'A contained class is matched first' gives each path one class. Then main's read_deny of 'holdout' would not cover holdout-evaluations, the product-owner's 'spec-product' grant would not cover brief, and the architect's 'spec-arch' grant would not cover guidance. The rule the design means ('wherever a row says holdout, it covers holdout-evaluations too'; read_allow 'wins over a containing class that is denied') is stated only in the information-walls topic and partly in the read_allow key note.",
+  "proposed_resolution": "State in the walls.toml header that a class named in read_deny or write also covers the classes nested inside it, except those named in read_allow. Add tests: main denied holdout-evaluations, product-owner may write brief, architect may write guidance.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R1",
+  "origin": "slice layer 2, B6, review",
+  "severity": "blocker",
+  "where": "next/tools/build.py",
+  "problem": "In _stamp_agents (lines 353-364), the test is is_reviewer = (agents.get(name) or model) == roster['tiers']['reviewer']['model']. For a rostered agent this compares the tier name 'reviewer' with the model 'opus', so it is never true and no reviewer in the roster gets the severity table or the key rule. The B6 lint (test_roster_lint.py lines 216-222) decides reviewer status itself (tier_name == 'reviewer') and requires both regions, then tells the author to 'run tools/build.py'. Running it changes nothing and build --check reports the tree current. I reproduced this in a scratch copy: an adversary.md after build.py has 0 severity markers, check passes, and the lint fails. The lint's docstring says the stamping 'delegates to tools/build.py itself', but the reviewer decision is made twice and the two disagree. No test runs the build's stamping and then the lint: test_reviewer_without_the_severity_stamp_is_rejected stamps with the lint's own helper. This breaks A6a (adversary, security-reviewer) in step 5, or forces a hand-written copy of the severity table, which the design forbids.",
+  "proposed_resolution": "In _stamp_agents, decide reviewer status by tier name: is_reviewer = agents.get(name) == 'reviewer'. Fall back to the model comparison only for agents not in the roster. Expose that decision as one function (for example build_mod.is_reviewer(name, roster)) and call it from the lint, so there is one decision. Add a seam test: write a reviewer agent with empty marker pairs into a temporary plugin, run build_mod.build() against it, and assert that agent_problems returns [].",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R2",
+  "origin": "slice layer 2, B6, review",
+  "severity": "blocker",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "KNOWN_TOOLS (lines 51-71) lists the MCP tools by bare name (query-docs, perplexity_ask, browser_navigate and so on). topics/research-and-browser-tools.md requires every agent that needs an MCP tool to list both 'mcp__plugin_vsdd-factory_<server>__<tool>' and 'mcp__<server>__<tool>'. topics/platform-proven.md item 10 shows that a tool name which does not resolve is dropped silently from an agent's list. The lint rejects both required spellings as 'not a known tool' (probed) and accepts the bare names, which resolve to nothing. Most step-5 agents carry DOCS, LOOKUP, BROWSER or STORYBOOK (test-writer, implementer, verifier, devops, demo-recorder, security-reviewer, architect). The lint therefore forces the spelling under which these agents would silently run without their tools.",
+  "proposed_resolution": "Build the known set from <plugin>/.mcp.json's server keys and the per-server tool lists. Accept a name when it is a built-in tool, or when it is 'mcp__plugin_vsdd-factory_<server>__<tool>' or 'mcp__<server>__<tool>' for a tool of that server's set (storybook in the second form only, per step-5 plan D8). Reject bare MCP names. Require that a plugin-server tool is listed in both spellings. Add fixture tests for both spellings, for a bare name, and for a list missing one of the pair.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R3",
+  "origin": "slice layer 2, B6, review",
+  "severity": "blocker",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "Lines 207-209 hold len(text.splitlines()) to agent_file_lines = 70, counting the stamped regions. topics/agent-file.md and agents-skills.md 2.7 define the 70 as frontmatter plus a body of at most 60 lines, with the stamped regions not counted. The shared block is 14 lines plus markers, and a reviewer also carries the severity table (6 lines) and the key rule. The effective body cap is therefore about 45 lines for a builder and about 33 for a reviewer, not 60. Probe: the spec's own 'complete example' adversary, stamped, is 71 lines with a 34-line body, and the lint rejects it. The roster's own comment ('whole file: frontmatter plus a body of at most 60 lines') describes a different count from the one the lint makes. The fixture tests use short bodies, so none exposes this.",
+  "proposed_resolution": "Apply agent_file_lines to the file with its stamped regions removed (the same _without_stamped_regions the body count uses). Add a test that runs the spec example from topics/agent-file.md, stamped, through agent_problems and expects [], and a test that a 61-line body fails while a 60-line one passes.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R4",
+  "origin": "slice layer 2, B6, review",
+  "severity": "major",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "workflow_problems (lines 226-260) treats only workflow('...') with a single or double quote as a call edge, and it removes the stamped prelude before scanning. Workflows call story through the prelude's runStories() (the toy toy-build.js does so), and that call sits in the hand-written region, so the lint never sees it. Probes: a story.js whose own region calls runStories() passes, although pipeline.md 2.3 says story contains no workflow() call and nesting throws at run time. A release.js calling runStories() passes, although the roster gives release calls = []. A wave calling workflow(`vsdd-factory:release`) with backticks passes. test_wave_may_call_story replaces 'runStories(units)' with a workflow() call, so the test avoids the real call form. L-XREF's first clause (every vsdd-factory:<name> in a shipped file resolves) is neither built nor listed among the deferrals.",
+  "proposed_resolution": "Count a runStories( call in the hand-written region as an edge to 'story'. Accept backtick literals in the call pattern. Report a workflow() call whose first argument is not a literal as a problem. Add tests: story calling runStories is rejected; release calling runStories is rejected; wave calling runStories passes. Either implement vsdd-factory:<name> resolution over agents, workflows and walls.toml now, or list it with the deferrals in the docstring.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R5",
+  "origin": "slice layer 2, B6, review",
+  "severity": "major",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "_parse_frontmatter (lines 93-111) lowercases every key and splits each line at the first colon. Probes show that 'omitclaudemd: true' and 'Model: sonnet' pass the lint, yet the platform reads the exact keys, so it would silently load the project's CLAUDE.md into the agent (the holdout-evaluator wall relies on this key) or ignore the model. A folded 'description: >' block passes as a one-character description, which gets past the 200-character cap. A strict, case-preserving reader already ships (plugins/vsdd-factory/py/vsdd/frontmatter.py) that refuses block scalars. The lint wrote a second, looser parser instead of using it.",
+  "proposed_resolution": "Parse agent frontmatter with vsdd.frontmatter.parse, which keeps key case and refuses block scalars, and compare keys exactly (omitClaudeMd, model, ...). Report a parse error as a lint problem. Add tests for a wrong-case key, a block-scalar description and a quoted model value.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R6",
+  "origin": "slice layer 2, B6, review",
+  "severity": "major",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "L-AGENT (tables/lint-checks.toml) ends 'Every agent has a row in walls.toml and every row has an agent.' Both inputs ship now (the roster lists all 20 agents and walls.toml has their rows), but nothing checks this: not this lint, not check.py's policy_tables_are_consistent, not test_policy.py. It is also missing from the docstring's deferrals. A misspelled row key (for example 'vsdd-factory:adversry') would silently drop that agent to the [other] row, which grants write = ['project'] and no 'outside' denial, and that weakens its wall. L-KIND catches this only for the stage agents of story kinds.",
+  "proposed_resolution": "Add to check_all a check that {row[len('vsdd-factory:'):] for each 'vsdd-factory:*' row} equals set(roster['agents']), reporting the missing and the extra names. Add a fixture test for each direction.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R7",
+  "origin": "slice layer 2, B6, review",
+  "severity": "major",
+  "where": "next/tests/lint/roster.toml",
+  "problem": "The [overrides] comment says 'lint rejects any other', and the same claim appears in rewrite/spec/conventions.md (Model tiers), topics/model-tiers.md, packaging/tests-lint.md and the generated comment in prelude.js. No code does this: no lint, check or harness test rejects a workflow that runs a step off its agent's tier, whether by a direct agent() call with its own model or effort, or by assigning RUN.tier or the tier tables in its own region. The user's model policy depends on this, and the story workflow (W2) is the next workflow to ship.",
+  "proposed_resolution": "In workflow_problems, reject in the hand-written region any direct agent( call (steps must go through step(), relay() or gated()), any 'model:' or 'effort:' key, and any assignment to RUN.tier, TIER, ROLE or OVERRIDE. Add fixture tests. If this is deferred instead, say so in the roster comment and the docstring rather than claiming it.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R8",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "rewrite/findings/outcomes/b6.json",
+  "problem": "The AU-S2-09 outcome says the B6 part is in place and that conventions.md 'already points there'. conventions.md (lines about 106-116) still restates every tier's model and effort, and topics/model-tiers.md restates the overrides. These are the very second statements the finding names. The outcome also says the lint rejects a colour that 'disagrees with its tier row', but colours are not in the roster's tier rows: they are a hard-coded TIER_COLOR table in the lint, and the clerk's colour is not checked at all (step-5 plan D10 picks yellow).",
+  "proposed_resolution": "Reduce the tier table in conventions.md to a link to tests/lint/roster.toml. Move colour into [tiers] (for example planner = { model, effort, color = \"blue\" }, with a clerk colour) and read it in the lint. Correct the AU-S2-09 what_was_done text.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R9",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "rewrite/spec/conflicts/tables-repair.md",
+  "problem": "The section 'Built files under next/ (recorded, not changed)' still says the built roster has status = \"model\", listed_description_chars = 400 and agent_file_lines = 60, and contrasts these with 'the spec table'. B6 changed the built file to \"both\", 4400 and 70 and turned the spec table into a pointer, so the spec file now describes a difference that no longer exists.",
+  "proposed_resolution": "Change the roster bullets to record that B6 brought the built file into line with agents-skills.md 2.12 and that the spec table is now a pointer, or remove them.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R10",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "roster_problems (lines 307-318) checks only that the budget keys exist and the model-visible count, and its failure branches have no test (it is only asserted to return [] on the live roster). It does not check that each [agents] value is a [tiers] key, that the [overrides] values are tiers and their keys name roster workflows, that [workflows] call targets are roster workflows and a called workflow has calls = [], or that [skills] values are person, model or both. Also, [platform] python_floor is read by nothing (check.py hard-codes (3, 11)), and check.py hard-codes engines '>=2.1.331' and the icon path, so the floor is stated in two places.",
+  "proposed_resolution": "Add these integrity checks to roster_problems, with a fixture test for each. Have check.py read the floors from the roster, or drop python_floor from the roster and say where the floor lives.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R11",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "L-KIND can switch off without a message. check_all skips it when py/vsdd/policy is not a directory (line 392). kind_grant_problems passes when artifacts.toml yields zero [[story-kind]] rows, and silently skips a kind whose implement_agent is empty. test_policy.py's import-time load and test_seven_kinds mitigate this today. In addition, grant qualifiers are ignored: an implementer granted only 'source:before-red' or 'source:create' would satisfy the 'source' need.",
+  "proposed_resolution": "Report a missing policy directory and zero story kinds as problems, and treat an empty implement_agent as a problem. Treat ':before-red' and ':create' as not meeting an unconditional write need, or state that L-KIND checks class presence only.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R12",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "next/tests/lint/test_roster_lint.py",
+  "problem": "The roster-to-disk half of L-ROSTER ('none missing') is off, as the build plan allows. Nothing in a test run says so: the off state is recorded only in comments, and nothing names the switch-on point (E1 part 2).",
+  "proposed_resolution": "Add test_nothing_in_the_roster_is_absent_from_disk, implemented and marked unittest.skip('switches on with E1 part 2 (packaging/build-plan.md)'), so every run reports the check as skipped and the switch is a one-line change.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R13",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "rewrite/spec/tables/roster.toml",
+  "problem": "The pointer comment restates the workflow call edges ('wave, feature, verify, maintain and multi calling story and story calling none'). conflicts/people-repair.md P-8 does the same, and both copy the shipped roster's data, which breaks README rule 1 and rule 7. The registry summary for table:roster still says the roster carries 'each agent's tier, tools and package', which the shipped file does not. topics/tool-sets.md says 'the agent-file lint checks each file against' the named sets, but L-AGENT checks only membership in the union, so an adversary listing Bash or Edit passes.",
+  "proposed_resolution": "Reduce the pointer to the file path and its consumers. Correct the registry summary. Either make the per-agent tool sets data (for example a tool_sets key in the roster [agents]) and check each agent file against them, or change tool-sets.md to say what the lint actually checks.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R14",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "next/tools/build.py",
+  "problem": "B6 added tests/lint/test_roster_lint.py to the prelude-marker guard's allowlist (line 434) because TestWorkflowLint.write_workflow writes the marker strings as literals. The test module already loads build_mod and could use build_mod.PRELUDE_MARKERS, which would leave the guard narrower. As written, if the markers ever change, the fixtures stop carrying real markers and those tests still pass. Also, the AU-P2-01 outcome's statement that 'the prelude and the lint read' the call edges 'from one place' is wrong: the prelude reads no [workflows] table.",
+  "proposed_resolution": "Build the fixture marker lines from build_mod.PRELUDE_MARKERS, drop test_roster_lint.py from the allowlist, and correct the outcome sentence.",
+  "on_slice_path": true
+ },
+ {
+  "id": "B6-R15",
+  "origin": "slice layer 2, B6, review",
+  "severity": "minor",
+  "where": "rewrite/findings/sources/extra-b6.json",
+  "problem": "The unit's new finding L2-b6-1 names only next/ files in its 'where' field, so findings.py maps it to no spec file and no package ('mapped to no spec file: ... L2-b6-1'). It will appear in no by-package list, and the agent packages that widen method sets, which its resolution asks to act, will never see it.",
+  "proposed_resolution": "Add tables/lint-checks.toml (and, if wanted, the A-package agent files) to its 'where' field so it routes to B6 and the agent packages, then rebuild the ledger.",
+  "on_slice_path": true
+ }
+]

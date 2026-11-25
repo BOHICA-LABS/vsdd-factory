@@ -1,0 +1,35 @@
+[
+ {
+  "id": "S3B-survey-1",
+  "files": [
+   "tables/routes.toml",
+   "commands/gate-wave.md"
+  ],
+  "packages": [
+   "G6a"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S3B-survey-2",
+  "files": [
+   "commands/survey.md",
+   "tables/routes.toml"
+  ],
+  "packages": [
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S3B-survey-3",
+  "files": [
+   "commands/survey.md",
+   "commands/checkpoint.md"
+  ],
+  "packages": [
+   "S3"
+  ],
+  "on_slice_path": false
+ }
+]

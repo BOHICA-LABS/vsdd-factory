@@ -1,0 +1,11 @@
+[
+  {
+    "id": "layer-2a-fix-3-C1-1",
+    "origin": "layer-2a-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/tests/lint/test_roster_lint.py",
+    "problem": "The B6-R7 fixes hold for the forms that finding named, but the workflow lint still misses other ways a hand-written region can pin a tier. Each of these passes workflow_problems with 0 problems (probed in a scratch copy): (a) RUN['tier'] = 'reviewer' and Object.assign(RUN, { tier: TIER.reviewer }), because TIER_TABLE_ASSIGN_RE matches only the spelling RUN.tier; (b) const x = TIER followed by RUN.tier = x.reviewer || null, an alias the adoption form accepts; (c) a hand-written workflow('vsdd-factory:story', { story: id, tier: TIER.reviewer }), which the child adopts through its own RUN.tier = a.tier || null (runStories puts tier: RUN.tier after ...extra, so it overrides an extra tier; a direct call has no such override); (d) since TIER_KEY_RE was narrowed to quoted literals, { model: big ? 'opus' : 'sonnet' }, a model chosen between literals, which was rejected before the narrowing. Separately, _strip_comments_and_strings lets a ' or \" string run across newlines. A / the stripper misreads as a division (if (x) /'/.test(y)) or as a regex (a++ / 2; const s = 'x/y') therefore opens a string that blanks the rest of the file and hides a later direct agent( call: the lint fails open. Forms (a), (b) and (c) are older than this fix; (d) is new with the B6-R7 decision. No toy and neither spec skeleton reads TIER, ROLE or OVERRIDE in its hand-written region, so a stricter rule costs nothing.",
+    "proposed_resolution": "In the hand-written region, reject any reference to TIER, ROLE or OVERRIDE, reject RUN[ and Object.assign(RUN, and reject any tier: key outside the two adoption forms. Have TIER_KEY_RE reject a model: or effort: value that holds a quoted literal anywhere before the next , or }. End a ' or \" string at an unescaped newline, which JavaScript forbids, or report the file, so that a misread / cannot hide what follows. Add one test for each form.",
+    "on_slice_path": true
+  }
+]

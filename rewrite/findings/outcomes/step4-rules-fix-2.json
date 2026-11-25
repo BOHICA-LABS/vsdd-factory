@@ -1,0 +1,86 @@
+[
+  {
+    "id": "S4R-rules-2",
+    "outcome": "fixed",
+    "what_was_done": "The symlink test is now driven through Bash, as the check proposed: 'echo x > tests/test_sample.py' with cwd set to the worktree reached through the symlinked alias, as the verifier. write_targets keeps the alias spelling (abspath, not realpath), so the literal and resolved forms really differ and _is_frozen's dual-form measurement is what blocks. The test asserts the two spellings differ before firing, and blocks red_test_frozen. Verified it fails against a single-root _is_frozen (root from realpath, relative from the literal path): 1 failed; with the fix restored: passed.",
+    "where": "next/tests/hooks/test_tests_first.py::test_frozen_test_through_symlinked_parent"
+  },
+  {
+    "id": "S4R-rules-7",
+    "outcome": "fixed",
+    "what_was_done": "Wrappers are matched by basename (/usr/bin/env is env) and their own options are skipped when the wrapped program is sought: env's -i/--ignore-environment, -u/--unset with its value, -S/--split-string with its value and --; nice's -n/--adjustment with its value; command's and time's -p; -- ends each wrapper's options. A wrapper option that cannot be parsed marks the segment opaque (fail closed). Split git's -C scan to the words before the subcommand while here: 'git switch -C develop' made the parser read develop as a git -C directory, which turned 'git switch -C $(echo develop)' into where_unknown with no branch judged. Added the seven forms of the finding to test_wrappers_do_not_hide_git and three write_targets rows (env -i, nice -n 5, /usr/bin/env wrapping sed -i). Interface note for hook-runner and hook-runner-b: Segment.program is now the wrapped program, not the wrapper or its option, and Segment.where is no longer perturbed by a subcommand's own -C.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_wrapper_name, _wrapper_options, _global_args); next/tests/hooks/test_merge_guard.py::test_wrappers_do_not_hide_git; next/tests/hooks/test_writes.py::test_write_targets_table"
+  },
+  {
+    "id": "S4R-rules-19",
+    "outcome": "fixed",
+    "what_was_done": "test_story_lookups_taken_once monkeypatches vsdd.state.story_unit.story_kind and vsdd.state.gate_evidence.evidence with counting wrappers, drives one three-path Bash sed write in one story after red (all paths judged, none short-circuits), and asserts one kind lookup and one evidence lookup in total. Verified with the memo disabled (facts never filled): the test fails with three of each; restored, it passes with one of each.",
+    "where": "next/tests/hooks/test_tests_first.py::test_story_lookups_taken_once"
+  },
+  {
+    "id": "S4R-rules-23",
+    "outcome": "fixed",
+    "what_was_done": "writes.py treats -E like -e for perl, bundled (-pE, -iE) and separate, in the value-option table and the bundled-value reader; the bundled reading now runs before the separate pairing so 'perl -i -pE <script> <file>' trims the script, not the file. When perl's program came as no -e/-E/-f option (checked on the original arguments, with M/F/I honouring their rest-of-word values so -MData::Dumper stays a module), the first operand is the program file and is dropped from the write targets. touch -t joined touch's value options. test_writes rows added for perl -i script.pl src/a.py, perl -pi script.pl src/a.py, perl -pi -E, perl -i -pE and touch -t.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (_perl_scripted, _targets); next/tests/hooks/test_writes.py::test_write_targets_table"
+  },
+  {
+    "id": "S4R-rules-25",
+    "outcome": "fixed",
+    "what_was_done": "test_walled_refused now covers '.factory/./holdout/scenarios/s2.md' and 'holdout/scenarios/s2.md' as walled (blocked walled_not_built, twice each, implementer and scenario-reviewer), and test_normalised_path_outside_the_wall_stores pins the not-walled side: '.factory/holdout/../src/x.md' normalises outside the wall, grounds against the project root, and stores with no grounded mark. tests/unit/test_state_steps.py::test_store_step (a records test; the edit is recorded under S4R-rules-C1-3) stores a result whose only finding cites '.factory/./holdout/HS-003.md' and asserts the walled_not_built refusal beside the state-relative spelling. Verified: with posixpath.normpath dropped from _under_holdout the three tests fail; with the 'holdout/' clause removed (the rule's own old predicate) they fail too; restored, all pass.",
+    "where": "next/tests/hooks/test_step_results.py::test_walled_refused, ::test_normalised_path_outside_the_wall_stores; next/tests/unit/test_state_steps.py::test_store_step"
+  },
+  {
+    "id": "S4R-rules-26",
+    "outcome": "fixed",
+    "what_was_done": "test_block_texts_survive_the_wrapper now wraps each block exactly as platform item 40 records: 'PreToolUse:<tool> hook error: [<command line>]: <message>', a blank line, then 'This hook comes from the vsdd-factory@<plugin> plugin.', with the copied plugin's real launch.sh path as the command line and the StructuredOutput case carrying its own tool name; the assertions that tag, Why: and Instead: stand alone inside that frame are unchanged. The spike case in test_not_applied is annotated as documentation only: a spike directory is no story, so the rule is silent there with or without spike_exempt, and the runner's skip is hooked-runner's to prove; no story and spike overlap exists to construct at slice depth.",
+    "where": "next/tests/hooks/test_rules_fail_closed.py::test_block_texts_survive_the_wrapper; next/tests/hooks/test_tests_first.py::test_not_applied"
+  },
+  {
+    "id": "S4R-rules-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "In merge_guard's _git, an argument the verdict depends on that holds '$' or a backtick blocks opaque_git (_ambiguous, naming the verb and the guarded set): push refspec destinations, fetch/pull refspec destinations (colon-bearing only), the positionals given to update-ref and symbolic-ref, branch positionals when a mutator flag is present, the names of switch -C and checkout -B, and the rebase branch argument (the last positional, where the S4R-rules-5 verdict reads it). Plain '$B' expansions ride the same check, since the destination text carries the '$'. Arguments the verdict ignores (a commit message, a reset revision, a fetch upstream) stay free, with passing cases. test_substitutions_in_gits_own_arguments covers the ten forms of the finding and the free-argument controls; verified to fail with _expanded disabled.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git, _push, _branch, _switch, _checkout, _expanded, _ambiguous); next/tests/hooks/test_merge_guard.py::test_substitutions_in_gits_own_arguments"
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "The branch is now judged where git reads HEAD: the --git-dir option or a GIT_DIR assignment (seg.assignments, env-wrapper assignments included, since the S4R-rules-7 parser records them), resolved against seg.where; --work-tree is never read. No redirect means the repository at seg.where, so 'git --work-tree=/tmp commit' from the develop checkout is held (commit_on_guarded) while the same call from the story worktree passes. A --git-dir/GIT_DIR that cannot be resolved blocks where_unknown. The opaque path's _opaque_redirected is dropped: an opaque git call with a redirect blocks opaque_git through the plain scan, fail closed. test_judged_at_the_git_directory covers commit/merge/reset/push under --work-tree on develop, the story-worktree control, GIT_DIR bare and through env, --git-dir, and the $-unresolvable forms; verified to fail with the git-directory lookup disabled. test_opaque_global_values_and_trees keeps its expectations unchanged.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_dir_of, _git_dir_option, _git, _opaque); next/tests/hooks/test_merge_guard.py::test_judged_at_the_git_directory"
+  },
+  {
+    "id": "S4R-rules-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "The two departures are recorded here as sanctioned exceptions for the orchestrator, neither reportable as a surprise: (1) hook-runner's shell.py, edited by this unit for S4R-rules-3, -7 and the C1-2 redirect reading — the owners' plans should note the new meaning of Segment.program (the wrapped program, wrappers matched by basename, their options skipped, and an unparseable wrapper option marking the segment opaque) and Segment.where (no longer perturbed by a subcommand's own -C: git's -C scan stops at the subcommand). (2) records' state/steps.py, edited for S4R-rules-25's shared predicate _under_holdout (dot segments normalised; the state-relative 'holdout/' spelling walled), with the one-definition note that the step-results rule and the verdict read the store's predicate and must not grow their own; the owning unit's test_state_steps.py gained the normalised-spelling store case. Owners' tests pass (test_shell.py, test_ctx.py, test_state_steps.py all green after the edits).",
+    "where": "rewrite/findings/outcomes/step4-rules-fix-2.json (this record); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py; next/plugins/vsdd-factory/py/vsdd/state/steps.py; next/tests/unit/test_state_steps.py"
+  },
+  {
+    "id": "S4R-rules-C1-4",
+    "outcome": "fixed",
+    "what_was_done": "rules/tests-first.md 'What it checks' gains the config_invalid bullet: an invalid factory.toml falls back to the built-in defaults, the path-class table is thereby empty, and every write in a red-gated story worktree is blocked config_invalid — naming the configuration error and the fix — until the file parses again, with the scope stated (one write inside a story worktree while the governing project's configuration is invalid, any caller) and the pointer to topics/hook-failure.md's invalid-configuration row.",
+    "where": "rewrite/spec/rules/tests-first.md"
+  },
+  {
+    "id": "S4R-rules-C1-5",
+    "outcome": "fixed",
+    "what_was_done": "Item 4 of rules/step-results.md no longer says the updatedInput is the stored record: it is the agent's own result with the agent-supplied grounded keys removed and the failing findings marked grounded: false — not the stored record, which carries the runner's own fields (agent_type, worktree_head, agent_id) beside what the agent sent — returned whenever it differs from the input.",
+    "where": "rewrite/spec/rules/step-results.md"
+  },
+  {
+    "id": "S4R-rules-C1-6",
+    "outcome": "fixed",
+    "what_was_done": "Count recorded: the suite now carries 12 failures — 8 in tests/hooks/test_rule_cases.py, because the tests-first case tables accumulated in the earlier rounds (the sed -i -e case of S4R-rules-1 and the case-table entries the round drove into tests/hooks/cases/) need CASE_PROJECTS fixtures that step 3's runner does not build, and 4 in the step-3 tests the corrected S4R-rules-12 account already names (test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner and ::test_no_marker, test_liveness.py::test_lock_refresh and ::test_lock_refresh_belongs_by_run_and_story). Added to the owed hook-runner fix run, beside the ones S4R-rules-12 lists: test_rule_cases.py reads fixture_cases/ only, as ORDER.md R5 records, or skips cases that carry a project key; no step-4 unit may edit that file, so nothing was changed there. Reproduced just now: 12 failed, 51 passed in test_rule_cases.py, test_caller.py and test_liveness.py.",
+    "where": "rewrite/findings/outcomes/step4-rules-fix-2.json (this record and the S4R-rules-12 entry)"
+  },
+  {
+    "id": "S4R-rules-C1-7",
+    "outcome": "fixed",
+    "what_was_done": "For fetch and pull, a refspec destination is taken only from a colon-bearing refspec; a colon-less one (git fetch origin develop, git pull origin develop) writes no local branch and passes, including from a story worktree, so the usual prelude of git rebase origin/develop is free. The pull-with-refspec integrate_on_guarded block on a guarded branch stands unchanged, as do the colon-bearing moves_guarded_branch blocks. test_colon_less_fetch_and_pull_pass_in_a_story holds both passing cases and both blocked controls; verified to fail with the colon guard removed.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git fetch/pull); next/tests/hooks/test_merge_guard.py::test_colon_less_fetch_and_pull_pass_in_a_story"
+  },
+  {
+    "id": "S4R-rules-12",
+    "outcome": "fixed",
+    "what_was_done": "Account updated (whose outcome this round's work changed): the count is now twelve, not ten — eight in test_rule_cases.py (the S4R-rules-12 account recorded six), because the tests-first case tables grew in the earlier fix rounds, and the same four step-3 tests. See S4R-rules-C1-6 for the split and the added owed hook-runner fix run item.",
+    "where": "next/tests/hooks/test_rule_cases.py, next/tests/hooks/test_caller.py, next/tests/hooks/test_liveness.py (counts only; no file edited)"
+  }
+]

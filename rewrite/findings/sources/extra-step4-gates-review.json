@@ -1,0 +1,191 @@
+[
+  {
+    "id": "S4R-gates-1",
+    "origin": "slice step 4, gates, review",
+    "severity": "blocker",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure, line 29); next/tests/unit/test_gate_registry.py (test_demo_is_direct)",
+    "problem": "The registered demo function is measure(project, subject, run) with no keyword arguments. The registry contract (plan 3.4; ORDER.md section 3 rule 2: 'A registered function is fn(project, subject, run, *, wait=None, retry=\"\") -> dict ... demo is direct') covers every registered gate. survey-2.md 3.4 step 3 calls fn(root, story, run, wait=<seconds left>, retry=retry) for red, green and demo in turn. The survey's first re-measure of demo therefore raises TypeError: unexpected keyword argument 'wait'. test_demo_is_direct asserts that 'wait' is NOT in the signature, so the test locks in the break.",
+    "proposed_resolution": "def measure(project, subject, run, *, wait=None, retry=\"\"), accepting and ignoring both, so it stays callable as measure(project, subject, run) for G4a (3.5). Replace test_demo_is_direct with a call of registered_gate(\"demo\")(root, STORY, run, wait=0, retry=\"x\") that returns a result (never pending).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-2",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure)",
+    "problem": "The demo gate never returns the passing record for the head. It measures on every call, and evidence_write replaces that gate and commit's record. So a later failing measurement overwrites a passing demo record, against plan 3.3 ('A failing record never replaces a passing one: a passing record for the head is returned first') and 3.5 ('the passing record for the head when there is one, else a measurement'). The function's docstring claims the cache is used. Reviewer probe: demo passed, then the AC-1 case in the green .xml was marked failed; the second demo call returned passed false and demo.<sha12>.json on disk became passed false.",
+    "proposed_resolution": "After resolve_story, read evidence_read(root, subject, 'demo', head). If it passed, return the result built from it (evidence path, metrics {}) without measuring. Add a test: pass demo, break an input, call again, and assert passed true and the record unchanged.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-3",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (measure lines 54-67, _shape lines 70-85)",
+    "problem": "The demo gate builds its result by hand and breaks plan 3.1 three ways. (a) A table that fails (a criterion's test not passed in the green report) returns passed false with failures [] and no error. The failure lines go only into the .log (probe: exit 1, failures []). (b) Admission refused returns ok: true; the 3.1 table makes it 'not attempted', ok false. The line also reads 'admission refused: admission refused: no run ...' because the prefix is added twice. (c) Failures are never capped at 20 lines of 400 characters. A recording with more than 20 badly named files gives a result that fails gate-result, and cmd_gate_story._validate then turns it into a Refuse, so the gate exits 2 as a usage error. G4a and survey-2 call this function directly and read passed, ok and failures.",
+    "proposed_resolution": "Build every demo result with gatelib.result and gatelib.not_attempted. Carry the table's failures into the result. Return not_attempted for an admission refusal, with one prefix. Add tests for a failing table (at least one failure line), an unknown run (ok false, exit 1) and 25 bad files (20 lines, the last 'and 6 more').",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-4",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (_table_record lines 123-158, _recording_checks lines 174-216); rewrite/spec/commands/gate-demo.md",
+    "problem": "The demo gate never reads the story's criteria. uncovered is computed from the red record's criteria map, and that map holds only criteria with at least one test. So metrics.uncovered is always [], and the table never lists a criterion with no test, which D14 and gate-demo.md require. In recorded mode, any AC-<digits> file passes (AC-99 for a story with only AC-1), and any *.png is accepted without naming a criterion, although the spec says 'every file names a criterion'. Plan section 4 names load_artifact's '### AC-<N>' headings as the input for this. No test has a story with an uncovered criterion.",
+    "proposed_resolution": "Read the story's AC-<N> headings, through load_artifact or the reader G3 already has in verdicts.py. Set uncovered to the headings minus the criteria keys, and write a table row for each. In recorded mode, require k to be one of the story's criteria, and require a screenshot to be AC-<k>.png. Add a story with AC-2 and no test (expect uncovered ['AC-2'], still passed) and an AC-9.txt file (expect a failure).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-5",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_cached, lines 361-399)",
+    "problem": "D4's 'Green also needs its .xml to exist' is not built. _cached returns a passing green result whenever green.<sha12>.json passed, with no check that green.<sha12>.xml exists. evidence_write writes the .json, then the .log, then the .xml. A kill between those writes, or a removed copy, leaves a passing record without its report. From then on every green call returns the cache, and demo fails 'the green report copy is missing' at this head forever. Probe: deleting the .xml, then calling green, gave passed true, metrics {}, and still no .xml; demo then failed. The tool cannot recover without a new commit.",
+    "proposed_resolution": "In _cached for green, return None unless evidence_dir(project, subject)/green.<sha12>.xml is a file, so the gate measures again. Add a test: delete the .xml, call green (it measures, and the .xml is back), then demo passes.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-6",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_base_cases lines 582-606, _read_or_empty lines 609-613)",
+    "problem": "The base report is written in place (kept.write_bytes, no rename), and a kept report that does not parse is read silently as {}. Because _base_cases reuses any existing file, a report cut short by a kill is reused for every later red gate and re-freeze cut from that base. The same happens when two stories cut from one base run at once, because the lock is per story. One can read the other's half-written file. With the base set empty, every inherited test counts as new. Probe: a truncated base report gave base_tests 0, new 10, and the misleading failure 'fewer than half of the non-exempt new tests are red (3 of 10)', on every retry. In a re-freeze the inherited tests would join the frozen 'tests'. Kill-safety is a stated requirement, and here a kill fails silently and permanently.",
+    "proposed_resolution": "Write the kept report through store.write_via_tmp (rename). When an existing kept report does not parse, delete it and measure the base again, or fail out loud naming the file; never return {} for a file that exists. Add a test with a truncated kept report.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-7",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_red, lines 662 and 677-682)",
+    "problem": "The half rule counts exempt tests as red. 'red' is every counted red case, exempt ones included, and the rule compares len(red) * 2 with the non-exempt count. With one non-exempt new test that passes and one failing wiring test, the gate sees 1 red of 1 non-exempt and passes. Probe: exit 0, passed true, metrics red 1, exempt 1, new 2. The pass condition is 'at least half of the non-exempt new tests are red', which here is 0 of 1. The real test is frozen while it already passes, which is exactly what the red gate exists to prevent.",
+    "proposed_resolution": "Count only non-exempt red cases for the half rule, and keep 'at least one test red' over all of them, as the spec says. Add the probe's case to test_half_rule_and_exemptions.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-8",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_refreeze, lines 732-747); rewrite/spec/commands/gate-red.md (Re-freezing, 'Made exact')",
+    "problem": "The re-freeze judges tests that did not change. D10 says each earlier identity must still be reported, and each new test in a changed or unknown file must pass or be red; the design quoted in gate-red.md says 'every changed frozen test'. The code does two things beyond that. It refuses on a skip or a harness error among all earlier identities. And it checks every new test in any frozen file, because fresh is the whole base-to-head set, not the files changed or added since the earlier record. So an unchanged frozen test that errors on the implementer's half-done code refuses a legitimate re-freeze, which contradicts D10's own reason. Probe: changing only tests/test_blade.py, while tests/test_knife.py (unchanged) had a TypeError error, was refused twice for test_knife. The builder's 'Made exact' bullet in gate-red.md states the broader rule, so the spec file now contradicts the design sentence it quotes.",
+    "proposed_resolution": "Keep 'still reported' for every earlier identity. Apply the skip and harness-error checks, and the new-test check, only to tests whose file is in changed + added (or is ''). Change the gate-red.md bullet to match. Add the probe's case as a test that passes.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-9",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_refreeze line 740; _measured lines 493-507)",
+    "problem": "The re-freeze worker crashes on two inputs. (a) An earlier identity whose <error> has no type gives IndexError at case.error_types[0]. _red guards this case, _refreeze does not, and pytest's junitxml writes setup errors with no type. (b) A re-freeze record over the 8,000-byte cap gives KeyError 'new' in the over_cap handler, because re-freeze metrics hold changed and added, not new. So D15's 'the red record is over its cap (<n> new tests): split the story' is never given for a re-freeze. Probes: the results were 'the job crashed: IndexError: list index out of range' and 'the job crashed: KeyError: 'new''. The shape survives, but the agent gets a traceback line, not the rule. The 'if record is None' branch (D15) is dead: neither _red nor _refreeze returns None.",
+    "proposed_resolution": "Use 'unknown' when error_types is empty, as _red does. In the over_cap message, count len(record['tests']), and remove the dead branch. Add tests for a type-less error on re-freeze and for a re-freeze that adds 240 tests (the message is 'split the story', and no record is written).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-10",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_cached, line 372)",
+    "problem": "A cached green result without --since has no changed_files key. Plan 3.1 promises 'changed_files: [] without --since', and the measured path sets []. Probe: the first green call had changed_files [], and the second (cached) call's keys omitted it. Callers that read result['changed_files'], such as W2's story script or the survey, fail on a key error on exactly the call the cache serves. test_cached_green_rewrites_patch does not check the key.",
+    "proposed_resolution": "Default changed_files to [] for green in _cached, and assert it in test_cached_green_rewrites_patch.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-11",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_green lines 826-833, _measured); rewrite/spec/commands/gate-green.md",
+    "problem": "The green record has no diff_patch field. Plan 3.3 promises 'green.<sha12>.json with diff_patch (always the base-to-head patch, also after --since)', and gate-green.md, which the builder edited, says 'the record's diff_patch field and its patch_id are always the base to the head'. The record is written before the patch, with gate, subject, sha, passed, patch_id and flaky only. test_since_patch_leaves_whole_patch says it checks 'the record's diff_patch' but asserts only sha and patch_id. The departure was not reported.",
+    "proposed_resolution": "Write the whole patch before evidence_write and put its path in the record as diff_patch. evidence-record has no additionalProperties: false, but its owner should list the field. Alternatively, have the orchestrator drop the field from plan 3.3 and from gate-green.md. In either case, make the test assert what the plan says.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-12",
+    "origin": "slice step 4, gates, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (measure, lines 296-299)",
+    "problem": "sha is '' on refusals made after the story resolved. measure's 'except Refused' returns not_attempted(gate, subject, str(exc)) without the head, both for _require_report (commands.test empty, test_report not junit:) and for resolve_since (since not a commit or not an ancestor). Probe: both refusals printed sha ''. Plan 3.1 says sha is '' only when the story could not be resolved.",
+    "proposed_resolution": "Pass sha=spec['head'] to not_attempted when spec is set. Assert sha in test_since_not_an_ancestor_refused.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-13",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_measured, lines 535-540); next/tests/unit/test_gate_green.py (test_baseline_named_is_strict_and_says_so)",
+    "problem": "The baseline line is appended twice (the if block is duplicated). Probe: a failing green with a baseline listed 'the cycle has a baseline, and the comparison is not built: every failure counts' twice. The test checks only a passing result, so it cannot see the line or count it.",
+    "proposed_resolution": "Delete the duplicate block. Add a failing-with-baseline case that asserts exactly one such line.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-14",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_retain_old_base_reports, lines 616-632)",
+    "problem": "Base-report retention reads the wrong file. directory.parent.parent.parent is the .factory directory, so load() opens .factory/.factory/factory.toml, raises, and 'except Exception: days = 30' hides it. A configured state.retain_runs_days is never applied. Probe: with retain_runs_days = 1, a 2-day-old base report survived. The failure is silent and untested. Its effect is limited to housekeeping, because 30 is also the key's default.",
+    "proposed_resolution": "Pass the job's config (ctx.config) or the project root in, and read config.get('state', 'retain_runs_days'). Do not catch everything. Add a test with retain_runs_days = 1 and an aged file.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-15",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py (_red lines 653-661, _refreeze lines 726-730)",
+    "problem": "The red gate and the re-freeze define 'new test' differently. _red drops tests whose file is classed source; _refreeze keeps them. A re-freeze's tests (which green then requires to pass, and which the next re-freeze must find reported) can therefore hold tests that red never counted.",
+    "proposed_resolution": "Have one helper return the counted new cases from the head report, the base identities, the tree, the tests files and the config, and use it in both.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-16",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/diffpatch.py (lines 34-36)",
+    "problem": "write_patch writes through a fixed temporary name, .diff.<range>.patch.tmp, in the evidence directory. Two writers of one patch at once share it: the foreground cached path of gate green and the survey's registered call, or green and delivery. One truncates the other's file, and the loser's os.replace raises FileNotFoundError out of measure. A kill leaves the .tmp behind.",
+    "proposed_resolution": "Write through store.write_via_tmp, or use a temporary name unique per writer (pid and a random token).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-17",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_junit.py (test_sample_runner_writes_file_and_type, lines 102-105)",
+    "problem": "The test builds its sample project inside the repository, at next/tests/unit/fixtures/junit/sample-run, and runs the suite there. Two pytest runs in this shared tree remove and rewrite the same directory under each other. A kill leaves a copied project, with __pycache__, inside tests/unit/fixtures.",
+    "proposed_resolution": "Build the copy under tmp_path.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-18",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_gate_cli.py (test_through_launcher, lines 136-153)",
+    "problem": "test_through_launcher does not go through the launcher. It calls dispatch.main in process like every other test, so the exit codes 0 and 1 by way of launch.sh (plan section 7) are not tested, although the docstring claims they are.",
+    "proposed_resolution": "Run one exit-0 and one exit-1 gate call through the launcher as a subprocess, or rename the test and drop the claim.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-19",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/gate-red.md ('Frozen files'); rewrite/spec/records/evidence.md",
+    "problem": "Both files, which this unit edited, say the red record lists 'each new test with its file' ('tests, the new test identities with the file of each'). The record's tests is a list of identities, and the schema makes it an array of strings. The spec states something the code does not do.",
+    "proposed_resolution": "Drop 'with its file' from both files, or have records' schema carry a file per test. No consumer needs it.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-20",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gate_demo.py (SCRIPT_CAP, TRANSCRIPT_CAP, SCREENSHOT_CAP, STORY_CAP, lines 21-24)",
+    "problem": "The demo caps are hard-coded as a second copy of the [demo-evidence] row of policy/artifacts.toml (max_bytes 1500000, and cap_note). Plan section 4 names vsdd.policy.load('artifacts') as the source. A change to the row would not reach the gate.",
+    "proposed_resolution": "Read max_bytes, and the per-file caps from cap_note (or from cap columns added to the row by its owner), through vsdd.policy.load('artifacts').",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-21",
+    "origin": "slice step 4, gates, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step4-gates.json (AU-S2-12)",
+    "problem": "The AU-S2-12 outcome describes a re-freeze rule in code and cites test_refreeze_accepts_a_failing_assertion. The finding is about conversion commentary in design files: gate-red.md 45-47 and gate-green.md 38 for G2, plus files of C2, G1 and S1. G2's two files are in fact clean (the commentary is now in conflicts/commands.md, items 18-19), but the outcome text neither says so nor addresses the finding.",
+    "proposed_resolution": "Rewrite what_was_done to say that gate-red.md and gate-green.md hold no conversion commentary and that it lives in conflicts/commands.md items 18-19. Leave the other packages' files (env-stop.md and the rest) to their owners.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "route-data.schema.json",
+  "type": "object",
+  "description": "Output of vsdd feature route. Field list from pipeline.md#2.10.8 and state.md#2.16. The design gives this field list but no JSON types and no required list; types are stated only where the design states them.",
+  "properties": {
+    "ok": {},
+    "route": {},
+    "amendment": {},
+    "stories": {
+      "type": "array",
+      "description": "One per repository touched.",
+      "items": { "$ref": "story-unit.schema.json" }
+    },
+    "readiness": {
+      "type": "array",
+      "description": "Chore stories the project still needs, as story units.",
+      "items": { "$ref": "story-unit.schema.json" }
+    }
+  }
+}

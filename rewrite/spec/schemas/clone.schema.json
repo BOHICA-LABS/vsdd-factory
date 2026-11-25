@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clone.schema.json",
+  "type": "object",
+  "description": "Fields of the clone record (decision D33), .factory/local/clone.json. Not tracked. Built by package M6 when the build widens; not written on the thin slice path. The object stays open.",
+  "properties": {
+    "schema": {"type": "integer", "description": "Format version; 1."},
+    "id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "description": "Sixteen random hex characters, made once for this clone. It is what a claim and a state commit name. The store checks the characters; the shipped schema checker has no pattern keyword."
+    },
+    "label": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "A short name people read in place of the id: the host name unless the person gave another. Copied into the claims this clone takes. Shown only; no program decides anything by it."
+    },
+    "created": {"type": "string", "description": "ISO 8601, UTC, by this clone's clock."},
+    "how": {
+      "type": "string",
+      "enum": ["switched", "joined", "remade"],
+      "description": "How the clone got this record: it turned team use on, it joined a team, or its record was lost and vsdd status --fix made a new one."
+    },
+    "sync": {
+      "type": "object",
+      "description": "The outcome of the last sync, which the briefing prints without fetching.",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["synced", "unpushed", "unreachable", "missing", "rewritten", "diverged", "blocked", "refused", "busy"]
+        },
+        "at": {"type": "string", "description": "ISO 8601, UTC, by this clone's clock."},
+        "remote_head": {
+          "type": "string",
+          "description": "The last head of the remote's state branch whose arrivals this clone checked and took into its mount: a fetched head, written after the mount holds it, or a commit of this clone that the remote took. A fetch that only judges a push does not change it. The next sync requires the head it fetches to contain it, and checks the files that differ between the two."
+        },
+        "ahead": {"type": "integer", "minimum": 0, "description": "State commits this clone holds that the remote did not accept yet."},
+        "unpublished": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Ids of the decisions settled here whose settlement the remote does not hold yet. Written by the function that settles; removed by the sync when the commit is contained in the remote's head. Every reader treats a listed decision as open."
+        },
+        "unknown": {
+          "type": "array",
+          "description": "Commits whose push got no answer while the remote could not be asked. The next sync that reaches the remote measures whether each is contained in its head and moves it to settled.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "commit": {"type": "string"},
+              "request": {"type": "string", "description": "For a commit that minted an id: the digest of what the caller asked for, as record:clone defines it. Empty for any other commit."}
+            },
+            "required": ["commit", "request"]
+          }
+        },
+        "error": {"type": "string", "description": "Empty, or the cause with git's own line."}
+      },
+      "required": ["state", "at", "remote_head", "ahead", "unpublished", "unknown", "error"]
+    },
+    "aside": {
+      "type": "array",
+      "description": "What a sync did not take from this clone. Each entry stays until its retention ends.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "The path in the state directory."},
+          "kept": {"type": "string", "description": "Where this clone's version was saved, under .factory/local/aside/."},
+          "reason": {
+            "type": "string",
+            "enum": ["record_changed_on_both", "claim_held_elsewhere", "decision_settled_first"]
+          },
+          "theirs_by": {"type": "string", "description": "The author of the version that stands, as its commit names them."},
+          "at": {"type": "string"}
+        },
+        "required": ["path", "kept", "reason", "theirs_by", "at"]
+      }
+    },
+    "settled": {
+      "type": "array",
+      "description": "Each commit that left sync.unknown: what it carried and whether the remote had taken it. Each entry stays until its retention ends; one for a minted file also leaves when a command with the same request is run again.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "commit": {"type": "string"},
+          "carried": {"type": "array", "items": {"type": "string"}, "description": "The paths the commit added or changed: claim files or one minted file."},
+          "request": {"type": "string", "description": "Copied from sync.unknown. A command that mints is given the id back only when its own request equals this one. Empty for a commit that minted nothing."},
+          "accepted": {"type": "boolean", "description": "True when the remote's head contained the commit."},
+          "at": {"type": "string"}
+        },
+        "required": ["commit", "carried", "request", "accepted", "at"]
+      }
+    }
+  },
+  "required": ["schema", "id", "label", "created", "how", "sync", "aside"]
+}

@@ -1,0 +1,182 @@
+[
+  {
+    "id": "C2-R1",
+    "outcome": "fixed",
+    "what_was_done": "The HUMAN_ONLY and GOVERNED values are back in rewrite/spec/tables/callers.toml and match hooks.md#2.7 (decide, config set, cycle close, lock release --force, init --fresh, import; story deliver, release). rules/gate-guard.md points at that table and names H6. tests/unit/test_policy.py and tools/check.py policy_tables_are_consistent both read that one file and do not repeat the values. Confirmed by mutation in a scratch copy: adding 'new' to HUMAN_ONLY fails test_person_only_subcommands_are_in_no_group, and adding 'xyz' to GOVERNED fails test_governed_subcommands_name_real_routes and the check. Dropping a value passes, which is expected because no second copy exists. One wording slip next to it is recorded as L2C-c2-b6-3: walls.toml's closing note says model.py reads the values 'from there at build time'.",
+    "where": "rewrite/spec/tables/callers.toml; rewrite/spec/rules/gate-guard.md; next/tests/unit/test_policy.py::TestWallTableInvariants; next/tools/check.py::policy_tables_are_consistent"
+  },
+  {
+    "id": "C2-R2",
+    "outcome": "not-fixed",
+    "what_was_done": "Most of it is fixed. Every key of the five slice rows is pinned exactly. The [callers] groups, the slice class globs and the from_config keys are pinned. So are the story status enum and the contracts type, and the [reveals] list entries are derived from the kinds' globs. There are holdout-reader and tool_only-deny-outside invariants. In a scratch copy, all of the reviewer's named mutations now fail a test except one. Still wrong: (1) '\"review show\" = []' still passes every suite, as do 'review show --include-walled', 'refs --include-walled' and 'coverage --include-walled' emptied or narrowed. No test pins the six [reveals] entries that are not list entries, so 'review show' could stop counting as a read of reviews and reviewers would see earlier passes. (2) The holdout-reader invariant looks only at vsdd-factory:* rows, so removing holdout from the [other] row (every unlisted agent type, including a general-purpose subagent the main session dispatches) passes. (3) The code-reviewer row is still outside the no-shell rule's test: dropping 'outside' or 'reviews' from its read_deny passes, which the finding named explicitly. To do: assert the six non-list [reveals] entries exactly; pin the [other] row exactly (or include it in the holdout invariant); and add the code-reviewer and adversary to test_shell_less_rows_deny_outside, with 'reviews' asserted for every reviewer row.",
+    "where": "next/tests/unit/test_policy.py (TestWallTableInvariants, TestRegistryVocabularyAgrees); next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [other], [reveals], [\"vsdd-factory:code-reviewer\"]"
+  },
+  {
+    "id": "C2-R3",
+    "outcome": "fixed",
+    "what_was_done": "The passages are struck. A grep finds no 'Replaces' in agents/codebase-analyzer.md or holdout-evaluator.md and no P2LEAN-17 anywhere outside conflicts/. It finds no design-history 'first pass'/'second pass' in event-log.md, caller-identity.md, rule-tuning.md or tests-conformance.md (the remaining 'first pass' at tests-conformance.md:24 is a convergence pass). There are no conflicts-file pointers in state-layout.md or computed-status.md. The AU-P2-04 outcome in outcomes/c2.json now lists the second sweep, so 'fixed' is true. Text only, checked by spec_lint; no code test applies.",
+    "where": "rewrite/spec/agents/{codebase-analyzer,holdout-evaluator,code-reviewer,test-writer}.md, rewrite/spec/topics/{run-lock,event-log,caller-identity,rule-tuning,state-layout,computed-status}.md, rewrite/spec/packaging/tests-conformance.md, rewrite/findings/outcomes/c2.json"
+  },
+  {
+    "id": "C2-R4",
+    "outcome": "fixed",
+    "what_was_done": "artifacts/contract.md now holds only a pointer to the [contract] row plus the two facts the row lacks (when references are checked, and retirement through replaced_by). The restated screenshot cap is gone from artifacts/demo-evidence.md. records/holdout-evaluation.md no longer restates the write-once lifecycle; it links both rows for the removal at cycle close. Small remainder, not counted against the finding: demo-evidence.md still repeats the row's lifecycle sentence about scripts and transcripts being the evidence, alongside the D22 rationale.",
+    "where": "rewrite/spec/artifacts/contract.md, rewrite/spec/artifacts/demo-evidence.md, rewrite/spec/records/holdout-evaluation.md; checked by spec_lint"
+  },
+  {
+    "id": "C2-R5",
+    "outcome": "fixed",
+    "what_was_done": "story-unit.schema.json now has tests_agent, tests_method, impl_agent, impl_method and red_gate, all required, and no 'method'. The fixtures, the universal-test unit (universal.test.mjs:67-68) and the generated S_STORY_UNIT literals in prelude.js and the toys match it. The stale prose is corrected in workflows/story.md, tables/step-methods.toml, rules/write-scopes.md and agents/devops.md, and L2-c2-1 is reworded to name the schema. Confirmed by mutation in a scratch copy: renaming impl_method back to method, or dropping tests_agent from required, fails tools/check.py (via tests/lint/test_check.py).",
+    "where": "next/plugins/vsdd-factory/schemas/story-unit.schema.json, next/tests/unit/fixtures/schemas/story-unit/, next/tests/workflows/universal.test.mjs, next/workflow-lib/prelude.js; tests/unit/test_schema_fixtures.py, tools/check.py"
+  },
+  {
+    "id": "C2-R6",
+    "outcome": "fixed",
+    "what_was_done": "Every story frontmatter key now has a checkable type, and optional keys carry '?' (impl_method, tests_method, depends_on, properties, points, security, ui, demo, screens, repo, source). The descriptions moved into comments. test_nineteen_frontmatter_keys_every_one_typed fails if any key goes back to \"\", and test_story_frontmatter_types_and_optional_keys_are_pinned pins the optional set and 13 of the 19 types. Gap, not a regression: the types of impl_method, tests_method, properties, repo and source are not pinned (impl_method = 'int?' passes), so a later type change there is silent.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml [story.frontmatter]; next/tests/unit/test_policy.py::TestStoryArtifactKind"
+  },
+  {
+    "id": "C2-R7",
+    "outcome": "fixed",
+    "what_was_done": "[reveals] has one 'list <kind>' entry for each of the 32 artifact kinds, each equal to the class the kind's glob falls in (project-conventions and review-rules give guidance; asset gives the three spec classes). test_one_reveal_entry_per_artifact_kind and test_each_reveal_entry_is_the_class_the_kind_s_glob_falls_in pin it. Mutations that set 'list holdout-scenario' or 'list epic' to [] fail. L2-c2-2's case is now covered by the table, though that finding is still open in the ledger.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml [reveals]; next/tests/unit/test_policy.py::TestRegistryVocabularyAgrees"
+  },
+  {
+    "id": "C2-R8",
+    "outcome": "not-fixed",
+    "what_was_done": "Mostly fixed. classes.toml now defines own-worktree as the union (the worktree of the caller's working directory and, for a spike runner, also its ledger entry's worktree, never the main checkout). spike-bounds.md states the same union and links it. rules/write-scopes.md has the spike-runner-into-story-worktree case. The word test is gone, so the definition is documentation-only until H3/H4 build the matcher. Still wrong: topics/rule-model.md:54-57 restates the definition in the old either-or form ('defined by the caller's working directory or, for a spike runner, the worktree its open ledger entry records'). That is a third wording with the meaning this finding said to remove, and rule-model is what every hook rule reads first. To do: replace that clause with a bare link to the own-worktree definition in [[table:path-classes]], or state the union there too.",
+    "where": "rewrite/spec/topics/rule-model.md (lines 54-57); next/plugins/vsdd-factory/py/vsdd/policy/classes.toml; rewrite/spec/rules/spike-bounds.md; rewrite/spec/rules/write-scopes.md"
+  },
+  {
+    "id": "C2-R9",
+    "outcome": "fixed",
+    "what_was_done": "policy_tables_are_consistent now validates every row's commands against the family names of rewrite/spec/tables/command-families.toml (plus '*'), and its docstring matches. Dispatch is checked: every agent row except the spike runner and the clerk must dispatch exactly the spike runner, and test_policy pins those two at []. Confirmed in a scratch copy: 'git-reed' in the codebase-analyzer row fails the check ('commands name undefined command families'), and 'git-comit' in the implementer row fails TestImplementerRow. test_row_commands_name_defined_command_families keeps a hard-coded copy of the family names; the check reads the table.",
+    "where": "next/tools/check.py::policy_tables_are_consistent; next/tests/unit/test_policy.py::TestWallTableInvariants::test_row_commands_name_defined_command_families"
+  },
+  {
+    "id": "C2-R10",
+    "outcome": "fixed",
+    "what_was_done": "config/paths.md links the precedence in [[table:path-classes]] and does not restate it. rules/tests-first.md links the story-kind rows and does not list exempt kinds. command-families.toml says who holds each family is each row's commands list in [[table:walls]]. The Walls sections of clerk.md, adversary.md, ui-reviewer.md and code-reviewer.md link their rows and no longer list read_deny. The AU-S2-09 text in outcomes/c2.json matches. Text only, checked by spec_lint.",
+    "where": "rewrite/spec/config/paths.md, rewrite/spec/rules/tests-first.md, rewrite/spec/tables/command-families.toml, rewrite/spec/agents/{clerk,adversary,ui-reviewer,code-reviewer}.md, rewrite/findings/outcomes/c2.json"
+  },
+  {
+    "id": "C2-R11",
+    "outcome": "not-fixed",
+    "what_was_done": "The definition is fixed where it is authoritative. walls.toml's header, artifacts.toml's header and rules/write-scopes.md (case 2 and Grant suffixes) define @<method> as the resolved method of the caller's own stage (impl_method for the implement agent, tests_method for the tests agent). write-scopes.md's case table has the devops tests:create@repo-setup case in a chore story. The matcher itself belongs to H3/H4. Still wrong: rewrite/spec/artifacts/story.md:15-16 still says the suffix 'matches the resolved method of the stage written', the exact ambiguous phrase this finding is about, in the artifact file H4 and S1 read. To do: change it to 'the caller's own stage' and link [[rule:write-scopes]].",
+    "where": "rewrite/spec/artifacts/story.md (lines 15-16); next/plugins/vsdd-factory/py/vsdd/policy/walls.toml header; rewrite/spec/rules/write-scopes.md"
+  },
+  {
+    "id": "C2-R12",
+    "outcome": "fixed",
+    "what_was_done": "Fixed by the first option the finding offered. The artifacts.toml header now says that the kind rows other than contract and story are untested design placeholders: their glob and id cells use the design's notation, and a loader would send their writes to [_unknown]. It also says that where a kind caps per file, max_bytes is the per-kind or per-story total and cap_note carries the per-file caps. Real cells wait for the packages that ship each kind. The same header claims [contract] and [[story-kind]] are pinned by test_policy.py, which is not true; see L2C-c2-b6-1.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml (header, lines 13-20)"
+  },
+  {
+    "id": "C2-R13",
+    "outcome": "fixed",
+    "what_was_done": "The VSA-18 choice is in commands/story-deliver.md under 'Conflict repair': before the repair step, the tool merges the integration head into the story branch, so the builder rows keep only git-commit and git-read. The VSA-18 outcome in outcomes/c2.json is worded as left-for-builder for G4a, which builds the step. Text only.",
+    "where": "rewrite/spec/commands/story-deliver.md (lines 30-34); rewrite/findings/outcomes/c2.json"
+  },
+  {
+    "id": "C2-R14",
+    "outcome": "fixed",
+    "what_was_done": "registry.toml [table.identifiers] now names package S1. packages/S1.md lists [[table:identifiers]] under Implements, and packages/C2.md no longer does. Checked by spec_lint, which reads the registry.",
+    "where": "rewrite/spec/registry.toml [table.identifiers]; rewrite/spec/packages/S1.md, rewrite/spec/packages/C2.md"
+  },
+  {
+    "id": "C2-R15",
+    "outcome": "fixed",
+    "what_was_done": "The walls.toml header now has a Coverage paragraph: a class named in read_deny or write also covers the classes nested inside it, except those the row's read_allow names (code-reviewer and guidance, holdout-evaluator and brief), and a write grant covers nested classes the same way. TestClassCoverage derives the nesting from the globs and pins it, and pins the table facts the rule depends on: main denies holdout and not holdout-evaluations by name, the product-owner's spec-product grant covers brief, the architect's spec-arch grant covers guidance, and the read_allow exceptions. A spec-arch glob typo fails the nesting test. The matcher that applies the rule belongs to H3/H4, so table-level tests are as far as this can go now.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/walls.toml (Coverage paragraph); next/tests/unit/test_policy.py::TestClassCoverage"
+  },
+  {
+    "id": "B6-R1",
+    "outcome": "fixed",
+    "what_was_done": "build.py has one decision, is_reviewer(name, roster, text): it goes by tier name for a rostered agent and falls back to the model comparison only for agents outside the roster. _stamp_agents and the lint's agent_problems both call it. TestBuildStampingSeam::test_a_reviewer_stamped_by_the_build_passes_the_lint runs the build's own _stamp_agents on an adversary file and asserts that agent_problems returns []. Confirmed in a scratch copy: putting back the old model comparison fails test_reviewer_without_the_severity_stamp_is_rejected and the seam test.",
+    "where": "next/tools/build.py::is_reviewer, ::_stamp_agents; next/tests/lint/test_roster_lint.py::TestBuildStampingSeam, ::TestAgentLint"
+  },
+  {
+    "id": "B6-R2",
+    "outcome": "fixed",
+    "what_was_done": "The lint accepts built-in tools plus MCP tools spelled mcp__plugin_vsdd-factory_<server>__<tool> or mcp__<server>__<tool>, for servers in .mcp.json and the per-server lists of topics/tool-sets.md. Storybook is accepted in the second form only. It rejects bare MCP names and requires both spellings for a bundled server's tool. Fixture tests cover both spellings, a bare name, each spelling alone, and storybook alone. Confirmed in a scratch copy: turning off the bare-name rejection fails test_a_bare_mcp_tool_name_is_rejected, and turning off the pair rule fails test_one_spelling_without_the_other_is_rejected. Related, already recorded by the fixer as L2-c2-b6-fix-1: the shipped reader refuses unquoted MCP names, so tools lines must be quoted.",
+    "where": "next/tests/lint/test_roster_lint.py::_tool_problems, MCP_SERVER_TOOLS; TestAgentLint (test_a_bare_mcp_tool_name_is_rejected, test_both_spellings_..., test_one_spelling_..., test_the_second_spelling_alone_..., test_the_storybook_spelling_alone_...)"
+  },
+  {
+    "id": "B6-R3",
+    "outcome": "fixed",
+    "what_was_done": "agent_file_lines (70) now applies to the file with its stamped regions removed, and agent_body_lines (60) to the body without them. test_the_agent_file_topic_example_passes_stamped runs the complete example from topics/agent-file.md, stamped as a reviewer, and expects []. test_a_body_at_the_budget_passes_and_one_line_over_fails checks 60 lines pass and 61 fail. Confirmed in a scratch copy: counting the whole file again fails the 60/61 test.",
+    "where": "next/tests/lint/test_roster_lint.py::agent_problems; TestAgentLint (test_the_whole_file_budget_..., test_the_agent_file_topic_example_passes_stamped, test_a_body_at_the_budget_passes_and_one_line_over_fails); next/tests/lint/roster.toml [budgets]"
+  },
+  {
+    "id": "B6-R4",
+    "outcome": "not-fixed",
+    "what_was_done": "Partly fixed. A runStories( call in the hand-written region now counts as an edge to story. Tests show story or release calling runStories is rejected and wave calling it passes, and removing the edge fails test_release_may_not_call_runstories. Backtick literals are matched. workflow(<identifier>) is reported. vsdd-factory:<name> references in agent and workflow files resolve against the roster, and the docstring says so. Still wrong, from probes and a mutation in a scratch copy: (1) a target that is an expression starting with a quote is neither an edge nor reported: story.js containing workflow('vsdd-factory:' + name) or workflow(`vsdd-factory:${name}`) returns no problems; (2) a space before the parenthesis, as in workflow ('vsdd-factory:release') in wave.js, evades both patterns and passes; (3) test_a_backtick_literal_call_is_a_call_edge is vacuous: it uses the allowed story edge, so it still passes with backticks removed from WORKFLOW_CALL_RE. To do: allow \\s* between 'workflow' and '(', and between 'runStories' and '('; report every workflow( call whose first argument is not one complete quoted literal with no interpolation; change the backtick test to an edge the roster forbids (wave calling `vsdd-factory:release`).",
+    "where": "next/tests/lint/test_roster_lint.py (WORKFLOW_CALL_RE, NON_LITERAL_CALL_RE, workflow_problems, TestWorkflowLint::test_a_backtick_literal_call_is_a_call_edge)"
+  },
+  {
+    "id": "B6-R5",
+    "outcome": "fixed",
+    "what_was_done": "Agent frontmatter is now parsed with the shipped vsdd.frontmatter.parse, which keeps key case and refuses block scalars, and a parse error is reported as a lint problem. Keys are compared exactly. Tests cover a lowercase omitclaudemd (rejected), a folded 'description: >' (rejected as unparseable) and a quoted model value (accepted). A probe shows 'Model: sonnet' reported both as a key outside the template and as a model mismatch.",
+    "where": "next/tests/lint/test_roster_lint.py::_parse_frontmatter; TestAgentLint (test_a_lowercase_omitclaudemd_key_is_rejected, test_a_block_scalar_description_is_rejected, test_a_quoted_model_value_is_parsed_as_the_platform_reads_it)"
+  },
+  {
+    "id": "B6-R6",
+    "outcome": "fixed",
+    "what_was_done": "walls_row_problems checks that the vsdd-factory:* rows of walls.toml equal the roster's [agents] and reports missing and extra names. check_all calls it, so TestLiveTree runs it over the real tables. Fixture tests cover the matching case, a missing row and an extra (misspelt) row. Confirmed in a scratch copy: suppressing the extra-row report fails test_an_extra_row_is_reported. Small gap: removing the call from check_all passes, because the live tables agree.",
+    "where": "next/tests/lint/test_roster_lint.py::walls_row_problems, ::check_all; TestWallsRowsMatchTheRoster"
+  },
+  {
+    "id": "B6-R7",
+    "outcome": "not-fixed",
+    "what_was_done": "There is now code behind the roster's 'lint rejects any other'. workflow_problems rejects, in the hand-written region, a direct agent( call, any 'model:' or 'effort:' text, and any assignment to RUN.tier, TIER, ROLE or OVERRIDE, and fixture tests pin each rule. But the rule is broader than the design and rejects what the design requires. The design's own story.js skeleton (topics/story-script.md lines 36 and 43: RUN.tier = a.tier || null; RUN.tier = s.config.tier_override || null) and wave.js skeleton (topics/wave-script.md line 31) set RUN.tier in the hand-written region. That is how the VSDD_TEST_TIER override from the survey reaches the step wrapper (conventions.md, topics/model-tiers.md). Running the lint over the extracted skeletons gives 'the tier settings are the roster's (... RUN.tier =)' for story and wave, and over both toy workflows. So W2, the next slice workflow, fails the lint if built as written. The regex scan also does not skip comments or strings: '// hand the agent (the implementer) its brief', a prompt string containing 'effort:', and a data key { model: u.model } are each rejected. To do: allow the design's tier-override adoption, either by moving it into a stamped prelude helper (for example adoptRun(s) / adoptParent(a)) so the hand-written region never assigns RUN.tier, or by allowing exactly the two forms the skeletons use. Strip // and /* */ comments and string literals before the agent( and model:/effort: scans. Add a test that the story and wave skeletons in the design pass workflow_problems.",
+    "where": "next/tests/lint/test_roster_lint.py (DIRECT_AGENT_CALL_RE, TIER_OVERRIDE_RE, workflow_problems, TestWorkflowLint::test_assigning_the_generated_tier_tables_is_rejected); rewrite/spec/topics/story-script.md; rewrite/spec/topics/wave-script.md; next/tests/workflows/toys/toy-story.js, toy-build.js"
+  },
+  {
+    "id": "B6-R8",
+    "outcome": "fixed",
+    "what_was_done": "Colour is now part of each [tiers] row, including the clerk's (yellow, per step-5 plan D10), and the lint reads it from there. test_wrong_colour_for_the_tier_is_rejected and test_the_clerk_colour_comes_from_the_roster pin this; removing the colour check fails the clerk-colour test, and removing the clerk colour from the roster fails tools/check.py. conventions.md's tier table keeps only 'Used for' and points at the roster for model, effort and colour. topics/model-tiers.md no longer lists the override steps. The AU-S2-09 text in outcomes/b6.json matches. The edit left the same three sentences twice in conventions.md; see L2C-c2-b6-2.",
+    "where": "next/tests/lint/roster.toml [tiers]; next/tests/lint/test_roster_lint.py::agent_problems, TestAgentLint; rewrite/spec/conventions.md (Model tiers); rewrite/spec/topics/model-tiers.md; rewrite/findings/outcomes/b6.json"
+  },
+  {
+    "id": "B6-R9",
+    "outcome": "fixed",
+    "what_was_done": "The roster bullet in conflicts/tables-repair.md now says B6 brought the built file into line with agents-skills.md#2.12 (status \"both\", 4400, 70), that the spec table is a pointer, and that no difference remains. Text only.",
+    "where": "rewrite/spec/conflicts/tables-repair.md (Built files under next/)"
+  },
+  {
+    "id": "B6-R10",
+    "outcome": "fixed",
+    "what_was_done": "roster_problems now checks that every [agents] value is a tier, every [overrides] value is a tier and every override key names a roster workflow. It checks that [workflows] call targets are roster workflows and a called workflow has calls = [], that [skills] values are person, model or both, and that the budget keys exist. Each check has a fixture test in TestRosterIntegrity. tools/check.py reads engines (min_claude_code) and python_floor from roster [platform]. Gaps, not regressions: the model-visible-skills over-budget branch still has no test (removing it passes), and the manifest icon path is still a literal in check.py, which is a manifest value rather than a floor.",
+    "where": "next/tests/lint/test_roster_lint.py::roster_problems, TestRosterIntegrity; next/tools/check.py (plugin_manifest, python_compiles_on_the_floor, roster_platform)"
+  },
+  {
+    "id": "B6-R11",
+    "outcome": "fixed",
+    "what_was_done": "check_all reports a missing policy directory. kind_grant_problems reports zero [[story-kind]] rows and an empty implement_agent. ':create' and ':before-red' no longer meet an unconditional write need, while ':frozen' still does, and the comment says so. Tests cover zero kinds, an empty implement agent and a conditional qualifier; mutations of each fail. Gap: the missing-policy-directory branch has no test.",
+    "where": "next/tests/lint/test_roster_lint.py::kind_grant_problems, ::check_all, CONDITIONAL_QUALIFIERS; TestKindGrantLint"
+  },
+  {
+    "id": "B6-R12",
+    "outcome": "not-fixed",
+    "what_was_done": "test_nothing_in_the_roster_is_absent_from_disk exists and is marked unittest.skip('switches on with E1 part 2'), so every run reports one skipped test. But it checks the wrong tree. It looks under self.plugin, the empty temporary fixture directory that TestRosterMembership.setUp creates, not the real plugin. In a scratch copy I put a file or directory for all 45 roster names into plugins/vsdd-factory and removed the skip; the test still failed ('False is not true : product-owner'). Switching it on at E1 part 2 is therefore not a one-line change, and once fixed by hand it would never have been checked. To do: use the module's PLUGIN constant in that test (or an absence_problems(PLUGIN, roster) function called from check_all), and add a fixture test that a populated temporary plugin passes and one with a missing agent fails.",
+    "where": "next/tests/lint/test_roster_lint.py::TestRosterMembership::test_nothing_in_the_roster_is_absent_from_disk"
+  },
+  {
+    "id": "B6-R13",
+    "outcome": "fixed",
+    "what_was_done": "The pointer in rewrite/spec/tables/roster.toml now gives only the file path, its tables and its consumers, with no call edges. conflicts/people-repair.md P-8 names the shipped rows as the one copy and no longer repeats the edges. The registry summary for table:roster matches the shipped file (floors, tiers, each agent's tier, skills, calls, overrides, budgets). topics/tool-sets.md now says what the lint does: each tools entry is checked against the union of the sets, and the per-agent table is prose. The lint's known tools match the tool-sets table.",
+    "where": "rewrite/spec/tables/roster.toml, rewrite/spec/conflicts/people-repair.md (P-8), rewrite/spec/registry.toml [table.roster], rewrite/spec/topics/tool-sets.md"
+  },
+  {
+    "id": "B6-R14",
+    "outcome": "fixed",
+    "what_was_done": "test_roster_lint.py is off the prelude-marker guard's allowlist; only harness.mjs, universal.test.mjs and test_build.py remain. TestWorkflowLint.write_workflow builds its marker lines from build_mod.PRELUDE_MARKERS, so a marker change reaches the fixtures. The guard pins this: a literal marker in test_roster_lint.py would fail build --check and the build_is_current check. The AU-P2-01 outcome in outcomes/b6.json now says the prelude reads no [workflows] table.",
+    "where": "next/tools/build.py (marker guard allowlist); next/tests/lint/test_roster_lint.py::TestWorkflowLint.write_workflow; rewrite/findings/outcomes/b6.json"
+  },
+  {
+    "id": "B6-R15",
+    "outcome": "fixed",
+    "what_was_done": "L2-b6-1's where field now names rewrite/spec/tables/lint-checks.toml, which registry.toml assigns to B6. The rebuilt ledger maps it to that file, and it appears in rewrite/findings/by-package/B6.md. The optional routing to the A-package agent files was not added. One stale detail: that where field still mentions the build.py marker-guard allowlist, which no longer lists the lint.",
+    "where": "rewrite/findings/sources/extra-b6.json (L2-b6-1); rewrite/findings/ledger.json; rewrite/findings/by-package/B6.md"
+  }
+]

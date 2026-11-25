@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.schema.json",
+  "type": "object",
+  "description": "The structure of factory.toml: a top-level integer schema key, one section per property, and no other keys. Unknown keys and wrong types are errors that the briefing reports. The one key list - key, type, default and meaning - is tables/config-keys.toml; this schema carries its structure and its types.",
+  "properties": {
+    "schema": {"type": "integer", "description": "Format version; 1 in the design's example."},
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "ui": {"type": "boolean"},
+        "layout": {"type": "string", "enum": ["single", "hub"]}
+      }
+    },
+    "branches": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "integration": {"type": "string"},
+        "release": {"type": "string"},
+        "protected": {"type": "array", "items": {"type": "string"}},
+        "story": {"type": "string"},
+        "spike": {"type": "string"}
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "build": {"type": "string"},
+        "test": {"type": "string"},
+        "test_report": {"type": "string"},
+        "lint": {"type": "string"},
+        "format_check": {"type": "string"},
+        "run": {"type": "string"},
+        "ui_check": {"type": "string"},
+        "docs_check": {"type": "string"},
+        "mutation": {"type": "string"},
+        "scan": {"type": "string"},
+        "audit": {"type": "string"},
+        "bench": {"type": "string"},
+        "proofs": {"type": "string"},
+        "env": {
+          "type": "object",
+          "description": "Environment for every configured command; keys are environment names, values are shell strings.",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tests": {"type": "array", "items": {"type": "string"}},
+        "harness": {"type": "array", "items": {"type": "string"}},
+        "ci": {"type": "array", "items": {"type": "string"}},
+        "repo_config": {"type": "array", "items": {"type": "string"}},
+        "manifests": {"type": "array", "items": {"type": "string"}},
+        "docs": {"type": "array", "items": {"type": "string"}},
+        "source": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"type": "string", "enum": ["pr", "local"]},
+        "ci": {"type": "string", "enum": ["required", "none"]},
+        "merge": {"type": "string", "enum": ["auto", "human"]},
+        "merge_strategy": {"type": "string"},
+        "protected_paths": {"type": "array", "items": {"type": "string"}},
+        "dependency_changes": {"type": "string", "enum": ["human", "auto"]},
+        "ci_wait_minutes": {"type": "integer"}
+      }
+    },
+    "convergence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"passes": {"type": "integer"}, "rounds": {"type": "integer"}}
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agents_per_run": {"type": "integer"},
+        "agents_per_story": {"type": "integer"},
+        "stories_per_wave_run": {"type": "integer"},
+        "step_attempts": {"type": "integer"},
+        "delivery_rounds": {"type": "integer"},
+        "gate_minutes": {"type": "integer"},
+        "parallel_gates": {"type": "integer"},
+        "failed_runs_before_stuck": {"type": "integer"}
+      }
+    },
+    "spikes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "per_step": {"type": "integer"},
+        "per_run": {"type": "integer"},
+        "per_day": {"type": "integer"},
+        "minutes": {"type": "integer"},
+        "retain_days": {"type": "integer"},
+        "max_open": {"type": "integer"}
+      }
+    },
+    "holdout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mean_min": {"type": "number"},
+        "must_pass_min": {"type": "number"},
+        "stddev_max": {"type": "number"},
+        "rotation": {"type": "number"},
+        "batch": {"type": "integer"}
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kill_rate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "critical": {"type": "number"},
+            "high": {"type": "number"},
+            "medium": {"type": "number"},
+            "low": {"type": "number"}
+          }
+        }
+      }
+    },
+    "stops": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"plan": {"type": "string", "enum": ["auto", "always"]}, "plan_ceiling_agents": {"type": "integer"}}
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"wave_demo": {"type": "boolean"}, "final_demo": {"type": "boolean"}}
+    },
+    "maintain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"sweeps": {"type": "array", "items": {"type": "string"}}, "fixes_per_run": {"type": "integer"}}
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version_files": {"type": "array", "items": {"type": "object"}},
+        "changelog": {"type": "string"},
+        "tag_format": {"type": "string"},
+        "publish": {"type": "array", "items": {"type": "string"}},
+        "github_release": {"type": "boolean"}
+      }
+    },
+    "discover": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {"name": {"type": "string"}, "command": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "push": {"type": "boolean"},
+        "lock_stale_minutes": {"type": "integer"},
+        "retain_runs_days": {"type": "integer"},
+        "prune_closed_cycles": {"type": "boolean"}
+      }
+    },
+    "caps": {
+      "type": "object",
+      "description": "One optional key per artifact kind (the raised cap, an integer), plus waived.",
+      "additionalProperties": {"type": "integer"},
+      "properties": {"waived": {"type": "array", "items": {"type": "string"}}}
+    },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "channel": {"type": "string", "enum": ["none", "github-issue", "command"]},
+        "command": {"type": "string"}
+      }
+    },
+    "component": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "paths": {"type": "array", "items": {"type": "string"}},
+          "commands": {
+            "$ref": "#/properties/commands",
+            "description": "Overrides [commands]; the same keys as the top level."
+          }
+        }
+      }
+    },
+    "reference": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"name": {"type": "string"}, "url": {"type": "string"}}
+      }
+    },
+    "repo": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "path": {"type": "string"},
+          "url": {"type": "string"},
+          "branches": {
+            "$ref": "#/properties/branches",
+            "description": "Optional per-repository override, with the same keys as the top level."
+          },
+          "commands": {
+            "$ref": "#/properties/commands",
+            "description": "Optional per-repository override, with the same keys as the top level."
+          },
+          "paths": {
+            "$ref": "#/properties/paths",
+            "description": "Optional per-repository override, with the same keys as the top level."
+          },
+          "release": {
+            "$ref": "#/properties/release",
+            "description": "Optional per-repository override, with the same keys as the top level."
+          },
+          "delivery": {
+            "$ref": "#/properties/delivery",
+            "description": "Optional per-repository override, with the same keys as the top level."
+          }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "main_session_wall": {"type": "boolean"},
+        "log_retention_days": {"type": "integer"},
+        "rules": {
+          "type": "object",
+          "description": "One closed table per rule of tables/rules.toml ([hooks.rules.<rule>]), plus [hooks.rules.auto-allow]. Each rule takes strength (locked rules report setting it as a configuration error); bash-git takes attribution and bash-destructive allow_pr_close; secrets takes secret_globs; purity-advice takes pure_paths and side_effect_patterns; auto-allow takes scope.",
+          "properties": {
+            "auto-allow": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": ["off", "core", "extended"],
+                  "description": "Decision D4; set at setup."
+                }
+              }
+            },
+            "gate-guard": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "secrets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "strength": {"type": "string", "enum": ["block", "advise", "off"]},
+                "secret_globs": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Further files the secrets rule treats as secrets; default empty."
+                }
+              }
+            },
+            "read-walls": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "write-scopes": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "artifacts": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "tests-first": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "merge-guard": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "bash-destructive": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "strength": {"type": "string", "enum": ["block", "advise", "off"]},
+                "allow_pr_close": {"type": "boolean"}
+              }
+            },
+            "bash-git": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "strength": {"type": "string", "enum": ["block", "advise", "off"]},
+                "attribution": {
+                  "type": "string",
+                  "description": "Commit messages and pull request text; the example value is block."
+                }
+              }
+            },
+            "spike-bounds": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "decisions": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "step-results": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "session-briefing": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "compaction": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "lifecycle-log": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"strength": {"type": "string", "enum": ["block", "advise", "off"]}}
+            },
+            "purity-advice": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "strength": {"type": "string", "enum": ["block", "advise", "off"]},
+                "pure_paths": {"type": "array", "items": {"type": "string"}, "description": "Globs of the pure-core paths."},
+                "side_effect_patterns": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Regular expressions; default the list built into the rule."
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "x-notes": [
+    "The sections' prose is under config/, the whole annotated key list in topic:project-configuration.",
+    "The rule ids under hooks.rules are the rules of tables/rules.toml."
+  ]
+}

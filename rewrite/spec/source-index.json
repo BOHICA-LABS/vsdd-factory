@@ -1,0 +1,1418 @@
+{
+ "BLUEPRINT.md#1": [
+  "overview.md"
+ ],
+ "BLUEPRINT.md#2": [
+  "decisions.md"
+ ],
+ "BLUEPRINT.md#2.1": [
+  "commands/export-pdf.md",
+  "commands/render-diagram.md",
+  "decisions.md",
+  "rules/bash-git.md",
+  "topics/importer.md",
+  "topics/rule-tuning.md",
+  "topics/tool-call-approval.md"
+ ],
+ "BLUEPRINT.md#2.2": [
+  "artifacts/demo-evidence.md",
+  "decisions.md",
+  "topics/governed-delivery.md",
+  "topics/hooks-inert.md",
+  "topics/rule-tuning.md"
+ ],
+ "BLUEPRINT.md#2.3": [
+  "decisions.md",
+  "packaging/ci.md",
+  "packaging/cutover-deletions.md",
+  "packaging/cutover-projects.md",
+  "packaging/cutover-steps.md",
+  "packaging/plugin-manifest.md"
+ ],
+ "BLUEPRINT.md#2.4": [
+  "topics/decisions-built.md",
+  "topics/tool-call-approval.md"
+ ],
+ "BLUEPRINT.md#3": [],
+ "BLUEPRINT.md#3.1": [
+  "overview.md",
+  "topics/glossary.md"
+ ],
+ "BLUEPRINT.md#3.2": [
+  "overview.md",
+  "topics/trust-layers.md"
+ ],
+ "BLUEPRINT.md#3.3": [
+  "topics/story-life.md"
+ ],
+ "BLUEPRINT.md#3.4": [
+  "commands/report-debt.md",
+  "packaging/proof-brownfield.md",
+  "topics/brownfield.md",
+  "topics/multi-repo.md"
+ ],
+ "BLUEPRINT.md#4": [
+  "conventions.md"
+ ],
+ "BLUEPRINT.md#4.1": [
+  "config/branches.md",
+  "conventions.md",
+  "packaging/plugin-assets.md",
+  "packaging/python-package.md",
+  "packaging/repo-layout.md",
+  "packaging/terminal-shim.md",
+  "topics/agent-shared-block.md",
+  "topics/caller-identity.md",
+  "topics/event-log.md",
+  "topics/hook-launcher.md",
+  "topics/worktrees.md"
+ ],
+ "BLUEPRINT.md#4.2": [
+  "conventions.md",
+  "topics/model-tiers.md"
+ ],
+ "BLUEPRINT.md#4.3": [
+  "agents/adversary.md",
+  "agents/architect.md",
+  "agents/clerk.md",
+  "agents/code-reviewer.md",
+  "agents/codebase-analyzer.md",
+  "agents/demo-recorder.md",
+  "agents/devops.md",
+  "agents/holdout-evaluator.md",
+  "agents/implementer.md",
+  "agents/product-owner.md",
+  "agents/researcher.md",
+  "agents/scenario-reviewer.md",
+  "agents/security-reviewer.md",
+  "agents/spike-runner.md",
+  "agents/story-writer.md",
+  "agents/technical-writer.md",
+  "agents/test-writer.md",
+  "agents/ui-reviewer.md",
+  "agents/ux-designer.md",
+  "agents/verifier.md",
+  "rules/read-walls.md",
+  "rules/write-scopes.md",
+  "topics/information-walls.md",
+  "topics/tool-sets.md"
+ ],
+ "BLUEPRINT.md#4.4": [
+  "topics/method-files.md"
+ ],
+ "BLUEPRINT.md#4.5": [
+  "conventions.md",
+  "skills/author.md",
+  "skills/brief.md",
+  "skills/decide.md",
+  "skills/defer.md",
+  "skills/drive.md",
+  "skills/export-pdf.md",
+  "skills/observe.md",
+  "skills/preview.md",
+  "skills/research.md",
+  "skills/retro.md",
+  "skills/review.md",
+  "skills/setup.md",
+  "skills/status.md",
+  "topics/hotfix-cycle.md",
+  "topics/workflow-arguments.md",
+  "workflows/discover.md",
+  "workflows/feature.md",
+  "workflows/ingest.md",
+  "workflows/maintain.md",
+  "workflows/multi.md",
+  "workflows/plan.md",
+  "workflows/release.md",
+  "workflows/spec.md",
+  "workflows/spike.md",
+  "workflows/story.md",
+  "workflows/verify.md",
+  "workflows/wave.md"
+ ],
+ "BLUEPRINT.md#4.6": [
+  "artifacts/story.md",
+  "artifacts/toolchain.md",
+  "commands/gate-plan.md",
+  "commands/story-new-fix.md",
+  "config/commands.md",
+  "topics/project-configuration.md",
+  "topics/story-admission.md",
+  "topics/worktrees.md",
+  "workflows/story.md"
+ ],
+ "BLUEPRINT.md#4.7": [
+  "artifacts/change-request.md",
+  "config/paths.md",
+  "records/caller-marker.md",
+  "records/closure.md",
+  "records/config-fingerprint.md",
+  "records/cycle.md",
+  "records/decision.md",
+  "records/driver-flag.md",
+  "records/evidence.md",
+  "records/holdout-evaluation.md",
+  "records/job.md",
+  "records/lock.md",
+  "records/notes.md",
+  "records/run.md",
+  "records/spike-admission.md",
+  "records/step.md",
+  "topics/computed-status.md",
+  "topics/cycles.md",
+  "topics/machine-records.md",
+  "topics/state-layout.md"
+ ],
+ "BLUEPRINT.md#4.8": [
+  "conventions.md",
+  "topics/decisions.md"
+ ],
+ "BLUEPRINT.md#4.9": [
+  "commands/checkpoint-brief.md",
+  "commands/checkpoint.md",
+  "commands/config-set.md",
+  "commands/config.md",
+  "commands/coverage.md",
+  "commands/cycle-close.md",
+  "commands/decide.md",
+  "commands/defer-add.md",
+  "commands/defer-list.md",
+  "commands/discover-collect.md",
+  "commands/doctor.md",
+  "commands/driver-off.md",
+  "commands/driver-on.md",
+  "commands/driver-pause.md",
+  "commands/env-start.md",
+  "commands/env-stop.md",
+  "commands/events.md",
+  "commands/explain.md",
+  "commands/export-pdf.md",
+  "commands/feature-route.md",
+  "commands/gate-contracts.md",
+  "commands/gate-demo.md",
+  "commands/gate-green.md",
+  "commands/gate-ingest.md",
+  "commands/gate-integration.md",
+  "commands/gate-plan.md",
+  "commands/gate-red.md",
+  "commands/gate-release.md",
+  "commands/gate-spec.md",
+  "commands/gate-sweep.md",
+  "commands/gate-wave.md",
+  "commands/hooks-selftest.md",
+  "commands/idea-register.md",
+  "commands/import.md",
+  "commands/init.md",
+  "commands/list.md",
+  "commands/lock-release.md",
+  "commands/new.md",
+  "commands/note.md",
+  "commands/obs.md",
+  "commands/path.md",
+  "commands/plan-schedule.md",
+  "commands/refs.md",
+  "commands/release.md",
+  "commands/render-diagram.md",
+  "commands/report-debt.md",
+  "commands/repos-scan.md",
+  "commands/repos-split.md",
+  "commands/retire.md",
+  "commands/review-prepare.md",
+  "commands/review-show.md",
+  "commands/rules.md",
+  "commands/spike-close.md",
+  "commands/spike-open.md",
+  "commands/spike-record.md",
+  "commands/status.md",
+  "commands/story-deliver.md",
+  "commands/story-new-fix.md",
+  "commands/survey.md",
+  "commands/validate.md",
+  "commands/version.md",
+  "records/caller-marker.md",
+  "topics/caller-identity.md",
+  "topics/command-conventions.md",
+  "topics/gates.md",
+  "topics/long-commands.md"
+ ],
+ "BLUEPRINT.md#4.10": [
+  "rules/step-results.md",
+  "topics/holdout-findings.md",
+  "topics/result-schemas.md",
+  "topics/verdicts.md",
+  "topics/walled-findings.md"
+ ],
+ "BLUEPRINT.md#4.11": [
+  "commands/decide.md",
+  "records/decision.md",
+  "rules/decisions.md",
+  "skills/decide.md",
+  "topics/amendments.md",
+  "topics/decisions.md",
+  "topics/digests.md",
+  "topics/governed-delivery.md",
+  "topics/hotfix-cycle.md",
+  "topics/human-stops.md",
+  "topics/spec-lock.md"
+ ],
+ "BLUEPRINT.md#4.12": [
+  "config/commands.md",
+  "config/convergence.md",
+  "config/delivery.md",
+  "config/discover.md",
+  "config/holdout.md",
+  "config/hooks.md",
+  "config/limits.md",
+  "config/paths.md",
+  "config/release.md",
+  "config/spikes.md",
+  "config/stops.md",
+  "topics/governed-delivery.md",
+  "topics/prelude-run-stories.md",
+  "topics/project-configuration.md"
+ ],
+ "BLUEPRINT.md#4.13": [
+  "commands/story-deliver.md",
+  "records/baseline.md",
+  "records/lock.md",
+  "topics/brownfield.md",
+  "topics/caller-identity.md",
+  "topics/evidence-lookup.md",
+  "topics/run-lock.md",
+  "topics/verdicts.md"
+ ],
+ "BLUEPRINT.md#4.14": [
+  "topics/prelude-converge.md",
+  "topics/prelude.md",
+  "topics/resume.md",
+  "topics/single-sources.md"
+ ],
+ "BLUEPRINT.md#5": [],
+ "BLUEPRINT.md#5.1": [
+  "topics/convergence.md",
+  "topics/multi-repo.md",
+  "topics/story-admission.md",
+  "topics/workflow-shape.md",
+  "workflows/discover.md",
+  "workflows/feature.md",
+  "workflows/ingest.md",
+  "workflows/maintain.md",
+  "workflows/multi.md",
+  "workflows/plan.md",
+  "workflows/release.md",
+  "workflows/spec.md",
+  "workflows/story.md",
+  "workflows/verify.md",
+  "workflows/wave.md"
+ ],
+ "BLUEPRINT.md#5.2": [
+  "artifacts/dependencies.md",
+  "topics/computed-status.md",
+  "topics/cycles.md",
+  "topics/importer.md",
+  "topics/multi-repo-state.md",
+  "topics/spec-lock.md",
+  "topics/state-commits.md",
+  "topics/state-directory.md",
+  "topics/status-report.md"
+ ],
+ "BLUEPRINT.md#5.3": [
+  "topics/agent-file.md",
+  "topics/research-and-browser-tools.md"
+ ],
+ "BLUEPRINT.md#5.4": [
+  "records/config-fingerprint.md",
+  "rules/artifacts.md",
+  "rules/auto-allow.md",
+  "rules/compaction.md",
+  "rules/decisions.md",
+  "rules/gate-guard.md",
+  "rules/lifecycle-log.md",
+  "rules/merge-guard.md",
+  "rules/read-walls.md",
+  "rules/secrets.md",
+  "rules/spike-bounds.md",
+  "rules/step-results.md",
+  "rules/tests-first.md",
+  "rules/write-scopes.md",
+  "topics/hook-runner.md",
+  "topics/hook-wiring.md",
+  "topics/tool-call-approval.md"
+ ],
+ "BLUEPRINT.md#5.5": [
+  "commands/doctor.md",
+  "packaging/build-step.md",
+  "packaging/documentation.md",
+  "packaging/e2e-story-tier.md",
+  "packaging/proof-brownfield.md",
+  "packaging/proof-greenfield.md",
+  "packaging/sample-project.md",
+  "packaging/sandbox-needs.md",
+  "packaging/tests-conformance.md",
+  "packaging/tests-e2e.md",
+  "packaging/tests-lint.md",
+  "packaging/tests-python.md",
+  "packaging/tests-workflows.md"
+ ],
+ "BLUEPRINT.md#6": [
+  "artifacts/spike-ledger-entry.md",
+  "commands/spike-close.md",
+  "commands/spike-open.md",
+  "commands/spike-record.md",
+  "config/spikes.md",
+  "records/spike-admission.md",
+  "rules/spike-bounds.md",
+  "topics/named-spikes.md",
+  "topics/spikes.md",
+  "workflows/spike.md"
+ ],
+ "BLUEPRINT.md#7": [
+  "topics/briefing.md",
+  "topics/compaction-and-cold-start.md"
+ ],
+ "BLUEPRINT.md#8": [],
+ "BLUEPRINT.md#9": [
+  "packaging/build-plan.md",
+  "packaging/rewrite-layout.md"
+ ],
+ "BLUEPRINT.md#9.1": [
+  "packages/B0.md",
+  "packages/B1.md",
+  "packages/B2.md",
+  "packages/B3.md",
+  "packages/B4a.md",
+  "packages/B4b.md",
+  "packages/B5.md",
+  "packages/B6.md",
+  "packages/B7.md",
+  "packages/B8.md",
+  "packages/C1.md",
+  "packages/C2.md",
+  "packages/R0.md",
+  "packaging/build-plan.md",
+  "packaging/install-check.md"
+ ],
+ "BLUEPRINT.md#9.2": [
+  "packages/G1.md",
+  "packages/G2.md",
+  "packages/G3.md",
+  "packages/G4a.md",
+  "packages/G4b.md",
+  "packages/G5.md",
+  "packages/G6a.md",
+  "packages/G6b.md",
+  "packages/G7.md",
+  "packages/S1.md",
+  "packages/S2a.md",
+  "packages/S2b.md",
+  "packages/S2c.md",
+  "packages/S3.md",
+  "packages/S4.md",
+  "packages/S5.md",
+  "packages/S6.md",
+  "packaging/build-plan.md"
+ ],
+ "BLUEPRINT.md#9.3": [
+  "packages/H1.md",
+  "packages/H2.md",
+  "packages/H3.md",
+  "packages/H4.md",
+  "packages/H5.md",
+  "packages/H6.md",
+  "packages/H7.md",
+  "packages/H8.md",
+  "packages/H9.md",
+  "packaging/build-plan.md"
+ ],
+ "BLUEPRINT.md#9.4": [
+  "packages/A1.md",
+  "packages/A2a.md",
+  "packages/A2b.md",
+  "packages/A3.md",
+  "packages/A4.md",
+  "packages/A5.md",
+  "packages/A6a.md",
+  "packages/A6b.md",
+  "packages/K1.md",
+  "packages/K2.md",
+  "packages/K3a.md",
+  "packages/K3b.md",
+  "packaging/build-plan.md"
+ ],
+ "BLUEPRINT.md#9.5": [
+  "packages/W1.md",
+  "packages/W10.md",
+  "packages/W11.md",
+  "packages/W12.md",
+  "packages/W2.md",
+  "packages/W3.md",
+  "packages/W4.md",
+  "packages/W5.md",
+  "packages/W6.md",
+  "packages/W7.md",
+  "packages/W9.md",
+  "packaging/build-plan.md"
+ ],
+ "BLUEPRINT.md#9.6": [
+  "packages/CO1.md",
+  "packages/CO2.md",
+  "packages/D2.md",
+  "packages/D3.md",
+  "packages/E1.md",
+  "packages/E2.md",
+  "packages/E3.md",
+  "packages/E4.md",
+  "packages/R1.md",
+  "packages/T1.md",
+  "packages/T3.md",
+  "packages/T5.md",
+  "packaging/build-plan.md",
+  "packaging/cutover-steps.md",
+  "packaging/e2e-story-tier.md",
+  "packaging/proof-brownfield.md",
+  "packaging/proof-greenfield.md"
+ ],
+ "BLUEPRINT.md#10": [
+  "platform.md",
+  "topics/platform-proven-2.md",
+  "topics/platform-proven.md"
+ ],
+ "BLUEPRINT.md#11": [],
+ "BLUEPRINT.md#11.1": [],
+ "BLUEPRINT.md#11.2": [],
+ "BLUEPRINT.md#11.3": [],
+ "BLUEPRINT.md#11.4": [],
+ "pipeline.md#amendments-from-the-blueprint": [],
+ "pipeline.md#1": [
+  "topics/workflow-shape.md"
+ ],
+ "pipeline.md#2": [],
+ "pipeline.md#2.1": [
+  "topics/glossary.md"
+ ],
+ "pipeline.md#2.2": [
+  "topics/gates.md",
+  "topics/trust-layers.md"
+ ],
+ "pipeline.md#2.3": [
+  "topics/workflow-arguments.md",
+  "topics/workflow-shape.md",
+  "workflows/discover.md",
+  "workflows/feature.md",
+  "workflows/ingest.md",
+  "workflows/maintain.md",
+  "workflows/multi.md",
+  "workflows/plan.md",
+  "workflows/release.md",
+  "workflows/spec.md",
+  "workflows/spike.md",
+  "workflows/story.md",
+  "workflows/verify.md",
+  "workflows/wave.md"
+ ],
+ "pipeline.md#2.4": [
+  "commands/driver-off.md",
+  "commands/driver-on.md",
+  "commands/driver-pause.md",
+  "skills/drive.md",
+  "topics/brownfield.md",
+  "topics/hotfix-cycle.md"
+ ],
+ "pipeline.md#2.5": [
+  "commands/checkpoint.md",
+  "commands/survey.md",
+  "topics/hotfix-cycle.md",
+  "topics/prelude-run-stories.md",
+  "topics/resume.md",
+  "topics/workflow-shape.md",
+  "workflows/discover.md",
+  "workflows/feature.md",
+  "workflows/ingest.md",
+  "workflows/maintain.md",
+  "workflows/multi.md",
+  "workflows/plan.md",
+  "workflows/release.md",
+  "workflows/spec.md",
+  "workflows/story.md",
+  "workflows/verify.md",
+  "workflows/wave.md"
+ ],
+ "pipeline.md#2.6": [
+  "topics/amendments.md",
+  "topics/hotfix-cycle.md",
+  "topics/human-stops.md"
+ ],
+ "pipeline.md#2.7": [
+  "config/holdout.md",
+  "config/mutation.md",
+  "topics/convergence.md",
+  "topics/holdout-findings.md",
+  "topics/prelude-converge.md",
+  "topics/walled-findings.md"
+ ],
+ "pipeline.md#2.8": [
+  "commands/spike-open.md",
+  "commands/spike-record.md",
+  "topics/named-spikes.md",
+  "topics/prelude-run-spike.md",
+  "topics/spikes.md",
+  "workflows/spike.md"
+ ],
+ "pipeline.md#2.9": [
+  "topics/workflow-shape.md"
+ ],
+ "pipeline.md#2.9.1": [
+  "commands/gate-demo.md",
+  "commands/gate-green.md",
+  "commands/gate-red.md",
+  "commands/story-deliver.md",
+  "topics/governed-delivery.md",
+  "topics/story-admission.md",
+  "topics/story-life.md",
+  "workflows/story.md"
+ ],
+ "pipeline.md#2.9.2": [
+  "commands/gate-wave.md",
+  "topics/holdout-findings.md",
+  "workflows/wave.md"
+ ],
+ "pipeline.md#2.9.3": [
+  "commands/gate-spec.md",
+  "workflows/spec.md"
+ ],
+ "pipeline.md#2.9.4": [
+  "commands/feature-route.md",
+  "commands/gate-plan.md",
+  "topics/amendments.md",
+  "workflows/feature.md"
+ ],
+ "pipeline.md#2.9.5": [
+  "commands/gate-plan.md",
+  "commands/plan-schedule.md",
+  "topics/waves.md",
+  "workflows/plan.md"
+ ],
+ "pipeline.md#2.9.6": [
+  "commands/gate-release.md",
+  "workflows/verify.md"
+ ],
+ "pipeline.md#2.9.7": [
+  "commands/release.md",
+  "workflows/release.md"
+ ],
+ "pipeline.md#2.9.8": [
+  "commands/gate-ingest.md",
+  "records/baseline.md",
+  "topics/brownfield.md",
+  "workflows/ingest.md"
+ ],
+ "pipeline.md#2.9.9": [
+  "commands/checkpoint-brief.md",
+  "commands/discover-collect.md",
+  "commands/idea-register.md",
+  "workflows/discover.md"
+ ],
+ "pipeline.md#2.9.10": [
+  "commands/gate-sweep.md",
+  "workflows/maintain.md"
+ ],
+ "pipeline.md#2.9.11": [
+  "commands/gate-contracts.md",
+  "commands/gate-integration.md",
+  "commands/init.md",
+  "commands/repos-split.md",
+  "topics/multi-repo.md",
+  "workflows/multi.md"
+ ],
+ "pipeline.md#2.9.12": [
+  "workflows/spike.md"
+ ],
+ "pipeline.md#2.9.13": [
+  "workflows/discover.md",
+  "workflows/feature.md",
+  "workflows/ingest.md",
+  "workflows/maintain.md",
+  "workflows/multi.md",
+  "workflows/plan.md",
+  "workflows/release.md",
+  "workflows/spec.md",
+  "workflows/story.md",
+  "workflows/verify.md",
+  "workflows/wave.md"
+ ],
+ "pipeline.md#2.10": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.1": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.2": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.3": [
+  "topics/verdicts.md"
+ ],
+ "pipeline.md#2.10.4": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.5": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.6": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.7": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.10.8": [
+  "topics/result-schemas.md"
+ ],
+ "pipeline.md#2.11": [
+  "packaging/tests-workflows.md",
+  "topics/prelude.md",
+  "topics/story-script.md",
+  "topics/wave-script.md"
+ ],
+ "pipeline.md#2.11.1": [
+  "topics/prelude-converge.md",
+  "topics/prelude-run-spike.md",
+  "topics/prelude-run-stories.md",
+  "topics/prelude-steps.md",
+  "topics/prelude.md"
+ ],
+ "pipeline.md#2.11.2": [
+  "topics/story-script.md"
+ ],
+ "pipeline.md#2.11.3": [
+  "topics/wave-script.md"
+ ],
+ "pipeline.md#2.12": [],
+ "pipeline.md#3": [],
+ "pipeline.md#3.1": [],
+ "pipeline.md#3.2": [],
+ "pipeline.md#3.3": [],
+ "pipeline.md#3.4": [],
+ "pipeline.md#3.5": [],
+ "pipeline.md#3.6": [],
+ "pipeline.md#3.7": [],
+ "pipeline.md#4": [
+  "topics/seams-pipeline.md"
+ ],
+ "pipeline.md#5": [],
+ "pipeline.md#5.1": [
+  "topics/seams-pipeline.md"
+ ],
+ "pipeline.md#5.2": [
+  "topics/seams-pipeline.md"
+ ],
+ "pipeline.md#5.3": [
+  "topics/seams-pipeline.md"
+ ],
+ "pipeline.md#5.4": [
+  "topics/seams-pipeline.md"
+ ],
+ "pipeline.md#6": [],
+ "pipeline.md#7": [
+  "topics/risks-pipeline.md"
+ ],
+ "state.md#amendments-from-the-blueprint": [],
+ "state.md#1": [
+  "topics/state-directory.md"
+ ],
+ "state.md#2": [],
+ "state.md#2.1": [
+  "topics/glossary.md"
+ ],
+ "state.md#2.2": [
+  "topics/state-directory.md"
+ ],
+ "state.md#2.3": [],
+ "state.md#decision-keep-the-separate-branch-and-take-every": [
+  "topics/state-directory.md"
+ ],
+ "state.md#mounting": [
+  "commands/init.md",
+  "skills/setup.md",
+  "topics/state-directory.md"
+ ],
+ "state.md#layout": [
+  "artifacts/dependencies.md",
+  "topics/state-layout.md"
+ ],
+ "state.md#who-commits-state-and-when": [
+  "topics/state-commits.md"
+ ],
+ "state.md#2.4": [
+  "artifacts/contract.md",
+  "artifacts/project-conventions.md",
+  "artifacts/review-rules.md",
+  "commands/new.md",
+  "commands/refs.md",
+  "commands/retire.md",
+  "config/caps.md",
+  "records/cycle.md",
+  "topics/artifact-rules.md",
+  "topics/computed-status.md",
+  "topics/spec-lock.md"
+ ],
+ "state.md#2.5": [
+  "artifacts/adr.md",
+  "artifacts/analysis.md",
+  "artifacts/architecture-overview.md",
+  "artifacts/assessment.md",
+  "artifacts/asset.md",
+  "artifacts/brief.md",
+  "artifacts/change-request.md",
+  "artifacts/contract.md",
+  "artifacts/deferred-item.md",
+  "artifacts/demo-evidence.md",
+  "artifacts/dependencies.md",
+  "artifacts/design-system.md",
+  "artifacts/domain-spec.md",
+  "artifacts/epic.md",
+  "artifacts/flow.md",
+  "artifacts/holdout-scenario.md",
+  "artifacts/idea.md",
+  "artifacts/module-map.md",
+  "artifacts/prd.md",
+  "artifacts/project-conventions.md",
+  "artifacts/research-report.md",
+  "artifacts/review-report.md",
+  "artifacts/review-rules.md",
+  "artifacts/screen.md",
+  "artifacts/spike-ledger-entry.md",
+  "artifacts/story.md",
+  "artifacts/subsystem.md",
+  "artifacts/supplement.md",
+  "artifacts/toolchain.md",
+  "artifacts/ux-overview.md",
+  "artifacts/verification-property.md",
+  "commands/cycle-close.md",
+  "commands/review-show.md",
+  "records/closure.md",
+  "records/holdout-evaluation.md",
+  "topics/cycles.md",
+  "topics/named-spikes.md",
+  "topics/walled-findings.md",
+  "topics/waves.md"
+ ],
+ "state.md#2.6": [
+  "commands/coverage.md",
+  "commands/list.md",
+  "commands/path.md",
+  "topics/digests.md",
+  "topics/stored-and-derived.md"
+ ],
+ "state.md#2.7": [
+  "commands/note.md",
+  "commands/status.md",
+  "records/driver-flag.md",
+  "records/notes.md",
+  "topics/status-report.md"
+ ],
+ "state.md#2.8": [
+  "artifacts/dependencies.md",
+  "commands/decide.md",
+  "records/baseline.md",
+  "records/closure.md",
+  "records/cycle.md",
+  "records/decision.md",
+  "records/driver-flag.md",
+  "records/evidence.md",
+  "records/job.md",
+  "records/run.md",
+  "records/step.md",
+  "topics/cycles.md",
+  "topics/decisions.md",
+  "topics/digests.md",
+  "topics/evidence-lookup.md",
+  "topics/governed-delivery.md",
+  "topics/machine-records.md",
+  "topics/resume.md",
+  "topics/state-api.md",
+  "topics/verdicts.md"
+ ],
+ "state.md#2.9": [
+  "topics/briefing.md"
+ ],
+ "state.md#2.10": [
+  "commands/status.md",
+  "skills/status.md",
+  "topics/compaction-and-cold-start.md"
+ ],
+ "state.md#2.11": [
+  "commands/lock-release.md",
+  "records/lock.md",
+  "topics/run-lock.md"
+ ],
+ "state.md#2.12": [
+  "artifacts/toolchain.md",
+  "commands/config-set.md",
+  "commands/config.md",
+  "commands/init.md",
+  "commands/repos-split.md",
+  "config/branches.md",
+  "config/caps.md",
+  "config/commands.md",
+  "config/component.md",
+  "config/convergence.md",
+  "config/delivery.md",
+  "config/discover.md",
+  "config/evidence.md",
+  "config/holdout.md",
+  "config/hooks.md",
+  "config/limits.md",
+  "config/maintain.md",
+  "config/mutation.md",
+  "config/notify.md",
+  "config/paths.md",
+  "config/project.md",
+  "config/reference.md",
+  "config/release.md",
+  "config/repo.md",
+  "config/spikes.md",
+  "config/state.md",
+  "config/stops.md",
+  "topics/project-configuration.md"
+ ],
+ "state.md#2.13": [
+  "commands/new.md",
+  "packaging/plugin-assets.md",
+  "topics/templates.md"
+ ],
+ "state.md#2.14": [
+  "commands/repos-split.md",
+  "config/repo.md",
+  "topics/multi-repo-state.md",
+  "topics/waves.md"
+ ],
+ "state.md#2.15": [
+  "commands/import.md",
+  "commands/refs.md",
+  "topics/importer.md"
+ ],
+ "state.md#2.16": [
+  "commands/checkpoint-brief.md",
+  "commands/checkpoint.md",
+  "commands/config-set.md",
+  "commands/config.md",
+  "commands/coverage.md",
+  "commands/cycle-close.md",
+  "commands/decide.md",
+  "commands/defer-add.md",
+  "commands/defer-list.md",
+  "commands/discover-collect.md",
+  "commands/driver-off.md",
+  "commands/driver-on.md",
+  "commands/driver-pause.md",
+  "commands/env-start.md",
+  "commands/env-stop.md",
+  "commands/feature-route.md",
+  "commands/gate-contracts.md",
+  "commands/gate-demo.md",
+  "commands/gate-green.md",
+  "commands/gate-ingest.md",
+  "commands/gate-integration.md",
+  "commands/gate-plan.md",
+  "commands/gate-red.md",
+  "commands/gate-release.md",
+  "commands/gate-spec.md",
+  "commands/gate-sweep.md",
+  "commands/gate-wave.md",
+  "commands/idea-register.md",
+  "commands/import.md",
+  "commands/init.md",
+  "commands/list.md",
+  "commands/lock-release.md",
+  "commands/new.md",
+  "commands/note.md",
+  "commands/path.md",
+  "commands/plan-schedule.md",
+  "commands/refs.md",
+  "commands/release.md",
+  "commands/report-debt.md",
+  "commands/repos-split.md",
+  "commands/retire.md",
+  "commands/review-prepare.md",
+  "commands/review-show.md",
+  "commands/spike-close.md",
+  "commands/spike-open.md",
+  "commands/spike-record.md",
+  "commands/status.md",
+  "commands/story-deliver.md",
+  "commands/story-new-fix.md",
+  "commands/survey.md",
+  "commands/validate.md",
+  "records/evidence.md",
+  "topics/command-conventions.md",
+  "topics/gates.md",
+  "topics/long-commands.md",
+  "topics/worktrees.md"
+ ],
+ "state.md#2.17": [
+  "topics/worktrees.md"
+ ],
+ "state.md#2.18": [
+  "topics/seams-state.md"
+ ],
+ "state.md#3": [],
+ "state.md#4": [
+  "topics/seams-state.md",
+  "topics/state-api.md"
+ ],
+ "state.md#5": [
+  "records/decision.md",
+  "topics/seams-state.md"
+ ],
+ "state.md#6": [],
+ "state.md#7": [
+  "topics/risks-state.md"
+ ],
+ "agents-skills.md#amendments-from-the-blueprint": [],
+ "agents-skills.md#1": [
+  "topics/agent-design-rules.md"
+ ],
+ "agents-skills.md#2": [],
+ "agents-skills.md#2.1": [
+  "topics/glossary.md"
+ ],
+ "agents-skills.md#2.2": [
+  "topics/agent-design-rules.md"
+ ],
+ "agents-skills.md#2.3": [
+  "topics/model-tiers.md"
+ ],
+ "agents-skills.md#2.4": [
+  "agents/adversary.md",
+  "agents/architect.md",
+  "agents/clerk.md",
+  "agents/code-reviewer.md",
+  "agents/codebase-analyzer.md",
+  "agents/demo-recorder.md",
+  "agents/devops.md",
+  "agents/holdout-evaluator.md",
+  "agents/implementer.md",
+  "agents/product-owner.md",
+  "agents/researcher.md",
+  "agents/scenario-reviewer.md",
+  "agents/security-reviewer.md",
+  "agents/spike-runner.md",
+  "agents/story-writer.md",
+  "agents/technical-writer.md",
+  "agents/test-writer.md",
+  "agents/ui-reviewer.md",
+  "agents/ux-designer.md",
+  "agents/verifier.md"
+ ],
+ "agents-skills.md#2.5": [
+  "agents/adversary.md",
+  "agents/architect.md",
+  "agents/clerk.md",
+  "agents/code-reviewer.md",
+  "agents/codebase-analyzer.md",
+  "agents/demo-recorder.md",
+  "agents/devops.md",
+  "agents/holdout-evaluator.md",
+  "agents/implementer.md",
+  "agents/product-owner.md",
+  "agents/researcher.md",
+  "agents/scenario-reviewer.md",
+  "agents/security-reviewer.md",
+  "agents/spike-runner.md",
+  "agents/story-writer.md",
+  "agents/technical-writer.md",
+  "agents/test-writer.md",
+  "agents/ui-reviewer.md",
+  "agents/ux-designer.md",
+  "agents/verifier.md",
+  "topics/tool-sets.md"
+ ],
+ "agents-skills.md#2.6": [
+  "agents/adversary.md",
+  "agents/architect.md",
+  "agents/clerk.md",
+  "agents/code-reviewer.md",
+  "agents/codebase-analyzer.md",
+  "agents/demo-recorder.md",
+  "agents/devops.md",
+  "agents/holdout-evaluator.md",
+  "agents/implementer.md",
+  "agents/product-owner.md",
+  "agents/researcher.md",
+  "agents/scenario-reviewer.md",
+  "agents/security-reviewer.md",
+  "agents/spike-runner.md",
+  "agents/story-writer.md",
+  "agents/technical-writer.md",
+  "agents/test-writer.md",
+  "agents/ui-reviewer.md",
+  "agents/ux-designer.md",
+  "agents/verifier.md",
+  "topics/agent-file.md"
+ ],
+ "agents-skills.md#2.7": [
+  "topics/agent-file.md",
+  "topics/agent-shared-block.md"
+ ],
+ "agents-skills.md#2.8": [
+  "agents/adversary.md",
+  "agents/architect.md",
+  "agents/clerk.md",
+  "agents/code-reviewer.md",
+  "agents/codebase-analyzer.md",
+  "agents/demo-recorder.md",
+  "agents/devops.md",
+  "agents/holdout-evaluator.md",
+  "agents/implementer.md",
+  "agents/product-owner.md",
+  "agents/researcher.md",
+  "agents/scenario-reviewer.md",
+  "agents/security-reviewer.md",
+  "agents/spike-runner.md",
+  "agents/story-writer.md",
+  "agents/technical-writer.md",
+  "agents/test-writer.md",
+  "agents/ui-reviewer.md",
+  "agents/ux-designer.md",
+  "agents/verifier.md",
+  "topics/method-files.md"
+ ],
+ "agents-skills.md#2.9": [
+  "topics/information-walls.md",
+  "topics/seams-agents.md"
+ ],
+ "agents-skills.md#2.10": [
+  "skills/research.md",
+  "topics/research-and-browser-tools.md"
+ ],
+ "agents-skills.md#2.11": [
+  "topics/spikes.md"
+ ],
+ "agents-skills.md#2.12": [
+  "commands/defer-add.md",
+  "commands/defer-list.md",
+  "commands/retire.md",
+  "commands/review-prepare.md",
+  "skills/author.md",
+  "skills/brief.md",
+  "skills/decide.md",
+  "skills/defer.md",
+  "skills/drive.md",
+  "skills/export-pdf.md",
+  "skills/observe.md",
+  "skills/preview.md",
+  "skills/research.md",
+  "skills/retro.md",
+  "skills/review.md",
+  "skills/setup.md",
+  "skills/status.md",
+  "topics/skill-file.md"
+ ],
+ "agents-skills.md#3": [],
+ "agents-skills.md#3.1": [],
+ "agents-skills.md#3.2": [],
+ "agents-skills.md#3.3": [],
+ "agents-skills.md#3.4": [],
+ "agents-skills.md#4": [
+  "topics/seams-agents.md"
+ ],
+ "agents-skills.md#5": [
+  "topics/seams-agents.md"
+ ],
+ "agents-skills.md#6": [],
+ "agents-skills.md#7": [
+  "topics/risks-agents.md"
+ ],
+ "hooks.md#amendments-from-the-blueprint": [],
+ "hooks.md#1": [
+  "topics/hook-runner.md"
+ ],
+ "hooks.md#2": [],
+ "hooks.md#2.1": [
+  "topics/glossary.md",
+  "topics/rule-model.md"
+ ],
+ "hooks.md#2.2": [
+  "packaging/cli-entry.md",
+  "topics/hook-launcher.md"
+ ],
+ "hooks.md#2.3": [
+  "rules/auto-allow.md",
+  "rules/decisions.md",
+  "rules/read-walls.md",
+  "rules/spike-bounds.md",
+  "topics/hook-failure.md",
+  "topics/hook-runner.md",
+  "topics/hook-wiring.md"
+ ],
+ "hooks.md#2.4": [
+  "packaging/python-package.md",
+  "rules/artifacts.md",
+  "topics/hook-runner.md"
+ ],
+ "hooks.md#2.5": [
+  "rules/tests-first.md",
+  "topics/rule-model.md"
+ ],
+ "hooks.md#2.6": [
+  "config/hooks.md",
+  "records/config-fingerprint.md",
+  "rules/auto-allow.md",
+  "rules/session-briefing.md",
+  "topics/rule-tuning.md",
+  "topics/tool-call-approval.md"
+ ],
+ "hooks.md#2.7": [
+  "rules/gate-guard.md",
+  "rules/read-walls.md",
+  "rules/write-scopes.md",
+  "topics/information-walls.md"
+ ],
+ "hooks.md#2.8": [
+  "topics/hooks-inert.md"
+ ],
+ "hooks.md#2.9": [
+  "topics/hook-failure.md"
+ ],
+ "hooks.md#2.10": [
+  "rules/artifacts.md",
+  "rules/auto-allow.md",
+  "rules/bash-destructive.md",
+  "rules/bash-git.md",
+  "rules/compaction.md",
+  "rules/decisions.md",
+  "rules/gate-guard.md",
+  "rules/lifecycle-log.md",
+  "rules/merge-guard.md",
+  "rules/purity-advice.md",
+  "rules/read-walls.md",
+  "rules/secrets.md",
+  "rules/session-briefing.md",
+  "rules/spike-bounds.md",
+  "rules/step-results.md",
+  "rules/tests-first.md",
+  "rules/write-scopes.md"
+ ],
+ "hooks.md#2.11": [],
+ "hooks.md#2.11.1": [
+  "rules/bash-destructive.md",
+  "rules/bash-git.md",
+  "rules/gate-guard.md",
+  "rules/secrets.md"
+ ],
+ "hooks.md#2.11.2": [
+  "rules/read-walls.md",
+  "rules/write-scopes.md",
+  "topics/information-walls.md"
+ ],
+ "hooks.md#2.11.3": [
+  "rules/artifacts.md"
+ ],
+ "hooks.md#2.11.4": [
+  "rules/merge-guard.md",
+  "rules/tests-first.md"
+ ],
+ "hooks.md#2.11.5": [
+  "rules/decisions.md",
+  "skills/decide.md"
+ ],
+ "hooks.md#2.11.6": [
+  "records/spike-admission.md",
+  "rules/bash-git.md",
+  "rules/spike-bounds.md"
+ ],
+ "hooks.md#2.11.7": [
+  "records/step.md",
+  "rules/step-results.md",
+  "topics/verdicts.md"
+ ],
+ "hooks.md#2.11.8": [
+  "rules/session-briefing.md"
+ ],
+ "hooks.md#2.11.9": [
+  "rules/compaction.md"
+ ],
+ "hooks.md#2.11.10": [
+  "commands/note.md",
+  "records/caller-marker.md",
+  "rules/auto-allow.md",
+  "rules/gate-guard.md",
+  "rules/lifecycle-log.md",
+  "rules/purity-advice.md",
+  "topics/caller-identity.md",
+  "topics/tool-call-approval.md"
+ ],
+ "hooks.md#2.12": [
+  "commands/events-schema.md",
+  "commands/explain.md",
+  "topics/event-log.md"
+ ],
+ "hooks.md#2.13": [
+  "commands/events-schema.md",
+  "commands/explain.md",
+  "commands/hooks-selftest.md",
+  "commands/rules.md",
+  "commands/validate.md"
+ ],
+ "hooks.md#2.14": [
+  "commands/hooks-selftest.md",
+  "topics/rule-testing.md"
+ ],
+ "hooks.md#2.15": [],
+ "hooks.md#2.16": [
+  "topics/hook-platform-facts.md"
+ ],
+ "hooks.md#2.17": [],
+ "hooks.md#3": [],
+ "hooks.md#3.1": [],
+ "hooks.md#3.2": [],
+ "hooks.md#4": [],
+ "hooks.md#4.1": [
+  "topics/seams-hooks.md"
+ ],
+ "hooks.md#4.2": [
+  "topics/seams-hooks.md"
+ ],
+ "hooks.md#5": [
+  "topics/seams-hooks.md",
+  "topics/state-api.md"
+ ],
+ "hooks.md#6": [],
+ "hooks.md#7": [
+  "topics/risks-hooks.md"
+ ],
+ "packaging.md#amendments-from-the-blueprint": [],
+ "packaging.md#1": [
+  "packaging/repo-layout.md"
+ ],
+ "packaging.md#2": [],
+ "packaging.md#2.1": [
+  "packaging/packaging-decisions.md"
+ ],
+ "packaging.md#2.2": [
+  "packaging/packaging-decisions.md"
+ ],
+ "packaging.md#2.3": [],
+ "packaging.md#during-the-rewrite-branch-rewrite-v1": [
+  "packaging/rewrite-layout.md"
+ ],
+ "packaging.md#after-cutover": [
+  "packaging/python-package.md",
+  "packaging/repo-layout.md"
+ ],
+ "packaging.md#deleted-at-cutover-and-kept": [
+  "packaging/cutover-deletions.md"
+ ],
+ "packaging.md#2.4": [
+  "packaging/plugin-manifest.md",
+  "topics/research-and-browser-tools.md"
+ ],
+ "packaging.md#2.5": [
+  "packaging/build-step.md",
+  "packaging/reference-pages.md",
+  "topics/prelude.md",
+  "topics/single-sources.md"
+ ],
+ "packaging.md#2.6": [
+  "packaging/check-command.md"
+ ],
+ "packaging.md#layer-1-python-tests-pytest-through-uv": [
+  "packaging/tests-python.md"
+ ],
+ "packaging.md#layer-2-workflow-tests-node-built-ins-only": [
+  "packaging/tests-workflows.md"
+ ],
+ "packaging.md#layer-2b-conformance-fixtures": [
+  "packaging/tests-conformance.md"
+ ],
+ "packaging.md#layer-3-lint-over-every-shipped-file-pytest-test": [
+  "packaging/tests-lint.md"
+ ],
+ "packaging.md#layer-4-end-to-end-headless": [
+  "packaging/e2e-story-tier.md",
+  "packaging/proof-brownfield.md",
+  "packaging/proof-greenfield.md",
+  "packaging/sample-project.md",
+  "packaging/tests-e2e.md"
+ ],
+ "packaging.md#2.7": [
+  "packaging/ci.md"
+ ],
+ "packaging.md#2.8": [
+  "packaging/install-check.md",
+  "packaging/plugin-release.md"
+ ],
+ "packaging.md#2.9": [],
+ "packaging.md#the-repository-and-the-marketplace": [
+  "packaging/cutover-steps.md"
+ ],
+ "packaging.md#the-eight-projects": [
+  "packaging/cutover-projects.md"
+ ],
+ "packaging.md#2.10": [
+  "commands/config-set.md",
+  "commands/doctor.md",
+  "commands/events.md",
+  "commands/export-pdf.md",
+  "commands/lock-release.md",
+  "commands/obs.md",
+  "commands/render-diagram.md",
+  "commands/repos-scan.md",
+  "commands/status.md",
+  "commands/story-deliver.md",
+  "commands/validate.md",
+  "commands/version.md",
+  "packaging/cli-entry.md",
+  "packaging/sandbox-needs.md",
+  "packaging/terminal-shim.md",
+  "skills/export-pdf.md",
+  "topics/command-conventions.md",
+  "topics/worktrees.md"
+ ],
+ "packaging.md#the-observability-stack": [
+  "commands/obs.md",
+  "packaging/observability-stack.md",
+  "skills/observe.md"
+ ],
+ "packaging.md#2.11": [
+  "packaging/documentation.md",
+  "packaging/reference-pages.md"
+ ],
+ "packaging.md#the-replacement-claude-md": [
+  "packaging/repo-claude-md.md"
+ ],
+ "packaging.md#2.12": [],
+ "packaging.md#2.13": [
+  "packaging/install-check.md",
+  "packaging/packaging-assumptions.md"
+ ],
+ "packaging.md#3": [],
+ "packaging.md#packaging-and-manifests": [],
+ "packaging.md#bin-21-tools": [],
+ "packaging.md#tools-observability-15-files": [],
+ "packaging.md#scripts-ci-benches": [],
+ "packaging.md#tests": [],
+ "packaging.md#ci-and-release": [],
+ "packaging.md#documentation": [],
+ "packaging.md#4": [
+  "packaging/cli-entry.md",
+  "topics/seams-packaging.md"
+ ],
+ "packaging.md#5": [],
+ "packaging.md#from-the-hooks-design": [
+  "topics/seams-packaging.md"
+ ],
+ "packaging.md#from-the-state-design": [
+  "topics/seams-packaging.md"
+ ],
+ "packaging.md#from-the-agents-skills-design": [
+  "topics/seams-packaging.md"
+ ],
+ "packaging.md#from-the-pipeline-design": [
+  "topics/seams-packaging.md"
+ ],
+ "packaging.md#6": [],
+ "packaging.md#7": [
+  "topics/risks-packaging.md"
+ ]
+}

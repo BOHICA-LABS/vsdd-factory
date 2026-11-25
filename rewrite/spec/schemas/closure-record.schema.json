@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "closure-record.schema.json",
+  "type": "object",
+  "description": "Fields of the closure record; one schema serves every unit (state.md#2.8). Path cycles/<cycle>/units/<workflow>[.<subject>].json.",
+  "properties": {
+    "schema": {"type": "integer", "description": "Format version; 1 in the design's example."},
+    "workflow": {"type": "string"},
+    "subject": {"type": "string", "description": "Empty for a unit with no subject."},
+    "cycle": {"type": "string"},
+    "state": {
+      "type": "string",
+      "enum": ["open", "closed"],
+      "description": "open from admission or the first stage until the unit closes."
+    },
+    "position": {"type": "string", "description": "For a story: one of the positions of topic:story-life."},
+    "stages": {
+      "type": "object",
+      "description": "One entry per stage, in the order the stages finished.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "state": {"type": "string"},
+          "sha": {"type": "string"},
+          "artifacts": {"type": "array", "items": {"type": "string"}},
+          "at": {"type": "string", "description": "ISO 8601, UTC."}
+        },
+        "required": ["state", "at"]
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "description": "The verdict in the unit's closure record: 'perimeter, commit, passes, outcome, and the counts of advisory, dismissed and waived findings' (state.md#2.8, the convergence record row). The design's example writes waived as a list; this schema types the three counts as integers, and head is the commit the verdict covers.",
+      "properties": {
+        "perimeter": {"type": "string"},
+        "head": {"type": "string"},
+        "patch_id": {"type": "string", "description": "git patch-id of the diff the verdict covers."},
+        "passes": {"type": "integer", "minimum": 0},
+        "rounds_used": {"type": "integer", "minimum": 0},
+        "outcome": {"type": "string"},
+        "advisory": {"type": "integer", "minimum": 0},
+        "dismissed": {"type": "integer", "minimum": 0},
+        "waived": {"type": "integer", "minimum": 0}
+      },
+      "required": ["perimeter", "head", "passes", "rounds_used", "outcome"]
+    },
+    "delivery": {
+      "type": "object",
+      "description": "A story's record.",
+      "properties": {
+        "branch": {"type": "string", "description": "The branch the story is delivered to."},
+        "base": {
+          "type": "string",
+          "description": "The commit the story branch was cut from; written when the branch is created (topic:worktrees)."
+        },
+        "pr": {"type": "string", "description": "The pull request link; empty in local mode."},
+        "merged_sha": {
+          "type": "string",
+          "description": "Empty until the story is merged; its presence is what makes the story done."
+        }
+      },
+      "required": ["branch", "base"]
+    },
+    "admitted_by": {
+      "type": "string",
+      "description": "How the story became ready: plan, or the run that admitted it through vsdd gate plan --story or vsdd story new-fix."
+    },
+    "decision": {
+      "type": ["string", "null"],
+      "description": "The id of the decision that closed or blocks the unit; null when there is none."
+    },
+    "closed": {"type": "string", "description": "ISO 8601, UTC; empty while the unit is open."},
+    "waves": {
+      "type": "object",
+      "description": "In the plan's closure record: the map from wave to story ids that vsdd plan schedule computed.",
+      "additionalProperties": {"type": "array", "items": {"type": "string"}}
+    },
+    "flaky": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "In a story's record, a wave's record and verify.json: the identities of inherited tests a gate recorded as flaky, copied from the gate's evidence."
+    },
+    "baseline": {
+      "description": "In the baseline record, cycles/_standing/units/ingest.json or import.json (state.md#2.8): a baseline object.",
+      "$ref": "baseline.schema.json"
+    }
+  },
+  "x-notes": [
+    "Beyond the common shape: the plan's closure record also holds waves; a wave's record holds its stories and its gate rounds; verify.json holds the checks per round and the properties proven; a story's record, a wave's and verify.json also hold flaky; the baseline record is a closure record with a baseline object.",
+    "The baseline object holds: the integration head it was measured on; any earlier release tag; the suite result with the identities of the tests that failed; the lint and format findings; the mutation score per module; the scanner findings in existing dependencies; the recovered or imported contract ids; and whether the project has a suite, a JUnit report and CI."
+  ],
+  "required": ["schema", "workflow", "subject", "cycle", "state", "stages"]
+}

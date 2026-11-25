@@ -1,0 +1,92 @@
+[
+  {
+    "id": "S3R-hook-runner-b-1",
+    "outcome": "fixed",
+    "what_was_done": "liveness._released_under_busy reads getattr(busy, \"released\", None) — the attribute locks.lock_release sets (records outcome S3R-records-C2-2) — so the entries a partly successful release removed are logged as lock.released and returned. test_release_logs_a_busy_store now raises a plain StoreBusy carrying .released the way locks.py sets it, instead of a bespoke subclass carrying .entries; the drive-the-real-lock_release variant is additionally pinned by the test test_session_end_logs_released_entries_when_a_run_end_is_busy added with the records fix round.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_released_under_busy); next/tests/hooks/test_liveness.py (test_release_logs_a_busy_store)"
+  },
+  {
+    "id": "S3R-hook-runner-b-2",
+    "outcome": "fixed",
+    "what_was_done": "test_lock_refresh_belongs_by_run_and_story adds the cases that cannot pass on the session match alone: a second session's vsdd --run <id>, --run=<id>, a vsdd call made by path, and tool_input.step.run, each refreshing seen; the run's story worktree reached by a cd segment (the segment's effective directory, so a call from the project root counts); and the negative case naming another run id, which does not refresh. Mutating run_of to answer \"\" or story to \"\" fails the test. The P3SEAM-24 outcome below is reworded: the read-only reviewer half (a reviewer refreshing through Read/Grep before it returns its result) waits until those atoms are wired (D2); until then a reviewer that only reads refreshes at its StructuredOutput, and a review over 20 minutes still goes stale.",
+    "where": "next/tests/hooks/test_liveness.py (test_lock_refresh_belongs_by_run_and_story); next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_story_of)"
+  },
+  {
+    "id": "S3R-hook-runner-b-3",
+    "outcome": "fixed",
+    "what_was_done": "paths.py resolves the temporary directory through one helper (_tmp_root: os.path.realpath(tempfile.gettempdir())) for both the tmp check and the outside complement, so a real temporary file on macOS (/var/folders/... under the /var symlink) classes as tmp, not outside. test_real_temporary_directory_is_tmp writes a real mkdtemp file and asserts ('unclassified', 'tmp'); with the unresolved comparison restored it fails.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_tmp_root); next/tests/hooks/test_classes.py (test_real_temporary_directory_is_tmp)"
+  },
+  {
+    "id": "S3R-hook-runner-b-4",
+    "outcome": "fixed",
+    "what_was_done": "classes_of classifies by region: the project first (state classes, or the product class and project), then tmp only for a path outside the project root, then outside — the separate regions of classes.toml's closing comment. A project lying under the temporary directory gives every path its own class alone, never tmp. test_project_inside_temporary_directory_is_not_tmp makes the project under a real mkdtemp directory and asserts the product path stays ('unclassified', 'project') and the state path ('config',); on Linux this is what made test_state_classes_innermost_first and test_product_class_by_precedence fail before, and both hold again there and here.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_classify); next/tests/hooks/test_classes.py (test_project_inside_temporary_directory_is_not_tmp)"
+  },
+  {
+    "id": "S3R-hook-runner-b-5",
+    "outcome": "fixed",
+    "what_was_done": "classes_of calls the cached hooks.policy.tables() at the top whenever a project governs, so a table that does not load is PolicyInvalid on every branch, and _product_classes re-raises the OSError/ValueError of the load path_class makes itself as PolicyInvalid (the FileNotFoundError 'classes.toml missing' of the probe). test_invalid_policy_is_the_rules_fault gains the product-path case: the shipped tables load for the runner but vsdd.policy.load is made to raise for classes.toml, and the fixture rule reading ctx.classes on src/main.rs is refused with policy_invalid, not rule_error.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (classes_of, _product_classes); next/tests/hooks/test_classes.py (test_invalid_policy_is_the_rules_fault, product case)"
+  },
+  {
+    "id": "S3R-hook-runner-b-6",
+    "outcome": "fixed",
+    "what_was_done": "classes_of classes both forms of the path and returns their union: the literal form, anchored absolute under the resolved project root so ancestor symlinks (macOS /var) collapse while a symlink at the leaf stays literal, and the resolved form. The union keeps the literal form's order first and drops outside when a containing region (project, own-worktree, tmp) is present, so the spelling of a symlinked temporary path does not read outside. Ctx.classes now passes target_literal, so a write through a symlink is judged by the destination and by the place the call names. test_symlinked_target_classes_both_forms links .factory/specs/product/brief.md to src/main.rs and asserts ('brief', 'spec-product', 'source', 'project'); with ctx.classes back on the resolved target it fails. The interfaces of plan 3.1 keep their names: ctx.classes_of and paths.classes_of have the signatures they promised; only what they cover widened, and Ctx.classes now reads target_literal.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (classes_of, _forms, _anchored, _union); next/plugins/vsdd-factory/py/vsdd/hooks/model.py (Ctx.classes); next/tests/hooks/test_classes.py (test_symlinked_target_classes_both_forms)"
+  },
+  {
+    "id": "S3R-hook-runner-b-7",
+    "outcome": "fixed",
+    "what_was_done": "The revised P3OPS-20 outcome below records it as left-for-builder: the refresh half is done, the clear half waits for the B8 probe (still open after round 4, platform item 46) and then H9, and the probe is pointed at PR4C-15, which carries it.",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-b-fix.json (the P3OPS-20 entry)"
+  },
+  {
+    "id": "S3R-hook-runner-b-8",
+    "outcome": "fixed",
+    "what_was_done": "test_flush_lock_held_never_blocks_session_end now asserts the three things its docstring promised: the launch returns inside 1.5 s (the 0.5 s RELEASE_WAIT on top of the launcher's start-up; the probe measured 0.6 s), the sess_end entry is still in the lock table with its run's ended empty, and a runner.liveness_error naming StoreBusy is logged. The assertions fail against a release that wedged, deleted the entry without ending the run, or spent the whole platform budget.",
+    "where": "next/tests/hooks/test_liveness.py (test_flush_lock_held_never_blocks_session_end)"
+  },
+  {
+    "id": "S3R-hook-runner-b-9",
+    "outcome": "fixed",
+    "what_was_done": "liveness.run_of reads the segment program through _is_vsdd_program — os.path.basename(program) == 'vsdd', the same test caller.is_vsdd_call applies — so a vsdd call made by path refreshes. The shared-helper half is reported, not done: py/vsdd/hooks/caller.py belongs to the concurrent records fix round this week, so the helper stands in liveness.py for the caller owner to adopt; the path-form case ./vsdd gate --run is in test_lock_refresh_belongs_by_run_and_story.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_is_vsdd_program, run_of); next/tests/hooks/test_liveness.py (test_lock_refresh_belongs_by_run_and_story)"
+  },
+  {
+    "id": "S3R-hook-runner-b-10",
+    "outcome": "fixed",
+    "what_was_done": "liveness passes the story of the first Bash segment whose effective directory sits in a story worktree (_story_of walks command.segments with ctx.story_at(segment.where), ruling-model's per-segment where, falling back to ctx.story for other tools), so 'cd .worktrees/S-3.01 && ...' from the project root counts. run-lock.md keeps its wording; the test case is in test_lock_refresh_belongs_by_run_and_story.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_story_of); next/tests/hooks/test_liveness.py (test_lock_refresh_belongs_by_run_and_story)"
+  },
+  {
+    "id": "S3R-hook-runner-b-11",
+    "outcome": "fixed",
+    "what_was_done": "The gaps are stated where the reader stands: the paths.py module docstring says containing_worktree answers None outside .worktrees/, so the platform's throwaway worktree is never own-worktree at this depth, and that the ledger union and the platform worktree arrive with spike-bounds (H8); the spike-bounds brief gained the same sentence at its write-scopes bullet, to build and test them there. Building them now would add a ledger read to every rule call of the slice for a rule (spike-bounds, H8) that is not built yet.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (module docstring); rewrite/spec/rules/spike-bounds.md (write-scopes bullet)"
+  },
+  {
+    "id": "S3R-hook-runner-b-12",
+    "outcome": "fixed",
+    "what_was_done": "The registry.py docstring says four duties wired with no rule: the caller marker, the session-start briefing and notices, and the two lock-liveness duties. rule-model.md now says own-worktree is decided 'by the caller's working directory — the payload cwd — or the directory passed to classes_of', no longer colliding with Ctx.where. Reported for the hook-runner owner: hooks/__init__.py (owned by the hook-runner unit, not this one) still lists no paths or liveness module; its Modules list wants two lines — vsdd.hooks.paths (the path classes of a call's target) and vsdd.hooks.liveness (lock liveness: refresh and release).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (module docstring); rewrite/spec/topics/rule-model.md (path classes paragraph)"
+  },
+  {
+    "id": "P3SEAM-24",
+    "outcome": "fixed",
+    "what_was_done": "Revised outcome. The refresh goes by the run the call names and the story it works in, not by the session id alone: liveness passes the --run value of a vsdd segment (bare word or by path), tool_input.step.run of a StructuredOutput call, and the story of the call's worktree — the payload cwd's and, for Bash, each segment's effective directory. test_lock_refresh holds the holder-session cases; test_lock_refresh_belongs_by_run_and_story holds the same facts from a second session and the negative stranger-run case. Still open: the read-only reviewer half (Read/Grep atoms refresh through the story of the file they touch) waits for D2's wiring — until then a reviewer that only reads refreshes at its StructuredOutput, and a review over 20 minutes still goes stale.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py; next/tests/hooks/test_liveness.py (test_lock_refresh, test_lock_refresh_belongs_by_run_and_story)"
+  },
+  {
+    "id": "P3OPS-20",
+    "outcome": "left-for-builder",
+    "what_was_done": "Split, correcting the earlier 'fixed'. The refresh half is done: runs with no worktree of their own are kept alive by the StructuredOutput step.run refresh and the vsdd --run refresh (test_lock_refresh, test_lock_refresh_belongs_by_run_and_story). The clear half — whether a workflow survives /clear — is left-for-builder for B8, the interactive-session probe carried by PR4C-15, and then H9; it is still unproven after round 4, which tested SIGTERM and not a clear (platform item 46). Meanwhile SessionEnd releases whatever the reason, so a surviving workflow's run is ended and its next gate refuses run_not_live out loud.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py; rewrite/findings/outcomes/step3-hook-runner-b.json (earlier outcome); rewrite/spec/packaging/build-plan.md B8"
+  },
+  {
+    "id": "S3B-hook-runner-b-2",
+    "outcome": "fixed",
+    "what_was_done": "Closed against records' name: the StoreBusy of lock_release carries the released entries on 'released' (locks.py sets busy.released; S3R-records-C2-2), and liveness reads exactly that. The ledger-open question of the attribute name is settled; test_release_logs_a_busy_store pins the plain-StoreBusy shape.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_released_under_busy); next/tests/hooks/test_liveness.py (test_release_logs_a_busy_store)"
+  }
+]

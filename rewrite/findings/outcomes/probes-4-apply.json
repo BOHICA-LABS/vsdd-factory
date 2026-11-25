@@ -1,0 +1,68 @@
+[
+ {
+  "id": "PR4C-R1",
+  "outcome": "fixed",
+  "what_was_done": "topics/platform-proven-2.md is rewritten so that each item says what CHECK.md's reruns support, with a first line naming the permission mode and the evidence, and a header that fixes the version (Claude Code 2.1.331, git 2.50.1, macOS) and says only a --plugin-dir plugin was probed. Item 37 now has the three legs (undeclared, declared optional, closed with additionalProperties false: the platform refuses the rewrite and the step fails). Item 39 is reversed: a rewrite with no decision is applied and then permission-checked as rewritten; it grants nothing and always changes what runs. Item 40 gives the wrapper the agent reads. Item 41 covers every write under .git/worktrees/ (story worktrees, the integration worktree, the .factory mount), the branch a refused worktree add -b leaves, signing, and what was not shown. Item 43 says backgrounded at the timeout, killed at the step's final response, worker survival on macOS only. Item 45 adds pre-merge-commit. Item 46 is 'partly': is_error false on a block, SIGTERM tested, /clear open. New items: 47 (the ten-minute ceiling of headless print mode and CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS), 48 (effort.level in payloads), 49 (the inline Workflow script; a typed skill is not sufficient). platform.md: item 27's row points to item 38, item 26 is observable, index rows for 36 to 49, open-leg blocks for 36, 41, 43, 44 and 46, and a section 'Headless runs: what the first one (step 6) must set' with the ceiling variable and the sandbox off. platform-proven.md: items 6 and 27 point to items 42, 43 and 38, and its round-4 paragraph is a pointer. PR4-1, PR4-2 and PR4-3 are reworded in extra-probes-4.json. sandbox-needs.md gains the .git/worktrees/ and gpg rows. Not changed, because outside this round's files, and listed for the spec steward in rewrite/plans/step-4/ORDER.md section 7: rules/step-results.md still calls updatedInput on StructuredOutput unproven; topics/hook-platform-facts.md still lists items 27, 28 and 30 as not verified; packaging/tests-e2e.md asserts on is_error and sets no ceiling variable; topics/spikes.md does not name the inline-script failure.",
+  "where": "rewrite/spec/topics/platform-proven-2.md"
+ },
+ {
+  "id": "PR4C-01",
+  "outcome": "fixed",
+  "what_was_done": "P1 is marked answered (platform item 36) in step-4 ORDER.md section 7 and in RESOLUTIONS.md (PL4-22): a typed step's payload carries agent_type exactly '<plugin>:<agent>', an untyped step 'workflow-subagent', one agent_id across the step's calls, and the main session neither key. verdicts.md section 4 and rules.md 3.4 now state that instead of 'unproven'. The built hook runner already reads both keys with a default (model.py), so no code changes. G3's 'skipped' listing and delivery's quoting of it stay, and platform.md carries the open leg 36 (an installed copy) with its test and fallback.",
+  "where": "rewrite/plans/step-4/ORDER.md"
+ },
+ {
+  "id": "PR4C-02",
+  "outcome": "fixed",
+  "what_was_done": "P2 is marked answered (platform item 37) and the H7 planner's open question is closed in step-4 ORDER.md section 7 and RESOLUTIONS.md: no grounded property is added to finding.schema.json or any other schema. rules.md section 7 adds test_finding_schemas_stay_open to the rules unit: no shipped schema, with $ref resolved, closes a finding object with additionalProperties false unless it declares grounded. The test reads the shipped schema files only. A separate parse of the prelude's copies is rejected: they are generated from those files and nothing else, which tools/build.py --check already enforces, so a second reader would be a second source.",
+  "where": "rewrite/plans/step-4/rules.md"
+ },
+ {
+  "id": "PR4C-03",
+  "outcome": "fixed",
+  "what_was_done": "The two step-3 probes (records' VSDD_CALLER rewrite in the default mode; the hook runner's allow-plus-rewrite pairing) are marked answered with platform item 38 in step-3 RESOLUTIONS.md, and P3 is marked answered in step-4 ORDER.md section 7: yes, in the default mode inside a step, for Bash and StructuredOutput. HD7 stands as written and no plan of a built unit was changed. The neighbouring question (updatedInput with no decision) is marked answered with item 39 and points to PR4C-04 for what the built hook runner adds.",
+  "where": "rewrite/plans/step-3/RESOLUTIONS.md"
+ },
+ {
+  "id": "PR4C-05",
+  "outcome": "fixed",
+  "what_was_done": "rules.md gains D16 (an agent reads a block inside the platform's wrapper, never as the first characters, so every reason and fix stands alone and names its finding, gate or path) and test_block_texts_survive_the_wrapper (each blocking case, wrapped as platform item 40 records, still shows its tag, Why: and Instead:). Its P3OPS-21 line now says the hook-before-schema-check order is proven. The step 5 plan quotes no block today; its section 7 item 3 now checks that no agent or method file does ('hook error', 'vsdd-factory blocked'), and step-5 RESOLUTIONS.md records why. The records part (the store's own schema check, D4's same-agent replacement) is the records unit's and is built: its own outcome (step3-records.json) records it, tested in test_step_collision. records.md was not edited; step-3 RESOLUTIONS.md marks that probe answered with item 40.",
+  "where": "rewrite/plans/step-4/rules.md"
+ },
+ {
+  "id": "PR4C-07",
+  "outcome": "fixed",
+  "what_was_done": "survey.md: create_story makes the branch and the worktree by separate git commands, each when absent, never 'worktree add -b', so the branch a refused call left is found and only the worktree is added. New decision D20 and code not_permitted: a git call of worktrees.py that fails with 'Operation not permitted' raises WorktreeError('not_permitted') with the sandbox message of step-3 ORDER.md rule 11 (the word 'sandbox', git's line, the fix) and undoes nothing; the survey prints it as its error, exit 1. Test test_refused_add_names_the_sandbox patches git to fail once the branch is made and checks that the next call finishes. Of the two repairs proposed, reuse was taken and deletion rejected: the tool never deletes a branch on a guess, and the recorded base stays true. To stay under the size limit, ten short statements that ORDER.md or another section of the plan already makes were removed from survey.md or turned into pointers; none of them is a rule the builder loses.",
+  "where": "rewrite/plans/step-3/survey.md"
+ },
+ {
+  "id": "PR4C-08",
+  "outcome": "fixed",
+  "what_was_done": "Step-3 ORDER.md gains cross-unit rule 11, 'The Bash sandbox': a git call that fails with 'Operation not permitted' is reported as the unit's own failure with an error that holds the word 'sandbox' and git's own line and says to run outside the sandbox, and nothing is undone, so the next run finishes. It names who does it: records' flush returns state 'failed' with that error; the survey passes that error on from its opening flush (survey.md D11) and raises WorktreeError('not_permitted') from its worktree library with the same words (D20); step 4 builds on them (its ORDER.md rule 7). Step-3 RESOLUTIONS.md marks the S3 sandbox probe answered with platform item 41, flush included. records.md was not edited. The code half is the records unit's and is built: its own outcome (step3-records.json) records commits.flush returning 'failed' with a cause that names the Bash sandbox, tested in test_flush_never_raises. The platform record says a hook is documented as running outside the Bash sandbox and that no probe leg wrote under .git/worktrees/ from a hook (platform.md, open leg 41).",
+  "where": "rewrite/plans/step-3/ORDER.md"
+ },
+ {
+  "id": "PR4C-09",
+  "outcome": "fixed",
+  "what_was_done": "delivery.md D7: any git write of delivery that ends in 'Operation not permitted', a WorktreeError('not_permitted') from the worktree library included, is answered 'refused' with the sandbox named as step-4 ORDER.md rule 7 words it; nothing has moved and the next run merges again. Test test_sandbox_refusal_names_the_sandbox. ORDER.md rule 7 also covers the other step-4 units without editing their plans: a gate's worker lets the WorktreeError out, so the job layer's error line carries the message, and the survey passes a flush's error on. agents.md M2, common text of every builder method (test-writer, implementer, fix-findings step 5): a git write refused with 'Operation not permitted' is returned as blocked, kind environment, naming the Bash sandbox and git's line. The uncommitted work stays in the worktree for the next run.",
+  "where": "rewrite/plans/step-4/delivery.md"
+ },
+ {
+  "id": "PR4C-10",
+  "outcome": "fixed",
+  "what_was_done": "delivery.md D6: both strategies now end in an explicit 'git commit -F <file>' ('squash' after 'git merge --squash', 'merge' after 'git merge --no-ff --no-commit'), so the project's pre-commit and commit-msg hooks run whatever the strategy, and pre-merge-commit never runs because the tool makes no automatic merge commit. The other option, stating different hooks per strategy, was rejected: a project's pre-commit would be skipped silently under 'merge'. D7: a commit git refuses is 'refused' and names 'git hook <names>' (those of pre-commit, prepare-commit-msg and commit-msg that are executable in the worktree's hooks directory), or 'git' when there is none; row 13's text carries it. Step-4 ORDER.md rule 7 states what a hook sees there (cwd = the worktree, that worktree's GIT_DIR, tracked files only). D10: a clean merge-in whose commit git refuses is aborted with 'git merge --abort' and answered as D7, so the story branch is as it was. Tests: test_both_strategies_run_pre_commit_never_pre_merge_commit, test_hook_rejection_refuses_and_moves_nothing (now naming the hook and merging on the next call), test_refused_merge_in_commit_is_aborted. To stay under the size limit, sentences that ORDER.md sections 5 and 7 already carry were replaced by pointers.",
+  "where": "rewrite/plans/step-4/delivery.md"
+ },
+ {
+  "id": "PR4C-13",
+  "outcome": "fixed",
+  "what_was_done": "Step-3 RESOLUTIONS.md marks G1's survival probe answered for macOS with platform item 43 and says Linux is still open (platform.md, open leg 43, with its test and fallback); the ten-minute probe is marked answered with item 42. topics/long-commands.md no longer says the tool stops or kills a call at its timeout: the call is moved to the background and killed at the step's final response, and the job survives only because its worker is detached. PR4-2 in extra-probes-4.json says the platform does reap, at the step's end. agents.md M3 and the clerk's rule tell an agent to run the same command again once its call is moved to the background and never to poll the background task. The prelude's closing lines (built, B4a) are left as they are: the method and the clerk file carry the rule, so it is said once. No built unit needs a change: the jobs code states no kill premise.",
+  "where": "rewrite/spec/topics/long-commands.md"
+ },
+ {
+  "id": "PR4C-14",
+  "outcome": "fixed",
+  "what_was_done": "Step-5 RESOLUTIONS.md marks N12's Glob probe answered for a step whose working directory is the project root (platform item 44) under PL5-2, and records the leg still open: a reviewer whose working directory is a story worktree, using the absolute <project dir>/.factory/specs path, a cheap B8 follow-up needed only if N11 (contracts as paths) does not land first. agents.md section 6 states the same in N12 and drops 'E2's first run needs the Glob probe'. platform.md carries the open leg 44 with its test and fallback. The screenshot half of N12 is still unprobed and says so.",
+  "where": "rewrite/plans/step-5/RESOLUTIONS.md"
+ }
+]

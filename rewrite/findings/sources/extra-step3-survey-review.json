@@ -1,0 +1,173 @@
+[
+  {
+    "id": "S3R-survey-1",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py (run_checkpoint, _close_story)",
+    "problem": "Plan 3.2 puts run_set(agents) and lock_release in a finally, but run_checkpoint has no try/finally: only the flush's failure is handled. Any exception from the per-story close escapes to the dispatcher as exit 2 'internal error', with the lock still held and the run not ended. Reproduced twice. (1) A closure file that does not parse makes closure_read raise StoreCorrupt. (2) closure_update raises StoreBusy when flush.lock is not had within its 3 s wait, which happens when a flush is running. In both cases lock.json still names the run, and run.json has an empty ended. _release_path's own LOUD handling of StoreBusy shows a busy flush is expected here. test_checkpoint_broken_mount_still_releases only covers a flush that returns failed.",
+    "proposed_resolution": "Wrap the product stops, every _close_story and the flush in try/except, adding each fault to errors, and call _release_path in a finally so the lock is released and the run ended whatever happened. Compute next after that. Add tests where a corrupt story closure, and a closure_update that raises StoreBusy, still give ok:false and exit 1, an empty lock and an ended run.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-2",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py (run_survey usage checks)",
+    "problem": "D3 says a hub layout and a hotfix cycle are exit 2 'not built yet', never a guess. The survey checks neither. With a hotfix cycle open, 'vsdd survey story' exits 0, takes the lock and cuts story/<id> from the integration branch's head. topics/worktrees.md says a hotfix cycle's target is hotfix/<version> at the release tag, so this is a wrong base, recorded as delivery.base. With layout = hub it also exits 0 and admits. Separately, 'survey story' without --subject is exit 1 with the precondition text 'story  is not in the open wave w1' rather than a usage refusal.",
+    "proposed_resolution": "In the usage checks, raise Refuse('... not built yet') when config project.layout is hub, when the open cycle's kind is hotfix, and when --subject is empty for story. Add these cases to test_survey_unbuilt_is_exit_2_with_whole_object.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-3",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (create_story, set_integration, detached; verify_story's message)",
+    "problem": "A worktree directory removed outside git stays registered under .git/worktrees. This happens when a person deletes it, or when a kill lands between the two halves of 'git worktree remove'. Every later 'git worktree add' at that path then fails with git's \"is a missing but already registered worktree\", and nothing prunes. Reproduced for a story: after rm -rf .worktrees/S-9.01, require_story says 'admit the story again to recreate it', and the re-survey fails with exit 1 on every call. Reproduced for .worktrees/_integration with set_integration. detached() has the same add path. The tool is not restartable from this state without a manual 'git worktree prune'. test_admit_completes_after_crash simulates the crash with remove_story, which deregisters cleanly, so it misses this case.",
+    "proposed_resolution": "Before each 'worktree add', run 'git worktree prune', or use 'worktree add -f' when the target path is absent but registered. Add tests that rmtree the story worktree and the integration worktree and assert that admit, the survey and set_integration recreate them.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-4",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_SANDBOX_MARKS, _classified)",
+    "problem": "ORDER.md rule 11 forbids guessing at the sandbox from anything but git's 'Operation not permitted'. _classified also matches the word 'sandbox' anywhere in the GitError message, and that message includes the command's arguments, which include absolute paths. Reproduced with a project under a directory named sandbox: an ordinary 'git worktree add' failure (missing but registered) came back as WorktreeError('not_permitted') with the advice to run outside the Bash sandbox. Step 4 turns not_permitted into delivery 'refused', so the wrong cause would reach the person.",
+    "proposed_resolution": "Classify as not_permitted only when git's stderr contains 'Operation not permitted', case-insensitive, and never from the message that carries the arguments. Add a test whose project path contains 'sandbox' and whose git failure is ordinary; it must give code 'git'.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-5",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "rewrite/findings/outcomes/step3-survey.json (P3REQ-07, P3OPS-07, P3OPS-08, P3REQ-02, P3OPS-10, D33-21)",
+    "problem": "Six outcomes are marked fixed, but the unit built only their story-path part. Each one's own what_was_done names a remainder owned by another package or by a later depth. P3REQ-07 and P3OPS-07 leave the re-admission of whole wave maps by the other surveys (G5, S2a, S3 when widened). P3OPS-08 leaves non-story stages. P3REQ-02 leaves readiness ordering (G5, W6). P3OPS-10 leaves the route row and the new spec decision, which are most of its problem (S3 when widened, S4). D33-21's problem is delivery.detail and decision packets, all G4a and step 4, and this unit wrote none of them. After findings.py build these are closed in the ledger and gone from their packages' by-package lists; G4a.md, for one, no longer lists D33-21. The ledger's own precedent records a half-built finding as left-for-builder with the remainder named (P3SEAM-07, and P3OPS-20 'split, correcting the earlier fixed').",
+    "proposed_resolution": "Re-record these six as left-for-builder. Each what_was_done should name the story-path part done here, plus the remainder and the package that owns it. Alternatively, keep the slice part fixed and open one new finding per remainder for its owning package. Rerun findings.py build so the remainders show again in G4a, G5, W6, S4 and S3.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-6",
+    "origin": "slice step 3, survey, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_admission.py (test_require_story_refusals)",
+    "problem": "require_story's membership check is records' run_require(root, run, story=story): 'the one membership check' that every gate and delivery repeats, and the basis of the P3BLD-23 and P3OPS-07 outcomes. It is untested. The 'not in the run' case of test_require_story_refusals passes for another reason: the story has no closure yet, so require_story raises no_closure. Changing the call to run_require(root, run) keeps the whole unit suite green (mutation run in a scratch copy).",
+    "proposed_resolution": "After admitting the story in run A, open a second live run B (run_open, or a fresh run_begin after release). Assert that require_story(root, B, story) raises AdmissionError with records' not-admitted code while the closure, base and worktree all exist.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-7",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_admission.py, next/tests/unit/test_checkpoint.py (D33-21's cited tests)",
+    "problem": "The D33-21 outcome cites test_admit_writes_closure_run_branch_worktree and test_checkpoint_closes_delivered_story, but neither checks that the tracked records hold no machine-local path. In a scratch copy, writing the absolute worktree path into the closure's delivery, or into a stage entry, kept both tests green.",
+    "proposed_resolution": "In both tests, assert that no string in the closure record (json.dumps of it) contains str(root) or the tmp directory.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-8",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (_remote_head messages, create_story not_descendant message)",
+    "problem": "D33-13 and topics/worktrees.md promise refusals that name 'the git command that corrects them'. The command printed is 'git branch develop --set-upstream-to=gitea/develop develop', and git refuses it with 'fatal: too many arguments to set new upstream' (checked). The test only asserts that '--set-upstream-to' appears. create_story's not_descendant refusal says 're-admit the story to re-record its base', but admit re-reads the base only when the branch is missing, so re-admitting raises the same refusal again.",
+    "proposed_resolution": "Print 'git branch --set-upstream-to=<remote>/<branch> <branch>'. Have the test run the printed command and then call target_head again. For not_descendant, name a remedy that works (restore the history, or delete the story branch so admission records a new base), or make admit re-record the base.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-9",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py (admit call: admitted_by=run_id)",
+    "problem": "The survey admits a story that the plan's open wave places with admitted_by set to the run id. The closure schema, records/closure.md and the [story] lifecycle in artifacts.toml say admitted_by is 'plan' for a plan story. A run id means the story was admitted out of plan, through 'gate plan --story' or 'story new-fix'. So every plan story's tracked closure now claims an out-of-plan admission. The tests assert the run id, which pins the wrong value.",
+    "proposed_resolution": "Pass admitted_by='plan' when the story's admissibility came from the open wave (its closure had no admitted_by), and keep the run id for the admission commands. Update test_admit_writes_closure_run_branch_worktree and add a survey assertion.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-10",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/route.py (row 15, _wave_state)",
+    "problem": "D10 says a human next carries args.decisions with the ids. Row 15 puts them only in the reason text ('the decisions: ...'), and test_row_waiting_on_decisions checks only the text. Also, tables/preconditions.toml and routes.toml say the route's 'could run' is the same function as the survey's preconditions, and plan 3.5 says that is check(..., hooks_alive=None). route.py never calls it: any undelivered story with no open decision counts as runnable, including one whose depends_on are undelivered.",
+    "proposed_resolution": "Return args: {reason, decisions: [ids]} for row 15. Decide 'runnable' with preconditions.check(root, 'story', subject=story, cycle=cycle, hooks_alive=None), all rows met. Assert args.decisions in the test.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-11",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (story_path, integration_path), story_unit.py (position, build), checkpoint.py (_head_of), admission.py (_check_story_file)",
+    "problem": "Plan 3.3 and ORDER.md rule 7 say both paths take the layout from vsdd.project.classify_worktree. worktrees.py hard-codes '.worktrees' and '_integration' instead. story_unit.position, story_unit.build and checkpoint._head_of each build root/.worktrees/<story> themselves rather than calling story_path, so the layout fact sits in five places. story_path accepts any safe segment, so an id outside the story grammar would get a worktree that containing_worktree (the hook runner, jobs) does not classify as a story. The criticality list in _check_story_file repeats the [story.frontmatter] enum of the artifacts policy.",
+    "proposed_resolution": "Derive both paths from classify_worktree, and raise WorktreeError when an id does not classify as a story. Call worktrees.story_path wherever a story tree is needed. Read the criticality values from policy.load('artifacts')['story']['frontmatter'].",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-12",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/survey.py, preconditions.py (_dependencies), checkpoint.py (run_read)",
+    "problem": "With no open cycle, the survey's precondition details are internal texts ('the story cannot be judged: path segment must not be empty'). If the story has depends_on it crashes: exit 2 'internal error: StoreRefused', because _dependencies calls closure_read(root, '', ...) unguarded. Both reproduced. '--cycle X' with no open cycle indexes open_cycles[0] inside the refusal message (IndexError). 'checkpoint --run ../x' answers 'internal error: StoreRefused' instead of the unknown-run refusal.",
+    "proposed_resolution": "When no cycle is open, give the rows the detail 'no cycle is open' and skip the cycle-scoped reads. Word the --cycle refusal without indexing. Treat StoreRefused from run_read as 'no run <id>'. Add a test of each.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-13",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py (_gate)",
+    "problem": "_gate catches every Exception from gate_evidence.evidence and answers None. A corrupt evidence record, or a bug in a registered gate lookup (G2 and G3 register them in step 4), therefore lowers the story's position without a word. The story script then reruns stages it had finished, and no output names the fault.",
+    "proposed_resolution": "Catch only what means 'no evidence'. Let StoreCorrupt and other faults reach the survey, which can report them in error (exit 1) or in a precondition detail. Add a test with a corrupt green record.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-14",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py (status)",
+    "problem": "The status is 'done' if all(delivered), and all([]) is True. A run whose stories list is empty, for instance one whose admission failed before run_admit, is therefore reported 'done' by its checkpoint, on the D8 path as well as the normal one.",
+    "proposed_resolution": "Make the status 'partial' (or 'failed') when the run record has no stories, and add a test.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-15",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_story_unit.py",
+    "problem": "test_position_reviewed_from_closure_verdict, named in plan section 7, does not exist, though the builder reported every section-7 name present. Its case is only partly inside test_position_ladder. No test covers D6's 'a kind with no red gate starts at red' for position(): the only position tests use kind fix, which has a red gate.",
+    "proposed_resolution": "Add test_position_reviewed_from_closure_verdict. It should show a converged verdict covering the head gives reviewed (demo: true), and one not covering the head stays at green. Add a position test for a kind without a red gate (facade or docs) that reaches red with no red record.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-16",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/worktrees.py (remove_story)",
+    "problem": "remove_story(delete_branch=True) reads the branch to delete from the worktree it is about to remove. If a call is killed after the worktree removal and before 'branch -D', every retry returns False and never deletes the branch. That is a partial result a restart cannot finish.",
+    "proposed_resolution": "Delete the branch by its configured name (branch_name of the project's config and the story), not by what the worktree had checked out, so a retry finishes. Add a test that removes the worktree first and then calls with delete_branch=True.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-survey-17",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/closure-record.schema.json (delivery.branch), rewrite/spec/topics/worktrees.md",
+    "problem": "The spec gives delivery.branch two meanings. The shipped closure schema and rewrite/spec/schemas say it is 'The story branch the delivery worked on'. topics/worktrees.md, and this unit's code, record the target branch there: develop, returned by require_story as 'target'. Step 4's delivery unit will read one of the two.",
+    "proposed_resolution": "Settle it as the target branch, matching worktrees.md and the code. Correct the schema description through the records owner, and state the meaning once.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-18",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "rewrite/spec/records/run.md, rewrite/spec/commands/survey.md",
+    "problem": "P3BLD-23's first resolution bullet asks the spec to state that the survey records every story unit it returns in the run record's stories. The code does this, but records/run.md still says 'Written by vsdd survey; the admission commands (...) record admitted stories in it', which implies the survey does not. commands/survey.md's Writes does not say it either.",
+    "proposed_resolution": "Add to records/run.md and to commands/survey.md (Writes): 'the survey records each story unit it returns in the run's stories'.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-survey-19",
+    "origin": "slice step 3, survey, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py (_close_story: record['closed'] = True)",
+    "problem": "The reported departure reads plan 3.2's 'and closed' as a boolean closed: true. The record family's closed field is the close date: cycle.json's closed is 'the close date the release checkpoint adds'. A boolean holds nothing that state: closed does not already say, and a later reader expecting a stamp would get True.",
+    "proposed_resolution": "Write closed as the ISO 8601 UTC stamp of the checkpoint (store.now()), matching the cycle record, or drop it in favour of state. Say which in records/closure.md.",
+    "on_slice_path": true
+  }
+]

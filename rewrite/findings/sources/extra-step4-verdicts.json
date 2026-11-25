@@ -1,0 +1,29 @@
+[
+  {
+    "id": "S4B-verdicts-1",
+    "origin": "slice step 4, verdicts, builder",
+    "severity": "minor",
+    "where": "rewrite/plans/step-4/verdicts.md section 3.1 (difference 2); next/tests/conformance/cases/",
+    "problem": "The replay's continue-after-a-return-point rule (a pass that follows a pass the script would have ended on is reviewed with no claims after a clean pass, else with claims rebuilt from the open findings and the pass's fix) is built and exercised only indirectly: the loop conformance cases cannot carry it, because the Node prelude stops at the script's first return point, and no records case stores a return-point pass with a recorded pass after it (r11 covers only the cut-off after a fix).",
+    "proposed_resolution": "When a records-case author next touches the fixtures, add one case whose recorded passes continue after a blocked review (the following pass's review receiving the rebuilt claims), so the continue rule is pinned like the rest.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4B-verdicts-2",
+    "origin": "slice step 4, verdicts, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/steps.py (step_path, store_step)",
+    "problem": "The step-record path is keyed on name.attempt alone, so a workflow whose step names do not carry the loop and pass would overwrite an earlier pass's record under the same name (step_exists from another agent, or a same-agent_id replacement). The shipped prelude names every review, fix and arbitrate step with its loop and pass (review-a-l1-p1), so nothing is lost today, but nothing enforces the name grammar that the verdict relies on for one record per pass.",
+    "proposed_resolution": "When the build widens beyond the shipped workflows, either lint the step-name grammar of workflow scripts or key the record path on the full step identity including loop and pass.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4B-verdicts-3",
+    "origin": "slice step 4, verdicts, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py (module docstring)",
+    "problem": "The module docstring of gate_evidence.py still describes the review lookup as 'the verdict of a converged closure that covers the head', but the review branch now answers vsdd.state.verdicts.covering (computed verdict first, closure second, per PL4-2). The plan's edit sanction covered the _review_lookup body and its test only, so the docstring was left saying the old single rule.",
+    "proposed_resolution": "Have the records owner refresh the module docstring's per-gate sentence to name the computed-verdict-first rule of topics/evidence-lookup.md.",
+    "on_slice_path": true
+  }
+]

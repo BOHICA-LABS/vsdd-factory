@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "job-record.schema.json",
+  "type": "object",
+  "description": "Fields of a job record (state.md#2.8): a detached gate or delivery job, or a product started by vsdd env start, which is a job record with its port, process id and the caller's agent id. The design gives no field list with key names, no types and no required list."
+}

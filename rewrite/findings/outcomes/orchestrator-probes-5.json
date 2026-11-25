@@ -1,0 +1,20 @@
+[
+ {
+  "id": "probes-5-apply-C1-2",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session copied the staged extract into rewrite/spike/probes-round-5/step-transcripts/ (the tool records of the seven step transcripts with their line numbers, extract.py and verify.py; about 79 KB; the form the corrector recommended, because a whole transcript carries the text of the person's own user-level CLAUDE.md). It scanned the copy for that private text and found none; verify.py passes all its checks on the copy. Item 52 now cites step-transcripts/ in place of the sentence about who read the rows, and item 55's evidence line names the folder.",
+  "where": "rewrite/spike/probes-round-5/step-transcripts/; rewrite/spec/topics/platform-proven-3.md (items 52 and 55)"
+ },
+ {
+  "id": "probes-5-apply-C2-1",
+  "outcome": "fixed",
+  "what_was_done": "The reading rule and its reason are stated once, in item 52: 'Records of other types are left out: a result can be repeated in one with none of these keys (item 55), and the text leg would name a repeated refusal twice.' Item 55 keeps the facts and drops the rule.",
+  "where": "rewrite/spec/topics/platform-proven-3.md (items 52 and 55)"
+ },
+ {
+  "id": "probes-5-apply-C2-2",
+  "outcome": "fixed",
+  "what_was_done": "The third row of item 52's table reads 'every result in a type: user record' for the two transcripts whose results are also repeated in other records. The row is under 400 characters and the file under 16 KB; the spec lint passes.",
+  "where": "rewrite/spec/topics/platform-proven-3.md (item 52)"
+ }
+]

@@ -1,0 +1,17 @@
+# Registrations added by the round-3 platform probes (2026-11-24).
+# Same format as rewrite/spec/registry.toml.
+
+[topic.platform-proven]
+summary = "Settled platform facts: what each probe of blueprint section 10 proved, and the logged evidence it rests on."
+group = "index"
+sources = ["BLUEPRINT.md#10"]
+
+[topic.platform-proven-2]
+summary = "Round-4 platform probes as their independent check left them (items 36 to 49): hook payload identity, rewrites, the sandbox against git, long, backgrounded and detached calls, worktree hooks, headless limits; evidence in rewrite/spike/probes-round-4/."
+group = "index"
+sources = ["BLUEPRINT.md#10"]
+
+[topic.platform-proven-3]
+summary = "Round-5 platform probes as their independent check left them (items 50 to 55): the typed workflow command with no skill, the plugin under the isolation flags, bare tool names and a step's refused call, the effort a step's payloads carry, the two shapes of a budget stop, a session's records; evidence in rewrite/spike/probes-round-5/."
+group = "index"
+sources = ["BLUEPRINT.md#10"]

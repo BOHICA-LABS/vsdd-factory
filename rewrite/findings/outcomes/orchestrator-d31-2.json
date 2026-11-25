@@ -1,0 +1,14 @@
+[
+ {
+  "id": "d31-fix-2-C2-1",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session applied the proposed fix as written: the test-writer duty now says 'Split a test that the on state breaks only in part', and the adversary's item flag-off says that for a split test the two parts together hold every assertion of the original, unchanged, that the moved part holds only what the on state breaks, and that the part keeping the name is not a weakened test. Not confirmed by an independent check; the reviewer of package F4 reads it when the duties are built.",
+  "where": "rewrite/spec/tables/flag-duties.toml"
+ },
+ {
+  "id": "d31-fix-2-C2-2",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session applied the proposed fix as written: for the F-STATES refusal alone, a name names AC-<N> when, with every token of the flag taken out, it holds ac<N> with no letter or digit directly before it and no digit directly after it. The red gate's own map rule is left alone. Not confirmed by an independent check; the reviewer of package F2 reads it when the check is built.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml"
+ }
+]

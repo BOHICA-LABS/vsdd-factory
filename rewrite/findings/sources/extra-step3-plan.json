@@ -1,0 +1,11 @@
+[
+ {
+  "id": "S3P-1",
+  "origin": "slice step 3, plan integration (rewrite/plans/step-3/ORDER.md section 7)",
+  "severity": "major",
+  "where": "next/workflow-lib/prelude.js; topics/prelude-steps.md",
+  "problem": "The prelude's emptyOf() gives status \"\" and next {} for a relayed command that printed no JSON, and neither passes the shipped checkpoint-result or survey schema: status has an enum without the empty string, and next requires kind. relay() tells the clerk to return that object, which the platform's schema check would refuse. The Python side avoids it with Command.failure.",
+  "proposed_resolution": "Give the prelude the same per-schema failure values the commands print on exit 2, generated from one source, and test that each passes its schema.",
+  "on_slice_path": true
+ }
+]

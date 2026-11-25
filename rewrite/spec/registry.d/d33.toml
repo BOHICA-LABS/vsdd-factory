@@ -1,0 +1,216 @@
+# Registrations added by decision D33 (team use: several clones of one repository), adopted 2026-11-24.
+# Same format as rewrite/spec/registry.toml. None of these is on the thin slice path; they are built when
+# the build widens (packaging/build-plan.md). The order of work is M6, M1, M2, M3, M4, M5: an id says when
+# a package was added, not when it is built.
+
+[package.M6]
+summary = "Team settings, the clone record, joining and the preflight"
+delivers = """
+The `[team]` keys in the loader and the key table, and `[team]` among the fingerprinted sections. The
+clone record and its schema, with the label. `vsdd init` on a clone that did not create the state: the
+choice of remote, the notice while team use is off, joining while it is on (T-JOIN). The preflight
+function, which the sync, `vsdd init`, `vsdd status` and `vsdd doctor` call, with the git floor, the
+plugin floor and the shallow-clone refusal (T-VERSION and the preflight part of T-REMOTE). The team lines
+of `vsdd status` and the briefing that are read from the clone record. One failing and one passing case
+per refusal. Takes ledger entries D33-1, D33-2, D33-12 and D33-14, the report lines of D33-19 and the
+function half of D33-22"""
+depends = "S1, S2a, S2c, H1, C1"
+source = "decisions.md#D33"
+
+[package.M1]
+summary = "The sync"
+delivers = """
+The function `vsdd.state.sync` and the command `vsdd sync`: the lock that keeps one sync to a clone, the
+full and the partial flush, the listing, the fetch into the remote-tracking ref, the combine built path
+by path without touching the mount, the push that names the head it was built on, and the outcome in
+the clone record. The one function that lists changed paths with rename detection off, and the one
+that looks a branch up on the remote by its exact name. The field of
+the job specification that keeps a finished sync from being served to a later call. The network form
+of the git helper, which cannot wait for a person. The checks of the table sync-checks, and T-LOCAL.
+Every fact of the topic team-git-facts as a test, run in CI on Linux with a git at the floor. One
+failing and one passing case per refusal. Takes ledger entries D33-3, D33-29 and D33-31, the `sync`
+half of D33-4, and the fetch half of P3OPS-13"""
+depends = "M6, S2a, S2b, S3, G1"
+source = "decisions.md#D33"
+
+[package.M2]
+summary = "Work claims"
+delivers = """
+The work-claim record and its schema; the scopes with what each covers; taking a claim in `vsdd survey`,
+in the two admission commands and in `vsdd feature route`; removing it in `vsdd checkpoint` and in a
+full sync; `vsdd claim take`; the refusal of a tracked write to a unit this clone does not hold;
+withholding at sync; claiming what is in flight when team use is turned on or a clone joins. The
+survey's function for the batch of child stories a run will start, with its test against
+`runStories()`. The checks of the table work-claim-checks that name no other package. The `elsewhere`
+field of the survey object and the `work_claims` field of the status object. One failing and one
+passing case per refusal. Takes ledger entries D33-5, D33-6 and D33-32, the `claim take` half of D33-4,
+the claim lines of D33-19, and the lease half of P3OPS-13"""
+depends = "M1, S3, S4, G5, G4b, C1, C2, H6, B4a"
+source = "decisions.md#D33"
+
+[package.M3]
+summary = "Who, decisions across clones, and hand-off"
+delivers = """
+The person and the clone in the decision record, the claim, the delivery and every state commit, read
+from git itself. A settlement that counts only once the remote holds it, published at once, and the
+rule for two settlements of one decision. Order by stored link, never by a time. The tracked copy of the
+red record, read back where no local one exists; the story branch pushed under its own name at the
+checkpoint; `vsdd claim release`. Ids that `vsdd` mints taken inside a sync, and the request digest
+that tells a repeated request from a new one after a lost answer. The checks of the tables
+team-checks and work-claim-checks that name M3. Takes ledger entries D33-7, D33-8, D33-10, D33-11,
+D33-15, D33-16, D33-20 and D33-28, the `claim release` half of D33-4, and the push half of D33-25"""
+depends = "M1, M2, S4, S6, G2, G3, H7, K1"
+source = "decisions.md#D33"
+
+[package.M4]
+summary = "Team delivery, hand commits and a wave on a team"
+delivers = """
+The checks of the table team-delivery-checks: on a team, delivery through pull requests and CI only, by
+the clone that holds the story; the delivery state `queued`; a pull request merged by the host or
+outside the tool; commits to the product that the factory did not make, on the integration branch and
+on a story branch, noticed, listed, made items of the review and of the release packet, each with its
+patch, and never rewritten, with team use on or off; the forced push that names the head it expects,
+and every push of a story branch judged by a fetch; a release that moves shared branches through pull
+requests; a wave whose stories several clones hold. The
+`hand:` items of the verdict, the `hand_commits` of the gate results and the section of the adversary's
+method files. Harness scenarios for a hand commit at each perimeter. One failing and one passing case
+per refusal. Takes ledger entries D33-17, D33-23, D33-26 and D33-27"""
+depends = "M2, M3, G2, G3, G4a, G4b, G6a, G6b, G7, A6a, B5, W2, W3, W7"
+source = "decisions.md#D33"
+
+[package.M5]
+summary = "The two-clone proof, and offering team use"
+delivers = """
+The test harness that makes two clones of one bare repository, with different remote names, identities
+and clocks, a third working copy without the plugin, and hooks on the bare repository that delay,
+decline or outlast a push; the scenarios of proof-team, each with its end condition; the delivery
+double shared by both clones; and one headless run at the story tier in which two sessions deliver two
+stories of one wave. Once the proof passes: the passage of the `setup` skill that offers team use. Takes
+ledger entries D33-24 and D33-30"""
+depends = "M1, M2, M3, M4, M6, B5, K1, E1, E2"
+source = "decisions.md#D33"
+
+[topic.team-use]
+summary = "Team use (decision D33), end to end: the parts, the path from one clone to a team, what runs in parallel, what was decided for each question and why, and where each clause is enforced."
+group = "team"
+sources = ["decisions.md#D33"]
+
+[topic.team-sync]
+summary = "How a clone meets the remote, and why: no run without a fetch, how two clones' state combines, which conflicts remain, hand edits, remotes and their rules, and a state branch that grows."
+package = "M1"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[topic.team-git-facts]
+summary = "The git behaviour team use rests on, each fact run on the floor version and on a current one, and kept as a test."
+package = "M1"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[topic.team-claims]
+summary = "The work claim: what can be claimed, how exactly one of two clones wins, where everyone sees it, how it ends or is taken over by a person, and a wave on a team."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[topic.team-records]
+summary = "What the records say on a team: who acted, decisions opened on one clone and settled on another, order without clocks, and what a hand-off continues from."
+package = "M3"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[topic.team-delivery]
+summary = "Delivery on a team: pull requests and CI, a target branch that moves, and commits made by hand without the plugin."
+package = "M4"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[config.team]
+summary = "[team]: whether more than one clone runs the factory on this repository, the oldest plugin version that may write its state, and what is shared and what belongs to one clone."
+package = "M6"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[record.work-claim]
+summary = "One work claim: which clone and person hold a story, a cycle's run slot, the specification set or the opening of a cycle."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[record.clone]
+summary = "What belongs to this clone alone: its id and label, how it came to hold the state, the outcome of its last sync, and what a sync set aside."
+package = "M6"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[schema.work-claim]
+summary = "Fields of a work claim."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[schema.clone]
+summary = "Fields of the clone record."
+package = "M6"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[command.sync]
+summary = "Brings this clone's state and the remote's together: flush, fetch, combine, push, in a stated order; refuses out loud when it cannot."
+package = "M1"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[command.claim-take]
+summary = "Takes over a work claim another clone holds; person only, in a terminal."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[command.claim-release]
+summary = "Gives up a work claim this clone holds, after publishing the work it covers."
+package = "M3"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.team-config-keys]
+summary = "Every [team] key with its type, default and meaning, and who gives it its value."
+package = "M6"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.team-checks]
+summary = "The rules every team check follows, and the checks of joining, versions, what stays on one machine, identity and order."
+package = "M6"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.sync-checks]
+summary = "The checks of the sync: remote and ref, when a run may start, a state branch rewound or deleted, what arrived, how two histories combine, how a push is judged, and one clone that finds a second."
+package = "M1"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.work-claim-scopes]
+summary = "What can be claimed: each scope with its file, who takes it, how long it is held and the paths and branch it covers."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.work-claim-checks]
+summary = "The checks of taking, releasing and taking over a work claim, of hand-off, of minted ids and of a decision settled on two clones."
+package = "M2"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[table.team-delivery-checks]
+summary = "The checks of team delivery, of commits made by hand, and of a wave whose stories several clones hold."
+package = "M4"
+group = "team"
+sources = ["decisions.md#D33"]
+
+[packaging.proof-team]
+summary = "The team proof: the scenarios run on two clones of one remote, each with what must be true at the end, and what passing it unlocks."
+package = "M5"
+group = "team"
+sources = ["decisions.md#D33"]

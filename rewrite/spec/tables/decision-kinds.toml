@@ -1,0 +1,75 @@
+# sources: BLUEPRINT.md#4.11, state.md#2.8, pipeline.md#2.6
+# The nine decision kinds: when each opens, its choices, and the status each choice sets
+# (the choice-verb to status mapping is in topic:decisions).
+
+[[kind]]
+id = "brief"
+opened_when = "The brief skill ends, or discover in assess mode ends (either way the checkpoint that opens the decision also opens the cycle)"
+approved = ["approve"]
+revise = ["revise -- <guidance>"]
+rejected = ["drop"]
+
+[[kind]]
+id = "spec"
+opened_when = "spec ends; feature on the standard route or as an amendment ends; ingest ends (the recovered baseline); multi for a project-level specification"
+approved = ["approve [variant=<id>] [topology=single or split]"]
+revise = ["revise [stage=<name>] -- <guidance>"]
+rejected = ["drop"]
+note = "An approval is bound to a digest of exactly what was approved: the specification file set for spec. Approve maps to the status approved, and the specification set is locked from that moment. For an empty repository the packet also shows the toolchain lines ([commands], [paths]) that approval will write into factory.toml"
+
+[[kind]]
+id = "release"
+opened_when = "verify ends"
+approved = ["approve"]
+revise = ["hold -- <guidance>"]
+rejected = []
+note = "An approval is bound to a digest of exactly what was approved: the commit for release"
+
+[[kind]]
+id = "ideas"
+opened_when = "discover in scan mode ends"
+approved = ["select pursue=<ids> research=<ids> defer=<ids> reject=<ids>"]
+revise = []
+rejected = []
+note = "One command for the whole list; each idea's own status is set from its list"
+
+[[kind]]
+id = "merge"
+opened_when = "A delivered story waits for a person: protected path, dependency change, or delivery.merge = \"human\""
+approved = ["approve"]
+revise = []
+rejected = ["reject"]
+note = "approve: the next vsdd story deliver performs the merge, and a dependency it names is recorded as approved. reject: the pull request is closed and the story is descoped. In maintain, dependency changes are batched into one decision per run"
+
+[[kind]]
+id = "plan"
+opened_when = "Configured, or the estimate exceeds stops.plan_ceiling_agents"
+approved = ["approve"]
+revise = ["revise -- <guidance>"]
+rejected = []
+note = "Authorising the spend"
+
+[[kind]]
+id = "finding"
+opened_when = "A review loop reached its cap with an upheld blocking finding or an uncovered item, or a critical or security finding"
+approved = ["waive key=<key> [key=<key> ...] -- <reason>", "waive-coverage item=<item> [item=<item> ...] -- <reason>"]
+revise = ["direct -- <guidance>"]
+rejected = ["descope"]
+note = "The keys or items are recorded as waived; direct means exactly one more round with the guidance"
+
+[[kind]]
+id = "spec-gap"
+opened_when = "A reviewer showed the approved specification is silent or wrong"
+approved = ["amend"]
+revise = ["not-a-gap -- <reason>"]
+rejected = ["descope"]
+note = "amend writes an amendment request for the open cycle; the amendment run ends at decision spec, and plan then runs in delta scope"
+
+[[kind]]
+id = "blocked"
+opened_when = "A unit cannot continue for one of four reasons, which the packet and the briefing line state: spike_limit (a step needs more spikes than allowed), environment (a credential, access right or tool is missing), stuck (the unit failed in two runs), reviewer (a reviewer refused or could not review; opened the first time)"
+approved = ["retry", "open-spike name=<name> (for spike_limit)", "skip (for an optional environment check)"]
+revise = ["direct -- <guidance>"]
+rejected = ["descope"]
+note = "retry (also \"I have supplied it\" for environment)"
+

@@ -1,0 +1,110 @@
+[
+  {
+    "id": "S3R-hook-runner-b-1",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_released_under_busy); next/tests/hooks/test_liveness.py (test_release_logs_a_busy_store)",
+    "problem": "When lock_release raises StoreBusy, records puts the entries it did release on busy.released. See locks.lock_release, and outcome S3R-records-C2-2: 'exc.released holds the entries actually released'. liveness reads busy.entries instead, finds nothing and logs no lock.released. It also returns [], although those entries were removed from lock.json and their runs ended. test_release_logs_a_busy_store raises its own StoreBusy subclass that carries .entries, so the test pins a shape records never raises. A probe in a scratch copy raised StoreBusy with .released=[{run: <id>}] from lock_release. The result was zero lock.released events and only runner.liveness_error. The builder reported this seam as a departure that follows records' contract, but the attribute name does not match.",
+    "proposed_resolution": "Read the released entries from getattr(busy, 'released', None). In the test, raise a plain StoreBusy with .released set the way locks.py sets it. Better, drive the real lock_release with two entries of one session, one of whose run_end is held busy. Close S3B-hook-runner-b-2 against records' name 'released'.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-2",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_liveness.py (test_lock_refresh); rewrite/findings/outcomes/step3-hook-runner-b.json (P3SEAM-24, P3OPS-20)",
+    "problem": "P3SEAM-24 and the refresh half of P3OPS-20 are marked fixed, citing the --run, step.run and story-worktree cases of test_lock_refresh. Every one of those cases is sent with the holder's own session id (SESSION) and an agent id. lock_seen's _belongs matches on the session alone, so all of them pass without the code they cite. Mutation in a scratch copy: passing run='' and story='' to lock_seen left all seven tests in test_liveness.py green. A separate probe showed that the code does refresh for another session's --run and step.run calls: the fix is there, but no test would catch its loss. The P3SEAM-24 outcome also says steps 'given by path' the story worktree are covered. Read, Edit and Grep are not wired (D2), so a reviewer that only reads refreshes only when it returns its StructuredOutput. A review longer than 20 minutes still goes stale, which is the exact scenario the finding names.",
+    "proposed_resolution": "Add test_lock_refresh cases from a different session id with an agent id: '--run <id>', '--run=<id>', a step.run, and a Bash call whose cwd is the story worktree. Add a negative case where the --run value is another run id. Reword the P3SEAM-24 outcome: the case of a reviewer that only reads waits for a rule that wires Read/Edit (D2). Alternatively, record that half as left-for-builder.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-3",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (classes_of, _under_any)",
+    "problem": "The tmp test compares a realpath'd path with Path(tempfile.gettempdir()), which is not resolved. On macOS gettempdir() is /var/folders/.../T, and /var is a symlink to /private/var, so every real temporary path resolves to a location outside it. Such a path is classed 'outside', never 'tmp'. Probe: Path(tempfile.gettempdir())/'vsdd-probe.txt' gave ('unclassified', 'outside'). classes.toml makes tmp always writable, so write-scopes (H5) built on this would block writes to the temporary directory on macOS. test_computed_classes passes only because its fake temporary root sits under pytest's tmp_path, which is already resolved.",
+    "proposed_resolution": "Resolve the temporary directory once, with os.path.realpath(tempfile.gettempdir()), and use that in both tmp checks. Add a test that classes a file under the real gettempdir(), not a fake root built from tmp_path.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-4",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (classes_of); next/tests/hooks/test_classes.py",
+    "problem": "tmp is added to every path under the temporary directory, including the project's own state and product paths when the project itself lies there. classes.toml's closing comment treats project, tmp and outside as separate regions: outside means outside the project, the plugin directory and tmp. tmp is always writable, so in a project under /tmp every path, runs and brief included, would carry an always-writable class. On Linux, a supported platform, pytest's tmp_path is under /tmp, which is not a symlink. There test_state_classes_innermost_first and test_product_class_by_precedence fail. Simulated here by setting TMPDIR to a resolved directory, they return ('brief', 'spec-product', 'tmp') and ('tests', 'project', 'tmp'). The suite is green on macOS only because of S3R-hook-runner-b-3, and fixing that finding alone makes these tests fail on macOS too.",
+    "proposed_resolution": "Give tmp only to a path outside the project root: test the project first, then tmp, then outside, as the closing comment orders the regions. Add a test whose project root lies under a monkeypatched temporary directory. Run test_classes.py once with TMPDIR set to a resolved directory.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-5",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_product_classes); next/tests/hooks/test_classes.py (test_invalid_policy_is_the_rules_fault)",
+    "problem": "Plan 3.1 promises that a policy table that does not load raises PolicyInvalid, giving the rule that read the field the code policy_invalid. Only the state-directory branch calls hooks.policy.tables(). The product branch goes straight to S1's path_class, which loads classes.toml through vsdd.policy.load and lets FileNotFoundError or TOMLDecodeError escape. Probe with classes.toml unreadable: a gate rule reading ctx.classes for src/a.rs was blocked as rule_error ('FileNotFoundError: classes.toml missing'), not policy_invalid. The test covers only a state path (brief.md).",
+    "proposed_resolution": "Call tables() at the top of classes_of, so a broken table raises PolicyInvalid on every branch; it is cached, so this costs nothing. Alternatively, re-raise OSError and ValueError from path_class as PolicyInvalid. Add a product-path case to test_invalid_policy_is_the_rules_fault.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-6",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (classes_of); next/plugins/vsdd-factory/py/vsdd/hooks/model.py (Ctx.classes); rewrite/spec/topics/rule-model.md (target row)",
+    "problem": "rule-model.md's target row, taken from hooks.md 2.5, says that class matching tests both the literal and the resolved path. ctx.classes classes only the resolved target. paths.classes_of applies os.path.realpath to whatever it is given, so even ctx.classes_of(ctx.target_literal) cannot answer for the literal path. Probe: with .factory/specs/product/brief.md a symlink to src/x.rs, both forms gave ('unclassified', 'project'), and 'brief' appeared in neither. A write-scopes or tests-first rule built in step 4 on ctx.classes would judge a write through a symlink only by where the link points. The builder did not report this departure.",
+    "proposed_resolution": "Class the literal path in its absolute form, without realpath, as well as the resolved path, and have ctx.classes return the union of the two, keeping innermost-first order. Alternatively, give classes_of a resolve flag and document that rules must call it for both forms. Either way, add a symlink case to test_classes.py. If the design is to change instead, amend rule-model.md and say so in the plan.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-7",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-b.json (P3OPS-20)",
+    "problem": "P3OPS-20 is recorded as 'fixed', but its own text says the clear half, whether a workflow survives /clear, is left for B8 and then H9. Plan 6 records that half as left-for-builder. As written, the ledger shows the whole finding closed. PR4C-15, left-for-builder, does carry the probe.",
+    "proposed_resolution": "Record P3OPS-20 as left-for-builder for B8, with the refresh half noted as done, or point the outcome at PR4C-15 explicitly so the clear half cannot be lost.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-b-8",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_liveness.py (test_flush_lock_held_never_blocks_session_end)",
+    "problem": "The test asserts only exit 0 and isinstance(lock_entries(...), list). It would pass if the release deleted the entry without ending its run, or if it took the whole platform budget. Its docstring promises 'promptly and says so', and it checks neither. A probe of the same setup took 0.6 s, kept the entry, left the run not ended, and logged runner.liveness_error with StoreBusy.",
+    "proposed_resolution": "Assert that the launch takes under about 1.0 s, that the session's entry is still in lock.json with its run's 'ended' empty, and that a runner.liveness_error naming StoreBusy is logged.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-9",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (run_of)",
+    "problem": "run_of recognises a vsdd segment by segment.program == 'vsdd'. caller.is_vsdd_call uses os.path.basename(segment.program) == 'vsdd'. A call by path, such as '.../bin/vsdd gate --run <id>', therefore gets the caller marker but passes no run to lock_seen. The two predicates for one fact disagree.",
+    "proposed_resolution": "Use the basename test, ideally through one helper shared with caller.py, and add a path-form case to test_lock_refresh.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-10",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (_refresh); rewrite/spec/topics/run-lock.md (Liveness)",
+    "problem": "run-lock.md lists among the calls that belong to a run any call whose target path or effective directory lies in a worktree the run owns. For Bash, rule-model gives one effective directory per segment: a cd, git -C or vsdd -C prefix. The refresh passes ctx.story, which for Bash is read from the payload cwd only. So 'cd .worktrees/S-3.01 && cargo test', or 'vsdd -C .worktrees/S-3.01 ...', run from the project root does not count by story. The session match, after item 28, covers subagents today, so nothing is lost on the slice, but the spec and the code disagree.",
+    "proposed_resolution": "Pass the story of the first segment whose effective directory is in a story worktree (ctx.story_at(segment.where)), or reword run-lock.md to say the payload cwd for Bash.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-b-11",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_in_own_worktree)",
+    "problem": "classes.toml defines own-worktree as the union of the worktree that holds the caller's working directory and, for a spike runner, the worktree its open ledger entry records. That includes the throwaway platform worktree a spike runner is given. The code uses containing_worktree, which answers None outside .worktrees/, so a platform worktree (.claude/worktrees/<id>) is never own-worktree, and the ledger half is absent. Neither gap is stated in paths.py or the plan.",
+    "proposed_resolution": "Say in paths.py's docstring, and in the spike-bounds package brief, that the ledger union and platform worktrees arrive with spike-bounds. Then build them there, with a test.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-b-12",
+    "origin": "slice step 3, hook-runner-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (module docstring); next/plugins/vsdd-factory/py/vsdd/hooks/__init__.py; rewrite/spec/topics/rule-model.md (Path classes)",
+    "problem": "registry.py's module docstring still says two duties are wired with no rule, PreToolUse on Bash and SessionStart. There are now four, adding StructuredOutput and SessionEnd. hooks/__init__.py, a hook-runner file, lists the package's modules without paths and liveness. rule-model.md says own-worktree is computed 'by `where`, which defaults to the payload `cwd`'. In that file `where` is the Ctx field for the effective directory, which classes.toml says own-worktree is deliberately not.",
+    "proposed_resolution": "Update the registry docstring. Ask the hook-runner owner to add the two modules to __init__.py. In rule-model.md, say 'by the caller's working directory (the payload cwd), or the directory passed to classes_of'.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,146 @@
+[
+ {
+  "id": "PL6-1",
+  "origin": "slice step 6, plan review",
+  "severity": "blocker",
+  "where": "rewrite/plans/step-6/story-workflow.md; rewrite/plans/step-5/agents.md",
+  "problem": "W2 D6 sends every fix and repair to the story kind's implement agent with method fix-findings. Its contract fails any call whose method is not in the agent's list, and the test `each kind is fixed by its own builder` runs every shipped [[story-kind]] row. agents.md section 3 gives technical-writer only `docs`, devops only `repo-setup` and verifier only `proofs`, and test_agent_files.py holds each agent to that list. So W2's own tests fail on the docs, chore and harness rows, and W2 section 8 tells its builder to stop. STATE next action 5 does not carry this correction into the step 5 build. In the same way, review-story-diff's rule that the test-writer owns test and coverage findings must give way to the owner the task names. Otherwise a kind with no red gate gets findings routed to a test-writer whose re-freeze fails (gates.md D16).",
+  "proposed_resolution": "Put both corrections in the notes of the step 5 build. First, technical-writer, devops and verifier list fix-findings, and test_agent_files.py's method table follows. fix-findings says that for a kind with no red gate the agent fixes within its own write scope. Second, review-story-diff takes each finding's owner from the task when the task names one for every category. If that is not wanted in step 5, W2 narrows `each kind is fixed by its own builder` to the feature row and records the other rows as left for A5.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-2",
+  "origin": "slice step 6, plan review",
+  "severity": "major",
+  "where": "rewrite/plans/step-6/story-workflow.md; rewrite/plans/step-6/first-run.md",
+  "problem": "W2 needs the fixture's factory.toml to set spikes.per_run = 0, so that a spike request ends blocked spike_limit inside step() and never reaches runSpike(). The spike-runner has no agent file on the slice. first-run sets only three keys and does not mention this one. It could not set it anyway: config.py types spikes.per_run and per_step as INT1, an integer of at least 1 (config.py lines 51 and 162-165), so config.load refuses 0. With the shipped value of 6, any step that returns needs_spike makes the run call agent() with an agent type that has no file. What happens then is W2's own open question (throw, null, or run untyped), it is unproven, and the first-run diagnosis names no cause for it.",
+  "proposed_resolution": "(a) The owner of config.py allows 0 for spikes.per_step and per_run, using an INT0 kind (the spec sets no minimum). The loader sets spikes.per_run = 0 as a fourth set_key, and a fixture test asserts the survey answers limits.spikes_per_run == 0. Or (b) W2 sets RUN.limits.spikes_per_run = 0 after applyLimits, with a comment naming A3, S6 and H8, and removes it when they are built. Under either, the first-run diagnosis adds the cause spike_limit. If neither is taken, add the unknown-agentType leg to the probe of PL6-4.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-3",
+  "origin": "slice step 6, plan review",
+  "severity": "major",
+  "where": "rewrite/plans/step-6/story-workflow.md; rewrite/plans/step-4/verdicts.md",
+  "problem": "Delivery merges only when G3's covering() finds a converged verdict rebuilt from the stored step records, so the script and the tool meet only in those records. W2's scenario stubs are shaped to fit W2's own reading. verdicts.md's records cases are written by hand. The loop conformance cases compare converge() with the Python replay, not with the records the script's steps actually produce: names, loop and pass, method, agent type, the fix's gate entries, and a later loop's items. first-run's deliver_scripted stores records the way delivery_fixtures does, not the way the script does. Nothing would catch a mismatch at this seam before the real platform answers refused.",
+  "proposed_resolution": "W2's test_story_workflow.py gains test_script_records_rebuild_to_the_script_verdict. It runs the shipped story.js in node for these scenarios: clean; a test finding fixed by the test-writer and then the implementer; a coverage gap; a dispute ruled not_defect; the cap; a repair that adds a file (loop 2); and review_stale. It turns each returned step result into the record the step-results rule would store: agent_type from the call's agentType, the result's head, in call order. It then calls vsdd.state.verdicts.rebuild(records, subject, cap, waived, acs, changed), with changed answered from the scenario's --since stubs. It asserts that the tool's outcome, reason, passes, rounds_used, coverage_missing and chain equal the script's verdict, and that skipped is empty.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-4",
+  "origin": "slice step 6, plan review",
+  "severity": "major",
+  "where": "rewrite/plans/step-6/first-run.md; rewrite/plans/step-6/story-workflow.md",
+  "problem": "Neither plan makes the platform behaviour the first run depends on a gate to be checked first. (1) Do --plugin-dir hooks, workflows and bin/ load under --setting-sources project,local --strict-mcp-config? Every round-4 run had user settings loaded, which on this machine include skipWorkflowUsageWarning. (2) Does the typed workflow command work with no skill in default mode? Item 31 was seen only in round 3, which ran in auto mode. Round 4 always entered through the typed skill probecall, and in the C30 control the model went through Skill and was refused. W2 builds no skill on item 31 alone. (3) With bare tool names allowed, can a step Read the method file under the plugin directory (outside cwd), and Edit and Write in a linked worktree? (4) Item 26: does the effort.level in a payload show the step's effort when the session's effort differs? first-run's tier_applied assumes it does. (5) What does a --max-budget-usd stop leave in the middle of a workflow? (6) Unless PL6-2 is resolved: what happens with an agentType that has no file?",
+  "proposed_resolution": "Make one probe round a gate in ORDER.md before E2's first run. Run one or two headless sessions on a scratch copy of the spike plugin, each started by the typed workflow command itself (no skill), with first-run's exact flags plus --effort medium. Use a one-step workflow whose low-effort step reads a file under the plugin directory, edits and writes in a linked worktree, runs plain Bash and returns. Add a second leg: a three-step workflow under --max-budget-usd 0.05. Pass means a hook log, a workflow result, empty permission_denials, and the payload's effort recorded. Expected cost is under a dollar. Record the results as platform items, and set first-run's D8 defaults from them.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-7",
+  "origin": "slice step 6, plan review",
+  "severity": "major",
+  "where": "next/tests/unit/story_ready.py (_install_product); rewrite/plans/step-4/gates.md section 7; rewrite/plans/step-4/survey-2.md; rewrite/plans/step-6/first-run.md",
+  "problem": "story_ready.make_project(product=<directory>) copies every child of the product directory, .factory/ included, then sets paths.source to every top-level name. On tests/e2e/sample-project the project's own factory.toml is overwritten by the sample's (delivery.mode = pr, state.push = true) and paths.source becomes .factory/**, .gitignore/**, README.md/**, tally/**, tests/**, tools/**, so tests/** is both a tests and a source class. The step 4 gates unit builds tests/unit/gate_project.py on exactly this call, and survey-2's and delivery's fixtures build on that: a red gate that does not count a source-class test, and a tests-first rule that blocks a source write after red, would misread the sample's tests, and delivery would refuse. No test covers the product option.",
+  "proposed_resolution": "In the survey unit's story_ready.py: skip .factory (and .git) when copying a product directory, and set [paths] from the product's own .factory/factory.toml when it has one (the sample's is tests = [tests/**], source = [tally/**, tools/**]); keep the project's own delivery and state settings. Add a test of the product option on the tally sample.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-5",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md; rewrite/plans/step-6/story-workflow.md",
+  "problem": "The kept round-4 session folder answers first-run open question 3 and W2 open question 1. The folder is ~/.claude/projects/-private-tmp-...-pr4-project/1cf1064b-.../. Its wf_*.json has the keys script, scriptPath, status, result, agentCount and workflowProgress. For a call by name, script and the file at scriptPath equal the plugin file byte for byte. workflowProgress gives each agent's agentType and full model id, and the step transcripts carry tool_use entries. W2 asks the driver to log Workflow PreToolUse and PostToolUse through a hook, but first-run builds no such hook and does not need one, because the run-record check is what item 49 prescribes. The PostToolUse input of a named call also carries script, so a 'no script' test is valid only on PreToolUse. first-run D11 says the model is seen only in modelUsage. That cannot attribute a model to a step, and the plan gives no mapping from alias to id.",
+  "proposed_resolution": "Record the folder's shape as a platform item. In first-run's tier_applied, take each step's model from workflowProgress, joined to the payloads by agentId, and match an alias as a segment of the id. Use modelUsage only for the main session. Model fake_claude.py and deliver_scripted on that record shape. W2 drops the request for a hook and keeps the byte check as the driver's.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-6",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md; rewrite/plans/step-6/story-workflow.md",
+  "problem": "Under the default cheap tier the override is sonnet:low, the session runs --effort low, and the clerk tier is low too. If a payload reports the session's effort (item 26 is open), every effort.level reads low whether or not the override applied. So the run meant to settle item 18 passes tier_applied on effort without testing anything. Also, the first survey clerk runs before the override is known, at the clerk tier. With any --tier other than sonnet:low, tier_applied fails on that step, and W2's `a tier override reaches every step` has to exempt it.",
+  "proposed_resolution": "Assert the override from the captured StructuredOutput payload of the survey clerk (config.tier_override). That settles item 18 directly. Run the session at an effort no probe tier uses (for example --effort medium). Exempt the first survey step from both tier_applied and W2's contract, and say so in both plans.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-8",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/story-workflow.md; rewrite/plans/step-5/agents.md",
+  "problem": "W2 D11 adds to relay(): 'If the call is moved to the background, run the same command again', for every relayed command. probes-4-apply-C2-3, which STATE sends into the step 5 build, limits that sentence to job commands (story deliver): survey and checkpoint return directly, and a moved call of theirs is waited for. Being safe to repeat one after another is not the same as being safe to run beside a copy still running. Built as planned, the clerk file and the relay prompt disagree again, which is the fault C2-1 was about.",
+  "proposed_resolution": "Use one text in both relay() and the clerk file: 'If a vsdd story deliver call is moved to the background, run the same command again: it re-attaches to its job. A moved call of any other command: wait for it, as the notice says.' W2's clerk-prompt test checks that text.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-9",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/story-workflow.md",
+  "problem": "W2 D4 says the built 'could not build the story unit' path keeps the lock and sets run_id. As built (survey.py lines 151-164), that path releases the lock and empties run_id (S3R-survey-C1-1), and survey-2's re-measure failure does the same. The case that is really left is different: a lock release that itself fails leaves the lock held with run_id empty. W2 cannot close that, and does not say so.",
+  "proposed_resolution": "Restate D4 against the code and keep the branch and its test as a defence. Name the release-fault case as the survey's to recover from: the next survey can take the run once the lock is stale, and the driver releases it through first-run refusal 7 (lock release --force).",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-10",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/story-workflow.md; rewrite/plans/step-4/gates.md",
+  "problem": "W2 takes a later loop's items from the --since green result's changed_files. The schema leaves that field optional, and the step-results rule checks only gate, subject, sha and passed. A copy that drops the list therefore passes every check, and an empty item list lets the script's loop converge on nothing while the tool names files. W2's table also does not say that the test-writer's green command in a later loop carries --since <from>.",
+  "proposed_resolution": "W2 reads a --since entry without a changed_files array as an unusable result: the step failed, with a summary that names the field. W2 gives the test-writer the --since green command in a later loop, with one scenario test for each of these two points. gates.md may make changed_files and test_output required on a green result.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-11",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md",
+  "problem": "holdout_wall measures nothing on this fixture. The overlay has no .factory/holdout, and H2's read walls are not on the slice. Either the check passes because there is nothing to read, or, with a holdout file added, it fails for a rule the slice does not enforce.",
+  "proposed_resolution": "Keep the transcript reader. Report holdout_wall as not applicable (no holdout in the overlay, H2 not built) and leave it out of ok. Make it a pass condition when E2 widens with a holdout overlay and H2.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-12",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-4/ORDER.md; rewrite/plans/step-4/gates.md; rewrite/plans/step-6/story-workflow.md",
+  "problem": "ORDER-4 section 7 says the script does not record evidence again after a repair, so a demo: true story is refused at the demo row. But gates.md D14's demo rule is a file check plus green covering the head, so the old recording passes at the new head and the story would merge with a demo older than the repair. W2 D9 records again, which is right either way. Not on the slice's path.",
+  "proposed_resolution": "The integrator strikes ORDER-4's sentence in favour of W2 D9. G2, when widened, records the commit each recording was made at and refuses a recording older than the head.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-13",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md",
+  "problem": "The gates and delivery row 6 need a clean story worktree, and M3 tells builders to commit everything. The sample's .gitignore does not cover .pytest_cache/, .ruff_cache/ or .mypy_cache/. A builder that runs pytest or ruff in the worktree either fails its gate on dirt or commits the cache. Committing the cache then fails integration_holds_change on a story that was delivered.",
+  "proposed_resolution": "first-run adds the three caches to tests/e2e/sample-project/.gitignore, beside its README and factory.toml edits, and test_sample_commands_run_offline_and_leave_nothing covers the file.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-14",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md",
+  "problem": "Section 3.7 makes a resume the person's re-run, but open question 4 says the driver treats any subtype other than success as a failed attempt and resumes. If resuming is automatic, nothing bounds the number of attempts. --max-budget-usd caps one session only, so total spend across attempts is unbounded.",
+  "proposed_resolution": "State that the driver never starts an attempt by itself. report.json sums cost over all attempts, and the driver refuses an attempt (exit 2) when recorded spend plus the next cap would exceed a total for the tier or --budget.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-15",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/story-workflow.md",
+  "problem": "Some scenario tests would pass with the script wrong. No test covers a reviewer whose reviewed_sha is not the head ending failed with no_result. None checks that a later loop's fix steps and the test-writer's green command carry --since. The default step stub never returns a green result shaped like a real --since result (changed_files and range patch) unless a test overrides it. And the contract's model and effort assertion has to exempt the first survey call under an override.",
+  "proposed_resolution": "Add two tests: `a reviewer on another commit ends failed` and `a later loop fixes close with --since`. Make the default green stub for a --since closing return changed_files and a range diff_patch built from the scenario's files. Exempt the survey step in the tier assertion, as PL6-6 says.",
+  "on_slice_path": true
+ },
+ {
+  "id": "PL6-16",
+  "origin": "slice step 6, plan review",
+  "severity": "minor",
+  "where": "rewrite/plans/step-6/first-run.md; rewrite/plans/step-4/survey-2.md; rewrite/plans/step-4/delivery.md",
+  "problem": "For a story delivered within one run, the checkpoint writes only the review and deliver stage entries and then drops the evidence, and the squash merge deletes the branch. Only the local step records and unreachable loose objects, read at once after the session, show that the tests came first. A clone, or the same machine later on, cannot show it.",
+  "proposed_resolution": "This is first-run's question for the person, extending STATE waiting item 6. Until it is answered, run as planned. If the answer is to keep a record, survey-2's assess writes the tests and implement entries for a delivered story from the run's passing red and green step entries, which needs no evidence.",
+  "on_slice_path": true
+ }
+]

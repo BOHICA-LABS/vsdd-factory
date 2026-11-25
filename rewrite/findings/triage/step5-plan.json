@@ -1,0 +1,106 @@
+[
+ {
+  "id": "S5P-N1",
+  "files": [
+   "topics/story-script.md",
+   "workflows/story.md"
+  ],
+  "packages": [
+   "S3",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N2",
+  "files": [
+   "topics/agent-file.md"
+  ],
+  "packages": [
+   "C1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N6",
+  "files": [
+   "packaging/tests-workflows.md"
+  ],
+  "packages": [
+   "B5",
+   "A1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N7",
+  "files": [
+   "topics/prelude-run-spike.md",
+   "topics/spikes.md"
+  ],
+  "packages": [
+   "A3",
+   "S6",
+   "H8",
+   "E2"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N8",
+  "files": [
+   "schemas/step-result.schema.json"
+  ],
+  "packages": [
+   "C1"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S5P-N9",
+  "files": [
+   "topics/story-script.md",
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "W2",
+   "G3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N10",
+  "files": [
+   "topics/story-script.md",
+   "workflows/story.md"
+  ],
+  "packages": [
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N11",
+  "files": [
+   "topics/story-script.md",
+   "schemas/story-unit.schema.json"
+  ],
+  "packages": [
+   "S3",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S5P-N12",
+  "files": [
+   "platform.md",
+   "topics/platform-proven.md"
+  ],
+  "packages": [
+   "B8",
+   "E2"
+  ],
+  "on_slice_path": true
+ }
+]

@@ -1,0 +1,116 @@
+# sources: pipeline.md#2.5, BLUEPRINT.md#4.12, state.md#2.12
+# Each limit: the design's row, the name the survey returns it under (the prelude's name, where the
+# blueprint's mapping gives one; ci_minutes is the prelude name of delivery.ci_wait_minutes, the CI wait
+# in the delivery-rounds row of [[config:limits]]), its factory.toml key, its default, what enforces it
+# and what happens at the limit. A test fails on any unknown limit key.
+
+[[limit]]
+name = "agents"
+key = "limits.agents_per_run"
+limit = "Agents per run"
+default = "900 (the platform stops at 1,000; a parent and its children share the platform's counter)"
+enforced_by = "Script counter"
+at_the_limit = "Stop starting work, return partial; the same command continues"
+
+[[limit]]
+name = "story_agents"
+key = "limits.agents_per_story"
+limit = "Agents per child story"
+default = "40"
+enforced_by = "The child's own counter in step()"
+at_the_limit = "The story returns blocked with kind agent_budget"
+
+[[limit]]
+name = "stories_per_run"
+key = "limits.stories_per_wave_run"
+limit = "Stories per wave run"
+default = "24"
+enforced_by = "Script"
+at_the_limit = "partial"
+
+[[limit]]
+name = "attempts"
+key = "limits.step_attempts"
+limit = "Attempts per step (unusable result, or the step's gate fails)"
+default = "2"
+enforced_by = "Script"
+at_the_limit = "Unit failed, or blocked with kind gate"
+
+[[limit]]
+name = "passes"
+key = "convergence.passes"
+limit = "Review passes: story, spec"
+default = "3, plus 1 after arbitration"
+enforced_by = "Script; the tool recomputes"
+at_the_limit = "The convergence rule of [[topic:convergence]]."
+
+[[limit]]
+name = "rounds"
+key = "convergence.rounds"
+limit = "Review rounds: wave, verify"
+default = "3, plus 1 after arbitration"
+enforced_by = "Script; the tool recomputes"
+at_the_limit = "The convergence rule of [[topic:convergence]]."
+
+[[limit]]
+limit = "Review passes: plan, ingest"
+default = "2"
+enforced_by = "Script"
+at_the_limit = "Open findings go to the packet or report"
+
+[[limit]]
+name = "delivery_rounds"
+key = "limits.delivery_rounds"
+limit = "Delivery rounds per story"
+default = "3; each CI wait is one job of at most delivery.ci_wait_minutes (30), served by one clerk"
+enforced_by = "Script and tool"
+at_the_limit = "Blocked"
+
+[[limit]]
+name = "ci_minutes"
+key = "delivery.ci_wait_minutes"
+default = "30 (total waits, taken in slices of nine minutes)"
+
+[[limit]]
+name = "gate_minutes"
+key = "limits.gate_minutes"
+limit = "Gate run time"
+default = "limits.gate_minutes (60), waited in slices of nine minutes"
+enforced_by = "Tool"
+at_the_limit = "The gate result is ok: false"
+
+[[limit]]
+key = "maintain.fixes_per_run"
+limit = "Fix stories per maintain run"
+default = "10"
+enforced_by = "Script"
+at_the_limit = "The rest are reported"
+
+[[limit]]
+name = ["spikes_per_step", "spikes_per_run"]
+key = ["spikes.per_step", "spikes.per_run", "spikes.per_day"]
+limit = "Spikes per step, per run, per day"
+default = "2, 6, 20"
+enforced_by = "Script and tool"
+at_the_limit = "The spike bounds of [[topic:spikes]]; vsdd spike open remains the backstop."
+
+[[limit]]
+name = "spike_minutes"
+key = "spikes.minutes"
+limit = "Spike time box"
+default = "20 minutes"
+enforced_by = "Hook"
+at_the_limit = "The spike bounds of [[topic:spikes]]."
+
+[[limit]]
+key = "limits.failed_runs_before_stuck"
+limit = "Runs in which a unit failed without a human-decidable reason"
+default = "2"
+enforced_by = "Tool"
+at_the_limit = "Decision blocked with the reason stuck"
+
+[[limit]]
+limit = "Token budget, if the person set one"
+default = "none"
+enforced_by = "Platform budget"
+at_the_limit = "partial"

@@ -1,0 +1,38 @@
+[
+ {
+  "id": "layer-2a-fix-3-C1-1",
+  "files": [
+   "tables/lint-checks.toml",
+   "packaging/tests-workflows.md",
+   "workflows/story.md"
+  ],
+  "packages": [
+   "B6",
+   "B5",
+   "W2"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-2",
+  "files": [
+   "topics/caller-identity.md",
+   "topics/rule-model.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "ORCH-3",
+  "files": [
+   "rules/auto-allow.md",
+   "topics/tool-call-approval.md"
+  ],
+  "packages": [
+   "H6"
+  ],
+  "on_slice_path": false
+ }
+]

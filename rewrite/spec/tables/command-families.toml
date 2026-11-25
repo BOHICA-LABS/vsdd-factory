@@ -1,0 +1,26 @@
+# The git and GitHub command families and the callers each is allowed for. Machine copy of the family
+# table of hooks.md section 2.11.1. Sources: hooks.md#2.11.1, agents-skills.md#2.9.
+#
+# shell.py classifies each git or gh segment of a Bash command into exactly one family, and a wall row's
+# commands list grants families (see [[table:walls]]). A row with no commands key, or commands = [], may
+# run none of them, which is how the holdout evaluator gets "no git". Its other restriction, no command
+# that names a source, test or specification path, is read-walls applied to Bash. A call of the plugin's
+# own tool is in no git family.
+#
+# The first six families are closed lists. git-other is whatever is left, so a command nobody thought
+# of is refused for every agent that is not granted it, not allowed.
+
+[families]
+git-commit = "git commit, git add, git rm, git mv, git restore"
+git-read = "git status, diff, log, show, rev-parse, rev-list, ls-files, ls-tree, cat-file, blame, grep, describe, merge-base, shortlog, and the listing forms of branch, tag, remote, stash and worktree (no name to create, move or delete); gh pr view, list, status, checks and diff; gh run view and list"
+git-push = "git push, git tag with a push"
+git-integrate = "git merge, git rebase, git cherry-pick"
+git-worktree = "git worktree add, remove, prune"
+gh-pr = "gh pr create, edit, merge"
+git-other = "every other git and gh command, including the ones that move, create or delete a ref without a commit (update-ref, symbolic-ref, branch and tag with a name, switch, checkout, reset, fetch, pull) and gh api"
+
+# Who holds which family is each row's commands list in [[table:walls]] - the one copy; this table
+# defines only what each family may contain. The main session's row holds "*", and vsdd subcommands
+# are granted per role by the [callers] table in the same file. No granted family overrides
+# [[rule:merge-guard]]: nothing but vsdd story deliver and vsdd release merges into, pushes to or
+# moves the integration or release branch, whoever runs it.

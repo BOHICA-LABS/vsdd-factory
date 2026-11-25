@@ -1,0 +1,38 @@
+[
+  {
+    "id": "d31-fix-2-C1-1",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-duties.toml (test-writer duty, removal clauses); rewrite/spec/tables/flag-story-checks.toml (F-DEFINITION)",
+    "problem": "The removal duty this round added, for a removal that keeps the off behaviour, does not fit its check. The duty says to 'delete its on tests and the test of its definition, and take the token out of the names of the rest'. But the same duty has every off test 'set it off' through the test double, and at a removal F-DEFINITION refuses 'a test that sets it', as the item flag-removed does ('no test sets the key'). So a test-writer that follows the duty produces a removal the green gate refuses. Only the clause that keeps the on behaviour takes the flag setting out ('take the flag setting out of its on tests'). Also, the clause that keeps the on behaviour does not say what becomes of a pending test. Such a removal can be asked for on a flag that is not on, F-ON does not run on a removal story, and F-DEFINITION refuses any moved test that remains. The duty gives no way through, so the story ends blocked with no stated reason.",
+    "proposed_resolution": "In the clause that keeps the off behaviour, add: take the flag setting out of the off tests (and out of any other test that sets the key), then take the token out of the names of the rest. In the clause that keeps the on behaviour, say what a pending test means. For example, a removal that keeps the on behaviour is refused while the flag has a pending test, as a turn-on is (state it in F-DEFINITION's removal refusal, so the message names the test). Or the test-writer returns blocked and names it.",
+    "on_slice_path": false
+  },
+  {
+    "id": "d31-fix-2-C1-2",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/implement-data.schema.json (test_defects description); rewrite/spec/topics/story-script.md (the test-defects prompt); rewrite/spec/tables/flag-duties.toml (implementer duty)",
+    "problem": "The design choice 'no ledger entry was added: test_defects carries a test that F-ON names, with its shape unchanged' is right about the shape (path, test, reason). But the shipped schema describes the field as 'frozen tests the builder believes are wrong and may not edit', and the story script's prompt tells the test-writer 'The implementer reports these frozen tests as wrong'. A test that F-ON names is an existing test the story did not write, and it is not frozen. Moved tests are expressly not held among the frozen tests (F-STATES). So D31 uses a shipped field beyond its documented meaning, with no ledger entry to widen the description. D31-8 makes exactly that kind of change for the acs field. A builder or reviewer who reads the description could reject or ignore such an entry.",
+    "proposed_resolution": "Add a ledger entry, left-for-builder for package F2: widen the description of test_defects in implement-data.schema.json to 'tests the builder believes are wrong and may not edit: frozen tests, and existing tests that the green gate's run with a flag on names'. The shape does not change. Leave the story script's prompt unchanged, so nothing on the slice path changes. F4's harness scenario, in which an existing test is moved once the run with the flag on has named it, already proves that the step works with that prompt.",
+    "on_slice_path": false
+  },
+  {
+    "id": "d31-fix-2-C1-3",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES); rewrite/spec/tables/flag-duties.toml (test-writer duty)",
+    "problem": "The test-writer duty says that a moved test is renamed 'with a token and, in a story behind a flag, the flag off criterion', and the corrector's account says F-STATES checks that a moved test 'names the flag-off criterion'. F-STATES refuses only an off, default or moved test whose name 'names no criterion (ac<N>)', and its reads do not include the story's criteria. The item flag-off does not check the criterion either. So a moved test named for an on criterion passes every check, and gate demo's criterion table then shows a test of the old behaviour as evidence for the new one. The flag-duties header calls a duty with neither a check nor a reviewer a defect of that table.",
+    "proposed_resolution": "In a story behind a flag, have F-STATES refuse a moved test (and, if wanted, an off or default test) whose name names no criterion whose text contains 'flag off', compared without case. F-REQUIRE already guarantees that such a criterion exists. Add the story's criteria to F-STATES's reads. Alternatively, drop 'the flag off criterion' from the duty and let any criterion do.",
+    "on_slice_path": false
+  },
+  {
+    "id": "d31-fix-2-C1-4",
+    "origin": "d31-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/packaging/build-plan.md (Order of work, step 5)",
+    "problem": "The residue of D31R-C-4, which the corrector left for the orchestrating session in a 'fixed' outcome text, where no open list carries it. F5 now depends on G7 because it puts F-CHOICE inside the sweep's spec coherence check (registry.d/d31.toml; packages/F5.md). Step 5 still sums F5 up as extending only 'the planning gates'.",
+    "proposed_resolution": "The orchestrating session changes 'F5 the planning gates' to 'F5 the planning gates and the sweep's spec coherence check'. Nothing else changes: G7 is built in step 3, before any F package.",
+    "on_slice_path": false
+  }
+]

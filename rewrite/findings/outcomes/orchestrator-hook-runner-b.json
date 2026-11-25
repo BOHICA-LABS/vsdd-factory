@@ -1,0 +1,26 @@
+[
+ {
+  "id": "S3R-hook-runner-b-C2-1",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session added H3 to P3SEAM-24's packages in triage/a.json, with a note that states the acceptance for the read-only reviewer half and points at decision D2 of the hook-runner-b plan, not at decisions.md.",
+  "where": "rewrite/findings/triage/a.json"
+ },
+ {
+  "id": "P3SEAM-24",
+  "outcome": "left-for-builder",
+  "what_was_done": "Built by hook-runner-b: the lock is refreshed by a vsdd call that names the run, by a step result of the run, and by a Bash call whose effective directory is in a story worktree of the run. Left for H3: a Read or Grep in the locked run's story worktree, from a second session with an agent id, must refresh the lock, with a test (decision D2 of rewrite/plans/step-3/hook-runner-b.md).",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py; package H3"
+ },
+ {
+  "id": "S3R-hook-runner-b-6",
+  "outcome": "left-for-builder",
+  "what_was_done": "Fixed for the case the finding named. What remains is a path that goes through a directory symlink inside the project and is spelled through an alias of the project root: only its resolved form is classed. Left for H4, which builds the first rule that decides on a path's classes: before the realpath fallback, walk the literal path's parents and anchor at the first ancestor whose realpath equals the resolved root, with the confirmer's probe as the test.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py"
+ },
+ {
+  "id": "S3B-hook-runner-b-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "The reference class (.reference/**) answers unclassified from classes_of. Left for H5 with write-scopes, as the builder proposed: teach the elsewhere branch to answer it, or fold it into path_class.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py"
+ }
+]

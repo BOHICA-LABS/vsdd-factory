@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "repos-split-result.schema.json",
+  "type": "object",
+  "description": "Output of vsdd repos split: ok, repos (state.md#2.16: member repositories; [[repo]] entries appended to factory.toml). The design gives no types and no required list.",
+  "properties": {
+    "ok": {},
+    "repos": {
+      "type": "array",
+      "description": "The member repositories.",
+      "items": { "type": "object" }
+    }
+  }
+}

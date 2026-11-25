@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S3R-hook-runner-b-C2-1",
+    "origin": "slice step 3, hook-runner-b, confirmation",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-b-fix-2.json (the P3SEAM-24 entry); rewrite/findings/triage/a.json (P3SEAM-24)",
+    "problem": "The S3R-hook-runner-b-2 fix records P3SEAM-24 as left-for-builder and says the read-only reviewer half is 'Left for H3 (Walls)'. The ledger cannot route it there. An outcome entry does not set packages: rewrite/findings/triage/a.json gives P3SEAM-24 the packages S2b and H1. After rewrite/tools/findings.py build, P3SEAM-24 is listed in by-package/H1.md and by-package/S2b.md, but not in by-package/H3.md. The H3 builder, who wires Read and Grep for read-walls, never sees it. Wiring Read does refresh the lock by itself (plan D2: refresh runs on every PreToolUse the runner handles, and ctx.story uses a Read's target directory). But nobody in H3 is asked to add the test that a Read in a story worktree from another session keeps the lock alive, and nobody is asked to close P3SEAM-24. The entry's 'where' also cites 'rewrite/spec/decisions.md D2 (the read wiring)'. decisions.md D2 is about the plugin committing and pushing the state branch, not about read wiring. The read-wiring D2 is the plan's own, rewrite/plans/step-3/hook-runner-b.md section 5 D2.",
+    "proposed_resolution": "Add H3 to P3SEAM-24's packages in rewrite/findings/triage/a.json, or record the read-only reviewer half as its own entry triaged to H3. Its acceptance: a test that a Read or Grep in the locked run's story worktree, from a second session with an agent id, refreshes the lock. In the next P3SEAM-24 outcome, replace 'rewrite/spec/decisions.md D2' with rewrite/plans/step-3/hook-runner-b.md section 5 D2.",
+    "on_slice_path": false
+  }
+]

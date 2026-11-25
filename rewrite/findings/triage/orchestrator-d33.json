@@ -1,0 +1,50 @@
+[
+ {
+  "id": "d33-fix-2-C2-1",
+  "files": [
+   "tables/team-delivery-checks.toml",
+   "packaging/proof-team.md"
+  ],
+  "packages": [
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-2",
+  "files": [
+   "commands/survey.md",
+   "commands/gate-wave.md",
+   "commands/gate-release.md"
+  ],
+  "packages": [
+   "M4"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-3",
+  "files": [
+   "tables/sync-checks.toml",
+   "records/clone.md",
+   "schemas/clone.schema.json",
+   "packaging/proof-team.md"
+  ],
+  "packages": [
+   "M1",
+   "M6"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-4",
+  "files": [
+   "tables/team-delivery-checks.toml",
+   "packaging/proof-team.md"
+  ],
+  "packages": [
+   "M4"
+  ],
+  "on_slice_path": false
+ }
+]

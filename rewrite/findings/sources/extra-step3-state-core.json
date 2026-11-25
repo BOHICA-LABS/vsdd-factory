@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S3B-state-core-1",
+    "origin": "slice step 3, state-core, builder",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/.factory/factory.toml; rewrite/spec/topics/project-configuration.md",
+    "problem": "The shipped sample factory.toml omits the [hooks] section (main_session_wall, log_retention_days, rules) although the spec example claims to be the whole key list. The loader fills the defaults, so nothing breaks, but the sample is no longer a full illustration of the key table.",
+    "proposed_resolution": "Have E1 regenerate the sample factory.toml from config.SPECS when the [hooks] keys settle, or add the [hooks] block to the sample by hand.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-state-core-2",
+    "origin": "slice step 3, state-core, builder",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml (placeholder rows: module-map, dependencies, toolchain, holdout-evaluation, demo-evidence, review-report, design-system, asset)",
+    "problem": "Placeholder registry rows carry no max_bytes cell and a string frontmatter cell, so check_text silently applies no size cap and no frontmatter check to those kinds (for example .factory/specs/architecture/dependencies.toml passes validation at any size), while topic:artifact-rules states every file has a size cap checked before the write.",
+    "proposed_resolution": "The packages that ship those kinds (the G series) must give the rows real glob, id, frontmatter and max_bytes cells; until then, test_policy pins the placeholder state, so the waiver is explicit and tested.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3B-state-core-3",
+    "origin": "slice step 3, state-core, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (changed_paths)",
+    "problem": "git status --porcelain collapses untracked directories (?? stories/), so a caller that forgets -uall gets directory names whose files it cannot then read. The shipped helper now passes -uall, but nothing binds future callers to it.",
+    "proposed_resolution": "Note the -uall requirement in topic:state-commits when flush is specified, or move the flag behind a named helper so callers never open-code the status call.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3B-state-core-4",
+    "origin": "slice step 3, state-core, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run)",
+    "problem": "init checks the git identity before detect(), so a project mid-setup gets the identity error even when it would have taken the ready/idempotent path, which writes nothing; the two error orders can disagree about which problem a broken environment reports first.",
+    "proposed_resolution": "If a later package needs the idempotent path to run without a configured identity, move the identity check into the create/mount branch only. Left as is at slice depth because init always ends in a commit.",
+    "on_slice_path": true
+  }
+]

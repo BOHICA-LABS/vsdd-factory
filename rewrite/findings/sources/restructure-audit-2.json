@@ -1,0 +1,899 @@
+{
+ "missing": [],
+ "repairs": [
+  {
+   "area": "rules (rewrite/spec/rules/, the 8 rules-group tables, the 15 hook/rule topics, schemas/event.schema.json, registry.d/hooks.toml)",
+   "summary": "Repaired the rules area of rewrite/spec/ against the six originals. Verified all 22 wall rows cell by cell, restored dropped interface text (launcher skeleton, rule check() signature, main loop, state-API signatures), removed an invented schema field, struck remaining original-document pointers and history phrasing, resolved the demo-recorder/technical-writer command-grant inconsistency, and recorded derivations, disagreements and gaps in conflicts/hooks-repair.md. Both checks pass: spec_lint 0 problem(s); coverage 240 sections, 181 cited, 39 retired, 0 uncovered.",
+   "audit_findings_fixed": [
+    "F01 wall rows wrong for every converter-written row: walls.toml rebuilt and all rows verified against hooks.md#2.7 defaults, agents-skills.md#2.9 and BLUEPRINT.md#4.3; derivations recorded in conflicts/hooks-repair.md",
+    "F02 holdout-evaluator row: full deny list from agents-skills.md#2.9 (17 classes) replaces the shortened-here excerpt; walls row is the single statement",
+    "F03 state functions lost signatures: topics/state-api.md carries the S7 signatures and refusal behaviour verbatim (store_step, settle_decision, spike_entry, spike_admit, spike_attach, story_kind, kind_has_red_gate, caller, evidence, spec_locked, artifact_locked, guidance_locked, unit_tree, lock_seen, lock_release, status, briefing, path_class, verdict); registered in registry.d/hooks.toml",
+    "F04 rule check() signature and main-loop skeleton restored into topics/rule-model.md as written (hooks.md#2.5)",
+    "F13 security-reviewer analysis grant: walls.toml row follows BLUEPRINT.md#4.3 (reviews:create, analysis:create); agents file left to its owner",
+    "F14 walls.toml restored to the original format: top-level [main]/[other]/[\"vsdd-factory:*\"] with [callers] and [reveals] in the same file",
+    "F21 launch.sh skeleton copied byte-identical into topics/hook-launcher.md, replacing the pointer into the original document",
+    "F22 duplicate definitions reduced in my files: caller marker, auto-allow scope table and spike protocol each stated once with links elsewhere",
+    "F23 change history struck from callers.toml, events.toml, rules.toml, path-classes.toml, environment.toml and the rule/topic files; remaining first-pass sentences are design rationale quoted from the originals",
+    "F30 event-type lists agreed: runner.call present in both tables/event-types.toml and schemas/event.schema.json",
+    "F33 small sentences present and verified: expected-time column and ~120-line frontmatter reader (topics/hook-runner.md)",
+    "F34 path-classes globs are machine-matchable; prose moved to comments",
+    "F35 pointers into originals replaced: spike protocol -> [[topic:spikes]], blueprint platform items 33/35 -> [[doc:platform]], launcher -> copied text; invented hooks.md citations removed from environment.toml values"
+   ],
+   "audit_findings_not_mine": [
+    "F05 plan-is-ready definition (routes/preconditions, workflows area)",
+    "F06 roster [platform] table and row format (tables area, roster.toml)",
+    "F07 configuration defaults and meanings (config area)",
+    "F08 prelude constraints behind a link (packaging area)",
+    "F09 spike question normalised-hash wording (topics/spikes, commands area)",
+    "F10 spike retention and named-spike branch rule (worktrees/spike topics, other groups)",
+    "F11 config keys defined three times (config-keys table, config files, schema)",
+    "F12 invented config meanings (config files)",
+    "F15 wrong retirements BLUEPRINT#4.4 and state#2.17 (retired.toml, methods/worktrees owners)",
+    "F16 P2LEAN-17 open offer (platform/decisions area)",
+    "F17 spike open --step syntax (commands/spike-open, topics/spikes)",
+    "F18 wrapped -- in workflow arguments (topics/workflow-arguments)",
+    "F19 limits table rows (tables/limits.toml)",
+    "F20 script harness cases (packaging tests)",
+    "F24 list fields as objects in the seven pipeline schemas and config schema (records group)",
+    "F25 artifacts.toml incomplete (records group)",
+    "F26 roster workflows incomplete (tables/agents group)",
+    "F27 baseline record wording (records group)",
+    "F28 spikes vs blueprint section 6 (topics/spikes)",
+    "F29 command files commentary (commands group)",
+    "F31 retirement reasons (retired.toml owner)",
+    "F32 conflicts note wrong (conflicts/commands.md)",
+    "F33 remainder: state.md#5 P-7 packet reason (records group)"
+   ],
+   "content_restored": [
+    "launch.sh skeleton, byte-identical (uv-missing message, [uv_missing]/[launch_rc_N] codes, mode branches, exit-code mapping) -> topics/hook-launcher.md",
+    "the @rule declaration with def check(ctx: Ctx, cfg: RuleConfig) -> Outcome | list[Outcome] | None and its comments -> topics/rule-model.md",
+    "the runner main-loop skeleton as written -> topics/rule-model.md",
+    "the state API: all S7 signatures, refusal causes, one-second-except-flush budget, vsdd.project.path_class and vsdd.state.verdict -> topics/state-api.md (new file, registered in registry.d/hooks.toml)",
+    "nine derived wall rows (product-owner, ux-designer, codebase-analyzer, researcher, demo-recorder, technical-writer, code-reviewer, security-reviewer, ui-reviewer) with the derivation basis per row -> tables/walls.toml, documented in conflicts/hooks-repair.md",
+    "holdout-evaluator full read_deny (adds harness, manifests, repo-config, ci, evidence, stories, research, analysis, spikes) -> tables/walls.toml",
+    "git-commit command family for demo-recorder, completing the six-builder grant of agents-skills.md#2.9 -> tables/walls.toml",
+    "hooks.json self-guarding command kept byte-identical while folded to respect the 400-character line limit -> topics/hook-wiring.md",
+    "expected-time column (8 ms, 190 ms first call, 60-90 ms, 80 ms plus flush, 55 ms) and the ~120-line frontmatter reader -> topics/hook-runner.md"
+   ],
+   "duplicates_replaced_by_links": 4,
+   "files_changed": 12,
+   "gaps_recorded": 5,
+   "lint_result": "python3 rewrite/tools/spec_lint.py: 0 problem(s); all 8 rules-area TOML tables, the event schema and registry.d files parse; every rules-area file under 16 KB with no line over 400 characters",
+   "coverage_result": "python3 rewrite/tools/sections.py coverage: sections 240; cited by a spec file 181; retired 39; uncovered 0 (up from 179 cited / 41 retired at audit, reflecting the restored content and its added source citations)",
+   "machine_files_checked": 9,
+   "values_removed_as_invented": 1
+  },
+  {
+   "area": "rewrite/spec/commands/ (all 62 command files) plus the five registry topics with group \"commands\" (command-conventions, long-commands, worktrees, governed-delivery, gates)",
+   "audit_findings_fixed": [
+    "F09 \u2014 spike-open.md: restored the blueprint's wording verbatim: an earlier finding for the same question is returned '(matched by a hash of the normalised question) only when the earlier runner worked under walls at least as strict as this asker's' (BLUEPRINT.md#6), replacing the narrower state.md#2.16 read_deny-only phrasing; BLUEPRINT.md#6 was already in the file's sources",
+    "F10 \u2014 topics/worktrees.md: restored the state.md#2.17 retention rule as written (ledger entry lists worktree and branch; checkpoint and status --fix remove spike worktrees older than spikes.retain_days (14) and those whose asking unit is delivered; the branch spike/<name> of a named spike is kept until the spike is closed) and added state.md#2.17 to its sources; commands/spike-close.md now links to topic:worktrees instead of restating a narrowed, named-spikes-only variant",
+    "F17 \u2014 spike-open.md keeps state.md#2.16's form '--step <workflow>/<subject>/<name>.<attempt>' (the state design fixes the commands' arguments); the two-forms disagreement is recorded in conflicts/commands-repair.md, and topics/spikes.md should link",
+    "F22 (my files) \u2014 commands/decide.md now links [[topic:decisions]] for the <id>@<cycle> qualifier and keeps only the command's own refusal; ownership ruling for the green/red gate pass conditions and story-deliver behaviour (command files own them, citing pipeline.md#2.9.1; workflows/story.md should shrink to links) recorded in conflicts/commands-repair.md",
+    "F29 \u2014 commands/list.md: removed the inter-quotation commentary 'a kind is refused, not silently shortened'; commands/gate-spec.md: removed '(The blueprint row says \"the planners\" generically; the state design names the owning planner.)'",
+    "F32 \u2014 conflicts/commands.md item 8 corrected: hooks.md#2.7 does enumerate the constants, and the note now copies them (HUMAN_ONLY: decide, config set, cycle close, lock release --force, init --fresh, import; GOVERNED: story deliver, release; kinds exempt from tests before code: facade, docs, chore, harness, via kind_has_red_gate(kind))",
+    "F35 (my files) \u2014 pointers to original documents replaced: doctor.md (BLUEPRINT.md#4.9 \u2192 topic link), export-pdf.md and render-diagram.md (decision D14 in BLUEPRINT.md#2.1 \u2192 [[doc:decisions]]), topics/gates.md ('BLUEPRINT 4.9' parenthetical removed), survey.md ('blueprint 4.9' dropped from the quoted check order), checkpoint.md ('From the pipeline design:' dropped), checkpoint-brief.md ('The pipeline design confirms:' dropped)",
+    "F23 (my files only) \u2014 change history struck: events.md ('T3 absorbs the former T2 package'), repos-scan.md ('the former T4 package'), obs.md ('the ported factory-obs bash becomes this Python command'), retire.md and review-prepare.md ('Formerly ... now one' replaced by the state.md#2.16 not-built wording), hooks-selftest.md ('the canary command of the first pass is gone'), topics/gates.md ('The former per-check commands are gone:')",
+    "Un-invented value \u2014 commands/events-schema.md claimed the command works outside an initialised project; the shared exemption list (init, import, doctor, obs, hooks selftest, --version) does not include it, so the claim was reversed to match the originals",
+    "Restoration \u2014 callers stated for the operator commands that lacked them (events, obs, repos-scan, export-pdf, render-diagram: 'Run by the main session', from the BLUEPRINT.md#4.9 operator row)"
+   ],
+   "audit_findings_not_mine": [
+    "F01, F02, F14 (tables/walls.toml, tables/callers.toml, agents/holdout-evaluator.md)",
+    "F03 (topics/seams-state.md, topics/seams-hooks.md), F04 (topics/rule-model.md, rules/tests-first.md, topics/hook-runner.md), F21 (topics/hook-launcher.md), F23/F33/F35 remaining files (rules/*, topics/artifact-rules.md, topics/run-lock.md, records/decision.md, tables/limits.toml, rules/spike-bounds.md)",
+    "F05 (tables/routes.toml, topics/waves), F19 (tables/limits.toml), F20 (packaging/tests-workflows)",
+    "F06, F26 (tables/roster.toml, conflicts/agents.md)",
+    "F07, F11, F12 (config/*.md, tables/config-keys.toml, schemas/config.schema.json)",
+    "F08 (packaging/build-step.md, topics/prelude.md)",
+    "F13 (tables/walls.toml, agents/security-reviewer.md, tables/path-classes.toml)",
+    "F15, F31 (retired.toml, tables/methods.toml)",
+    "F16 (platform.md, doc:decisions or topic:run-lock)",
+    "F18 (topics/workflow-arguments.md \u2014 group workflows, not commands)",
+    "F24 (schemas/*.md list-field array wrapping)",
+    "F25 (tables/artifacts.toml)",
+    "F27 (records/baseline.md, conflicts/records.md)",
+    "F28 (topics/spikes.md \u2014 group workflows; spike-open side done, see F09)",
+    "F30 (tables/event-types.toml, schemas/event.schema.json)",
+    "F33 (topics/rules/hook files, records/decision.md), F34 (tables/path-classes.toml)"
+   ],
+   "content_restored": [
+    "The earlier-spike-finding match rule, blueprint wording ('matched by a hash of the normalised question ... walls at least as strict as this asker's', BLUEPRINT.md#6) \u2014 commands/spike-open.md",
+    "The spike retention rule and the named-spike branch rule as written (state.md#2.17: 'the ledger entry lists the worktree and branch; vsdd checkpoint and vsdd status --fix remove spike worktrees older than spikes.retain_days (14) ...; the branch spike/<name> of a named spike is kept until the spike is closed') \u2014 topics/worktrees.md, with state.md#2.17 added to its sources",
+    "The three code constants behind BLUEPRINT.md#4.9's 'constants in code' sentence (HUMAN_ONLY, GOVERNED, kinds exempt from tests before code, hooks.md#2.7) \u2014 conflicts/commands.md item 8",
+    "Callers for the operator commands (run by the main session, BLUEPRINT.md#4.9 operator row) \u2014 commands/events.md, commands/obs.md, commands/repos-scan.md, commands/export-pdf.md, commands/render-diagram.md",
+    "Design traceability for retire/review-prepare consolidation (state.md#2.16 'not built' wording: defer resolve/lesson retire/research retire are one retire; review diff and review path are one review prepare) \u2014 commands/retire.md, commands/review-prepare.md"
+   ],
+   "duplicates_replaced_by_links": 2,
+   "files_changed": 22,
+   "gaps_recorded": 4,
+   "lint_result": "spec_lint: no problems in my area; final run reports 1 problem, 'registry.d/people.toml: topic:state-api is already registered', a concurrent edit by another area (mine none; earlier-run problems in tables/artifacts.toml, tables/roster.toml, topics/hook-wiring.md were also other areas'). All my files under 16 KB and 400 chars/line.",
+   "coverage_result": "sections.py coverage: 240 sections; 180 cited by a spec file; 41 retired; 0 uncovered (up from 179 cited after state.md#2.17 gained its citing file).",
+   "machine_files_checked": 0,
+   "summary": "Fixed every audit finding naming a file in my area (F09, F10, F17, F22-partial, F29, F32, plus F23/F35 instances in my files), then checked all 62 command files and the 5 commands-group topics cell by cell against the command tables in BLUEPRINT.md#4.9 and state.md#2.16 and against pipeline.md 2.5/2.8/2.9.1-2.9.11, hooks.md 2.12-2.13, packaging.md 2.10 for arguments, outputs, writes, exit behaviour, messages and callers. All quoted passages verified traceable; original-argument spellings confirmed (including spike-open's --step form and the env stop / validate conflicts already recorded). Removed invented claims, original-document pointers and change-history phrases; deduplicated restatements with links; recorded 6 disagreements and 4 gaps in conflicts/commands-repair.md. My area has no TOML/JSON machine files (checked the registry: none in group commands). Both checks pass for my files.",
+   "values_removed_as_invented": 1
+  },
+  {
+   "area": "rewrite/spec records group: records/, schemas/, config/, 4 tables (limits, config-keys, identifiers, decision-kinds), 7 topics (machine-records, evidence-lookup, verdicts, digests, decisions, project-configuration, result-schemas), registry.d/records.toml, conflicts/records-repair.md",
+   "summary": "A prior pass had already applied most of the audit's records-group findings; I verified every machine-readable file cell by cell against the originals (46 schemas against pipeline.md#2.10.1-2.10.8 and state.md#2.5/2.7/2.8/2.16, 4 tables against pipeline.md#2.5, state.md#2.4, BLUEPRINT.md#4.7/4.11/4.12/4.8, hooks.md#2.6), then confirmed the prose, finished the residuals and ran both checks. Verified in place: limits table row-for-row from pipeline.md#2.5 including the two restored rows and topic links instead of section pointers (F19); config keys defined once in tables/config-keys.toml with quoted meanings and config/*.md linking (F11, F12); the annotated factory.toml copied verbatim into topics/project-configuration.md (F07); the eight list-field schemas wrapped as arrays with items and config.schema.json additionalProperties:false throughout (F24); topic.state-api carrying the S7 signatures with record:step, record:decision, record:caller-marker and record:spike-admission linking to it (F03). I then fixed the residues: restored the state.md#5 P-7 sentence in records/decision.md (F33); replaced the original-document pointers in topics/result-schemas.md and records/step.md with the originals' own statements (F35); struck two converter-authored passages (old-system mapping sentence in topics/machine-records.md, $ref parenthetical in result-schemas.md); deduplicated the choice-to-status mapping between the decision-kinds table comment and topics/decisions.md; and added the missing source citations (state.md#2.5, #2.16, #2.7, #2.4). Added RR10-RR12 to conflicts/records-repair.md covering the blueprint-versus-state flaky-test and first-release wordings (F27's second difference, previously unrecorded) and the cross-area dispositions of F22 and F30. Every meaning string, default, enumeration and required list in my files now traces to quoted original text; the standing gaps (no types or required lists in the design, unnamed run-record and job-record keys, hooks.defaults) remain recorded in conflicts/records.md part 2 and records-repair.md part 2 rather than invented. spec_lint reports zero problems in my files (verified on a scratchpad copy; the real-tree run aborts on the other areas' duplicate topic.state-api registration in registry.d/hooks.toml and registry.d/people.toml, plus three problems in artifacts.toml, roster.toml and hook-wiring.md, none mine). Coverage: 240 sections, 181 cited, 39 retired, 0 uncovered. No files outside my area were edited; nothing committed.",
+   "audit_findings_fixed": [
+    "F03 (records side): state-function signatures carried by topic:state-api; records/step.md, records/decision.md, records/caller-marker.md, records/spike-admission.md link [[topic:state-api]]; arrangement documented in registry.d/records.toml",
+    "F07: annotated factory.toml example copied once, as written, into topics/project-configuration.md; branches.protected default [\"main\"], state.push conditional default, delivery.mode/ci handled; disagreements recorded (records-repair RR2, RR8)",
+    "F11: one key list in tables/config-keys.toml (key, type, default, owner); config/*.md hold prose and link; schemas/config.schema.json divides the work (structure and key lists); overlap note stands in conflicts/records.md part 2",
+    "F12: meanings in config files and the keys table are quotes from state.md#2.12 comments, BLUEPRINT.md#4.12 table, hooks.md#2.6 or state.md#2.8; unsourced meanings removed",
+    "F19: tables/limits.toml copies pipeline.md#2.5 row for row, including \"Review passes: plan, ingest\" and \"Token budget\" rows; converter's ci_minutes row not carried as its own row; at-the-limit pointers replaced by [[topic:convergence]]/[[@topic:spikes]] links (RR6, RR7)",
+    "F24: review-data, fix-data, ruling-data, holdout-data, module-map-data, outline-data, score-data and survey schemas wrap each list field as an array with items; config.schema.json has additionalProperties:false at top level and per section",
+    "F27: both blueprint-4.13-vs-state-2.8 differences recorded; flaky-test and first-release wording difference added as RR10 (R4 had only the field list)",
+    "F33: state.md#5 P-7 sentence restored in records/decision.md (schemas for step results, verdicts and decisions stay within the caps; a write over a cap is refused)",
+    "F35 (my files): tables/limits.toml pointer gone; topics/result-schemas.md intro replaced with pipeline.md#2.10's own sentence; records/step.md \"the key in the pipeline design's S3\" replaced by the key statement itself",
+    "F22 (my share): decision choices defined by tables/decision-kinds.toml with topics/decisions.md linking; choice-to-status mapping deduplicated; ambiguous-id ownership for the records group recorded as RR11"
+   ],
+   "audit_findings_not_mine": [
+    "F01, F02, F13, F14: tables/walls.toml rows, holdout-evaluator row, analysis grant, wall format \u2014 tables/agents area",
+    "F04: rule check() signature and main loop \u2014 topics/rule-model, rules area",
+    "F05: definition of \"the plan is ready\" \u2014 tables/routes / topic:waves area",
+    "F06, F26: roster [platform] table and workflows list \u2014 tables area",
+    "F08: prelude constraints behind a link \u2014 packaging:build-step area",
+    "F09, F10, F28: spike question matching, retention and named-spike branch rules \u2014 topics/commands of other groups",
+    "F15, F16, F31: retirements (retired.toml) and platform.md's P2LEAN-17 pointer \u2014 index/doc area",
+    "F17, F18, F20, F21, F29, F32, F34: spike-open syntax, wrapped --, script harness cases, launcher skeleton, command commentary, conflicts note, path-classes globs \u2014 commands/workflows/packaging areas",
+    "F23: history leaks in rules, topics and tables of other groups",
+    "F25: artifacts.toml completeness \u2014 artifacts/table area",
+    "F30: event-type list between schemas/event.schema.json and tables/event-types.toml \u2014 both group \"rules\"; recorded as RR12, taking no action",
+    "Real-tree lint blockers owned by other passes: duplicate topic.state-api in registry.d/hooks.toml and registry.d/people.toml; tables/artifacts.toml line 157 over 400 chars; tables/roster.toml broken agent link; topics/hook-wiring.md line 40 over 400 chars"
+   ],
+   "files_changed": 10,
+   "machine_files_checked": 50,
+   "values_removed_as_invented": 0,
+   "content_restored": [
+    "state.md#5 P-7 sentence (schemas for step results, verdicts and decisions stay within the caps; a write over a cap is refused) -> records/decision.md",
+    "pipeline.md#2.10 opening sentence (schemas live as files in <plugin>/schemas/, single source for scripts, tool and hook runner) -> topics/result-schemas.md",
+    "BLUEPRINT.md#4.7 status-values sentence (status read from the decision or closure record; code never rewrites tracked files) -> topics/machine-records.md",
+    "state.md#2.8 step-key statement (keyed by run, workflow, subject, name and attempt) -> records/step.md, replacing the pointer to pipeline.md S3",
+    "Source citation state.md#2.5 (hub wave closure record wave.<W-NN>.<repo>.json) -> records/closure.md",
+    "Source citation state.md#2.16 (frozen test identities and hashes) -> records/evidence.md",
+    "Source citation state.md#2.7 (derived driver field) -> records/driver-flag.md",
+    "Source citation state.md#2.4 (cycle-id slug of 2 to 40 lower-case characters) -> records/cycle.md",
+    "RR10: blueprint-vs-state flaky-test and first-release wording difference -> conflicts/records-repair.md",
+    "RR11 and RR12: cross-area ownership notes for the ambiguous-decision-id rule and the event-type list -> conflicts/records-repair.md"
+   ],
+   "duplicates_replaced_by_links": 1,
+   "gaps_recorded": 3,
+   "lint_result": "0 problems in my files (verified on a scratchpad copy with the other passes' duplicate removed). Real-tree run exits 1 before file checks: registry.d/people.toml re-registers topic.state-api (also in registry.d/hooks.toml) \u2014 other areas; 3 further problems in tables/artifacts.toml, tables/roster.toml, topics/hook-wiring.md \u2014 other areas.",
+   "coverage_result": "240 sections; 181 cited by a spec file; 39 retired; 0 uncovered"
+  },
+  {
+   "area": "rewrite/spec/workflows/ \u2014 the 12 workflow files, the 25 topics and 4 tables whose registry group is \"workflows\" (routes, preconditions, story-kinds, step-methods)",
+   "audit_findings_fixed": [
+    "F05: definition of \"the plan is ready\" plus the plan-unit closure/reopen rule, the steady-state rule for an ingested or imported project with no brief, and the cycle.json route-field rule with the no-route-yet matching rule \u2014 restored as header-comment prose in rewrite/spec/tables/routes.toml",
+    "F08: the prelude constraints (declarations only; no import/export; no Date.now, Math.random, argument-less new Date; no reference to anything a single workflow defines; header comment listing every top-level name; 400-line cap; collision caught as harness syntax error; stamped text costs no tokens) \u2014 copied as written from packaging.md#2.5 into rewrite/spec/topics/prelude.md, source added to frontmatter",
+    "F09: earlier spike finding \"matched by a hash of the normalised question\" (BLUEPRINT#6 wording over pipeline.md#2.8) \u2014 restored in rewrite/spec/topics/spikes.md protocol step 2",
+    "F28: \"dispatch agents\" restored in the spike-containment sentence of topics/spikes.md step 3; the vsdd status --fix retention-enforcer disagreement recorded in conflicts/workflows-repair.md",
+    "F10 (my files only): retention restatement in topics/spikes.md replaced by a link to [[topic:worktrees]]; the restoration of both retention rules (14 days / delivered; spike/<name> branch until closed) handed to the owner, topic:worktrees in the commands area",
+    "F17 (my files only): the disputed --step syntax removed from the who-asked table in topics/spikes.md, which now links to [[command:spike-open]] as the single definition",
+    "F18: wrapped -- restored \u2014 \"uv-startup -- measure cold and warm start\" in rewrite/spec/topics/workflow-arguments.md",
+    "F22 (my files only): hub model de-duplicated \u2014 topics/multi-repo.md rewritten as an explanation linking to [[workflow:multi]] (owner) and [[topic:multi-repo-state]]; the ambiguous-decision-id restatement in topics/hotfix-cycle.md replaced by a link to [[topic:decisions]] (qualified identifiers); spike-limit, --step-syntax and green/red-gate ownership notes recorded for the other areas",
+    "F33 (my files only): the \"brief skill uses brief (product-owner)\", \"author skill uses conventions (architect)\" and \"stubs is merged into failing-tests\" sentences restored in the rewrite/spec/tables/step-methods.toml header",
+    "F35 (my files only): pointers into the originals replaced \u2014 story-script.md and wave-script.js code comments \"(section 2.11.1)\" now cite [[topic:prelude]], story-script's KIND comment cites [[table:story-kinds]] instead of blueprint 4.6, discover.md's \"the packaging design documents and tests the recipe\" now links [[packaging:documentation]]",
+    "Change history removed from my files (task step 5): \"replaces the old sub-workflows\" in workflows/multi.md, \"this replaces the technical-debt register sweep\" in workflows/maintain.md, \"which the old Phase 1 gate demanded\" in workflows/spec.md, \"no longer\" in workflows/wave.md, \"carry over from the old system\" in topics/convergence.md, \"were four decision kinds in the first pass\" in topics/human-stops.md, \"the second pass removed about nine of them\" in topics/risks-pipeline.md"
+   ],
+   "audit_findings_not_mine": [
+    "F01, F02, F13, F14 \u2014 tables/walls.toml rows, holdout-evaluator row, analysis-grant and walls format: group \"rules\" (plus agents/security-reviewer.md)",
+    "F03 \u2014 state-function signatures: topic:seams-state, group \"state\"",
+    "F04 \u2014 rule check() signature and runner main loop: topic:rule-model, group \"rules\"",
+    "F06, F26 \u2014 tables/roster.toml [platform] and [workflows]: group \"agents\"",
+    "F07, F11, F12 \u2014 config defaults, double-defined config keys, invented meanings: config/*.md and tables/config-keys.toml, group \"records\"",
+    "F15, F16, F31 \u2014 retired.toml corrections: shared file outside my area",
+    "F19 \u2014 tables/limits.toml rows: group \"records\"",
+    "F20 \u2014 the B5 harness test case list (six story cases, three wave cases, twenty corrected-behaviour checks): target packaging:tests-workflows, group \"packaging\"",
+    "F21 \u2014 launch.sh skeleton into topic:hook-launcher: group \"rules\"",
+    "F23 \u2014 history leakage in rules/*, topics/hook-wiring, topics/verdicts, tables/callers: groups \"rules\" and \"records\"",
+    "F24, F25, F27 \u2014 schema list fields, artifacts.toml completeness, baseline wording: groups \"records\" and \"state\"",
+    "F29 \u2014 commentary in commands/list.md and commands/gate-spec.md: group \"commands\"",
+    "F30 \u2014 event-type list agreement: group \"rules\"",
+    "F32 \u2014 conflicts/commands.md item 8 error: conflicts file of the commands area",
+    "F34 \u2014 path-classes.toml globs: group \"state\"",
+    "F33 remainder \u2014 hooks.md#2.3 expected times, frontmatter reader, 12 KB packet reason: groups \"rules\" and \"records\""
+   ],
+   "content_restored": [
+    "Definition of \"the plan is ready\" with the plan-unit closure and revise-reopen rule, copied from pipeline.md#2.4 into rewrite/spec/tables/routes.toml",
+    "Rule that a project ingested or imported with no brief is in steady state, and why the queued-request row sits where it does, from pipeline.md#2.4 into rewrite/spec/tables/routes.toml",
+    "Rule that a cycle's route is the route field of its cycle.json (standard from a brief-opened cycle, written by vsdd feature route) and that a cycle whose request has no route yet matches neither the plan row nor the no-plan verify case, from pipeline.md#2.4 into rewrite/spec/tables/routes.toml",
+    "\"A route is not a script\" opening sentence, from pipeline.md#2.4 into rewrite/spec/tables/routes.toml",
+    "Link \"a story waiting on its own decision does not stop later waves\" (carried by workflows/wave.md) referenced from tables/routes.toml",
+    "The common precondition wording \"the project is ready and the hooks are alive for this call\", from the pipeline.md#2.5 table header into the tables/preconditions.toml header",
+    "The \"(standalone)\" qualifier on the story precondition row, from pipeline.md#2.5 into tables/preconditions.toml",
+    "The sentences \"Outside the workflows, the brief skill uses brief (product-owner) and the author skill uses conventions (architect)\" and \"stubs is merged into failing-tests, because one step takes one method\", from pipeline.md#2.9.13 into the tables/step-methods.toml header",
+    "The prelude-constraints paragraph (declarations only; no import/export; no Date.now, Math.random or argument-less new Date; no reference to anything a single workflow defines; header comment listing every top-level name; at most 400 lines; redeclaration fails to load with a syntax error; stamped text costs no tokens), from packaging.md#2.5 into rewrite/spec/topics/prelude.md",
+    "The parenthetical \"matched by a hash of the normalised question\" on the same-question ledger match, from BLUEPRINT.md#6 into rewrite/spec/topics/spikes.md",
+    "The words \"dispatch agents\" in the spike-containment rule, from BLUEPRINT.md#6 into rewrite/spec/topics/spikes.md",
+    "The em-dash note separator in the named-spike example: \"uv-startup -- measure cold and warm start\", from pipeline.md#2.3 into rewrite/spec/topics/workflow-arguments.md",
+    "Links replacing pointers to the original documents: [[topic:prelude]] in the stamped-region comments of topics/story-script.md and topics/wave-script.md, [[table:story-kinds]] in story-script's KIND comment, [[packaging:documentation]] for the headless schedule recipe in workflows/discover.md"
+   ],
+   "coverage_result": "Unchanged from the audit baseline: sections 240; cited by a spec file 179; retired 41; uncovered 0 (text 972 KB total, 783 KB cited, 188 KB retired). packaging.md#2.5 added to topic:prelude sources was already cited elsewhere; no section lost a citation.",
+   "duplicates_replaced_by_links": 4,
+   "files_changed": 19,
+   "gaps_recorded": 3,
+   "lint_result": "spec_lint: 3 problems, none attributable to my area (tables/artifacts.toml line lengths and a roster.toml link \u2014 other groups, edited concurrently). Registry counts unchanged (12 workflow, 21 table, 85 topic). All four of my TOML tables parse; no file over 16 KB; no line over 400 characters in my files.",
+   "machine_files_checked": 4,
+   "summary": "Fixed all eight audit findings that name files in the workflows area (F05, F08, F09, F10/F17/F22/F28/F33/F35 in their my-files parts), restored the plan-ready definition, prelude constraints, spike question-hash rule and other lost text by copying it from the six originals, de-duplicated the hub model and ambiguity rule, stripped change-history phrases, recorded the pipeline-vs-blueprint disagreements and gaps in rewrite/spec/conflicts/workflows-repair.md, and left both checks at the audit baseline. The 3 remaining lint problems are in other areas' in-flight files (tables/artifacts.toml, tables/roster.toml, topics/hook-wiring.md).",
+   "values_removed_as_invented": 0
+  },
+  {
+   "area": "rewrite/spec/agents/, skills/, artifacts/, packaging/, the four top-level documents, registry tables/topics in groups agents/state/packaging/index (tables: roster, methods, severity, artifacts, lint-checks; 34 topics), plus exclusive files retired.toml, registry.d/people.toml and conflicts/people-repair.md.",
+   "summary": "An earlier partial pass had already mended most audit damage in my area (walls rows, roster platform table, artifacts table, state-api topic); I verified each mend against the originals and completed the unfinished tail myself. See the structured fields for the split between fixed and not-mine findings. Final state: coverage passes (240 sections: 181 cited + 39 retired, 0 uncovered); lint reports 1 remaining problem, in topics/hook-wiring.md (group rules, another area).",
+   "audit_findings_fixed": [
+    "F02 holdout wall stated twice: agents/holdout-evaluator.md links to table:walls (verified)",
+    "F03 state function signatures: topics/state-api.md carries the S7 signatures and contracts, path_class and verdict (verified)",
+    "F05 plan-ready definition: copied into tables/routes.toml header from pipeline.md#2.4 (verified)",
+    "F06 roster [platform] restored, name=tier agent rows, no invented keys (verified)",
+    "F08 prelude constraints copied into packaging/build-step.md (verified)",
+    "F13 security-reviewer analysis grant: one statement in tables/walls.toml per BLUEPRINT#4.3 precedence, agent file links; stale A-1 note in conflicts/agents.md updated to match",
+    "F15 wrong retirements: BLUEPRINT.md#4.4 and state.md#2.17 removed from retired.toml with proper citations added",
+    "F16 P2LEAN-17 open offer recorded in topics/run-lock.md; doc:platform probe 29 has a referent (verified)",
+    "F20 B5 test list (6 story cases, 3 wave cases, 20 checks) in packaging/tests-workflows.md (verified)",
+    "F22 duplicate facts in my files closed: tier table (conventions vs roster vs model-tiers), contract row (artifacts/contract.md links), ambiguous-id rule, walls restatements in agent files",
+    "F23 history passages struck from my files (clerk.md, artifacts.toml, artifact-rules.md verified clean; design's own convergence-pass wording kept as content)",
+    "F25 tables/artifacts.toml holds one row per kind from state.md#2.5 (verified, plus my line-length fixes)",
+    "F26 roster [workflows] completed from BLUEPRINT#4.5 (verified)",
+    "F31 retirement reasons corrected to duplicate for the five open-question sections, BLUEPRINT#11.3 and packaging#2.12",
+    "F33 lost sentences: brief/author method usage and stubs-merge carried in tables/step-methods.toml header (verified)",
+    "F35 pointer prose replaced: packaging/documentation.md, packaging/cutover-deletions.md, tables/artifacts.toml (mine); topics/artifact-rules.md and topics/run-lock.md (verified already done)"
+   ],
+   "audit_findings_not_mine": [
+    "F01, F14 walls.toml row derivations and format (rules group)",
+    "F04 rule check() signature and runner main loop (topics/rule-model.md, rules group)",
+    "F07, F11, F12 config defaults, duplicate key lists, invented meanings (config area)",
+    "F09, F10, F17, F28 spike matching, retention, spike-open syntax (workflows area)",
+    "F18 wrapped -- in workflow-arguments (workflows area)",
+    "F19, F34 limits.toml and path-classes.toml rows (other table groups)",
+    "F21 launcher skeleton in topics/hook-launcher.md (hooks area)",
+    "F24 list fields as objects in schemas (records/schemas area)",
+    "F27 baseline record wording (records area)",
+    "F29 command-file commentary (commands area)",
+    "F30 event-type lists (records/schemas area)",
+    "F32 conflicts/commands.md item 8 (commands area)"
+   ],
+   "files_changed": 10,
+   "machine_files_checked": 5,
+   "values_removed_as_invented": 2,
+   "content_restored": [
+    "[platform] floors (min_claude_code 2.1.331, python_floor 3.11) verified in tables/roster.toml (F06)",
+    "twelve-workflow roster table completed from BLUEPRINT#4.5 in tables/roster.toml (F26)",
+    "state API signatures and contracts (S7, path_class, verdict) verified in topics/state-api.md (F03)",
+    "definition of 'the plan is ready' verified in tables/routes.toml header (F05)",
+    "prelude constraints sentence verified in packaging/build-step.md (F08)",
+    "P2LEAN-17 open offer verified quoted in topics/run-lock.md (F16)",
+    "BLUEPRINT#4.4 framing sentences plus citation restored into topics/method-fields \u2014 topics/method-files.md, and its replaced-name table verified row-for-row in tables/methods.toml (F15)",
+    "seven storage rules of state.md#2.2 restored verbatim into topics/state-directory.md (rules 2, 4, 5, 7 had been dropped behind links)",
+    "state.md#2.17 un-retired with the named-spike branch rule verified carried in topics/worktrees.md",
+    "31 artifact-kind rows verified in tables/artifacts.toml (F25)",
+    "lint-checks (18 rows), severity (4 definitions + stamping) and methods tables verified word-for-word against packaging.md layer 3, agents-skills.md#2.7 and #2.8 (F19-adjacent checks)",
+    "B5 test list verified in packaging/tests-workflows.md (F20)",
+    "RELEASING.md row rendered as prose plus link in packaging/documentation.md; scripts/ci/benches mapping redirected to rewrite/history in packaging/cutover-deletions.md; toolchain shape pointed at config:commands and config:paths in tables/artifacts.toml (F35)"
+   ],
+   "duplicates_replaced_by_links": 5,
+   "gaps_recorded": 5,
+   "lint_result": "spec_lint: 1 problem, all remaining issues outside my area (topics/hook-wiring.md line 40 over 400 chars, group rules; fixed the two in my files: artifacts.toml line-length and roster pseudo-link). All my TOML/JSON parse; sizes within limits.",
+   "coverage_result": "sections.py coverage passes: 240 sections; 181 cited by a spec file; 39 retired; 0 uncovered (was 179 cited + 41 retired; the two un-retired sections are now cited by topics/method-files.md and topics/worktrees.md)."
+  }
+ ],
+ "audits": [
+  {
+   "key": "tables",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/conflicts/audit-2-tables.md",
+   "verdict": "Not yet faithful. I checked all 68 machine files (21 TOML tables and 47 JSON schemas) against the six originals. 33 are fully faithful: 6 tables and 27 schemas. Every schema passes the Draft 2020-12 meta-schema check, and the seven result schemas of pipeline.md#2.10.1-#2.10.7 are byte-equal to the originals. The 26 findings are 5 blockers, 12 major and 9 minor. The blockers: (1) the roster gives feature, verify, maintain and multi no call to story, although the originals say all five of those workflows call it; (2) the artifact registry's story row is the excerpt the original labels \"illustrative\", so story frontmatter keys are missing and the row disagrees with artifacts/story.md; (3) the code-reviewer's wall omits the local class, so .factory/local is readable; (4) the limits table keeps the ci_minutes name only in a comment; (5) the holdout class lost its block-message route sentence. The major findings: path-classes and artifacts changed their formats; every artifact kind is still defined twice (F25 not finished); identifier examples were invented; many list fields in the schemas are still not arrays; the configuration key list is defined in two places that differ, and its schema accepts unknown rule keys; the protected_paths default does not follow section 4 of the blueprint; the environment table is incomplete; and key names were invented in three schemas whose gaps are already recorded.",
+   "checked": 68,
+   "faithful": 33,
+   "findings": 26
+  },
+  {
+   "key": "prose",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/conflicts/audit-2-prose.md",
+   "verdict": "Not yet faithful enough to build from, though much closer than before the repair. 28 of the 35 earlier findings are fixed as asked. 7 are not fixed, or their fix left a new defect: F08, F14, F22, F23, F26, F27 and F35. I found 2 new blockers, both in machine tables. First, tables/roster.toml gives feature, verify, maintain and multi `calls = []`, but the originals say all four call story. Second, the only [story] row in tables/artifacts.toml is the hook design's illustrative five-key excerpt, while state.md#2.5 lists 18 keys and artifacts/story.md carries all of them. Prose and code skeletons are otherwise copied closely: the launcher, the rule-model code blocks and the annotated factory.toml are byte-identical to the originals. Totals: 2 blockers, 9 major, 12 minor. Both checks pass (lint 0 problems; coverage 240 sections, 181 cited, 39 retired, 0 uncovered).",
+   "checked": 108,
+   "faithful": 86,
+   "findings": 23
+  },
+  {
+   "key": "structure",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/conflicts/audit-2-structure.md",
+   "verdict": "Not yet one fact in one place. Both checks pass: spec_lint prints \"0 problem(s)\" and coverage prints \"sections: 240; cited by a spec file: 181; retired: 39; uncovered: 0\". The registry is clean: all 456 entries have their file and a valid, sensible package. The repairs fixed the single-definition cases they were pointed at: spike open --step, the holdout and security wall rows, HUMAN_ONLY, the state API, check(), \"the plan is ready\" and the named-spike branch rule. But the F22 pattern is mostly unfixed. Workflow files restate the command files. Topics restate the records and rules they explain. Every artifact kind is defined in both artifacts.toml and its own file. The decision rules are stated three times. Most copies agree. Three do not: the delivery.mode, delivery.ci and auto-allow.scope defaults (the table against the annotated example), the flaky-test rule (two wordings in five places), and the hub model's [[repo]] overrides. History phrases and pointers into the original documents remain in about forty places. packaging/build-plan.md rewrites the build plan's own paragraphs. 38 of 39 retirements are sound; BLUEPRINT.md#11.2 is retired while its first item is carried without a citation. 13 major, 12 minor, 0 blockers.",
+   "checked": 568,
+   "faithful": 510,
+   "findings": 25
+  }
+ ],
+ "findings": [
+  {
+   "id": "T2-01",
+   "kind": "altered",
+   "severity": "blocker",
+   "where": "Original: agents-skills.md#2.12 line 901; pipeline.md#2.3 line 251; BLUEPRINT.md#5.1 line 867. New: rewrite/spec/tables/roster.toml lines 58-71; conflicts/people-repair.md P-8",
+   "problem": "[workflows] gives feature, verify, maintain and multi calls = []. The originals say all five of wave, feature, verify, maintain and multi call story ('and so on for feature, verify, maintain and multi'; 'may call story'; 'the five workflows that call story'). The table and P-8 misread BLUEPRINT.md#4.5 ('Only story is ever called') as meaning there are no other call edges.",
+   "proposed_resolution": "Set calls = [\"story\"] for feature, verify, maintain and multi; correct the comment and P-8."
+  },
+  {
+   "id": "T2-02",
+   "kind": "lost",
+   "severity": "blocker",
+   "where": "Original: hooks.md#2.11.3 line 1057 ('illustrative; the content is state.md section 2.5'); state.md#2.5 line 565; state.md#2.4 line 404. New: rewrite/spec/tables/artifacts.toml line 44-53 ([story]); artifacts/story.md",
+   "problem": "The [story] row is the illustrative excerpt, with frontmatter id, title, status, kind and contracts only. No row built from state.md#2.5 follows, so the row lacks cycle, method, depends_on, properties, points, priority, criticality, security, ui, demo, screens, repo and source, and also the writer and the lifecycle. Because only the keys the registry lists are allowed, real stories would be refused. artifacts/story.md lists the full set, so the two definitions disagree. The [contract] row also lacks its writer and lifecycle.",
+   "proposed_resolution": "Build the [story] row from state.md#2.5 in the registry format, keeping the excerpt's forbid and tables keys; add the writer and lifecycle to [contract]."
+  },
+  {
+   "id": "T2-03",
+   "kind": "altered",
+   "severity": "blocker",
+   "where": "Original: agents-skills.md#2.9 line 578; BLUEPRINT.md#4.3 lines 327-328; state.md#2.4 lines 519-520. New: rewrite/spec/tables/walls.toml line 152; conflicts/rules.md R10",
+   "problem": "The code-reviewer may read 'nothing in the state directory except evidence and guidance'. The derived read_deny enumerates every state class except guidance, evidence and local, so the lock, jobs, caller markers, events and media under .factory/local/ are readable. R10's premise is wrong: it says evidence and guidance are siblings of no denied class, but state.md#2.4 nests guidance inside spec-arch and evidence inside local.",
+   "proposed_resolution": "Add \"local\" to the row's read_deny; correct R10."
+  },
+  {
+   "id": "T2-04",
+   "kind": "lost",
+   "severity": "blocker",
+   "where": "Original: BLUEPRINT.md#4.12 line 697; state.md#2.12 line 1217. New: rewrite/spec/tables/limits.toml lines 3, 63, 86-87; conflicts/records-repair.md RR7",
+   "problem": "The prelude name ci_minutes maps to delivery.ci_wait_minutes with default 30, but that mapping appears only in a header comment. The delivery row's name is delivery_rounds, so RR7's claim that the row was given the blueprint's names is false. The spike row packs two names and three keys into single strings, so no entry maps one name to one key.",
+   "proposed_resolution": "Give each prelude name its own entry (ci_minutes with key and default only, nothing invented); write the spike row's names and keys as lists or as separate rows."
+  },
+  {
+   "id": "T2-05",
+   "kind": "lost",
+   "severity": "blocker",
+   "where": "Original: hooks.md#2.7 line 579. New: rewrite/spec/tables/path-classes.toml line 68 ([path-classes.holdout])",
+   "problem": "The holdout class's route, 'Holdout scenarios are written by the product owner: /vsdd-factory:author holdout', is missing, and the sentence occurs nowhere under rewrite/spec/. This is a lost exact block message.",
+   "proposed_resolution": "Copy the route key into the holdout row."
+  },
+  {
+   "id": "T2-06",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: hooks.md#2.7 lines 576-621, 636, 756. New: rewrite/spec/tables/path-classes.toml lines 17-172",
+   "problem": "The classes.toml format was changed: [path-classes.<class>] instead of top-level [<class>], [product] instead of [_product], and an added [computed] list, although the original says computed classes are 'computed, not listed'. The header still claims the file is 'the content of classes.toml and nothing else'. This is the same class of change as F14 was for walls.",
+   "proposed_resolution": "Restore the original layout ([<class>] and [_product]); write the computed classes as a comment and keep R6."
+  },
+  {
+   "id": "T2-07",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: state.md#2.4 line 376 (format of hooks.md#2.11.3); state.md#2.5 line 577. New: rewrite/spec/tables/artifacts.toml lines 29-53 versus lines 61 onward, line 230",
+   "problem": "The table has two row structures. The worked rows use glob, id, dir, an inline frontmatter table, lock, headings, max_bytes and template; the 29 kind rows use path, a prose frontmatter string, writer, cap, cap_note and lifecycle. Cells that hold several caps were folded into one number: demo-evidence has cap = 1500000, the per-story total, not the 8,000-byte script cap.",
+   "proposed_resolution": "Use one row structure for every kind; where a cell gives several caps, keep them all."
+  },
+  {
+   "id": "T2-08",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Audit F25. New: rewrite/spec/artifacts/*.md (30 of 31 files) and rewrite/spec/tables/artifacts.toml",
+   "problem": "F25's resolution was to put every row in the table 'and have the artifact files link to it'. The rows were added, but the artifact files still restate path, frontmatter, writer, cap and lifecycle, so every kind is defined twice; for story the two copies already disagree (T2-02).",
+   "proposed_resolution": "Keep the prose in the artifact files and have them link to their [[table:artifacts]] row instead of restating its cells."
+  },
+  {
+   "id": "T2-09",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: hooks.md#2.7 lines 747, 769, 810; state.md#2.5 line 605. New: rewrite/spec/tables/artifacts.toml lines 110, 204; rewrite/spec/tables/walls.toml [reveals]",
+   "problem": "The originals' kind vocabulary is 'scenario' ('list scenario', 'vsdd list scenario') and 'conventions' ('author conventions'). The table names these kinds holdout-scenario and project-conventions. [reveals] is generated from the artifacts.toml kinds, so its key 'list scenario' matches no kind.",
+   "proposed_resolution": "Record the disagreement for the registry owner and use one vocabulary for the kind ids and [reveals]."
+  },
+  {
+   "id": "T2-10",
+   "kind": "invented",
+   "severity": "major",
+   "where": "Original: state.md#2.4 lines 416-433; BLUEPRINT.md#4.8 line 530. New: rewrite/spec/tables/identifiers.toml lines 9-213",
+   "problem": "Fifteen examples occur in no original: ENT-004, DI-002, EVT-007, DEC-003, ASM-005, R-009, FM-001, NFR-011, FLOW-002, EC-1, ID-006, CR-003, holdout/evaluations/auth-sso/story.S-7.03-1.json, code:src/parser/parse.rs:null-check and walled:9c1d2e3a4b5f. The original examples merge.S-7.04 and blocked.S-7.04 are dropped.",
+   "proposed_resolution": "Keep only the originals' examples, leave rows that were split from a shared row without one, and restore the two decision examples."
+  },
+  {
+   "id": "T2-11",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: pipeline.md#2.10.8 lines 1531-1541; state.md#2.5, #2.7, #2.16. New: rewrite/spec/schemas/{story-draft-data,intake-data,route-data,sweep-data,survey,story-unit,wave-gate-data,delivery-data,checkpoint-result,repos-split-result,holdout-evaluation,delta-data,status}.schema.json",
+   "problem": "Fields the originals name as plural lists have no type array and no items: units, covers, stories, readiness, findings and fixable, done, decisions, bcs and acs, fix_units, changed_files, repos, scores, symptoms and walled_findings, cross_repo, and in status decisions, spikes, others and notes. The status lists also drop their stated limits (12, 8, 3 and 5), although notes.schema.json encodes its limit. review-data.findings is an array of finding.schema.json, while the same field in sweep-data is untyped.",
+   "proposed_resolution": "Wrap each field as an array of the items the original names, as F24 did for the record lists."
+  },
+  {
+   "id": "T2-12",
+   "kind": "lost",
+   "severity": "major",
+   "where": "Original: pipeline.md#2.10.8 line 1539 ('The gate result fields, and ...'); state.md#2.8 line 740; state.md#4 S7 store_step. New: rewrite/spec/schemas/wave-gate-data.schema.json, step-record.schema.json",
+   "problem": "Both schemas are defined as another schema plus extra fields, but they list only the extras and do not include the base schema, so the required fields of the gate result and the step result are not checked.",
+   "proposed_resolution": "Compose each with allOf: gate-result.schema.json for wave-gate-data, step-result.schema.json for step-record."
+  },
+  {
+   "id": "T2-13",
+   "kind": "defined-twice",
+   "severity": "major",
+   "where": "New: rewrite/spec/tables/config-keys.toml; rewrite/spec/schemas/config.schema.json line 298; config/holdout.md, commands.md, state.md, evidence.md, maintain.md",
+   "problem": "The key list is enumerated in both the table and the schema, and they differ: the schema allows attribution and allow_pr_close under every rule, while the table ties them to bash-git and bash-destructive. Five config files restate meanings, and one restates a default, that the table already holds.",
+   "proposed_resolution": "Keep one key list: generate the schema from the table or reduce it to structure, and have the config files link to the table rows."
+  },
+  {
+   "id": "T2-14",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: state.md#2.12 line 1040; hooks.md#2.6 line 556. New: rewrite/spec/schemas/config.schema.json lines 286-305",
+   "problem": "The originals say unknown keys and wrong types are errors, and that an unknown rule id, unknown key or bad value under [hooks] logs config.invalid. The schema accepts any rule id, leaves per-rule tables open (no additionalProperties: false) and gives no leaf key a type, although the table states each type.",
+   "proposed_resolution": "Limit rule ids to those in table:rules, close the per-rule tables, and put the table's types on the leaf keys."
+  },
+  {
+   "id": "T2-15",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original: BLUEPRINT.md#4.12 line 721; pipeline.md#2.6 line 479; state.md#2.12 line 1095. New: rewrite/spec/tables/config-keys.toml line 233",
+   "problem": "The protected_paths default follows state.md#2.12, which adds a literal CHANGELOG.md, instead of section 4.12 (and pipeline.md#2.6): '.github/**, .env*, CODEOWNERS, and the files [release] names'. delivery.mode and delivery.ci follow 4.12, so the precedence rule is applied unevenly, and no conflicts file records this disagreement.",
+   "proposed_resolution": "Use the blueprint's default and record both texts in conflicts/records-repair.md."
+  },
+  {
+   "id": "T2-16",
+   "kind": "lost",
+   "severity": "major",
+   "where": "Original: state.md#2.12 line 1066; state.md#2.16 line 1437; BLUEPRINT.md#4.12 line 715; packaging.md#2.4 line 361; hooks.md#2.3 line 321. New: rewrite/spec/tables/environment.toml lines 17, 21, 25, 37",
+   "problem": "The table's summary promises every environment variable the plugin reads or sets, and its sources include state.md#2.12, yet VSDD_PORT, the CLAUDE_PLUGIN_OPTION_* keys, CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR are missing. The 'who' values 'Debug switch.', 'Test capture.', 'Test override.' and 'Test switch.' are converter labels that no original states.",
+   "proposed_resolution": "Add the missing variables from the cited text and leave 'who' empty where no original states it."
+  },
+  {
+   "id": "T2-17",
+   "kind": "invented",
+   "severity": "major",
+   "where": "Original gap notes: conflicts/records.md part 2 lines 99-113. New: rewrite/spec/schemas/evidence-record.schema.json (patch_id), caller-marker.schema.json (time), notes.schema.json (top-level notes)",
+   "problem": "The originals give no key spelling for the evidence record's git patch-id, the caller marker's time or the shape of notes.json, and the gaps are recorded as such, yet the schemas invent the key names patch_id and time and wrap notes.json in a top-level notes key.",
+   "proposed_resolution": "Leave the unnamed fields out and describe them in the description only, as run-record.schema.json does."
+  },
+  {
+   "id": "T2-18",
+   "kind": "history-leaked",
+   "severity": "minor",
+   "where": "New: rewrite/spec/tables/limits.toml lines 5-6",
+   "problem": "The header says 'the pipeline design left to its sections 2.7 and 2.', a truncated pointer into an original document, and refers to 'the three spike rows' when there are two. Trailing periods were added to cells unevenly.",
+   "proposed_resolution": "Strike the sentence and copy the cells as written."
+  },
+  {
+   "id": "T2-19",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: state.md#2.12; pipeline.md#2.7 lines 636-637; hooks.md#2.6, #2.12 line 1497; BLUEPRINT.md#4.12. New: rewrite/spec/tables/config-keys.toml lines 168, 361 onward, 597, 617, 638",
+   "problem": "Meanings are paraphrased rather than quoted: paths.harness, holdout.*, the state.* keys, caps.<kind> and hooks.log_retention_days. The auto-allow.scope default paraphrases 'set at setup'. allow_pr_close has default \"\" where RR4 says there is none, while bash-git.attribution takes the tuning example's \"block\" as its default. Line 597 joins five keys in one row.",
+   "proposed_resolution": "Quote the source or leave the cell empty; drop the empty default; write one key per row."
+  },
+  {
+   "id": "T2-20",
+   "kind": "lost",
+   "severity": "minor",
+   "where": "Original: hooks.md#2.12 lines 1476-1477. New: rewrite/spec/schemas/event.schema.json",
+   "problem": "cwd, an extra field of agent.start and agent.stop, is missing from the properties, and the id description names rule.block and rule.advise but not rule.would_block, which carries the same field.",
+   "proposed_resolution": "Add the cwd property and complete the id description."
+  },
+  {
+   "id": "T2-21",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: hooks.md#2.3 line 305, #2.10, #2.12 line 1492. New: rewrite/spec/tables/events.toml, rules.toml, event-types.toml",
+   "problem": "Machine fields hold prose tokens: 'all gates' as a rule id; 'the advisor' rendered as purity-advice; timeout_seconds = 'platform budget of 1.5' in an integer column; the invented tokens any-guarded, web-and-research and any-guarded-for-lock-liveness; and runner.call given '(extra: ms)', which the original does not state.",
+   "proposed_resolution": "Copy the cells as written and record any normalisation in conflicts/hooks-repair.md."
+  },
+  {
+   "id": "T2-22",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: state.md#2.8 lines 753-779. New: rewrite/spec/schemas/closure-record.schema.json",
+   "problem": "verdict is described as 'the fields of verdict.schema.json', although R1 records that the closure verdict holds counts. 'Per-worktree additions' does not match the original's wording. The baseline property of the ingest closure record is missing, and the wave and verify.json additions are not mentioned.",
+   "proposed_resolution": "Quote state.md#2.8, add a baseline property that refers to baseline.schema.json, and mention the wave and verify.json additions."
+  },
+  {
+   "id": "T2-23",
+   "kind": "other",
+   "severity": "minor",
+   "where": "Original: pipeline.md#2.10.8 line 1524; BLUEPRINT.md#4.10 line 615. New: rewrite/spec/schemas/claim.schema.json",
+   "problem": "The schema correctly follows the blueprint (a holdout claim carries the key alone), but the disagreement with pipeline.md ('key, resolution and commit only') is recorded in no conflicts file.",
+   "proposed_resolution": "Record both section ids and both texts in a conflicts file."
+  },
+  {
+   "id": "T2-24",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: BLUEPRINT.md#4.11 line 651; state.md#2.8; pipeline.md#2.6 line 490. New: rewrite/spec/tables/decision-kinds.toml",
+   "problem": "The notes for spec, release, spec-gap and blocked reword their sources instead of quoting them. spec-gap.opened_when takes the pipeline.md#2.6 wording over the blueprint's, and the choice is not recorded.",
+   "proposed_resolution": "Quote one source per cell and record the choice in a conflicts file."
+  },
+  {
+   "id": "T2-25",
+   "kind": "other",
+   "severity": "minor",
+   "where": "New: rewrite/spec/tables/step-methods.toml (ingest disposition row; maintain risks row; discover research row)",
+   "problem": "Two rows marked 'positional' have one agent and two methods, which breaks the table's own rule of pairing agents[n] with methods[n]. The methods list holds the string 'market-intel or discovery', which is not a method name.",
+   "proposed_resolution": "Repeat the agent or drop 'positional', and keep the alternative in the note."
+  },
+  {
+   "id": "T2-26",
+   "kind": "invented",
+   "severity": "minor",
+   "where": "New: rewrite/spec/tables/artifacts.toml lines 152, 256; path-classes.toml line 23; command-families.toml; lint-checks.toml L-METHOD",
+   "problem": "The [dependencies] row has a frontmatter cell that no original gives (conflicts/state.md S6 says none is given). The spike ledger's 'fields of pipeline.md S6' became 'the spike-finding schema'. Some cells keep pointers into the originals, for example '(pipeline.md S11)'. Writer cells were cut short or reworded. 'in no git family' became 'in no family'. The [callers] table is linked to [[table:callers]] instead of [[table:walls]], where it lives. L-METHOD keeps the pointer 'pipeline.md 2.9.13'.",
+   "proposed_resolution": "Copy the cells as written and replace each pointer with a [[kind:id]] link."
+  },
+  {
+   "id": "P2-01",
+   "kind": "altered",
+   "severity": "blocker",
+   "where": "Original: agents-skills.md#2.12 line 901 ('and so on for feature, verify, maintain and multi'); pipeline.md#2.3 lines 219-230 (Calls column) and line 251 (nesting rule); BLUEPRINT.md#4.12 line 700. New: spec/tables/roster.toml lines 58, 64, 68, 70, 71; conflicts/people-repair.md P-8 lines 63-67.",
+   "problem": "The roster's [workflows] table gives feature, verify, maintain and multi `calls = []`; only wave calls story. All three originals say these four call story. The repair (F26) read BLUEPRINT 4.5's 'Only story is ever called by another workflow' as 'no other call edges', which it does not say.",
+   "proposed_resolution": "Set calls = [\"story\"] for feature, verify, maintain and multi, citing pipeline.md#2.3; correct P-8."
+  },
+  {
+   "id": "P2-02",
+   "kind": "altered",
+   "severity": "blocker",
+   "where": "Original: state.md#2.5 line 565 (story row, 18 frontmatter keys); hooks.md#2.11.3 line 1057 ('# illustrative; the content is state.md section 2.5'). New: spec/tables/artifacts.toml lines 42-54 (only [story] row); spec/artifacts/story.md lines 20-30.",
+   "problem": "The registry's only [story] row is the illustrative excerpt: it allows only id, title, status, kind and contracts. The complete row in state.md#2.5 also has cycle, method, depends_on, properties, points, priority, criticality, security, ui, demo, screens, repo and source. artifacts/story.md lists all 18 keys, so the two statements disagree. A registry built from this table would refuse valid stories.",
+   "proposed_resolution": "Build [story] from state.md#2.5 line 565 in the [contract] row's format, and link artifacts/story.md to that row."
+  },
+  {
+   "id": "P2-03",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "F22. workflows/story.md 63-99,143-157 vs commands/gate-green.md 19, gate-red.md 19-37, story-deliver.md 20-40; topics/human-stops.md 17-75 vs tables/decision-kinds.toml; conventions.md 150, commands/decide.md 32, skills/decide.md 39, topics/hotfix-cycle.md 15, topics/decisions.md 31; topics/spikes.md 92-99 vs tables/limits.toml 85-98; topics/convergence.md 101 vs tables/config-keys.toml 361; conventions.md 119-122 vs topics/model-tiers.md 31-35; topics/event-log.md 46-53 vs commands/explain.md 21.",
+   "problem": "Several facts are still defined in two to five files: the green and red gates, re-freeze and delivery; the decision choices; the refusal of an ambiguous decision id; the spike limits; the holdout thresholds; the tier override; and the vsdd explain example.",
+   "proposed_resolution": "Keep each fact in its owner file and link to it from the others."
+  },
+  {
+   "id": "P2-04",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "F23. agents/code-reviewer.md 10, codebase-analyzer.md 10, holdout-evaluator.md 10 ('Replaces'); rules/spike-bounds.md 107; topics/event-log.md 15; topics/caller-identity.md 17; topics/rule-tuning.md 47; agents/test-writer.md 46; packaging/tests-conformance.md 40; topics/run-lock.md 54; topics/computed-status.md 26-30; topics/state-layout.md 60-63; tables/story-kinds.toml 7-9.",
+   "problem": "History and conversion commentary remain in design files. Three agent files keep the old-agent 'Replaces' column. Several files keep 'first pass' and 'second pass' phrasing, and one keeps a finding id (P2LEAN-17). Some keep notes about which disagreement was recorded where.",
+   "proposed_resolution": "Strike these passages, and keep the commentary in the conflicts files."
+  },
+  {
+   "id": "P2-05",
+   "kind": "lost",
+   "severity": "major",
+   "where": "Original: pipeline.md#2.4 lines 268-280 (column '1.0 route'); pipeline.md#2.9.6 line 1051. New: conflicts/workflows.md 118-120 (treated as history); topics/brownfield.md 59-60; workflows/verify.md 88.",
+   "problem": "The whole per-mode route table was dropped as an old-system mapping. Its right-hand column is design: the greenfield and discovery sequences, and the verify scope per fast route ('suite and traceability only', bug-fix scope, the critical-bug branching). This also leaves a disagreement unrecorded: 2.4 gives the trivial route 'suite and traceability only', and 2.9.6 gives 'baseline only'.",
+   "proposed_resolution": "Carry the 1.0-route column, in topic:brownfield or the routes header, and record the 2.4/2.9.6 disagreement."
+  },
+  {
+   "id": "P2-06",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "F27. Original: BLUEPRINT.md#4.13 lines 746-750; state.md#2.8 lines 786-789. New: records/baseline.md 28-31 (state wording); commands/gate-green.md 41 (blueprint wording); conflicts/records-repair.md RR10.",
+   "problem": "The flaky-test and first-release rules are now stated two ways, and the two statements disagree. The record file uses the detail document's wording, against the rule that section 4 of the blueprint wins. The green-gate command uses the blueprint's wording.",
+   "proposed_resolution": "Use BLUEPRINT.md#4.13 in record:baseline, and link to it from command:gate-green."
+  },
+  {
+   "id": "P2-07",
+   "kind": "fixed-during-conversion",
+   "severity": "major",
+   "where": "Original: BLUEPRINT.md#4.6 line 395; pipeline.md#2.9.1 line 882. New: commands/gate-green.md lines 23-24.",
+   "problem": "The file adds 'instead' to 'a docs story's green gate runs the documentation check'. No original says the documentation check replaces the build, suite, lint and format commands, so the word settles an open question.",
+   "proposed_resolution": "Remove 'instead'."
+  },
+  {
+   "id": "P2-08",
+   "kind": "defined-twice",
+   "severity": "major",
+   "where": "F08. Original: packaging.md#2.5 lines 464-467. New: packaging/build-step.md 61-65 and topics/prelude.md 91-97.",
+   "problem": "The F08 fix copied the prelude constraints into packaging:build-step, but topic:prelude still holds them as well. The build-step copy is also reworded: 'one of those names' became 'one of the prelude's top-level names'.",
+   "proposed_resolution": "Keep one copy, as written, in packaging:build-step, and link to it from topic:prelude."
+  },
+  {
+   "id": "P2-09",
+   "kind": "other",
+   "severity": "major",
+   "where": "F14. rules/read-walls.md 74; topics/information-walls.md 54; agents/architect.md 42, story-writer.md 44, ux-designer.md 38, researcher.md 40, product-owner.md 46, codebase-analyzer.md 41; rules/gate-guard.md 30, 48; tables/command-families.toml 23; topics/command-conventions.md 30; packages/C2.md 51 (registry summary).",
+   "problem": "After F14, [callers] and [reveals] live in tables/walls.toml, and table:callers holds only the three constants. More than ten files still link table:callers for the vsdd groups and for [reveals], and the registry summary still describes the old contents.",
+   "proposed_resolution": "Link table:walls for the groups and reveals, and have the registry owner update the table:callers summary."
+  },
+  {
+   "id": "P2-10",
+   "kind": "lost",
+   "severity": "minor",
+   "where": "Original: hooks.md#2.12 lines 1462-1467. New: topics/event-log.md; schemas/event.schema.json line 5 and properties.",
+   "problem": "The example rule.block event line is in no file. The schema calls itself a machine copy of that documented line. Its properties also omit the cwd field that agent.start and agent.stop carry.",
+   "proposed_resolution": "Copy the example line into topic:event-log and add cwd to the schema's properties."
+  },
+  {
+   "id": "P2-11",
+   "kind": "wrongly-retired",
+   "severity": "major",
+   "where": "Original: BLUEPRINT.md#11.2 lines 1661-1675. New: retired.toml (11.2 as history); topics/run-lock.md 52-60 (sources omit 11.2).",
+   "problem": "Items 2 (the lessons register) and 3 (the importer and the spike rule kept apart) are offers a person can still take, but they were retired as history. Item 1 is quoted in topic:run-lock, which does not cite 11.2 while 11.2 is still listed as retired.",
+   "proposed_resolution": "Record the three offers once, cite BLUEPRINT.md#11.2, and stop retiring it."
+  },
+  {
+   "id": "P2-12",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "F35. packaging/cli-entry.md 36; topics/rule-testing.md 11; topics/risks-hooks.md 9; topics/information-walls.md 74; topics/hook-runner.md 28; rules/artifacts.md 32; rules/secrets.md 65; packaging/plugin-manifest.md 119,128; packaging/e2e-story-tier.md 20,37; packaging/proof-greenfield.md 23-24; tables/limits.toml 5-6; commands/status.md 18.",
+   "problem": "Pointers into the original documents remain where a link belongs. Examples: 'Which subcommands exist is in BLUEPRINT.md#4.9', 'Copied in substance from hooks.md section 7', 'blueprint section 10, item N' instead of doc:platform, and the limits header citing 'its sections 2.7 and 2' with a wrong count of spike rows.",
+   "proposed_resolution": "Replace each pointer with a [[kind:id]] link."
+  },
+  {
+   "id": "P2-13",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: pipeline.md#2.9.1 line 858; state.md#2.11 line 1019. New: commands/story-deliver.md line 21.",
+   "problem": "The trailer value '(`Factory-Story: S-7.03`)', which comes from a different section, was inserted inside a sentence quoted from pipeline.md#2.9.1.",
+   "proposed_resolution": "Move the trailer outside the quotation marks and cite its source."
+  },
+  {
+   "id": "P2-14",
+   "kind": "lost",
+   "severity": "minor",
+   "where": "Original: packaging.md#layer-4-end-to-end-headless lines 735-739 (Rough cost column). New: packaging/tests-e2e.md 30-62.",
+   "problem": "The per-tier costs are lost: 'a few dollars', 'tens of dollars; measured in step 4 of the plan', 'about a dollar'.",
+   "proposed_resolution": "Copy the Rough cost column."
+  },
+  {
+   "id": "P2-15",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: BLUEPRINT.md#6 lines 1126-1127, 1150; pipeline.md#2.8 lines 747-749. New: topics/spikes.md 14-15, 59; topics/risks-pipeline.md 73-77; conflicts/workflows.md.",
+   "problem": "The spike definition follows pipeline.md ('experiment', 'two sizes') rather than the blueprint ('experiment or piece of research', 'one protocol and one agent'), and the difference is not recorded. The rule that the runner checks out ref first survives only as a risk. The person row of the blueprint's entrance table is truncated.",
+   "proposed_resolution": "Use the blueprint's wording and record the difference; carry the ref sentence in command:spike-open; restore the full person row."
+  },
+  {
+   "id": "P2-16",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: state.md#decision-keep-the-separate-branch-and-take-every lines 240-249. New: topics/state-directory.md 56-62.",
+   "problem": "The '1.0' column of the storage cost table was paraphrased into prose. Several facts were lost: 'No questions are asked', 'Two machines are reconciled by git when state is pushed', 'Nobody composes or reads state commit messages', and that CI mounting is optional and needs two lines.",
+   "proposed_resolution": "Copy the column as written."
+  },
+  {
+   "id": "P2-17",
+   "kind": "lost",
+   "severity": "minor",
+   "where": "Original: state.md#2.16 lines 1399-1402; hooks.md#2.11.7 lines 1300-1302. New: topics/run-lock.md 41, commands/retire.md 26, rules/step-results.md 64-65.",
+   "problem": "The 'Not built, and why' list is lost: vsdd flush, stale, review verdict/diff/path, job wait/status and step record, each with its reason. In rules/step-results.md the converter replaced the step-record sentence with its own wording.",
+   "proposed_resolution": "Copy the list into topic:command-conventions, and restore the original hooks.md sentence without its history clause."
+  },
+  {
+   "id": "P2-18",
+   "kind": "invented",
+   "severity": "minor",
+   "where": "Original: hooks.md#2.11.1; state.md#2.12 (the whole key list). New: rules/secrets.md lines 19-20 and 69.",
+   "problem": "The file claims that secret_globs is 'project configuration owned by the state design', which no original states, and secret_globs is not in the key list; the gap is not recorded. The git commit -F attribution sentence, which belongs to bash-git, was also copied into secrets.",
+   "proposed_resolution": "Strike both, and record the missing secret_globs key as a gap."
+  },
+  {
+   "id": "P2-19",
+   "kind": "invented",
+   "severity": "minor",
+   "where": "Original: hooks.md#2.10 lines 925, 930, 932 and the 'What it checks' column. New: tables/rules.toml lines 71, 101, 115.",
+   "problem": "The machine table uses tool tokens that appear in no original: any-guarded, any-guarded-for-lock-liveness and web-and-research. The 'What it checks' column is carried nowhere as written.",
+   "proposed_resolution": "Use the original cell text as the value, or record the encoding; copy the column."
+  },
+  {
+   "id": "P2-20",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original: BLUEPRINT.md#4.12 line 726 ('set at setup'). New: tables/config-keys.toml line 619; conflicts/records-repair.md RR3.",
+   "problem": "The default of hooks.rules.auto-allow.scope is a paraphrase ('written once by vsdd init, from the answer setup collected'). RR3 calls it the blueprint's meaning, but it is not the blueprint's text.",
+   "proposed_resolution": "Use 'set at setup', and keep RR3's record of the two example values."
+  },
+  {
+   "id": "P2-21",
+   "kind": "lost",
+   "severity": "minor",
+   "where": "Original: pipeline.md#2.11.3 lines 2190-2191; agents-skills.md#2.6 security-reviewer row. New: topics/wave-script.md; agents/security-reviewer.md line 30.",
+   "problem": "Two sentences are lost. The first is that verify, feature, maintain and multi call runStories() and treat its skipped list the same way. The second is the security reviewer's pipeline-versus-on-demand writes ('Nothing in the pipeline ...'), replaced by a link to the wall row.",
+   "proposed_resolution": "Copy both sentences."
+  },
+  {
+   "id": "P2-22",
+   "kind": "other",
+   "severity": "minor",
+   "where": "spec/source-index.json",
+   "problem": "The index is stale: 20 sections differ from the files' own sources. For example, pipeline.md#2.11 lacks packaging/tests-workflows.md, and BLUEPRINT.md#4.4 shows [] although tables/methods.toml cites it.",
+   "proposed_resolution": "Regenerate it with sections.py."
+  },
+  {
+   "id": "P2-23",
+   "kind": "other",
+   "severity": "minor",
+   "where": "spec/tables/artifacts.toml lines 13-21, 29-54 and 61-280.",
+   "problem": "One machine table mixes two row formats. The worked rows use the hook format (glob, id, inline frontmatter, max_bytes); the other rows use prose strings (path, frontmatter string, cap). The header documents only the first format.",
+   "proposed_resolution": "Use the hook design's format for every row, and record any key the originals do not give."
+  },
+  {
+   "id": "S2-01",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Original pipeline.md#2.9.1 lines 836-866, state.md#2.16 lines 1426-1434. New workflows/story.md 63-72, 83-100, 143-157, 165-174 vs commands/gate-red.md 19-35, gate-green.md 19-25, story-deliver.md 20-44; also wave.md 67-75 vs gate-wave.md, verify.md 44-50 vs gate-release.md 26-30, feature.md 38-42 vs feature-route.md 18-22, plan.md vs gate-plan.md/plan-schedule.md, spec.md vs gate-spec.md",
+   "problem": "Workflow files still restate the pass conditions, states and modes that the command files define (F22). The copies agree sentence for sentence; the only difference is 'no longer part of the gate' against 'not part of the gate'.",
+   "proposed_resolution": "Keep the pass condition and behaviour in the command file. The workflow stage keeps its gate expression and links [[command:...]]."
+  },
+  {
+   "id": "S2-02",
+   "kind": "defined-twice",
+   "severity": "major",
+   "where": "Original BLUEPRINT.md#4.13 lines 746-748 vs state.md#2.8 786-788 and pipeline.md#2.9.8 1101-1103. New records/baseline.md 28-31, commands/gate-green.md 40-42, workflows/ingest.md 101-104, packaging/tests-python.md 59, schemas/gate-result.schema.json 16",
+   "problem": "The flaky inherited test rule is stated five times in two wordings. The blueprint reruns any inherited test that 'fails and then passes'; the state and pipeline wording reruns only one 'that passed at the baseline'. conflicts/records-repair.md RR10 chose state.md#2.8, against the precedence rule (section 4 of the blueprint first).",
+   "proposed_resolution": "Keep one statement in record:baseline, worded per BLUEPRINT.md#4.13. Keep RR10 recording the disagreement and correct its 'Used' line. The other files link."
+  },
+  {
+   "id": "S2-03",
+   "kind": "defined-twice",
+   "severity": "major",
+   "where": "Original state.md#2.12 lines 1043-1194 (mode=pr 1090, ci=required 1091, scope=off 1190) vs BLUEPRINT.md#4.12 ('detected', 'set at setup'). New tables/config-keys.toml (delivery.mode, delivery.ci 'detected'; auto-allow.scope 617-621) vs topics/project-configuration.md 63-211 (110, 111, 210); also schemas/config.schema.json and tables/limits.toml",
+   "problem": "Two key lists, each calling itself the one list, carry defaults. They disagree on delivery.mode, delivery.ci and hooks.rules.auto-allow.scope and agree on the other 81 defaults compared. The schema is a third list of the same keys, and limits.toml repeats 14 defaults; both agree.",
+   "proposed_resolution": "State each default once: keep the verbatim example and have the table carry only key, type and owner, or mark the three rows as recorded disagreements (RR2, RR3). limits.toml links to the key rows."
+  },
+  {
+   "id": "S2-04",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Original BLUEPRINT.md#4.11 642-652, #4.8 532, state.md#2.8 836, pipeline.md#2.6 516-517. New tables/decision-kinds.toml vs topics/human-stops.md 17-80; conventions.md 146-150, topics/decisions.md 26-31, topics/hotfix-cycle.md 12-16 (plus parts of commands/decide.md 32, skills/decide.md 39, rules/decisions.md 32-38)",
+   "problem": "human-stops.md restates every kind's opened-when and choices. The qualified id <id>@<cycle> and the refusal of an ambiguous id are written out three times. They agree in substance; the wording differs for the 'reviewer' reason and for merge reject.",
+   "proposed_resolution": "Keep the choices in the table only and the identifier rule in doc:conventions only (it is BLUEPRINT.md section 4.8). The topics link."
+  },
+  {
+   "id": "S2-05",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Original state.md#2.5 534-629, hooks.md#2.11.3 1049-1093. New tables/artifacts.toml (31 rows) vs every artifacts/<kind>.md (e.g. brief.md 10-17, contract.md 10-19); rules/artifacts.md 30-46; records/holdout-evaluation.md vs [holdout-evaluation]",
+   "problem": "Each artifact kind's path, frontmatter, writer, cap and lifecycle are defined in the table and again in its own file. rules/artifacts.md still carries the [story] and [_unknown] rows (F22, F25). Caps and paths agree for all 31 kinds.",
+   "proposed_resolution": "The artifact files keep only what the table does not hold and link [[table:artifacts]]. rules/artifacts.md links instead of showing the rows."
+  },
+  {
+   "id": "S2-06",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "records/lock.md 18-45 vs topics/run-lock.md 16-42, 79-80 (state.md#2.11); records/caller-marker.md 13-29 vs topics/caller-identity.md 11-31 (hooks.md#2.8); records/config-fingerprint.md vs topics/rule-tuning.md; rules/auto-allow.md 43-90 vs topics/tool-call-approval.md 28-45; topics/workflow-shape.md 47-52 vs topics/resume.md 13-31",
+   "problem": "Records and rules are restated by the topics that explain them: lock lifecycle, caller marker, fingerprint, auto-allow switch, and the done test (which resume.md states twice). They agree, with small wording differences ('through lock_seen'; 'row' vs 'role').",
+   "proposed_resolution": "The record or rule file defines; the topic explains and links."
+  },
+  {
+   "id": "S2-07",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "commands/import.md 18-40 vs topics/importer.md 15-75 (state.md#2.15/2.16); commands/init.md vs topics/project-configuration.md 39-48 and state-directory.md; commands/survey.md 30-34 and checkpoint.md vs topics/workflow-shape.md 24-40; commands/explain.md vs topics/event-log.md; commands/retire.md vs topics/artifact-rules.md; packaging/build-step.md 61-71 vs topics/prelude.md 89-97 (packaging.md#2.5 464-467)",
+   "problem": "Command files and topics restate each other. They agree, but import.md and importer.md each carry a clause the other lacks. The prelude constraints are in two files (P-3 noted this and left both).",
+   "proposed_resolution": "One owner each (the command, topic:importer, packaging:build-step); link elsewhere."
+  },
+  {
+   "id": "S2-08",
+   "kind": "defined-twice",
+   "severity": "major",
+   "where": "Original pipeline.md#2.9.11 1167-1209, state.md#2.14 1270-1304. New workflows/multi.md 12-18 and 81, topics/multi-repo.md 14-18, topics/multi-repo-state.md 10-30 (line 21)",
+   "problem": "The hub model is written out three times, including a converter-written 'In one view' paraphrase. The copies differ on what a [[repo]] entry may carry: 'branches, commands, paths, release and delivery' against '[release] and [delivery] tables'. The difference is not recorded.",
+   "proposed_resolution": "Keep one statement of the hub model and of the per-repository overrides, record the difference in the override lists, and remove the paraphrase."
+  },
+  {
+   "id": "S2-09",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "topics/spikes.md 90-99 vs tables/limits.toml; tables/event-types.toml vs schemas/event.schema.json x-documented-types; tables/roster.toml 12-16 vs conventions.md 111-117, model-tiers.md 14-36 and line 15 of each agent file; tables/callers.toml 12 vs rules/merge-guard.md 34; exempt kinds in story-kinds.toml, callers.toml 13-14, tests-first.md 47, story.md 54-55; holdout thresholds; lock_stale_minutes in five files; spike reuse rule in five files",
+   "problem": "Lists and values are stated in a second file: spike limits, event types (F30), tiers, GOVERNED, exempt kinds, thresholds, stale minutes and the spike reuse rule. All copies agree, but each is a second definition.",
+   "proposed_resolution": "Keep each in its table and link from the prose."
+  },
+  {
+   "id": "S2-10",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Copied: topics/caller-identity.md 17-20 (hooks.md 1373), topics/rule-tuning.md 47 (hooks.md 537), rules/spike-bounds.md 107-110 (hooks.md 1252), topics/event-log.md 15-16 (hooks.md 1455), agents/test-writer.md 46-47 (agents-skills.md 504), packaging/tests-conformance.md 40 (packaging.md 632), packaging/tests-workflows.md 53-66 (pipeline.md 1566-1579), platform.md 266 (BLUEPRINT.md 1513). Converter-written: topics/run-lock.md 54-55, topics/computed-status.md 29-31, rules/secrets.md 65, topics/seams-state.md 9, tables/methods.toml 345-347, packaging/build-plan.md 21-23, tables/callers.toml 14",
+   "problem": "History phrases remain in design files: 'first pass', 'second pass', 'before the corrections', 'is now defined', 'the blueprint amendment', 'today', and the finding id P2LEAN-17 (F23).",
+   "proposed_resolution": "Strike each history clause and keep the design clause. Quote BLUEPRINT.md#11.2 item 1 without the framing sentence or the finding id."
+  },
+  {
+   "id": "S2-11",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "commands/import.md 18 ('Section 2.15.', state.md 1376); commands/config.md 20; rules/artifacts.md 30; tables/limits.toml 6 (truncated '2.7 and 2.'); agents/verifier.md 16, codebase-analyzer.md 16, spike-runner.md 15, topics/model-tiers.md 40 ('open question 1', retired agents-skills.md#6); topics/risks-state.md 18; packaging/ci.md 10, cutover-steps.md 21 and 28, cutover-deletions.md 11, plugin-manifest.md 62, 119 and 128, e2e-story-tier.md 20 and 37, proof-greenfield.md 23-24, packaging-assumptions.md 14, cli-entry.md 36, proof-brownfield.md 28, plugin-assets.md 11; topics/event-log.md 11, information-walls.md 29, tool-call-approval.md 16 and 21; rules/decisions.md 11 and 27; tables/artifacts.toml 122, 217, 232, 278",
+   "problem": "Pointers into the original documents ('section 2.15', 'decision Dnn in BLUEPRINT.md#2.3', 'blueprint section 10, item N', 'open question 1 of the design') stand where a link or copied text belongs (F35). Several were written by the converters.",
+   "proposed_resolution": "Replace each with the [[kind:id]] link of the thing ([[doc:decisions]], [[doc:platform]], [[topic:importer]] and so on), or copy the text."
+  },
+  {
+   "id": "S2-12",
+   "kind": "other",
+   "severity": "minor",
+   "where": "tables/walls.toml 3, story-kinds.toml 7-9, command-families.toml 29, artifacts/analysis.md 21, topics/state-layout.md 60-63, computed-status.md 29-31, commands/cycle-close.md 20-22 and 38, env-stop.md 14-16, validate.md 14-15, review-prepare.md 31, coverage.md 32, idea-register.md 15, defer-add.md 37, gate-red.md 45-47, gate-green.md 38; the descriptions of the run-record, driver-flag, config-fingerprint and spike-admission schemas",
+   "problem": "Conversion commentary and 'see conflicts/...' pointers sit inside design files (F29 class). env-stop and validate each present two syntaxes instead of the one the precedence rule picks.",
+   "proposed_resolution": "Move the commentary to the conflicts files. Each design file states only the chosen text."
+  },
+  {
+   "id": "S2-13",
+   "kind": "altered",
+   "severity": "major",
+   "where": "Original BLUEPRINT.md#9.1 1358-1359 and #9.6 1452-1457. New packaging/build-plan.md 17-23, 32-34, 38-41",
+   "problem": "The build-plan paragraphs are paraphrased and wrong. 'Except where a dependency cycle made a split necessary: B4 ... and E4' replaces 'split six ... split B4 ... added E4'. 'Two packages ... no longer exist' names only one, plus a fragment from the retired packaging.md#2.12. A fifth order-of-work step (T1, T3, T5, E1 to E4, D2, D3, R1, CO1, CO2 after the workflows) is in no original, and T1 is a dependency of K1. A summary of the foundation packages was added.",
+   "proposed_resolution": "Copy the order-of-work paragraph as written. Drop the history sentence rather than paraphrase it. Remove step 5 and the summary."
+  },
+  {
+   "id": "S2-14",
+   "kind": "earlier-finding-not-fixed",
+   "severity": "major",
+   "where": "Original state.md#2.17 lines 1452-1454. New: absent (config/spikes.md and topics/spikes.md 109-111 checked)",
+   "problem": "No file carries the reason for one project ledger outside spike worktrees: 'a ledger that lives in a throwaway worktree cannot stop a question being asked twice'. F15 named this sentence. people-repair P-4 says it is reached through config:spikes, but it is not there.",
+   "proposed_resolution": "Copy the sentence into artifact:spike-ledger-entry or topic:spikes, citing state.md#2.17, and correct P-4."
+  },
+  {
+   "id": "S2-15",
+   "kind": "wrongly-retired",
+   "severity": "minor",
+   "where": "Original BLUEPRINT.md#11.2 lines 1661-1676. New retired.toml 17-19; topics/run-lock.md 52-62 (sources lack 11.2)",
+   "problem": "11.2 is retired as history, yet item 1 (lock liveness by process, still open, the subject of probe 29) is quoted in run-lock.md without a citation. Items 2 and 3 (the lessons register is reversible; S5/CO1 and H8/W1 could be merged) are open offers to the person and appear in no file.",
+   "proposed_resolution": "Cite BLUEPRINT.md#11.2 from topic:run-lock and drop the retirement, or record all three open offers once in doc:decisions."
+  },
+  {
+   "id": "S2-16",
+   "kind": "other",
+   "severity": "minor",
+   "where": "conventions.md 165; tables/methods.toml 345-420; topics/method-files.md",
+   "problem": "conventions.md says BLUEPRINT.md#4.4 is 'not carried over', but methods.toml carries it as [[replaced-name]] and method-files.md cites it. Those rows are a mapping from the provisional names, and their list values are comma-joined strings.",
+   "proposed_resolution": "Correct the conventions line to link [[table:methods]]. Decide once whether 4.4 is design (keep the rows, with arrays) or history (retire it and drop the rows)."
+  },
+  {
+   "id": "S2-17",
+   "kind": "other",
+   "severity": "minor",
+   "where": "tables/story-kinds.toml line 5 (red_gate at 15-55)",
+   "problem": "The header says the story kinds, with whether each has a red gate, are one table in artifacts.toml. In the spec they are in story-kinds.toml, and artifacts.toml has no red-gate data.",
+   "proposed_resolution": "Say where the table is in the spec, or link [[table:story-kinds]]."
+  },
+  {
+   "id": "S2-18",
+   "kind": "other",
+   "severity": "minor",
+   "where": "rewrite/spec/source-index.json",
+   "problem": "12 sections map to fewer files than cite them now. For example BLUEPRINT.md#4.4 gives [] (live: topics/method-files.md), state.md#2.17 gives [] (live: topics/worktrees.md), and state.md#4, #2.8 and hooks.md#5 lack topics/state-api.md.",
+   "proposed_resolution": "Regenerate with 'python3 rewrite/tools/sections.py coverage --write-index'."
+  },
+  {
+   "id": "S2-19",
+   "kind": "other",
+   "severity": "minor",
+   "where": "registry.toml [table.callers] and [table.roster]",
+   "problem": "The callers summary still claims the [callers] groups and [reveals], which moved to tables/walls.toml (lines 205 and 222). The roster summary claims 'tools and package', which were removed under F06.",
+   "proposed_resolution": "The registry owner corrects the two summaries; repairers may not edit registry.toml."
+  },
+  {
+   "id": "S2-20",
+   "kind": "history-leaked",
+   "severity": "minor",
+   "where": "registry.d/people.toml 1-6, registry.d/records.toml 1-3, registry.d/hooks.toml 1-2",
+   "problem": "Comments narrate the repair passes ('this pass's audit (F03)', 'repair passes').",
+   "proposed_resolution": "Remove the comments; delete the empty additions files."
+  },
+  {
+   "id": "S2-21",
+   "kind": "other",
+   "severity": "minor",
+   "where": "rewrite/spec/README.md lines 3-4",
+   "problem": "The README says the six documents are kept under rewrite/history/design-v1/, which does not exist. They are at rewrite/BLUEPRINT.md and rewrite/design/.",
+   "proposed_resolution": "For the person or the README's owner; the repair rules forbid editing it."
+  },
+  {
+   "id": "S2-22",
+   "kind": "defined-twice",
+   "severity": "minor",
+   "where": "agents/security-reviewer.md 39 vs tables/walls.toml 160 (BLUEPRINT.md#4.3 line 308, hooks.md#2.7)",
+   "problem": "The agent file gives its read walls as 'holdout and reviews'. The row also denies runs and outside, so the second statement is incomplete.",
+   "proposed_resolution": "Link the walls row, as agents/holdout-evaluator.md now does."
+  },
+  {
+   "id": "S2-23",
+   "kind": "altered",
+   "severity": "minor",
+   "where": "Original pipeline.md#2.11 1566-1579. New packaging/tests-workflows.md 54-66",
+   "problem": "The B5 sentence is moved to the front, 'three blocks' becomes 'three script skeletons', and 'They have not been run on the platform.' is dropped.",
+   "proposed_resolution": "Copy the passage as written, without its history clauses."
+  },
+  {
+   "id": "S2-24",
+   "kind": "other",
+   "severity": "minor",
+   "where": "retired.toml 21-23 (BLUEPRINT.md#11.3)",
+   "problem": "The 'duplicate' reason names files, not the section id the README requires, and one of them (topics/hooks-inert.md) does not carry the text. The consequences are carried in rules/auto-allow.md, workflows/ingest.md and topics/spikes.md.",
+   "proposed_resolution": "Name the sections that hold the text (hooks.md#2.11.10, pipeline.md#2.9.8, pipeline.md#2.8)."
+  },
+  {
+   "id": "S2-25",
+   "kind": "other",
+   "severity": "minor",
+   "where": "conflicts/people-repair.md P-4; the repair summaries for hooks, commands and workflows",
+   "problem": "Repair records claim fixes that are incomplete: the ledger reason, the de-duplicated hub model and ambiguity rule, the struck pointers and history (see S2-04, S2-08, S2-10, S2-11, S2-14).",
+   "proposed_resolution": "Correct the records when the fixes land."
+  }
+ ]
+}

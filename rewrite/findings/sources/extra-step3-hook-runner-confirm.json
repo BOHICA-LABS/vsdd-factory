@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S3R-hook-runner-C1-1",
+    "origin": "slice step 3, hook-runner, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py",
+    "problem": "The fix for S3R-hook-runner-6 sets _Word.subst for any word that opens with '$(' and marks the segment opaque on it. That includes arithmetic expansion: 'echo $((1+2))' and \"git commit -m \\\"$((1+2))\\\"\" now parse as opaque. _own_opacity still excludes '$((' explicitly, and the module docstring says plain expansions are not opaque. The exclusion is now dead code and the two statements disagree. A vsdd call with an arithmetic argument no longer gets its caller marker.",
+    "proposed_resolution": "Decide on one behaviour. Either set subst for '$((' only when the arithmetic contains a '$(' or a backtick, or drop the '$((' exclusion from _own_opacity and say in the docstring that arithmetic is opaque. Add 'echo $((1+2))' to test_substitution_in_any_word_is_opaque with the expected answer.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-C1-2",
+    "origin": "slice step 3, hook-runner, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py",
+    "problem": "The fix for S3R-hook-runner-14 makes _bad_input log only in gate mode, so bad input in notify mode now leaves no event at all. HD11, topics/rule-model.md ('logged in notify, under the session id unknown') and the failure table of topics/hook-failure.md (notify: Logged) all say it is logged in notify. test_bad_input_logged_in_gate_only asserts that the events directory stays empty in notify, which locks in the contradiction.",
+    "proposed_resolution": "Keep rule.block gate-only, but log a non-block event in notify (and in brief) under the session id unknown. That can be rule.error with rule 'runner', error 'runner_bad_input' and fail 'open', or a new type added to tables/event-types.toml and the model constants. Change the test to expect that event in notify and no rule.block.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-C1-3",
+    "origin": "slice step 3, hook-runner, confirmation",
+    "severity": "minor",
+    "where": "next/tests/lint/test_hooks_wiring.py",
+    "problem": "test_wiring_generated_from_a_fixture_table covers six of the seven events, and SessionEnd is missing. SessionEnd has the one special wiring: no matcher and no timeout key, because the platform's budget governs it. Changing _wire_entry's 'if event.timeout is not None' to 'if True' in a scratch copy leaves tests/hooks and the wiring lint green, although a SessionEnd rule would then be wired with \"timeout\": null. hook-runner-b wires SessionEnd next.",
+    "proposed_resolution": "Add a SessionEnd row to the fixture table. Assert that its wire has no matcher, no timeout key and no onFailure, and carries the notify guard.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-C1-4",
+    "origin": "slice step 3, hook-runner, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/tests-first.md; rewrite/spec/topics/seams-hooks.md",
+    "problem": "S3R-hook-runner-18 fixed rule-model.md and hook-runner.md, but two spec files still describe the decorator that HD1 removed. rules/tests-first.md says 'The `@rule` declaration form is [[topic:rule-model]]; tests-first is its example, with spike_exempt = True', and topics/seams-hooks.md says 'one module, one `@rule` declaration, one row in the registry'. A step 4 builder reading tests-first.md is pointed at a form that no longer exists.",
+    "proposed_resolution": "In tests-first.md, say that the RuleEntry row in registry.RULES is the declaration, and that rule-model.md shows tests-first's row (spike_exempt=True). In seams-hooks.md, write 'one module exposing check, and one RuleEntry row in the registry, which is the declaration'.",
+    "on_slice_path": true
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "P3BLD-14",
+    "outcome": "fixed",
+    "what_was_done": "The lock refresh and the session-end release are core duties of the hook runner, wired with no rule beside the caller-marker duty: liveness.refresh on every PreToolUse call and liveness.release on SessionEnd, calling records' lock_seen and lock_release. Lock liveness no longer waits for H9, so no workflow of the slice holds a lock that goes stale after 20 minutes while it runs.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py, registry.py, main.py; tests/hooks/test_liveness.py (test_lock_refresh, test_session_end_releases, test_refresh_is_cheap_without_a_lock)",
+    "recorded_in": "step3-hook-runner-b.json"
+  },
+  {
+    "id": "P3SEAM-24",
+    "outcome": "fixed",
+    "what_was_done": "The refresh goes by the run the call names and the story it works in, not by the session id alone: liveness.refresh passes the --run value of a vsdd segment, tool_input.step.run of a StructOutput call, and ctx.story of the call's worktree to lock_seen, which decides belonging. Steps that start in the main session's directory are covered by step.run and by the story worktree they are given by path.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py (run_of); tests/hooks/test_liveness.py (test_lock_refresh: the --run, the step.run and the story-worktree cases)",
+    "recorded_in": "step3-hook-runner-b.json"
+  },
+  {
+    "id": "P3OPS-20",
+    "outcome": "fixed",
+    "what_was_done": "The refresh half: runs with no worktree of their own are kept alive by the StructuredOutput step.run refresh and the vsdd --run refresh (test_lock_refresh). The clear half stays with the probe, not with this fix: SessionEnd releases whatever the reason (liveness.release reads the reason only to log it), and whether a workflow survives /clear is still unproven after round 4, which tested SIGTERM, not a clear — if a probe shows one surviving, keeping the lock on reason clear is a one-line change; until then a workflow that survives has its run ended and its next gate refuses run_not_live out loud. The clear half is left for B8 (the probe), then H9.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/liveness.py; tests/hooks/test_liveness.py (test_lock_refresh, test_session_end_releases)",
+    "recorded_in": "step3-hook-runner-b.json"
+  }
+]

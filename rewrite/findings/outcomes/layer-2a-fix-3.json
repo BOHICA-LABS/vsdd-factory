@@ -1,0 +1,38 @@
+[
+  {
+    "id": "CATCHUP-R10",
+    "outcome": "fixed",
+    "what_was_done": "Both open parts. (1) toy-story's close now passes --outcome failed when outcome is unset as well ('!outcome || outcome.status === \\'failed\\''). New harness test 7b runs toy-story with a throwing work step and asserts the close clerk prompt carries --outcome failed; against the old 'outcome && ...' ternary the close carries it nowhere, so the test fails without the fix (checked on a scratch copy of the toy). (2) The reopened AU-P2-12 is closed: the six stale pointers are repaired in place - topics/rule-testing.md ('packaging.md' and 'hooks.md section 2.14' to [[packaging:tests-python]], [[schema:step-result]] and [[schema:decision-record]]), topics/risks-hooks.md (the copied-in-substance pointer to the sources line of the frontmatter), topics/information-walls.md ([[topic:risks-hooks]]), packaging/e2e-story-tier.md 20 and 37 and packaging/proof-greenfield.md 23-24 ([[doc:platform]], items; the outcome's 'topics/proof-greenfield.md' path corrected) and commands/status.md (the bare '(2.10)' dropped, the fact already carried by [[topic:status-report]] and [[schema:status]] in the same sentence). spec_lint reports 0 problems. triage/d.json's AU-P2-12 entry now lists the six files with the corrected path and their real owners (E2, E3, S2c; the three hook-rule topics carry package none in the registry and so were repaired directly), and an AU-P2-12 entry in this file marks the finding fixed.",
+    "where": "next/tests/workflows/toys/toy-story.js (the close relay); next/tests/workflows/universal.test.mjs (test 7b); rewrite/spec/topics/rule-testing.md, rewrite/spec/topics/risks-hooks.md, rewrite/spec/topics/information-walls.md, rewrite/spec/packaging/e2e-story-tier.md, rewrite/spec/packaging/proof-greenfield.md, rewrite/spec/commands/status.md; rewrite/findings/triage/d.json; the AU-P2-12 entry below"
+  },
+  {
+    "id": "B6-R7",
+    "outcome": "fixed",
+    "what_was_done": "(1) RUN_TIER_ADOPTION_RE matches only a dotted member chain on an input object ending in '|| null' (a.tier, s.config.tier_override, survey.config.tier_override), and workflow_problems skips it only when the chain names no TIER, ROLE or OVERRIDE. RUN.tier = TIER.planner, RUN.tier = TIER.reviewer || null, RUN.tier = a.tier || TIER.planner, RUN.tier = a.tier and RUN.tier = 'planner' are each rejected now (test_pinning_the_run_to_a_tier_is_rejected; the old loose regex accepted the first three). (2) _strip_comments_and_strings scans a template literal's ${...} interpolations as code, so a direct agent(, a model:/effort: literal and a forbidden workflow('vsdd-factory:release') written inside a template are reported (test_interpolations_are_scanned_as_code). A regular-expression literal is opaque: escapes and [...] classes hold no terminator, flags are consumed, and a regex that does not close before the line's newline reads as division, so a quote inside /'/g no longer throws the string state off and a following direct agent( is reported (test_a_regex_literal_hides_nothing_after_it). (3) The stripping is pinned by tests that fail with it removed: test_a_comment_and_a_prompt_string_are_not_tier_settings (a comment 'the agent (x)' and a prompt string 'effort: high' trip nothing) was checked by mutation to fail with js = body. (4) The data-key question is decided and tested: a model:/effort: key whose value is carried ({ model: u.model, effort: u.effort }) passes what the run was given and is allowed; one set from a quoted literal is a tier setting and is rejected (TIER_KEY_RE narrowed; test_a_carried_model_data_key_is_not_a_tier_setting, both halves). Lint suite: 85 passed, 1 skipped.",
+    "where": "next/tests/lint/test_roster_lint.py (_strip_comments_and_strings, RUN_TIER_ADOPTION_RE + TIER_NAME_RE, TIER_KEY_RE; TestWorkflowLint: test_a_comment_and_a_prompt_string_are_not_tier_settings, test_interpolations_are_scanned_as_code, test_a_regex_literal_hides_nothing_after_it, test_the_skeleton_tier_adoptions_are_allowed, test_pinning_the_run_to_a_tier_is_rejected, test_a_carried_model_data_key_is_not_a_tier_setting)"
+  },
+  {
+    "id": "C2-R8",
+    "outcome": "fixed",
+    "what_was_done": "The parenthesis is closed: '... and is defined in that table ([[rule:spike-bounds]]). Two cases hold it: ...' in the own-worktree paragraph of rule-model.md, so the following sentences no longer read as if they were inside the parenthesis. spec_lint: 0 problems.",
+    "where": "rewrite/spec/topics/rule-model.md (own-worktree paragraph); python3 rewrite/tools/spec_lint.py"
+  },
+  {
+    "id": "L2C-c2-b6-1",
+    "outcome": "fixed",
+    "what_was_done": "The contract row's headings cell is pinned: TestContractArtifactKind gains test_headings_are_pinned, asserting headings == ['Behavior', 'Preconditions', 'Postconditions', 'Invariants', 'Edge cases', 'Test vectors'] cell for cell. Dropping 'Test vectors' (the mutation the confirmation ran) now fails the suite, so the artifacts.toml header's claim that the [contract] row is pinned holds for every enforced cell, and the story row's headings stay asserted in test_writer_lock_and_heading.",
+    "where": "next/tests/unit/test_policy.py (TestContractArtifactKind.test_headings_are_pinned)"
+  },
+  {
+    "id": "L2C-catchup-2",
+    "outcome": "fixed",
+    "what_was_done": "error is set to '' in the three ok: true fixtures valid_state-ci-failed.json, valid_state-conflict.json and valid_state-review-stale.json, matching delivery-data.schema.json ('empty when ok') and story-deliver.md, which uses error only for the ok: false states; the schema and story-deliver.md are unchanged. The rule is pinned by test_delivery_data_ok_states_carry_an_empty_error, which fails on any valid delivery-data fixture with ok: true and a non-empty error - the contradiction the confirmation found.",
+    "where": "next/tests/unit/fixtures/schemas/delivery-data/valid_state-ci-failed.json, valid_state-conflict.json, valid_state-review-stale.json; next/tests/unit/test_schema_fixtures.py (test_delivery_data_ok_states_carry_an_empty_error)"
+  },
+  {
+    "id": "AU-P2-12",
+    "outcome": "fixed",
+    "what_was_done": "The last six files of the F35 pointer set are repaired (see the CATCHUP-R10 entry in this file for the per-file links); the earlier four (packaging/cli-entry.md, packaging/plugin-manifest.md, rules/secrets.md, tables/limits.toml) were already repaired. triage/d.json now lists the six files with the corrected packaging/proof-greenfield.md path and their real owner packages (E2, E3, S2c; the hook-rule topics carry package none in the registry), replacing the stale B1/B2/H2/S1 routing that kept the finding out of the E2, E3 and S2c by-package lists.",
+    "where": "rewrite/spec/topics/rule-testing.md, rewrite/spec/topics/risks-hooks.md, rewrite/spec/topics/information-walls.md, rewrite/spec/packaging/e2e-story-tier.md, rewrite/spec/packaging/proof-greenfield.md, rewrite/spec/commands/status.md; rewrite/findings/triage/d.json"
+  }
+]

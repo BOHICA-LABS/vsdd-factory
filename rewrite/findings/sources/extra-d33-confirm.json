@@ -1,0 +1,83 @@
+[
+  {
+    "id": "D33R-C-1",
+    "origin": "decision D33, confirmation",
+    "severity": "major",
+    "where": "rewrite/spec/tables/sync-checks.toml (T-REMOTE); rewrite/spec/topics/team-git-facts.md (fact 9); rewrite/spec/commands/sync.md (Writes); ledger D33-13",
+    "problem": "T-REMOTE says every fetch and every push names `refs/heads/<branch>` on both sides. For a fetch that is wrong. Tested with git 2.34.1 on Linux and 2.50.1 on macOS: `git fetch <remote> refs/heads/<b>:refs/heads/<b>` into the state branch, which is checked out in the mount, exits 128 ('Refusing to fetch into current branch'), so every sync would end `unreachable`; into a target branch that is not checked out it would move the person's own local branch. A fetch into the remote-tracking ref without a leading `+` exits 1 ('[rejected] (non-fast-forward)') after the remote was rewound, and the head rule makes a failed fetch `unreachable`, so T-HISTORY's `rewritten` is never reached. Fact 9's 'git fetch exits 0 and reports a forced update' holds only for a forced refspec (the configured one, or `+refs/heads/<b>:refs/remotes/<r>/<b>`). command:sync already says the sync writes the remote-tracking ref, so the two files disagree. Ledger D33-13, which is on the slice path, carries the same ambiguity to S3's target_head being built now ('fetches refs/heads/<branch> from that remote under the branch's own name').",
+    "proposed_resolution": "Say in T-REMOTE that a push names refs/heads/<b> on both sides and a fetch is `git fetch <remote> +refs/heads/<b>:refs/remotes/<remote>/<b>`, never into refs/heads. Add to fact 9 that the `+` is what turns a rewind into a forced update with exit 0, and that without it the fetch exits 1. Amend D33-13 to the same refspec before S3 builds target_head, with a pr-mode test that the local integration branch did not move. M1's T-HISTORY test fetches a rewound branch and expects `rewritten`.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-2",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/team-git-facts.md (fact 6); rewrite/spec/tables/sync-checks.toml (T-COMBINE)",
+    "problem": "Fact 6 names `git diff --name-status` against the merge base as what the sync reads to decide each path. Porcelain diff detects renames by default, and a person's diff.renames setting can change that. Tested with git 2.34.1 and 2.50.1: one commit that removes claims/story.S-1.json and adds claims/story.S-2.json (a release and a take, pretty-printed JSON) is listed as the single line `R080 claims/story.S-1.json claims/story.S-2.json`. A path-by-path decision read from that output misses a removal and an addition, and can take a new claim for a change to the released one.",
+    "proposed_resolution": "State in T-COMBINE and fact 6 that the two diffs are read with rename detection off (`git diff-tree -r --no-renames --name-status <base> <head>`, or `git diff --no-renames`), which lists D and A for the same commit, and add that case to M1's tests.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-3",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/sync-checks.toml (T-PUSH); rewrite/spec/tables/work-claim-checks.toml (T-PUBLISH, T-MINT); rewrite/spec/records/clone.md (sync.remote_head)",
+    "problem": "T-PUSH calls a refused push a lost race whenever the remote's head is no longer the commit the push was built on. A state branch rewound or replaced between the claim's sync and its push matches that test too. The sync goes back to step 3, where T-HISTORY can catch it, but T-PUBLISH and T-MINT build the commit again on the new head, push it, and on acceptance bring it into the mount through T-COMBINE, which merges the vanished commits back: the outcome T-HISTORY exists to prevent. The commits that arrived between the two heads also reach the mount without T-INCOMING or T-HOLD having run on them. clone.md defines sync.remote_head as the head 'at the last listing or fetch that succeeded', so T-PUSH's own fetch of a rewound head moves it, and the next sync's T-HISTORY test then passes and the rewind is undone silently.",
+    "proposed_resolution": "A lost race requires that the new head contains the head the push was built on; otherwise every caller answers `rewritten`. After a lost race T-PUBLISH and T-MINT run the sync's steps 3 and 4 (T-HISTORY, T-INCOMING, T-HOLD) on the new head before building again. sync.remote_head is written only once T-HISTORY has accepted a fetched head. Add to proof scenario 7 a rewind between B's opening sync and its claim push.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-4",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/work-claim-checks.toml (T-RELEASE, T-TAKEOVER); rewrite/spec/commands/claim-take.md",
+    "problem": "A full sync removes, unasked, 'a story claim under which nothing was begun and for which no run is live', and every claim held for a run whose run is not live here. A claim a person has just taken with `vsdd claim take` matches both: the command starts no run, and this clone has no commit of that story. The next full sync is the opening sync of the very survey that claim-take.md says 'enters the claim as its own', so the claim is removed first, `taken_from` is lost, and the story is free to any clone until that survey's T-CLAIM takes it again. Whether 'begun' is measured on this clone's branch or on the remote's is not said; measured locally, it also frees a taken story whose old holder had pushed work.",
+    "proposed_resolution": "Say that 'begun' is measured on the story branch on the remote as well as on this clone, and that a full sync does not remove a claim carrying `taken_from` until a run of this clone has entered it or a person releases it. Add the case to proof scenario 28.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-5",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/long-commands.md (Team use); rewrite/spec/rules/decisions.md (Team use); rewrite/spec/commands/sync.md",
+    "problem": "`vsdd sync` is a job keyed by the command and the state branch, with no commit, and the decisions rule starts it detached and returns. Nothing ever collects that job's result, and the built job layer serves a finished, uncollected result to the next call with the same key (next/plugins/vsdd-factory/py/vsdd/gates/jobs.py, _serves; a record is pruned only after the retention days). So the next `vsdd sync` that a person or the main session runs, when the briefing says state is behind or unpublished, returns the earlier outcome of the hook's sync and runs no sync.",
+    "proposed_resolution": "Start the rule's sync under a key of its own (for example the subject `settle:<decision id>`), or have `vsdd sync` attach only to a running job and otherwise start a new one. State it in the Team use passage of long-commands.md, with a test: a rule-started sync finishes, then `vsdd sync` fetches again.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-6",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/sync-checks.toml (T-SOLO); rewrite/spec/tables/work-claim-checks.toml (T-SWITCH, T-HANDOFF); rewrite/spec/packaging/proof-team.md (scenario 17)",
+    "problem": "A clone that was mounted while team use was off joins by itself at its next push once the fetched factory.toml has team use on (T-SOLO). Unlike T-SWITCH on the switching clone, nothing claims the stories this clone has in flight, and T-HANDOFF pushes the branch only of a story whose claim this clone holds. Its in-flight story therefore stays unclaimed and its branch stays on this clone, and another clone's survey takes the story as free and starts it again from its base: the double work clause 4b forbids. Proof scenario 17 gives B no story in flight.",
+    "proposed_resolution": "When T-SOLO joins, it claims in the same sync, as T-SWITCH does, every undelivered story whose branch on this clone holds a commit beyond its base and that no other clone claims, and reports the others for a person. Extend scenario 17 with a story in flight on B.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-7",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/team-checks.toml (head rule 'When a check runs'); rewrite/spec/config/team.md (On and off); rewrite/spec/topics/team-use.md (One clone); rewrite/spec/tables/team-delivery-checks.toml (T-DELIVERY)",
+    "problem": "The head rule says a check runs only while team use is on 'with three exceptions' (T-JOIN, T-SOLO and the hand-commit checks). T-DELIVERY is a fourth: its row and ledger D33-17 ('All of it but the two claim refusals runs with team use off as well') run the host-module refusal, `queued`, the adoption of a merge made by the host or outside the tool, and `merged_by` in every pr-mode delivery. config/team.md's 'Off' list and team-use.md's 'One clone' line omit it. config/team.md also says 'No survey fetches' with team use off, while in pr mode the survey fetches the target branch (target_head) and T-NOTICE and T-BRANCH read after that fetch. With team use off `merged_by` is to hold 'the person and clone', but no clone record exists then.",
+    "proposed_resolution": "Name T-DELIVERY, less its two team refusals, as an exception in the head rule, in config/team.md's 'Off' list and in team-use.md. Say that with team use off `merged_by` holds the person and no clone. Reword 'No survey fetches' as 'No survey fetches the state branch'.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-8",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/sync.md (step 1; Time); rewrite/spec/tables/sync-checks.toml (T-FRESH)",
+    "problem": "A second sync 'waits for the first and then runs its own' on local/sync.lock, with no limit. `vsdd sync` run as a job has ten minutes for each network call, so a survey, a checkpoint or `vsdd decide` that starts behind it waits past the 60-second budget that T-FRESH and command:sync give a sync inside a foreground command to keep it inside the Bash tool's default limit.",
+    "proposed_resolution": "Count the wait for local/sync.lock against the caller's 60-second budget; when it runs out the caller answers `busy` and changes nothing. Add a case: a slow `vsdd sync` job holds the lock while a survey starts.",
+    "on_slice_path": false
+  },
+  {
+    "id": "D33R-C-9",
+    "origin": "decision D33, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/team-delivery-checks.toml (T-NEVER, T-BRANCH)",
+    "problem": "The outcome of a story-branch push is judged only by its exit status; T-PUSH's measurement covers the state branch alone. T-NEVER puts the branch back at its pre-rebase head 'when the remote refuses' the forced push. If that push was accepted and its answer lost (a time limit or a dropped connection, fact 3) and the tool takes it as refused, the remote holds the rebased commits while delivery.pushed and the local head hold the old ones. T-BRANCH then finds the rebased copies reachable from neither, records the holder's own commits as hand commits, merges them in and makes them `hand:` items: the doubled history D33R-S-5 named, which the `git cherry` filter S-5 proposed, and the correction dropped without a reason, would have caught.",
+    "proposed_resolution": "Judge every push of a story branch as T-PUSH judges a state push: after any push that did not report success, fetch the branch and compare; if the remote head is the pushed commit the push was accepted and delivery.pushed is set to it. In T-BRANCH also drop an arrived commit whose patch id is already on the local branch (git cherry). Add a case: a forced push accepted under a post-receive hook that outlasts the client's limit.",
+    "on_slice_path": false
+  }
+]

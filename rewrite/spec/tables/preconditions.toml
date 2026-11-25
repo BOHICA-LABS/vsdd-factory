@@ -1,0 +1,57 @@
+# The named preconditions of each workflow, checked by the survey before it takes the lock.
+# Sources: pipeline.md#2.5, BLUEPRINT.md#5.1, BLUEPRINT.md#4.14.
+# Every row below is what the workflow needs beyond the common precondition, which is that "the
+# project is ready and the hooks are alive for this call". Evaluated by the survey before the lock is
+# taken and by the route's "could run" test, in one implementation with a fixture per predicate.
+# "The specification is approved" has one meaning everywhere: the latest spec decision, whether it
+# came from spec, feature, ingest or an import, is approved and its digest matches the specification
+# set as it stands.
+
+[[precondition]]
+workflow = "spec"
+beyond_common = "A cycle is open; decision brief is approved"
+
+[[precondition]]
+workflow = "feature"
+beyond_common = "A baseline exists (a release, an ingest whose spec decision is approved, or an import). With amend: a cycle is open and a spec-gap decision was settled amend"
+
+[[precondition]]
+workflow = "plan"
+beyond_common = "A cycle is open; the specification is approved"
+
+[[precondition]]
+workflow = "wave"
+beyond_common = "The plan is ready; the baseline check passed; every earlier wave is closed; [commands] is configured"
+
+[[precondition]]
+workflow = "story"
+beyond_common = "The specification is approved; the story is admitted (it is in an open wave, or a fast route or a fix round admitted it); its dependencies are delivered; [commands] is configured"
+note = "standalone"
+
+[[precondition]]
+workflow = "verify"
+beyond_common = "A cycle is open; every wave is closed, or the cycle has no plan (its route is trivial, bugfix or hotfix, or its kind is maintenance) and every story admitted to it is delivered"
+
+[[precondition]]
+workflow = "release"
+beyond_common = "Decision release is approved for the verified commit"
+
+[[precondition]]
+workflow = "ingest"
+beyond_common = "None beyond the common one"
+
+[[precondition]]
+workflow = "discover"
+beyond_common = "None beyond the common one"
+
+[[precondition]]
+workflow = "maintain"
+beyond_common = "None beyond the common one. maintain runs report-only while a product cycle is open"
+
+[[precondition]]
+workflow = "multi"
+beyond_common = "The project layout is hub"
+
+[[precondition]]
+workflow = "spike"
+beyond_common = "None beyond the common one, and it takes no lock"

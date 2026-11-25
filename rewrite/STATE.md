@@ -1,361 +1,366 @@
 # vsdd-factory 1.0 rewrite — resume record
 
-A session starting cold reads this file first. It is the single source of truth for the rewrite effort.
-It is independent of `.factory/`, the `factory-artifacts` branch, and the process rules in the repo `CLAUDE.md`,
-all of which describe the pre-rewrite system and are historical reference only.
+A session starting cold, or one that has just compacted, reads this file first. It wins over anything
+remembered. The full dated history of how the work got here is in `rewrite/LOG.md`; this file holds only
+what is needed to continue.
 
-Last updated: 2026-11-23 (session 1).
+Last updated: 2026-11-25 07:18: step 4 has `gates` and `verdicts` built, `rules` in its last round and `survey-2` being built; steps 5 and 6 are planned and the probe gate passed.
 
 ## Resume in one breath
 
-We are rewriting vsdd-factory from scratch as version 1.0: a native Claude Code plugin with JavaScript workflows
-for orchestration, a small Python hook runner launched through `uv`, and every agent and skill rewritten.
-The survey of the old system is done and saved under `rewrite/reference/`. The plan is agreed and the platform
-spike passed (results below; the spike plugin is kept in `rewrite/spike/plugin/`).
-**The design workflow (step 2) ran to completion on 2026-11-23** (nine agents, none failed, about two hours,
-about 4.5 million subagent tokens; script at `rewrite/workflows/design.js`). It produced:
-- `rewrite/BLUEPRINT.md` (997 lines): the document the user approves. Section 2 lists 30 decisions, 14 of which
-  block the build. Section 9 is a build plan of about 70 packages. Section 10 lists 26 untested platform assumptions.
-- `rewrite/design/{pipeline,state,agents-skills,hooks,packaging}.md`: the five detail designs, amended to match.
-- `rewrite/design/review-{seams,coverage,operations}.md`: 96 findings (13 blocker, 56 major, 27 minor).
-  The synthesizer marked 94 fixed and 2 deferred to the user (both are decision D4).
+vsdd-factory is being rewritten from scratch as version 1.0 on branch `rewrite/v1`: a native Claude Code
+plugin with JavaScript workflows, a standard-library Python tool and hook runner started through `uv`, and
+every agent and skill rewritten. The design is in `rewrite/spec/` (one small file per thing; 86 build
+packages). Working code is under `next/`. The current milestone is the thin slice: one story delivered on
+the sample project through the real platform. Of its 6 steps, steps 1 to 3 are built and closed; step 4 is
+being built: of its five units, `gates` and `verdicts` are built and confirmed, `rules` is in its last
+round, `survey-2` is being built, and `delivery` follows; step 5 is planned, with its corrections in
+`rewrite/plans/step-5/ORDER.md`; step 6 is planned and its probe round passed. Two decisions the user adopted on
+2026-11-24 are in the design and are built after the slice: feature flags (D31) and team use (D33).
 
-The design in one line: 20 agents, 13 skills, 12 workflows, about 70 method files, 17 hook rules, and one
-standard-library Python package that is both the hook runner and a `vsdd` command. Workflows order the work, the
-tool measures and records evidence, hooks refuse what the evidence does not support. Three routine human
-decisions per cycle (brief, specification, release).
+## In flight when this was written
 
-Caveats recorded by the assistant after checking the result:
-- The 94 fixes were applied by one agent in one pass and have not been reviewed again.
-- The design is large (843 KB of documents) and the operations reviewer noted bookkeeping creeping back (OPS-28).
-- Two facts found on disk: the marketplace repository is now `bohica-labs/claude-mp`, and all eight old installs
-  carry a stale `agent` setting.
+Two workflows are running in the background of the session that launched them (the same session, after its
+second compaction). A workflow keeps running through a compaction of that session and reports back with a
+notification. It cannot be resumed from a new session; there, see which outputs exist on disk and relaunch
+what is missing from the saved script with the same `args`.
 
-**Decisions: on 2026-11-23 the user adopted every recommendation in section 2 of the blueprint (D1 to D30).**
-Each recommendation is now a fixed decision. That includes: state on its own branch, committed and pushed by the
-plugin (D1, D2); an importer for the eight old projects (D3); the plugin approving its own routine tool calls
-(D4); a fourth "clerk" tier of Sonnet at low effort, Opus at extra-high effort for reviewers, and model aliases
-(D5); the main session walled like an agent (D6); `/vsdd-factory:spike` as a workflow (D8); one clean review pass
-per perimeter with a cap of three (D9).
+| Workflow | Task id | Script and args | Done when | When it reports |
+|---|---|---|---|---|
+| Step 4, stage B: `survey-2` (the second part of S3). Launched 07:18 on 2026-11-25, beside the round below (a departure from `ORDER.md`, which has it wait for `rules`; each is told what the other changes) | `w9dxokz40` | `rewrite/workflows/slice-build-unit.js`, `{step: 4, key: "survey-2"}`; title, packages, `concurrent` and `notes` as saved in the session scratchpad, `launch/stage-b-args.json`, and in the launch call of the session transcript. The notes carry what stage A built, `D33-21`, `D33-33`, `S3B-survey-2` and what the story workflow's plan relies on | `rewrite/findings/outcomes/` holds `step4-survey-2.json`, `-fix.json` and `-confirm.json` | Next action 1 |
+| Step 4, `rules` (H5, H7): the fourth and last round. It applies decision `ORCH-8` (a rule over command text blocks what it can positively read; tests-first passes what it cannot read, because the green and red gates measure it; merge-guard keeps blocking an unreadable git command where position does not show it harmless) and takes five findings on the path of an ordinary run: the here-document parser bug (blocker), ordinary commands falsely blocked, `git commit -am`, `bash -c`, and a checkout of a guarded branch followed by a commit. Its confirmation is told what counts. Launched 07:18 on 2026-11-25 | `woio9h8nm` | `rewrite/workflows/slice-fix-open.js`, `{name: "step4-rules-fix-4"}`; args saved in the session scratchpad, `launch/rules-fix-4-args.json` | `rewrite/findings/outcomes/` holds `step4-rules-fix-4.json` and `-confirm.json` | Save the result. No fifth round: a blocker or major it leaves that is an ordinary command blocked or a plain direct command passing goes into the `notes` of the `delivery` build as a fix it must not build on, and is fixed by a small round after `survey-2` reports; anything else is triaged to H5 under `ORCH-7` |
 
-The user also asked whether brownfield is covered: adding features to an existing project the factory did not
-build, and adding features after the greenfield build is finished. It is (`ingest` then `feature`, and `feature`
-alone), and both are now explicit cases the second pass must walk end to end.
+When any workflow reports: copy its result to `rewrite/findings/results/<name>.json` (the notification
+gives the output file; the result is its `result` key), run `python3 rewrite/tools/findings.py build`, and
+read `still_open`.
 
-**The second pass (step 2b) ran to completion on 2026-11-24** (eight agents, none failed, about two hours, about
-4.1 million subagent tokens; script at `rewrite/workflows/second-pass.js`). Results:
-- Only 41 of the 96 first-pass fixes were fully in place; the rest were partial and three had regressed.
-- 118 new findings: 4 blockers, 43 major, 71 minor. The blockers came from two root problems: a story written
-  after a workflow's opening survey got no worktree (which stalled every brownfield path and every bug fix), and
-  no agent was allowed to write build manifests or repository configuration (which stalled the first wave of a
-  new product). The requirements reviewer found that, as first written, none of five brownfield cases reached
-  a release.
-- The amender fixed 100 defects and applied 16 cuts. Brownfield is now explicit in blueprint section 3.4, and a
-  new build package, E4, proves the brownfield cases before cutover. The platform probe results are folded into
-  section 10. Counts after: 20 agents, 13 skills, 12 workflows, 17 hook rules, about 48 `vsdd` subcommands
-  (was about 60), 14 record types (was 19), 74 build packages. The blueprint is now 1,676 lines.
-- The close-out check was **not clean**: no blocker, 5 major and 16 minor problems remain
-  (`rewrite/design/pass2-closeout.md`). Three of the majors are new seams between second-pass fixes.
-- One new question for the user: the scope of decision D4 at setup, `core` (what was adopted) or `extended`
-  (also approves read-only commands and spike experiments; recommended for unattended runs). One cut is offered
-  pending a probe (decide lock staleness by whether the holding process exists).
+## Where each piece stands
 
-**A close-out fix run was launched on 2026-11-24** to resolve those 21 items: one Fable fixer, one Opus verifier,
-at most two rounds. Script at `rewrite/workflows/closeout-fix.js`; the verifier writes
-`rewrite/design/pass2-closeout-2.md`.
-
-**User instruction, 2026-11-24:** "run one more full review pass and then go to the thin slice next. make sure we
-fix what we find during both methods." The user also asked whether the two must run one after the other or can
-run in parallel. The assistant's answer and plan (the user has not yet replied to it):
-
-1. The close-out fix run (2c) finishes first. Everything else reads the six design documents it is editing.
-2. Then two things run at the same time:
-   - **Review pass 3**: a full fresh review by six reviewers, who only read the documents.
-   - **Thin slice, layer 1**: the foundations no review has disputed, built under `next/`: the skeleton,
-     manifest, launcher and entries (blueprint packages B0, B1, B2), the shared core and schemas (B3, C1), the
-     workflow prelude, build step and harness (B4a, B5), and a sample project.
-3. One amend step folds the review findings and anything layer 1 found into the documents, with a fix-and-verify
-   loop. The design documents have one writer at a time.
-4. **Thin slice, layer 2**, built against the amended design: only as much of state (S1, S2a, S2b, S3), gates
-   (G1, G2, G3, G4a in local mode), hooks (H1, H5, H7, B4b), agents (A1, A4, the adversary from A6a) and the
-   `story` workflow (W2) as one story needs. Then one story is delivered on the sample project through the real
-   platform, headless.
-5. Whatever the slice run finds is fixed in the code and in the design documents, then the build widens.
-
-Rule for both methods: every finding gets a recorded outcome, in the documents and in the code where it applies.
-Slice findings go to `rewrite/design/slice-findings.md`.
-
-**The close-out fix run (2c) finished on 2026-11-24** (four agents, two rounds, about an hour). Round one fixed
-the 21 items and its check found 5 new problems, one major. Round two fixed those and its check was clean of
-blockers and majors. Five minor problems remain, each caused by a round-two fix (R1 to R5 in
-`rewrite/design/pass2-closeout-3.md`): they concern which run may write a cycle's route, an earlier
-specification approval counting in a later cycle, a retry that drops a story, and two undefined phrases.
-They go into the next amend step.
-
-**Launched together on 2026-11-24:**
-- **Review pass 3**: five Opus reviewers (seams; coverage and platform truth; operations; requirements; a
-  builder's cold read of the slice path and build plan). Read-only. They write `rewrite/design/pass3-*.md`.
-  Script at `rewrite/workflows/review-pass-3.js`.
-- **Thin slice, layer 1**: Sonnet builders and Opus reviewers build the foundations under `next/`:
-  unit 1 the skeleton, manifest, launcher and entries (packages B0, B1, B2), unit 2 the shared core and schemas
-  (B3, C1), unit 3 the workflow prelude, build step and harness (B4a, B5), unit 4 a sample project. Unit 1
-  also replaces the repository root `CLAUDE.md` on this branch with the short rewrite-mode version the
-  blueprint specifies. Script at `rewrite/workflows/slice-layer-1.js`.
-
-**Review pass 3 finished on 2026-11-24** (five reviewers, none failed, about 25 minutes). 104 findings: 3
-blockers, 51 major, 50 minor; 56 of them lie on the thin-slice path (2 blockers, 27 major). Reports are
-`rewrite/design/pass3-{seams,coverage,operations,requirements,builder}.md`. The problems several reviewers
-found independently:
-- **Local delivery has nowhere to merge.** With no remote, the integration branch is the one checked out in the
-  person's own checkout; the design both requires merging into it and forbids touching that checkout (blocker,
-  on the slice path).
-- **The tool cannot recompute a review verdict.** No record stores which method a review pass belonged to, nothing
-  says how passes, disputes and rulings are found among step records, and a scoped re-review overwrites the
-  first review's records (blocker, on the slice path).
-- **The feature route's delta record has no path or class**, and the specification lock refuses the write (blocker).
-- **Brownfield still does not reliably reach a release**: an ingest can measure its baseline before its commands
-  are known; the hand-off of a queued request is undefined; the no-tests case branches a fix story before the
-  harness exists; a hub cannot ingest its second repository.
-- **Resume gaps**: a resumed run loses stories an earlier run admitted; a lock orphaned inside a live session
-  is never released.
-- **Two enforcement holes**: delivery never checks red evidence, and in local mode git ref commands can move the
-  integration branch past the merge guard.
-- **The slice plan itself was wrong**: the package list above omits B6, C2 and B8 and the decision package S4
-  that H7 needs; the sample project sits inside E1; S3 is too large for one builder. The layer 2 definition
-  must be corrected from `pass3-builder.md` before it is built.
-
-Slice layer 1 is still running. Its first unit has replaced the root `CLAUDE.md` with an 18-line rewrite-mode
-file, which the assistant read and found sound.
-
-**Proposal awaiting the user's answer (2026-11-24).** The user asked whether the prose should be broken into
-smaller files. Measured: the design proper is 983 KB (about 250,000 tokens) in six files of 119 to 217 KB, with
-single lines up to 2,094 characters; review reports are another 626 KB. The same thing is described in several
-files (`vsdd story deliver` is in all six, 45 times), which is why fixes kept landing in some places and not
-others. The assistant recommended restructuring by thing, not by size, before the amend step:
-one file per command, record, hook rule, agent, skill and workflow; real JSON schemas; machine-readable tables
-(roster, walls, routes, limits, configuration keys); short topic pages that link instead of restating; one brief
-per build package naming the files it implements; history (reviews, finding tables, old-system mappings) moved
-out; a lint that checks every reference resolves and nothing is defined twice. The original six documents are
-kept untouched under `rewrite/history/`, and a script checks that every old section is accounted for.
-The assistant also asked for permission to make a local commit of `rewrite/` and `next/` first, because none
-of this work is in git yet.
-
-**Next action: when layer 1 finishes, write the slice's design findings to `rewrite/design/slice-findings.md`,
-then run one amend step (a fixer and a verifier, at most two rounds) over the 104 pass-3 findings, R1 to R5 and
-the slice findings, with the slice-path findings first. Then correct the layer 2 package list and build it.
-Nothing is committed.**
-
-## Heads
-
-| Thing | Value |
-|---|---|
-| Rewrite branch | `rewrite/v1`, created from `develop` @ `150bc36c`; local only, nothing committed or pushed yet |
-| Old plugin version | `1.0.0-rc.25` (the rc line ends here; the rewrite ships as `1.0.0`) |
-| Old pipeline state | `origin/factory-artifacts` @ `3f9be6d6` (not mounted in this clone; reference only) |
-| Old plugin installs on this machine | project-scoped in `~/Dev/{secops-factory,prism,pregolya,flowloom,vantage,hylo,opnrynkr,vitrand}`; not installed for this clone |
-
-## Decisions made by the user (2026-11-23)
-
-1. Full rewrite, shipping as version 1.0. The existing corpus (code, `.factory` artifacts, policies, decision log) is
-   historical reference only. No compatibility with the `1.0.0-rc.N` line.
-2. Scope: port all of it. Every capability carries over, including market discovery, the design/UX suite,
-   multi-repo, service clones (DTU), the observability stack, and maintenance sweeps.
-3. Platforms: macOS and Linux only.
-4. Models: Sonnet at extra-high effort is the default. Fable at extra-high effort for planning, thinking and
-   creative roles. Opus for the adversary, the security reviewer, and all other independent reviewers.
-5. Hook runner: Python, launched through `uv`.
-6. Orchestration: Claude Code Workflows. The pipeline workflows are redesigned and improved, not transcribed.
-7. Low touch: as little human effort as possible to run it and keep it running. An activation step is acceptable
-   only if genuinely needed.
-8. The rewrite itself is carried out with multi-agent workflows, on a new branch, with the new plugin in a fresh
-   directory beside the old one until cutover.
-9. The rewrite and the new pipeline must both survive compaction, warm a fresh context, and resume from a cold start.
-
-Assumptions of mine that the user has not confirmed:
-- Opus runs at extra-high effort like the other tiers.
-- "Port all of it" means capabilities, so duplicate skills merge, and hooks that only police the old bookkeeping
-  formats are dropped because those formats are gone.
-- The git rules from the old `CLAUDE.md` still hold: no AI attribution in commits, no `--no-verify`,
-  no force-push to `main`, commit or push only when asked.
-
-## What the survey found (one-paragraph version)
-
-The old system is a Claude Code plugin ported in April 2026 from an OpenClaw system called dark-factory.
-It has 35 agents, 127 skills, 17 `.lobster` YAML workflow files with about 560 steps and no runtime (an LLM reads
-them and dispatches by hand), 79 registered hooks behind a Rust/WASM dispatcher (about 195,000 lines of Rust across
-55 crates), and 2,279 bats tests. The cross-vendor adversary in the docs (GPT-5.4, Gemini) never existed on
-Claude Code. Bookkeeping swamped delivery: 3,489 artifact commits against 883 code commits, and a 231 KB `STATE.md`.
-Full detail is in `rewrite/reference/`.
-
-## Verified platform facts
-
-From the workflow authoring reference and the plugin documentation:
-- A plugin ships workflows as `workflows/*.js`, invoked as `/<plugin>:<name>`.
-- A workflow step can run a named agent type and set `model`, `effort` and worktree isolation per step.
-- A workflow can call another saved workflow, one level deep only.
-- Workflow scripts cannot read files, call the shell, import modules, or take user input mid-run.
-  Limits: 16 concurrent agents, 1,000 agents per run. Resume works only inside the same session.
-- Agent frontmatter accepts `model` (`sonnet`, `opus`, `fable`, `haiku`, `inherit`, or a full ID) and
-  `effort` (`low` to `max`). Plugin-shipped agents ignore `permissionMode`, `hooks`, `mcpServers`, `initialPrompt`.
-- Plugin hooks are commands in `hooks/hooks.json`. Exit 2 blocks; any other non-zero exit is non-blocking.
-- Plugins need no activation step.
-
-Measured on the user's Mac (uv 0.12.23):
-- `uv run --script` with inline script metadata starts in about 49 ms warm when standard-library only,
-  and 65–110 ms with one third-party package.
-- It leaves the target project's own `pyproject.toml` untouched.
-- `uv` missing exits 127, which Claude Code treats as non-blocking: gates would silently switch off.
-- A failed package download exits 2, which Claude Code treats as a block. A PyPI fetch failed in the
-  assistant's sandboxed shell with a TLS "UnknownIssuer" error.
-- Consequence: keep the runner standard-library only, use `uv` to pin the interpreter, and guard the hook
-  command so a missing `uv` fails loudly.
-
-Proven by the platform spike on 2026-11-23 (Claude Code 2.1.331, headless `claude -p --plugin-dir`):
-- A workflow step can run a plugin agent by its qualified name (`agentType: 'fspike:builder'`). With no model set
-  on the step, the agent file's `model` is used. A `model` set on the step overrides the agent file, and the
-  agent still gets its own system prompt. A step with no agent type runs on the session model.
-- A plugin workflow can call another plugin workflow by qualified name (`workflow('fspike:story', args)`),
-  and the arguments and return value pass through.
-- A `uv`-launched Python hook blocks a tool call with exit 2, and the model is shown the runner's reason.
-  The shell guard for a missing `uv` exits 2 with a clear message.
-- Hook input carries `agent_type` for calls made inside a subagent (`fspike:builder`, `workflow-subagent`;
-  empty for the main session). A read wall keyed on it worked: the builder was blocked from a holdout file
-  and the reviewer read it.
-- A `SessionStart` hook's `additionalContext` reaches the model with `source` = `startup`, `resume` and `compact`.
-  `PreCompact` and `PostCompact` both fire. After compaction the model has only a summary plus the fresh briefing.
-- Workflows run headless when `Workflow` is in `--allowedTools`. `CLAUDE_PLUGIN_DATA` is set for hooks.
-
-Also observed:
-- Hooks fire for the `Workflow` and `StructuredOutput` tools, so the runner must pass unknown tools through.
-- Seven trivial agents cost about $1.06, almost all of it fixed per-agent context. Every agent start carries the
-  session's loaded plugins and skill listings, so the number of model-visible skills is a cost multiplier.
-- `claude plugin validate` wants a README, a licence, an icon, and a `network.hosts` declaration for hooks.
-
-Still not verified:
-- Whether a step inherits the agent file's `effort` (there is no way to observe effort from inside a run).
-  Set effort on the step, or accept the agent file's value on trust.
-
-Platform probes, round 2 (2026-11-23, against section 10 of the blueprint; plugin in `rewrite/spike/plugin/`):
-
-| Blueprint item | Result |
-|---|---|
-| 1. Hook on the `StructuredOutput` call | Proven. The hook receives the whole result as `tool_input`, and a block makes the agent correct it and return again. |
-| 2. Typed decision command | Proven, headless. `UserPromptExpansion` fires with `command_name` and `command_args`; a hook can add context; a block ends the prompt with zero model turns, so the text never reaches a model. |
-| 3. Refused stop | Partly. A refused `SubagentStop` keeps a step running when the step returns text. It does not when the step has already returned a schema result. Use a block on the `StructuredOutput` call instead (item 1), which is proven. |
-| 4. Skill starts a workflow | Proven, headless: a skill a person invokes makes the main session start a plugin workflow and relay its result. Left to its own judgment, the main session used a model-visible spike skill when there was one, and dispatched the spike agent directly when there was not. It never started a workflow unprompted. |
-| 5. `<plugin>/bin` on `PATH` | Proven in the main session, a dispatched agent and a workflow step, headless. A person typing `! vsdd` was not tested. |
-| 6. Long Bash call and detached job | A 150-second call with an explicit timeout ran in a workflow step, and a detached job outlived the call that started it. The full ten minutes was not tested. |
-| 7. Hook approval of a tool call | Proven in the default permission mode in the main session, a dispatched agent and a workflow step: the approved command ran and the control was refused. The user's sessions default to the `auto` permission mode, where the control was allowed anyway. |
-| 8. Tool lists | Proven. An agent whose file lists the Agent tool still has none as a workflow step. An agent limited to `Bash` still returns a schema result. |
-| 11. Agent frontmatter | `isolation: worktree` is honoured when the agent is dispatched with the Agent tool and ignored when it runs as a workflow step, so workflow steps must pass isolation themselves. `omitClaudeMd` is honoured (indirect evidence: about 600 fewer tokens, and the agent no longer listed the global `CLAUDE.md`). A forked skill can name a plugin agent. |
-| 14. Search tool and git exclude | Proven. `Grep` skipped a directory listed in `.git/info/exclude`. `Grep` and `Glob` exist in this build. |
-| 15. Hook working directory | Proven earlier: the payload's `cwd` is the worktree for an isolated agent. |
-| 17. Fixed cost of an agent start | Measured. An agent with an explicit tool list starts with about 2,700 to 3,400 tokens of context. An agent with no tool restriction starts with about 19,000. Explicit tool lists cut the fixed cost by about 85 percent. |
-| 9, 10, 12, 13, 16, 18 to 25 | Not probed: they need MCP servers, an interactive session, or the product itself. |
-
-Also seen: a project `CLAUDE.md` in a scratch directory under `/private/tmp` was not loaded by headless sessions,
-even in the main session, while the user-level `CLAUDE.md` was. Check this before end-to-end tests depend on it.
-
-## Requirements the blueprint must meet
-
-Pipeline workflows:
-- Flatten nesting to one level: each phase is its own workflow; a wave calls story delivery.
-- Human stops are workflow boundaries; prune the old 37 approval steps to real decisions.
-- Convergence needs a workable rule: severity threshold, cap, escalation path.
-- Information walls are enforced by hooks keyed on the calling agent, not by instructions.
-- Build and test commands come from project config, not hardcoded `cargo`.
-- One per-story playbook, with the adversary loop in it.
-
-Compaction, warm-up and cold start (applies to the new pipeline):
-- The main session stays thin: orchestration lives in workflow scripts and in subagents with their own contexts.
-- All state is on disk, written at each step boundary. Nothing important lives only in a conversation.
-- Every workflow starts by working out what is already done from the artifacts and git, so re-running the same
-  command in a new session continues instead of restarting.
-- A `SessionStart` hook prints a short briefing (project initialised or not, current phase, what is in flight,
-  the exact next command) on startup, on resume, and after compaction.
-- A pre-compaction hook flushes anything pending. The old pre- and post-compaction hooks were registered but
-  never wired, so that mechanism has never run.
-- State files have size caps. The old `STATE.md` grew to 231 KB against a 200-line target.
-- One status-and-resume entry point replaces the old wrap, wave-handoff, wave-reset, rehydrate-wave,
-  recover-state and compact-state skills.
-
-Spikes (user requirement, 2026-11-23: "include provisions for running spikes as well and allow workflows/agents
-to run spikes when they think they need to"; and "make sure vsdd has the ability to run spikes, from agents, to
-skills, to workflows, etc. it should be selectable anytime a human or agent thinks a research spike is warranted"):
-- A spike is a first-class capability of the new plugin: an isolated, bounded experiment that answers one question.
-- It must be reachable from every level: a person, any agent, any skill, any workflow, at any point.
-- Agents and workflows may start one on their own judgment, without a human stop.
-- The user's existing convention is the starting point: a `spike/<name>` branch, a `.spike/STATE.md` and
-  `.spike/TASKS.md` ledger, a `.worktrees/spike-<name>/` worktree, and full isolation from pipeline state
-  (see `~/.claude/skills/resume-spike/SKILL.md`).
-- Entry points tested on 2026-11-23 with the spike plugin (`rewrite/spike/plugin/`):
-
-  | Who decides a spike is needed | How it starts | Result |
-  |---|---|---|
-  | A person | Runs the spike skill as a slash command; the skill opens a ledger, dispatches the spike agent, records the finding | works |
-  | An agent dispatched in a normal session | Dispatches the spike agent itself with the Agent tool (main session, then agent, then spike agent) | works |
-  | An agent running as a workflow step | Returns a spike request in its structured result; the workflow runs the spike agent in an isolated worktree and re-runs the step with the finding | works end to end |
-  | An agent running as a workflow step, directly | It has no Agent tool, so it cannot spawn a spike agent. It can invoke a skill, but a skill that dispatches an agent fails at that step | does not work |
-  | A top-level workflow | Runs a spike step, or calls a spike workflow | works |
-  | A workflow that is already a child | Runs the spike as a step of its own. Calling a third workflow throws "nesting is limited to one level" | works as a step only |
-
-- Worktree isolation held: the spike ran in `.claude/worktrees/<run-id>` on its own branch, the file it wrote
-  never appeared in the main checkout, and the worktree was kept because it had changes.
-- The hook runner sees every spike start and which agent asked (`PreToolUse` on `Agent` with the spike agent
-  type, and `SubagentStart`), so limits can be enforced in code.
-- Consequences for the blueprint (assistant's reading, not yet confirmed by the user):
-  - One spike protocol with three entrances: slash command for people, direct dispatch for agents in normal
-    sessions, structured request for agents inside workflows. The rule for agents: in a workflow, ask; elsewhere, dispatch.
-  - Every workflow step's result schema carries an optional spike request, handled by one shared wrapper.
-    Scripts cannot import, so the wrapper is stamped into each workflow file at build time or checked by a test.
-  - Limits per step and per run keep autonomous spikes bounded; exceeding them escalates to a person.
-  - Pipeline gates such as tests-before-code must not block work inside a spike worktree, and nothing from a
-    spike reaches the product branch except through the pipeline.
-  - A durable spike ledger records question, who asked, method, result and verdict, so findings survive a cold
-    start and are not repeated. Kept spike worktrees need a retention rule.
-
-Hook runner:
-- One checked-in `hooks/hooks.json`, no per-platform variants, no activation.
-- Hooks do nothing in a project that has not been initialised for the factory.
-- Standard-library Python; config in TOML; a small frontmatter reader ships inside the plugin.
-- Known defects not to carry over: the old dispatcher never wrote to stdout, so `protect-bc` and `protect-vp`
-  did not block; the hook timeout of 10000 was read as seconds.
-
-## Plan and status
-
-| Step | What | Status |
+| Piece | State at 22:30 on 2026-11-24 | Record |
 |---|---|---|
-| 0 | Survey the old system and the platform; agree direction | done |
-| 1 | Platform spike: throwaway plugin proving the unverified facts above | done 2026-11-23 |
-| 2 | Design workflow: Fable designers per subsystem, Opus reviewers on the seams, one blueprint for approval | done 2026-11-23; blueprint awaiting the user's decisions and approval |
-| 2b | Second review pass on the blueprint and the platform probes (blueprint package B8) | done 2026-11-24; close-out found 5 major and 16 minor problems |
-| 2c | Close-out fix run for those 21 problems | done 2026-11-24; clean of blockers and majors, 5 minor remain |
-| 2d | Review pass 3 (full, read-only), then one amend step | **running**, launched 2026-11-24 |
-| 3a | Thin slice, layer 1: foundations under `next/` | **running**, launched 2026-11-24 |
-| 3b | Thin slice, layer 2: one story delivered on a sample project | pending the amend step |
-| 3 | Build workflows per subsystem: conventions, hook runner, agents, skills, workflows, docs and tests | pending |
-| 4 | End-to-end proof on a small sample project | pending |
-| 5 | Cutover: replace the old plugin directory, release 1.0.0, decide what the eight existing installs do | pending |
+| Step 1: foundations | Built | `rewrite/LOG.md` |
+| Step 2: catch-up, C2, B6 | Built and closed: 57 of 58 findings confirmed fixed; `layer-2a-fix-3-C1-1` left for B6, B5 and W2 | `rewrite/findings/sources/slice-layer-2a-result.json`, `slice-layer-2a-confirm-result.json`, `layer-2a-fix-3-result.json` |
+| Step 3 plans | Seven plans, corrected; `ORDER.md` gives order, owners and cross-unit rules | `rewrite/plans/step-3/` |
+| Step 3 `state-core` (S1) | Built, reviewed (30 findings), fixed, confirmed; nothing open | `rewrite/findings/results/step3-state-core.json` |
+| Step 3 `hook-runner` (H1, B4b) | Built and closed for the slice. The allow-list for approving a `vsdd` call (`ORCH-2`) holds: 6,150 shell runs of texts it accepts, across ten shell setups, ran only `vsdd`. The sixth round pinned the grammar in the tests with an independent checker and a differential test (of 1,163 changes to the grammar tried in a scratch copy, every ASCII one fails a test) and made the bare `/vsdd` program word accepted, as the spec said. One minor is left for H1: the tests do not pin non-ASCII characters, though the code is right on every code point (`step3-hook-runner-fix-6-C2-1`, with the test to add) | `rewrite/findings/results/step3-hook-runner.json` and `step3-hook-runner-fix-3.json` to `-fix-6.json` |
+| Step 3 `jobs` (G1) | Built and closed for the slice: 31 findings fixed over four rounds, `MAX_WAIT` raised to 540. Two minor races between overlapping `env start` calls are left for G1 when the build widens, with the instruction to rewrite that logic as one loop under one rule | `rewrite/findings/results/step3-jobs.json`, `step3-jobs-fix-3.json`, `step3-jobs-fix-4.json` |
+| Step 3 `records` (S2a, S2b, S4) | Built and closed: every finding of its review and of its four fix rounds is confirmed fixed, `D33-9` included. Nothing open | `rewrite/findings/results/step3-records.json`, `step3-records-fix-3.json`, `step3-records-fix-4.json` |
+| Step 3 `jobs-b` (G1, second part) | Built and confirmed; nothing open | `rewrite/findings/results/step3-jobs-b.json` |
+| Step 3 `hook-runner-b` (H1, second part) | Built and confirmed: 17 findings fixed, nothing blocker or major open. One symlink case is left for H4 and the reference class for H5 | `rewrite/findings/results/step3-hook-runner-b.json` |
+| Step 3 `survey` (S3, first part) | Built and confirmed: its review raised 19 findings (6 major) and the first confirmation 2 more; all 21 are confirmed fixed. Six older findings it built only for the story path are recorded again as left for the packages that widen them. Its builder's three minors have owners (`S3B-survey-2` goes to `survey-2`). A third round (reported 00:50 on 2026-11-25) fixed the `product=` option of `tests/unit/story_ready.py` (`PL6-7`): it no longer copies the product's `.factory/` and takes `[paths]` from the product's own `factory.toml`; five tests in `tests/unit/test_story_ready.py`; confirmed, nothing open | `rewrite/findings/results/step3-survey.json`, `step3-survey-fix-3.json` |
+| Step 3 as a whole | Built. Checked on a quiet tree at 23:40: `tools/build.py --check` clean, 30 of 30 checks, 1,039 tests passed with 1 skipped (`tests/hooks/test_latency.py` among them), 27 workflow harness tests, spec lint clean. Snapshot `rewrite-next-1124-2341.tar.gz` | |
+| Step 4 `gates` (G2) | Built and confirmed (reported 02:57 on 2026-11-25): its review raised 21 findings (1 blocker, 11 major) and its first confirmation 3 more; all 24 are confirmed fixed. Nothing blocker or major open. A third round on test support (reported 04:36) made the sample's test runner collect plain test functions and keep its report on an import error, and made `gate_project.py` build on the fixed `story_ready` and assert the project's delivery mode and path classes (`ORCH-5`). Two edge cases of the runner (a module that exits or skips at import) are left for the step 6 `first-run` unit. Two step 3 tests of the survey's provisional story position (`test_position_ladder`, `test_position_reviewed_from_closure_verdict`) fail now that real gates are registered: `survey-2` updates them, as `ORDER.md` section 4 gives it | `rewrite/findings/results/step4-gates.json`, `step4-gates-fix-3.json` |
+| Step 4 `verdicts` (G3) | Built and confirmed (reported 03:35 on 2026-11-25): its review raised 16 findings (8 major) and its confirmations 5 more; nothing blocker or major is open. Three minors are left for later packages: the replay's round count on a clone with no local records (`S4R-verdicts-15`, for M3 with S3 and G3), one conformance case and a step-name lint. `acs()` in `story_unit.py` is now the one reader of acceptance criteria; `survey-2` keeps it (`ORDER.md` section 4 has the row) | `rewrite/findings/results/step4-verdicts.json` |
+| Step 4 `rules` (H5, H7) | Built: its review raised 27 findings (16 major) and three rounds of confirmation 42 more; 62 are confirmed fixed. `tests-first`, `step-results` and the grounding check have nothing blocker or major open that is not in the last round. The third round (reported 07:05 on 2026-11-25) rebuilt `merge-guard` to pass a git command only on a positive reading, made the hook runner inert outside a factory project (`ORCH-6`) and repaired the twelve step 3 tests; its confirmation ran about 165 commands against real git and left twelve findings, five of them on the path of an ordinary run (in the round above) and seven unusual spellings assigned to H5 | `rewrite/findings/results/step4-rules.json`, `step4-rules-fix-3.json` |
+| Step 4 stage A as a whole | Checked on a quiet tree at 07:16 on 2026-11-25, with the five `rules` findings above still open: `tools/build.py --check` clean, 30 of 30 checks, 1,326 tests passed with 1 skipped, 27 workflow harness tests and 26 conformance tests, `tests/hooks/test_latency.py` alone in 1.5 seconds, spec lint clean. Snapshot `rewrite-next-1125-0716.tar.gz` | |
+| Step 4 plans | Five plans (`gates`, `verdicts`, `rules`, `survey-2`, `delivery`), corrected twice: for their seam review and for the probe results | `rewrite/plans/step-4/` |
+| Step 6 plans | Two plans (`story-workflow` for W2; `first-run` for the `story-ready` fixture and the driver of the first headless run), reviewed by a walk of one story through the plans of steps 3 to 6 and the built code (16 findings: 1 blocker, 4 major), corrected. `ORDER.md` gives the build order, the exact command of the first run, the changes asked of the step 4 and 5 builds (section 8.1), the probe round (8.2), the questions for the person (8.3) and the ledger entries its build records (8.4) | `rewrite/plans/step-6/`, `rewrite/findings/results/step6-plan.json` |
+| Step 5 plan | One plan for ten agent files and fifteen method files, corrected for the probe results | `rewrite/plans/step-5/` |
+| Platform probes, round 4 | Run, independently checked, and applied to the platform record and to the plans | `rewrite/spike/probes-round-4/CHECK.md`, `rewrite/findings/results/probes-round-4.json`, `probes-4-apply.json` |
+| Platform probes, round 5 | Run and independently checked (the checker reran the main leg whole). **The gate before the first run passed in its primary form**, on Claude Code 2.1.332 in the default permission mode: the plugin's hooks, workflows and `bin/` load with the user's settings kept out; the typed workflow command starts the shipped script with no skill; bare tool names admit a step's read of the plugin's files and its write and commit in a story worktree; a step's hook payload carries the effort it was dispatched with; items 36 to 38 and 40 still hold. Cost about 35 cents plus the check's reruns. The check corrected the prober on leg B (a budget stop mid-workflow kills the workflow and loses the running step; the cap is soft) and on wording; a correction round applied the check to the platform record and to the step 6 plans (18 findings fixed, 3 minors from its confirmation fixed by the orchestrating session) | `rewrite/spike/probes-round-5/CHECK.md`, `rewrite/findings/results/probes-round-5.json`, `probes-5-apply.json` |
+| Feature flags (D31) | In the design and closed for now: 62 findings fixed, 12 left for the packages F1 to F6 that build it. No further round of design fixes | `rewrite/findings/sources/d31-feature-flags-result.json`, `rewrite/findings/results/d31-fix-2.json` |
+| Team use (D33) | In the design and closed for now: `rewrite/spec/topics/team-use.md` explains it and links the rest; packages M1 to M6. Of 105 ledger entries, 70 are fixed and 35 are left for the packages that build it, each with a resolution. The second correction round (reported 23:30) settled which refs a fetch and a push name (T-REMOTE in `tables/sync-checks.toml`), after running each git claim on git 2.34.1 and 2.50.1. No further round of design fixes. Of its entries for the slice units, `D33-9`, `D33-13` and `D33-25` are built; `D33-21` is built for the survey and goes to `delivery`; `D33-33` (a missing `+` in the built `target_head` refspec, pr mode only) goes to `survey-2` | `rewrite/findings/results/d33-team-use.json`, `d33-fix-2.json` |
+| Decision D32 | Written into the design | `rewrite/spec/decisions-later.md` |
 
-Design subsystems for step 2: pipeline workflows, human stops and spikes; state and artifact model (including
-compaction, warm-up and cold-start resume); agent roster and models; skill roster; hook rules and runner;
-packaging, release and tests.
+Readings at 07:16 on 2026-11-25, on a quiet tree before `survey-2` started: the checks as in the row "Step 4
+stage A as a whole". Ledger: 908 findings, 691 fixed, 140 left for a named package, 4 rejected, 71 open (2
+blockers: the old `P3SEAM-01` outside the slice, and the here-document parser bug that the `rules` round is
+fixing), and every open one has an owner. Latest snapshot: `rewrite-next-1125-0716.tar.gz`.
 
-## How this record stays current
+## Next actions, in order
 
-Update this file at the end of every step and before ending any session: the status table, the next action,
-new decisions, and newly verified facts. Workflow results are written to files under `rewrite/` before the
-step is marked done, because workflow output and background-agent reports do not survive a session.
+1. **When `survey-2` reports:** save its result (`rewrite/findings/results/step4-survey-2.json`, as
+   `{logs, result}`), rebuild the ledger, give its builder's own findings (`S4B-survey-2-<n>`) owners, and
+   send anything blocker or major still open to a `slice-fix-open` round (two passes; a further round only
+   for a blocker or major; otherwise triage to the owning package as left-for-builder with a concrete
+   resolution, in an outcome file and a triage file named `orchestrator-<unit>.json`). Record the outcomes
+   the plans claim for older findings (`rewrite/plans/step-4/ORDER.md` section 7, "Ledger"). When it and
+   the `rules` round have both reported with nothing blocker or major open on the path of an ordinary run:
+   run every check on a quiet machine (`tools/build.py`, `tools/check.py`, the whole pytest suite, both
+   node suites, `tools/build.py --check`; `tests/hooks/test_latency.py` again by itself), take a snapshot,
+   and launch two builds at the same time, each named in the other's `concurrent`: stage C, `delivery`
+   (G4a; `D33-21`'s delivery half in its notes), and step 5, `agents` (next action 5). Keys, titles and
+   packages: `rewrite/plans/step-4/ORDER.md` section 1.
+2. (Done at 01:44 on 2026-11-25: probe round 5 is applied. The platform record, items 50 to 55 in
+   `rewrite/spec/topics/platform-proven-3.md`, says what the evidence shows, and the step 6 plans carry the
+   answers. Its evidence extract is in `rewrite/spike/probes-round-5/step-transcripts/`. Only `PR5-1` stays
+   open, for the `first-run` unit to close.)
+3. (Done at 23:46: the 24 older open findings with no owner are settled. Ten are fixed or were already
+   fixed, two are rejected as history, and twelve have owners, in `orchestrator-old.json` under `outcomes/`
+   and `triage/`. No open finding is without an owner.)
+4. (Step 4's last stage is in action 1.)
+5. **Step 5 build** from `rewrite/plans/step-5/agents.md` (`args: {step: 5, key: "agents", ...}`), after
+   step 4. Its `notes` carry the corrections of `rewrite/plans/step-4/ORDER.md` section 7 (PL4-23) and
+   `probes-4-apply-C2-3` (the sentence about re-running a command moved to the background applies only to
+   job commands). It may start beside step 4's later stages if waiting would hold up step 6.
+   Also in its `notes`: `L2-c2-b6-fix-1` (a tools line that holds an MCP tool name is written quoted).
+   And rows 4 to 7 of `rewrite/plans/step-6/ORDER.md` section 8.1, which block the W2 build: the
+   technical-writer, devops and verifier each list `fix-findings`, with its new head and its sentence for a
+   kind with no red gate; `review-story-diff` takes a finding's owner from the task when the task names one;
+   the clerk file carries the two background sentences word for word; universal tests 3 and 6 never name
+   `toy-steps`, and the toy uses the closings `story.js` uses. All of these, with the step 4 corrections,
+   are written out in `rewrite/plans/step-5/ORDER.md` section 3, which holds over the plan; the launch
+   `notes` only point at it and say what step 4 built. Launch it when `survey-2` has reported, beside
+   step 4's last unit `delivery`, and name each in the other's `concurrent`. Not earlier: its own test
+   needs every `vsdd` subcommand its files name to be registered (`story deliver` comes with `delivery`),
+   it changes `tools/build.py` and `tools/check.py`, which `survey-2` runs, and a half-filled `agents/`
+   folder fails a harness test (`S5P-N6`).
+6. **Step 6 build**, when steps 4 and 5 have reported and every check passes on a quiet machine: take a
+   snapshot and launch `story-workflow` (W2) and `first-run` (E1's fixture part, E2's first run) at the
+   same time with `slice-build-unit.js` (`step: 6`; `rewrite/plans/step-6/ORDER.md` gives keys, owners and
+   cross-unit rules). Their `notes` carry the answers of probe round 5 and three older findings:
+   `L2-catchup-fix-1` (type and require the members of `survey.config` a script reads), `PR3-1` (the
+   driver's project lives outside Claude Code's temporary tree) and `VSA-15` (the values the loader writes
+   with and without `--local`). The `first-run` notes also carry two edge cases of the sample's test runner
+   (`step4-gates-fix-3-C2-1` and `-C2-2`: a test module that exits or skips at import). After both report: every check (the node line becomes
+   `node --test tests/workflows/*.test.mjs`), then the loader once as a model-free smoke check. Then the
+   first run, cheap tier: `cd next && uv run --no-sync python -B tests/e2e/run.py story`, from a shell
+   outside the Bash sandbox (if this session cannot get one, the user runs that one command). It is
+   capped at 6 dollars a session and 12 over all attempts. The roster tier (capped at 30 and 60 dollars)
+   is run only after the user says so. Fix what the run finds, in the code and in the spec. When the
+   `gates` unit of step 4 gets a fix round, add row 2 of section 8.1 (`gate_project.py` asserts
+   `delivery.mode`, `paths.tests` and `paths.source` after building its project).
+7. Then widen to all 86 packages (the 74 of the blueprint, F1 to F6 for feature flags in the order F1, F5,
+   F2, F6, F3, F4, and M1 to M6 for team use with M6 first), run the greenfield and brownfield proofs (E3,
+   E4) and the two-clone proof, write the documents, build the release tooling and cut over.
 
-## Reference index
+The authoritative order for the slice is the section "The thin slice" in
+`rewrite/spec/packaging/build-plan.md`.
 
-| File | Contents |
+## Standing rules from the user
+
+- **Models:** Fable at extra-high effort plans. Sonnet at extra-high effort writes code. Opus at extra-high
+  effort reviews. Set model and effort explicitly on every workflow step.
+- **Workflows:** always use a workflow when one applies. This is a standing opt-in; do not ask first.
+  The session guideline is under ten agents per workflow, so run several workflows instead of one large one.
+- **Git:** commit or push only when asked. No AI attribution in commit messages, and that includes the
+  session trailer the harness suggests. Never `--no-verify`. Never force-push `main`.
+- **Scope:** full rewrite as 1.0; every capability of the old system ports; macOS and Linux only; Python
+  through `uv`, standard library only at run time; as low touch as possible; research spikes reachable by a
+  person, an agent, a skill and a workflow; brownfield (existing code, and features after a finished build).
+- **Feature flags (decision D31, adopted 2026-11-24 with the word "adopt"):** the factory treats feature
+  flags as a first-class concern of the software it builds, not of itself. Both halves are in scope: the
+  product gets a sound flag system, and features are delivered through it. It is opt-in per project. The
+  factory uses an established flag system and the person confirms which one, in this order: the one already
+  in the code, the one the person or brief names, the one the architect recommends after research, and
+  rolling our own only as a last resort with explicit approval and a recorded reason. The user's words:
+  "it should probably also confirm which feature flag system we are using (launchdarkly, unleash, etc, etc,
+  etc), rolling our own should be a last resort." Code reaches flags through one interface, OpenFeature where
+  the language supports it. The factory writes flag definitions into the repository and never calls the
+  outside service; keys stay out of the repository; tests never reach the live service. Operating flags in
+  production is out of scope. No new workflow. Built when the build widens past the thin slice. The nine
+  clauses as mirrored to the user are in the `DECISION` text of `rewrite/workflows/d31-feature-flags.js`.
+- **Team use (decision D33, adopted 2026-11-24 after the user answered five questions).** Several people,
+  each with their own machine, clone and session, run the factory against one shared repository like a
+  normal development team, and the result must be as sound as with one person. The Git remote is the only
+  coordination channel: no server. The user's words on hand-off between machines: "this should be bound
+  within the physics achievable with git"; the assistant reads that as coordination and hand-off resting on
+  fetch, push and the atomic update of a ref, with work picked up from what has been pushed, and told the
+  user so. The factory records who did what and does not enforce who may approve, merge or release: "a
+  properly setup repo should enforce this". It must cope with teammates who commit by hand without the
+  plugin. Designed now, so that the state code does not bake in one machine; the thin slice stays one
+  story on one machine; built when the build widens, with a two-clone test as proof. The eight clauses are
+  the `decision` argument of the D33 launch, saved in `rewrite/spec/decisions-later.md` in short and in the
+  session transcript in full.
+- **The user asks for a mirror before a new capability is designed:** restate what was asked, say what the
+  design has today, ask the questions whose answers change the design, and start only after the answer.
+- **Findings:** everything found by review or by building gets a recorded outcome. Nothing is dropped.
+- **Resume:** the rewrite and the product must both survive compaction and a cold start.
+- The user adopted every recommendation in the blueprint's decisions D1 to D30 (`rewrite/spec/decisions.md`),
+  and D32: the hook runner approves an agent's own single `vsdd` call, to attach the caller marker, whatever
+  `hooks.rules.auto-allow.scope` says.
+
+## Commits
+
+Two local commits exist on `rewrite/v1`, both approved by the user, neither pushed:
+`2a23827b` (the first snapshot of `rewrite/`) and `486b6835` (`next/` foundations and the rewrite-mode root
+`CLAUDE.md`). Everything since is uncommitted: about 180 changed or new paths under `rewrite/` and `next/`.
+
+Because so much is uncommitted while several agents write to the tree, snapshot archives of `rewrite/`,
+`next/` (without the virtual environment) and the root `CLAUDE.md` are saved in
+`/private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/snapshots/`,
+named `rewrite-next-<month day>-<hour minute>.tar.gz`. The latest is `rewrite-next-1125-0716.tar.gz`. They
+are a safety net against an agent's mistake only: a reboot can clear that folder. Take a new one before each
+stage of builds:
+
+```
+SNAP=/private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/snapshots
+tar czf "$SNAP/rewrite-next-$(date +%m%d-%H%M).tar.gz" --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache --exclude=node_modules rewrite next CLAUDE.md
+```
+
+Every builder is told never to use git to discard or restore files.
+
+## Waiting on the user
+
+Nothing here blocks the next actions. Each default stands until the user says otherwise.
+
+1. **Local commits.** May the assistant commit locally at each step boundary? Asked several times, not yet
+   answered, so no further commit has been made. A yes would protect the work and let builds run in
+   isolated worktrees.
+2. **The Bash sandbox.** With Claude Code's Bash sandbox on, every write under `.git/worktrees/` is refused,
+   so the factory cannot commit or create a story worktree. Working assumption, recommended by the
+   assistant: the factory requires the sandbox off for the sessions that run it, `doctor` and the first
+   survey say so loudly, and a later probe looks for an allowance that works. The first story run is made
+   with the sandbox off.
+3. **Team use (D33), three questions.** Should each person who joins be asked for their own machine which
+   tool calls the plugin approves by itself (D4 was answered once per project)? The assistant recommends
+   yes. Is a team on a Git host other than the one whose command-line tool pull-request mode uses in scope
+   for 1.0? The assistant recommends no, with the host operations behind one module (`D33-18`). Does cutover
+   wait for the two-clone proof? As designed it does not; the assistant recommends making it a gate.
+4. **Team use, six limits the design chose:** with team use on, no run starts without a successful fetch (no
+   offline runs); team use needs pull-request delivery with CI required; it cannot be turned on in a
+   multi-repository hub yet; a fork-only workflow is not supported; the state branch must accept direct,
+   unsigned pushes; git 2.34 or later.
+5. **Feature flags, four defaults:** `flags.require` defaults to `high-risk` (the assistant asked the user to
+   confirm this one; `existing` would flag every feature story on an existing product); `flags.removal`
+   defaults to `human`; F1 to F6 are built before the proofs, so they are on the path to cutover; the
+   flagged-story run is not added to CI.
+6. **Step 4, four defaults for the slice:** until governed delivery (G4b) is built, local delivery refuses a
+   story that touches a dependency manifest or `CHANGELOG.md`; a project with `delivery.merge = "human"`
+   cannot deliver until G4b; after a local merge the story branch is deleted, so with a squash merge the
+   story's individual commits become unreachable (the assistant asked the user to confirm this one); a
+   decision is settled with `vsdd decide` in a terminal until the `decide` skill is built.
+7. Not blocking: the blueprint's offer (section 11.2) to replace the lock heartbeat with liveness by process
+   is still open; the heartbeat is built. The assistant changed the plan for old findings: they are closed
+   in code as each package is built. The user was told and has not objected.
+
+8. **Step 6, four questions** (`rewrite/plans/step-6/ORDER.md` section 8.3), each with the default that
+   stands: (a) may `spikes.per_run = 0` become a valid setting meaning "this project runs no spikes"?
+   Default: no change; `story.js` sets its own spike limit to zero until the spike packages are built.
+   (b) Should a delivered story keep a durable record of its red and green commits (in the closure, or a
+   kept ref), since a squash merge makes them unreachable? Default: no; this extends item 6. (c) Should
+   the product refuse, by a hook rule, a `Workflow` call that carries an inline script, so that an
+   interactive run is known to be the shipped script? It is a new capability, to be mirrored first.
+   Default: no rule. (d) Spending on the real platform: the probe round costs under a dollar and the
+   first run at the cheap tier one to three dollars; the assistant runs both. The roster-tier run (six to
+   fifteen dollars expected) waits for the user's word.
+
+9. **A guard at the ref for the integration branch** (`ORCH-7`). `merge-guard` reads the text of a tool
+   call. However strictly it reads, it cannot see git run by a script, by make or by an interpreter, so it
+   is not a guarantee that only delivery moves the integration branch. Git's `reference-transaction` hook,
+   installed by `vsdd init`, could refuse any move of that branch unless the tool makes it. That is a new
+   mechanism in the product's repository (it must leave a person's own terminal alone, live with a project
+   that sets its own hooks path, and needs git 2.28), so it is mirrored to the user before anyone designs
+   it. Default: no such guard; the text rule, delivery's own checks, and the listing of hand commits that
+   D33 designs for the wave and release gates.
+
+Decisions the assistant made and told the user, recorded in the ledger:
+
+- **`ORCH-2`: a `vsdd` call is approved by an allow-list, not by parsing the shell.** The hook runner
+  approves an agent's own `vsdd` call. It did so when a shell parser found nothing dangerous in the command,
+  and four review rounds each found a new construct that slipped through. Approval now also needs a match of
+  the whole raw command text: `vsdd`, then arguments that are bare words of letters, digits and
+  `_ @ % + = : , . / -`, or single-quoted strings holding no quote and no control character. Anything else
+  passes unmarked and unapproved. The same rule is recorded for the auto-allow rule of package H6
+  (`ORCH-3`).
+- **`merge-guard` passes a git command only when it can read the whole of it** (told to the user on
+  2026-11-25). Three review passes each found new spellings that slipped through on the integration branch
+  (`env -S`, an expansion in git's own arguments, an exported `GIT_DIR`, a wrapper not in the table). The
+  rule now blocks a git-bearing command it cannot read, unless position alone shows it harmless (a story
+  worktree, no other branch or directory named). The same change of approach as `ORCH-2`.
+- **A rule over command text blocks what it can positively read; the guarantee is measured (`ORCH-8`, told
+  to the user on 2026-11-25).** Treating every unreadable command as the violation it could be blocked
+  ordinary work (`grep -rn rm src`, `git mv`, a commit message in a here-document) and still never became
+  complete. tests-first now passes what it cannot read: the green gate fails on any frozen test whose
+  content changed since it was frozen, and the red gate fails if the new tests do not fail. merge-guard
+  has no measured backstop until `ORCH-7` is decided, so it still blocks an unreadable git command where
+  position does not show it harmless; seven findings about unusual spellings are left for H5.
+- **`survey-2` was launched beside the last `rules` round**, against the planned order, to save two to
+  three hours: that round touches only the shell reader and the two rules, not the fixtures `survey-2`
+  builds on, and each run is told what the other changes.
+- **A fix round runs two passes; after that only a blocker or major gets another round.** A minor that is
+  left goes to the package that must settle it, with a concrete resolution.
+
+## How the work is done
+
+- **The design** is `rewrite/spec/`. `rewrite/spec/README.md` gives the layout: one file per thing, a
+  registry, links written `[[kind:id]]`, files under 16 KB. Each build package has a generated brief in
+  `rewrite/spec/packages/<ID>.md`. The spec was converted from six larger documents kept in
+  `rewrite/history/design-v1/`; a builder reads the original section when a spec file is silent. When a
+  package is built, its spec files shrink to pointers at the code.
+- **Adding to the design.** A new build package is registered in a `rewrite/spec/registry.d/` file as
+  `[package.<ID>]` with `summary`, `delivers`, `depends` and `source`, and
+  `python3 rewrite/tools/gen_packages.py` writes its brief. Decisions D1 to D30 are in
+  `rewrite/spec/decisions.md` and D31 onwards in `rewrite/spec/decisions-later.md`; a file that comes from
+  a later decision takes `sources: [decisions.md#D<n>]`.
+- **The ledger** is `rewrite/findings/`. `python3 rewrite/tools/findings.py build` reads the raw findings in
+  `sources/`, the owners in `triage/` and the outcomes in `outcomes/` (applied in the order listed in
+  `outcomes/ORDER`, so a later file wins), and writes `ledger.json` and one list per package in
+  `by-package/`. Whole workflow results are saved in `results/`.
+- **The workflow scripts** are in `rewrite/workflows/` and are launched with the Workflow tool's `scriptPath`
+  and `args`. The ones to reuse:
+  - `slice-build-unit.js`, `{step, key, title, packages, concurrent, notes}`: one unit from its plan. Sonnet
+    builds, Opus reviews, Sonnet fixes every finding, Opus confirms, with a second fix and confirmation if
+    needed. It records everything in the ledger under the name `step<step>-<key>`.
+  - `slice-fix-open.js`, `{name, about, others, findings}`: code findings an earlier round left open.
+    Sonnet fixes, Opus confirms, twice at most.
+  - `spec-fix-open.js`, `{name, about, findings, may_write, guidance, forbid}`: the same for the design and
+    the plans, with Fable correcting and Opus confirming.
+  - `design-decision.js`, `{id, slug, decision, read_first, must_answer, soundness_lens, package_prefix,
+    extra}`: writes an adopted decision into the design. Fable designs, two Opus reviewers (fit; soundness
+    in practice), Fable integrates, Opus confirms.
+  - `slice-step-4-plan.js` is the model for a planning run (five Fable planners, one Opus seam review, one
+    Fable integrator that writes `ORDER.md` and `RESOLUTIONS.md`); `slice-probes-4.js` for a probe round
+    (Sonnet probes, Opus checks the evidence and reruns what matters).
+- **Before a stage of builds:** every check on a quiet tree, then a snapshot. **In a launch:** `concurrent`
+  names what else is writing to the tree, and `notes` carries what was learned after the plan was written;
+  the note says it holds over the plan.
+- **Checks under `next/`:** `cd next && uv run --no-sync python tools/build.py --check`, then
+  `uv run --no-sync python tools/check.py`, then `uv run --no-sync python -m pytest -q` (about three
+  minutes), then `node --test tests/workflows/universal.test.mjs`. If `uv` cannot reach the package index,
+  add `--system-certs`. A `__pycache__` folder under `next/plugins/` makes two checks fail; it comes from an
+  agent that imported the plugin with plain `python3`, and deleting it is safe.
+- **Checks on the spec:** `python3 rewrite/tools/spec_lint.py`, `python3 rewrite/tools/sections.py coverage`
+  and `python3 rewrite/tools/gen_packages.py`.
+- **Platform probes** use the throwaway plugin in `rewrite/spike/plugin/`, a scratch project outside the
+  repository, and headless `claude -p --plugin-dir`. Results are in `rewrite/spec/platform.md`,
+  `rewrite/spec/topics/platform-proven.md` and `platform-proven-2.md`; evidence for the last round is in
+  `rewrite/spike/probes-round-4/`.
+
+## What has been learned that changes how to work
+
+- Fixing prose does not converge; building with a reviewer and tests behind each unit does. A design round
+  gets one correction pass and one more for what its confirmation finds; the rest goes to the packages.
+- A reviewer that reruns the checks and breaks the code in a scratch copy finds what tests miss. Every
+  step 3 unit passed its own tests when built, and every review found majors.
+- A fix often opens the next gap. An independent confirmation after every fix is what catches it; two of the
+  step 3 majors were introduced by fixes.
+- When rounds keep finding new cases of one kind, change the approach, do not patch again: an allow-list in
+  place of a deny-list for the approved command; one loop under one rule for a state machine; a differential
+  test against an independent checker in place of hand-picked cases.
+- Probe a platform assumption before building on it. Round 4 cost under two dollars, confirmed the verdict
+  design could work, and found three things no plan knew (the sandbox, the ten-minute stop of headless
+  background work, which git hooks a merge runs). The prober misread five of eleven results; the independent
+  check caught each.
+- Units built at the same time meet at their seams. Give each builder what the other is changing, in
+  `notes`, and add a test that crosses both.
+- An agent with an explicit tool list starts with about 3,000 tokens of context; one without starts with
+  about 19,000. A workflow step cannot spawn agents; a workflow may call another one level deep only; a
+  script cannot read files or run commands. A missing hook launcher does not block anything, so the launch
+  command guards itself.
+- The assistant's own shell runs sandboxed: it cannot reach the package index without `--system-certs`, and
+  a project `CLAUDE.md` is not loaded for a project under `/private/tmp`.
+
+## Where things are
+
+| Path | Contents |
 |---|---|
-| `rewrite/reference/old-agents-inventory.md` | All 35 old agents: frontmatter, roles, boilerplate, contradictions |
-| `rewrite/reference/old-skills-inventory.md` | All 127 old skills: categories, call graph, duplicates, missing files |
-| `rewrite/reference/old-hook-runner-map.md` | Dispatcher flow, all 79 registry entries, every plugin's rule, tests |
-| `rewrite/reference/old-workflows-packaging-map.md` | `.lobster` schema, tooling, templates, CI, release, pipeline concepts |
-| `rewrite/reference/claude-code-plugin-platform-facts.md` | Plugin components, agent and skill frontmatter, hook events, distribution |
-| `rewrite/spike/plugin/` | The spike plugin: two agents, parent and child workflows, `hooks.json`, the `uv` guard script, the Python runner |
-| `plugins/vsdd-factory/docs/{VSDD,FACTORY,CONVERGENCE,AGENT-SOUL}.md` | The old methodology docs (still the best statement of intent) |
-| `git show origin/factory-artifacts:<path>` | Old specs, stories, ADRs, policies |
+| `rewrite/STATE.md` | This record |
+| `rewrite/LOG.md` | The dated history, in two parts: up to the first compaction, and what reported on 2026-11-24 |
+| `rewrite/WARMUP.md` | The prompt that reloads a session after compaction or from cold |
+| `rewrite/spec/` | The design; `README.md`, `conventions.md`, `decisions.md`, `decisions-later.md`, `platform.md`, `packaging/build-plan.md` are the places to start |
+| `rewrite/plans/step-<n>/` | Build plans, one per unit, with `ORDER.md` (order, owners, cross-unit rules), `REVIEW.md` and `RESOLUTIONS.md` |
+| `rewrite/findings/` | The ledger: `sources/`, `triage/`, `outcomes/`, `results/`, `ledger.json`, `by-package/` |
+| `rewrite/workflows/` | Every workflow script run so far |
+| `rewrite/tools/` | `spec_lint.py`, `sections.py`, `gen_packages.py`, `findings.py` |
+| `rewrite/history/design-v1/` | The six original design documents, unchanged |
+| `rewrite/spike/` | The probe plugin and the evidence of each probe round |
+| `next/` | The product being built; the plugin is `next/plugins/vsdd-factory/` |
+| `plugins/`, `crates/` | The old system: read for reference, never edit |
+
+## Keeping this record current
+
+Update this file at the end of every step and before ending or compacting a session: what is in flight, the
+next actions, the commit list, and what is waiting on the user. Put history in `rewrite/LOG.md`, not here.
+Workflow results are written to files under `rewrite/` before a step is marked done, because workflow output
+does not survive a session.

@@ -1,0 +1,38 @@
+[
+ {
+  "id": "d33-fix-2-C2-1",
+  "origin": "d33-fix-2, confirmation",
+  "severity": "minor",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml (T-NEVER, runs)",
+  "problem": "New, from the correction of d33-fix-2-C1-2. The head rule of table:team-checks used to give every hand-commit check a local condition ('wherever the branch they read has an upstream'). It now says when each acts 'is stated in its own runs cell and nowhere else'. T-NEVER's runs cell says 'At every git command the tool runs on a branch that is on the remote'. That is a property of the remote, and the cell gives no local test for it. T-BRANCH's cell gives one (delivery.pushed recorded, or an upstream), but only for T-BRANCH. A builder who follows T-NEVER's row literally would list the remote before the tool rebases or squashes a story branch. In local mode, which rebases branches that were never pushed, that is a network call config/team.md ('Off') and proof scenario 23 ('no listing of the remote') forbid. Where the listing cannot be made, the head rule's 'cannot measure is a failure' would refuse the delivery.",
+  "proposed_resolution": "Write T-NEVER's runs cell as a test read without the network: a story branch for which T-BRANCH's runs cell has the remote asked (its closure records delivery.pushed, or it has an upstream), and a target branch that has an upstream. Say that no listing is made to decide it. Proof scenario 23 then covers T-NEVER as well: a local delivery that rebases makes no listing.",
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-2",
+  "origin": "d33-fix-2, confirmation",
+  "severity": "minor",
+  "where": "rewrite/spec/commands/survey.md (Team use); rewrite/spec/commands/gate-wave.md (Team use); rewrite/spec/commands/gate-release.md (Team use); rewrite/spec/tables/team-checks.toml (head rule); rewrite/spec/topics/team-delivery.md (Commits made by hand)",
+  "problem": "New, from the correction of d33-fix-2-C1-2. Two statements were added: the head rule of table:team-checks says when each hand-commit check acts 'is stated in its own runs cell and nowhere else', and topics/team-delivery.md says the same. The correction also reports that the D33 passage of commands/survey.md 'restates no condition'. Yet that passage still says 'Wherever the target branch has an upstream it lists the hand commits on it (T-NOTICE)', and the D33 passages of commands/gate-wave.md and commands/gate-release.md open with 'Wherever the target branch has an upstream, with team use on or off'. Each copies T-NOTICE's runs cell. The copies agree with the cell today, but the 'nowhere else' claim is false, and a change to T-NOTICE's condition would leave three command files wrong (spec rule 1).",
+  "proposed_resolution": "In the three D33 passages, replace the condition with a link: 'where T-NOTICE's runs cell has it act' ([[table:team-delivery-checks]]). Change only those passages, because survey.md is read on the slice path.",
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-3",
+  "origin": "d33-fix-2, confirmation",
+  "severity": "minor",
+  "where": "rewrite/spec/tables/sync-checks.toml (T-HISTORY, T-PUSH); rewrite/spec/records/clone.md (sync.remote_head); rewrite/spec/schemas/clone.schema.json (remote_head)",
+  "problem": "New, from the correction of D33R-C-3. T-HISTORY now says sync.remote_head 'is written in two places only': step 4 of the sync, and an accepted push. Neither place covers the moment a clone record is made. vsdd init writes the record when a clone joins (T-JOIN; record:clone, 'Written by'), and the schema requires remote_head. T-SWITCH and T-SOLO's join make the record inside a sync whose T-HISTORY and T-INCOMING read the field before step 4 writes it. A record that is remade has lost it. Before the correction, 'the head at the last listing or fetch that succeeded' gave init's fetch and the switching sync's fetch a value. Now no file says what a new record holds, what the `rewritten` test compares, or which files T-INCOMING checks on a clone's first team sync. The rule is also stated more than once. record:clone says when the field is written 'is T-HISTORY's to say' and then repeats that a judging fetch does not change it. The schema description repeats both halves, and T-PUSH repeats 'That fetch changes nothing in the mount or the clone record' beside T-HISTORY's 'A fetch made to judge a push writes nothing'. Adding a third writer would mean editing four places.",
+  "proposed_resolution": "In T-HISTORY, name the value a new record starts with: the merge base of the mount's head and the fetched head, written once the mount holds it. For T-JOIN at vsdd init that is the head it mounted; for T-SWITCH, T-SOLO's join and a `remade` record it is what this clone last shared with the remote. A rewrite that happened before then is the case T-HISTORY's `unmeasured` cell already names. Keep T-HISTORY as the one statement of when the field is written. Cut record:clone and the schema description to the field's one-line meaning with a link to T-HISTORY. Drop T-PUSH's copy and have T-PUSH link to T-HISTORY. Add to proof scenario 17 a record that fails its check and is on the remote when B joins at its push: B's sync reports it through T-INCOMING.",
+  "on_slice_path": false
+ },
+ {
+  "id": "d33-fix-2-C2-4",
+  "origin": "d33-fix-2, confirmation",
+  "severity": "minor",
+  "where": "rewrite/spec/tables/team-delivery-checks.toml (T-BRANCH, refuses, last paragraph)",
+  "problem": "New, from the correction of d33-fix-2-C1-2. T-BRANCH's runs cell now has the survey look for a story branch only where the closure records delivery.pushed or the local branch has an upstream. Take a first push whose answer was lost and whose judging fetch failed. Nothing records delivery.pushed, and git sets the upstream of `push -u` only on a reported success, so the branch has neither. The last paragraph of the same row still says that in this case 'the result lists the story as not pushed, and the next survey measures'. For a first push the next survey does not measure: the runs cell excludes the branch. The adopted design choice says such a push is caught at the next push, but no file says so, and the row contradicts itself.",
+  "proposed_resolution": "Reword the last sentence of T-BRANCH's refuses: the next survey measures where the runs cell has it look, and a first push whose answer and fetch were both lost is measured at the next push of the branch, which is judged as every push is. Add that case to proof scenario 44: the next push of the branch finds the commit the remote took, records it as delivery.pushed, and reports no hand commit. The alternative is to have the tool write the branch's upstream configuration before the first push, so that the runs cell covers it (fact 21 shows for-each-ref reads the configuration with no remote-tracking ref). That would change T-REMOTE's first-push sentence too.",
+  "on_slice_path": false
+ }
+]

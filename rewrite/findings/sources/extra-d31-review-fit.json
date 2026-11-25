@@ -1,0 +1,218 @@
+[
+ {
+  "id": "D31R-F-1",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "Clause 7 asks that no code reads a flag outside the one interface, and clause 2(a) and 5 ask for one interface, which matters most for existing code. The design checks only added lines (F-INTERFACE at green). The flags check of the wave, release and sweep jobs runs F-REGISTERED and F-USED but no bypass search. So reads that existing code makes straight through a vendor SDK are never counted, reported or planned away. F-INTERFACE states this as unmeasured. After opting in, an ingested product keeps two ways of reading flags indefinitely: the old direct reads and the new interface. Nothing asks the architect, product-owner or story-writer to move them. The same gap covers the case flag-system-choice.md describes, where flags are detected and the person names another system: the record 'says how the code moves off the old one', but no heading, check or story holds that.",
+  "proposed_resolution": "Add F-INTERFACE on the whole tree to the flags check of wave, release and sweep. It reports every bypass match outside flags.interface as a fixable finding (category code, owner implementer) and lists the count in the release packet and report-debt. For source = existing, and for detected = true with source = named, require a decision-record heading 'Reads outside the interface' that states the count found on the integration head and how they move behind the interface. Give the story-writer the duty to plan those moves as stories after the interface story. F-CHOICE checks that the heading exists.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-2",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "Clause 2(b) asks for 'default off', so that half-finished work can merge without being exposed. The design holds the fallback at the read (F-RECORD, F-DEFAULT) but not the value the definition serves. F-DEFINITION states 'what a definition says' as unmeasured. flag-lifecycle.md 'Delivered off' cites F-USED, F-RECORD, F-STATES and F-ITEMS, and none of them checks the definition's value. The implementer's row in flag-duties.toml says the flag-off item holds it to 'write its definition, default off', but the flag-off item's text in F-ITEMS does not mention the definition. Where the decision record says the pipeline applies definitions, an owning story whose definition serves 'on' exposes the feature on merge, and nothing catches it.",
+  "proposed_resolution": "Add to the flag-off:<key> item of F-ITEMS, and to the adversary's duty, that the definition the owning story writes serves the off value (the record's default) in every environment it defines. Optionally, let the toolchain carry a definition_off_pattern that F-DEFINITION matches on the owning story's added definition lines, failing with 'cannot measure' when it is empty.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-3",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "tables/flag-duties.toml",
+  "problem": "In a project that has not opted in, the story-writer must return blocked with kind spec_gap whenever it judges that a story cannot merge safely without a flag. That opens a spec-gap stop, which halts the whole plan workflow because its gate needs every epic done. Clause 3 says a project that has not opted in is not forced into flags, and the decision is asked once. The design does not record a not-a-gap answer, a person-written flags.enabled = false or a toolchain 'declined' as the project's standing answer. So every later story, and every later amendment in which the architect may propose flags again, can ask the same question. This conflicts with clause 3, with clause 4's 'asked once ... so that later stories do not ask again', and with the low-touch rule that a stop exists only where a person must decide.",
+  "proposed_resolution": "Ask once and record the answer. The story-writer may raise the flags spec_gap only while the project has never answered: flags.enabled is unset in factory.toml, no toolchain 'declined' exists, and no earlier spec-gap on flags was settled. A not-a-gap on that gap, a declined text, or a person-set enabled = false then stands for the project. The story-writer and the architect do not raise or propose flags again until a person asks through a request or the brief. Otherwise the story goes ahead unflagged, and the plan gate result notes what the setting would have flagged.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-4",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "The removal stop is a fourth always-wait that neither D15 nor D31 lists, and as designed it repeats. The cleanup story is built in full (tests, review, green gate) before the person is asked. A reject descopes it, and 'the sweep proposes the removal again in the next run in which the condition still holds'. With remove_when = date: or after:, which say nothing about whether the flag is on in production, a flag still off for users is rebuilt and re-asked in every maintain run until the person edits remove_when through the author skill. Each answer is the same, so most of these stops are not needed, and the rebuilt story each run is wasted work.",
+  "proposed_resolution": "Ask once per flag, and ask before building. When the condition is met, the sweep's finding opens the question ('is <key> on for everyone?'). Only an approve writes the cleanup story, and its merge then follows delivery.merge. A reject takes a new condition (for example -- until <date>), which the record keeps, so the sweep is silent until then. Where a delivered flag_change: enable story turned the flag on in the repository's definitions and the decision record says the pipeline applies them, the factory knows the flag is on, and no person is needed. Leave the user's open question about automatic removal as it is.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-5",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "config/flags.md",
+  "problem": "Clause 5 wants the vendor changeable later, and flag-system-choice.md says a person changes the system with a change request whose new decision record a spec decision approves. But F-FILL copies the run keys (interface, read_patterns, bypass_patterns, definitions, runbook, key_env, override_env) into factory.toml only while they are unset, and never overwrites a set key. It cannot tell a key the survey filled from one a person set. After the first approval those keys are set, so a superseding toolchain never reaches factory.toml. The gates keep checking the old system's patterns and interface while flags.decision names the new record. F-REGISTERED and F-INTERFACE then pass or fail against the wrong system.",
+  "proposed_resolution": "Keep one source. Either leave the run keys out of factory.toml and have the loader read them from the latest approved toolchain file unless a person has set them in factory.toml, or have the survey record which keys it filled and refresh exactly those from each newly approved toolchain, announcing the change in the briefing. Have the spec packet show any person-set [flags] key that will override the approved proposal.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-6",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "config/flags.md",
+  "problem": "'Enabled but not configured' (a person sets flags.enabled = true in factory.toml without a chosen system) makes every flags check in every gate fail with 'cannot measure'. F-REGISTERED and F-INTERFACE run on added lines at every story's green gate, so every story in the open cycle stops, flagged or not. The remedy the file names is a change request for the flag system, run as an amendment. But feature needs a baseline (a release, an approved ingest or an import), and a non-critical request stays queued while another cycle is active. In a first cycle the remedy cannot run, and the cycle cannot finish. Missing [commands], the case this is compared to, is a precondition of the workflows that measure, not a failure inside every gate.",
+  "proposed_resolution": "Treat it as missing commands is treated. Flag checks on a story that names no flag report 'flags not configured' in the gate result and the release packet instead of failing. The plan gate refuses only stories that name a flag. vsdd status and the briefing show the state. The remedy inside an open cycle is the spec-gap amend path (the plan gate or the story-writer raises a spec_gap on 'flags enabled, no system'), and outside a cycle it is the change request.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-7",
+  "origin": "decision D31, review (fit)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "Clause 6: tests run without reaching the live service. F-KEY removes key variables only from commands a gate or vsdd env start launches. The implementer and test-writer have SHELL and run the suite in their own shells during TDD, with the session's environment. Where the product's wiring installs the real provider when a key is present, a flag_default test ('sets nothing') and the rest of the suite reach the live service. The test-writer's row in flag-duties.toml says the adversary checks this in review-story-diff, but the adversary's own row and the F-ITEMS items do not include it. flags.override_env is not removed from gate commands either, so a value left set in the shell where the gate runs can turn flags on for the whole suite.",
+  "proposed_resolution": "Make the test setup carry the guarantee. The decision record's 'Tests and local runs' heading must name how the suite installs the in-memory test double for every test under the test command, so no network provider runs there whatever the environment. Add 'no test reaches the live flag service, and the suite's setup installs the test double' to the flag-system item and to the flag-off item, and to the adversary's duty. Have F-KEY also remove flags.override_env from every gate command except vsdd env start.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-8",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-duties.toml",
+  "problem": "Clause 5 makes OpenFeature the interface wherever the product's language supports it. F-CHOICE only checks that, with standard = \"none\", the heading 'Why the interface is not OpenFeature' has text under it. The adversary's review-specs duty covers the source of the choice, a researched choice's alternatives and the read patterns, but not whether the reason for none holds. A language that has a maintained SDK can still end with standard = none.",
+  "proposed_resolution": "Add to the architect row's checked_by, and to the adversary's review-specs duty: check the standard = none reason against the SDK availability and maturity the 'Interface' heading states.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-9",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-duties.toml",
+  "problem": "Clause 7 says a flagged story's contract covers both states. The design covers both states in tests (F-STATES) but does not require the story's acceptance criteria to state them. The story-writer's duty is silent on it. So the off and default tests trace to no criterion, and the criterion-to-test map and the demo table do not show the off state.",
+  "proposed_resolution": "Give the story-writer the duty to write, for a story behind a flag, a criterion for the off and default states (existing behaviour unchanged) beside the criteria for the on state. Name the tests ac<N>_flag_off and so on, and have F-REQUIRE refuse a story behind a flag with no off-state criterion.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-10",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "topics/feature-flags.md",
+  "problem": "Rule 1 (one fact, one place) is broken in several places. The header of flag-checks.toml says outright that a permanent limit 'is stated here and in [[topic:feature-flags]]'. feature-flags.md restates the definition of high-risk (config/flags.md), the decision record's soundness list (flag-system-choice.md), where the record and definitions live (artifacts/flag.md) and the F-KEY behaviour (also restated in config/flags.md and the flag-config-keys meaning). The restatements have already drifted: feature-flags.md says an after: condition is met when the story or epic is 'done and released', while artifacts/flag.md says 'done and the cycle that delivered it has closed'.",
+  "proposed_resolution": "Keep each fact in its home and link to it: the limits in the unmeasured cells, high-risk in config/flags.md, the headings in flag-system-choice.md, the record in artifacts/flag.md, the key handling in F-KEY. Cut feature-flags.md's 'What was decided, and why' to the reasons and the links. Settle the after: wording in artifacts/flag.md only.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-11",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "The section 'What ports from the old plugin' is a mapping from the old system, which rule 6 puts in rewrite/history/, not in the spec. The port itself holds. The delivery skill's 'feature flag wrapping recommended for high-risk changes' becomes flags.require = high-risk. The template's rollback instructions, its Flag/Controls/Default table and its 'Feature flag configured' checklist line become the Rollback section, the Feature flags section and F-USED.",
+  "proposed_resolution": "Move the mapping to rewrite/history/ or to a ledger entry; keep only the two pull request sections in the spec.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-12",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "registry.d/d31.toml",
+  "problem": "Lines 13 and 25 (the delivers of F2 and F4) are 401 and 408 characters, over the 400-character limit of rule 4. spec_lint passes because it skips registry.d/ when it checks line length.",
+  "proposed_resolution": "Shorten the two delivers strings (for example, move 'One failing and one passing case per refusal' to the package Notes), and consider having spec_lint check registry.d/ lines.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-13",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "registry.d/d31.toml",
+  "problem": "F2 is not sized for one builder. It covers 13 checks with about 40 refusal clauses, each needing a failing and a passing case. It wires them into eight commands owned by eight packages (G1, G2, G3, G5, G6a, G6b, G7, G4a), plus the verdict items and the survey and admission change of D31-8. There is also a dependency inversion. F-FILL, built by F1, writes inherited records from the read patterns, but the pattern scanner is part of the 'one module the gates call' that F2 builds after F1.",
+  "proposed_resolution": "Split F2 into a planning part (F-CHOICE, F-RECORD, F-REQUIRE, F-READY in the G5 gates) and a story and job part (F-STATES to F-KEY, F-RUNBOOK, F-REMOVE, F-ITEMS). Put the read-pattern scanner (compile, match, capture key and default, class source only) in F1, so F-FILL and the F2 checks share it.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-14",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "packaging/build-plan.md",
+  "problem": "F4's scenarios run a story through story, a story refused at the plan gate, a removal that waits in maintain, and one story-tier run. Yet F4 depends on none of W2, W5 or W6, W11 or E2; it relies only on the 'workflows follow' ordering. The build plan places E1 in step 6, after the F packages, although F4 depends on E1. Only E1's first part, which the slice builds, is meant.",
+  "proposed_resolution": "Add W2, W5 (or W6), W11 and E2 to F4's depends. In the build plan, say F4 needs E1's first part and E2's story tier, both built on the slice.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-15",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "artifacts/flag.md",
+  "problem": "The flag row introduces artifact-registry semantics that the shipped format does not have, and the ledger does not name them. A 'stem' column percent-encodes the key, so the id no longer equals the file stem, against the shipped header's rule that id equals the stem. Freezing on 'removed' is a lock condition outside the existing 'spec' and 'done'. The deferred item 'deferred/flag-<key>.md' is built from the raw key, which for an inherited key may hold '/', capitals or spaces. state-layout.md writes the path as stories/flags/<key>.md. The [toolchain] row caps the file at 4,000 bytes, which a [flags] table of pattern and glob lists, unioned across components, can exceed.",
+  "proposed_resolution": "Widen D31-1 (and its by-package entry for F1, which depends on H4) to name the artifact-rule changes: the stem column and its check, a 'removed' lock, deferred items named from the stem, state-layout written with <stem>, and a raised [toolchain] max_bytes.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-16",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "topics/feature-flags.md",
+  "problem": "'Keys and secrets' relies on the secrets hook rule to keep agents from printing key variables. That rule blocks echo or printf of a 'secret-shaped' variable and web calls carrying such values. A variable named in flags.key_env need not be secret-shaped, so the claim may not hold. No ledger entry asks the secrets rule (package H2) to treat the key_env names as secret.",
+  "proposed_resolution": "Add a ledger entry for H2, taken by F2: the secrets rule treats every name in flags.key_env as secret-shaped (for printing, and for the web-call and upload value checks), with one case each.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-17",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "decisions.md",
+  "problem": "Ledger entry D31-7 (the registry summary of decisions.md) is triaged to package F1 with the outcome left-for-builder. Its own text says it is not a builder's edit, and only the orchestrating session may change registry.toml. So F1's by-package list holds a task its builder is not allowed to do.",
+  "proposed_resolution": "Triage D31-7 to no package, as an orchestrator item, and leave its outcome open until the orchestrating session changes the summary.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-18",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-ITEMS accepts an item marked not_checkable with a reason, so a reviewer can close flag-off:<key> or flag-system without looking, although the diff is always there to check. Items count only in loop 1. A later loop after a delivery repair checks only the changed files, so new commits that make code reachable with the flag off are not re-checked against the item.",
+  "proposed_resolution": "For flag-off and flag-system require the state checked; not_checkable counts as uncovered and goes to a finding decision at the cap. In a later loop, carry flag-off:<key> again when the new commits touch files of class source.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-19",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "artifacts/flag.md",
+  "problem": "The term 'flagged' collides with the existing design. artifacts/flag.md defines 'a flagged story' as one with flag and no flag_change. But workflows/story.md already says 'the story is flagged security' (security: true), and plan.md and wave.md use 'flags' for the story's boolean keys. A builder reading the story script can confuse the two.",
+  "proposed_resolution": "Name D31's term 'a story behind a flag' throughout the flag files, or rename the existing uses to 'marked security' and 'story keys'.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-20",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "topics/flag-system-choice.md",
+  "problem": "Opting in (clause 3) and confirming the system (clause 4) both ride on a plain approve of the whole specification set. The packet prints the flag lines, but a person who approves a large set confirms the flag system without ever naming it. Declining a system that ingest found costs a full revise round and a second spec stop, because only the architect can write declined.",
+  "proposed_resolution": "When an approval would turn flags.enabled from false to true, have F-APPROVE require a named value on approve (for example flags=existing, flags=named or flags=researched, matching source), as it already does for home-built. That keeps the confirmation explicit with no new stop. Consider flags=decline -- <words> as a way to decline a found system at the same stop.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-21",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-CHOICE's last refusal (with source = existing, read patterns that find no read on the integration head) also runs inside the sweep's spec coherence check, in every project with an ingest closure. Once the last flag has been removed, or the code moved to new reads with other patterns, every sweep fails spec coherence against an approved, locked toolchain file that no maintenance fix can change.",
+  "proposed_resolution": "Apply the 'patterns find reads' refusal only when gate spec checks a proposal that is not yet approved (the run that proposes it). In the sweep, report it as an advisory.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-22",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-duties.toml",
+  "problem": "F-RUNBOOK fails the release baseline check when the runbook is missing, and the finding becomes a docs fix story. No duty plans the runbook when the flag system is built. The story-writer's row covers the interface and the owning stories only. So the first verify after opting in always fails on it and needs a fix round.",
+  "proposed_resolution": "Give the story-writer the duty to plan a docs story for flags.runbook alongside the stories that cite flag-system contracts, and order a story behind a flag after it, or after the kill-switch story.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-23",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "tables/flag-duties.toml",
+  "problem": "The architect's duty includes 'state in conventions.md that a flag is read only through the interface with its key as a literal', but lists only the method architecture. conventions.md belongs to the method conventions (guidance class, with its own lock, outside the spec decision's digest). So L-FLAG would place the section in the wrong method, and the rule would not be part of what the spec approval confirms.",
+  "proposed_resolution": "Either add conventions to the architect's methods for this duty, or put the rule under the decision record's 'Interface' heading, which the spec decision approves, and have the conventions method link to it.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-F-24",
+  "origin": "decision D31, review (fit)",
+  "severity": "minor",
+  "where": "commands/story-deliver.md",
+  "problem": "flag-lifecycle.md puts the Rollback section 'in every pull request', including projects that never opted in, but story-deliver.md and F3's delivers call it one of 'the two flag sections' without saying that. It is the port of the old template's rollback, which was not about flags. A builder of F3 or G4a cannot tell whether a project that has not opted in gets it.",
+  "proposed_resolution": "Say in story-deliver.md that Rollback is in every pull request body and that the flag step is added only for a story behind a flag. Or assign the plain Rollback section to G4a's body renderer and keep only its flag line in F3.",
+  "on_slice_path": false
+ }
+]

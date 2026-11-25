@@ -1,0 +1,6 @@
+# The path classes ship at "next/plugins/vsdd-factory/py/vsdd/policy/classes.toml" (package C2):
+# every class with its globs, write mode and writer, the [_product] precedence among the seven
+# product classes, and the definitions of the computed classes (own-worktree, project, tmp,
+# outside). The shipped file is the single definition (README rule 7); this pointer is kept valid
+# TOML.
+# Sources: state.md#2.4, hooks.md#2.7, BLUEPRINT.md#4.7, agents-skills.md#2.9.

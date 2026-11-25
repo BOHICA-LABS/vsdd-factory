@@ -1,0 +1,191 @@
+[
+  {
+    "id": "S3R-hook-runner-1",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "blocker",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (wiring, _wire_entry)",
+    "problem": "wiring() writes the wrong document as soon as a rule names any event but the two current duties. (a) It drops the matcher of every event except PreToolUse: a row on UserPromptExpansion, SubagentStart or SubagentStop gets a handler with no matcher key, so it fires on every prompt expansion and every subagent instead of on ^vsdd-factory:decide$ or ^vsdd-factory:|^workflow-subagent$ (verified by generating wiring for such rows). H7's decisions gate (step 4) would then run, with onFailure block, on every slash-command expansion. (b) EventSpec.is_async is never written, so SubagentStart would be wired synchronously although tables/events.toml says async = true. (c) A PreToolUse row with no atoms means every call of the event and select() picks it for Read, but wiring adds no atom for it, so hooks.json carries only the atoms other rows and duties name (here Bash) and the rule never runs for any other tool. test_shape checks only the two current duties, and test_reachability skips rows with empty atoms and tests atoms by substring, so it cannot catch any of this.",
+    "proposed_resolution": "In _wire_entry use the EventSpec's own matcher for every event with a fixed matcher that is not PreToolUse. Emit \"async\": true when is_async. For PreToolUse, use the full TOOL_ATOMS matcher when any selected row names no atoms. Extend test_shape and test_reachability to generate wiring from a fixture table with one row per event plus an every-tool PreToolUse row, and to check reachability with re.fullmatch of the wired matcher against every tool select() picks.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-2",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (TOOL_ATOMS)",
+    "problem": "TOOL_ATOMS is EVENTS[2].matcher.split(\"|\"), which also splits inside the two MCP groups. The result is 21 entries, among them broken fragments such as 'mcp__(plugin_vsdd-factory_)?playwright__browser_(navigate', 'tabs', 'mcp__(plugin_vsdd-factory_)?(perplexity' and 'context7)__.*'. wiring() refuses a rule that names the design's MCP atom 'mcp__(plugin_vsdd-factory_)?(perplexity|tavily|context7)__.*' as 'not a tool atom'. It accepts 'tavily', but select('PreToolUse', 'mcp__tavily__search') never picks that rule, and matches() hides the re.error the fragments raise. Plan 3.3 promises that a rule names an atom by its text. test_shape's '|'.join(TOOL_ATOMS) == DESIGN_MATCHER is an identity and cannot fail. secrets and read-walls cannot be wired to the research and Playwright tools.",
+    "proposed_resolution": "Declare TOOL_ATOMS as the explicit 16-entry tuple and build the PreToolUse matcher as '|'.join(TOOL_ATOMS). Add tests: there are 16 atoms; every atom compiles; each MCP atom selects mcp__tavily__search and mcp__plugin_vsdd-factory_playwright__browser_navigate; a fragment such as 'tabs' is refused.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-3",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_run_guarded, _rule_crashed, _is_crash)",
+    "problem": "HD3 and the failure table of topics/hook-failure.md are not met outside gate mode, in both directions. (1) The deadline appends Block('runner_timeout') in every mode, so brief and notify exit 10, which the launcher maps to 2. On SessionStart this puts a block on stderr and no fallback briefing, because emit.finish returns as soon as it sees a block. On SubagentStop (4 s deadline, notify mode) it refuses the stop and traps the agent, which topics/hook-wiring.md rules out. Verified: both modes return 10 with the block text. (2) In brief mode a crashing rule adds nothing to outcomes, because _rule_crashed appends only for gate plus closed. _is_crash therefore never fires and the fallback line is never printed. A crashing session-briefing gives a silent session start (verified: (0, '', '') for fail open and fail closed). test_deadline covers gate only, and deleting the fallback append fails no test. Also, a _Deadline that arrives while _rule_crashed or ctx.log runs inside the except handler escapes the loop and crashes the runner.",
+    "proposed_resolution": "Add the runner_timeout Block only when mode == 'gate'. In the other modes log rule.timeout and, in brief, append the fallback Context. Trigger the fallback from a flag set whenever this call logs a rule.error or rule.timeout, not from Block codes. Cancel the timer, or guard the handler, before the crash logging runs. Add tests for a deadline and for a crash in brief mode (exit 0, fallback JSON with systemMessage) and in notify mode on SubagentStop (exit 0, nothing on stdout or stderr).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-4",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_applies, _run_rule), model.py (rule_config)",
+    "problem": "RuleEntry.locked is never read by the runner. A rule's strength comes only from config.py, which refuses strength for the ids in its own _LOCKED_HOOK_RULES list. A row with locked=True whose id is not in that list is skipped when factory.toml sets strength = \"off\", and its blocks turn into advice under \"advise\" (verified: exit 0 for both). Plan 3.2 promises that a locked rule always gets block, and HD1 makes the row the rule's one declaration. Which rules are locked is now stated in two places, and nothing checks that they agree.",
+    "proposed_resolution": "When entry.locked, use RuleConfig('block', cfg.options) in both _applies and _run_rule. Add a lint that {e.id for e in RULES if e.locked} equals config._LOCKED_HOOK_RULES, or derive one from the other. Add a test with a locked fixture row whose table says off and advise.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-5",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/gitfs.py (head_sha, _git_dir)",
+    "problem": "head_sha returns None in a linked worktree that is on a branch, which is the story-worktree case. It looks for the loose ref and for packed-refs under .git/worktrees/<name>/, but a linked worktree keeps its refs in the common directory its commondir file names. Verified: after `git worktree add -b story/S-9.01 wt`, branch() gives story/S-9.01 and head_sha() gives None. test_branch_in_a_linked_worktree calls head_sha only after --detach, where HEAD holds the SHA itself, so the test cannot catch this. Plan 3.6 lists head_sha as a helper step 4 builds on.",
+    "proposed_resolution": "Resolve the common directory: read <gitdir>/commondir, resolved relative to gitdir, falling back to gitdir. Look up refs/... and packed-refs there, and skip '^' peeled lines. Assert head_sha on an attached branch in the linked-worktree test, equal to `git rev-parse HEAD`.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-6",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_own_opacity, _build_segment)",
+    "problem": "A substitution outside the arguments does not make the segment opaque. Verified: '$(echo rm) -rf /' gives program '$(echo rm)' with opaque False; 'X=$(rm -rf /) ls' and 'echo > $(rm x)' are also opaque False. _own_opacity inspects args only. Plan 3.6 says opaque marks a substitution the parser does not enter. A rule that reads program sees an unknown program and passes it: merge-guard (H5, step 4) would let '$(echo git) push origin main' through.",
+    "proposed_resolution": "Mark a segment opaque when any of its words carries a $( or backtick span: the program, an assignment value, a redirect target or an argument. Track this on _Word while lexing instead of re-scanning the text. Add these three cases to test_opaque_constructs.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-7",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_resolve, _lex, _build_segment)",
+    "problem": "The parse reports wrong facts where it should say \"\" (unknowable), against its own rule 'never to a wrong fact'. Verified: 'cd ~/proj && git commit' gives where '/w/cwd/~/proj', and 'git -C ~/x' does the same. 'cd foo$BAR' gives '/w/cwd/foo$BAR', because _Word.expanded is computed and then discarded and _resolve tests only for a leading '$'. 'cd -' gives '/w/cwd/-'. A bare 'cd' keeps cwd. 'cmd &> f' is split at '&' as a background joiner. Reserved words are taken as the program: 'if x; then git push origin main; fi' gives program 'then', and '! git push' gives '!'. merge-guard (H5, step 4) reads segment.where, branch_at and program. Run from a story worktree, 'cd ~/proj && git commit' would be judged against the story branch while it commits in the main checkout.",
+    "proposed_resolution": "Pass _Word.expanded into _resolve. Return \"\" for any expanded word, a leading '~' (or expand it from the env HOME), '-' and a bare cd. Lex '&>' and '&>>' before the ';&|' branch. Strip leading reserved words ('!', if, then, elif, else, do, while, until, '{', time) before taking the program, or mark the segment opaque. Add each case to the parse table tests.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-8",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_rule_cases.py (CASE_FILES, test_gate_case_coverage)",
+    "problem": "test_rule_cases loads only tests/hooks/fixture_cases/*.toml. Plan 3.7 promises that it runs every tests/hooks/cases/*.toml, and topics/rule-testing.md puts each rule's cases in tests/hooks/cases/<rule>.toml, so the case tables step 4 adds would never run, and nothing would say so. test_gate_case_coverage checks only the runner's own codes. It does not test what plan 7 names ('every gate row has a blocking and an allowing launcher case; modules match rows'), and even the runner has no allowing launcher case.",
+    "proposed_resolution": "Load both tests/hooks/fixture_cases/*.toml and tests/hooks/cases/*.toml. Make the coverage test iterate registry.RULES and require, for every row with kind == 'gate', a launcher case that blocks and one that allows. Check that every vsdd/rules/*.py module has a row and that each row's module imports. Add one allowing launcher case to probe.toml.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-9",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (wiring); next/tests/lint/test_hooks_wiring.py (test_generator_refusals)",
+    "problem": "The refusal plan 3.3 promises, 'async on an event with a gate rule', is built as 'an event row whose mode is gate and is_async', which matches no row. A RuleEntry(kind='gate') on SubagentStart, the async event, is wired without complaint (verified). The platform ignores decisions from background hooks, so such a gate would switch off with no message. test_generator_refusals monkeypatches EVENTS to make PreToolUse async instead of declaring a gate rule on an async event, so it does not test the promised case.",
+    "proposed_resolution": "Raise WiringError when any entry with kind == 'gate' names an event whose EventSpec.is_async is set. Test it with such a row against the real EVENTS.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-10",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_caller.py, test_runner.py, test_emit.py",
+    "problem": "Several promised behaviours have tests that cannot fail, or no test at all. In a scratch copy, each of these mutations left the whole tests/hooks suite green: removing the StructuredOutput branch of HD7; removing 'a Permit stands' from the rewrite decision; removing _root_usable's refusal of a home or '/' root (test_root_at_home_is_inert passes anyway, because with no rule and a non-vsdd command the runner prints nothing either way); taking the marker's root from ctx.cwd instead of the -C directory (test_minus_c_honoured points -C into the same project); ignoring the spike exemption (plan 7 names it under test_applies_and_strength); accepting a leading assignment in a vsdd call (HD8); raising the quarantine threshold from 2 to 4 (the crashing rule adds its own rule.error, so the boundary is not pinned); and dropping story from rule events.",
+    "proposed_resolution": "Add one assertion for each: a rewrites=True rule on StructuredOutput in default mode gives allow; a permitting rule plus a vsdd call in default mode gives allow; a home or '/' root with a blocking fixture rule stays silent with exit 0; -C naming a second project puts the marker there and none in the session project; a spike_exempt blocking rule in a spike worktree gives 0; 'FOO=1 vsdd survey' writes no marker; with a blocking (non-crashing) rule, one seeded fault still blocks and two quarantine; a block in a story worktree logs story.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-11",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (_deliver); next/tests/hooks/test_emit.py (test_stdout_by_outcome)",
+    "problem": "A Context on PreToolUse is delivered as additionalContext with a systemMessage (verified). Plan 3.4 and topics/rule-model.md say Context is dropped on every event except SessionStart, UserPromptExpansion, SubagentStart and PreCompact. test_stdout_by_outcome asserts the delivery, so the test locks in the deviation, and it also holds a dead 'for ... pass' loop.",
+    "proposed_resolution": "Drop contexts on PreToolUse in _deliver. Change the test to assert that a contextual rule on PreToolUse prints nothing, and remove the dead loop.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-12",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_run_rule), emit.py (_pre_tool_use_decision)",
+    "problem": "At strength advise, _run_rule skips the HD10 check, so a Rewrite from a rule whose row does not set rewrites is applied (verified: updatedInput with permissionDecision ask) instead of being that rule's crash. Separately, permissionDecisionReason is always the marker sentence ('the plugin's own command, rewritten to carry its caller marker'), even for step-results' StructuredOutput rewrite, and Rewrite.reason is never used. A second rewrite is dropped without a log line.",
+    "proposed_resolution": "Apply the rewrites check before branching on strength. Build the reason from the chosen Rewrite's reason, after the 'vsdd-factory hook:' prefix. Log the rule id of any rewrite that is discarded.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-13",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_runner.py (test_import_crash_blocks_via_launcher); next/tests/hooks/runner_helpers.py (launch_copy)",
+    "problem": "test_import_crash_blocks_via_launcher does not test what plan 7 names ('a broken emit.py exits 2 in gate, 0 in notify'). It injects a missing rule module, which is the rule_error row, already covered in process. The runner's own import crash is covered only by the fake-uv exit-code mapping in test_launcher. I checked by hand: with a raising emit.py in a launch_copy, gate exits 2, notify 0, and brief 0 with the down briefing under sh, bash and dash, so the behaviour is right and only the test is missing. Also, launch_copy drops a row's 'module' key, so the test passes only because the default module vsdd.rules.probe is missing too.",
+    "proposed_resolution": "Write a raising emit.py into the launch_copy and assert gate 2, notify 0 and the brief down briefing under each interpreter. Keep 'module' in the row launch_copy injects.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-14",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_debug, _capture, _bad_input, _run_rule)",
+    "problem": "Event lines and switches differ from the tables. (1) runner.slow is logged only when VSDD_FACTORY_HOOKS_DEBUG=1, but tables/event-types.toml and hooks.md 2.12 log it for any call over 300 ms; only runner.call depends on the debug switch. (2) rule.would_block lacks the table's id and 'target or command' fields. (3) _bad_input logs a rule.block in brief and notify mode, where nothing was blocked, and ignores VSDD_EVENTS_DIR. (4) The capture writes one file per tool name, so each call overwrites the last, and its _meta.json lacks the Claude Code version and capture date that topics/rule-testing.md asks for.",
+    "proposed_resolution": "Log runner.slow whenever ms > 300, whatever the debug switch says. Give rule.would_block an id and _context_target_fields. Log rule.block from _bad_input only in gate mode and use the call's events directory. Name captures uniquely and record the version and date in _meta.json.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-15",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/main.py (_notices)",
+    "problem": "config.py leaves the question of whether a rule id exists to the runner, and topics/rule-tuning.md says an unknown id under [hooks] logs config.invalid and is announced in the briefing. The runner checks no ids. It announces an unknown id set to off as one of the 'rules below full strength' (test_four_notices asserts 'soft-rule (off)', an id no row has), so a typo in a rule id reads as a working relaxation.",
+    "proposed_resolution": "Give _notices the registry table. Add unknown ids to the configuration notice and to config.invalid, and list only registered rules among the relaxations. Use a registered fixture row in the relaxation test.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-16",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/tests/lint/test_hooks_wiring.py (test_current_and_drift)",
+    "problem": "The test appends a byte to the checked-in plugins/vsdd-factory/hooks/hooks.json and restores it in finally. A kill in between leaves the shipped file drifted. Meanwhile, any concurrent tools/check.py or build.py --check in this shared tree (other units run them) sees a false DRIFT. The variable 'drifted' is unused.",
+    "proposed_resolution": "Run the drift check against a temporary copy, by giving build.py a root argument or by monkeypatching PLUGIN to a copied tree in process, and never write the real file.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-17",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/caller.py (write_marker); next/plugins/vsdd-factory/schemas/caller-marker.schema.json",
+    "problem": "A kill between write_text and os.replace leaves <key>.json.tmp in the calls directory. records' caller() prunes 'markers whose file time is over ten minutes' (*.json), so nothing ever removes the .tmp files, and neither the schema description nor records/caller-marker.md mentions them. The schema's key also has no pattern, although its description says 32 hexadecimal characters.",
+    "proposed_resolution": "Either write the temporary file under .factory/local/tmp/ (records' convention) and rename it into calls/, or have records' prune also remove *.json.tmp older than ten minutes, and say which in the record file and the schema description. Add \"pattern\": \"^[0-9a-f]{32}$\" to key.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-18",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/rule-model.md; rewrite/spec/topics/hook-runner.md",
+    "problem": "The spec files this unit edited state things the code does not do. rule-model.md still opens with the @rule decorator (HD1: the registry row is the only declaration, and there is no decorator). Its main-loop skeleton runs applies outside the try and catches the deadline with except Exception (against HD4 and HD5). 'The runner raises four blocks of its own' is followed by three. The project bullet list sits inside the field table, so the rows after it (target, classes, ...) render without a header. The new text cites finding ids '(P3COV-07, PR3-3)' in design prose, the history-phrase class AU-S2-10 asks to remove, although the outcome says these additions carry none. topics/hook-runner.md's layout still lists 'the @rule decorator' under model.py.",
+    "proposed_resolution": "Replace the decorator example with a RuleEntry row plus its check module, and align the skeleton with main.py. Say three blocks. Move the bullet list below the table. Drop the finding ids. Correct the model.py line in hook-runner.md.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-hook-runner-19",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-hook-runner.json (P3BLD-14, L2-catchup-fix-3)",
+    "problem": "P3BLD-14's what_was_done describes path classes (ctx.classes on S1's path_class), but that finding is about the lock refresh and the release at session end. The deferral to hook-runner-b is right; the text is wrong. L2-catchup-fix-3's outcome says each event type is 'a constant at its call site', while plan section 6 says 'one constant in model.py'. The type strings are literals spread over main.py and emit.py, and the departure is not reported.",
+    "proposed_resolution": "Rewrite P3BLD-14's text to say lock liveness and release with records' lock_seen and lock_release, in hook-runner-b. Either put the runner's event type names in model.py constants as planned, or record the departure.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-20",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py (__all__), main.py, model.py, registry.py",
+    "problem": "emit.__all__ names RunnerCodes, which does not exist, so 'from vsdd.hooks.emit import *' raises AttributeError. main.ROOT_AT_HOME_INERT, main.now_monotonic, Ctx._env (a second copy of env, with a misplaced comment) and registry's '_ = RuleEntry' are dead code.",
+    "proposed_resolution": "Remove the dead names and the dead code. Add a lint that every name in a module's __all__ exists in that module.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-hook-runner-21",
+    "origin": "slice step 3, hook-runner, review",
+    "severity": "minor",
+    "where": "next/tests/lint/test_hooks_wiring.py (test_guard)",
+    "problem": "test_guard runs [interpreter, '-c', guard_command(mode)], and that command is itself sh -c '<body>'. The body therefore always runs under /bin/sh (bash on macOS), and the outcome's 'verified under sh, bash and dash' holds only for the outer word. I ran the body directly under dash, bash and sh and it behaves correctly in all three modes, so this is a gap in the test, not a defect in the guard.",
+    "proposed_resolution": "Expose the body (for example a guard_body(mode) helper) and run it directly under each interpreter in test_guard.",
+    "on_slice_path": true
+  }
+]

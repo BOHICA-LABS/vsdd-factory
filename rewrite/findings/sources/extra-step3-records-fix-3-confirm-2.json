@@ -1,0 +1,11 @@
+[
+  {
+    "id": "step3-records-fix-3-C2-1",
+    "origin": "step3-records-fix-3, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py",
+    "problem": "The C1-1 fix sets GIT_LITERAL_PATHSPECS=1 on flush's add, rm --cached and commit calls. git refuses that when GIT_ICASE_PATHSPECS=1 or GIT_GLOB_PATHSPECS=1 is also set ('fatal: global 'literal' pathspec setting is incompatible with all other global pathspec settings', exit 128). gitrun.git passes the inherited environment through and strips only the repository-locating GIT_* keys, so a person who exports either variable gets state 'failed' from every flush that has changes, and hooks inherit it too. Probe: in a scratch copy, one new decisions/plain.md flushed with GIT_ICASE_PATHSPECS=1 (or GIT_GLOB_PATHSPECS=1) in os.environ gives 'failed: git add -A -- ... exited 128', and the next flush fails the same way. With _LITERAL_PATHSPECS emptied (the code before the fix) both commit. GIT_NOGLOB_PATHSPECS=1 is accepted.",
+    "proposed_resolution": "In commits.py, make _LITERAL_PATHSPECS {\"GIT_LITERAL_PATHSPECS\": \"1\", \"GIT_GLOB_PATHSPECS\": \"0\", \"GIT_NOGLOB_PATHSPECS\": \"0\", \"GIT_ICASE_PATHSPECS\": \"0\"}; git reads \"0\" as off. In scratch this made both probes commit and kept test_state_commits.py at 20/20, also with both variables exported for the whole run. Add a test in test_state_commits.py that monkeypatches GIT_ICASE_PATHSPECS=1 and GIT_GLOB_PATHSPECS=1 into os.environ and asserts that flush commits a new packet and that the glob-neighbour case still leaves a.md out of HEAD.",
+    "on_slice_path": true
+  }
+]

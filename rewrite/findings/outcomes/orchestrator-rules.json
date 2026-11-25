@@ -1,0 +1,14 @@
+[
+ {
+  "id": "ORCH-7",
+  "outcome": "left-for-builder",
+  "what_was_done": "Waiting on the person, with a default that stands: no guard at the ref; merge-guard stays a rule over command text, strict about what it cannot read, with its limit stated in rules/merge-guard.md. If the person wants the guard, it is designed as a decision (mirrored first), probed, and built with H5 when the build widens.",
+  "where": "rewrite/spec/rules/merge-guard.md"
+ },
+ {
+  "id": "S4B-rules-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "For H1 when the launcher tests are next widened (hub layouts, worktree working directories): launch() in the hook test helpers sets CLAUDE_PROJECT_DIR to the project the test built, so that the child resolves the same project as the test; add one test whose working directory is a story worktree.",
+  "where": "next/tests/hooks/ (the launcher helper)"
+ }
+]

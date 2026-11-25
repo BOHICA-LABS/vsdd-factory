@@ -1,0 +1,6 @@
+# Registrations made by the orchestrating session.
+
+[doc.decisions-later]
+summary = "The record of the decisions adopted after 2026-11-23, D31 onwards, as decided."
+group = "index"
+sources = ["decisions.md#D31", "decisions.md#D32", "decisions.md#D33"]

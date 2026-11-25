@@ -1,0 +1,65 @@
+[
+  {
+    "id": "S3R-state-core-C1-1",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/mount.py (_is_interrupted_mount, mount_state); next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py",
+    "problem": "The S3R-2 fix treats any .factory/ whose only entry is named .git as an interrupted mount, and mount_state then runs shutil.rmtree on it. It never checks that .git is a pointer file into this repository's own .git/worktrees, which the finding's proposed fix required. Reproduced in a scratch copy: a .factory/ that is a separate repository with two commits and its one file deleted from the worktree (so only .git remains). vsdd init answered exit 0, state ready, created true, and that repository's history was gone. Before the fix, init refused this case with 'move it aside'.",
+    "proposed_resolution": "Accept as an interrupted mount only a .factory/.git that is a regular file. Its 'gitdir:' must resolve inside this repository's common git directory under worktrees/, and that worktree's gitdir file must point back at <root>/.factory/.git. Refuse with 'move it aside' otherwise. Add a test: a .factory/ holding a nested repository's .git directory is refused and left untouched, and no state branch is created.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-C1-2",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (_load_command)",
+    "problem": "The S3R-18 family check takes the family as the module stem up to its first underscore. Plan 3.1 says <family> is the command's first word with '-' written '_', so a hyphenated first word can no longer register. Reproduced: a cmd_lock_release.py with words ('lock-release',) gives 'RegistrationError: the first word 'lock-release' does not match the module's family 'lock'' from both dispatch and commands(). No current spec command has a hyphenated first word, so the regression is latent.",
+    "proposed_resolution": "Accept the entry when f\"cmd_{words[0].replace('-', '_')}\" equals the stem, or when the stem starts with it followed by '_'. Add a hyphenated-family case to test_registration_rejects_malformed_commands, both one that registers and one that is refused.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-C1-3",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/tests/unit/test_init.py::test_init_origin_mount",
+    "problem": "The new origin-mount test runs init in a fresh git clone that has no local user.email or user.name, and git() inherits os.environ. The test therefore passes only on a machine with a global git identity. Reproduced: with GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM=1, test_init_origin_mount failed (KeyError 'state': init refused for lack of an identity). The other 83 state-core unit tests passed in that run.",
+    "proposed_resolution": "Set a local identity in the clone (git -C clone config user.email/user.name) before running init. Alternatively, have the suite's conftest set GIT_CONFIG_GLOBAL to a file holding a test identity.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-C1-4",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run)",
+    "problem": "The S3R-4 up-front refusal checks only state_dir.is_dir(). A .factory that is a plain file, or a symlink to a non-directory, passes the check. init then creates the state branch, crashes in 'git worktree add' with 'internal error: GitError ... already exists', and leaves refs/heads/factory-artifacts behind. This is the failure S3R-4 described, reproduced in a scratch copy.",
+    "proposed_resolution": "Before anything is created, refuse whenever .factory exists and is anything other than an empty directory or a verified interrupted mount (see C1-1). Extend test_init_refuses_a_non_empty_state_directory_without_leaving_a_branch with a .factory file case.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-C1-5",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "rewrite/findings/outcomes/step3-state-core.json (SL1-27)",
+    "problem": "The S3R-6 fix changed a partial project's init from exit 2 to exit 1. The SL1-27 outcome still records 'detect reports partial and init exits 2 naming /vsdd-factory:status --fix', which is now false, and the ledger carries that text.",
+    "proposed_resolution": "Re-record SL1-27's text: init exits 1 with state partial, mounted false, and next naming /vsdd-factory:status --fix (test_init_partial_refuses).",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-state-core-C1-6",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (check_paths); rewrite/spec/rules/artifacts.md",
+    "problem": "The S3R-9 fix adds a reason code, 'unreadable', that is not in spec rules/artifacts.md. Plan 3.5 closes the code set: the spec's codes except artifact_frozen, plus criterion_contract. The departure is not recorded in the plan or the spec, so consumers of Problem.code (validate output, flush, the status report) meet a code the spec does not define.",
+    "proposed_resolution": "Add 'unreadable' (file cannot be read or is not UTF-8) to the reason-code table in rules/artifacts.md and to plan 3.5's code list. Alternatively, report the condition under an existing code such as frontmatter_invalid.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-C1-7",
+    "origin": "slice step 3, state-core, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (registry, _ref_pattern)",
+    "problem": "The S3R-19 compile-time ref: check reports '[<target>]: a ref: to a kind with no id row and no constant pattern'. It names the target kind, not the row and key that hold the bad cell. Plan 3.5 says a RegistryError names the row, and the fixer reports that both checks do. For a row 'things' with who = 'ref:nohope', the message names only [nohope].",
+    "proposed_resolution": "In registry(), catch the RegistryError from _ref_pattern and re-raise it as '[<row>].<key>: ref:<target> names a kind with no id row and no constant pattern'. Assert '[things]' in test_registry_compiles_cells_loudly.",
+    "on_slice_path": true
+  }
+]

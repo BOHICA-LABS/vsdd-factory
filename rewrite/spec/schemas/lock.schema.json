@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lock.schema.json",
+  "type": "object",
+  "description": "Fields of lock.json (state.md#2.11, whose example this shape is copied from). The design gives no required list.",
+  "properties": {
+    "locks": {
+      "type": "array",
+      "items": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "Repository and branch, e.g. acme-api:develop."
+          },
+          "run": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "taken": {
+            "type": "string",
+            "description": "ISO timestamp; the design gives no tighter type."
+          },
+          "seen": {
+            "type": "string",
+            "description": "Refreshed by the hook runner at most once a minute. ISO timestamp; the design gives no tighter type."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "probes-4-apply-C1-1",
+    "origin": "probes-4-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/step-results.md (item 5, lines 45-48); rewrite/spec/topics/hook-platform-facts.md (rows for items 27, 28, 30, and line 40); listed only in rewrite/plans/step-4/ORDER.md section 7",
+    "problem": "The corrected round-4 record now contradicts two spec files that this round could not edit. rules/step-results.md still says it is 'not proven' that the platform honours updatedInput on a StructuredOutput call (item 27) and describes a fallback for when it does not. Items 37 and 38 of topics/platform-proven-2.md prove it in the default mode, and item 27 already showed it in auto mode. topics/hook-platform-facts.md still marks the updatedInput rewrite, the session id inside steps and the Workflow permit (items 27, 28, 30) as 'Not verified', and line 40 says to capture payloads for them as a first build task, although items 27, 28, 30, 36 and 38 settle them. The corrector listed these, with three others, for the spec steward in a prose paragraph of step-4 ORDER.md section 7. That paragraph is not a ledger entry, so nothing tracks the fix or names who owns it. The other three are already tracked: tests-e2e.md's is_error by PR4C-16, spikes.md's inline script by PR4C-17, and story-deliver.md's 'Git hooks run' is vague but not wrong now that delivery.md D6 says which hooks run.",
+    "proposed_resolution": "The spec steward rewrites the passage of rules/step-results.md that calls updatedInput on StructuredOutput unproven: the rewrite is proven (platform-proven-2 items 37 and 38), so the fallback sentence goes. The steward also marks rows 27, 28 and 30 of topics/hook-platform-facts.md proven, each with a pointer to its item in topics/platform-proven.md or platform-proven-2.md, and removes or narrows line 40's 'capture payloads for the rows still unverified'. Then drop that sentence from step-4 ORDER.md section 7, or turn it into a pointer to this finding.",
+    "on_slice_path": false
+  },
+  {
+    "id": "probes-4-apply-C1-2",
+    "origin": "probes-4-apply, confirmation",
+    "severity": "minor",
+    "where": "rewrite/plans/step-5/agents.md (M3 and the clerk rule); rewrite/spec/topics/platform-proven-2.md item 43; rewrite/spec/topics/long-commands.md",
+    "problem": "When the platform moves a call to the background, its notice tells the agent: 'It is running now: do not start a second copy while it runs.' It also says: 'if you need its result, wait for it before giving your final response.' M3 and the clerk rule now tell the agent the opposite: 'run the same command again once the call is moved to the background (never poll it)'. Neither says why the re-run is safe. topics/long-commands.md reconciles the two ('a job command starts none', because the call re-attaches), but that text never reaches the agent. So the agent gets two contradicting instructions at the moment it must choose. In round 4, the s4b agent followed the platform and polled the background output. Separately, item 43 quotes the notice ('not to start a second copy') from rerun C's log. That log is temporary, under the session scratchpad at chk4/logs/C.jsonl, and CHECK.md does not quote that line, although the record's header says CHECK.md quotes the lines that decide.",
+    "proposed_resolution": "Give M3 and the clerk rule the reason in a few words. For example: 'once the call is moved to the background, run the same command again; it re-attaches to the job already running and is not a second copy; do not wait for or read the background task.' The method then settles the conflict with the platform's notice instead of contradicting it. Have the orchestrator save the notice line from chk4/logs/C.jsonl into rewrite/spike/probes-round-4/ before the scratchpad is cleared, and have item 43 cite that saved file.",
+    "on_slice_path": false
+  }
+]

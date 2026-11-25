@@ -1,0 +1,265 @@
+{
+ "logs": [],
+ "result": {
+  "missing": [],
+  "plans": [
+   {
+    "unit": "gates (package G2): the story gates red, green, demo and the diff patch writer",
+    "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/gates.md",
+    "summary": "Plan written (22.9 KB) for vsdd gate red (JUnit reader, base report, pass rule, frozen files, criteria map, --refreeze), gate green (red record present, frozen files unchanged, no VSDD-STUB, configured commands, diff patch, --since), gate demo (criterion-to-test table, and a file check of recorded evidence) and the diff patch writer. Red and green do all measuring inside a G1 job: the command and the registry function only do cheap checks and attach, so nothing waits on a suite in the foreground. Each gate module is gate_<name>.py and ends with register_gate(name, measure); the registered function attaches to the same job as the command and can return the pending object, which differs from records.md's wording (\"a gate result\") and must be taken up by S3's second part. Every path where a gate cannot measure (no report, stale report, dirty worktree, moved head, kind without the gate, no red record, job failure) returns passed false with a failure line and never a pass. Step 5's assumptions are met (re-freeze result is named red and passes when nothing changed; gate green --since is named green; sha is the head); two additions for its methods: --refreeze is refused unless it is the whole command of a test-writer's call, and a skipped changed frozen test fails the re-freeze. Left for the widening: the baseline comparison and flaky rerun (the baseline's fields are G7's and the spec schema names none; a cycle naming a baseline is measured strictly and says so), feature-flag checks, hub projects, the red lookup after a rebase, the commit.made event. Step 3 code is not yet under next/, so the plan is written against the step 3 plans' promised interfaces only. No S5P finding is triaged to G2; S5P-N1's demo directory is stated as the path the gate reads.",
+    "files_owned": 18,
+    "shared_files": [
+     "next/plugins/vsdd-factory/schemas/gate-result.schema.json",
+     "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json",
+     "next/tests/unit/fixtures/schemas/wave-gate-data/valid_minimal.json",
+     "next/tests/unit/fixtures/schemas/wave-gate-data/valid_holdout-batches-of-scenario-ids.json",
+     "next/workflow-lib/prelude.js",
+     "next/tests/workflows/toys/toy-build.js",
+     "next/tests/workflows/toys/toy-story.js",
+     "next/tests/workflows/toys/toy-verdict.js",
+     "next/tests/e2e/sample-project/tools/junit_runner.py"
+    ],
+    "needs_from_step_3": 15,
+    "findings_planned": 6,
+    "findings_deferred": 4,
+    "open_questions": [
+     "Should an acceptance criterion that no test covers fail the red gate or the demo table? Planned: it is listed in metrics.uncovered and in the table and does not fail, because the spec's pass conditions do not include it and the review accounts for every criterion.",
+     "AU-P2-07: does a docs story's green gate run the documentation check as well as build, suite, lint and format (planned, the stricter reading) or instead of them?",
+     "May the step 4 builder change E1's sample runner (adding the file and type attributes) and the two C1 schemas with their generated prelude copies, or should those edits go back to the packages that own them?"
+    ]
+   },
+   {
+    "unit": "verdicts (package G3)",
+    "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/verdicts.md",
+    "summary": "Plan written (23,954 bytes) for G3 at slice depth, perimeter `story` only. It builds: a Python port of the prelude's judge() and a replay of converge() over recorded passes (state/convergence.py); the verdict rebuilt from a story's stored step records, the cover lookup, the closure form, the unit's waivers and passes used (state/verdicts.py); the one grounding check that H7's step-results rule calls (state/grounding.py); `vsdd review show` (state/cmd_review.py); and 40 conformance cases under next/tests/conformance/cases/ in three kinds (judge and loop run in Node and Python, records in Python only), with a Node runner that pytest also starts. Deferred: `vsdd review prepare`, holdout_findings and its two cases, the other perimeters, full walled-finding handling, `direct` after a cap. All files are new and owned; nothing shared and no schema added. One seam needs the orchestrator: ORDER.md section 7 has G3 put the computed verdict ahead of the closure inside records' gate_evidence.evidence('review'), but this plan may not change a step 3 file, so it provides verdicts.covering() (computed first, closure fallback) and states the three-line delegation as a need, with a test that fails until it is made. I did not read the other step 4 plans (delivery.md, gates.md, rules.md were already in the directory). The plan meets the step 5 assumptions and asks no change of that plan.",
+    "files_owned": 10,
+    "shared_files": [],
+    "needs_from_step_3": 11,
+    "findings_planned": 6,
+    "findings_deferred": 0,
+    "open_questions": [
+     "Person (orchestrator): who makes the three-line change in records' state/gate_evidence.py so that evidence(project, 'review', subject) returns verdicts.covering(...)? ORDER.md section 7 gives it to G3, but this plan was told not to change a step 3 file.",
+     "Probe (E2's first run will show it): is the agent_type in the StructuredOutput hook payload of a workflow step exactly 'vsdd-factory:<name>' under --plugin-dir? The verdict counts a review pass only when the stored type equals that string; if it differs, no pass counts and delivery refuses."
+    ]
+   },
+   {
+    "unit": "survey-2 (S3, second part): story positions, measuring a missing gate again, checkpoint mapping to closures and decisions",
+    "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/survey-2.md",
+    "summary": "The plan is written to rewrite/plans/step-4/survey-2.md (23,943 bytes, eight sections in the required order). Nothing under next/ or the protected rewrite/ folders was changed, and I did not read the four sibling step 4 plans that appeared in the directory while I worked.\n\nWhat the unit builds for one story:\n- **Position:** one ladder (`story_unit.ladder`) over the evidence lookup and G3's verdict. `position()` now reads it, with the same results as the first part.\n- **Re-measure:** when the closure says a stage is done at the worktree's head and no evidence covers that head, the survey calls the registered gate function. While the gate job runs it prints the gates' own pending object and keeps the run and lock, so the clerk's retry re-enters the same run.\n- **Checkpoint mapping:** `unit_outcome.assess` turns step records, evidence, the verdict and the delivery state into stage entries with their own commits, the closure's verdict and `flaky`, and at most one decision per story. `packets` writes the packet and runs the `command` notification channel.\n- **Decisions read back:** the next survey refuses a story that waits on an open decision, and fills `waived`, `guidance`, `blocked` and `rounds_used`.\n- **Unit paths:** `bc_paths`, `conventions` and `demo_dir` are added to the story unit, for S5P-N1 and S5P-N11.\n\nThree things a reviewer should check first:\n- **Shared schema edit.** The three new unit fields change `story-unit.schema.json`, which regenerates `prelude.js` and the toys' stamped region, and touches the harness's `storyUnit` literal and two fixtures. No step 3 unit edits that schema; another step 4 unit might.\n- **Interfaces I could only state, not verify.** G2's registered function must return a gate result or the pending object. G3 must expose `vsdd.state.verdict` through the facade, returning `None` when no pass is stored. G4a must write `delivery.state`, `run`, `detail`, `pr`, `needs_person` and `dependencies` into the story closure.\n- **Two loud limits.** Red evidence missing at an earlier commit is refused, not restored, because the registered function only measures the head. A descoped story is refused as \"not built yet\".\n\nOf the 25 findings in the S3 list, 5 are resolved here (P3REQ-06, VSA-09, P3COV-06, S5P-N1, S5P-N11), 7 were already closed on the story path by the first part, and 13 are not at slice depth. The plan also lists five new gaps for the orchestrator to record. The step 5 plan needs no correction; W2 must pass the new unit fields into its prompts.",
+    "files_owned": 10,
+    "shared_files": [
+     "next/plugins/vsdd-factory/py/vsdd/state/story_unit.py",
+     "next/plugins/vsdd-factory/py/vsdd/state/survey.py",
+     "next/plugins/vsdd-factory/py/vsdd/state/checkpoint.py",
+     "next/plugins/vsdd-factory/schemas/story-unit.schema.json",
+     "next/workflow-lib/prelude.js",
+     "next/tests/workflows/toys/toy-build.js",
+     "next/tests/workflows/toys/toy-story.js",
+     "next/tests/workflows/toys/toy-verdict.js",
+     "next/tests/workflows/universal.test.mjs",
+     "next/tests/unit/fixtures/schemas/story-unit/valid_minimal.json",
+     "next/tests/unit/fixtures/schemas/story-unit/invalid_missing-field.json",
+     "next/tests/unit/test_story_unit.py",
+     "next/tests/unit/test_survey.py",
+     "next/tests/unit/test_checkpoint.py"
+    ],
+    "needs_from_step_3": 11,
+    "findings_planned": 5,
+    "findings_deferred": 13,
+    "open_questions": []
+   },
+   {
+    "unit": "delivery (package G4a)",
+    "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/delivery.md",
+    "summary": "The plan for `vsdd story deliver` in local delivery mode is written (23,970 bytes, eight sections in the order asked). It plans against the step 3 interfaces only; step 3 code does not exist yet under next/, and I did not read the four sibling step 4 plans that appeared in the same folder while I worked.\n\nWhat it plans: the command as a job keyed by the story, with the whole delivery in the detached worker; 15 refusals in a fixed order, each with its exact error text and a test; the verdict matched to the head by commit or patch id, compared again in delivery itself; the checked commit merged by id in the detached integration worktree; the target branch moved only from the head that was read; `checkout_dirty`; `conflict`, with the target merged into the story worktree for the repair (VSA-18); `review_stale` with the scoped patch; the closure's `delivery` fields, the `pr.merged` event and the flush; and resumption after a kill at each point through a local intent file plus adoption by trailer.\n\nThree things differ from what a reader might expect:\n- Local mode never returns `awaiting_merge` or `ci_failed`. A story that would wait for a person (`delivery.merge = \"human\"`, a protected path, a manifest change) is `refused` until G4b is built.\n- A merge commit that git refuses, usually a project hook, is `refused` rather than `ci_failed`, so no repair rounds are spent on something an implementer cannot fix.\n- The step 5 plan's conflict repair holds, with one correction for it: when the tool itself concluded the merge, `fix-findings` should run the green gate instead of returning `blocked` for \"no marker\".\n\nLeft for when the build widens: all of `pr` mode (push, pull request, CI wait, `delivery.ci`, rebase, the `gh` test double), governed delivery, `rebase` strategy locally, hub and hotfix. Of the seven findings, five are planned with tests (AU-S2-01, AU-P2-13, VSA-09, VSA-10, VSA-18) and two are not at slice depth (VSA-01, P3REQ-03). No S5P-N finding is triaged to G4a.\n\nOne gap for W2, noted in the plan: after a delivery repair the story script does not run the evidence stage again, so a story with `demo: true` is refused once and finished by the next run.",
+    "files_owned": 9,
+    "shared_files": [],
+    "needs_from_step_3": 9,
+    "findings_planned": 5,
+    "findings_deferred": 2,
+    "open_questions": [
+     "Probe: can a project's git hooks (pre-commit frameworks that need installed dependencies) run in the bare .worktrees/_integration/ worktree? The spec requires hooks to run on the local merge commit; if they cannot, every local delivery in such a project ends `refused`, and a person must decide how the integration worktree is prepared.",
+     "Person: until G4b is built, a project with delivery.merge = \"human\", or a story touching a protected path or a manifest file, cannot deliver at all (it is refused). Is that acceptable for the slice, or should G4b's awaiting_merge and merge decision be pulled into step 4?",
+     "Person: delivery deletes story/<id> after the merge when the branch is still at the delivered commit; with the default squash strategy the story's individual commits then become unreachable. Confirm, or keep the branches."
+    ]
+   },
+   {
+    "unit": "rules (packages H5 and H7): tests-first, merge-guard, decisions, step-results",
+    "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/rules.md",
+    "summary": "The plan is written to rewrite/plans/step-4/rules.md (23,983 bytes). It builds four hook rules, each one module plus one row in step 3's registry: tests-first and merge-guard (H5), decisions and step-results (H7). Two helpers come with them: the paths a shell segment writes, and the grounding check.\n\nThings the orchestrator should know:\n\n- **Two step 3 files are edited.** The four rows go into `hooks/registry.py` between the anchors step 3 provides for rules, and `test_shape` in `tests/lint/test_hooks_wiring.py` must expect the new wiring. `hooks.json` is regenerated by the build in the same step. No other step 3 file is touched.\n- **A gap in step 3's case-table runner.** No step 3 plan promises that a case in `tests/hooks/cases/*.toml` can give its project `[paths]` globs and a story worktree. Without that, tests-first has no blocking table case and step 3's `test_gate_case_coverage` fails for its row. The builder reports this and does not edit the runner; the launcher tests in this unit's own files cover the cases meanwhile.\n- **decisions cannot fire live in the slice.** It needs the `decide` skill (K1), which no slice step builds. The rule is built and tested with a hand-written payload; until K1 a person settles with `vsdd decide` in a terminal.\n- **Where the step 5 agent files overstate.** They mark several rules \"(enforced)\" that H2, H3 and H6 enforce. At slice depth only these hold: source before and after red, frozen tests, and commits, merges and pushes onto the integration or release branch. An implementer can still edit an unfrozen test, and git inside a story worktree is unrestricted.\n- **What G2 must guarantee.** Every gate result printed with `passed: true` needs an evidence record at the same subject, gate and commit with `passed: true`. That includes a re-freeze when no frozen test changed, and `gate green --since`. Otherwise step-results blocks the step's return.\n- **Walled findings are refused, not stored.** A scenario-reviewer result with findings, or a finding under `.factory/holdout/`, blocks `walled_not_built`. The story path never produces one.\n- **Failure cases.** Section 3.7 of the plan lists each way a rule can fail to run, what happens, and the test for it. An import error or crash in any of the four exits 2 through the launcher.\n\nTen findings are in the two by-package lists: eight are resolved with a test, two are not at slice depth (P3BLD-27 to G3, AU-S2-11 spec prose). None of S5P-N1 to S5P-N12 is triaged to H5 or H7.",
+    "files_owned": 19,
+    "shared_files": [
+     "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py",
+     "next/plugins/vsdd-factory/hooks/hooks.json",
+     "next/tests/lint/test_hooks_wiring.py"
+    ],
+    "needs_from_step_3": 17,
+    "findings_planned": 8,
+    "findings_deferred": 2,
+    "open_questions": [
+     "Person: the decide skill (K1) is not in the slice, so the decisions rule cannot fire live. Pull a minimal decide skill file into step 5 or 6, or accept vsdd decide in a terminal for the slice?",
+     "Probe: does a StructuredOutput rewrite that adds a key the step's schema does not declare (grounded: false inside a finding) pass the platform's check and reach the script? Item 27 rewrote only the value of a declared field. If it fails, C1 must add an optional grounded boolean to finding.schema.json and the prelude must be regenerated.",
+     "Probe: allow plus updatedInput on a StructuredOutput call is proven only in the auto permission mode. In the default mode the script's copy may lack the grounded mark; the tool's verdict then stands.",
+     "Probe: does PreToolUse on StructuredOutput run before the platform's own schema check? This decides whether the schema_invalid block can ever fire (already open from step 3).",
+     "Probe: the missing-launcher probe (item 13) did not exercise UserPromptExpansion or PreToolUse. Does exit 2 from the self-guarding command on UserPromptExpansion stop a typed decide command?"
+    ]
+   }
+  ],
+  "review": {
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/REVIEW.md",
+   "verdict": "Not ready to build as written. There are 3 blockers and 8 major findings. The blockers: grounding is planned twice (G3 and H7, with different rules and the same test file); nobody is authorised to make the review-lookup edit in records' gate_evidence.py that G3, the second part of S3 and G4a all rely on; and the rules unit cannot pass the inherited test_gate_case_coverage. The majors are G3's verdict contract and the duplicates the second part of S3 builds of it, the --since patch overwriting the whole-story patch (silent), three definitions of changed_files (VSA-03 still open), the survey ignoring the gates' wait argument, the missing sample-seeding test helper, the order of the rules unit, and gitrun's env handling. Once these are settled: G2, G3 and H5/H7 in parallel, then S3 part 2, then G4a.",
+   "findings": 23,
+   "blockers": 3,
+   "majors": 8
+  },
+  "integrated": {
+   "summary": "All 23 findings are decided and the five step 4 plans are corrected; 22 are fixed and one (PL4-20) waits for a person. Each plan is under 24,000 bytes and keeps its eight sections. Nothing was built or run: these are plan edits only.\n\nThe three blockers:\n- **PL4-1 (grounding):** one module, one signature and one test file, all owned by the rules unit (`vsdd/grounding.py`, `ground(finding, *, tree, project_root)`). It uses the project root for `.factory` paths and exempts `holdout` findings and empty paths. G3 has no grounding code.\n- **PL4-2 (review lookup):** G3's builder makes exactly one edit in records' `gate_evidence.py`, so that `evidence(project, \"review\", subject)` returns `verdicts.covering(...)`. I recorded this as approved in `ORDER.md` section 4 on the strength of step 3's `ORDER.md` section 7, which gives G3 that job. If you do not allow it, `verdicts` cannot report and `survey-2` must not start.\n- **PL4-3 (rule case tables):** the rules unit runs its own case tables with its own runner and per-row coverage test, so nothing is asked of the hook runner. The built `test_rule_cases.py` reads `fixture_cases/` only and does not demand a case per rule.\n\nTwo requests to step 3 block stage A; both units were unbuilt when I checked:\n- **R1 (survey):** `story_ready(tmp, *, product=...)` commits the sample before the story is admitted.\n- **R2 (records):** `evidence_dir(project, \"_base\")` is accepted.\n\nPlaces where I went a different way from the review's proposal:\n- **PL4-11:** no change to S1's `gitrun.git`. Delivery runs git that can start a project's hooks through the job's `ctx.run`, which already uses the product environment.\n- **PL4-14:** delivery deletes the squashed branch itself and resets the integration worktree itself, so the survey unit is asked for nothing.\n- **PL4-18:** all three items are deferred rather than kept as exceptions: `vsdd review show`, the `decisions` rule and notification sending.\n- **PL4-12:** the `merge` decision row and the `needs_human` status are also deferred to G4b, since local delivery never writes `awaiting_merge`.\n- **PL4-5:** I added one G3 function, `verdicts.rounds_used`, so the survey and the closure verdict share one count.\n\nBuild order is three stages: `verdicts`, `gates` and `rules` together, then `survey-2`, then `delivery`. Inside stage A, `gates` imports `verdicts.changed_files`, which G3 builds as its first step.\n\nPL4-20 is the open question for you: with the shipped defaults, local delivery refuses any story that touches a manifest file or `CHANGELOG.md` until G4b. The plans build that refusal, and E2's sample story must touch neither.\n\n`ORDER.md` section 7 lists what I could not write myself: corrections to the step 5 plan, inputs to W2's plan, three probes to run before E2, and ledger outcomes.\n\nOne process note: a batch of byte trims to `gates.md` was applied with a short script rather than the Edit tool; every other change used Edit.",
+   "resolutions": [
+    {
+     "id": "PL4-1",
+     "outcome": "fixed",
+     "what_was_done": "Grounding has one module, one signature and one test file, all owned by the rules unit: vsdd/grounding.py with ground(finding, *, tree, project_root) -> str, and tests/unit/test_grounding.py (rules.md 3.5). It takes H7's rule for .factory paths (project root, as finding.schema.json says), G3's exemption for category holdout, G3's reason texts, and one rule for an empty path: exempt, because judge() already holds such a finding advisory. verdicts.md drops state/grounding.py, ungrounded, its test file and the body of section 3.2 (now a pointer); its D5 already trusts the stored mark. ORDER.md section 7 records that G3's grounding deliverable moved to H7."
+    },
+    {
+     "id": "PL4-2",
+     "outcome": "fixed",
+     "what_was_done": "G3's builder makes exactly one edit in records' gate_evidence.py: the review branch of evidence becomes 'from vsdd.state.verdicts import covering; return covering(project, subject)', imported inside the function, with no ImportError fallback, and the closure-only code it replaces is removed; records' review test case is updated only if it no longer holds. Step 3's ORDER.md section 7 already gives G3 this job; step 4's ORDER.md section 4 lists the edit as approved and says stage B must not start if the orchestrator disallows it. Request R4 (not blocking) asks records to keep the closure rule in one function. verdicts.md section 4 and step 5 of its order state the edit; survey-2.md and delivery.md name covering as what the lookup returns."
+    },
+    {
+     "id": "PL4-3",
+     "outcome": "fixed",
+     "what_was_done": "Nothing is asked of the hook runner. The built tests/hooks/test_rule_cases.py reads tests/hooks/fixture_cases/ only and its coverage test names only the runner's own codes, so the inherited test does not fail. The rules unit owns its own runner, tests/hooks/test_rule_tables.py, for tests/hooks/cases/*.toml: the probe format plus one key, project, naming a fixture in rule_projects.CASE_PROJECTS (a checkout on develop, a story before and after red, a live run), with {root}, {worktree}, {story}, {run} and {sha} substituted. It also holds the per-row coverage test: every gate row has a blocking and an allowing case through the real launcher. If the hook-runner test later reads tests/hooks/cases/, the rules builder stops and reports (R5)."
+    },
+    {
+     "id": "PL4-4",
+     "outcome": "fixed",
+     "what_was_done": "G3's contract stands: verdict() always returns an object, and 'no pass is stored' is one test, verdicts.summary(...) is None. survey-2's tool_verdict returns dict; its closure verdict is summary() and the stored one stays when that is None (test_closure_verdict_kept_without_passes). Delivery D3 is rewritten: covering(head=H); else last is verdict() when summary() is not None, else the closure's verdict; review_stale needs last converged with its head an ancestor of the head and not equal to it; an equal head without cover is row 9. Delivery's tests follow G3's D8 both ways and add test_stale_on_a_clone_uses_the_closure_verdict."
+    },
+    {
+     "id": "PL4-5",
+     "outcome": "fixed",
+     "what_was_done": "survey-2 defines no waiver list, pass count or closure form. waived is verdicts.waivers, the closure verdict is verdicts.summary, and rounds_used is a new G3 function, verdicts.rounds_used (the larger of the loop-1 passes of every run and the stored closure count), on which the survey only applies its owed-pass cap. summary stores the same value, so a later loop's count or a clone without run records never lowers it. Tests: survey-2's test_rounds_used_after_a_later_loop and test_unit_waived_is_g3s_list; G3's test_rounds_used_never_below_closure."
+    },
+    {
+     "id": "PL4-6",
+     "outcome": "fixed",
+     "what_was_done": "One writer, G2's diffpatch.write_patch(project, subject, base, head, *, tree, since=''), naming the file by its range: diff.<head12>.patch for base to head, diff.<since12>-<head12>.patch with since. Green writes the whole patch on every call and the range patch too with --since; the green record's diff_patch always names the whole patch, a --since result's names the range patch. Delivery calls write_patch(..., since=reviewed_sha) and has no writer of its own. G2 adds test_since_patch_leaves_whole_patch; delivery's stale test checks the whole patch is untouched. The spec gives one name for both ranges: noted for the spec steward."
+    },
+    {
+     "id": "PL4-7",
+     "outcome": "fixed",
+     "what_was_done": "One definition, G3's verdicts.changed_files(project, since, head) with --no-renames. G2's diffpatch.changed_files and delivery's checks.changed_files are removed; green's --since path, delivery's changed_files, its conflict union and its needs_person file list all call G3's function. G3 builds it as its first step so that G2, built beside it, can import it. Each of the three plans has a test with a renamed file."
+    },
+    {
+     "id": "PL4-8",
+     "outcome": "fixed",
+     "what_was_done": "The registry contract is fn(project, subject, run, *, wait=None, retry=''), stated the same way in gates.md 3.4 and survey-2.md section 4. The survey calls it with the whole seconds left of its own wait and its own retry line and no longer polls: the function waits inside its job attach, so --wait 0 answers at once. Records only stores the callable, so its code does not change. Tests: survey-2's test_survey_wait_zero_is_pending_at_once with G2's real function; G2's registry test checks wait=0."
+    },
+    {
+     "id": "PL4-9",
+     "outcome": "fixed",
+     "what_was_done": "Request R1 to the survey unit (not built yet): story_ready(tmp, *, product=<dir or callable>) copies and commits the product on the integration branch and sets [paths] before the story is admitted. G2's tests/unit/gate_project.py is the one sample-based builder on top of it, and survey-2's real-gate tests reuse it. R1 blocks stage A; if the survey unit reports without it, it is added by a fix run of that unit, never by a second builder."
+    },
+    {
+     "id": "PL4-10",
+     "outcome": "fixed",
+     "what_was_done": "rules runs beside gates and verdicts only and must have reported before survey-2 starts (ORDER.md section 2; rules.md and survey-2.md section 8). The shared build is ORDER.md rule 3: gates makes its schema edits and runs tools/build.py as its first step, every unit runs the build again just before its final checks, and a drift naming a file another unit in flight changed is not a finding."
+    },
+    {
+     "id": "PL4-11",
+     "outcome": "fixed",
+     "what_was_done": "Solved inside delivery with no change to S1. Git that can run a project's hooks (the merge commit, the commit of a clean merge-in, the fast-forward in a checkout) goes through local.hook_git, which uses the job's ctx.run: the job layer already runs that in command_env(root) and under the job's time limit. move_branch now takes the job context. Test: test_merge_hooks_run_in_the_product_environment. The proposed env_only keyword on gitrun.git is not needed."
+    },
+    {
+     "id": "PL4-12",
+     "outcome": "fixed",
+     "what_was_done": "One key, delivery.detail (the output's detail, else its error), in delivery.md 3.4 and survey-2.md section 4. survey-2 drops the merge-decision assumption: the merge decision row, the status needs_human and their tests are left for G4b, because local delivery never writes awaiting_merge. The stuck packet names the last delivery state with its detail, and needs_person when the state is refused."
+    },
+    {
+     "id": "PL4-13",
+     "outcome": "fixed",
+     "what_was_done": "Request R2 to the records unit (not built yet): evidence_dir(project, '_base') is accepted, with a test. It blocks stage A; gates.md section 4 says a miss is reported, not worked around."
+    },
+    {
+     "id": "PL4-14",
+     "outcome": "fixed",
+     "what_was_done": "Two of the three need nothing from step 3. Delivery deletes the story branch itself with git update-ref -d refs/heads/<branch> <H>, which acts only while the branch is still at the delivered commit and asks no merged check; and it runs git reset --hard in the integration worktree before set_integration, so a merge a killed worker left cannot fail the next one (test_merge_left_in_integration_worktree_is_cleared). The third is request R3 to records: the closure schema names the delivery keys (not blocking; they validate today)."
+    },
+    {
+     "id": "PL4-15",
+     "outcome": "fixed",
+     "what_was_done": "G2 exports gatelib.dirty_files(tree, config) as an interface (gates.md 3.5) and delivery's row 6 calls it. Delivery's row 10 is 'passed' of the registered demo function for every story; that function returns the passing record for the head when there is one, else measures."
+    },
+    {
+     "id": "PL4-16",
+     "outcome": "fixed",
+     "what_was_done": "G2's worker puts its run into the result as a private key; the command and the registry function remove it, serve no result made for another run, and attach again once (gates.md D1), as delivery D1 does. Test: test_result_of_another_run_is_not_served. ORDER.md rule 4 states it for both units."
+    },
+    {
+     "id": "PL4-17",
+     "outcome": "fixed",
+     "what_was_done": "Fix records are joined in the script's order (method test-fixes first, then the rest) and the last entry for a key wins, with the conformance case r16-fix-order-last-wins (verdicts.md rule 4 and D6). passes_used counts distinct (run, pass) pairs of loop 1, tested with three passes in one run and one in the next."
+    },
+    {
+     "id": "PL4-18",
+     "outcome": "fixed",
+     "what_was_done": "All three are deferred, following the build plan's rule for the slice. vsdd review show and cmd_review.py leave verdicts.md (with K2); skipped stays in rebuilt(), and delivery quotes it when it refuses for want of a verdict. The decisions rule, its UserPromptExpansion wiring and its tests leave rules.md (with K1; a person settles with vsdd decide). packets.notify leaves survey-2.md; a notify.channel other than none is logged as notify.failed, so it is not silent. ORDER.md section 7 lists the three as scope changes."
+    },
+    {
+     "id": "PL4-19",
+     "outcome": "fixed",
+     "what_was_done": "Accepted for the slice, as proposed: a merge-in that changes a frozen test file leaves a repair that only a test-writer with --refreeze can finish, and today that repair ends blocked. Recorded in delivery.md section 6 and in ORDER.md section 7 as an input to W2's plan."
+    },
+    {
+     "id": "PL4-20",
+     "outcome": "needs-a-person",
+     "what_was_done": "Recorded in delivery.md D9 and as the open question of ORDER.md section 8. With the shipped defaults, local delivery refuses, with needs_person set, any story whose diff touches a manifest file or CHANGELOG.md, until G4b. E2's sample story must touch neither. The person decides whether that refusal stands for the slice or the sample's configuration is relaxed; the plans build the refusal."
+    },
+    {
+     "id": "PL4-21",
+     "outcome": "fixed",
+     "what_was_done": "ORDER.md section 4 lists every edit of another unit's file as an approved exception, with what sanctions it: survey-2's edits of the first part's files and tests and of C1's story-unit schema; the rules unit's three registry rows and test_shape; G2's two C1 schemas and E1's sample runner; G3's one edit of the review lookup (PL4-2); and the generated files. No two units edit the same file. The orchestrator confirms the table by launching the units."
+    },
+    {
+     "id": "PL4-22",
+     "outcome": "fixed",
+     "what_was_done": "Recorded as probe P1 in ORDER.md section 7, to run before E2's first run with the two probes H7 left open. The failure is made loud in the plans: G3 lists each uncounted pass in skipped with agent_type (test_uncounted_agent_type_is_listed_in_skipped), and delivery's refusal for want of a verdict names the count and the reason."
+    },
+    {
+     "id": "PL4-23",
+     "outcome": "fixed",
+     "what_was_done": "ORDER.md section 7 lists the corrections for rewrite/plans/step-5/agents.md (the whole-command rule for --refreeze, a skipped frozen test, fix-findings after a concluded merge, demo_dir, bc_paths, .factory paths relative to the project root) and the inputs to W2's plan (the four unit fields, coverage from review-story-diff alone, later-loop items and the range patch from the --since result, test_output refreshed with the patch, the frozen-test repair, the evidence stage after a repair), with the ledger outcomes to record. The step 5 plan itself was not edited: it is outside what this step may write."
+    }
+   ],
+   "build_order": [
+    "Stage 0 (no unit): all seven step 3 units have reported with no blocker or major finding open, requests R1 (survey: story_ready product=) and R2 (records: evidence_dir '_base') are in their builds, and every check passes on a quiet machine",
+    "Stage A: verdicts (G3), gates (G2) and rules (H5, H7), at the same time. verdicts builds verdicts.changed_files as its first step, because gates imports it in its green gate; gates makes its two schema edits and runs tools/build.py as its first step; verdicts makes its one edit of records' gate_evidence.py in its step 5",
+    "Stage B: survey-2 (S3, second part), alone, after verdicts, gates and rules have all reported",
+    "Stage C: delivery (G4a), alone, after survey-2 has reported",
+    "After each stage the orchestrator runs tools/build.py, tools/check.py, the whole pytest suite, the node harness and tools/build.py --check on a quiet machine, and takes a snapshot before the next stage"
+   ],
+   "parallel_groups": [
+    "Stage A: verdicts, gates, rules. Their files are disjoint. gates needs verdicts.changed_files at its step 5 (G3's first step). gates and rules both run tools/build.py (ORDER.md rule 3: rerun the build before final checks; a drift caused by the other unit in flight is not a finding)",
+    "Stage B: survey-2 alone. It rewrites survey.py, story_unit.py and checkpoint.py, which the rules unit's tests run, and it regenerates the prelude after its story-unit schema edit",
+    "Stage C: delivery alone. Its fixtures run the real survey and it calls G2's and G3's functions"
+   ],
+   "needs_changed_in_step_3": [
+    "R1, survey unit (blocks stage A): tests/unit/story_ready.py takes product=<dir or callable>; it copies and commits the product on the integration branch and sets [paths] before the story is admitted, so the tally sample is in the story's base (PL4-9)",
+    "R2, records unit (blocks stage A): evidence_dir(project, '_base') is accepted; the path-segment rule allows '_base' beside '_standing', with a test (PL4-13)",
+    "R3, records unit (not blocking): closure-record.schema.json names the delivery keys state, detail, needs_person, run, at, head and patch_id; they validate today because delivery has no additionalProperties (PL4-14)",
+    "R4, records unit (not blocking): the closure rule of the review branch of gate_evidence.evidence sits in one function, _review_lookup(project, subject), so that G3's approved edit replaces one function body (PL4-2)",
+    "R5, hook-runner unit (nothing to add): tests/hooks/test_rule_cases.py keeps reading tests/hooks/fixture_cases/ only, as built; tests/hooks/cases/ is run by the rules unit's own test_rule_tables.py (PL4-3)",
+    "Not a step 3 unit's change but an edit of a step 3 file by a step 4 unit, to be confirmed by the orchestrator: verdicts (G3) replaces the review branch of records' gate_evidence.evidence with a call to verdicts.covering (ORDER.md section 4; PL4-2)"
+   ],
+   "plan_files": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/gates.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/verdicts.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/rules.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/survey-2.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/delivery.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/ORDER.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/plans/step-4/RESOLUTIONS.md"
+   ]
+  }
+ }
+}

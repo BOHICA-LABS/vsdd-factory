@@ -1,0 +1,137 @@
+# The 1.0 rule list: each rule's events and tools, what it checks, the kind of result it gives, and
+# whether a project may relax it. Machine copy of the rule table of hooks.md#2.10 (the fail-closed
+# column is hooks.md#2.9's). Tools cells are the table's cells verbatim; where the table sums a tool
+# set up in prose (spike-bounds, lifecycle-log, auto-allow), the prose is the value. The story of the
+# format: [[topic:rule-model]]; tuning: [[topic:rule-tuning]]; what each rule checks in detail:
+# its own file under rules/.
+# Sources: hooks.md#2.10, hooks.md#2.9, hooks.md#2.11.6.
+#
+# result = the outcome type the rule returns (see the outcome table in [[topic:rule-model]])
+# relax   = Locked | Yes | No | "Time box tunable" | "Scope set at setup"
+# fail    = closed | open | "open, announced" | "closed, except at stop"
+
+[rules.gate-guard]
+tools = ["Edit", "Write", "MultiEdit", "Bash"]
+checks = "Writes to the installed plugin, to the runner's own records, and to Claude Code settings that would disable hooks or this plugin. Tool subcommands only a person may run, and subcommands the caller's row does not grant. A command that sets a VSDD_* variable itself."
+result = "Block"
+relax = "Locked"
+fail = "closed"
+
+[rules.secrets]
+tools = ["Read", "Grep", "Bash"]
+checks = "Reading, copying, archiving or printing .env files and secret-shaped variables"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+
+[rules.read-walls]
+tools = ["Read", "Grep", "Glob", "Bash", "Agent"]
+checks = "The caller's row may not read the path class the call reaches; the dispatch table"
+result = "Block"
+relax = "Locked"
+fail = "closed"
+
+[rules.write-scopes]
+tools = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]
+checks = "The caller's row may write this class; code-only and read-only classes; shell writes into the state directory; spike containment"
+result = "Block"
+relax = "Locked"
+fail = "closed"
+
+[rules.artifacts]
+tools = ["Edit", "Write", "MultiEdit"]
+checks = "The file's content after the call is a valid artifact of its kind: path, identifier, frontmatter, headings, references, size cap, frozen status, forbidden patterns"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+spike_exempt = true
+
+[rules.tests-first]
+tools = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]
+checks = "In a story, product source is written by the implementer only after red evidence exists, and by the test writer (stubs) only before; tests frozen at the red gate stay frozen for other builders"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+spike_exempt = true
+
+[rules.merge-guard]
+tools = ["Bash"]
+checks = "A direct merge into, push to, commit on or move of the integration or release branch is refused, and the governed tool command is named"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+
+[rules.bash-destructive]
+tools = ["Bash"]
+checks = "Destructive shell, git and GitHub commands"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+
+[rules.bash-git]
+tools = ["Bash"]
+checks = "Force push, --no-verify, AI attribution, command families by agent, spike branches leaving their sandbox"
+result = "Block"
+relax = "Yes"
+fail = "closed"
+
+[rules.spike-bounds]
+tools = ["Any guarded tool called by a spike runner, including its StructuredOutput call", "Agent (to record who dispatched a spike runner)", "SubagentStart", "SubagentStop"]
+checks = "A spike runner works only with an open ledger entry, only inside its time box, under the walls of whoever asked, and may not finish without a recorded finding"
+result = "Block"
+relax = "Time box tunable"
+fail = "closed, except at stop"
+
+[rules.decisions]
+tools = ["UserPromptExpansion"]
+checks = "Nothing to refuse except a malformed or stale decision; records the decision a person typed"
+result = "Block or Context"
+relax = "Locked"
+fail = "closed"
+
+[rules.step-results]
+tools = ["StructuredOutput"]
+checks = "A review finding must point at a real file, line range and quote, and a passing gate result must match its evidence record; then the step result is stored"
+result = "Block"
+relax = "Locked"
+fail = "closed"
+
+[rules.session-briefing]
+tools = ["SessionStart"]
+checks = "Nothing; composes the briefing"
+result = "Context"
+relax = "Locked"
+fail = "open, announced"
+
+[rules.compaction]
+tools = ["PreCompact"]
+checks = "Nothing; flushes state and tells the summariser what to keep. It writes no snapshot file"
+result = "Context"
+relax = "No"
+fail = "open, announced"
+
+[rules.lifecycle-log]
+tools = ["SubagentStart", "SubagentStop", "SessionEnd", "every guarded call for the lock's liveness"]
+checks = "Nothing; records agent and session lifecycle; keeps the run lock alive and releases it at session end; stops a product an agent left running; prunes old logs. Commit and pull-request events are written by the tool"
+result = "Record"
+relax = "No"
+fail = "open"
+
+[rules.purity-advice]
+tools = ["Edit", "Write", "MultiEdit"]
+checks = "Side-effect patterns in files on configured pure-core paths"
+result = "Advise"
+relax = "Yes"
+fail = "open"
+spike_exempt = true
+
+[rules.auto-allow]
+tools = ["Read", "Bash", "Edit", "Write", "Workflow", "for the extended scope the web and research tools"]
+checks = "Built-in: the plugin reading its own method and template files and calling its own command. By the project's answer to decision D4: the core or extended scope of hooks.md 2.11.10"
+result = "Permit"
+relax = "Scope set at setup: off, core or extended"
+fail = "open"
+
+# All gates run on PreToolUse unless stated.
+# Spike exemption: only tests-first, artifacts and purity-advice declare spike_exempt; the safety
+# rules, the walls and gate-guard still apply inside a spike.

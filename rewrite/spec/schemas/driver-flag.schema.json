@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "driver-flag.schema.json",
+  "type": "object",
+  "description": "Fields of driver.json (state.md#2.8): on, paused at a decision id, or absent; and the session."
+}

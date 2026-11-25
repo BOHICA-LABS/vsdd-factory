@@ -1,0 +1,272 @@
+[
+  {
+    "id": "S3R-state-core-1",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/detection.py (render_config)",
+    "problem": "render_config hand-types a second copy of every SPECS key and default (limits, spikes, holdout, delivery, branches, state, hooks, ...) and init writes all of them into factory.toml, including the literal delivery.protected_paths = [\".github/**\", \".env*\", \"CODEOWNERS\", \"CHANGELOG.md\"]. Because the key is then present, config.loads never applies the computed default, so the AU-T2-15 fix is dead on every project init creates: changing release.changelog to RELEASES.md in an init'd file leaves protected_paths ending in CHANGELOG.md (reproduced). It also contradicts decision 5 and the AU-S2-03/AU-T2-13/AU-P2-03/AU-S2-09 outcomes ('config.SPECS is the one key list', 'limits and defaults exist once, in SPECS'): a key added to SPECS is silently not written, and a changed default drifts. No test compares the rendered file with SPECS.",
+    "proposed_resolution": "Build the rendered sections from SPECS ({key: spec[0]}) with the detected values laid over them; leave delivery.protected_paths out of the rendered file (or write the computed list from the rendered [release]) so the loader computes it. Add a test that the keys init writes equal SPECS's fixed-section keys, that every undetected value equals its SPECS default, and that editing release.changelog in an init'd file moves protected_paths.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-2",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run); next/plugins/vsdd-factory/py/vsdd/state/mount.py (mount_state)",
+    "problem": "init is not restartable at two kill points. (a) Killed after mount_state and before ensure_excludes: the next run detects 'ready' and returns at once, so .git/info/exclude never gets .factory/ and .worktrees/ and the person's git status shows '?? .factory/' for good (reproduced by raising in ensure_excludes, then re-running init: exit 0, ready, not excluded). (b) Killed inside 'git worktree add' (pointer written, checkout not done): the next run refuses with 'move it aside and run vsdd init again'; after the person does exactly that, init crashes with 'internal error: GitError ... is a missing but already registered worktree' (reproduced). The plan requires that an interrupted init resume.",
+    "proposed_resolution": "Call ensure_excludes before mount_state and also on the ready path (it is idempotent). In mount_state run 'git worktree prune' before 'worktree add', and treat a .factory/ that holds only a .git pointer to this repository's own .factory worktree admin directory as an interrupted mount to finish (or remove and redo), not as foreign content. Add a test that injects a failure after each step of init and checks that a second run ends ready with the exclusions.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-3",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_create_branch)",
+    "problem": "Decision 3 and the module docstring say the first commit lands with 'update-ref with an empty old value'; the code runs 'git update-ref refs/heads/factory-artifacts <commit>' with no old value. Two inits that both saw no branch (two sessions running setup) end with the second silently replacing the first's state branch under its mounted worktree; reproduced by calling _create_branch twice: the ref moved, no error.",
+    "proposed_resolution": "Pass the empty old value: git update-ref refs/heads/factory-artifacts <commit> \"\". On failure, re-read the branch and continue with the mount path. Test that _create_branch raises when the branch already exists.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-4",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run)",
+    "problem": "The non-empty-.factory/ refusal is checked only when the condition is 'unmounted'. With a non-empty .factory/ that holds no state and no state branch (condition 'none'), init creates the state branch, then crashes in 'git worktree add' with 'internal error: GitError ... already exists' (exit 2 as a crash, not a refusal), leaving a new factory-artifacts branch in the person's repository (reproduced). Plan 3.6 lists a non-empty unmounted .factory/ as an exit-2 refusal, which must come before anything is written.",
+    "proposed_resolution": "Check for a non-empty .factory/ before _branch_tip/_create_branch for both 'none' and 'unmounted', and Refuse there. Add a test that the refusal leaves no branch behind.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-5",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run, _branch_holds_state)",
+    "problem": "An unmounted pre-1.0 state branch (factory-artifacts holding STATE.md, no .factory/) is mounted: init returns {state: legacy, mounted: true, next: []}, exit 1 (reproduced). Plan decision 3 says an unmounted legacy branch is refused, and 3.6 says legacy is 'nothing converted or mounted' with next holding the dry-run and import commands. The setup skill then has no import commands to show. test_init_legacy_converts_nothing covers only a plain .factory/STATE.md directory.",
+    "proposed_resolution": "When the branch holds STATE.md and no factory.toml, return state legacy, mounted false, next [the dry-run command, the import command], without mounting. Add the unmounted-legacy-branch case to test_init_legacy_converts_nothing.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-6",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py (_run); next/tests/unit/test_init.py (test_init_partial_refuses)",
+    "problem": "Plan 3.6 promises 'Exit 1 with state ... partial (next names /vsdd-factory:status --fix)'. The code raises Refuse (exit 2, no fields, data == {} on stdout under --json), and the test pins the exit-2 form. The builder did not report this departure. Decision 3's word 'refused' is in tension with 3.6, but 3.6 is the interface the setup skill reads (state, next).",
+    "proposed_resolution": "Return the init fields with state 'partial', created/mounted false and next ['/vsdd-factory:status --fix'], exit 1; update test_init_partial_refuses. If exit 2 is preferred, record the departure and fix plan 3.6 and the setup skill's expectations instead.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-7",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/cli.py (main); next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (main)",
+    "problem": "Two crashes exit 1, which launch.sh passes through silently as the negative answer (decision 1: a crash never exits 1). Path.cwd() runs before the try, so any vsdd call, even 'vsdd -C <dir> ...', from a deleted directory (a removed story worktree) dies with a FileNotFoundError traceback, exit 1 (reproduced). The --version branch is also outside the try, and _plugin_version raises Refuse uncaught on an unreadable manifest: traceback, exit 1 (reproduced on a scratch copy). cli.py guards only the import; its old plugin_version(), which exited 2 for the damaged manifest, is now dead code duplicating dispatch._plugin_version.",
+    "proposed_resolution": "In cli.main wrap the dispatch.main call in the same BaseException guard as the import (re-raise SystemExit, else 'vsdd: <type>: <text>' and exit 2). In dispatch.main move the cwd lookup after -C parsing and inside the try (use os.environ PWD or refuse when cwd is gone and no -C is given), and handle --version inside the try. Delete cli.plugin_version. Test both cases through cli.py.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-8",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (main)",
+    "problem": "json_requested is set only after _resolve succeeds, so every refusal raised during resolution (no matching command, a cmd_ module that fails to import, duplicate words) prints nothing on stdout under --json; 'vsdd nonesuch --json' gives exit 2 and an empty stdout (reproduced). Plan 3.1 says a Refuse with --json also prints {\"ok\": false, \"error\": ...} on stdout. A relayed command whose module breaks (survey, checkpoint) gives the clerk no object at all, which is the case decision 1 exists to prevent.",
+    "proposed_resolution": "Read --json from the raw tokens (before the first lone --) before calling _resolve, so _fail prints at least {\"ok\": false, \"error\": message}. Extend test_unknown_command_exits_2 and test_broken_command_module_is_loud to assert the JSON line.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-9",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (check_paths); next/plugins/vsdd-factory/py/vsdd/state/cmd_validate.py",
+    "problem": "check_paths skips any file it cannot read or decode, with no Problem. 'vsdd validate .factory/stories/E-9/S-9.99.md' for a file that does not exist exits 0 with checked 1 (reproduced); an invalid-UTF-8 file under .factory/stories/ passes a whole-tree validate with exit 0 (reproduced); a directory given as PATH also passes. Flush (records.md) leaves out only files with an error Problem, so it would commit such a file unchecked. A silent pass of the backstop check.",
+    "proposed_resolution": "For a path in the artifact territory that cannot be read or decoded, report an error Problem (frontmatter_invalid naming the read error, or a dedicated code added to the rules list); for an explicit validate PATH that does not exist or is not a file, Refuse. Add tests for the missing path, the undecodable file and the flush call form.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-10",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (changed_paths)",
+    "problem": "changed_paths returns wrong paths. path.strip().lstrip(\"./\") strips characters, not a prefix, so the state branch's own .gitignore comes back as '.factory/gitignore'; and git's C-quoting is not undone, so a name with a space or a non-ASCII letter comes back as '.factory/\"stories/E-9/S-9.02 copy.md\"' or '.factory/\"stories/E-9/caf\\303\\251.md\"' (all reproduced). Flush (records) checks and commits from this list; check_paths then cannot read these paths and (finding S3R-state-core-9) passes them silently. test_changed_paths only checks endswith on two plain names.",
+    "proposed_resolution": "Use git status --porcelain=v1 -z -uall, split on NUL, take the second path of a rename record, and prefix '.factory/' without stripping. Test with a dotfile, a name with a space and a non-ASCII name.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-11",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (check_text)",
+    "problem": "Plan decision 10 says 'Line limits are those of spec topics/artifact-rules.md; an over-long body line is size_cap', and that topic says 'Body lines are at most 1,000 characters'. check_text has no line check: a valid story with one 5,000-character body line gives no problem (reproduced). There is no test, and the builder did not report the omission.",
+    "proposed_resolution": "Add the body-line check (over 1,000 characters is size_cap, naming the line number) to check_text, with an invalid fixture and a case in test_each_reason_code.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-12",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/mount.py (ensure_excludes)",
+    "problem": "ensure_excludes appends to .git/info/exclude without checking that the file ends in a newline. A person's exclude file ending '*.log' becomes '*.log.factory/' then '.worktrees/' (reproduced): the person's pattern stops working, .factory/ is not excluded, and git status in the product checkout shows both '?? .factory/' and the log files. test_ensure_excludes_is_idempotent starts from git's template, which ends in a newline.",
+    "proposed_resolution": "Write a newline first when the current content is non-empty and does not end with one; write through a temporary file and os.replace. Add the no-trailing-newline case to the test.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-13",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_dispatch.py; next/tests/unit/test_project_paths.py; next/tests/unit/test_state_facade.py; next/tests/unit/test_config_keys.py",
+    "problem": "Several tests named in plan section 7 cannot fail for the behaviour they are named after. On a scratch copy, a retry_command returning \"\", a raw split that drops the lone -- and keeps taking --json after it, and a reversed class precedence all left test_dispatch.py and test_project_paths.py green apart from unrelated cases. test_raw_command_gets_tokens never inspects args.tokens; test_retry_command never calls retry_command; test_path_class_precedence never puts a path in two classes (make_project has src/, so tests/** and src/** do not overlap). Also: test_key_table_parity's second loop asserts key in SPECS[section] for keys taken from SPECS[section]; test_import_loads_no_submodule does not assert that a lookup adds only the owner; test_relayed_failure_prints_whole_object and test_shipped_commands_register_cleanly check key presence, not schema validity, and the plan's 'invalid file' (ConfigError) case is missing.",
+    "proposed_resolution": "Make the echo command return args.tokens and assert ['story', '--', '--json', 'why']; assert inv.retry_command() equals 'vsdd ' + shlex.join(argv) for an argument needing quotes; add a path that matches both tests and source globs (e.g. src/tests/x.py with tests = ['**/tests/**']); validate the relayed objects with vsdd.schema.validate against the named schema, including a ConfigError case; assert sys.modules after one lookup holds exactly vsdd.state.mount; drop or fix the vacuous loop.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-14",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "next/tests/unit/test_init.py (test_init_mounts_existing_branch, test_init_resumes_after_interruption)",
+    "problem": "The plan names test_init_mounts_existing_branch '(local and origin)', but only the local branch is tested; the origin path of mount_state (worktree add --track -b from origin/factory-artifacts), which is how every fresh clone gets its state, has no test (it works when tried by hand). test_init_resumes_after_interruption is the same steps as the local case and interrupts nothing, so the kill points of S3R-state-core-2 go unnoticed.",
+    "proposed_resolution": "Add a clone-from-bare-remote case that asserts state ready, created false and the upstream origin/factory-artifacts. Make the resumption test stop init after the branch exists and before the mount (and after the mount, before the exclusions), then re-run.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-15",
+    "origin": "slice step 3, state-core, review",
+    "severity": "major",
+    "where": "rewrite/findings/outcomes/step3-state-core.json",
+    "problem": "Seven outcomes overclaim. AU-P2-03 and AU-S2-09 are marked fixed though this unit did not change prelude_limits (it predates the unit; only a test was added) and both findings are about facts stated twice in spec files; detection.py now restates the limits (S3R-state-core-1). AU-S2-03 and AU-T2-13 had been found not-fixed for spec text, and that text is unchanged: topics/project-configuration.md still calls both the table and its example 'the one key list', the example still omits the per-rule hook keys, and config/hooks.md says 'three rules' and lists four. AU-T2-15 is defeated for init'd projects (S3R-state-core-1). AU-S2-12: commands/validate.md, S1's own file, still presents two syntaxes with a conflicts pointer. AU-P2-17: the 'not built, and why' list was not copied into topic:command-conventions, and the test passes for any unknown name. P3OPS-11 (left-for-builder) says 'this unit added the report keys', but _COMMAND_KEYS has no lint_report, format_report or scan_report.",
+    "proposed_resolution": "Record AU-P2-03, AU-S2-09, AU-S2-03, AU-T2-13, AU-T2-15, AU-S2-12 and AU-P2-17 as not-fixed or left-for-builder with what remains, or finish them (S3R-state-core-1; trim project-configuration.md to one key-list claim pointing at SPECS; give validate.md one syntax; copy the not-built list). Correct P3OPS-11's text to say that the report keys are not yet added.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-16",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (main)",
+    "problem": "Invocation.start is promised absolute, but a relative -C is stored as given (start = Path(tokens[1])); it is then resolved against the process directory, not against main(cwd=...), and init reports a relative 'root' (reproduced: start 'clone', is_absolute False).",
+    "proposed_resolution": "start = Path(os.path.abspath(os.path.join(base, tokens[1]))) where base is the cwd argument or the process directory, keeping symlinks unresolved as find_project_root expects.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-17",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (main)",
+    "problem": "'vsdd --help' exits 2 with 'vsdd: no command given; try 'vsdd --help'', a hint that points at itself (reproduced). Command.summary and commands() exist 'for --help' (plan 3.1), but nothing prints the command list; the B2 parser that answered --help was removed.",
+    "proposed_resolution": "Handle a leading --help/-h: print 'vsdd <words>  <summary>' for each entry of commands(), exit 0; keep exit 2 for no command at all.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-state-core-18",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (commands, _load_command)",
+    "problem": "commands() accepts a Command whose first word is not its module's family (a ('unlock',) command in cmd_lock.py is listed), while the dispatcher can never resolve it ('no command matches'); an empty words tuple crashes later with IndexError. The lint and --help would show a command that cannot run.",
+    "proposed_resolution": "In _load_command raise RegistrationError when words is empty or words[0] with '-' as '_' is not the module's family (cmd_<family> or cmd_<family>_<x>).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-19",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (registry, _compile_kind, _type_problem, _check_references)",
+    "problem": "registry() does not check frontmatter type cells or ref: targets when it compiles. A typo'd type ('integr?') or a ref: to a kind with no id and no constant builds cleanly (reproduced); the fault appears later as a RegistryError raised from check_text on every write of that kind, or as a frontmatter_invalid problem blamed on the agent's file for the unknown type. Decision 7 says anything outside the grammar is a RegistryError, and 3.5 says registry() raises naming the row, so test_shipped_registry_compiles_every_row cannot catch a bad cell.",
+    "proposed_resolution": "Validate each frontmatter cell against the decision-7 grammar and resolve each ref: target (_ref_pattern) in _compile_kind/registry(); test with a patched table.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-20",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (_needs_check, _fail)",
+    "problem": "Plan 3.1: an 'initialised' command outside a project exits 2 'naming the condition and /vsdd-factory:setup'; the message names no condition (a legacy or unmounted project reads 'not an initialised vsdd-factory project'). The stderr label is 'vsdd ' + the candidate tokens, so positional arguments appear as command words ('vsdd path S-9.01: ...') instead of 'vsdd <words>'.",
+    "proposed_resolution": "Include detect(start) in the refusal (e.g. 'condition legacy: run /vsdd-factory:setup'); label with command.words when the command is resolved.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-21",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (_size_problem); rewrite/spec/topics/project-configuration.md ([caps] example)",
+    "problem": "caps.waived globs are matched against the '.factory/'-prefixed path, while the spec's only example is relative to the state directory (waived = [\"specs/architecture/decisions/ADR-052.md\"]). A waiver written as documented never matches and the cap still blocks, with no message saying why.",
+    "proposed_resolution": "Settle one form (paths relative to .factory/ is the documented one) and match it, or accept both; fix the example or the code to agree, and test the documented form.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3R-state-core-22",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (_check_criteria)",
+    "problem": "Only a level-3 heading of exactly 'AC-N' or 'AC-N (...)' counts as a criterion. '### AC-1: Counts (BC-9.99.001)' naming a contract the story does not list gives no problem (reproduced), and such headings escape the uniqueness check too: a story written slightly off the form is not checked at all, silently.",
+    "proposed_resolution": "Treat any level-3 heading starting 'AC-' that does not match the form as criterion_contract ('use ### AC-N (<contract>)'), so the form is enforced instead of bypassed.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-23",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/detection.py (detect_values, render_config)",
+    "problem": "Detection sets branches.release to main, else master, else the current branch, but always writes branches.protected = [\"main\"]. In a repository whose release branch is master (or develop only), the protected list names a branch that does not exist and the real release branch is unprotected from bash-git's direct-push rule.",
+    "proposed_resolution": "Write branches.protected = [detected release branch] (or the SPECS default only when the release is main), and assert it in test_init_detection.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-24",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gitrun.py (git)",
+    "problem": "The tool's one git helper passes GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_COMMON_DIR and similar variables through from the caller's environment, so under a git hook or a script that exports them every git(cwd, ...) call ignores cwd and acts on the wrong repository (init's plumbing, worktree add, changed_paths). Git missing from PATH raises FileNotFoundError, not GitError; on a timeout the stderr captured is bytes and appears as b'...'.",
+    "proposed_resolution": "Remove the repository-locating GIT_* variables from the child environment; map FileNotFoundError to GitError (returncode 127); decode the timeout's bytes.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-25",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/globs.py (glob_regex)",
+    "problem": "'**/tests.rs' compiles to '.*/tests\\.rs' and 'src/**/x.py' to 'src/.*/x\\.py', so a leading or inner '**/' never matches zero directories: a root-level tests.rs is not in the spec example's tests class, and src/x.py does not match src/**/x.py. git and the usual glob semantics match zero or more directories there. No test covers '**/'. This is the one glob semantics for path classes, the registry and digests.",
+    "proposed_resolution": "Translate '**/' to '(?:.*/)?' (and a trailing '/**' as now), and add cases for both to test_glob_semantics; state the rule in the module docstring.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-26",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_validate.py",
+    "problem": "'checked' counts every file under .factory/, including .git, factory.toml, notes.json and local/**, not the files checked (the test's own comment says factory.toml and notes.json are skipped, yet they are counted). Giving PATHs together with --changed silently ignores --changed. The command reaches into the private artifacts._tree_rels.",
+    "proposed_resolution": "Count only paths whose kind_of is not None; refuse --changed with PATHs (or intersect them); expose the tree listing as a public helper.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-27",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py (_package_dirs)",
+    "problem": "Any ImportError raised while importing a command package (for example vsdd/gates/__init__.py importing something broken) is treated as 'package missing', so every command of that package reports 'no command matches' instead of the import error that caused it.",
+    "proposed_resolution": "Skip a package only when importlib.util.find_spec(package) is None; let a failing import of an existing package Refuse with the exception, naming the package.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-28",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_init.py (test_init_through_bin_vsdd); next/tests/unit/test_dispatch.py (test_import_error_exits_2)",
+    "problem": "Both tests replace HOME and PATH, so the launcher finds uv only in /opt/homebrew/bin, /usr/local/bin or /usr/bin, and uv finds a Python 3.11+ only through the working directory's .venv. On Linux with uv in ~/.local/bin both fail, and test_import_error_exits_2 failed when I ran it from a scratch copy with no .venv ('uv found no Python 3.11 or newer' instead of the import error).",
+    "proposed_resolution": "Put the directory of shutil.which('uv') and of sys.executable on the PATH the tests pass, and run the subprocess with cwd set to a directory whose Python discovery does not depend on a .venv.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-29",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_artifacts.py; next/tests/unit/fixtures/artifacts/invalid_id_mismatch.md; next/tests/unit/test_config_keys.py",
+    "problem": "The fixture invalid_id_mismatch.md is not used by any test (id_mismatch is tested by renaming the valid contract instead). _planted_project creates directories with tempfile.mkdtemp outside tmp_path and never removes them. test_config_command_prints_merged_data ends with an assertion that holds for any non-empty project name. test_path_command does not check the --json fields id, kind, path and exists that plan 3.6 promises.",
+    "proposed_resolution": "Use the fixture in test_each_reason_code (or delete it); use tmp_path; replace the last assertion with the expected name; add a --json case to test_path_command.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-state-core-30",
+    "origin": "slice step 3, state-core, review",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/state-directory.md (the five project conditions)",
+    "problem": "The spec's 'ready' row says factory.toml 'parses with schema = 1'; the plan and test_detect_five_conditions decide that an invalid file is still ready (detect checks the file exists, so that gates can report the configuration error). The spec now says something the code does not do.",
+    "proposed_resolution": "Change the row to 'factory.toml exists, and .factory/.git ... HEAD is refs/heads/factory-artifacts; an invalid file is still ready and is reported by the loader'.",
+    "on_slice_path": true
+  }
+]

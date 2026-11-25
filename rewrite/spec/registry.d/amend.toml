@@ -1,0 +1,8 @@
+# Registrations added while applying the slice-path findings to rewrite/spec/.
+# Same format as rewrite/spec/registry.toml.
+
+[schema.implement-data]
+summary = "Step data of the story implement step: the frozen tests the builder reports as wrong."
+package = "C1"
+group = "records"
+sources = ["agents-skills.md#2.9", "pipeline.md#2.10.8"]

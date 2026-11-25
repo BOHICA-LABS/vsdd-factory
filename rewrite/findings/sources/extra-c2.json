@@ -1,0 +1,20 @@
+[
+  {
+    "id": "L2-c2-1",
+    "origin": "slice layer 2, c2",
+    "severity": "major",
+    "where": "rewrite/spec/topics/story-script.md (the KIND block and the story-unit field names); next/plugins/vsdd-factory/schemas/story-unit.schema.json",
+    "problem": "The story.js skeleton carried a second copy of the kind-to-agent-and-method table (const KIND) and read story-unit fields named for the pre-split key (u.method, u.tests_method), so building W2 from it would have made story.js kind-resolution drift from the shipped story-kind rows exactly as P3SEAM-08 warned, and a story unit would have carried a field (method) that the shipped story frontmatter does not define.",
+    "proposed_resolution": "Applied during C2, and completed in the c2-b6-fix pass at the schema: the skeleton drops its KIND copy and reads the unit fields the survey resolves from the shipped story-kind rows, and story-unit.schema.json now defines the same names - tests_agent, tests_method, impl_agent, impl_method (renamed from method) and red_gate, all required - so a W2 port reads no undefined field. Confirm when W2 is built that the survey's unit carries exactly those fields.",
+    "on_slice_path": true
+  },
+  {
+    "id": "L2-c2-2",
+    "origin": "slice layer 2, c2",
+    "severity": "minor",
+    "where": "rewrite/design hooks.md 2.7 [reveals] (as carried into the shipped walls.toml [reveals]); rules/read-walls.md",
+    "problem": "[reveals] has entries for list holdout-scenario, list story and list contract but none for the other listable walled kinds, notably project-conventions: the code-reviewer is denied spec-arch but allowed guidance, so after generating reveals per kind it would be refused 'vsdd list project-conventions' outright (an unknown kind is treated as revealing every walled class), although it may read the conventions file itself.",
+    "proposed_resolution": "When the build generates [reveals] from the kind classes (hooks.md 2.7, the H-package that owns read-walls), emit one entry per listable kind whose class any caller is denied, adding 'list project-conventions' = [\"guidance\"]; alternatively keep the refusal and have vsdd list point walled callers at the read they may do.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,62 @@
+[
+ {
+  "id": "D31R-F-10",
+  "outcome": "fixed",
+  "what_was_done": "Each of the three facts now has one home. (1) Why the record is on the state branch and the definition in the product tree stays in artifacts/flag.md; feature-flags.md gives one line and the link. (2) What the gates do with the key and override variables stays in the F-KEY row; config/flags.md 'Keys and local runs' now says only what the keys name and who reads them, feature-flags.md gives one line, and the same restatement is gone from the override_env row of flag-config-keys.toml, from flag-lifecycle.md 'The product under review' and from the D31 passage of commands/env-start.md. (3) The default of flags.require stays in flag-config-keys.toml; the '(default)' mark is gone from the value table of config/flags.md and feature-flags.md gives the reason without naming the value. Four more restatements of the same kind were removed: what [flags.approved] holds (now F-FILL only; config/flags.md and project-configuration.md link to it), what a check does with a pattern that does not compile or a scan that timed out (now the header rule of flag-checks.toml only), the runbook's required headings (now F-RUNBOOK only), and the reason for one copy of the settings (now config/flags.md only).",
+  "where": "rewrite/spec/topics/feature-flags.md, rewrite/spec/config/flags.md, rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/commands/env-start.md, rewrite/spec/topics/project-configuration.md"
+ },
+ {
+  "id": "D31R-F-19",
+  "outcome": "fixed",
+  "what_was_done": "The fixture overlay in F4's delivers text is renamed story-behind-flag and the briefs are regenerated. No file under rewrite/spec/ or next/ names story-flagged any more.",
+  "where": "rewrite/spec/registry.d/d31.toml, rewrite/spec/packages/F4.md"
+ },
+ {
+  "id": "D31R-D-25",
+  "outcome": "fixed",
+  "what_was_done": "Closed by the same rename as D31R-F-19: the overlay is story-behind-flag. The definition of 'story behind a flag' stays in the glossary.",
+  "where": "rewrite/spec/registry.d/d31.toml"
+ },
+ {
+  "id": "D31R-C-1",
+  "outcome": "fixed",
+  "what_was_done": "Every open D31-<n> entry was read against the design as it stands and six were rewritten in sources/extra-d31.json, with their outcome texts in outcomes/d31.json and their notes and file lists in triage/d31.json. D31-4: the spec row takes flags=<source> for every source, or flags=decline -- <words>; the merge row gains the decision merge.flag-<stem> that the maintain checkpoint opens before a cleanup story is written, only while flags.removal = human, with approve letting the next maintain run write the story and reject needing until; nothing waits at story deliver. D31-8: F-ITEMS is in flag-story-checks.toml with four items; only checked counts; two come back in a later loop; not-a-flag is known only from the green evidence. D31-2: the survey writes [flags.approved] only. D31-1: four story keys, the stem cell, the lock value removed and the 12,000-byte toolchain cap. D31-3: two tables of factory.toml, with set_by deciding which accepts a key, and the four keys that may be empty. D31-6: points at the encoded form of a key. D31-5 already matched the design. D31-7 is closed and was left as it is.",
+  "where": "rewrite/findings/sources/extra-d31.json, rewrite/findings/outcomes/d31.json, rewrite/findings/triage/d31.json"
+ },
+ {
+  "id": "D31R-C-2",
+  "outcome": "fixed",
+  "what_was_done": "Decided: the test-writer moves an existing test that the on state breaks, by renaming it; nobody edits or drops one. The move carries one of two tokens. flag_old_<k>: a criterion of a story behind the flag replaces everything the test asserts; the test is deleted when the flag is removed. flag_pending_<k>: the test asserts behaviour the product must keep that the flag's stories do not provide yet, which is the half-finished case of clause 2b. When: in the tests stage where the criteria show the need; otherwise after the green gate's run with the flag on (F-ON) names the test, through the existing test-defects step: the implementer changes code only where the code is at fault, else returns blocked with the test under test_defects, and the test-writer moves it and re-freezes. No stage, step or prompt is added. What checks the move. Programs: F-STATES holds a moved test to passing with no flag set and to naming the flag-off criterion, and refuses more missing base tests than new moved tests, so an existing test leaves the suite only by a move; F-ON leaves moved tests out of the on run, refuses a moved test that passes with the flag on (it is given its name back), names every other failing test and says whether the base held it, and refuses a turn-on story while a pending test remains; F-DEFINITION refuses a removal that leaves a test named for the off state. Reviewer: the adversary's item flag-off, which only checked satisfies, now covers each moved test (an existing test, assertions unchanged, old only where a criterion replaces it, no other existing test deleted, renamed or weakened); the item is also added to a turn-on story and comes back in a later loop that touches tests. The pull request body lists the moved tests by name. Walked through red, green and review for a feature added to existing code, for a feature built over several stories, for turning on and for removal. Not changed, and outside this finding: vsdd env start turns every live temporary flag on for wave and release evaluation, which includes a flag whose feature is unfinished.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES, F-ON, F-DEFINITION, F-ITEMS), rewrite/spec/tables/flag-duties.toml (test-writer, implementer, adversary), rewrite/spec/topics/flag-lifecycle.md, rewrite/spec/topics/feature-flags.md, rewrite/spec/workflows/story.md (D31 passage), rewrite/spec/registry.d/d31.toml (F2, F4)"
+ },
+ {
+  "id": "D31R-C-3",
+  "outcome": "fixed",
+  "what_was_done": "The header rule now fails a check only for an empty key that F-CHOICE requires, a pattern that does not compile, or a scan stopped at its time limit. A second rule names the four keys that may be empty (key_env, key_patterns, definition_patterns, definitions_check) and says the check then does what its row says and prints the report its unmeasured cell names. Each of the four has a report: 'no key variable named' was added to F-KEY for an empty key_env; 'key shape not measured', 'definition value not measured' and 'definitions not validated' were already there. The adversary's check of the architect in review-specs now also compares each key the table leaves empty with the record's heading 'Definitions and keys', so an empty key is a reviewed choice.",
+  "where": "rewrite/spec/tables/flag-checks.toml (header), rewrite/spec/tables/flag-story-checks.toml (F-KEY), rewrite/spec/tables/flag-duties.toml (architect)"
+ },
+ {
+  "id": "D31R-C-4",
+  "outcome": "fixed",
+  "what_was_done": "G7 is added to F5's depends and the briefs are regenerated; packages/F5.md now lists G7. One line was left for the orchestrating session because this task may not edit it: step 5 of packaging/build-plan.md still sums F5 up as extending 'the planning gates', and should add the sweep job.",
+  "where": "rewrite/spec/registry.d/d31.toml, rewrite/spec/packages/F5.md"
+ },
+ {
+  "id": "D31R-C-5",
+  "outcome": "fixed",
+  "what_was_done": "A token now ends at the end of the name, at '__', or at a character that is not a letter, a digit or '_', so a single '_' after it belongs to a longer key and flag_off_checkout no longer matches inside flag_off_checkout_v2. The encoded form of a key is defined once, in the header of flag-checks.toml: lower case, each run of other characters written as one '_', none at either end. It can therefore never contain '__', which is what makes the terminator safe for every key, inherited ones included. F-RECORD refuses a new key whose encoded form is another record's, and F-REQUIRE refuses a story behind a flag whose encoded form another record shares. The alternative, refusing a key that begins another, was rejected: keys are never reused, so it would forbid 'checkout.v2' for ever once 'checkout' existed, and it could not cover two inherited keys.",
+  "where": "rewrite/spec/tables/flag-story-checks.toml (F-STATES), rewrite/spec/tables/flag-checks.toml (header, F-RECORD, F-REQUIRE)"
+ },
+ {
+  "id": "D31R-C-6",
+  "outcome": "fixed",
+  "what_was_done": "'Every gate result' is dropped: config/flags.md now says the line is printed by vsdd status, the briefing and the release packet. flag-lifecycle.md 'The release' says that in the state requested the packet's section is that one line, and that in the state off there is no section. Both have a builder: F1 delivers the states in status and the briefing, F3 the flag lines of the release packet. The helper called from every gate result was rejected: no flag check runs in that state, a gate result is read by a script and not by a person, and it would add a flag dependency to every gate package for a line that has no reader there.",
+  "where": "rewrite/spec/config/flags.md, rewrite/spec/topics/flag-lifecycle.md"
+ },
+ {
+  "id": "D31R-C-7",
+  "outcome": "fixed",
+  "what_was_done": "flags.enabled is now set_by proposal with override = true, and its meaning says it is the one key F-FILL does not copy as written. flags.require is the only key left with set_by person, and the header says a proposal that carries such a key is refused (F-CHOICE). The D31 passage of project-configuration.md no longer says what [flags.approved] holds; it links to config:flags, which links to F-FILL.",
+  "where": "rewrite/spec/tables/flag-config-keys.toml, rewrite/spec/topics/project-configuration.md, rewrite/spec/config/flags.md"
+ }
+]

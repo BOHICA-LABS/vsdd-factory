@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S3B-records-1",
+    "origin": "slice step 3, records, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/records/evidence.md; next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py",
+    "problem": "The evidence lookup orders records by their `at` stamp, which carries whole seconds. Two records of one gate written within the same second tie, and the tie falls to the file name, so 'the latest record by at' is not deterministic for fast rewrites of nearby commits (for example a red re-run and a base re-record inside one second).",
+    "proposed_resolution": "Either stamp evidence records with millisecond precision like the event log, or settle ties by the file's mtime, and say which in topics/evidence-lookup.md when the wider build touches it. Not on the slice's critical path: one record per gate and commit means a tie needs two writes to one key, which replace each other anyway.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-records-2",
+    "origin": "slice step 3, records, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; rewrite/spec/topics/state-commits.md",
+    "problem": "Flush validates the records this unit writes (cycle, closure, decision, notes) but a tracked file shape added later (a new record kind in the state tree) would be committed unchecked by flush unless its author extends _record_problem; the artifact-territory check does not cover records, and nothing reminds the next builder.",
+    "proposed_resolution": "When the build widens past the seven record shapes, move the per-kind record check into a table (path prefix, schema, cap) that new record kinds must extend, next to the artifact registry, and have flush and the write hook read the same table.",
+    "on_slice_path": false
+  }
+]

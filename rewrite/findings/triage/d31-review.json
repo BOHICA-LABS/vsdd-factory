@@ -1,0 +1,3 @@
+[
+ {"id": "D31R-F-15", "files": ["artifacts/flag.md", "artifacts/story.md", "artifacts/toolchain.md", "artifacts/deferred-item.md", "tables/artifacts.toml", "topics/state-layout.md"], "packages": ["F1"], "on_slice_path": false, "note": "Add to the shipped artifact registry and the artifact rule: the stem cell and its check, the lock value removed, the story key flag_irreversible, the record keys permanent_because and default_because, vsdd checkpoint as a writer of deferred items named flag-<stem>, and a [toolchain] cap of 12,000 bytes."}
+]

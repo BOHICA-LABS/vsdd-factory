@@ -1,0 +1,245 @@
+[
+  {
+    "id": "S4R-rules-1",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (_targets, _has_script_option)",
+    "problem": "write_targets drops sed's file operands whenever the script is given with -e/-f. _targets first removes every '-e <script>' pair (_without_option_value) and only then asks _has_script_option(args), which no longer sees the -e, so it treats the first remaining operand (the file) as the script and drops it. Measured: \"sed -i -e 's/a/b/' src/a.py\" -> (), \"sed --in-place -e ...\" -> (), \"sed -i.bak -e ...\" -> (), \"sed -i -e x -e y src/a.py src/b.py\" -> only src/b.py. Through the hook, \"sed -i -e 's/a/b/' <worktree>/src/main.rs\" by the implementer before red exits 0, while the same command without -e is blocked no_red_evidence. This is a silent bypass of tests-first (plan 3.5: 'the files of sed with -i'). test_writes.py has no -e case.",
+    "proposed_resolution": "Compute _has_script_option on the original argument list, before the option-value pairs are removed (or have _without_option_value report whether it removed -e/-f). Add test_writes cases for sed -i -e, --in-place -e, -i.bak -e, two -e with two files, and a tests-first case for sed -i -e before red.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-2",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (_is_frozen)",
+    "problem": "The frozen check is meant to accept the path 'literal or resolved' (plan 3.2), but it computes one root from the literal path (gitfs.worktree_root uses abspath, no symlinks resolved) and returns False as soon as either form fails relative_to(root). When any directory above the project is a symlink (macOS /tmp and /var, a symlinked home or dev directory), the resolved form is never under the literal root, so the function returns False even though the literal form matched. Measured: with the project reached through a symlinked directory, _is_frozen(<literal>/tests/test_sample.py) is False while the real path is True, and 'echo x > <worktree>/tests/test_sample.py' by the implementer after red exits 0 (the same command on the real path exits 10 red_test_frozen). Shell writes carry literal paths, so a frozen test is open to every builder in such a project. The test suite cannot see this because pytest's tmp_path is already resolved.",
+    "proposed_resolution": "Test each form against its own root (worktree_root(form)) and 'continue' on ValueError instead of returning False; match when any form is in the frozen set. Add a test that reaches the story project through a symlinked parent and writes a frozen test from Bash.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-3",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_segment, _opaque); next/tests/hooks/test_merge_guard.py (test_opaque)",
+    "problem": "Plan 3.3 limits opaque_git to 'an opaque segment whose own program is not git'. The code sends every opaque segment to _opaque, whatever its program, and _opaque scans text for 'git <verb>'. So a git commit inside a story worktree is blocked opaque_git when its message comes from a here-document or a substitution: 'git commit -m \"$(cat <<'EOF' ... EOF)\"' (the usual commit form Claude Code agents use) and 'git commit -F - <<EOF' both exit 10, though 'git commit -m plain' in the same worktree passes. A here-document anywhere in the command makes every segment opaque (shell.parse), and a subshell segment ('()') is judged by the whole command's text, so '(cd x && make) && git commit -m y' in a story worktree is blocked too. Plan section 1 says git inside a story worktree is unrestricted at slice depth. The plan's test case 'a commit message from a here-document passes' was replaced in test_opaque by an unrelated 'cat <<NOTE' command, which hides the fault. The block text also says 'the guarded branches are not put at risk', which is misleading here.",
+    "proposed_resolution": "When seg.program is git, judge the segment through _git with its parsed args even if it is opaque (the verb and branch are visible; only an argument is a substitution or a here-document body). For a subshell segment, scan only the subshell's own text (S4B-rules-2), not the whole command. Restore the plan's case: a commit with a here-document message in the story worktree passes, and the same on develop is commit_on_guarded.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-4",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_guarded); next/tests/hooks/test_merge_guard.py (test_unrelated_repository_passes)",
+    "problem": "Decision D7 and plan 3.3 say a segment is judged only when vsdd.project.find_project_root(seg.where) finds a project. _guarded calls ctx.project_at(seg.where) instead, which falls back to the payload cwd and then the session root, so it always finds the session's project and judges every repository with that project's branch names. Measured: 'git commit --allow-empty -m x' in an unrelated repository on branch develop is blocked commit_on_guarded. test_unrelated_repository_passes passes only by accident: the story_ready fixture sets branches.release = \"develop\", so the unrelated repository's 'main' happens not to be guarded. With the default config (release = main), a commit, push, reset or 'gh pr merge' on main in any other repository the agent touches is blocked.",
+    "proposed_resolution": "In _guarded (and in the gh pr merge branch) call find_project_root(seg.where, home=ctx.env.get('HOME')) first and return None when it finds no project; only then read the branch names from that project's configuration. Extend the test with an unrelated repository on develop and one on main under a default [branches] table.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-5",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git, rebase branch)",
+    "problem": "Plan 3.3 blocks 'git rebase <upstream> <guarded>', where the second argument is the branch git checks out and rewrites. The code blocks whenever the last positional is a guarded name, so 'git rebase develop' in a story worktree (one positional: develop is only the upstream; the story branch is rewritten) is blocked integrate_on_guarded, with a reason claiming git 'checks out and rewrites develop'. Measured: 'git rebase develop' in the story worktree exits 10; 'git rebase develop story/S-9.01' passes. Updating a story branch onto the integration branch is ordinary work inside a story worktree. No test covers the one-positional form.",
+    "proposed_resolution": "Treat the rewritten branch as the positional after the upstream (skipping the value of --onto and handling --root); block only when that branch argument is guarded, or when the current branch is guarded. Add 'git rebase develop' and 'git rebase origin/develop' in the story worktree as passing cases.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-6",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git, fetch/pull)",
+    "problem": "On a guarded branch, 'git pull <remote> <branch>' fetches <branch> and merges it into the checked-out guarded branch, which is the same integration 'git merge' is blocked for. The rule only checks pull refspec destinations, so 'git pull origin story/S-9.01' and 'git pull . story/S-9.01' on develop exit 0 while 'git merge story/S-9.01' exits 10. D6 allowed only a bare 'git pull'. An agent can merge a story into the integration branch outside story deliver.",
+    "proposed_resolution": "When the current branch is guarded, block 'git pull' that names any refspec after the remote as integrate_on_guarded (a bare pull stays allowed per D6). Add the case to test_ref_moves or test_case_table.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-7",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_segment); next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (_targets)",
+    "problem": "Both rules match the segment's program by exact name. A path or a command wrapper hides it. Measured on the main checkout (develop): '/usr/bin/git commit -m x', 'command git commit -m x', 'env git commit -m x', 'exec git commit -m x', 'time git commit -m x' and 'nohup git push origin develop' all exit 0, while 'git commit -m x' exits 10. _opaque already accepts a '/git' suffix, but the main path does not. The same spellings ('command sed -i ...', 'env sed -i ...', '/bin/rm ...') give write_targets no targets, so tests-first is skipped too. The actions merge-guard guards are irreversible, and these are trivial spellings.",
+    "proposed_resolution": "Normalise the program before judging it: take the basename of a path, and skip the wrappers command, env (with its options and NAME=value words), exec, nohup, time and nice to the real program and its args. Do it in one helper both rules use (or in shell.parse as a step 3 maintenance change). Add cases to test_merge_guard and test_writes.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-8",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (_grounding, _marked)",
+    "problem": "The grounding mark is matched by finding key. _grounding records failing findings as (str(finding.get('key', '?')), why), and _marked marks a finding only when finding.get('key') is in that set. A failing finding with no key ('?' never equals None) or with a non-string key (7 vs '7') is stored with no 'grounded: false'. Measured: a keyless finding whose quote is absent is blocked once, then stored on the second return with no mark, and the same happens for key 7. Plan 3.4 promises G3 that 'a stored finding is grounded unless it carries grounded: false', and the verdict trusts the stored mark (VSA-07), so an ungrounded finding counts as grounded and nothing reports it. data is not schema-validated at the store, so nothing else catches the missing key.",
+    "proposed_resolution": "Mark by position: have _grounding return the indices (or the objects) of the failing findings in the list, and set grounded: false on exactly those nodes in the deep copy; keep the key only for the block text. Add tests for a keyless finding, an integer key, and two findings sharing a key where one grounds.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-9",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (check)",
+    "problem": "Plan 3.4 step 5 says 'the blocks of 2 to 5 are returned together'. The code writes the marker and adds findings_ungrounded only when no other block exists ('if failing and not blocks'). Measured: a result with a gate entry that has no record and an ungrounded finding gets only gate_result_mismatch. The agent learns about its citations only on a later return, and that return is blocked again. This costs an extra round trip against the platform's retry limit, and the once-per-step design exists to protect that limit ('one bad citation cannot use up the platform's retries'). The departure is not reported and no test covers the combination.",
+    "proposed_resolution": "Follow the plan: when findings fail and no marker exists, write the marker and append the findings_ungrounded block to the other blocks in the same return. If the separate return is intended, report it as a departure and say so in the spec. Add a test with a gate mismatch and an ungrounded finding together.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-10",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (check); next/tests/hooks/test_rules_fail_closed.py (test_invalid_config_relaxes_nothing)",
+    "problem": "Plan 3.6 says an invalid factory.toml leaves the gates at full strength. When the configuration does not parse, _HookProject.config falls back to the built-in defaults, and their [paths] classes are empty, so no path is source or tests and tests-first never applies. Measured: adding '[limits] agents_per_run = 0' to a story project's factory.toml lets the implementer edit <worktree>/src/lib.rs before red (exit 0). Meanwhile the SessionStart notice says 'built-in defaults, the strictest settings, are in force'. The builder reported this departure and called it correct. It is not: one bad key anywhere in the file silently switches off the delivery-order gate. The test was narrowed to the merge-guard leg.",
+    "proposed_resolution": "In tests_first.check, when ctx.project.config_error is set and the path lies in a story worktree, block with a code such as config_invalid that names the configuration error and the fix (repair factory.toml). Alternatively, classify paths with the file's own [paths] table when that section alone validates. Extend test_invalid_config_relaxes_nothing to assert that tests-first still blocks a source edit before red.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-11",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_rules_fail_closed.py (test_corrupt_evidence_blocks)",
+    "problem": "The test cannot fail. build() writes no red record (it calls story_project and freeze only), so the glob over red.*.json corrupts nothing. The source edit is then blocked no_red_evidence simply because no record exists, and the assertion accepts 'no_red_evidence' or 'rule_error'. The case that matters is untested: after a red record exists and is corrupted, a frozen-test edit and a source edit must not pass. The code behaves correctly today, because read_record raises StoreCorrupt and the rule crashes closed. Nothing would catch a regression that skipped corrupt records, though, and that would silently unfreeze the tests.",
+    "proposed_resolution": "Call rule_projects.red(p) before corrupting, assert that the glob found at least one file, and assert rule_error (exit 2) for both a source edit by the implementer and a frozen-test edit.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-12",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_caller.py, next/tests/hooks/test_liveness.py (step 3 files); rewrite/findings/outcomes/step4-rules.json (builder's account)",
+    "problem": "The builder reported '10 failed (all in tests/hooks/test_rule_cases.py)'. The full run gives 1238 passed, 10 failed, 1 skipped, but only 6 of the failures are in test_rule_cases.py. The other 4 are step 3 tests that this unit's new registry rows break, and none of them is reported. (1) test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner: merge-guard now blocks '10>/dev/null git push --force origin main'. (2) test_caller.py::test_no_marker: with VSDD_FACTORY_ROOT outside any project, tests-first and merge-guard crash with \"AttributeError: 'NoneType' object has no attribute 'rule_config'\". The runner's _rule_cfg dereferences a None ctx.project, and the first Bash rules expose it, so every Bash call blocks rule_error. (3, 4) test_liveness.py::test_lock_refresh and test_lock_refresh_belongs_by_run_and_story: step-results blocks the liveness payload {'step': {'run': ...}} with bad_identity. The rules behave as specified in cases (1) and (3, 4), but the suite is red for reasons the outcome account does not name. Plan section 4 also says the builder stops and reports if test_rule_cases.py reads tests/hooks/cases/; the builder continued instead.",
+    "proposed_resolution": "Record the three step 3 breakages for fix runs of hook-runner and hook-runner-b: give the liveness step payload a full identity, or expect the block while still checking that seen moved; update the bypass-form expectation now that merge-guard is active; make the runner treat a None ctx.project as inert before _rule_cfg. Correct the outcome account and the foreign_failures list so the orchestrator sees all ten.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-13",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "rewrite/spec/rules/step-results.md (items 3 and 5, closing paragraph)",
+    "problem": "The spec file this unit edited still carries the sentences that three findings marked fixed were about. Item 3 says 'the rule reads the evidence record the entry names', the exact wording VSA-11 objected to; the code never follows the entry. Item 5 says 'The tool validates each record against its schema, and applies the same grounding rule, before it counts the record toward a verdict', the count-time re-grounding VSA-07 removed. It now contradicts topics/verdicts.md ('no grounding check runs at count time'), so one fact is stated two ways. The closing paragraph says 'The rule does not re-validate the whole result against its JSON Schema ... and the standard library has no schema validator', the claim P3OPS-21 called false. The rule now blocks schema_invalid through the store's step-record validation (test_invalid_result_blocked_not_stored).",
+    "proposed_resolution": "Item 3: 'looks up the evidence record by the entry's subject, gate and commit; the entry's evidence path is never opened'. Item 5: 'honours the stored grounding mark when it counts the record; no grounding runs at count time' (point to topics/verdicts.md). Closing paragraph: the store validates the result against step-record.schema.json and the rule blocks schema_invalid every time (D14); the data schema is G3's.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-14",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/tests/hooks/test_step_results.py (test_gate_entries); rewrite/findings/outcomes/step4-rules.json (VSA-11)",
+    "problem": "VSA-11 is marked fixed and proven by 'the forged-path case in test_gate_entries', but that test cannot catch the forgery VSA-11 describes. Its forged entry points at ../../etc/passwd, which is no record, and the store holds nothing, so any implementation blocks it. Verified in a scratch copy: changing _gate_blocks to read the entry's evidence file whenever it exists, and to fall back to the lookup otherwise, leaves test_gate_entries and every step-results case table passing. The plan named a dedicated test_forged_evidence_path_is_ignored, which was not written.",
+    "proposed_resolution": "Write a forged record (a JSON object whose gate, subject, sha and passed match the entry) at a writable path inside the project, point the entry's evidence at it, keep the store empty, and assert gate_result_mismatch. Keep the separate test name the plan gave.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-15",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "rewrite/findings/outcomes/step4-rules.json (P3BLD-24); rewrite/spec/packages/H7.md",
+    "problem": "P3BLD-24 is marked fixed, but its resolution is a set of brief and registry edits that were not made. packages/H7.md still says 'depends_on: [H1, S2a, S4]' (no S3). The other three bullets ([reveals] to B4a, scaffold/demo to A5 and design-system to A2a, the stamped texts kept in B4a) belong to other packages and are untouched. The builder itself says 'the brief's dependency line remains the spec steward's', and catchup-fix.json had recorded it left-for-builder for that reason. Because the latest outcome wins, the ledger now shows the whole finding fixed, which also drops it from the A2a, A5 and B4a lists.",
+    "proposed_resolution": "Change the outcome to left-for-builder (or not-fixed) and say that the code follows the H7 <- S3 dependency while the brief and registry edits remain the steward's, then rebuild the ledger.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-16",
+    "origin": "slice step 4, rules, review",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (_frozen_block)",
+    "problem": "Plan 3.2 says that for a frozen test the fix names 'returning blocked with data.test_defects'. The code's fix tells the implementer and the verifier to 'Ask the test writer, or run vsdd gate red --refreeze --story <id> from the test writer's row'. Gate-guard refuses --refreeze to every row but the test writer's, so the route offered is one the blocked caller cannot take, and the route the workflow handles (a blocked step with data.test_defects) is never named. No test asserts the fix text.",
+    "proposed_resolution": "Make the fix: 'Return blocked with data.test_defects naming <path> and what is wrong; the test writer changes it and re-freezes.' Assert it in test_frozen_tests.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-17",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_tests_first.py (test_refrozen_set_stays_frozen)",
+    "problem": "The proof given for P3SEAM-15 cannot tell 'the latest record' from any other. The re-freeze is written at the same commit as the first red record, and evidence_write replaces that gate and commit's record (red.<sha12>.json), so only one record ever exists. Verified in a scratch copy: making gate_evidence.evidence return the oldest red record instead of the latest leaves the test passing.",
+    "proposed_resolution": "Commit in the story worktree between the red record and the re-freeze so that two records exist, then assert that a test added only in the re-freeze is frozen.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-18",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_tests_first.py (test_source_before_and_after_red); next/tests/hooks/cases/tests-first.toml; rewrite/spec/rules/tests-first.md",
+    "problem": "test_source_before_and_after_red comments 'The record holds across the implementer's own commits' but makes no commit: it edits a second file at the same head, so a head-tied lookup would still pass. The spec says the case tables include 'an implementer edit after its own commit (allowed) and a test-writer source edit after red at a later commit (blocked)', and also 'the same sed -i after red (allowed)' by the implementer. tests-first.toml has none of these, and its Bash cases use the main-session payload rather than the implementer's. The behaviour itself is correct (a probe with a real commit gives implementer 0, test-writer 10), but neither the test nor the tables prove it.",
+    "proposed_resolution": "Commit in the worktree after red in the test. Add the three spec cases to tests-first.toml with an implementer Bash payload, or correct the spec sentence.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-19",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (_one_path, _red_record, _has_red_gate)",
+    "problem": "tests-first looks up the red record and the story kind once per written path, with no memo per story. Each gate_evidence.evidence call starts git through state.store.git (10 s timeout): rev-parse, plus two merge-base --is-ancestor once the story has commits. topics/hook-runner.md allows a rule one git subprocess at 1.5 s. Measured in process: 'touch' of 40 source files started 40 git processes and took 819 ms. A 200-path glob after a commit (about 600 git processes) can pass the 4 s gate deadline and block with runner_timeout.",
+    "proposed_resolution": "Memoise the story's red record and kind inside check, so there is one lookup per story per call. Tell the orchestrator that evidence()'s own git use (prescribed by the plan) is in conflict with the one-subprocess budget.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-20",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/grounding.py (ground, _ground)",
+    "problem": "Two gaps let a finding ground when it should not. (1) The catch-all returns '' (grounded) for any exception, so a cited file that cannot be read (permission denied or another OSError) grounds: measured, a mode-000 file with an absent quote returns ''. (2) The project-root base is chosen by the first path segment alone, so '.factory/../src/x.py' grounds against the main checkout's src instead of the reviewed tree. The same trick reaches another story's worktree through '.factory/../.worktrees/<other>/...'.",
+    "proposed_resolution": "Catch OSError around the read and return 'file cannot be read: <path>'. Keep the catch-all for shape faults only. Use the project-root base only when the resolved path stays under project_root/.factory; anything else resolves against the tree. Add both cases to test_grounding.py.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-21",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_next_verb, _git_words)",
+    "problem": "Plan 3.3 says git's global options are skipped to find the verb. In opaque text, _next_verb skips '-C' but takes its value as the verb, so \"sh -c 'git -C /main commit -m x'\" passes (measured 0). On the parsed path, '--git-dir' and '--work-tree' are skipped, but the rule still judges seg.where, so 'git --git-dir=<root>/.git --work-tree=<root> commit -m x' from a story worktree commits on develop and passes (measured 0). '--namespace <v>' also takes its value as the verb.",
+    "proposed_resolution": "In _next_verb, skip the values of -C, -c, --git-dir, --work-tree, --namespace and --config-env. When --work-tree or --git-dir is given, judge the branch at that location, or block when it cannot be resolved.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-22",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_reset_moves)",
+    "problem": "_reset_moves returns at the first positional. 'git reset HEAD --hard' on develop therefore passes (measured 0), while 'git reset --hard' is blocked. Plan 3.3 blocks a reset 'with a mode flag', and git accepts options after the revision.",
+    "proposed_resolution": "Scan every argument before '--' for a mode flag first, then check for a non-HEAD revision. Add 'git reset HEAD --hard' to test_reset_forms.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-23",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (_perl_in_place, _VALUE_OPTIONS, _copy_like)",
+    "problem": "Several false readings, measured. _perl_in_place counts any bundled option containing 'i' as in-place, so 'perl -Mstrict -e ... src/a.py' and '-Mlib=...' read as writes of src/a.py; 'perl -i script.pl f' counts the script as written. 'touch -r ref.txt f' and 'touch -d <date> f' count the option values as written paths. 'cp --target-directory=src a.py' (GNU's real long option) is missed and the source a.py is taken as the destination. Before red, these false targets block harmless commands in a story worktree, and the cp form misses the real target.",
+    "proposed_resolution": "Recognise perl's -M, -I, -e and -E values and only a real -i or -i<ext>. Add touch's -r, -d and -t to _VALUE_OPTIONS. Accept --target-directory (and its abbreviations) for cp, mv and ln. Add these to test_writes.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-24",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (_store)",
+    "problem": "Plan 3.4 step 6 defines the stored result as 'the input with every agent-supplied grounded key removed and grounded: false set on each failing finding', and the Rewrite is meant to carry that. The code returns Rewrite(stored), where stored is store_step's record with agent_type, worktree_head and agent_id added. The script therefore receives three keys the agent never produced. This is harmless while stepSchema leaves the top level open, but it is an unreported departure from a promised interface (the spec was edited to say 'the updatedInput is the stored record').",
+    "proposed_resolution": "Return Rewrite(adjusted), the marked input, or record the departure and keep spec and plan in step.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-25",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/step_results.py (_under_holdout, _holdout)",
+    "problem": "The walled test is stated twice and differently. step_results._under_holdout duplicates vsdd.state.steps._under_holdout, but the store also walls 'holdout/...' and walks the whole result, while the rule reads only data.findings and top-level findings. Neither normalises '.' or '..' segments, so '.factory/./holdout/s1.md' or 'src/../.factory/holdout/s1.md' is not walled by either. Such a finding grounds against the project root, and its walled text is stored.",
+    "proposed_resolution": "Keep one predicate in the state layer, with the path normalised (posixpath.normpath) before the prefix test, and import it in the rule. Add a test with a dotted holdout path.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S4R-rules-26",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "next/tests/hooks/test_rules_fail_closed.py, next/tests/hooks/test_tests_first.py",
+    "problem": "Several tests are narrower than the plan. test_block_texts_survive_the_wrapper wraps nothing (plan: 'each blocking case, wrapped as item 40 records'); it only greps the raw stderr. test_import_error_blocks replaces only merge-guard and never checks that nothing is stored, although the plan says 'any one of the three modules' and 'nothing is stored', which matters for step-results. test_not_applied has no docs story and no spike worktree case, both named in the plan.",
+    "proposed_resolution": "Wrap the stderr the way platform item 40 records it before asserting. Parametrise test_import_error_blocks over the three modules, with a StructuredOutput call that asserts no step record. Add docs-kind and spike-worktree cases to test_not_applied.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-rules-27",
+    "origin": "slice step 4, rules, review",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/merge-guard.md (What it checks)",
+    "problem": "The spec lists git merge, rebase and cherry-pick as blocked on a guarded branch. The code and plan D6 also block revert and am, and the spec (which this unit edited) does not say so.",
+    "proposed_resolution": "Add 'git revert' and 'git am' (each adds a commit) to the integrator list in merge-guard.md.",
+    "on_slice_path": false
+  }
+]

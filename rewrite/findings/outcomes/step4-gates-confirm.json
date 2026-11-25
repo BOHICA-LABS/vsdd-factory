@@ -1,0 +1,8 @@
+[
+  {
+    "id": "S4R-gates-15",
+    "outcome": "not-fixed",
+    "what_was_done": "The code half is in: gatelib._new_cases drops base identities and source-class tests, and both _red and _refreeze call it. The test does not prove it. In a scratch copy I put back the old re-freeze line (every head identity the base lacks, with no source-class filter), and tests/unit/test_gate_refreeze.py::test_refreeze_drops_source_class_tests still passed. The cause is the sample runner (tests/e2e/sample-project/tools/junit_runner.py): it discovers tests only under tests/, so tally/test_in_src.py never runs and never reaches the JUnit report. A probe confirmed it: the red report holds no test_in_src case, and metrics.new is 3 with or without the file. tests/unit/test_gate_red.py::test_source_class_test_does_not_count has the same hole. Still to do: make both tests' test command write a report that holds a testcase whose file attribute is tally/test_in_src.py (as test_refreeze_names_an_error_that_has_no_type does with tools/error_report.py), or have the command discover tally/ too. Then assert that neither the red record nor the re-freeze record lists it, and check that both tests fail with the filter removed.",
+    "where": "next/tests/unit/test_gate_refreeze.py"
+  }
+]

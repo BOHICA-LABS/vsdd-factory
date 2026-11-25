@@ -1,0 +1,38 @@
+[
+  {
+    "id": "PR3-1",
+    "origin": "platform probes, round 3",
+    "severity": "major",
+    "where": "rewrite/spec/platform.md (the standing observation); rewrite/spec/skills/setup.md (project CLAUDE.md sections); rewrite/spec/packaging/build-plan.md (E1 and E2 headless runs, including the slice's E2 first run); rewrite/spec/topics/compaction-and-cold-start.md (cold-start briefing)",
+    "problem": "A project CLAUDE.md in a project root under Claude Code's own temp tree (/private/tmp/claude-<uid>/) is not loaded into a headless session; the session transcripts show the user-global CLAUDE.md as the only one injected (probe R9a-c in rewrite/spike/probes-round-3/). The same scratch project under $HOME had its project CLAUDE.md loaded and quoted verbatim. Other /tmp locations were not tested. Any unattended run whose project lives under that temp tree therefore runs without its project rules, and where that happens is invisible in the result files.",
+    "proposed_resolution": "Fixture and sample projects for unattended runs live under $HOME (or another trusted root), and nothing that must reach a headless session travels only in a project CLAUDE.md: the hook briefings (SessionStart additionalContext) and the survey remain the load-bearing carriers, which the design already prefers. Add a fixture-placement note to the E1/E2 setup steps and to packaging/sample-project.md.",
+    "on_slice_path": true
+  },
+  {
+    "id": "PR3-2",
+    "origin": "platform probes, round 3",
+    "severity": "minor",
+    "where": "rewrite/spec/platform.md item 13; rewrite/spec/topics/hook-wiring.md; rewrite/spec/topics/hook-failure.md; rewrite/spec/packages/B4b.md",
+    "problem": "platform.md item 13 assumed the platform's block-on-failure setting covers a missing hook launcher. The probe shows the opposite: with every hook command pointing at a missing file, sh exits 127 and the headless session ran normally; each failure surfaced in the transcript as a non-blocking hook error, so the platform fails open rather than blocking (R6). Exit 127 is treated as non-blocking, confirming what topics/hook-wiring.md already records for a missing uv.",
+    "proposed_resolution": "Keep the self-guarding launcher exactly as designed (it is load-bearing, not defensive padding): run.sh must translate a missing interpreter or missing files into exit 2 with a loud message. platform.md item 13 is corrected to fail-open in this build. No code change.",
+    "on_slice_path": true
+  },
+  {
+    "id": "PR3-3",
+    "origin": "platform probes, round 3",
+    "severity": "minor",
+    "where": "rewrite/spec/rules/auto-allow.md; rewrite/spec/topics/rule-model.md; rewrite/BLUEPRINT.md section 10 item 27 (finding P3COV-07's stated rule)",
+    "problem": "Pairing a hook command rewrite (updatedInput) with permissionDecision ask does not run the call in a headless session in the auto permission mode (R10a-c; all three sessions ran in auto): the call never executed (side-effect file not created) and the permissionDecisionReason text was surfaced to the model as the call's outcome, which the model reported as the command's printed output. An ask paired with a rewrite is therefore unusable in unattended runs and its reason text can be mistaken for command output.",
+    "proposed_resolution": "Adopt the P3COV-07 rule only where a person is present: in unattended paths (headless, workflow steps, dispatched agents) every rewrite pairs with allow, and a rule that cannot permit the call refuses it plainly instead of answering ask. The rule model should also keep reason strings distinct from tool output in wording, so a surfaced reason cannot be mistaken for a result.",
+    "on_slice_path": true
+  },
+  {
+    "id": "PR3-4",
+    "origin": "platform probes, round 3",
+    "severity": "minor",
+    "where": "rewrite/spec/platform.md items 9 and 33; rewrite/spec/topics/research-and-browser-tools.md; rewrite/spec/topics/tool-sets.md",
+    "problem": "WebFetch refuses undotted hostnames outright (R5): 'WebFetch cannot fetch localhost or other hostnames without a dot. To reach a local server, use Bash with curl instead.' The dotted workaround does not work either: WebFetch to http://127.0.0.1:8139 upgraded the request to HTTPS and returned HTTP 502 against the plain-http server (check rerun C9), so a plain-http loopback fixture is unreachable through WebFetch. A walled agent restricted to WebFetch cannot reach a localhost fixture at all; of the two routes the original resolution offered, only the shell is left, and it was not tested.",
+    "proposed_resolution": "Localhost fixtures for walled agents travel through the shell, where the walls already apply per the item-9 fallback; the shell route itself is untested, so the e2e-wall work must verify it. The 127.0.0.1-through-WebFetch route is refuted and stays dropped. Record both the undotted-hostname refusal and the http-to-https upgrade in the browser-tools topic so the e2e walls expect them.",
+    "on_slice_path": false
+  }
+]

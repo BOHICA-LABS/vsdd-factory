@@ -1,0 +1,7 @@
+# Registry entries of the hook and rules area that are not in registry.toml.
+# Same format as rewrite/spec/registry.toml.
+
+[topic.state-api]
+summary = "The state design's importable functions (S7): their signatures, what each refuses, and the rules that call them."
+group = "rules"
+sources = ["state.md#4", "state.md#2.8", "hooks.md#5"]

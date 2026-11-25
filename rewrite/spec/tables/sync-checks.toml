@@ -1,0 +1,184 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M1). Not read by anything on the slice path.
+# The capability from end to end: [[topic:team-use]].
+#
+# The checks of the sync: which remote and ref, when a run may start, a state branch that was rewound or
+# deleted, what arrived, how two histories combine, how a push is judged, and the one clone that finds a
+# second. The rules every row follows are at the head of [[table:team-checks]]. The order in which the sync
+# runs them is in [[command:sync]]; why each is as it is, is in [[topic:team-sync]]; and the git behaviour
+# they rest on is [[topic:team-git-facts]].
+
+[T-REMOTE]
+form = "A part of the preflight; a step of the sync, and of every fetch or push the tool makes for a product branch"
+runs = "Before each fetch and each push, with team use on or off; the shallow-clone refusal only while it is on"
+reads = "The upstream git records for the state branch and for the branch a story is delivered to: its remote, and its ref only to compare it with the branch's own name; the list of remotes; `git rev-parse --is-shallow-repository`"
+refuses = """
+A branch with no upstream when the clone has more than one remote, or none: it names the branch and the
+git command that sets the upstream. With exactly one remote and no upstream it uses that remote and
+records the upstream in the clone's git configuration.
+Taking a ref from an upstream: only the remote is read there. The tool writes every ref out, in these two
+forms and no other, where `<branch>` is the state branch, a name from `[branches]` or `story/<id>`:
+- a push is `git push <remote> <source>:refs/heads/<branch>`. The source is `refs/heads/<branch>`, or the
+  id of a commit built on the remote's head (T-PUBLISH, T-MINT);
+- a fetch is `git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`. Its destination is
+  the remote-tracking ref and never a ref under `refs/heads/`. Fetched there, the mounted state branch
+  is refused or, on the floor git from another worktree, moved under the mount; a person's own target
+  branch is moved, or refused when it holds a commit of its own ([[topic:team-git-facts]], fact 15). The
+  `+` lets a branch that was rewound arrive, so that the tool measures the rewind itself (T-HISTORY,
+  T-BRANCH, T-NOTICE); without it that fetch fails (fact 9).
+It runs no `git pull` and no fetch without a refspec. A local branch therefore moves only as its own row
+says: the mounted state branch by the flush and by a fast-forward in the mount (T-COMBINE), a story
+branch by work in its worktree (T-BRANCH), and a target branch, in `pr` mode, never. What a clone last
+took in from the remote is never read from the remote-tracking ref, which any fetch moves, a person's
+included: it is `sync.remote_head` for the state branch (T-HISTORY) and `delivery.pushed` for a story
+branch (T-BRANCH).
+A branch whose upstream names a ref other than its own name is refused with the command that corrects
+it, because a plain `git push` there moves another branch. A story branch is created at a commit id, so
+git gives it no upstream; it is pushed to the remote of the branch it will be delivered to, and that
+first push sets its upstream to its own name.
+Team use in a shallow clone, naming `git fetch --unshallow`: ancestry cannot be measured there.
+It never reads a remote's name from code or from `factory.toml`, never assumes one is called `origin`,
+and passes `--force` to no push. Two pushes carry a lease, and each names the head it expects: the push
+of the state branch, which can only add to that head (T-PUSH), and the push after the tool's own rebase
+of a story branch (T-NEVER)."""
+unmeasured = """
+Whether every clone's upstream is the same repository. Two repositories each accept a claim for one
+path, so a clone that pushes its state or story branches to a copy or a fork of its own shares nothing
+with the others, and no program can see that. `vsdd doctor` prints the address each factory branch is
+pushed to, without any user or password part, for people to compare. Whether this clone may push at
+all: the first push shows it"""
+
+[T-FRESH]
+form = "A step of `vsdd survey`: the opening sync, before any precondition is read"
+runs = "In every survey of every workflow"
+reads = "The outcome of the sync ([[command:sync]])"
+refuses = """
+Starting a run unless the opening sync ended `synced`. Nothing is written, no lock is taken and no claim
+is tried; the error carries the outcome, git's own line, and what [[command:sync]] says a person does
+about it. A run whose claims this clone already holds is refused too: a clone that could not fetch does
+not know what the team pushed, and a clone that could not push holds state nobody else has.
+The opening sync has the budget of a sync inside a foreground command, which covers its wait for
+another sync of this clone as well as its network calls ([[command:sync]]), and the claim that follows
+it has 30 seconds, which together keep the survey inside the Bash tool's default limit
+([[topic:long-commands]]). A clone too far behind for that is told to run `vsdd sync`, which is a job. The briefing never fetches: it prints the outcome and time of the last sync from the clone record."""
+unmeasured = "What was pushed after the fetch returned. The claim's push closes that gap for the unit a run takes (T-PUBLISH), and the checkpoint's sync meets the rest"
+
+[T-HISTORY]
+form = "A step of the sync, between the listing of the remote and the combine"
+runs = "At every sync"
+reads = "A listing of the remote's state branch (the listing rule at the head of [[table:team-checks]]); `sync.remote_head` in the clone record; the fetched head; the mount's head"
+refuses = """
+Going on when the remote's state branch is not one this clone can build on.
+`missing`: the remote answers and has no state branch. Nothing is pushed, because a push would create
+the branch again from this clone's copy and undo a deletion somebody made. The message gives the plain
+push with which a person restores it.
+`rewritten`: `sync.remote_head` is not contained in the head this clone fetched, and the mount still
+contains it, so the branch was rewound or replaced. Nothing is combined or pushed, because a
+combine would bring the vanished commits back unasked. Both heads and the commits that vanished are
+named with their authors. A person either pushes the old head back or moves the mount onto the remote's
+history with git; after either the next sync goes on.
+A listing that fails for any other reason is `unreachable`.
+`sync.remote_head` is the last head of the remote whose arrivals this clone checked and took into its
+mount. This check reads it and never writes it. It is written in two places only, each time after the
+mount holds the commit and never before: by the local step of the sync that has checked what arrived
+and fast-forwarded the mount, to the fetched head ([[command:sync]], step 4); and when a push of this
+clone is accepted, to the pushed commit, also where the remote's head is by then beyond it (T-PUSH).
+A fetch made to judge a push writes nothing. After a lost race it is therefore still the head the push
+was built on, so the sync that follows checks every commit between that head and the new one
+(T-INCOMING), and a rewound branch never looks like one this clone had already seen."""
+unmeasured = "A rewrite made before this clone first fetched. The clone starts from what it found, and a claim dropped that way is gone for every clone that had not seen it"
+
+[T-INCOMING]
+form = "A step of the sync, on what arrived"
+runs = "After the fetch, before anything is combined"
+reads = "The files that differ between `sync.remote_head` (T-HISTORY) and the fetched head, each as the fetched head has it, against the registry, its schema and its cap, as a flush checks a local change; the trailers of each arriving commit"
+refuses = """
+Building on a record that fails its check: every command that reads it answers with the path, the last
+commit that changed it and that commit's author; the unit it belongs to stops with the route answer
+`human`; and `vsdd status` lists it until a later commit repairs it. The rest of what arrived is taken.
+When the commit carries a `Plugin:` trailer newer than this plugin, the cause given is "written by plugin
+<version>: upgrade this clone", not a broken record; the unit stops the same way, which is safe.
+It lists, as a report: each arriving commit that changes a code-written record and carries none of the
+trailers a flush writes, which is a record changed outside the factory; and a claim removed or changed
+by a commit whose `Clone:` is not its holder's and that is not a take-over.
+An approval whose files changed reads `stale`, as it does on one clone ([[topic:digests]]). A path under
+`local/` in an arriving commit is refused the same way (T-LOCAL).
+The files are checked once, on the tree that arrived, and not commit by commit, so the cost follows what
+changed and not how long the clone was away."""
+unmeasured = "Whether a record that passes its check and was edited by hand is true. Git records the author a clone gives; who may push to the state branch is for the repository's own rules ([[topic:team-sync]], \"A remote with its own rules\")"
+
+[T-COMBINE]
+form = "A step of the sync"
+runs = "When this clone and the remote each hold state commits the other lacks"
+reads = "The merge base; the paths each side changed since it, as two listings in which every path is its own entry (the listing rule at the head of [[table:team-checks]]); for each path the write mode of its class ([[table:path-classes]]); the claims as the remote has them"
+refuses = """
+It refuses nothing by itself. It decides each path from the two listings before any tree is built, and
+reports every path it did not take from this clone. No path is decided by the exit status of a merge of
+the whole tree.
+A path only one side changed is taken from that side. Records are one file each and a unit has one
+holder, so this is the usual case.
+A path both sides changed, in a class whose write mode is `code`: the remote's version stands, whole.
+This clone's version is set aside under `.factory/local/aside/` and listed in the clone record, the sync
+result, `vsdd status` and the briefing, with the author of the remote's version. Two openings of one
+decision, two closures of a unit nobody claims and one path that code added twice end this way. Two
+settlements have T-SETTLE, and a unit another clone holds has T-HOLD.
+`notes.json` has a rule of its own, because each of its entries is independent and a person asked for
+it: the result is the remote's notes followed by those this clone added since the merge base, cut to
+the record's cap from the oldest end. No note is set aside.
+A path both sides changed, in any other class (an artifact, `factory.toml`): a three-way merge of that
+one file with `git merge-file`. A conflict in it, a file one side removed and the other changed, one
+path added on both sides with different content, or a result that fails the check a flush makes, is
+`diverged`: nothing is combined, pushed or set aside, both commits and authors are named, and a person
+merges in `.factory/` with git and runs `vsdd sync` again.
+The combined commit is built with a temporary index, and the mount is then fast-forwarded to it. When
+that would overwrite a file with uncommitted changes the outcome is `blocked`, naming the file. The
+mounted branch is never moved to a commit that does not contain its head."""
+unmeasured = "Whether two edits that merge cleanly as text still mean what each author meant. The file's own check runs on the result; a reviewer sees the rest at the next perimeter"
+
+[T-PUSH]
+form = "The one way a push of the state branch is made and judged: a function of the sync, which T-PUBLISH and T-MINT use too. A push of a story branch is judged by the same measurement (T-BRANCH)"
+runs = "At every push of the state branch; the judging after every such push that did not report success: a refusal, a time limit, a dropped connection"
+reads = "The commit to push; the remote head it was built on, which is `sync.remote_head`; the remote's head after a new listing and fetch"
+refuses = """
+Pushing a commit that does not contain the head it was built on, and pushing without naming that head:
+the push carries `--force-with-lease=refs/heads/<state branch>:<that head>`. The remote then takes it
+only while its head is still that commit, so the push adds to that head or does nothing. A plain push
+is not enough: where the branch was moved back to an ancestor it is a fast-forward, is accepted, and
+puts the removed commits back unasked ([[topic:team-git-facts]], fact 16).
+Reading the reason git printed, and taking "the push failed" for "the remote did not accept it". After a
+push that did not report success the tool lists and fetches again and T-HISTORY judges the fetched head.
+That fetch changes nothing in the mount or the clone record, and one of five things is true, each
+measured by comparing commits:
+- the pushed commit is contained in the remote's head: `accepted`, whatever the push reported;
+- T-HISTORY answers `missing`, or answers `rewritten` because the fetched head does not contain the
+  head the push was built on. Every caller gives that answer, and nothing is built again on such a head;
+- the remote's head is unchanged: the push was not taken and nobody else moved the branch. The outcome is
+  `refused` with git's own line, which says why: as a rule it is a rule of the remote, which only a
+  person can change. Nothing is retried;
+- the remote's head moved and contains the head the push was built on: the push lost a race. The sync
+  repeats from its listing, and T-PUBLISH and T-MINT from their opening sync, so that what arrived
+  passes T-INCOMING and T-HOLD before the mount takes it or anything is built on it; five times at
+  most, then `busy`;
+- the listing or the fetch fails as well: `unknown`. The commit is written to the clone record
+  (`sync.unknown`, with its request where it mints an id) and the caller answers `unpushed`. A claim
+  in that commit is not treated as held, an id in it is not minted a second time, and the next sync
+  that reaches the remote settles it by the same test and reports it ([[command:sync]], `settled`)."""
+unmeasured = "Nothing once the remote answers a fetch. Until then the clone does not know, says so, and starts no run (T-FRESH)"
+
+[T-SOLO]
+form = "A refusal of the state push in `vsdd checkpoint` and `vsdd sync`, while team use is off"
+runs = "When that push is not accepted and a fetch shows commits on the remote's state branch that this clone lacks"
+reads = "The commits that arrived, with the author of each; `team.enabled` in the fetched `factory.toml`"
+refuses = """
+Combining and pushing unasked. While the fetched `factory.toml` has team use off as well, it changes
+nothing, reports `refused` with the authors of the commits it found, and names the two ways on: turn
+team use on ([[config:team]]); or, where one person only moved from one machine to another, bring the
+two histories together with git in `.factory/` and push with `vsdd sync`. The local commits stay.
+When the fetched `factory.toml` has team use on, a team was formed while this clone was mounted. The
+preflight runs, and what it refuses is refused. Otherwise the clone gets its record with
+`how = "joined"`, the sync goes on as a team sync, and before it ends the clone claims the stories it
+has in flight as T-SWITCH claims them ([[table:work-claim-checks]]), so that no other clone takes one
+of them as free and starts it again from its base.
+This replaces the unasked rebase and retry of [[topic:state-commits]]. With no second clone the remote
+never moves and T-SOLO never runs."""
+unmeasured = "A second clone that has not pushed state yet. Two clones can do the same work until one of them pushes; the notice `vsdd init` gives when it mounts state another clone wrote is the earlier warning (T-JOIN)"

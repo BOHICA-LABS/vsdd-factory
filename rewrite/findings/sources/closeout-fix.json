@@ -1,0 +1,64 @@
+{
+ "rounds": [
+  {
+   "round": 1,
+   "fixed": 21,
+   "clean": false,
+   "remaining": 5
+  },
+  {
+   "round": 2,
+   "fixed": 5,
+   "clean": true,
+   "remaining": 5
+  }
+ ],
+ "last_fix": {
+  "summary": "All five items (N1 major, N2 to N5 minor) are fixed across the blueprint and four of the design documents; `agents-skills.md` already agreed and needed no edit. No command, record type, rule, agent, skill or build package was added, and no adopted decision was reopened. One field name is new: `flaky`, in the gate result and in a closure record (N4).\n\nChecks I ran: the edited `gated()` was extracted from `pipeline.md` and run in Node against nine cases (two stories with the second failing once, failing twice, a missing unit, both passing, no gate result, and four single-gate cases); all behaved as specified and the single-gate behaviour is unchanged. The edited prelude block parses, and all seven JSON blocks in `pipeline.md` still parse. Nothing was run on the platform.\n\nBlueprint section 1 now says the second check found 1 major and 4 minor problems and that all 26 close-out problems are fixed; no other count in section 1 changed. Section 11.4 has a short paragraph and five new rows, N1 to N5.\n\nThree things you should know:\n- **N1, a deviation from the proposed wording.** The proposal named the \"Who commits state\" table. That table lists the five flush points, a count stated in several places, and the `feature` checkpoint already commits `cycle.json`. I added the \"route is derived\" row to the writers table in `state.md` 2.7 instead and left the flush points alone.\n- **N2, a residual edge I did not change.** With the brief out of the digest, an earlier cycle's approval still counts as \"the specification is approved\" at the start of a later product cycle. The route names `spec` first, so only a hand-typed `plan` before `spec` would get past the `plan` precondition.\n- **N3, a gap outside the item.** If the story-writer omits a story's gate entry altogether, nothing detects it. A count check against the route's story list would close that; I did not add it.\n\nFiles changed: `/Users/jmagady/dev2/vsdd-factory/rewrite/BLUEPRINT.md`, `/Users/jmagady/dev2/vsdd-factory/rewrite/design/pipeline.md`, `/Users/jmagady/dev2/vsdd-factory/rewrite/design/state.md`, `/Users/jmagady/dev2/vsdd-factory/rewrite/design/packaging.md`, `/Users/jmagady/dev2/vsdd-factory/rewrite/design/hooks.md`. Nothing was committed, branched or pushed.",
+  "net_size_change": "Net +38 lines across the six documents (10,662 to 10,700): BLUEPRINT.md +15, pipeline.md +17, state.md +5, packaging.md +1, hooks.md 0, agents-skills.md 0. The directory is untracked, so there is no git diff to count from; by my edits that is roughly 80 lines added and 42 removed, most of them single long table rows or paragraph lines replaced in place. About 12 of the added lines are the 11.4 close-out paragraph and its five rows, and about 9 are the `gated()` change.",
+  "not_fixed": []
+ },
+ "final": {
+  "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/design/pass2-closeout-3.md",
+  "clean": true,
+  "summary": "All five fixes (N1 to N5) are at every place the fixing agent named, and the blueprint and design documents agree on each rule. N4 and N5 are fully resolved. N1 resolves the major misroute: the route is now in cycle.json, and a fresh clone routes a standard-route feature to plan. N2 and N3 resolve the problems as the earlier report described them. No blocker or major problem remains. Five minor problems remain, each caused by a fix in this round and each a local edit. R1 (from N1): vsdd feature route now writes cycle.json with no exception, so an amendment run can overwrite a product cycle's route, for example to trivial, which cuts verify to baseline only. R2 (from N2): an earlier spec approval now stays current at the start of a later product cycle. As a result the spec survey's amendment mark is unscoped, the plan precondition passes before spec has run, and the route's spec row depends on the undefined phrase 'not converged'. R3 (from N3): gated() in each mode accepts a retry that leaves out a story an earlier attempt admitted, which contradicts 'no story is delivered while one is missing'. A Node run confirmed this, and a proposed correction was tested against the same eight cases. R4 (from N1): the route is now defined as empty for a maintenance cycle, but neither the verify check list nor the release version rule has an entry for it. R5 (from N1): the new plan fixture depends on the row above it, 'a change request in flight and neither delivered nor awaiting a decision', where 'delivered' is undefined. Two issues that predate this round are noted but not counted: a resumed standard-route feature run holds no amendment, and the verify precondition's 'every wave is closed' is vacuous before a plan exists.",
+  "checked": 5,
+  "remaining": [
+   {
+    "id": "R1",
+    "severity": "minor",
+    "problem": "Because of N1, vsdd feature route writes the route it derives into cycle.json with no exception. A feature run with amend runs inside a cycle someone else opened and has a delta step that ends with vsdd feature route, so it overwrites that cycle's route. Suppose a product cycle's amendment changes no contract: its route derives as trivial, verify then runs baseline only for the whole product cycle, and the release version is computed from the wrong route. state.md 2.8 says the route is written only 'when a change request opened' the cycle, which contradicts the other three places.",
+    "where": "pipeline.md 2.9.4 delta and route row (line 982); state.md 2.16 vsdd feature route row (line 1432); state.md 2.7 writers table (line 720); state.md 2.8 Cycle record row (line 736); pipeline.md 2.6 'Amendments inside an open cycle' (lines 505-513); effects at pipeline.md 2.9.6 (line 1051) and 2.9.7 (line 1063)",
+    "proposed_resolution": "State that a run with amend is always on the standard route, and that vsdd feature route writes route only in the run that opened the cycle, so an amendment run leaves cycle.json unchanged. Make the change in pipeline.md 2.9.4 and 2.6, state.md 2.7 and 2.16, and blueprint 4.9. The plan row's amendment clause already re-traces an amended fast-route cycle."
+   },
+   {
+    "id": "R2",
+    "severity": "minor",
+    "problem": "Because of N2, an earlier spec approval stays current at the start of a later product cycle, and three rules cannot tell it apart from the cycle's own approval. (1) The spec survey's amendment mark is unscoped ('when the latest spec decision is approved'). A spec run started by hand or by mistake in the middle of a product cycle whose own spec is approved now unlocks the whole set with no change analysis, so plan has no stories to re-trace afterwards. (2) The plan precondition is met before spec runs in a later product cycle, so a plan started too early is not refused, contrary to 'that workflow's survey refuses'. (3) The route's spec row now does all the work of sending that cycle to spec, and it depends on the undefined phrase 'the specification is not converged'.",
+    "where": "state.md 2.16 vsdd survey row (line 1379); BLUEPRINT.md 4.11 (lines 656-660) and 11.4 N2 row (line 1733); pipeline.md 2.9.3 survey row (line 950); pipeline.md 2.5 plan precondition (line 383); pipeline.md 2.4 spec row (line 297) and line 336; conflicts with state.md 2.5 staleness row (line 644) and packaging.md line 1006; clearing rule at state.md 2.8 lines 803-805",
+    "proposed_resolution": "Use one predicate, 'the cycle's own spec decision' (one in cycles/<cycle>/decisions/). (1) The spec survey marks the amendment only when the cycle began with a brief and has no spec decision of its own; change state.md 2.16, pipeline.md 2.9.3 (drop the parenthesis) and blueprint 4.11 with its N2 row. (2) The spec row reads 'the brief is approved and the cycle has no spec decision of its own, or its latest one asked for revision'. (3) The plan precondition adds 'in a cycle that began with a brief, the approved spec decision is the cycle's own'. Also state that this survey mark is not 'opening an amendment' for the state.md 2.8 clearing rule."
+   },
+   {
+    "id": "R3",
+    "severity": "minor",
+    "problem": "Because of N3, gated() in each mode checks only the entries the current attempt returned. Suppose attempt 1 admits S-1 and S-2 fails, and the retry returns only S-2, now passing: the step is accepted, S-1 is admitted but not in data.units, and S-2 is delivered while S-1 is missing. A Node run confirmed this, and it contradicts the 2.9.4 row and blueprint 4.10. Two smaller points: when the agent fixes a story within one attempt, its earlier failing entry still uses up an attempt; and 'it changes nothing' in state.md 2.16 can be read as 'does not measure the gate again'.",
+    "where": "pipeline.md 2.11.1 gated() (lines 1726-1743); pipeline.md 2.9.4 story-draft row (line 983); BLUEPRINT.md 4.10 Gate output row (line 618); state.md 2.16 vsdd gate plan row (line 1430)",
+    "proposed_resolution": "Have gated() carry the set of subjects seen across attempts. In each mode only the last entry per subject counts, every subject seen earlier must have a passing entry and its unit in the final result, and a missing subject is named in the retry note. This was tested in Node against eight cases: it blocks the omission case and changes no other. Have the story-draft row also check the units against the route data's stories and readiness. Reword state.md 2.16: 'measures the gate again, admits nothing new, and returns the same unit when the story still passes'."
+   },
+   {
+    "id": "R4",
+    "severity": "minor",
+    "problem": "N1 defines a maintenance cycle's route as empty, but the verify check list 'by the cycle's route' has no entry for an empty route, and neither does the release version 'computed from the route'. A maintenance cycle therefore reaches verify and release with no defined checks and no version rule. This is the remaining part of N1's 'the check list reads a missing value'.",
+    "where": "state.md 2.8 Cycle record row (line 736); pipeline.md 2.9.6 (line 1051); pipeline.md 2.9.7 (line 1063); pipeline.md 2.9.10 (lines 1158-1161)",
+    "proposed_resolution": "In 2.9.6 add 'a maintenance cycle (no route): all that apply, in delta scope'. In 2.9.7 state the version rule for a maintenance cycle, for example a patch release, as for bugfix."
+   },
+   {
+    "id": "R5",
+    "severity": "minor",
+    "problem": "N1's new fixture says a standard-route feature whose delta spec is approved gives plan. The row above the plan row, 'a change request is in flight and neither delivered nor awaiting a decision', gives feature. After the approval the request is active, not delivered and awaiting no decision, so read plainly that row matches first. 'Delivered' is not defined for a request.",
+    "where": "pipeline.md 2.4 row at line 296 and the fixture at line 325; packaging.md 2.6 route-table fixture row (line 516)",
+    "proposed_resolution": "Reword the row to 'a change request is in flight, its feature unit is not closed, and it awaits no decision'. A unit can be closed while its decision is open, as the plan unit is (line 313), so both the fast-route fixture and the new standard-route fixture hold."
+   }
+  ]
+ }
+}

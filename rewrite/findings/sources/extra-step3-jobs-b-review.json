@@ -1,0 +1,42 @@
+[
+  {
+    "id": "S3R-jobs-b-1",
+    "origin": "slice step 3, jobs-b, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_cmd_env.py (_launch_cli, test_cli_env_commands)",
+    "problem": "The launched calls inherit pytest's standard input. Under pytest's default fd capture, fd 0 is /dev/null, so the marked `env stop` runs as a tool call and only the marker can make it succeed. Under `pytest -s` from a terminal, fd 0 is the terminal, so the launched `env stop` runs as a person's call and stops every product whatever the marker says. This is the only test at the command layer that a marked stop passes the caller to the handler, and how strong it is depends on how the suite is run. Checked in a scratch copy with `_run_stop` changed to pass `None` for the caller: run normally, test_cli_env_commands fails ('no caller marker', exit 1); run under a pseudo-terminal (`script`) with `-s`, it passes.",
+    "proposed_resolution": "Pass `stdin=subprocess.DEVNULL` in `_launch_cli`. That is the Bash tool's condition, and it makes a successful stop depend on the marker. Optionally add a second marked stop with another agent's marker that must stop nothing (exit 1) before the matching one runs."
+  },
+  {
+    "id": "S3R-jobs-b-2",
+    "origin": "slice step 3, jobs-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py (_run_stop)",
+    "problem": "`env stop` treats a call as a person's terminal from `inv.stdin_tty` alone. Plan D3 calls this 'the same fact S1's require_person reads', but `require_person` also treats a set `VSDD_CALLER` as an agent. When `VSDD_CALLER` is set, the hook rewrote the call, so it is a tool call. If its marker is missing (pruned after ten minutes, looked for under another root through `-C`, or already read) and standard input is a terminal, the call stops every product, other agents' included, which is the silent stop D16 exists to prevent. Probe, in process: `main(['-C', root, 'env', 'stop', '--json'], stdin_tty=True, environ={'HOME': ..., 'VSDD_CALLER': 'nomarker01'})` with one product running returned exit 0 and stopped it. A Bash tool call's standard input is not a terminal, so this is defence in depth, and the code does what the plan says.",
+    "proposed_resolution": "Pass `terminal=inv.stdin_tty and inv.caller_key is None`, matching `require_person`. Add a test to test_cmd_env.py: with `VSDD_CALLER` set, no marker file and `stdin_tty=True`, `env stop` exits 1, stops nothing and the product's record stays. Record the refinement of D3 in the plan or env-stop.md."
+  },
+  {
+    "id": "S3R-jobs-b-3",
+    "origin": "slice step 3, jobs-b, review",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/cmd_env.py",
+    "problem": "Plan section 3 names the four functions `run_start`, `run_stop`, `configure_start` and `configure_stop`. The module defines `_run_start`, `_run_stop`, `_configure_start` and `_configure_stop`, and the builder reported no departure. The difference is harmless: no other unit or test reaches these functions, because registration goes through `COMMANDS`, and every S1 and records `cmd_` module (`cmd_init`, `cmd_path`, `cmd_validate`, `cmd_lock`, `cmd_decide`) uses private `_run`/`_configure` names. But it is a difference from a promised interface that was not reported.",
+    "proposed_resolution": "Keep the private names, which follow the codebase's convention, and record the departure in the unit's outcome, or amend the plan's names. If a later unit needs to call the adapters directly, rename them to the plan's public names instead."
+  },
+  {
+    "id": "S3R-jobs-b-4",
+    "origin": "slice step 3, jobs-b, review",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/env-start.md (Output and failure cases)",
+    "problem": "This unit added the built output shapes to env-stop.md: the success object, and the negative answer with exit 1. env-start.md still gives only `{ok, url, port, pid}` and names no failure case. The built negative answer `{ok: false, error, log}`, exit 1 (no worktree, an empty commands.run, no free port, the run command exiting on three ports, a held lock) and exit 2 for a malformed subject are stated only in plans/step-3/jobs.md 3.5. The two command files of one package now promise different amounts, and a reader of the spec cannot tell that env start has a negative answer or that it carries `log`.",
+    "proposed_resolution": "Add one sentence to env-start.md's Output and failure cases: a refusal is the negative answer `{ok: false, error, log}`, exit 1, with `log` naming the product's log file; a subject outside the id grammar is a usage error, exit 2."
+  },
+  {
+    "id": "S3R-jobs-b-5",
+    "origin": "slice step 3, jobs-b, review",
+    "severity": "minor",
+    "where": "next/tests/unit/test_cmd_env.py (test_start_bad_subject_exits_2)",
+    "problem": "The final assertion `assert not record_path(project, 'S-1.01').exists()` cannot fail. The test only starts the subjects '../evil' and 'x' * 100, and nothing in it ever asks for S-1.01. Its intent, that a malformed subject starts nothing and leaves nothing in the job store, is not tested. The exit-2 assertions above it do bite (checked by removing the Refuse conversion).",
+    "proposed_resolution": "Assert that the job store is absent or empty after the two calls (`store_of(project)` has no `*.json`, `*.lock` or `*.log`), so a handler that created files before rejecting the subject would fail the test."
+  }
+]

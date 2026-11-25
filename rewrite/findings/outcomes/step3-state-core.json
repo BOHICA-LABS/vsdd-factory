@@ -1,0 +1,128 @@
+[
+  {
+    "id": "AU-S2-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands: config.SPECS is the one key list the loader validates against, no config schema file ships, and the loader's strict defaults win where the two design lists disagreed (test_key_table_parity). What remains is prose: tables/config-keys.toml and topics/project-configuration.md each still call themselves the one key list; reconciling them is the documentation pass. The config/hooks.md rule count is corrected (four rules, not three).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS); next/tests/unit/test_config_keys.py::test_key_table_parity; rewrite/spec/config/hooks.md"
+  },
+  {
+    "id": "AU-T2-13",
+    "outcome": "left-for-builder",
+    "what_was_done": "Same settlement as AU-S2-03: in code, SPECS is the list the loader validates against and no second list ships (test_key_table_parity). Remaining: the duplicated one-key-list claims in the spec prose (tables/config-keys.toml versus topics/project-configuration.md), left for the documentation pass.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py; next/tests/unit/test_config_keys.py::test_key_table_parity"
+  },
+  {
+    "id": "AU-T2-15",
+    "outcome": "fixed",
+    "what_was_done": "The protected_paths default is computed, and it stays computed: init's factory.toml no longer carries a written protected_paths copy (which froze the default at init time and defeated the derivation on every init'd project). The loader computes it from [release] whenever the file does not set it, and editing release.changelog moves it.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (_refresh_protected_paths); next/plugins/vsdd-factory/py/vsdd/state/detection.py (render_config); next/tests/unit/test_config_keys.py::test_protected_paths_default_follows_release, ::test_editing_release_changelog_moves_protected_paths"
+  },
+  {
+    "id": "P3SEAM-06",
+    "outcome": "fixed",
+    "what_was_done": "The keys under [hooks.rules.<rule>] are closed: strength, the keys bash-git (attribution), bash-destructive (allow_pr_close), secrets (secret_globs) and purity-advice (pure_paths, side_effect_patterns) take of their own, and for auto-allow only scope. An unknown key or bad value costs that rule its settings, reported in Config.hook_problems.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (_apply_hook_rules); next/tests/unit/test_config_keys.py::test_hook_rule_keys_closed_per_rule"
+  },
+  {
+    "id": "SL1-47",
+    "outcome": "fixed",
+    "what_was_done": "Fault scope settled per decision 6: a fault under [hooks] itself (unknown key, wrong type, non-table rules value at the [hooks] level) is a ConfigError that invalidates the file; a fault under [hooks.rules.<rule>] costs that rule its settings only, with strict defaults and a hook_problems entry. test_hook_fault_scope holds both halves.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (_apply_hook_rules); next/tests/unit/test_config_keys.py::test_hook_fault_scope"
+  },
+  {
+    "id": "SL1-48",
+    "outcome": "fixed",
+    "what_was_done": "find_project_root with home=None now means os.environ.get('HOME') (an empty HOME counts as unset), so the walk always stops below the person's home directory; the dispatcher passes home=$HOME explicitly.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/project.py (find_project_root); next/tests/unit/test_project_paths.py::test_find_root_stops_below_home_by_default"
+  },
+  {
+    "id": "SL1-49",
+    "outcome": "fixed",
+    "what_was_done": "The validated raised cap is the cap: check_text reads [caps] and applies a project's raised value for the kind, and a file matched by caps.waived skips the size check altogether. test_raised_cap_applies_and_waived_skips covers raised-applies, waived-skips and the default cap firing.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py (_size_problem); next/tests/unit/test_config_keys.py::test_raised_cap_applies_and_waived_skips"
+  },
+  {
+    "id": "VSA-17",
+    "outcome": "fixed",
+    "what_was_done": "Detection always writes README.md and CLAUDE.md into paths.docs; the code does this and spec topics/project-configuration.md now says it (spec_lint passes).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/detection.py (_paths); rewrite/spec/topics/project-configuration.md; next/tests/unit/test_init.py::test_init_detection"
+  },
+  {
+    "id": "SL1-27",
+    "outcome": "fixed",
+    "what_was_done": "init refuses a plain .factory/ holding a factory.toml: detect reports partial and init exits 1 with state 'partial' and next naming /vsdd-factory:status --fix (the S3R-6 correction), converting nothing. Moving the sample's file into the overlay stays with E1.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_init.py; next/tests/unit/test_init.py::test_init_partial_refuses"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "One validate syntax: vsdd validate [--changed] [PATH...], exit 0 with no error-severity problem, 1 with one, 2 usage; giving --changed together with paths is a usage error. The prose settled too: rewrite/spec/commands/validate.md now states the single row and marks packaging.md's old row superseded.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/cmd_validate.py; next/tests/unit/test_artifacts.py::test_validate_exit_codes; rewrite/spec/commands/validate.md"
+  },
+  {
+    "id": "AU-P2-17",
+    "outcome": "left-for-builder",
+    "what_was_done": "The code half stands: flush, stale, job and step are not commands at slice depth, and the dispatcher exits 2 for each name (test_unknown_command_exits_2). What remains: the finding's list of not-built commands was not copied into the prose (the command topics still imply more than slice depth ships); documentation pass.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/cli/dispatch.py; next/tests/unit/test_dispatch.py::test_unknown_command_exits_2"
+  },
+  {
+    "id": "AU-P2-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "In S1's code the limits now exist once, in SPECS: prelude_limits draws every value from the SPECS default of the key it maps to, and render_config (which restated the limits a second time) now derives every written default from SPECS. What remains: the duplicates in the other packages the finding names - G2's prelude literals, S4's reports, B6's and H's lints. The prelude_limits mapping itself predates S1; S1 pinned it with a test.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (prelude_limits); next/plugins/vsdd-factory/py/vsdd/state/detection.py (render_config); next/tests/unit/test_config_keys.py::test_prelude_limits_equal_prelude_keys"
+  },
+  {
+    "id": "AU-S2-09",
+    "outcome": "left-for-builder",
+    "what_was_done": "S1's half: the limits and their defaults are stated once, in SPECS - prelude_limits derives from it and detection no longer restates any limit after the render_config fix. The remaining duplicates named by the finding belong to G2, S4, B6 and H and are left to their packages.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py; next/plugins/vsdd-factory/py/vsdd/state/detection.py; next/tests/unit/test_config_keys.py::test_prelude_limits_equal_prelude_keys"
+  },
+  {
+    "id": "AU-S2-11",
+    "outcome": "left-for-builder",
+    "what_was_done": "Does not arise in the code this unit built: no prose pointer into the original documents was introduced. The prose repairs in the named spec files (commands/import.md, packaging/*, agents/*) wait for the documentation packages (S1 prose pass).",
+    "where": "rewrite/spec/ files named by the finding; package S1 (documentation pass)"
+  },
+  {
+    "id": "AU-P2-16",
+    "outcome": "left-for-builder",
+    "what_was_done": "Prose repair of topics/state-directory.md (copying the storage-cost column verbatim): not a code fact; no behaviour in this unit depends on it. Belongs to the S1 documentation pass.",
+    "where": "rewrite/spec/topics/state-directory.md; package S1 (documentation pass)"
+  },
+  {
+    "id": "P3COV-04",
+    "outcome": "left-for-builder",
+    "what_was_done": "Missing command and threshold keys (fidelity, fuzz, coverage, perf): a key-table change with new policy; nothing at slice depth reads those keys. The loader's closed key list makes adding them a design change first.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS); packages S1, G5, G7"
+  },
+  {
+    "id": "P3COV-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "Notification when a decision opens: not at slice depth (no scheduled runs, no checkpoint). The notify channel keys exist in SPECS; the behaviour waits for S3.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS notify); package S3"
+  },
+  {
+    "id": "P3OPS-11",
+    "outcome": "left-for-builder",
+    "what_was_done": "Correction of this entry's own text: init renders [commands] from SPECS alone; the report-format keys (fidelity, fuzz, coverage, perf) were NOT added - they are the key-table change recorded under P3COV-04. The report formats for lint/format_check/scan and the baseline comparison are the green gate's, package G2.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS commands); package G2"
+  },
+  {
+    "id": "P3REQ-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "delivery.ci='none' staying true until a CI chore merges: a derived-fact change in the survey and delivery design; nothing at slice depth computes readiness. Waits for G4a and S3.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS delivery); packages G4a, S3"
+  },
+  {
+    "id": "P3REQ-12",
+    "outcome": "left-for-builder",
+    "what_was_done": "Named-spike worktree retention: no retention sweep exists at slice depth; init creates no spike worktrees. The wording repair in the design files waits for S3 and S5.",
+    "where": "package S3, S5"
+  },
+  {
+    "id": "SL1-22",
+    "outcome": "left-for-builder",
+    "what_was_done": "tokens_left as a survey limit key: the slice step() consults the platform budget object, so no key is needed on the story path this unit builds; the limits-table owner (S1 prose pass with W1) still decides whether the key joins the table.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/config.py (SPECS limits); package S1 (documentation pass), W1"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "S3B-survey-1",
+    "origin": "slice step 3, survey, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/routes.toml (row 16), rewrite/spec/topics/story-life.md",
+    "problem": "After the last story of the open wave is delivered, route row 16 ('a wave is open') answers wave, but no step 3 unit can ever close the wave: the wave gate is step 4. On the thin slice every project whose wave's stories are delivered keeps being sent to wave until a built row changes, which the D12 guard hides as 'not built yet' the moment the wave closure exists.",
+    "proposed_resolution": "State in routes.toml row 16 or topics/story-life.md that on the slice the wave closure is written by the wave gate (step 4), so 'a wave is open' remains the honest answer for it; revisit when the wave gate lands.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-survey-2",
+    "origin": "slice step 3, survey, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/routes.toml (rows 1 and 2), rewrite/plans/step-3/survey.md (D12)",
+    "problem": "route.next_step answers the guard ('a route row that is not built yet') when factory.toml does not load, although the real state is a broken configuration. A person following the answer would look for an unbuilt route row instead of their factory.toml.",
+    "proposed_resolution": "Let the guard's reason carry the configuration fault, or add a route row 'the configuration does not load' pointing at the briefing; a small spec addition beside topics/story-life.md's route commentary.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3B-survey-3",
+    "origin": "slice step 3, survey, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/commands/survey.md, rewrite/spec/commands/checkpoint.md",
+    "problem": "The shipped survey schema requires 'preconditions' and 'units' even on a refusal that precedes any reading (exit 2 relay), and the dispatcher satisfies it through empty_of plus Command.failure; nothing in the spec of either command says the failure object is the schema's empty form. A reader cannot reconstruct the exit-2 contract from the command specs alone.",
+    "proposed_resolution": "One sentence in commands/survey.md and commands/checkpoint.md: 'On a usage refusal the whole object prints with empty fields (state-core.md 3.1).' when the docs package (D3) revises the command files.",
+    "on_slice_path": true
+  }
+]

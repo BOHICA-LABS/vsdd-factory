@@ -1,0 +1,86 @@
+[
+  {
+    "id": "S4R-rules-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "A free-text option's value (-m/--message/-F/--file, separate or attached) is free text everywhere: shell.py records it and merge_guard upgrades an opaque git segment whose only hidden words are free-text values to the plain judgement (_plain_readable), derives the position test's chunks from program+args with values excluded (_segment_chunks, so message words are never command text), and judges each substitution inside a value as its own command under the git-bearing/plain/position rules (_value_substitutions), so $(cat <<'EOF'..EOF) is harmless and $(git push origin develop) blocks. Heredoc opacity is now the segment holding the << operator, not the whole command: shell.py no longer passes a global cut flag to _build_segment; the << redirect marks its own segment.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_plain_readable, _value_substitutions, _segment_chunks, _substitution_spans); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse, _build_segment); next/tests/hooks/test_merge_guard.py (test_builder_forms_pass_in_a_story_worktree heredoc-message and cat-then-commit rows, test_substitutions_anywhere_are_not_plain updated: the --message=$(echo note) case is now judged plainly at its own directory)"
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "_harmless_or_block no longer trusts the directory alone: a not-plain git-bearing segment whose directory is in no factory project blocks opaque_git when its text names -C, --git-dir, --work-tree, a GIT_DIR/GIT_WORK_TREE spelling, cd, or a far verb. Together with the shell.py timeout crash fix this covers all nine measured commands; timeout and caffeinate rows now parse and are judged at the -C target.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block); next/tests/hooks/test_merge_guard.py (test_unplaced_commands_that_reach_into_a_project: the nine measured commands run from a directory in no factory project, each blocked)"
+  },
+  {
+    "id": "S4R-rules-C2-2",
+    "outcome": "fixed",
+    "what_was_done": "shell.py reads the wrapper's leading operand with tokens[index][1].text (the tuple read crashed the parse, collapsing every cd to one opaque segment); each wrapper owns its long-value prefixes (_WRAPPER_LONG_VALUE_PREFIXES is a per-wrapper table) and its value flags, sudo's grammar corrected (-R is --chroot, -D is --chdir, --chroot added); a directory-changing wrapper option (env -C/--chdir, sudo -D/--chdir) resolves the wrapped program's where like a cd, sudo -R/--chroot leaves it unknowable. Added test_shell rows asserting timeout/stdbuf/sudo parse to program git with its args, and merge-guard cases that only a read wrapper decides.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_wrapper_options, _WRAPPER_FLAGS, _WRAPPER_VALUE_FLAGS, _WRAPPER_LONG_VALUE_PREFIXES, _WRAPPER_CHDIR_OPTIONS, _build_segment chdir threading); next/tests/hooks/test_shell.py (test_wrapper_leading_operand_parses_to_the_wrapped_program, test_directory_changing_wrapper_options_move_the_where); next/tests/hooks/test_merge_guard.py (test_a_read_wrapper_decides_the_verdict, test_wrappers_are_read_or_covered)"
+  },
+  {
+    "id": "S4B-rules-2",
+    "outcome": "fixed",
+    "what_was_done": "A subshell whose text holds cd, pushd or popd gets where \"\" instead of the outer directory: the subshell runs somewhere its own text does not resolve. The worktree-only casework changed with it: (cd <root> && git commit -m x) from the story worktree now blocks, and from the main checkout (cd <wt> && sed -i ...) is a write in an unknown place judged by tests-first.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse subshell branch); next/tests/hooks/test_shell.py (test_a_subshell_holding_a_cd_is_unplaced); next/tests/hooks/test_merge_guard.py (the subshell row of test_unplaced_commands_that_reach_into_a_project); next/tests/hooks/test_tests_first.py (test_a_write_behind_a_cd_is_judged_in_an_unknown_place, the sed form)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "A cd, pushd or popd word in a not-plain segment's text means the directory the parse gives is not the directory the segment runs in: _harmless_or_block blocks opaque_git on it, in a factory project or not. The nine measured spellings (sh -c, bash -c, eval, a substitution value, nohup sh -c, find -exec, xargs, caffeinate, script) are added as blocked cases from the story worktree, and the substitution-value form is judged through its own parsed segments.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block, _MOVE_WORDS); next/tests/hooks/test_merge_guard.py (test_a_cd_in_an_unreadable_segment_moves_it)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "shell.py's _cut_heredocs now returns the (delimiter, body) pairs it cuts, and _build_segment hangs a body back on the segment whose reader is a shell interpreter (sh, bash, dash, zsh, ksh; HEREDOC_SHELL_READERS) so the body is part of that segment's text for the git-bearing and position rulings; bodies read by cat, tee and git commit -F - stay out; subshell interiors carry the bodies they read too.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_cut_heredocs, _take_body, _consume_bodies, _build_segment body attachment); next/tests/hooks/test_merge_guard.py (test_a_heredoc_that_feeds_a_shell_is_the_commands, with the cat control)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "Each governed verb has a table of its options (_VERB_OPTIONS): an option not in it — abbreviated (--forc, --mirr, --al, --force-c), a bundle holding a governed letter (-qf, -fB), or a value attached to -C/-B/--force-create (-Cmain, -Bmain, --force-create=main) — makes the call not plain and position decides. _positionals reads operands after a --. update-ref --stdin is out of the table on purpose, so the stdin-driven ref writes are not plain. _push reads @ as HEAD. Additions cover every measured command on the guarded checkout and the worktree rows only a far-verb or attached-value ruling decides.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_VERB_OPTIONS, _GOVERNED_LETTERS, _NO_ATTACHED_VALUE, _options_plain, _positionals, _push); next/tests/hooks/test_merge_guard.py (test_abbreviated_and_bundled_options_are_not_plain)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-4",
+    "outcome": "fixed",
+    "what_was_done": "The verb is read positively: a verb outside git's own command list (GIT_COMMANDS) is not plain, so aliased verbs block. A -c, --config-env or GIT_CONFIG_KEY_* key naming alias.*, push.* or a remote's .push/.pushdefault makes the call not plain (_config_directed), and a git config write of such a key is judged the same way (_config_write_redirects). send-pack joins the plain verbs with push's refspec judgement, filter-branch is judged as the rewrite of the checked-out branch or a named one, and fast-import — its ref writes riding the standard input — is never plain. Assignment values join the position scan, so a pushed-through-configuration value naming a far verb is seen.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (GIT_COMMANDS, _config_directed, _redirecting_key, _config_write_redirects, _UNREADABLE_VERBS, send-pack and filter-branch in _VERBS/_git); next/tests/hooks/test_merge_guard.py (test_aliases_and_config_cannot_speak_for_git)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-5",
+    "outcome": "fixed",
+    "what_was_done": "shell.py threads every -C in order, each resolved against the one before it with the last standing (_minus_c), and merge_guard takes the last --git-dir (_git_dir_option) resolved with realpath so a symlink to a repository's git directory names the repository; a git-dir name that exists nowhere yet fails closed. A cd under a CDPATH an earlier segment set, and an absolute cd operand that is not a directory at parse time (a worktree a former segment is about to create included), are unknowable. A git call in a { ... } body is not plain and its where is \"\" — the body runs at its call site.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_minus_c, _cd_target, _sets_cdpath, _build_segment body groups); next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_dir_option, _resolve_dir, body-group handling); next/tests/hooks/test_merge_guard.py (test_multi_minus_c_last_gitdir_and_function_bodies); next/tests/hooks/test_shell.py (test_minus_c_options_thread_in_order, test_absolute_cd_to_a_missing_directory_is_unknown, test_a_function_body_is_judged_at_its_call_site)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-6",
+    "outcome": "fixed",
+    "what_was_done": "_exports_git_environment poisons the later git-bearing segments on any assignment of GIT_DIR or GIT_WORK_TREE whose segment's program is not git itself (special builtins included: GIT_DIR=... :), on export, set, readonly, declare, typeset or local naming either, and on any opaque segment whose text names either — eval export included. The assignment riding into the segment's own git call stays that call's redirection.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_exports_git_environment); next/tests/hooks/test_merge_guard.py (test_more_spellings_of_a_git_environment_export)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-7",
+    "outcome": "fixed",
+    "what_was_done": "Guarded-branch comparisons answer to letter case on macOS (_CASE_FOLD on sys.platform == 'darwin'): _same_branch backs the on_guarded test, _is_ref and the verb positionals, and the position test's name scan honours the folded forms. The measured commands are added as blocked cases, skipped by pytest on other platforms where Main and main are distinct branches.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_CASE_FOLD, _same_branch, _is_ref, _chunk_names); next/tests/hooks/test_merge_guard.py (test_guarded_names_answer_to_letter_case_on_macos)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-8",
+    "outcome": "fixed",
+    "what_was_done": "_git_bearing tests a parsed segment on its program and arguments as whole words, so grep -rn \"git push\" . and its siblings are no git calls; an argument that is a command string of its own (it carries a shell joiner: find -exec, sh -c payloads) has its words read as commands, so those still count. Opaque segments are tested on their text as before. The four measured builder commands are added to the story-worktree pass table.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git_bearing, _is_command_string); next/tests/hooks/test_merge_guard.py (test_builder_forms_pass_in_a_story_worktree grep and echo rows)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-9",
+    "outcome": "fixed",
+    "what_was_done": "tests-first now follows the could-be-the-edit stance in all the directions the finding names. write_unknown counts a segment whose program is no writer but one of whose words is a writer (flock, caffeinate, script, find, the for loop's sed), a writer whose path operand holds an expansion (sed -i ... $F), and keeps a git call's free-text values out of the scan so a heredoc commit message naming rm or touch is no write. _unreadable judges an opaque segment whose text holds a cd — or whose where is empty — as a write in an unknown place, checked against the governing project's stories with passing red records (_frozen_stories). The before-red counterpart blocks no_red_evidence.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py (write_unknown, _unknown_writer_words, _delegates_write, _expansion_operand); next/plugins/vsdd-factory/py/vsdd/rules/tests_first.py (_unreadable, _unstuck, _frozen_story, _frozen_stories); next/tests/hooks/test_tests_first.py (test_delegated_writers_are_the_edits_they_could_be, test_a_write_behind_a_cd_is_judged_in_an_unknown_place)"
+  },
+  {
+    "id": "step4-rules-fix-3-C1-10",
+    "outcome": "fixed",
+    "what_was_done": "Added story-worktree cases that only the position test's own clauses decide: sh -c 'git -C <root> commit -m x' and env -S 'git --git-dir=<root>/.git commit -m x' for the redirect clause, sh -c 'git log develop' and echo $(git log develop) for the guarded-name clause, each asserting the fix line runs the git command by itself, plainly, from the story worktree and names vsdd story deliver and vsdd release.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block clauses exercised); next/tests/hooks/test_merge_guard.py (test_unreadable_calls_name_their_reach_in_the_worktree)"
+  }
+]

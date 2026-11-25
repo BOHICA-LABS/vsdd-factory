@@ -1,0 +1,7 @@
+# The artifact registry is shipped, built and tested: it lives at
+# "next/plugins/vsdd-factory/py/vsdd/policy/artifacts.toml" (package C2), which also carries the
+# story-kind table (per kind: the tests stage and the implement stage, and whether it has a red
+# gate) and the [_unknown] policy for a write that matches no kind. The shipped file is the single
+# definition (README rule 7); this pointer is kept valid TOML.
+# Sources: state.md#2.5, state.md#2.4, state.md#layout, state.md#2.8, hooks.md#2.11.3,
+# BLUEPRINT.md#4.6, pipeline.md#2.9.1, pipeline.md#2.9.13.

@@ -1,0 +1,16 @@
+[
+ {
+  "id": "d31-fix-2-C1-2",
+  "files": [
+   "tables/flag-duties.toml",
+   "tables/flag-story-checks.toml",
+   "workflows/story.md",
+   "schemas/implement-data.schema.json"
+  ],
+  "packages": [
+   "F2"
+  ],
+  "on_slice_path": false,
+  "note": "Widen the description of test_defects in the shipped implement-data schema to cover existing tests that the green gate's run with a flag on names; the shape and the story script's prompt do not change."
+ }
+]

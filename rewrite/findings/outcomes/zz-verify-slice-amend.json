@@ -1,0 +1,74 @@
+[
+ {
+  "id": "AU-S2-03",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Two key lists still each claim to be the list. project-configuration.md says both that the one key list is the table and that 'The example below is the whole key list ... with its default. It is the one key list'. The config-keys.toml header points back to that example. The defaults differ: delivery.mode pr against detected, delivery.ci required against detected, protected_paths with a literal CHANGELOG.md against the blueprint default, auto-allow.scope off against 'set at setup', paths.docs fixed against detected. The example also omits the per-rule [hooks] keys although it claims every accepted key. This is the S1 loader's source, on the slice path.",
+  "where": "topics/project-configuration.md ('The whole key list, as an annotated example'); tables/config-keys.toml header"
+ },
+ {
+  "id": "AU-T2-13",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Two key lists still each claim to be the list. project-configuration.md says both that the one key list is the table and that 'The example below is the whole key list ... with its default. It is the one key list'. The config-keys.toml header points back to that example. The defaults differ: delivery.mode pr against detected, delivery.ci required against detected, protected_paths with a literal CHANGELOG.md against the blueprint default, auto-allow.scope off against 'set at setup', paths.docs fixed against detected. The example also omits the per-rule [hooks] keys although it claims every accepted key. This is the S1 loader's source, on the slice path.",
+  "where": "topics/project-configuration.md ('The whole key list, as an annotated example'); tables/config-keys.toml header"
+ },
+ {
+  "id": "AU-T2-15",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Two key lists still each claim to be the list. project-configuration.md says both that the one key list is the table and that 'The example below is the whole key list ... with its default. It is the one key list'. The config-keys.toml header points back to that example. The defaults differ: delivery.mode pr against detected, delivery.ci required against detected, protected_paths with a literal CHANGELOG.md against the blueprint default, auto-allow.scope off against 'set at setup', paths.docs fixed against detected. The example also omits the per-rule [hooks] keys although it claims every accepted key. This is the S1 loader's source, on the slice path.",
+  "where": "topics/project-configuration.md ('The whole key list, as an annotated example'); tables/config-keys.toml header"
+ },
+ {
+  "id": "P3SEAM-06",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Two key lists still each claim to be the list. project-configuration.md says both that the one key list is the table and that 'The example below is the whole key list ... with its default. It is the one key list'. The config-keys.toml header points back to that example. The defaults differ: delivery.mode pr against detected, delivery.ci required against detected, protected_paths with a literal CHANGELOG.md against the blueprint default, auto-allow.scope off against 'set at setup', paths.docs fixed against detected. The example also omits the per-rule [hooks] keys although it claims every accepted key. This is the S1 loader's source, on the slice path.",
+  "where": "topics/project-configuration.md ('The whole key list, as an annotated example'); tables/config-keys.toml header"
+ },
+ {
+  "id": "AU-T2-08",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: All 31 artifacts/*.md files still restate their row (path, frontmatter keys, writer, cap, lifecycle), although the outcome and tables-repair.md say they link instead. demo-evidence.md's lifecycle ('write-once. Removed with holdout/evaluations/<cycle>/...') already disagrees with the table row.",
+  "where": "rewrite/spec/artifacts/*.md"
+ },
+ {
+  "id": "AU-T2-09",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: The kind vocabulary was only recorded, not unified. The kind ids are holdout-scenario and project-conventions, while [reveals] says 'list scenario'. [reveals] is generated from the kinds at build time, so the generated table and the hand-written one disagree. The choice is put off until the build.",
+  "where": "tables/artifacts.toml; tables/walls.toml [reveals]; conflicts/tables-repair.md"
+ },
+ {
+  "id": "AU-P2-12",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Only the table part was done. Prose pointers into the originals remain: 'blueprint section 10, item N' (e2e-story-tier.md, plugin-manifest.md, proof-greenfield.md), 'open question 1 of the design' (verifier.md, codebase-analyzer.md, spike-runner.md, model-tiers.md), 'Section 2.15.' (import.md), 'BLUEPRINT.md#4.9' (cli-entry.md), 'pipeline.md guard G3' (rules/artifacts.md), and the other files the findings list.",
+  "where": "the files listed in AU-P2-12 and AU-S2-11"
+ },
+ {
+  "id": "AU-S2-11",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Only the table part was done. Prose pointers into the originals remain: 'blueprint section 10, item N' (e2e-story-tier.md, plugin-manifest.md, proof-greenfield.md), 'open question 1 of the design' (verifier.md, codebase-analyzer.md, spike-runner.md, model-tiers.md), 'Section 2.15.' (import.md), 'BLUEPRINT.md#4.9' (cli-entry.md), 'pipeline.md guard G3' (rules/artifacts.md), and the other files the findings list.",
+  "where": "the files listed in AU-P2-12 and AU-S2-11"
+ },
+ {
+  "id": "AU-S2-09",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Partly done. Still defined twice: the event types (x-documented-types in event.schema.json and event-types.toml), the tiers (conventions.md 114-116 and each agent file's tier line), GOVERNED (merge-guard.md), the exempt kinds (tests-first.md), the lock_stale default (run-lock.md), the spike reuse rule (artifacts.toml and spike-ledger-entry.md), and the pure_paths default (purity-advice.md). All copies currently agree.",
+  "where": "schemas/event.schema.json; conventions.md; agents/*.md; rules/merge-guard.md; rules/tests-first.md; topics/run-lock.md; artifacts/spike-ledger-entry.md; rules/purity-advice.md"
+ },
+ {
+  "id": "AU-S2-12",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: Commentary pointing to conflicts/commands.md remains in env-stop, validate, cycle-close, defer-add, review-prepare, coverage and idea-register, and in three schema descriptions. env-stop and validate still give two syntaxes.",
+  "where": "commands/*.md listed; schemas/driver-flag, config-fingerprint, spike-admission"
+ },
+ {
+  "id": "AU-P2-10",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: The example rule.block event line from hooks.md#2.12 is still in no spec file.",
+  "where": "topics/event-log.md"
+ },
+ {
+  "id": "AU-T2-22",
+  "outcome": "not-fixed",
+  "what_was_done": "A check found the fix incomplete: The closure verdict description paraphrases ('head, ... rounds_used') instead of quoting state.md ('perimeter, commit, passes, outcome, and the counts...').",
+  "where": "schemas/closure-record.schema.json (verdict)"
+ }
+]

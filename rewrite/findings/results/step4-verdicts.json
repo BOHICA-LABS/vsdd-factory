@@ -1,0 +1,129 @@
+{
+ "logs": [
+  "Review of verdicts: Not accepted as built: 8 major and 8 minor findings, no blockers. The convergence core matches the prelude, all 25 judge/loop cases agree in Node and Python, and the rebuild rules work. One promised interface differs without being reported: covering's stored-closure branch tests cover against closure.delivery.head/patch_id instead of the stored verdict's own head. As a result a closure-only verdict never covers before a merge, and a stale verdict can cover an unreviewed commit once delivery.head moves; both were confirmed by probes. changed_files returns git's C-quoted names for unusual paths. Mutations that change behaviour pass the whole suite in four places: chain, later-loop items, the verdict's waiver wiring (P3OPS-09) and count-time re-grounding (VSA-07). The two AC readers disagree on fenced headings, and the test meant to hold them together cannot fail. One spec row is falsely shown as covered by r11. Every finding is in /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step4-verdicts-review.json.. 16 findings, 8 blocker or major.",
+  "Round 1 for verdicts: 16 of 17 fixes confirmed, 5 still open.",
+  "Round 2 for verdicts: 3 of 5 fixes confirmed, 2 still open."
+ ],
+ "result": {
+  "unit": "step4-verdicts",
+  "build": {
+   "summary": "Built G3 to slice depth. First `vsdd.state.verdicts.changed_files` (gates unblocked), then `convergence.py` (judge + the converge() replay), `verdicts.py` (rebuild from step records, verdict, summary, covering, waivers, passes_used, rounds_used, rebuilt, public_verdict), 41 conformance cases (25 judge/loop, 16 records) with Node and pytest runners agreeing, and test_verdicts.py. Made the one sanctioned edit in records' gate_evidence.py: the review lookup is now `covering`. Closed P3OPS-09, S5P-N9, VSA-03, VSA-05, VSA-07; rejected P3BLD-27 with case l10. Spec: verdicts.md honours-the-mark wording and state-api verdict-never-None; spec_lint clean; findings rebuilt. Own tests 66 pass; check.py 30/30; universal node tests pass; no __pycache__ under plugins/. Persistent failures in tests/hooks (rule_cases, liveness, caller) are the rules unit's in-flight files, re-run three times.",
+   "files_changed": 11,
+   "tests_passed": 66,
+   "tests_failed": 0,
+   "findings_fixed": 6,
+   "findings_left": [],
+   "new_findings": 3,
+   "departures_from_plan": [
+    "Section 3.1 difference 2 realised as: after a pass the script would have returned from, a following pass is reviewed with no claims when the outcome was converged, else with claims rebuilt from the open findings and that pass's fix \u2014 the plan's wording, made precise in code; flagged as S4B-verdicts-1 that no records case pins the blocked-then-continue variant yet.",
+    "test_public_verdict_hides_walled drives the walled finding through rebuild by adjusting the stored record's JSON (records refuses to store a walled finding, exactly as the plan's section 7 anticipates).",
+    "Sections 1 and 'Left for later' honoured strictly; no review show/prepare, holdout findings, other perimeters, walled-file handling or flag items built."
+   ],
+   "spec_files_changed": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/verdicts.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/state-api.md"
+   ],
+   "foreign_failures": [
+    "tests/hooks/test_rule_cases.py: 6 failures in test_case_table_both_ways (rules unit's in-flight rule rows; persisted across three runs)",
+    "tests/hooks/test_liveness.py: test_lock_refresh and test_lock_refresh_belongs_by_run_and_story (persisted across three runs)",
+    "tests/hooks/test_caller.py: test_no_marker, test_refused_bypass_forms_pass_unmarked_through_the_runner (persisted across three runs)",
+    "transient during the run, now green: tests/unit/test_gate_*.py, tests/hooks/test_rules_fail_closed.py, tests/lint/test_check.py, and check.py's schema_fixtures row over the gates unit's untracked wave-gate-data fixtures"
+   ],
+   "deferred": [
+    "vsdd review show and review prepare (PL4-18; nothing on the story path calls them)",
+    "holdout_findings in Python and the two holdout-score conformance cases (G6a)",
+    "perimeters spec, plan, wave and release with their review methods and items (G5, G6a, G6b)",
+    "walled findings in full: the evaluation file and a waiver that names a walled key (S2a widened, H3)",
+    "the flag item F-ITEMS (F packages) and direct-after-cap with brief() guidance (P3OPS-09 remainder: B4a, W2, S3)",
+    "grounding module vsdd/grounding.py and test_grounding.py \u2014 the rules unit's (PL4-1); the verdict trusts the stored mark"
+   ]
+  },
+  "review": {
+   "verdict": "Not accepted as built: 8 major and 8 minor findings, no blockers. The convergence core matches the prelude, all 25 judge/loop cases agree in Node and Python, and the rebuild rules work. One promised interface differs without being reported: covering's stored-closure branch tests cover against closure.delivery.head/patch_id instead of the stored verdict's own head. As a result a closure-only verdict never covers before a merge, and a stale verdict can cover an unreviewed commit once delivery.head moves; both were confirmed by probes. changed_files returns git's C-quoted names for unusual paths. Mutations that change behaviour pass the whole suite in four places: chain, later-loop items, the verdict's waiver wiring (P3OPS-09) and count-time re-grounding (VSA-07). The two AC readers disagree on fenced headings, and the test meant to hold them together cannot fail. One spec row is falsely shown as covered by r11. Every finding is in /Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-step4-verdicts-review.json.",
+   "tests_rerun": "From next/: `uv run --no-sync python -B tools/check.py`: 30/30 checks passed. `uv run --no-sync python -B -m pytest -q`: 10 failed, 1238 passed, 1 skipped (511 s). Every failure is in another unit's in-flight files: tests/hooks/test_rule_cases.py (6), test_liveness.py (2) and test_caller.py (2), all owned by the rules unit. None is in a verdicts file. `node --test tests/workflows/universal.test.mjs`: 27 pass, 0 fail. `node --test tests/conformance/conformance.test.mjs`: 2 pass. From the repository root: `python3 rewrite/tools/spec_lint.py`: 0 problem(s). `python3 rewrite/tools/findings.py build`: 818 findings, 575 fixed, 125 left-for-builder, 1 not-fixed, 114 open, 3 rejected; 63 by-package lists written. No __pycache__ was created under next/plugins. The mutation and probe runs used a scratch copy at /private/tmp/claude-501/-Users-jmagady-dev2-vsdd-factory/f468fc16-2190-4e04-8bbb-50654bb31906/scratchpad/copy/next.",
+   "interfaces_checked": 17,
+   "interfaces_as_promised": 16,
+   "outcomes_checked": 6,
+   "outcomes_confirmed": 4,
+   "findings": 16,
+   "blockers": 0,
+   "majors": 8
+  },
+  "rounds": [
+   {
+    "round": 1,
+    "fix": {
+     "summary": "Fixed all 16 review findings for the verdicts unit (G3) in /Users/jmagady/dev2/vsdd-factory on branch rewrite/v1. Code changes: covering's stored branch judges by the stored verdict's own head (removed the delivery.head/patch_id path); changed_files now runs git -c core.quotePath=false diff --name-only -z --no-renames; public_verdict maps walled keys in dismissed to the walled key and drops the reason; convergence.replay caps with blocked/cap when the arbitration is spent; rebuild's last loop 1 replays with the used the script was given (earlier-run pairs raised by the stored closure count, via _closure_rounds_used); the AC reader is now one shared story_unit.acs(body) that skips fences, which verdicts._story_acs delegates to. Spec/schema: closure-record.schema.json verdict renamed commit to head and gained patch_id and rounds_used; rewrite/spec/records/closure.md updated to match. Tests: rewrote test_closure_used_without_records to summary()'s form; added test_closure_not_covered_after_a_new_commit, test_chain_open_at_one_loop_keeps_covering_none, test_waived_verdict_converges_through_the_decision, test_verdict_never_regounds_an_unmarked_finding, test_replay_uses_the_used_the_script_was_given; extended test_changed_files_and_later_loop_items (accented and double-quoted names), test_items_equal_unit_acs (### AC-9 inside the fence), test_public_verdict_hides_walled (withdrawn walled finding), test_computed_overrules_closure and records' test_evidence_lookup (summary-form stored verdicts). Conformance: new records cases r17-chain-broken-at-loop-one, r18-repair-item-unaccounted, r19-changed-range-unknown, r20-walk-on-after-clean, r22-cap-after-arbitration; r08 remade as a real four-pass after-cap waiver story; r16 reordered as steps_list returns with a fix record whose passing gate is at another sha (skipped why 'gate'); SPEC_ROWS remapped (walk-on row to r20) with the two holdout rows deferred to G6a via DEFERRED_TO_G6A; conformance.test.mjs now registers one Node test per case over shared results. The S4R-verdicts-1 rule change rippled into three hand-written stored verdicts in test_story_unit.py and the valid_story.json fixture, updated to carry head and patch_id. Eleven of the twelve new/changed discriminating tests were verified by mutation (fix removed, test fails; fix restored, test passes). Outcome file written to rewrite/findings/outcomes/step4-verdicts-fix.json and the ledger rebuilt: P3BLD-27 now shows rejected, closing S4R-verdicts-16. All 16 findings outcome fixed. Full suite: 1283 passed, 12 failed \u2014 every failure in tests/hooks files owned by other units (hook-runner and the in-flight rules unit), reproduced identically on two consecutive runs, not touched per the task.",
+     "tests_passed": 1283,
+     "tests_failed": 12,
+     "checks": "From next/: uv run --no-sync python tools/check.py \u2014 30/30 checks passed; uv run --no-sync python -m pytest -q \u2014 1283 passed, 12 failed, 1 skipped in 558s, the 12 all in tests/hooks files other units own (identical failure set on two full runs ten minutes apart); node --test tests/workflows/universal.test.mjs \u2014 27 pass, 0 fail. Also node --test tests/conformance/conformance.test.mjs \u2014 26 pass (one test per case). Targeted: test_verdicts.py + test_conformance.py + test_state_gate_evidence.py + test_story_unit.py + test_schema_fixtures.py together 209 passed. From the repository root: python3 rewrite/tools/spec_lint.py \u2014 0 problems; python3 rewrite/tools/findings.py build \u2014 865 findings: 660 fixed, 125 left-for-builder, 1 not-fixed, 75 open, 4 rejected. tools/build.py and tools/build.py --check: all generated copies current. No __pycache__ under next/plugins (ran Python with PYTHONDONTWRITEBYTECODE=1 throughout and verified by find). Outcome file at /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step4-verdicts-fix.json with one object per finding plus the P3BLD-27 rejection; the findings build appended it to outcomes/ORDER after step4-rules.json as S4R-verdicts-16 requires.",
+     "foreign_failures": [
+      "tests/hooks/test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner (hook-runner file; gate hook exits 0 where exit 10 block is expected; identical on both full-suite runs; not my unit's file)",
+      "tests/hooks/test_caller.py::test_no_marker (hook-runner file; assert 10 == 0 inverted outcome; not my unit's file)",
+      "tests/hooks/test_liveness.py::test_lock_refresh (lock-refresh VerdictError from vsdd; not my unit's file)",
+      "tests/hooks/test_liveness.py::test_lock_refresh_belongs_by_run_and_story (same file and cause)",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a commit on the integration branch is blocked] (rules unit's case table through the real launcher; the task forbids any step-4 unit editing test_rule_cases.py)",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[an entry that matches its record is stored]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a failing entry with no record is stored]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[product source before red is blocked by the implementer]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a sed on source before red is the edit it stands for]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a sed -i -e on source before red is the edit it stands for]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a redirect into a frozen test is blocked after red]",
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[a test-writer source edit after red at a later commit is blocked]"
+     ],
+     "rejected": [
+      {
+       "id": "P3BLD-27",
+       "outcome": "rejected",
+       "what_was_done": "Rejection re-recorded after step4-rules.json so the ledger no longer shows left-for-builder waiting for G3 (the 'other ledger finding whose outcome your work changed' entry): the shorter judge-the-last-pass rule stays rejected per plan decision D1 \u2014 a claim the next reviewer did not confirm keeps its finding open and a dismissal needs the dispute and the ruling, which only the full replay gives.",
+       "test": "next/tests/conformance/cases/l10-claim-not-confirmed.json plus every loop and records case; the replay is statement-for-statement with the prelude and 25 loop cases conform through both runners"
+      }
+     ]
+    },
+    "confirm": {
+     "tests_rerun": "From next/: tools/check.py printed 30/30 checks passed. pytest -q printed 12 failed, 1283 passed, 1 skipped in 546.70s. All 12 failures are in the rules unit's hook tests, which run beside this unit: test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner and ::test_no_marker, test_liveness.py::test_lock_refresh and ::test_lock_refresh_belongs_by_run_and_story, and 8 cases of test_rule_cases.py::test_case_table_both_ways. They report step-results/bad_identity, unsafe_id ('{run}' is not a safe path segment) and gate_result_mismatch; none of them touches verdicts, convergence or the review lookup. node --test tests/workflows/universal.test.mjs printed tests 27, pass 27, fail 0. node --test tests/conformance/conformance.test.mjs printed tests 26, pass 26. From the root: spec_lint.py printed 0 problem(s). findings.py build printed 867 findings: 659 fixed, 125 left-for-builder, 2 not-fixed, 77 open, 4 rejected; P3BLD-27 is now rejected, recorded in step4-verdicts-fix.json. No __pycache__ was found under next/plugins at any point. I ran 24 mutations in a scratch copy of next/ (outside the repo): 23 fail the named tests, and only S4c (rule 8's no-loop-before branch) passes everything. A probe of the S4R-verdicts-15 floor showed a regression after the checkpoint stores summary().",
+     "checked": 17,
+     "confirmed": 16,
+     "still_open": 5
+    }
+   },
+   {
+    "round": 2,
+    "fix": {
+     "summary": "Fixed all five review findings for the step-4 verdicts unit (G3) in /Users/jmagady/dev2/vsdd-factory. Root fix: removed the stored_used floor from verdicts._rebuild/_compute (S4R-verdicts-15 and its regression C1-1), restoring plan 3.3 rule 9 - a loop 1's used is the loop-1 passes of earlier runs only, so storing summary() into the closure no longer moves the arbiter or ratchets rounds_used. r16 conformance case made storable and its skipped list de-duplicated (C1-2), rule 8's no-loop-before branch given case r21 (C1-3), and the story_unit.acs dependency documented with the ORDER.md sanction row recorded for the orchestrator in the outcome file (C1-4). Outcome file: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step4-verdicts-fix-2.json; the ledger now shows all five fixed, recorded there. Interface changes to report to other units: none public - only the private _rebuild signature (lost stored_used) and the rebuilt semantics the findings demanded; the plan-section-3 functions verdict/summary/covering/waivers/rounds_used/changed_files/rebuilt/public_verdict/rebuild keep their signatures.",
+     "tests_passed": 1285,
+     "tests_failed": 12,
+     "checks": "From next/: uv run --no-sync python tools/check.py -> 30/30 checks passed. Full pytest (-q): 1285 passed, 1 skipped, 12 failed - every failure in files other units own (see foreign_failures); retried after several minutes, still present, not fixed by me. node --test tests/workflows/universal.test.mjs -> 27 pass, 0 fail. From the repository root: python3 rewrite/tools/spec_lint.py -> 0 problem(s); python3 rewrite/tools/findings.py build -> 880 findings: 663 fixed, 125 left-for-builder, 7 not-fixed, 81 open, 4 rejected (my five recorded in step4-verdicts-fix-2.json). My own files: tests/unit/test_verdicts.py + tests/conformance/test_conformance.py + tests/unit/test_state_gate_evidence.py -> 88 passed, re-verified at the end. No __pycache__ under next/plugins (count 0; all my Python runs used PYTHONDONTWRITEBYTECODE=1).",
+     "foreign_failures": [
+      "tests/hooks/test_rule_cases.py::test_case_table_both_ways[*] (12 cases) - owned by the rules unit; failed in both full-suite runs and again after waiting several minutes",
+      "tests/unit/test_gate_green.py::test_green_passes_and_writes_patch - owned by the gates unit; still failing on retry",
+      "tests/unit/test_gate_cli.py, tests/unit/test_gate_demo.py, tests/unit/test_gate_red.py, tests/unit/test_gate_refreeze.py, tests/unit/test_gate_registry.py, tests/hooks/test_caller.py, tests/hooks/test_liveness.py - gates/rules-owned files failing intermittently between the two full-suite runs (the builders are in flight in this tree); not touched"
+     ],
+     "rejected": []
+    },
+    "confirm": {
+     "tests_rerun": "From next/, `uv run --no-sync python tools/check.py`: 30/30 checks passed. `uv run --no-sync python -m pytest -q`: 12 failed, 1297 passed, 1 skipped in 638.73s. All 12 failures are hook tests: test_caller.py::test_refused_bypass_forms_pass_unmarked_through_the_runner and ::test_no_marker, test_liveness.py::test_lock_refresh and ::test_lock_refresh_belongs_by_run_and_story, and 8 test_rule_cases.py::test_case_table_both_ways cases. They come from the step store refusing results ('a step result needs a workflow'), which is the step-result schema and hook work in progress elsewhere in the tree. None of them goes through verdicts, convergence or story_unit. This unit's own tests pass: test_verdicts.py, test_conformance.py and test_state_gate_evidence.py give 88 passed, which is the earlier 87 plus r21; test_story_unit.py, test_survey.py and test_survey_cli.py give 28 passed. `node --test tests/workflows/universal.test.mjs`: 27 pass, 0 fail. From the repository root, `python3 rewrite/tools/spec_lint.py`: 0 problem(s). `python3 rewrite/tools/findings.py build`: 880 findings (676 fixed, 125 left-for-builder, 1 not-fixed, 74 open, 4 rejected), 63 by-package lists written; this ran before the outcome file was written. Mutations, run in a scratch copy outside the repository: putting the stored_used floor back fails test_storing_the_summary_moves_nothing. Making the no-loop-before branch give [] fails only r21-loop-two-without-loop-one. Turning off fence skipping in story_unit.acs fails test_items_equal_unit_acs. Re-adding the duplicate fix-x-l2-p3 record to r16 fails test_every_case_is_well_formed. Each records case gives the same result when its records are put in the order steps_list returns. There is no __pycache__ under next/plugins. Outcome file written: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/step4-verdicts-confirm-2.json. There were no new problems, so no extra-sources file was written.",
+     "checked": 5,
+     "confirmed": 3,
+     "still_open": 2
+    }
+   }
+  ],
+  "still_open": [
+   {
+    "id": "S4R-verdicts-15",
+    "severity": "minor",
+    "file": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py",
+    "problem": "The floor part is fixed: _rebuild and _compute no longer take or pass a stored_used, and test_storing_the_summary_moves_nothing fails when a floor is put back. The clone case this finding is about is back where it started. The fix went back to rule 9 (used = loop-1 passes of earlier local runs) and recorded nothing about the used the run was given. The fixer says clones 'follow the closure's stored verdict through covering() (D8)'. That holds only while the clone has no counted record at the head. Once the clone's own run stores a pass, the computed verdict covers the head and covering() never returns the stored one. Probe in a scratch copy: closure rounds_used 1, cap 3, no earlier records. Pass 1 has finding code:a, a fix disputes it, pass 2 has not_resolved, and the arbiter rules not_defect. The script is given used 1 by rounds_used() and converges (clean, rounds_used 3). The tool replays with used 0 and gives failed/no_result, covering() returns None so delivery would refuse, and summary() stores rounds_used 2 where 3 were used. The comment in _rebuild that says a clone with 'short records follows the closure's stored verdict through covering' is wrong.",
+    "proposed_fix": "Spec steward (S3/W2) first: record the used the survey hands the script, on the run record or in the loop-1 review step's identity. Then _rebuild replays each run's loop 1 with that recorded used, using rule 9's count only for runs without it, and rounds_used() comes from the recorded used plus the run's own passes instead of max(passes_used, closure). Correct the _rebuild comment, and add a test_verdicts case with the probe above that expects converged/clean and a covering() answer."
+   },
+   {
+    "id": "S4R-verdicts-C1-4",
+    "severity": "minor",
+    "file": "rewrite/plans/step-4/ORDER.md",
+    "problem": "The code side holds. story_unit.acs is the one AC reader and skips ``` and ~~~ fences. verdicts._story_acs imports it inside the function. Nothing refers to _acs, so no alias is needed. test_items_equal_unit_acs guards the pair (checked by mutation). The sanction the finding asks for has not been recorded. ORDER.md section 4 has no verdicts row for P/py/vsdd/state/story_unit.py, and that table says 'nothing outside this table is edited'. survey-2.md section 2's story_unit.py bullet does not mention acs. survey-2 has not built yet (story_unit.py has no STAGES or ladder), so the builder who rewrites the file is still told nothing until a test fails.",
+    "proposed_fix": "For the orchestrator, no code change: add this row to ORDER.md section 4: verdicts | P/py/vsdd/state/story_unit.py | acs stays the one AC reader, skipping code fences, and verdicts._story_acs delegates to it (test_items_equal_unit_acs holds the two together) | S4R-verdicts-7. Also add a line to survey-2.md section 2's story_unit.py bullet saying acs is kept as it is."
+   }
+  ]
+ }
+}

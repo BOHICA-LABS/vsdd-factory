@@ -1,0 +1,134 @@
+[
+  {
+    "id": "CATCHUP-R1",
+    "outcome": "fixed",
+    "what_was_done": "The spec now uses the generated names. story-script.md and wave-script.md use S_REVIEW_DATA, S_FIX_DATA, S_RULING_DATA, S_HOLDOUT_DATA and S_IMPLEMENT_DATA, and topics/prelude.md is a pointer that lists no literals. A grep of rewrite/spec finds no S_REVIEW, S_FIXES, S_RULINGS or S_HOLDOUT. The new check.py check spec_literals_are_the_generated_set fails on any S_* name in a spec code fence or a workflow body that is not a value of build.LITERAL_NAMES. I tested both sides in a scratch copy: writing `data: S_REVIEW` into the story-script.md code block failed the check, and so did writing it into toy-build.js's body.",
+    "where": "rewrite/spec/topics/story-script.md; rewrite/spec/topics/wave-script.md; rewrite/spec/topics/prelude.md; next/tools/check.py spec_literals_are_the_generated_set (also run by tests/lint/test_check.py::TestRepositoryChecks::test_every_registered_check)"
+  },
+  {
+    "id": "CATCHUP-R2",
+    "outcome": "fixed",
+    "what_was_done": "build() now reports a hand-written `const S_* =` found outside the generated:tables and generated:schemas blocks of prelude.js, and one found outside the stamped region of a workflow (_hand_literal_problems). _mapping_problems requires LITERAL_NAMES plus NON_PRELUDE_SCHEMAS (event.schema.json) to equal the set of shipped *.schema.json files. I tested both in a scratch copy. Appending `const S_HANDMADE = {...}` to prelude.js made build --check print 'hand-written schema literal S_HANDMADE'. Deleting the wave-gate-data mapping made it print 'shipped schemas no literal mapping covers ... wave-gate-data.schema.json'. test_build.py pins both guards. One small gap: the regex matches `const` only, so `let S_X =` is not caught.",
+    "where": "next/tools/build.py (_hand_literal_problems, _mapping_problems, build); next/tests/lint/test_build.py test_hand_written_literal_in_the_prelude_is_reported, test_hand_written_literal_in_a_workflow_body_is_reported, test_shipped_schema_without_a_mapping_is_an_error, test_mapping_without_a_shipped_file_is_an_error"
+  },
+  {
+    "id": "CATCHUP-R3",
+    "outcome": "not-fixed",
+    "what_was_done": "The code part is fixed. survey requires rounds_used, and wave-gate-data requires all 21 of its properties. The new check relayed_outputs_require_every_property asserts required == properties for survey, checkpoint-result, delivery-data, story-unit, wave-gate-data and pending-output. step-result has an invalid_missing-method fixture. In a scratch copy, the check failed when I removed review_rules from story-unit's required list, retry from pending-output's, rounds_used from survey's, or error from wave-gate-data's; removing method from step-result failed the fixture check and pytest. Still wrong: the finding also asked for VSA-14 to be split, and that was not done. VSA-14 is still recorded as fixed in zz-catchup.json and the ledger. Yet rewrite/spec/schemas/release-result.schema.json still has four untyped properties and no required list, and no ledger entry tracks that remainder. VSA-14's text is also out of date: it says 'survey requires all 19 fields, story-unit requires all 29', while the files now require 20 and 32.",
+    "where": "next/plugins/vsdd-factory/schemas/survey.schema.json, wave-gate-data.schema.json; next/tools/check.py relayed_outputs_require_every_property; next/tests/unit/fixtures/schemas/step-result/invalid_missing-method.json; residual: rewrite/findings/outcomes/zz-catchup.json (VSA-14), rewrite/spec/schemas/release-result.schema.json"
+  },
+  {
+    "id": "CATCHUP-R4",
+    "outcome": "fixed",
+    "what_was_done": "step() builds the identity as prelude-steps.md does: `...(o.pass ? { loop: o.loop || 1, pass: o.pass } : {})`. A result whose method differs from o.method is now unusable and is retried. converge() calls c.arbitrate(open, pass, notes). The spec text in prelude-steps.md and prelude-converge.md matches. A new universal test, 'the amended identity and arbitration', covers three cases: a stub that echoes a foreign method gets 2 calls and then fails; a step given pass alone carries loop 1; and arbitrate receives pass 2 and the dispute note. I re-ran four mutations in scratch, and that test failed each time: dropping the method check, using the old identity form, calling arbitrate(open), and calling arbitrate(open, pass) without the notes.",
+    "where": "next/workflow-lib/prelude.js step(), converge(); rewrite/spec/topics/prelude-steps.md; next/tests/workflows/universal.test.mjs 'the amended identity and arbitration: a foreign method is retried then fails; pass alone carries loop 1; arbitrate sees the pass and the dispute notes'"
+  },
+  {
+    "id": "CATCHUP-R5",
+    "outcome": "not-fixed",
+    "what_was_done": "The prompt text was changed as proposed. relay() now tells the clerk to return JSON.stringify(emptyOf(schema)) with error set, and test 7 checks fragments of that object in the survey and close prompts; reverting to the old {\"ok\": false} text fails test 7. The failure the finding describes still happens, though, because emptyOf() does not produce a schema-valid object. It fills top-level required fields only, uses '' even where the enum has no '', and leaves nested required members out. I ran a read-only probe against the repository prelude, validating emptyOf(schema) with error set through the harness validator. S_SURVEY fails ('next: missing required property kind'). S_CLOSE fails ('status: \"\" is not one of [done, partial, needs_human, blocked, failed]'). S_WAVE_GATE fails ('needs: missing required property security'). Only S_DELIVERY and S_GATE pass. I then ran toy-build in a scratch copy with a clerk that does exactly what the prompt says. The harness rejected the survey result ('result of toy-build · survey.next: missing required property \"kind\"') and the close result (status '' not in the enum). On the platform, the clerk's result is still rejected and retried, so the printed error is still lost. Test 7 checks only text fragments of the prompt and never validates the object. The spec's own emptyOf in prelude-steps.md has the same flaw.",
+    "where": "next/workflow-lib/prelude.js emptyOf(), relay(); rewrite/spec/topics/prelude-steps.md emptyOf; next/plugins/vsdd-factory/schemas/checkpoint-result.schema.json (status), survey.schema.json and checkpoint-result.schema.json (next.kind), wave-gate-data.schema.json (needs); next/tests/workflows/universal.test.mjs test 7"
+  },
+  {
+    "id": "CATCHUP-R6",
+    "outcome": "fixed",
+    "what_was_done": "Test 7 now selects the close relay by / checkpoint / and asserts /vsdd -C \\/proj checkpoint/. okStub fills project_dir with '/proj', so the -C form is exercised. Two scratch mutations each failed test 7: removing relay()'s -C prefix, and making okStub leave project_dir empty (the old condition).",
+    "where": "next/tests/workflows/universal.test.mjs test 7 and okStub"
+  },
+  {
+    "id": "CATCHUP-R7",
+    "outcome": "fixed",
+    "what_was_done": "EventLog.build() now refuses any session id that is not a non-empty str (`not isinstance(self.session_id, str) or not self.session_id.strip()`). _fit's slim path slices the string and never calls str() on None. test_session_id_must_be_a_string asserts that EventLog(d, None).build('session.start') raises EventError. Reverting to the old `not str(self.session_id).strip()` in scratch failed exactly that test.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/events.py build(), _fit(); next/tests/unit/test_events.py TestValidation::test_session_id_must_be_a_string"
+  },
+  {
+    "id": "CATCHUP-R8",
+    "outcome": "fixed",
+    "what_was_done": "In wave-gate-data, pending is now a required array of story ids, and the state property is gone. wave-script.md now builds its prompt with g.stories.map((u) => u.id).join(', ') to match the story-unit items. The invalid fixture invalid_pending-not-an-array pins the type, and the relay-rule check pins that pending is required. A neighbouring problem, which was already there and is not caused by this fix: holdout_batches has the same item-type mismatch, filed as L2C-catchup-1.",
+    "where": "next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json (pending, stories); rewrite/spec/topics/wave-script.md; next/tests/unit/fixtures/schemas/wave-gate-data/invalid_pending-not-an-array.json"
+  },
+  {
+    "id": "CATCHUP-R9",
+    "outcome": "fixed",
+    "what_was_done": "The new check composed_schemas_match_their_sources compares copied properties with their sources, descriptions dropped: checkpoint-result's status, progress, decisions and next against workflow-result; survey.next against workflow-result.next; and every gate-result property against wave-gate-data. Two scratch mutations failed it: adding test_output to gate-result alone ('wave-gate-data.test_output has drifted'), and widening workflow-result.status alone ('checkpoint-result.status has drifted').",
+    "where": "next/tools/check.py composed_schemas_match_their_sources"
+  },
+  {
+    "id": "CATCHUP-R10",
+    "outcome": "not-fixed",
+    "what_was_done": "All 20 findings named now have an outcome, in outcomes/catchup-fix.json. The code defects the finding named are fixed: converge() passes the dispute notes to arbitrate (P3SEAM-14, which a test pins), toy-story.js no longer passes --subject, and --wait is a global option in long-commands.md (P3SEAM-20). Several of the new outcomes are wrong, however.\n- P3SEAM-10 and P3COV-10 are recorded as fixed, with the claim that the scripts 'already did' what the checkpoint signature requires. Both findings are about story.js and wave.js, and those script texts were not changed. topics/story-script.md:55, topics/wave-script.md:37, workflows/story.md:181 and workflows/wave.md:108 still call `vsdd checkpoint <wf> --run <id> --subject <id>`. commands/checkpoint.md gives `vsdd checkpoint <workflow> --run <id> [--outcome failed]`, so a strict parser refuses the standalone story's checkpoint and its lock stays held. The toys also still pass `--outcome ${outcome.status}`, for example done or partial, which the signature does not take, so the claim that the toy matches the signature is also wrong.\n- SL1-51 was closed with the evidence that the ingest/map test pins gated()'s stage passthrough. That test reads only the OVERRIDE table. In a scratch copy, removing `stage: o.stage || name` from gated() passed every suite.\n- AU-P2-12 is recorded as fixed, but the pointers it names remain in topics/rule-testing.md:11, topics/risks-hooks.md:9, topics/information-walls.md:74, packaging/e2e-story-tier.md:20,37, packaging/proof-greenfield.md:23-24 and commands/status.md:18. Only the four files the triage listed were changed.",
+    "where": "rewrite/findings/outcomes/catchup-fix.json (P3SEAM-10, P3COV-10, SL1-51, AU-P2-12); rewrite/spec/topics/story-script.md:55; rewrite/spec/topics/wave-script.md:37; rewrite/spec/workflows/story.md:181; rewrite/spec/workflows/wave.md:108; next/tests/workflows/toys/toy-build.js, toy-story.js (close relay); next/workflow-lib/prelude.js gated()"
+  },
+  {
+    "id": "CATCHUP-R11",
+    "outcome": "fixed",
+    "what_was_done": "records/baseline.md now states the flaky rule in the wording of BLUEPRINT.md#4.13: 'an inherited test that fails and then passes when the gate runs the suite once more'. ingest.md and tests-python.md link to [[record:baseline]], and gate-green.md uses the same wording and points there. RR10's 'Used' line names BLUEPRINT.md#4.13. gate-result.schema.json and wave-gate-data.schema.json describe flaky with 'the flaky rule of record:baseline', and a grep finds no '2.9.8' left in the shipped schemas. This is a spec change only, so no code test applies; I checked it by grep. One small point: gate-green.md still restates the rule inline in the sentence that says it is stated once, but the two wordings now agree.",
+    "where": "rewrite/spec/records/baseline.md; rewrite/spec/commands/gate-green.md; rewrite/spec/workflows/ingest.md; rewrite/spec/packaging/tests-python.md; rewrite/spec/conflicts/records-repair.md RR10; next/plugins/vsdd-factory/schemas/gate-result.schema.json, wave-gate-data.schema.json (flaky)"
+  },
+  {
+    "id": "CATCHUP-R12",
+    "outcome": "fixed",
+    "what_was_done": "topics/prelude.md is now a pointer at next/workflow-lib/prelude.js and carries no code block, so the stale stepSchema, RUN.limits and parseArgs copies are gone. It names the constraints only as a list and says packaging/build-step.md is authoritative for them. build-step.md states the 400-line cap measured after the generated sub-blocks are stripped. tables/limits.toml lists gate_minutes and ci_minutes, matching LIMIT_KEYS.",
+    "where": "rewrite/spec/topics/prelude.md; rewrite/spec/packaging/build-step.md; rewrite/spec/tables/limits.toml"
+  },
+  {
+    "id": "CATCHUP-R13",
+    "outcome": "fixed",
+    "what_was_done": "judge() in prelude-converge.md now matches the built code: holdout is exempt from both the location condition and the spec_ref||repro condition, and grounded !== false is required. toy-verdict.js judges a holdout finding with empty spec_ref and repro, and test 14 asserts holdoutBareBlocking == 1. Two scratch mutations each failed test 14: switching the built judge() to the old spec form (no holdout exemption from spec_ref||repro), and removing the holdout exemption from the location condition.",
+    "where": "rewrite/spec/topics/prelude-converge.md; next/workflow-lib/prelude.js judge(); next/tests/workflows/toys/toy-verdict.js; next/tests/workflows/universal.test.mjs test 14"
+  },
+  {
+    "id": "CATCHUP-R14",
+    "outcome": "fixed",
+    "what_was_done": "Each of the four gaps now has a test that fails without the fix, checked by mutation in a scratch copy.\n- safe(): the test 'safe() admits a typed identifier and never an option...' asserts safe('-C/x') === '' and safe('S-1.01') === 'S-1.01'. Loosening the regex to admit a leading dash failed it.\n- Limit keys: the same test runs toy-story with limits {gate_minutes: 60, ci_minutes: 30}. Removing both keys from LIMIT_KEYS failed it.\n- Bare-name launch: TestBareNameInvocation runs `sh launch.sh` with cwd set to py/. Removing the `*) here=. ;;` branch failed it, and so did replacing the case guard with here=\"${0%/*}\".\n- Launcher event lines: TestEventLogSchema validates every line launch.sh writes with vsdd.schema.validate against the shipped EVENT_SCHEMA, and checks ts against _TS_READ_RE. Making the shipped schema refuse a null session_id failed it.",
+    "where": "next/tests/workflows/universal.test.mjs 'safe() admits a typed identifier and never an option, and the survey limit keys carry gate and ci minutes'; next/tests/hooks/test_launcher.py TestBareNameInvocation, TestEventLogSchema"
+  },
+  {
+    "id": "CATCHUP-R15",
+    "outcome": "fixed",
+    "what_was_done": "Both false sentences in tables-repair.md are corrected: the union drop is stated, and the event-schema split is described truthfully. event.schema.json is now shipped under <plugin>/schemas/, with valid and invalid fixtures, and events.py loads EVENT_SCHEMA from that file. The new check event_schema_is_the_shipped_file fails if events.py carries a modified copy, which I confirmed in scratch. The spec file rewrite/spec/schemas/event.schema.json is now a pointer, and L2-catchup-1 is closed. The finding also asked for a check that `vsdd events schema` prints the file. That cannot be built yet: the command belongs to package T3 (commands/events-schema.md, package: T3), and no CLI exists. Two small leftovers: the shipped schema no longer carries the ts pattern that SL1-05's outcome text still describes (the checker does not support pattern, so behaviour is unchanged), and tables-repair.md still says 'Twenty-one schemas' where 22 are shipped.",
+    "where": "next/plugins/vsdd-factory/schemas/event.schema.json; next/plugins/vsdd-factory/py/vsdd/events.py; next/tools/check.py event_schema_is_the_shipped_file; next/tests/unit/fixtures/schemas/event/; rewrite/spec/schemas/event.schema.json; rewrite/spec/conflicts/tables-repair.md; print-command check left to package T3"
+  },
+  {
+    "id": "CATCHUP-R16",
+    "outcome": "fixed",
+    "what_was_done": "gate-result no longer has a state property, and wave-gate-data has no state and a pending list. The pending state is therefore defined only in pending-output, whose state enum is ['pending']. The new fixture gate-result/invalid_pending-output.json shows that a pending object is not a valid gate result ('$.gate: missing required property'). brief()'s 'If it prints state \"pending\"' instruction applies to the pending output only.",
+    "where": "next/plugins/vsdd-factory/schemas/gate-result.schema.json; next/plugins/vsdd-factory/schemas/wave-gate-data.schema.json; next/tests/unit/fixtures/schemas/gate-result/invalid_pending-output.json"
+  },
+  {
+    "id": "CATCHUP-R17",
+    "outcome": "not-fixed",
+    "what_was_done": "Two of the three statuses are now right. VSA-03: delivery-data.schema.json defines changed_files as 'the files changed from reviewed_sha to the delivered head', and the gate green --since part is rightly left to the gate package. VSA-08: the hook's field is renamed worktree_head in step-record.schema.json, rules/step-results.md and records/step.md, and it is now recorded as fixed. Still wrong: VSA-06 stays left-for-builder while its outcome still offers two choices nobody has made: 'The story-workflow package must either pass the from-commit through the identity or drop the condition in topics/verdicts.md.' topics/verdicts.md:59-60 still requires each loop to be 'reviewed from the commit the one before it converged on', and no record stores that commit. Left-for-builder means the design is settled, and it is not.",
+    "where": "rewrite/findings/outcomes/zz-catchup.json (VSA-06); rewrite/spec/topics/verdicts.md:59-60"
+  },
+  {
+    "id": "CATCHUP-R18",
+    "outcome": "fixed",
+    "what_was_done": "Test '2 and 3' now also asserts that agents/<name>.md exists for every agentType whenever <plugin>/agents/ holds .md files. In a scratch copy I added one agents/clerk.md, and the test failed with 'agentType implementer has no agents/implementer.md file', so the real check switches on once package A1 populates agents/.",
+    "where": "next/tests/workflows/universal.test.mjs '2 and 3. phase titles match meta, the name matches the file, and every agentType is a roster agent'"
+  },
+  {
+    "id": "CATCHUP-R19",
+    "outcome": "fixed",
+    "what_was_done": "build-step.md's example now puts the provenance note on the closing marker. It also says that nothing may follow the opening marker on its line, because the build would rewrite that text and report it as drift. prelude.md carries no example now and says the same in prose. This matches build.py's insert_after_meta and _replace_between.",
+    "where": "rewrite/spec/packaging/build-step.md; rewrite/spec/topics/prelude.md; next/tools/build.py insert_after_meta"
+  },
+  {
+    "id": "CATCHUP-R20",
+    "outcome": "fixed",
+    "what_was_done": "The per-state ok list is now in story-deliver.md's Output section only. delivery-data.schema.json's ok description is the one-line rule ('False only when the command did not reach an actionable state') plus a pointer to story-deliver.md. One small point: that pointer is a rewrite/spec/... path inside a shipped schema file, and rewrite/ does not ship.",
+    "where": "rewrite/spec/commands/story-deliver.md (Output and failure cases); next/plugins/vsdd-factory/schemas/delivery-data.schema.json (ok)"
+  },
+  {
+    "id": "CATCHUP-R21",
+    "outcome": "fixed",
+    "what_was_done": "doneResult now parses the prompt's 'Return step = {...} unchanged.' identity and echoes it, as identityStub does, so loop and pass ride through and attempt is no longer pinned to 1. In toy-build.js, the converge review and fix steps pass loop: 1 and pass, and their names take the form review-adversary-l1-p<k>, fix-implementer-l1-p<k> and review-scenario-l1-p<k>. The node suite passes with step()'s stricter identity check.",
+    "where": "next/tests/workflows/universal.test.mjs doneResult; next/tests/workflows/toys/toy-build.js"
+  },
+  {
+    "id": "CATCHUP-R22",
+    "outcome": "fixed",
+    "what_was_done": "The file name no longer matters. rewrite/tools/findings.py applies outcome files in the order listed in outcomes/ORDER (zz-catchup.json, then catchup-fix.json), so the zz- prefix plays no part. The ledger counts come from the files, not from the unit's summary. The summary's 'findings_fixed 25' sits in a raw workflow-result source file, which is not edited after the fact. zz-catchup.json now holds 28 fixed and 4 left-for-builder entries.",
+    "where": "rewrite/findings/outcomes/ORDER; rewrite/tools/findings.py (outcome ordering)"
+  }
+]

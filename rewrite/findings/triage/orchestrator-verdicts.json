@@ -1,0 +1,58 @@
+[
+ {
+  "id": "S4R-verdicts-C1-4",
+  "files": [
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "G3",
+   "S3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4B-verdicts-3",
+  "files": [
+   "topics/evidence-lookup.md"
+  ],
+  "packages": [
+   "S2a",
+   "G3"
+  ],
+  "on_slice_path": true
+ },
+ {
+  "id": "S4R-verdicts-15",
+  "files": [
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "M3",
+   "S3",
+   "G3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S4B-verdicts-1",
+  "files": [
+   "packaging/tests-conformance.md"
+  ],
+  "packages": [
+   "G3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "S4B-verdicts-2",
+  "files": [
+   "records/step.md",
+   "tables/lint-checks.toml"
+  ],
+  "packages": [
+   "B6",
+   "S2a"
+  ],
+  "on_slice_path": false
+ }
+]

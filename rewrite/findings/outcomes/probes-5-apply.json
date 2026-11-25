@@ -1,0 +1,110 @@
+[
+ {
+  "id": "PR5C-1",
+  "outcome": "fixed",
+  "what_was_done": "Item 52 of topics/platform-proven-3.md no longer cites the empty permission_denials: its evidence is the PostToolUse lines of leg A (Read outside the working directory, Write, Read and Edit in the linked worktree, the compound git add and commit) and git (e2b67c6 on story/x; a61f0a6 in the check's rerun). It records the fact in bold: a refused call of a workflow step does not appear in the session result's permission_denials (leg D R3CTRL on 2.1.332, default mode, tool list 'Workflow Bash(echo *)', D-result.json permission_denials [] with subtype success; the round-4 rerun A the same on 2.1.331); it shows in the step transcript as a tool_result with is_error true and 'This command requires approval', and as a PreToolUse payload with no PostToolUse. Item 50 keeps the citation where it is evidence (a main-session call, item 30) and says it is none for a step. Added from the same step transcripts, read when the record was corrected and marked as not cited by CHECK.md: the transcript record's permissionDecision key (reject from source config for the refused call, reject from source hook for a hook's block, accept for an admitted call, absent for a call cut off by a budget stop), in a five-row table, so that a driver can tell a refusal from the other traces. platform.md gains the headless duty 'A step's refusal (item 52) is not in permission_denials: the driver reads the step transcripts'.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-2",
+  "outcome": "fixed",
+  "what_was_done": "The sentence 'The first run's tool list covers the story step's write scope' is gone. Item 52 lists what one step did and says 'no more than this was shown': one Read of a plugin file outside the working directory, one Write (type create), one Read and one Edit in a linked worktree under the project, and one compound Bash call (git add and git commit) there, each with its PostToolUse line; the rerun the same calls. It names what was not shown: Glob, Grep or Agent under a bare name, a write outside the project, a second step. The item's heading and the index row of platform.md say 'bare tool names' and no longer 'cross-boundary work'.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-3",
+  "outcome": "fixed",
+  "what_was_done": "Item 53 now says a main-session tool payload carries the session's effort: the PreToolUse and PostToolUse of the Workflow call carry medium in leg A and in the check's rerun, and low in leg D, whose session ran at low. The false sentence 'The main session's own Workflow events carry no effort key' is gone. PR5-1 in sources/extra-probes-5.json says the same ('a main-session payload carries the session's effort (medium)'). The same fact stated elsewhere was corrected: item 48 of topics/platform-proven-2.md now ends 'a step's payload carries the effort the step was dispatched with, a main-session payload the session's'.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-4",
+  "outcome": "fixed",
+  "what_was_done": "Item 53 is retitled 'a step's payloads carry the effort the step was dispatched with' and gives both runs: the prober's (session medium, agent file low, agent() call low: 16 payloads low, which cannot say whose value it is) and the check's rerun (agent file xhigh, call low, session medium: all 14 step payloads low), so the payload carries the dispatched effort, not the session's and not the agent file's. The claim that this settles item 26 is withdrawn: no step was dispatched without an effort, so whether such a step takes its agent file's effort is not shown, and the design does not rely on it (conventions.md: every step sets model and effort). platform.md row 26 therefore reads 'Open | Unprobed, not relied on: every step is dispatched with its effort, which its payloads carry (item 53)' in place of 'Proven | ... the agent file's effort'. Item 48 of platform-proven-2.md no longer says round 5 'settled it'.",
+  "where": "rewrite/spec/platform.md"
+ },
+ {
+  "id": "PR5C-5",
+  "outcome": "fixed",
+  "what_was_done": "Item 54 is rewritten as 'two shapes, and the cap is soft'. Shape 1 (cap 0.05, the prober's run and the check's rerun B): the spend crossed the cap only with the main loop's second answer, after the workflow had ended; run record completed with the whole return value, every agent done, standard error empty. Shape 2 (cap 0.02, the check's rerun only, said so): standard error 'Budget limit reached ($0.05 of $0.02); stopping background agents.', run record killed, result null, error 'Workflow aborted', the first step left in state progress with lastToolName StructuredOutput, later steps never started, journal with no result line, and the step's StructuredOutput PreToolUse in the hook log with no PostToolUse. The cap is soft: $0.0578 and $0.0651 on a 5-cent cap, $0.0544 on a 2-cent cap (2.7 times); a large step's overshoot is stated as not measured. PR5-1 describes both shapes the same way. platform.md's headless bullet no longer says 'A budget stop is not a dead run': it says the driver reads the run record, 'completed with the whole result or killed with its step lost', and that the cap is soft.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-6",
+  "outcome": "fixed",
+  "what_was_done": "'Empty result text' is gone from item 54 and from PR5-1. Both now say the session result of a budget stop has no result key at all, with errors ['Reached maximum budget ($<cap>)'] and terminal_reason budget_exhausted, in both shapes; item 54 adds that a driver therefore reads result.get(\"result\"). platform.md's headless bullet says 'has no result key'.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-7",
+  "outcome": "fixed",
+  "what_was_done": "Item 55 no longer gives a naming rule. It says the folder is found by the session id: every hook payload's transcript_path is the folder's path plus .jsonl, or a reader globs projects/*/<session id>/, so no rule is relied on; and that of the name only this was shown: each '/' and each '.' of the absolute project path becomes '-', no probed path holding any other character outside letters, digits and '-'. It adds the journal's real shape (one launched line for the run, then a started and a result line per agent; 'failed' for a failed step, seen in leg D's journal; none for a step cut off), the repeated tool_use entries (assistant records hold them all; api-request-blob records repeat some: leg A 8 ids in 10 entries; a reader takes the assistant records or dedupes by id), that workflowProgress starts with workflow_phase entries, and that a killed record has result null and adds a key error. The header says which folders were compared (the kept round-4 folder, leg A's, the three reruns') and that legs B and D's records and journals agree.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-8",
+  "outcome": "fixed",
+  "what_was_done": "Item 37 of topics/platform-proven-2.md now gives the closed-schema failure per version: 2.1.331 (rerun A) four refusals, then after about 190 s 'subagent completed without calling StructuredOutput (after in-conversation nudge)'; 2.1.332 (round 5, leg D, run once and not rerun) five attempts in about 10 s, each seen by the hook, then 'StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output — last StructuredOutput error:' and the schema message, the step's state error and the workflow completed. It adds that the open and declared legs held unchanged on 2.1.332. The header of platform-proven-3.md no longer says the closed-schema failure 're-held': its leg D section lists what held again (items 36, 37's open and declared legs, 38's Bash leg and control, 40, 48) and what changed (37's closed-schema leg: another count, error and time).",
+  "where": "rewrite/spec/topics/platform-proven-2.md"
+ },
+ {
+  "id": "PR5C-9",
+  "outcome": "fixed",
+  "what_was_done": "platform-proven-3.md has a section 'Leg D — the round-4 rerun A, run again on 2.1.332', placed where the rerun is cited. It records the three deviations: entered by the typed workflow command where the round-4 rerun went through the skill probecall; run under the two isolation flags, the sandbox-off --settings flag and the ceiling variable, none of which the round-4 rerun carried (tool list 'Workflow Bash(echo *)', session effort low); and R3B's rewrite not rebuilt, so that on this version item 38's StructuredOutput leg rests on R2A and R2B. It also says the round-5 check read leg D's logs and did not rerun it.",
+  "where": "rewrite/spec/topics/platform-proven-3.md"
+ },
+ {
+  "id": "PR5C-10",
+  "outcome": "fixed",
+  "what_was_done": "PR5-1 in sources/extra-probes-5.json now says one thing, the same as PR5C-15: its problem ends 'The plan ships STEP_EFFORT_PROVEN false, so the plan must change: it ships true', and its proposed resolution says 'STEP_EFFORT_PROVEN in tests/e2e/probe.py ships True, resting on item 53 with the check's rerun (first-run.md D11; ORDER.md 8.2 row A4 and the E2 line of 8.4), as PR5C-15 says'. The sentence 'No change is needed for ... STEP_EFFORT_PROVEN' is gone; 'no change' now covers the isolation flags and the allowed-tools list only. Its 'where' names the passages the plans changed.",
+  "where": "rewrite/findings/sources/extra-probes-5.json"
+ },
+ {
+  "id": "PR5C-11",
+  "outcome": "fixed",
+  "what_was_done": "The isolation default is unchanged: both flags stay on and --user-settings stays an option, not the default. first-run.md 3.5: the 'Rests on' cell of the --setting-sources/--strict-mcp-config row is 'Item 51 (2.1.332, default mode); D8'. D8: the 'unproven' sentence became 'A --plugin-dir plugin loads whole under the two flags (item 51). The person's user-level CLAUDE.md still reaches the main session and every step.' ORDER.md section 7: the sentence after the command is 'Both isolation flags stay on and Skill stays out of the tool list (items 50 and 51).' ORDER.md's stage P row and the closing paragraph of 8.2 say the round was run and checked on 2026-11-25, that legs A1 to A3 passed as specified and that no fallback of the table is taken. Item 51 records what the flags kept out (the person's plugins, MCP tools, auto mode) and what they did not (the user-level CLAUDE.md, seen in the check's rerun).",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-12",
+  "outcome": "fixed",
+  "what_was_done": "No change to the prompt or the tool list. first-run.md 3.5: the prompt row's 'Rests on' cell is 'Item 50. Every probe ran a copy outside the repository' in place of 'Item 31, seen in auto mode only: the probe of ORDER-6'. Section 4 (the paragraph on W2 3.1): the conditional sentence about Skill joining 3.5's list is gone; the paragraph cites '(items 31, 50: no Skill)'. story-workflow.md 3.1: 'set by first-run.md 3.5 and shown by probe (items 50 to 52): the Workflow tool allowed (item 30; Skill is not needed)' in place of 'where unproven, probed before the first run (ORDER-6, section 8)'.",
+  "where": "rewrite/plans/step-6/story-workflow.md"
+ },
+ {
+  "id": "PR5C-13",
+  "outcome": "fixed",
+  "what_was_done": "No change to the list 'Workflow Agent Bash Read Write Edit Glob Grep'. first-run.md 3.5: the --allowedTools row's last clause is 'Read under the plugin copy, writes in a worktree: item 52' in place of '...: the probe'.",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-14",
+  "outcome": "fixed",
+  "what_was_done": "first-run.md 3.6, session_ended: 'no permission_denials, and no refused step call (item 52) in the step transcripts, one per workflow_agent entry' (an agent of the run record with no transcript makes the check not measurable, so it cannot pass on nothing). 3.7, the cause denied: 'a permission_denials entry or a refused step call: agent, tool and input are named'. ORDER.md section 7, the row denied: look first at the failed session_ended check and the step transcripts in attempt-n/platform/; a step's refusal is never in permission_denials (item 52). The rule the check uses is stated once, in item 52: a tool_result with is_error true whose transcript record has permissionDecision.decision reject from a source other than hook, or whose text has 'requires approval'; the transcript is the agent's and the tool_use entry with the result's tool_use_id names the tool and its input. Tests (first-run.md section 7, test_each_check_fails_when_its_fact_is_broken): 'a step's refused call in a transcript, each form of item 52, with no denial (denied names agent, tool and input; a hook's reject passes); an agent with no transcript'; section 6 lists PR5C-14. Rejected from the proposed fix: naming the call from 'any PreToolUse payload with no PostToolUse'. Reason a reviewer can check: in leg D's hook log lines 5, 7, 19 and 24 to 26 are PreToolUse payloads with no PostToolUse that are a hook's block and schema refusals, not permission refusals, and the 2-cent rerun's cut-off StructuredOutput leaves the same trace; and the runner's capture is not relied on for Read, Grep and Glob (holdout_wall reads those from transcripts). The transcript alone names the call. Not shown, and recorded as such in item 52 and under B8 in ORDER.md 8.4: what a refused Read, Write or Edit leaves in a step's transcript.",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-15",
+  "outcome": "fixed",
+  "what_was_done": "The plan now has the builder write STEP_EFFORT_PROVEN = True in tests/e2e/probe.py. first-run.md D11: 'A step's payload carries the effort the step was dispatched with, over the session's and the agent file's (item 53, with its check's rerun): STEP_EFFORT_PROVEN = True in E/probe.py, and the effort leg counts.' 3.6 tier_applied leg (c) is unchanged, as the finding says; 3.5 keeps --effort medium and its reason and cites item 53; the test list drops 'with STEP_EFFORT_PROVEN set' because the leg now counts by default. ORDER.md 8.2 row A4: 'Answered low (item 53): first-run writes STEP_EFFORT_PROVEN = True in E/probe.py'. ORDER.md 8.4: the E2 line no longer says the constant ships false. PR5-1 says the same.",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-16",
+  "outcome": "fixed",
+  "what_was_done": "first-run.md 3.7, the cause budget_stop: subtype error_max_budget_usd; no result key, so the driver reads result.get(\"result\"); the run record gives the shape of item 54 and is printed, completed with its result or killed with the step left in progress. ORDER.md section 7, the row budget_stop, gives the finding's words in full: exit 1, no result key, errors naming the cap; completed with the whole result when the cap was passed after the workflow ended; killed, error 'Workflow aborted', result null and a step left in progress when it was passed during that step, with standard error 'Budget limit reached ...; stopping background agents.'; the step is named and its result may be in attempt-n/hooks/ with no PostToolUse. The caps: first-run.md 3.5's --max-budget-usd row is 'Item 54: a soft cap; two shapes of stop (3.7)', D14 says both caps are soft, and ORDER.md has a sentence under the caps table (in flight is charged past a cap, 2.7 times a 2-cent cap in the probe, so one attempt's overshoot can take a session past its cap and the run past its total). Two corrections beyond the proposed text, both needed for the diagnosis to be right. (1) budget_stop moves up the 'first that applies' list, after blocked_before_first_turn, in first-run.md 3.7 and in ORDER.md's table: a stop that kills the survey step would otherwise be named tier_not_applied or no_workflow. (2) 'Resume with --dir' alone would always be refused: a stop comes only after the cap is passed, so the recorded cost plus the same cap is over refusal 8's default total. D14, ORDER.md's row and the test say a resume at the same cap needs --total. Test: test_budget_stop_shapes (both shapes, no result key: exit 1, budget_stop, the record printed, --total in the resume line); section 6 lists PR5-1 and PR5C-16.",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-17",
+  "outcome": "fixed",
+  "what_was_done": "No change to the fields read or to finding the folder by <claude home>/projects/*/<session_id>/. first-run.md 3.3 now states the two readings in place of 'the shape of a kept round-4 folder': the driver reads each workflow_agent entry of workflowProgress, 'not its workflow_phase entries; a killed record has result: null and an error key (item 55)'. 3.6 holdout_wall reads Read, Grep and Glob 'from tool_use entries in the transcripts' assistant records' (the assistant-record reading was chosen over deduping by id: every id has an assistant record in leg A and in the rerun). Item 55 holds the facts, including that transcript_path without .jsonl is the folder.",
+  "where": "rewrite/plans/step-6/first-run.md"
+ },
+ {
+  "id": "PR5C-18",
+  "outcome": "fixed",
+  "what_was_done": "No first-run change. The spec notes are those of PR5C-8 and PR5C-9: item 37 of topics/platform-proven-2.md gives the 2.1.332 failure (StructuredOutput retry cap of 5, about 10 s) beside the 2.1.331 one, and topics/platform-proven-3.md has the leg D section with the three deviations and what held again and what changed.",
+  "where": "rewrite/spec/topics/platform-proven-2.md"
+ }
+]

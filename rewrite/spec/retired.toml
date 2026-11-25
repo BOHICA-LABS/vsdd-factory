@@ -1,0 +1,159 @@
+# Original sections deliberately not carried into rewrite/spec/. See README.md.
+# reason "history": a review-finding table, an amendment list, an old-system mapping, a superseded
+# open-question list, or a statement of what changed from an earlier pass.
+
+[[retired]]
+id = "BLUEPRINT.md#8"
+reason = "history"  # first-pass review findings and their resolution
+
+[[retired]]
+id = "BLUEPRINT.md#11"
+reason = "history"  # second-pass review narrative (118 findings, how they were disposed of)
+
+[[retired]]
+id = "BLUEPRINT.md#11.1"
+reason = "history"  # second-pass finding table
+
+[[retired]]
+id = "BLUEPRINT.md#11.2"
+reason = "history"  # cuts offered, applied and reversed during the second pass
+
+[[retired]]
+id = "BLUEPRINT.md#11.3"
+reason = "duplicate"  # the three consequences are carried by hooks.md#2.11.10, pipeline.md#2.9.8 and pipeline.md#2.8 (rules/auto-allow.md, workflows/ingest.md, topics/spikes.md)
+
+[[retired]]
+id = "BLUEPRINT.md#11.4"
+reason = "history"  # close-out review rounds and their fix tables
+
+[[retired]]
+id = "pipeline.md#amendments-from-the-blueprint"
+reason = "history"  # amendment list
+
+[[retired]]
+id = "pipeline.md#2.12"
+reason = "history"  # old-flow versus 1.0 table
+
+[[retired]]
+id = "pipeline.md#3.1"
+reason = "history"  # old .lobster workflow files mapped to 1.0
+
+[[retired]]
+id = "pipeline.md#3.2"
+reason = "history"  # old modes and documented paths mapped to 1.0 routes
+
+[[retired]]
+id = "pipeline.md#3.3"
+reason = "history"  # old phases mapped to 1.0 workflows
+
+[[retired]]
+id = "pipeline.md#3.4"
+reason = "history"  # old step kinds and recurring steps mapped to 1.0
+
+[[retired]]
+id = "pipeline.md#3.5"
+reason = "history"  # the old 37 approval steps mapped to 1.0 decisions
+
+[[retired]]
+id = "pipeline.md#3.6"
+reason = "history"  # old orchestrator files, loops and convergence material mapped to 1.0
+
+[[retired]]
+id = "pipeline.md#3.7"
+reason = "history"  # old orchestration skills and tools mapped to 1.0
+
+[[retired]]
+id = "pipeline.md#6"
+reason = "duplicate"  # each open question is answered by a decision in BLUEPRINT.md#2 (D5, D8-D10, D15-D21)
+
+[[retired]]
+id = "state.md#amendments-from-the-blueprint"
+reason = "history"  # amendment list
+
+[[retired]]
+id = "state.md#3"
+reason = "history"  # mapping from the old system
+
+[[retired]]
+id = "state.md#6"
+reason = "duplicate"  # each open question is answered by a decision in BLUEPRINT.md#2 (D1-D3, D22, D23)
+
+[[retired]]
+id = "agents-skills.md#amendments-from-the-blueprint"
+reason = "history"  # amendment list
+
+[[retired]]
+id = "agents-skills.md#3.1"
+reason = "history"  # old agents (35) mapped to the 1.0 roster
+
+[[retired]]
+id = "agents-skills.md#3.2"
+reason = "history"  # old skills (127) mapped to 1.0 homes
+
+[[retired]]
+id = "agents-skills.md#3.3"
+reason = "history"  # old AGENT-SOUL.md principles mapped to 1.0 locations
+
+[[retired]]
+id = "agents-skills.md#3.4"
+reason = "history"  # old agent-file sections mapped to 1.0
+
+[[retired]]
+id = "agents-skills.md#6"
+reason = "duplicate"  # each open question is answered by a decision in BLUEPRINT.md#2 (D5, D6, D13)
+
+[[retired]]
+id = "hooks.md#amendments-from-the-blueprint"
+reason = "history"  # amendment list
+
+[[retired]]
+id = "hooks.md#2.15"
+reason = "history"  # old defects and what prevents each one here
+
+[[retired]]
+id = "hooks.md#2.17"
+reason = "history"  # where the design departed from rewrite/STATE.md readings
+
+[[retired]]
+id = "hooks.md#3.1"
+reason = "history"  # all 79 old registry entries mapped to 1.0
+
+[[retired]]
+id = "hooks.md#3.2"
+reason = "history"  # old runner and supporting pieces mapped to 1.0
+
+[[retired]]
+id = "hooks.md#6"
+reason = "duplicate"  # each open question is answered by a decision in BLUEPRINT.md#2 (D4, D6, D7, D11, D12, D24)
+
+[[retired]]
+id = "packaging.md#amendments-from-the-blueprint"
+reason = "history"  # amendment list
+
+[[retired]]
+id = "packaging.md#2.12"
+reason = "duplicate"  # superseded build plan; BLUEPRINT.md#9 holds the current one
+
+[[retired]]
+id = "packaging.md#packaging-and-manifests"
+reason = "history"  # old plugin manifests and packaging mapped to 1.0
+
+[[retired]]
+id = "packaging.md#bin-21-tools"
+reason = "history"  # the old bin/ tools mapped to 1.0
+
+[[retired]]
+id = "packaging.md#scripts-ci-benches"
+reason = "history"  # old scripts, ci/ and benches/ mapped to 1.0
+
+[[retired]]
+id = "packaging.md#tests"
+reason = "history"  # old test stock mapped to the 1.0 test layers
+
+[[retired]]
+id = "packaging.md#ci-and-release"
+reason = "history"  # old CI and release arrangement mapped to 1.0
+
+[[retired]]
+id = "packaging.md#6"
+reason = "duplicate"  # each open question is answered by a decision in BLUEPRINT.md#2 (D25-D30)

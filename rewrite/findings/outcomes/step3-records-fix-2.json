@@ -1,0 +1,74 @@
+[
+    {
+        "id": "S3R-records-9",
+        "outcome": "fixed",
+        "what_was_done": "flush runs _record_problem (and so _cap_problems) only for rels that still exist — the same `present` list check_paths already got — so a deleted decision record and packet no longer stat a missing .md into state 'failed'. Beyond that, the commit pathspec is now what staging left that differs from HEAD (`git diff --cached --name-only`), so an 'AD' file — a new file staged by a killed flush and deleted since — neither breaks `commit --only`'s pathspec nor lands in the commit, and the result's `files` reports the paths actually committed. Note for consumers of flush's result: `files` can now be narrower than the valid set when staged files cancelled themselves.",
+        "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py::test_flush_commits_deleted_decision_record_and_packet (committed record and packet deleted: state committed, both gone from HEAD, tree clean, later flush clean) and ::test_flush_staged_then_deleted_new_file (the AD case)"
+    },
+    {
+        "id": "S3R-records-7",
+        "outcome": "fixed",
+        "what_was_done": "test_closed_cycles_are_not_searched rewritten to discriminate. Its unknown case now opens 'plan' only in the closed cycle hotfix-1.2 and expects the bare read to refuse unknown (the old case asked for 'plan', which existed in no cycle); its resolution case settles all three releases — both closed copies and product-1's — and expects the bare read to resolve to product-1 rather than be ambiguous (the old case left the open cycle's release open, so the open-first pass answered either way). Verified: restoring the all-cycles search fails both assertions.",
+        "where": "next/tests/unit/test_state_decisions.py::test_closed_cycles_are_not_searched (no code change; decisions.resolve_decision was already right)"
+    },
+    {
+        "id": "S3R-records-2",
+        "outcome": "fixed",
+        "what_was_done": "test_lock_seen_refresh_does_not_undo_a_concurrent_release now begins the run with now='2026-11-24T12:29:00Z', a full write-interval before lock_seen's 12:30:00 stamp, so the refresh is due and lock_seen reaches the locked re-read and write that the race injection surrounds. No code change: the re-read under lock.flock was already correct.",
+        "where": "next/tests/unit/test_state_locks.py::test_lock_seen_refresh_does_not_undo_a_concurrent_release"
+    },
+    {
+        "id": "S3R-records-19",
+        "outcome": "fixed",
+        "what_was_done": "The '..' refusal moved into store.safe_segment itself (the literal segments _standing, _base and _ still pass; '..' anywhere else in the segment refuses unsafe_id), so runs, steps, cycles, closures, evidence subjects and decisions all live under the one rule the docstring and plan records.md 3 state. decisions' duplicate _segment is dropped; its call sites use safe_segment directly.",
+        "where": "next/plugins/vsdd-factory/py/vsdd/state/{store,decisions}.py; next/tests/unit/test_state_store.py::test_store_refusals (safe_segment('a..b') refuses)"
+    },
+    {
+        "id": "S3R-records-20",
+        "outcome": "fixed",
+        "what_was_done": "No code change: the packet-first order and the tmp-and-replace side files were already in the code; the missing tests are added. test_packet_written_before_the_record kills the packet write (write_via_tmp patched to raise on .md) and asserts neither packet nor record exists and a bare read refuses unknown. test_log_replace_failure_leaves_the_old_log makes os.replace fail on the .log and asserts the old .log is intact, no partial file sits beside the record, and the temporary file in local/tmp is cleaned up. Both fail against the reverted write order/in-place write.",
+        "where": "next/tests/unit/test_state_decisions.py::test_packet_written_before_the_record; next/tests/unit/test_state_gate_evidence.py::test_log_replace_failure_leaves_the_old_log"
+    },
+    {
+        "id": "S3R-records-21",
+        "outcome": "fixed",
+        "what_was_done": "No code change: flush already passes the changed rels. The discriminating test is added: a spy wraps artifacts.check_paths across a flush where only notes.json changed, and asserts the received list holds exactly that changed, existing rel and not the story artifact committed by the previous flush (which a check_paths(root, None) would have included).",
+        "where": "next/tests/unit/test_state_commits.py::test_flush_checks_only_the_changed_paths"
+    },
+    {
+        "id": "S3R-records-26",
+        "outcome": "fixed",
+        "what_was_done": "No code change: patch_id already returns the first whitespace-separated field. The test now asserts the shape directly: re.fullmatch('[0-9a-f]{40}', patch_id(...)) on a non-empty diff, which git's whole output line (id plus zero commit id) would fail.",
+        "where": "next/tests/unit/test_state_gate_evidence.py::test_green_matches_by_patch_id_after_amend"
+    },
+    {
+        "id": "S3R-records-27",
+        "outcome": "fixed",
+        "what_was_done": "No code change: the catch is already ModuleNotFoundError narrowed to exc.name == 'vsdd.gates'. The discriminating test is added: a shipped fake vsdd.gates whose gate_absent.py imports a module nobody has makes registered_gate raise ModuleNotFoundError and leave _GATES_LOADED False — under the reverted broad `except ImportError` the lookup would silently return None instead.",
+        "where": "next/tests/unit/test_state_gate_evidence.py::test_gate_modules_missing_import_is_not_swallowed"
+    },
+    {
+        "id": "S3R-records-29",
+        "outcome": "fixed",
+        "what_was_done": "No code change: the logging was already fixed. The tests now hold it there: test_cmd_decide asserts decision.recorded carries decision='release' and choice='approve' and decision.refused carries decision, choice and code='bad_choice' (it checked event types only); the new test_cmd_decide_log_failure_after_settle makes EventLog.log raise OSError after the settle and asserts exit 0 with the record settled — un-guarded logging crashes the command instead.",
+        "where": "next/tests/unit/test_state_cmds.py::test_cmd_decide, ::test_cmd_decide_log_failure_after_settle"
+    },
+    {
+        "id": "S3R-records-32",
+        "outcome": "fixed",
+        "what_was_done": "test_kinds_match_the_shipped_table now also parses '<key>=<a> or <b>' from every table line and holds Choice.values to it exactly (topology=(single, split); adding 'banana' fails), with set equality in both directions so the code carries no value set the line does not state. It also names the one property the table does not hold: ideas select requires at least one list, asserted as any_of == {pursue, research, defer, reject}.",
+        "where": "next/tests/unit/test_state_decisions.py::test_kinds_match_the_shipped_table"
+    },
+    {
+        "id": "S3R-records-C1-1",
+        "outcome": "fixed",
+        "what_was_done": "Interface change, flagged: runs.run_end grew a keyword, run_end(project, run_id, *, now=None, wait=3.0) — default unchanged, so existing callers are unaffected. lock_release now times the whole call from before it takes lock.flock and passes each run_end only the budget left; an entry whose run cannot be ended within it stays in lock.json (its run is still live), so the call returns what it released, lock.json and the run records agree, and nothing waits 3 s per entry inside a 0.5 s SessionEnd budget. Verified the test fails against the pre-fix behavior (elapsed ~3 s).",
+        "where": "next/plugins/vsdd-factory/py/vsdd/state/{runs,locks}.py; next/tests/unit/test_state_locks.py::test_lock_release_wait_bounds_the_whole_call (flush.lock held: returns within 1 s, entry and live run agree; once flush.lock frees, the same release ends the run and empties the lock)"
+    },
+    {
+        "id": "S3R-records-C1-2",
+        "outcome": "fixed",
+        "what_was_done": "'import shutil' restored at the top of gate_evidence.py, so evidence_drop works again (it raised NameError since the last fix round's import rewrite). test_evidence_drop_removes_the_directory writes evidence, calls evidence_drop, asserts the directory is gone and a second call is a no-op; it fails with NameError without the import.",
+        "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py; next/tests/unit/test_state_gate_evidence.py::test_evidence_drop_removes_the_directory"
+    }
+]

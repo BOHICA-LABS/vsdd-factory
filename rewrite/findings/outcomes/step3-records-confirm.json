@@ -1,0 +1,62 @@
+[
+  {
+    "id": "S3R-records-9",
+    "outcome": "not-fixed",
+    "what_was_done": "Deletions are now collected and staged, but the reviewer's own probe still fails, in a worse way. A committed decision packet that is deleted (git status ' D cycles/product-1/decisions/release.md' and '.json') makes flush return state failed with 'flush failed unexpectedly: FileNotFoundError'. Every later flush fails the same way while the deletion stands, so no state file can be committed. The cause: _flush_locked runs _record_problem on every changed rel, deleted ones included, and _cap_problems calls stat() on the missing .md. The same happens for a new file staged by a killed flush and then deleted ('AD'). test_flush_commits_deletions deletes only notes.json, which takes no stat path. Fix: in _flush_locked, skip _record_problem (and _cap_problems) for rels that no longer exist, as check_paths already does. Test the probe itself: delete a committed decision record and its packet, flush, and expect state committed, both deletions in HEAD and a clean tree. Also test the 'AD' case.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/commits.py; next/tests/unit/test_state_commits.py"
+  },
+  {
+    "id": "S3R-records-7",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is right: resolve_decision searches only cycles_open plus _standing. A direct probe gives a bare 'release' settled in both the open cycle and a closed cycle -> product-1, and a bare 'plan' that exists only in a closed cycle -> unknown. But test_closed_cycles_are_not_searched cannot fail. Its 'only in a closed cycle' case asks for 'plan', which exists in no cycle. Its 'two closed and one open' case keeps the open cycle's release open, so the open-first pass finds one record whatever the candidates are. In a scratch copy, restoring the all-cycles search (candidates = _cycle_names(project)) left every test passing. Fix the test: open a 'plan' decision only in the closed cycle and expect unknown; settle the open cycle's release as well as the closed ones, and expect the bare read to resolve to the open cycle, not ambiguous.",
+    "where": "next/tests/unit/test_state_decisions.py"
+  },
+  {
+    "id": "S3R-records-2",
+    "outcome": "not-fixed",
+    "what_was_done": "The code fix is right: lock_seen re-reads lock.json under lock.flock before it writes. The takeover race test catches a revert. The release race test cannot fail. run_begin stamps the entry with the real clock (2026-11-25T01:xxZ), and lock_seen is called with now='2026-11-24T12:30:00Z', which is earlier than seen. So _due_entries finds nothing due, and lock_seen returns True without reaching the locked write. In a scratch copy, removing the re-read (writing the stale pre-check copy back) failed only the takeover test. Fix: in test_lock_seen_refresh_does_not_undo_a_concurrent_release, give run_begin an explicit now an hour before lock_seen's now, or age the entry's seen as the takeover test does, so the refresh is due and the race is exercised.",
+    "where": "next/tests/unit/test_state_locks.py"
+  },
+  {
+    "id": "S3R-records-19",
+    "outcome": "not-fixed",
+    "what_was_done": "Decision ids are now safe: _segment in decisions.py refuses '..' anywhere, and test_decision_ids_are_path_segments catches a revert. But store.safe_segment, the store-wide rule, still accepts a '..' inside a segment: safe_segment('a..b') returns 'a..b'. That contradicts its own docstring ('without ..') and plan records.md section 3 ('A path segment matches ... without ..'). Runs, steps, cycles, closures and evidence subjects still go through the looser rule. Fix: move the '..' refusal into safe_segment (the literal segments _standing, _base and _ stay), drop the duplicate _segment, and add 'a..b' to test_store_refusals.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/store.py; next/plugins/vsdd-factory/py/vsdd/state/decisions.py"
+  },
+  {
+    "id": "S3R-records-20",
+    "outcome": "not-fixed",
+    "what_was_done": "The code writes the packet first through write_via_tmp and makes the record the commit point. evidence .log and .xml now go through write_via_tmp. No test fails without this. In a scratch copy, putting the old order back (record first, then packet_path.write_bytes) and writing .log in place both left every test passing. test_kinds_packet_over_cap, which the fix cites, refuses on the cap before either write in both orders. Fix: add a test that makes the packet write fail (monkeypatch write_via_tmp to raise) and asserts no open decision record exists. Add one that makes the .log replace fail and asserts the previous .log is intact with no partial file beside it.",
+    "where": "next/tests/unit/test_state_decisions.py; next/tests/unit/test_state_gate_evidence.py"
+  },
+  {
+    "id": "S3R-records-21",
+    "outcome": "not-fixed",
+    "what_was_done": "flush now passes the changed rels that still exist to check_paths. No test fails without this. In a scratch copy, restoring check_paths(root, None, ...) left every test passing: rejected is filtered to changed paths, so the two calls give the same result and differ only in what they check. test_flush and test_flush_rejects_invalid_story, which the fix cites, cannot tell them apart. Fix: spy on check_paths in a test (monkeypatch vsdd.state.artifacts.check_paths), assert that it receives exactly the changed, existing rels, and assert that an unchanged committed artifact is not passed.",
+    "where": "next/tests/unit/test_state_commits.py"
+  },
+  {
+    "id": "S3R-records-26",
+    "outcome": "not-fixed",
+    "what_was_done": "patch_id now returns the first field of git's output. No test fails without this. In a scratch copy, returning git's whole line ('<id> 0000...') left every test passing, because test_green_matches_by_patch_id_after_amend only compares two patch ids, and both are whole lines when the fix is reverted. Fix: assert re.fullmatch('[0-9a-f]{40}', patch_id(wt, base, head)) in that test.",
+    "where": "next/tests/unit/test_state_gate_evidence.py"
+  },
+  {
+    "id": "S3R-records-27",
+    "outcome": "not-fixed",
+    "what_was_done": "The code catches ModuleNotFoundError only where name == 'vsdd.gates' and sets the loaded flag after the imports. The flag half is tested. The narrow catch is not. In a scratch copy, swallowing any ImportError left every test passing, because the broken gate module in test_gate_modules_discover_broken_gate_is_loud raises RuntimeError. Fix: add a gate_x.py whose body is 'import vsdd_no_such_module' and assert that the lookup raises ModuleNotFoundError and does not return None.",
+    "where": "next/tests/unit/test_state_gate_evidence.py"
+  },
+  {
+    "id": "S3R-records-29",
+    "outcome": "not-fixed",
+    "what_was_done": "cmd_decide now logs decision, choice and code, and every log call is guarded. Neither change is tested. In a scratch copy, logging decision.refused with only reason=<code> left test_cmd_decide passing, because it checks event types only. Removing the guard also left every test passing. Fix: in test_cmd_decide, assert that the decision.refused and decision.recorded events carry decision and choice (and code on the refusal). Add a case where EventLog.log raises after the settle: the command still exits 0 and the record is settled.",
+    "where": "next/tests/unit/test_state_cmds.py"
+  },
+  {
+    "id": "S3R-records-32",
+    "outcome": "not-fixed",
+    "what_was_done": "test_kinds_match_the_shipped_table ties verbs, keys, key modes, notes and reason gates to tables/decision-kinds.toml, and catches an added verb. It does not compare key values. In a scratch copy, adding 'banana' to the topology values left it passing, although the table line says 'topology=single or split'. The ideas select any_of rule and the built flags are not compared either. Fix: parse '<key>=<a> or <b>' value lists from each line and compare them with Choice.values. Assert any_of for the line whose keys are all unbracketed with no [..], or state in the test which properties are not in the table.",
+    "where": "next/tests/unit/test_state_decisions.py"
+  }
+]

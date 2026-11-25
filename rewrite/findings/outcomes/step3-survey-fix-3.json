@@ -1,0 +1,8 @@
+[
+  {
+    "id": "PL6-7",
+    "outcome": "fixed",
+    "what_was_done": "Rewrote _install_product in next/tests/unit/story_ready.py. For a directory product it now skips .factory and .git when copying, and when the product carries .factory/factory.toml it applies only that file's [paths] table to the project (every key of it, via set_keys), so delivery.mode stays local and [state]/[commands] stay the project's own; without a product factory.toml it sets paths.source to <name>/** for copied top-level directories only, never for a file. The commit of the product on the integration branch before admission is unchanged, as is the signature and the product=None and callable behaviours. Added next/tests/unit/test_story_ready.py with five tests on the real tally sample (configuration kept: delivery.mode local and own factory.toml text; [paths] tests=[tests/**] source=[tally/**, tools/**] and no pattern in both tests and source; sample committed on develop with the project's commands surviving and the config validating; directory-only source mapping for a product without factory.toml; composition with run_begin). All five fail on the pre-fix code (verified by temporarily restoring the old function) and pass on the fixed code.",
+    "where": "next/tests/unit/story_ready.py (_install_product); next/tests/unit/test_story_ready.py (five tests)"
+  }
+]

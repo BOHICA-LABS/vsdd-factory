@@ -1,0 +1,20 @@
+[
+  {
+    "id": "AU-P2-01",
+    "outcome": "fixed",
+    "what_was_done": "The shipped roster says feature, verify, maintain and multi call story (calls = [\"story\"]), with a regression test asserting the four rows against pipeline.md#2.3's Calls column, so the lint reads the call edges from the roster's [workflows] and the prelude's TIER, ROLE and OVERRIDE tables are generated from the same file (the prelude reads no [workflows] table at run time). P-8 in conflicts/people-repair.md no longer reads BLUEPRINT 4.5's nesting rule as 'no other call edges' and names the shipped rows as the source. The spec roster table's body now points at the shipped file (README rule 7), so the corrected rows have exactly one home.",
+    "where": "next/tests/lint/roster.toml [workflows]; next/tests/lint/test_roster_lint.py::TestRosterMembership.test_the_roster_lists_the_whole_design; rewrite/spec/conflicts/people-repair.md P-8; rewrite/spec/tables/roster.toml; checked by python3 rewrite/tools/spec_lint.py and uv run --no-sync python -m pytest tests/lint -q"
+  },
+  {
+    "id": "AU-S2-09",
+    "outcome": "left-for-builder",
+    "what_was_done": "The B6 part is now in place: tests/lint/roster.toml is the single data source for the tiers (conventions.md's tier table is reduced to a pointer to it and topics/model-tiers.md no longer re-lists the override steps), tools/build.py generates the prelude's TIER and ROLE tables from it, and the roster lint rejects any agent file whose model, effort or colour disagrees with its tier row - the colour read from the tier row itself, moved into [tiers] with a colour for every tier including the clerk, so the tier lines in agent files cannot drift again. What remains of the finding is not this package's: event types (H1) and the limits (S1) are still second-stated in prose files.",
+    "where": "next/tests/lint/roster.toml [tiers]; next/tests/lint/test_roster_lint.py::TestAgentLint (test_wrong_model_for_the_tier_is_rejected, test_wrong_colour_for_the_tier_is_rejected, test_the_clerk_colour_comes_from_the_roster); next/tools/build.py table generation; rewrite/spec/conventions.md and rewrite/spec/topics/model-tiers.md; the rest is taken when S1 (limits) and H1 (event types) build theirs"
+  },
+  {
+    "id": "AU-P2-15",
+    "outcome": "left-for-builder",
+    "what_was_done": "Does not arise in this package's file at slice depth: the roster's [workflows] spike row (calls = []) is the same under the pipeline and the blueprint wording, so there is nothing to fix in tests/lint/roster.toml. The wording repairs stay open for their owning files: command:spike-open must carry the ref sentence and the blueprint's 'experiment or piece of research' / 'one protocol and one agent' wording belongs in topics/spikes.md (S6 owns the command; the topic and conflicts/workflows.md are ownerless spec text).",
+    "where": "next/tests/lint/roster.toml [workflows]; the wording repairs are taken when S6 builds command:spike-open"
+  }
+]

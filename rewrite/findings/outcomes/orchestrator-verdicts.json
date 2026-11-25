@@ -1,0 +1,32 @@
+[
+ {
+  "id": "S4R-verdicts-C1-4",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session recorded the sanction: rewrite/plans/step-4/ORDER.md section 4 has a verdicts row for story_unit.py (acs is the one reader of acceptance criteria, skips code fences, verdicts._story_acs delegates to it), and the launch notes of survey-2, which rewrites that file, say that acs is kept as it is.",
+  "where": "rewrite/plans/step-4/ORDER.md section 4"
+ },
+ {
+  "id": "S4B-verdicts-3",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session corrected the module docstring of gate_evidence.py: the review lookup is what vsdd.state.verdicts.covering answers (the computed verdict when it covers the head, else the closure's stored verdict). A comment only; no behaviour changed.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py (module docstring)"
+ },
+ {
+  "id": "S4R-verdicts-15",
+  "outcome": "left-for-builder",
+  "what_was_done": "Not on the slice path: it needs a clone, or a machine that lost its local records, whose closure already carries a round count, and the slice is one run on one machine with records kept. For M3 (hand-off between clones) with S3 and G3: the survey records, on the run record, the rounds_used it hands the script for each story; verdicts._rebuild replays each run's loop 1 with that recorded figure, using rule 9's count only for a run without it; rounds_used() is the recorded figure plus the run's own passes. Correct the comment in _rebuild that says a clone with short records follows the closure's stored verdict, and add the test_verdicts case of the finding's probe (closure rounds_used 1, cap 3, no earlier records, a dispute ruled not_defect) expecting converged/clean and a covering() answer.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/verdicts.py; next/plugins/vsdd-factory/py/vsdd/state/survey.py"
+ },
+ {
+  "id": "S4B-verdicts-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "For G3 when the conformance cases are next extended (with G6a's holdout cases at the latest): add one records case whose stored passes continue after a blocked review, the following pass's review receiving the rebuilt claims, so that the continue rule is pinned as the walk-on-after-clean rule is by r20.",
+  "where": "next/tests/conformance/cases/"
+ },
+ {
+  "id": "S4B-verdicts-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "For B6 with S2a, when a workflow beyond the shipped story script is built (W3 first): lint the step-name grammar the verdict relies on (review-<lens>-l<n>-p<k>, fix-<agent>-l<n>-p<k>, arbitrate-l<n>) in every workflow script, so that one record per pass cannot be overwritten under a shared name; the story script's scenario tests already assert its names.",
+  "where": "next/tests/lint/; next/plugins/vsdd-factory/py/vsdd/state/steps.py"
+ }
+]

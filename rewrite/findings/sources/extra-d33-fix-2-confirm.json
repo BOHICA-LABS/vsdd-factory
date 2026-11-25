@@ -1,0 +1,20 @@
+[
+  {
+    "id": "d33-fix-2-C1-1",
+    "origin": "d33-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/work-claim-checks.toml (T-MINT); rewrite/spec/records/clone.md (settled); rewrite/spec/schemas/clone.schema.json (settled)",
+    "problem": "The correction of D33R-S-2 added to T-MINT that, once a sync has settled a lost answer as accepted, 'a command that mints that kind of id, run again, returns that id, takes the entry off the list and mints nothing'. That rule keys on the kind of id alone, and a `settled` entry holds only the commit, the paths it carried and whether the remote took it. So the next command of that kind run for a different request (a second idea, another change request, another spike) gets back the earlier id and file and mints nothing: the new request is dropped. This lasts until the entry's retention ends (state.retain_runs_days). From the kind alone a program cannot tell a repeat of the same request from a new one.",
+    "proposed_resolution": "Return the settled id only when the request matches what was minted: the file the command would write, less its id and its times, equals the minted file, or a digest of the request stored in the settled entry matches. Otherwise mint as usual and leave the entry for vsdd status and the briefing to show. Add to proof scenario 30 a different change request filed after the settled lost answer, which gets a new id and a new file.",
+    "on_slice_path": false
+  },
+  {
+    "id": "d33-fix-2-C1-2",
+    "origin": "d33-fix-2, confirmation",
+    "severity": "minor",
+    "where": "rewrite/spec/tables/team-delivery-checks.toml (T-BRANCH, runs); rewrite/spec/tables/team-checks.toml (head rule, when a check runs); rewrite/spec/topics/team-delivery.md (Commits made by hand); rewrite/spec/config/team.md (Off)",
+    "problem": "Two statements written in this correction disagree on when T-BRANCH acts. The head rule of table:team-checks says the hand-commit checks run 'wherever the branch they read has an upstream', which git answers locally. T-BRANCH's runs cell now says it runs 'wherever the story branch is on the remote' and that a listing (`git ls-remote --exit-code`, exit 2 for an absent branch) says whether it is. A builder who follows the row lists the remote for every story this clone holds, in every survey. That includes team use off and local mode, where story branches are never pushed and have no upstream. config/team.md ('Off': nothing waits on the network that did not wait before) and proof scenario 23 do not allow that network call. topics/team-delivery.md restates the upstream form of the condition as well.",
+    "proposed_resolution": "State the condition once, in T-BRANCH's runs cell. The listing is made only for a story whose closure records `delivery.pushed`, or whose local branch has an upstream (the branch may since have been deleted on the remote). A story branch this clone created and never pushed is not on the remote, so it needs no listing, and with team use off in local mode no listing is made. Have the head rule refer to that cell for the hand-commit checks' condition, and have topics/team-delivery.md link to it instead of restating it. Add to proof scenario 23 or 38 that a survey in local mode runs no ls-remote.",
+    "on_slice_path": false
+  }
+]

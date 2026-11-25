@@ -1,0 +1,26 @@
+[
+  {
+    "id": "D33R-F-13",
+    "outcome": "not-fixed",
+    "what_was_done": "The wave claim is capped by limits.stories_per_wave_run alone (default 24), and the story scope's `when` says these 'are the ones runStories() can start'. runStories() also caps a batch by the agent budget, floor((limits.agents_per_run - RUN.agents - CLOSE_RESERVE) / limits.agents_per_story) (topics/prelude-run-stories.md). With agents_per_run lowered (200 gives about 4), a wave run claims up to 24 stories, starts 4 and keeps the other 20 from every teammate for the whole run, which is the blocking F-13 named. Fix: claim the batch runStories() will actually start, the free units within min(stories_per_wave_run, that agent fit), computed by one function the survey and the prelude both read; correct the `when` text of the story scope and T-WAVE.",
+    "where": "rewrite/spec/tables/work-claim-scopes.toml"
+  },
+  {
+    "id": "D33R-F-14",
+    "outcome": "not-fixed",
+    "what_was_done": "The rule now heads work-claim-scopes.toml and team-claims.md no longer states it, but the parallel-work table of topics/team-use.md restates it ('spike, discover and a report-only maintain, at any time | They take no claim') and omits its exception: opening a cycle takes `open`, discover's assess checkpoint included. Fix: the row says they take no claim for their run and links [[table:work-claim-scopes]] for the rule and its exception.",
+    "where": "rewrite/spec/topics/team-use.md"
+  },
+  {
+    "id": "D33R-F-30",
+    "outcome": "not-fixed",
+    "what_was_done": "Most repeats now have one home, but 'no claim expires', whose home the integrator names as T-TAKEOVER, is still restated in topics/team-claims.md ('so no claim expires and no program ever decides that a holder is dead'), records/work-claim.md ('It carries no expiry and no sign of life') and topics/team-use.md ('Git has no liveness, so no program decides that a holder is gone'), besides T-TAKEOVER's own 'no claim expires or goes stale'. Fix: keep the rule in T-TAKEOVER; the two topics give the reason and link to it, and the record says only that `at` decides nothing.",
+    "where": "rewrite/spec/topics/team-claims.md"
+  },
+  {
+    "id": "D33R-S-2",
+    "outcome": "not-fixed",
+    "what_was_done": "T-PUSH now measures a lost answer by containment, but two parts remain. (a) T-PUBLISH's unmeasured cell says that a lost-answer claim found accepted is removed by T-RELEASE, and T-RELEASE's full sync removes only claims with held = \"run\" and story claims under which nothing was begun. An `open` or `open.hotfix` claim (held = \"act\") whose answer was lost, or whose opening command died before the push that carries the cycle record, stays held by this clone with no cycle record, and every other clone's opening of a cycle is refused until a person acts. (b) The sync that settles an `unknown` commit reports nothing of it: command:sync's output has no field for it and the clone record's list is only emptied. A person whose T-MINT command was refused after a lost answer and who runs it again after that sync mints a second change request or fix story, the duplicate S-2 named. Fix: a full sync also removes an act-held claim of this clone when no command of this clone is running under it and its cycle record is absent; the sync result lists each unknown commit it settled, with what it carried (claim scope, minted path) and whether the remote had taken it.",
+    "where": "rewrite/spec/tables/work-claim-checks.toml"
+  }
+]

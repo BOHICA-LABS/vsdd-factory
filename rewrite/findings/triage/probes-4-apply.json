@@ -1,0 +1,15 @@
+[
+ {
+  "id": "probes-4-apply-C1-1",
+  "files": [
+   "rules/step-results.md",
+   "topics/hook-platform-facts.md",
+   "topics/caller-identity.md"
+  ],
+  "packages": [
+   "H7",
+   "H1"
+  ],
+  "on_slice_path": false
+ }
+]

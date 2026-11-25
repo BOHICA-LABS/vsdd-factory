@@ -1,0 +1,14 @@
+[
+  {
+    "id": "S3R-hook-runner-b-2",
+    "outcome": "not-fixed",
+    "what_was_done": "The test half is fixed: test_lock_refresh_belongs_by_run_and_story drives a second session's --run <id>, --run=<id>, ./vsdd by path, step.run, a cd into the story worktree and a negative other-run case, and fails when run_of answers '' or the story is cut (checked by mutation in a scratch copy). The ledger half is not. The revised P3SEAM-24 outcome says the read-only reviewer half is 'Still open', and that 'a review over 20 minutes still goes stale', which is P3SEAM-24's own failure scenario. But it is recorded with outcome 'fixed', so the ledger shows P3SEAM-24 closed. No other open or left-for-builder entry carries the reviewer refresh. This is the defect S3R-hook-runner-b-7 named for P3OPS-20. Fix: record P3SEAM-24 as left-for-builder for the package that wires Read/Grep (H3, D2), with the refresh half noted as done, or open a separate entry for the read-only reviewer half.",
+    "where": "rewrite/findings/outcomes/step3-hook-runner-b-fix.json (the P3SEAM-24 entry)"
+  },
+  {
+    "id": "S3R-hook-runner-b-6",
+    "outcome": "not-fixed",
+    "what_was_done": "Fixed for a literal spelled under the resolved project root: test_symlinked_target_classes_both_forms gives ('brief','spec-product','source','project'), and fails with Ctx.classes back on target or with _forms resolved-only. Not fixed when the literal is spelled through a symlinked ancestor of the project root. ctx.project.root is resolved (found from ctx.target), so _anchored's second branch (spelled != root) never fires, _anchored answers None, and only the resolved form is classed. Probe: the same brief.md -> src/main.rs symlink, with file_path spelled /var/folders/... instead of /private/var/folders/..., gives ctx.classes ('source','project') with no brief. _anchored's docstring names this exact case (macOS /var) as collapsing to the root. A write through the symlink is again judged by its destination only. Fix: when the literal is under neither spelling of the root, anchor it as Path(realpath(literal.parent)) / literal.name, which collapses the ancestor symlinks and keeps a leaf symlink literal. Add a test that spells the path through a symlinked alias of tmp_path, so it is portable.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/paths.py (_anchored)"
+  }
+]

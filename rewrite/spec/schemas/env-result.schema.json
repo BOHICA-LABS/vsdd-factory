@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "env-result.schema.json",
+  "type": "object",
+  "description": "Output of vsdd env start: ok, url, port, pid (state.md#2.16: a product process on its own port, recorded as a job record with the caller's agent id from the caller marker). The design gives no types and no required list.",
+  "properties": {
+    "ok": {},
+    "url": {},
+    "port": {},
+    "pid": {}
+  }
+}

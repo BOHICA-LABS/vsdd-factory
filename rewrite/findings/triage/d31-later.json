@@ -1,0 +1,35 @@
+[
+ {
+  "id": "D31-9",
+  "files": [
+   "commands/env-start.md",
+   "topics/flag-lifecycle.md",
+   "tables/flag-release-checks.toml"
+  ],
+  "packages": [
+   "F6",
+   "F2"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D31-10",
+  "files": [
+   "topics/flag-lifecycle.md"
+  ],
+  "packages": [
+   "F3"
+  ],
+  "on_slice_path": false
+ },
+ {
+  "id": "D31-11",
+  "files": [
+   "tables/flag-story-checks.toml"
+  ],
+  "packages": [
+   "F2"
+  ],
+  "on_slice_path": false
+ }
+]

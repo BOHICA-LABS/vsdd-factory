@@ -1,0 +1,50 @@
+[
+ {
+  "id": "probes-4-apply-C1-2",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session copied the check's rerun logs, its run script and its git-hook rerun from the session scratchpad to rewrite/spike/probes-round-4/check-reruns/, and made item 43 and the header of platform-proven-2.md cite that folder.",
+  "where": "rewrite/spike/probes-round-4/check-reruns/; rewrite/spec/topics/platform-proven-2.md"
+ },
+ {
+  "id": "probes-4-apply-C2-2",
+  "outcome": "fixed",
+  "what_was_done": "PR4-2 is now triaged to E2 as well as G1, so the measurement that a call moved to the background is followed by the same command is in E2's by-package list.",
+  "where": "rewrite/findings/triage/orchestrator-probes.json"
+ },
+ {
+  "id": "PR4-2",
+  "outcome": "left-for-builder",
+  "what_was_done": "G1: the job record, not the tool's timeout, is what reaps a job. E2: its eleven-minute gate must measure that a call moved to the background is followed by a re-run of the same command, which re-attaches.",
+  "where": "rewrite/spec/topics/long-commands.md; rewrite/spec/packaging/e2e-story-tier.md"
+ },
+ {
+  "id": "PR4-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "T1 (doctor and sandbox-needs): a factory run needs the Bash sandbox off until an allowance is shown to work; doctor tests a commit inside a linked worktree. Every unit that writes with git names the sandbox when git answers Operation not permitted (rule 11 of rewrite/plans/step-3/ORDER.md). Whether sandbox-off is the product's stated requirement waits for the user's answer.",
+  "where": "rewrite/spec/packaging/sandbox-needs.md"
+ },
+ {
+  "id": "PR4-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "E2, and every headless driver: enter a workflow through a typed command or skill and check afterwards that the named workflow is what ran (platform item 49).",
+  "where": "rewrite/spec/platform.md, section 'Headless runs'"
+ },
+ {
+  "id": "probes-4-apply-C2-1",
+  "outcome": "left-for-builder",
+  "what_was_done": "B4a (the prelude's relay text) with W2: limit relay's 'if it prints no JSON' sentence to a call that finished, and say what the clerk does with a call that was moved to the background. PR4C-13 must not be read as saying relay retries: it retries only on a null return.",
+  "where": "next/workflow-lib/prelude.js (relay); rewrite/spec/topics/prelude-steps.md"
+ },
+ {
+  "id": "probes-4-apply-C2-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "The step 5 build (A1, A4, A5): the sentence telling an agent to re-run a command that was moved to the background, and its lint, apply only where the closing command is a job command (the list in topics/long-commands.md). It is left out of the demo method's Finish, and for the clerk it applies to story deliver, not to survey or checkpoint, where a moved call is waited for. Given to the step 5 builder in its notes.",
+  "where": "rewrite/plans/step-5/agents.md (M3, the demo Finish, the clerk, section 7 item 3)"
+ },
+ {
+  "id": "probes-4-apply-C1-1",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session applied the three replacement texts the correction round prepared and its confirmation checked: rules/step-results.md step 4 now says the rewrite on a step's StructuredOutput is honoured (items 37 and 38); topics/hook-platform-facts.md marks rows 27, 28 and 30 proven, keeps each fallback only as what follows if a later release changes it, and drops the line about capturing payloads first; topics/caller-identity.md's section says both facts are proven and that the two fallbacks are not built. Spec lint is clean.",
+  "where": "rewrite/spec/rules/step-results.md; rewrite/spec/topics/hook-platform-facts.md; rewrite/spec/topics/caller-identity.md"
+ }
+]

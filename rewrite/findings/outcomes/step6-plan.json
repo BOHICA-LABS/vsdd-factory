@@ -1,0 +1,92 @@
+[
+ {
+  "id": "PL6-1",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2 keeps D6 (every fix and repair goes to the story kind's implement agent with fix-findings; the review task names the owner of every category). The two corrections are asked of the step 5 build in ORDER.md 8.1 rows 4 and 5 and are preconditions of the W2 build (ORDER.md section 5 rows 5 and 6; W2 section 8: the builder stops and reports if one is missing). The weaker alternative of narrowing the test to the feature row is not taken.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-2",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: Alternative (b): after applyLimits the script sets RUN.limits.spikes_per_run = 0 with a comment naming A3, S6 and H8 (W2 D18, path 11, test `a spike request ends blocked, whatever the survey's limit`). No change to config.py, no fourth loader key; both plans say the fixture sets no spike limit. first-run's diagnosis gains the cause spike_limit, read from a step record with status needs_spike (what the store actually holds). The unknown-agentType probe is dropped. Whether 0 should become a valid config value is question 1 for the person; the default is this line.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-3",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2's test_story_workflow.py gains test_script_records_rebuild_to_the_script_verdict. To make the script's verdict observable the result gains `verdicts` (W2 3.3, D19) and story_scenario.mjs gains a `dump` form. The test turns each step result into a record as the step-results rule stores it (result plus agent_type, worktree_head, agent_id), calls vsdd.state.verdicts.rebuild, and asserts skipped is empty, per-loop equality of outcome, reason, passes, rounds_used, head and coverage_missing, and chain. Six scenarios are taken; review_stale is left out on purpose because delivery data names no head (W2 D17), recorded as a ledger entry for G4a's pr mode.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-4",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: One probe round is a gate before the first run (ORDER.md section 2 stage P and section 8.2): leg A (one session started by the typed workflow command, no skill, the first run's exact flags at --effort medium) answers plugin loading under the isolation flags, the typed command in default mode, bare tool names for Read under the plugin directory and Edit/Write/commit in a linked worktree, and whose effort a payload shows; leg B is a three-step workflow under --max-budget-usd 0.05; leg C records the session folder. A table says what each answer changes in first-run. W2 3.1 and first-run 3.5, D8 and D11 name the probe.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-5",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: first-run 3.3 describes the platform run record as the kept round-4 folder shows it (re-checked: workflowProgress workflow_agent entries carry agentId, agentType and a full model id; scriptPath lies under the session's workflows/scripts/). tier_applied takes each step's model from workflowProgress joined by agent id and matches an alias as a segment of the id; modelUsage is only recorded. fake_claude.py and deliver_scripted write that shape. W2 drops its request for a Workflow logging hook; named_workflow_ran is the one proof, worded the same in W2 3.1, first-run 3.6 and ORDER.md rule 2. Recording the folder as a platform item is probe leg C.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-6",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: tier_applied leg (a) asserts config.tier_override in the survey clerk's captured StructuredOutput payload (settles item 18). The session runs at --effort medium. The effort leg counts only when STEP_EFFORT_PROVEN in tests/e2e/probe.py is true; it ships false and is set from probe leg A4 (first-run D11). The first survey step, and only it, is exempt in first-run's tier_applied and W2's contract (W2 D20; tests `a tier override reaches every step after the survey` and test_tier_check_exempts_the_first_survey_step).",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-8",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: One text. W2 D11 makes relay()'s last sentence: finished call with no JSON returns the empty object with error set; a moved `vsdd story deliver` call is run again (it re-attaches to its job); a moved call of any other command is waited for. The clerk file is to hold the last two sentences word for word (ORDER.md 8.1 row 6, section 5 row 7). W2's test `every clerk prompt carries the relay text` and its contract check it.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-9",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2 D4 is restated against survey.py as built: a failure after run_begin releases the lock and empties run_id, so an ok:false survey with a run_id is not expected; the branch and its test stay as a defence. The leftover case (a release that itself failed) is named as the survey's to recover, by the next survey once the lock is stale or by the driver's refusal 7 (lock release --force); ORDER.md rule 6 states it for both units.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-10",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2 D8: a passing --since entry of repair-<r> without a changed_files array is no usable result and the run ends failed, naming the field; the test-writer's green command in a later loop carries --since <from> (row of 3.4). Tests `a repair result without changed_files ends failed` and `a later loop fixes close with --since`. The optional schema change in gates.md is not asked for; it is a ledger entry for C1, G2 and H7.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-11",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: holdout_wall is reported with the text 'not applicable: the overlay has no holdout and H2 is not built' and left out of ok (first-run 3.6, D13; Result gains counted). The transcript reader is kept; test_holdout_wall_is_reported_not_counted replaces the broken-fact case; a holdout overlay with H2 makes it a counted check when E2 widens.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-12",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2 D9 stands (evidence is recorded again after a repair). ORDER.md 8.1 row 3 asks for the contrary sentence in step 4's ORDER.md section 7 to be struck. A demo recording that carries its commit and a gate that refuses one older than the head is a ledger entry for G2 when widened; not on the slice's path (demo: false).",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-13",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: first-run adds .pytest_cache/, .ruff_cache/ and .mypy_cache/ to tests/e2e/sample-project/.gitignore (section 2); test_sample_commands_run_offline_and_leave_nothing also creates the three directories and asserts git status --porcelain stays empty.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-14",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: The driver never starts an attempt by itself; resume is the person's re-run with --dir (first-run 3.4, 3.7, D14). report.json totals sum cost over all attempts, and refusal 8 (exit 2) stops an attempt when recorded cost plus the next cap would pass the total: twice the session cap (12 dollars cheap, 60 roster) or --total.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-15",
+  "outcome": "fixed",
+  "what_was_done": "Corrected in the step 6 plans by the integrator: W2 section 7 adds `a reviewer on another commit ends failed` and `a later loop fixes close with --since`; the default green stub is shaped as the gate prints it, with changed_files and the range patch after a --since closing; contract exempts the survey call from the tier assertion.",
+  "where": "rewrite/plans/step-6/"
+ },
+ {
+  "id": "PL6-16",
+  "outcome": "left-for-builder",
+  "what_was_done": "Waiting on the person, with a default that stands: Question 2 in ORDER.md 8.3, extending 'Waiting on the user' item 6 of rewrite/STATE.md: should a delivered story keep a durable record of its red and green commits (in the closure, or a kept ref)? Default: no; the first run proves the order from local step records and loose objects, read at once (first-run D4, tests_first). If yes, ORDER.md 8.1 row 8 has survey-2's assess write the tests and implement entries for a delivered story from the run's passing gate entries.",
+  "where": "rewrite/plans/step-6/ORDER.md section 8.3"
+ }
+]

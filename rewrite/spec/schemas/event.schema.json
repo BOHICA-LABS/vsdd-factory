@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "description": "Pointer. The event log line's single source is the shipped file next/plugins/vsdd-factory/schemas/event.schema.json, which py/vsdd/events.py loads and validates every event against before writing.",
+  "x-single-source": "The checker carries the event schema in the shipped-schema set, with fixtures under next/tests/unit/fixtures/schemas/event/. The event-type list is tables/event-types.toml; the writer's own millisecond ts and dotted-type rule live in the writer (hooks.md 2.12)."
+}

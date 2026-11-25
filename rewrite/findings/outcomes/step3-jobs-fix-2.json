@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S3R-jobs-14",
+    "outcome": "fixed",
+    "what_was_done": "The two missing tests are in. test_write_record_refuses_even_after_shedding calls jobs._write_record with an irreducible record (the 3,850-byte command field is not one of the shed fields) and asserts ValueError with nothing written, then pins the shedding side: a record over the cap only through args and error_shape is written without them. test_start_refuses_an_oversize_product_record gives factory.toml a run command of RECORD_CAP + 500 bytes and asserts env.start answers code 1 naming the cap, with no record left behind. Both fail against the previous code (removing the raise in _write_record, or the size check in env._launch, makes each fail).",
+    "where": "next/tests/unit/test_jobs.py::test_write_record_refuses_even_after_shedding; next/tests/unit/test_env.py::test_start_refuses_an_oversize_product_record"
+  },
+  {
+    "id": "S3R-jobs-20",
+    "outcome": "fixed",
+    "what_was_done": "The five remaining 'see rewrite/spec/conflicts/commands.md' pointers are gone from the design files: commands/cycle-close.md now ends the repair sentence at 'This command is the repair path for a cycle left open when that did not happen.', idea-register.md's Syntax reads only 'vsdd idea register ...', review-prepare.md's Writes reads 'The diff patch and the report path it names.', coverage.md's 'The derived coverage view; writes nothing.' and defer-add.md's 'Not specified beyond the write.'. The facts moved to conflicts/commands.md, whose gaps already carried them (11-13) and which now carries the two that did not: gap 14 gained that idea register's argument detail is stated nowhere beyond the discover stage, gap 15 that the deferred-work register's store and limit keys are named only through validate's warning. With the pointers moved, AU-S2-12's fixed outcome is true for the whole finding (validate and env-stop came from state-core and step3-jobs-fix.json); see the AU-S2-12 entry below.",
+    "where": "rewrite/spec/commands/cycle-close.md, idea-register.md, review-prepare.md, coverage.md, defer-add.md; rewrite/spec/conflicts/commands.md (gaps 14, 15)"
+  },
+  {
+    "id": "S3R-jobs-C1-1",
+    "outcome": "fixed",
+    "what_was_done": "attach's loss branch kills a recorded command_pgid only when the key's cmd lock is held: the worker takes <key>.cmd.lock (flock, with a five-second bound so a stray escapee cannot block a restart) and its commands inherit the descriptor through pass_fds in ctx.run, so the flock lives exactly as long as the command's process tree (D3). A pgid reused after the old group exited or a reboot now names a lock-free file and nothing is killed. test_stale_command_group_survives_the_restart plants a stale running record naming an unrelated live 'sleep 30' group and asserts the group survives the restart while the job still runs (fails against the unconditional kill). command_pgid stays a record field: the plan's 3.1 is frozen for builders, so the design-level list is amended in rewrite/spec/records/job.md instead, which now documents command_pgid and both new per-key locks. Interface notes for other units: the store gains <key>.cmd.lock and <key>.settle.lock per key; JobContext gains an optional cmd_lock_fd; prune and _delete_key sweep the two new lock files with their key.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (_take_cmd_lock, worker_main, JobContext, JobContext.run, attach); next/tests/unit/test_jobs.py::test_stale_command_group_survives_the_restart; rewrite/spec/records/job.md"
+  },
+  {
+    "id": "S3R-jobs-C1-2",
+    "outcome": "fixed",
+    "what_was_done": "env._launch now holds a per-key settle lock it never passes to the product and writes the product's pid into the record right after Popen, during settling. stop_products stops a 'starting' record whose settle lock is free (a start call killed mid-settle) by its pid, and keeps the record without reporting a product whose lock is still held after the KILL, so its port stays taken; env._held_answer answers a held 'starting' record with a free settle lock by stopping the stale product and starting over instead of failing after five seconds. test_start_recovers_from_a_start_call_killed_mid_settle runs a real start call in a helper process, kills it inside the settle window and asserts the next start succeeds, with the orphaned product dead; test_stop_products_stops_a_stale_starting_record and the reshaped test_stop_products_leave_a_starting_record_and_a_held_lock_alone pin the stale stop, the live-start skip (settle lock held) and the kept record of a holder that outlives the KILL. Each fails against the previous code.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (stop_products); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch, _launch_locked, _held_answer); next/tests/unit/_jobs_helper.py (env-start mode); next/tests/unit/test_env.py (three tests)"
+  },
+  {
+    "id": "S3R-jobs-C1-3",
+    "outcome": "fixed",
+    "what_was_done": "Admission now measures the queued record with the later writes in mind: attach and env._launch refuse above RECORD_CAP - RECORD_HEADROOM (new exported constant, 128 bytes, the documented room for state, started, finished, pid and command_pgid at their widest). The worker's running and done writes and env._launch's running write catch the ValueError and fall back to a minimal record (key, kind, state, nonce, collected, starts) instead of dying, so an over-cap write can never leave a result beside a permanent 'running' record; the alarm handler's write got the same fallback. Tests: test_record_within_the_headroom_is_served (a spec just under the admission bar is served its result), test_record_over_the_headroom_is_refused_before_anything_is_written (the old band between bar and cap: refused at attach, nothing written; admitted and lost forever before), test_worker_falls_back_when_the_record_is_over_the_cap (an irreducible 5,000-byte record; the worker lives, the result is served, the surviving record is the minimal one) - each fails against the previous code.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (RECORD_HEADROOM, _minimal_record, attach, worker_main); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch_locked); next/tests/unit/test_jobs.py (three tests)"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "Recorded again by this unit, because its outcome changed: the last pointer lines the finding named are gone. validate's single syntax came from state-core, env-stop's from step3-jobs-fix.json, and the five remaining 'see conflicts/...' lines (cycle-close.md, idea-register.md, review-prepare.md, coverage.md, defer-add.md) were moved to the conflicts file by this unit (S3R-jobs-20 above); spec_lint passes with 0 problems.",
+    "where": "rewrite/spec/commands/cycle-close.md, idea-register.md, review-prepare.md, coverage.md, defer-add.md; rewrite/spec/conflicts/commands.md"
+  }
+]

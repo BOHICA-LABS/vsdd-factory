@@ -1,0 +1,113 @@
+# Every lint check by id and what it checks.
+# sources: packaging.md#layer-3-lint-over-every-shipped-file-pytest-test
+# Lint is ordinary pytest so that there is one runner and one report format
+# (packaging.md#layer-3-lint-over-every-shipped-file-pytest-test).
+
+[L-MAN]
+what = """
+plugin.json has exactly the fields in the manifest design. The engines floor equals [platform] min_claude_code
+in the roster. README, LICENSE (identical to the root one) and the icon exist. No plugin-root CLAUDE.md,
+package.json or settings.json."""
+
+[L-MCP]
+what = """
+Every ${user_config.X} in .mcp.json is declared in userConfig. Every remote host is in network.hosts. Every npx
+package is pinned to an exact version. No value looks like a literal credential. The Playwright entry does not
+carry --allow-unrestricted-file-access."""
+
+[L-HOOK]
+what = """
+hooks.json has the top-level hooks key. Every command goes through the launcher. Every handler has a timeout, and
+it is 60 or less: the unit is seconds, and the old value of 10000 was read as nearly three hours. Event names are
+real. Referenced files exist."""
+
+[L-AGENT]
+what = """
+The file name equals name. description is present. model and effort equal what the roster's tier says (low is
+accepted for the clerk tier only). omitClaudeMd: true is set. None of permissionMode, hooks, mcpServers,
+initialPrompt appears, because the platform silently ignores them in plugin agents. Every entry in tools is a known
+tool. The body is within the size cap and has the sections the standard agent template requires. The shared block
+is present byte for byte, and reviewer files carry the severity table and the finding key rule byte for byte. Both
+are stamped by the build from workflow-lib/agent-shared.md and workflow-lib/severity.md, so the lint compares each
+file with one source and no hand-written copy exists to drift. Every agent except spike-runner and clerk lists the
+Agent tool. Every agent has a row in walls.toml and every row has an agent."""
+
+[L-METHOD]
+what = """
+Every method file is within its line cap. Every method an agent file or a workflow names exists, and every method
+file is named by at least one agent file. Every method in [[table:step-methods]] is listed by the agent
+the table gives it to. Every method can be reached: a row of [[table:step-methods]] or a skill names it, or it
+belongs to the tests or implement agent of a story kind, so that a story's tests_method or method key can
+select it."""
+
+[L-TEMPLATE]
+what = """
+Each skeleton in <plugin>/templates/ agrees with its entry in artifacts.toml: the same frontmatter keys and
+required headings. Every path under <plugin>/assets/ (design-system/, demo/, scaffold/) that a method cites exists;
+nothing is copied from a skill's folder."""
+
+[L-KIND]
+what = """
+For every story kind in artifacts.toml, the agent of its implement stage (and of its tests stage, where it has one)
+holds, in walls.toml, a write grant for every class the method's output needs: the implementer source and
+manifests; the test-writer tests; devops ci, repo-config, manifests, and for repo-setup new files in source and
+tests; the verifier harness and tests; the technical-writer docs. This is the check that would have caught the
+scaffold story being given to an agent that could write only .github/**."""
+
+[L-POLICY]
+what = """
+walls.toml has [callers] and [reveals]; every subcommand under [callers] exists; [reveals] has one entry per
+artifact kind and equals what the build generates; no agent row carries relaxed_by; classes.toml has the
+product-class precedence. There is no gates.toml."""
+
+[L-SKILL]
+what = """
+The directory name equals name. description plus when_to_use is at most 1,536 characters, the platform's
+truncation point. The invocation mode equals the roster's. The file is within its size cap. Supporting files it
+names exist."""
+
+[L-ROSTER]
+what = """
+The agents, skills and workflows on disk are exactly those in tests/lint/roster.toml: none missing, none extra.
+While packages are still being built only "none extra" is enforced ([[packaging:build-plan]])."""
+
+[L-BUDGET]
+what = """
+The number of model-visible skills, and the total characters of all descriptions that are listed in every agent's
+context, are within the roster's budgets."""
+
+[L-XREF]
+what = """
+Every vsdd-factory:<name> written in any shipped file resolves to a real agent, skill or workflow. Every
+vsdd <subcommand> written anywhere is a real subcommand. Every ${CLAUDE_PLUGIN_ROOT}/... path exists. A workflow
+that another workflow calls does not itself call workflow()."""
+
+[L-DEAD]
+what = """
+No shipped file contains old-system vocabulary: .lobster, state-manager, factory-dispatcher, hooks-registry,
+openclaw, LiteLLM, GPT-5, Gemini, Corverax, dark-factory, /vsdd-factory:activate, and names of agents and skills
+the roster dropped."""
+
+[L-PY]
+what = """
+Shipped Python imports only standard-library modules (checked against sys.stdlib_module_names) and the vsdd
+package, and none of the network modules. It compiles on the floor. ruff is clean."""
+
+[L-SH]
+what = """
+shellcheck and sh -n pass on every shipped shell source: py/launch.sh, py/find-root.sh and bin/vsdd. All
+start with #!/bin/sh."""
+
+[L-SIZE]
+what = """
+The plugin directory is under 3 MB; no file over 256 KB except the icon."""
+
+[L-DOC]
+what = """
+Generated reference pages are current. CHANGELOG.md headings descend. If plugin.json's version has no tag yet,
+the changelog has a heading for it."""
+
+[L-OBS]
+what = """
+The compose file and the YAML configuration parse. Dashboards are valid JSON and refer to data sources by the
+pinned identifiers. Every image has a version tag."""

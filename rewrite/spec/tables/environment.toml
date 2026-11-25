@@ -1,0 +1,60 @@
+# Every environment variable the plugin reads or sets: what it does and who may set it.
+# Sources: hooks.md#2.2, hooks.md#2.6, hooks.md#2.11.10, hooks.md#2.12, hooks.md#2.14, hooks.md#4.1,
+# BLUEPRINT.md#4.2, state.md#2.12.
+
+[environment]
+
+[environment.VSDD_FACTORY_HOOKS]
+does = "The one emergency switch. on (default) | off: off turns every hook off for the session, and the session briefing announces it."
+who = "Only a person can set it, because a tool call cannot change the environment of the Claude Code process; gate-guard blocks settings writes that set VSDD_* variables."
+
+[environment.VSDD_FACTORY_HOOKS_QUARANTINE]
+does = "Quarantine for one rule: skips that rule, locked or not, but only when the event log shows repeated rule.error events for it. Exists so that a crash in one rule (for example step-results) does not force a person to switch every gate off. Every briefing announces it."
+who = "Only a person (an environment variable)."
+
+[environment.VSDD_FACTORY_HOOKS_DEBUG]
+does = "Logs every call as runner.call with its duration, for diagnosis."
+who = ""
+
+[environment.VSDD_FACTORY_HOOKS_CAPTURE]
+does = "Captures the JSON Claude Code sends on stdin as recorded payloads for the test suite, with {root}, {home} and {plugin} substitutions."
+who = ""
+
+[environment.VSDD_EVENTS_DIR]
+does = "Overrides the event log directory, for tests."
+who = ""
+
+[environment.VSDD_FACTORY_ROOT]
+does = "The governing project root, exported by the launcher after find-root.sh finds it; the Python side receives it as the session's project."
+who = "Set by the launcher."
+
+[environment.VSDD_CALLER]
+does = "The caller marker's one-time key. Before the runner lets a vsdd Bash call through it writes a marker and returns updatedInput with the command rewritten to begin VSDD_CALLER=<key> , so the tool can find its own marker. A command that assigns a VSDD_* variable itself is blocked for every caller (gate-guard)."
+who = "Added by the runner; a caller cannot forge it."
+
+[environment.VSDD_TEST_TIER]
+does = "When set, vsdd survey returns a tier override for end-to-end tests, the step wrapper uses it, and the briefing announces it."
+who = ""
+
+[environment.VSDD_PORT]
+does = "The port of a product started by vsdd env start: commands.run must take its port from {port} or $VSDD_PORT."
+who = ""
+
+[environment.CLAUDE_PLUGIN_OPTION]
+does = "Each userConfig secret of the plugin manifest, exported to hook processes under its own name: CLAUDE_PLUGIN_OPTION_PERPLEXITY_API_KEY and so on."
+who = "Exported by Claude Code to hook processes."
+
+[environment.CLAUDE_PLUGIN_ROOT]
+does = "Read by the guard command in hooks.json: the launcher path is taken from it, and the guard walks up from CLAUDE_PROJECT_DIR (or the working directory) looking for .factory/factory.toml."
+who = "Set by Claude Code."
+
+[environment.CLAUDE_PROJECT_DIR]
+does = "Read by the guard command in hooks.json: the guard walks up from it (or the working directory) looking for .factory/factory.toml."
+who = "Set by Claude Code."
+
+# Hygiene set or unset by the launcher for every hook call (hooks.md 2.2):
+#   unset UV_PYTHON, PYTHONPATH, PYTHONHOME, PYTHONSTARTUP
+#   export PYTHONSAFEPATH=1, PYTHONUTF8=1, VSDD_FACTORY_ROOT, and
+#   PYTHONPYCACHEPREFIX=<cache>/vsdd-factory/pycache (bytecode cached outside the installed plugin)
+# The launcher unsets UV_PYTHON because it overrides the inline requires-python and would run the
+# script on Python 3.9; the explicit --python flag on the uv command line wins over the variable.

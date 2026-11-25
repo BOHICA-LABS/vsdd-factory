@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S4R-rules-7",
+    "outcome": "not-fixed",
+    "what_was_done": "The seven forms the finding names now block, and the tests catch it: with basename matching removed, or with wrapper options not skipped, test_wrappers_do_not_hide_git and test_write_targets_table fail. But env's -S/--split-string value is skipped as if it were a plain option value, and it is really the command env runs. On develop, merge-guard passes 'env -S \"git commit -m x\"', \"env -S'git commit -m x'\" (attached), 'env --split-string \"git commit -m x\"' and 'env -S \"git push origin develop\"' with exit 0, because the parsed program is empty. Real env (macOS /usr/bin/env, under sh and dash) commits on develop with both the separate and the attached spelling. The same spellings hide sed from write_targets.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_WRAPPER_VALUE_FLAGS, _WRAPPER_LONG_VALUE_PREFIXES, _wrapper_options)"
+  },
+  {
+    "id": "S4R-rules-C1-1",
+    "outcome": "not-fixed",
+    "what_was_done": "The five forms the finding names now block, and test_substitutions_in_gits_own_arguments fails with _expanded disabled. Three gaps remain. (1) _expanded is tested on the refspec destination after the colon split, so a substitution that spans the colon passes. From the story worktree, 'git push origin $(echo HEAD:develop)' and 'git fetch origin $(echo topic:develop)' pass: the destination reads 'develop)', and the '$' sits in the source. (2) Word splitting: an unquoted substitution or expansion in a slot the verdict does not read can expand into the words it does read. From the story worktree these pass: 'git push $(echo origin develop)', 'git push $ARGS', 'git push $(echo --all)', 'git branch $(echo -f develop) HEAD', 'git branch $FLAGS develop', 'git switch $(echo -C develop)', 'git checkout $(echo -B) develop', 'git fetch $(echo origin topic:develop)' and 'git rebase $(echo origin/develop develop)'. Under dash, real git ran 'git branch $(echo -f main) HEAD' and moved main. These substitution forms blocked opaque_git before S4R-rules-3 sent opaque git segments to _git. (3) The verb itself: on develop, 'git $(echo commit) -m x' and 'git $V -m x' pass, and real git commits.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_segment, _git, _push, _branch, _switch, _checkout, fetch/pull branch)"
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "outcome": "not-fixed",
+    "what_was_done": "The --work-tree=/tmp forms and the bare and env GIT_DIR forms now block, and the tests fail with the git-directory lookup disabled. Three gaps remain. (1) Whether a segment is judged at all is still decided by seg.where's project, not the git directory's. From a directory in no factory project, these pass: 'cd /elsewhere && git --git-dir=<root>/.git commit -m x', the same with GIT_DIR=<root>/.git, '... push origin HEAD', '... update-ref refs/heads/develop HEAD', and 'git -C /elsewhere --git-dir=<root>/.git --work-tree=<root> commit -m x'. Real git, run from an outside directory with --git-dir set to the main checkout, committed on develop. (2) From the story worktree, 'export GIT_DIR=<root>/.git; git commit -m x' passes. Real git under sh and dash committed on develop: an export in an earlier segment is not carried to later ones. (3) The branch for a git directory is read by walking up to the nearest parent that holds .git, not from the git directory's own HEAD. So '--git-dir=<root>/.git/worktrees/S-9.01', the story worktree's own admin directory whose HEAD is the story branch, is judged at the main checkout and is wrongly blocked commit_on_guarded.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_git, _git_dir_of, _guarded)"
+  }
+]

@@ -1,0 +1,230 @@
+[
+  {
+    "id": "AU-T2-01",
+    "outcome": "fixed",
+    "what_was_done": "Restored the four call edges: feature, verify, maintain and multi now have calls = [\"story\"], citing pipeline.md#2.3; header comment corrected; People-repair P-8 misreading superseded by tables-repair.md.",
+    "where": "rewrite/spec/tables/roster.toml [workflows]"
+  },
+  {
+    "id": "AU-T2-02",
+    "outcome": "fixed",
+    "what_was_done": "Rebuilt the [story] row from state.md#2.5: all 18 frontmatter keys with kinds/enumerations, plus writer, lifecycle and the excerpt's headings/max_bytes/lock/forbid/tables; [contract] gained the writer and lifecycle of state.md#2.5; uniform one-structure rows for all 31 kinds (T2-07/P2-23) with multi-cap cells kept whole via cap_note (demo-evidence script/transcript/screenshot/per-story).",
+    "where": "rewrite/spec/tables/artifacts.toml [story], [contract] and every row"
+  },
+  {
+    "id": "AU-T2-03",
+    "outcome": "fixed",
+    "what_was_done": "Added local to the code-reviewer's read_deny so the state-directory lock/jobs/markers/events/media are not readable; R10 corrected to state.md#2.4's containment reading (guidance inside spec-arch, runs and evidence inside local).",
+    "where": "rewrite/spec/tables/walls.toml [vsdd-factory:code-reviewer]; rewrite/spec/conflicts/rules.md R10"
+  },
+  {
+    "id": "AU-T2-04",
+    "outcome": "fixed",
+    "what_was_done": "Added a ci_minutes row keyed to delivery.ci_wait_minutes with the mapping's default only (no invented enforced_by/at_the_limit); split the spike row's names and keys into arrays; stripped trailing periods so cells match the originals; RR7 updated.",
+    "where": "rewrite/spec/tables/limits.toml; rewrite/spec/conflicts/records-repair.md RR7"
+  },
+  {
+    "id": "AU-T2-05",
+    "outcome": "fixed",
+    "what_was_done": "Copied the exact block-message route from hooks.md#2.7 line 579 into the holdout row.",
+    "where": "rewrite/spec/tables/path-classes.toml [holdout] route"
+  },
+  {
+    "id": "AU-T2-06",
+    "outcome": "fixed",
+    "what_was_done": "Converted to the original classes.toml layout: top-level [<class>] tables and [_product] for precedence; the four computed classes (own-worktree, project, tmp, outside) recorded as a trailing comment, not a table; R6's three-versus-four note kept in conflicts/rules.md.",
+    "where": "rewrite/spec/tables/path-classes.toml"
+  },
+  {
+    "id": "AU-T2-07",
+    "outcome": "fixed",
+    "what_was_done": "One row structure for all 31 kinds in the hooks.md#2.11.3 format extended with the state design's writer/lifecycle columns; multi-valued caps preserved in cap_note (demo-evidence 8,000/20,000/300,000/1,500,000).",
+    "where": "rewrite/spec/tables/artifacts.toml"
+  },
+  {
+    "id": "AU-T2-08",
+    "outcome": "fixed",
+    "what_was_done": "All 31 artifact kind files now link their [[table:artifacts]] row instead of restating path, frontmatter, writer, cap and lifecycle; rules/artifacts.md drops the worked rows and links the table.",
+    "where": "rewrite/spec/artifacts/*.md; rewrite/spec/rules/artifacts.md"
+  },
+  {
+    "id": "AU-T2-09",
+    "outcome": "fixed",
+    "what_was_done": "Kind vocabulary left exactly as the originals have it (holdout-scenario, project-conventions; \"list scenario\" in [reveals]); the mismatch recorded for the registry owner in tables-repair.md.",
+    "where": "rewrite/spec/tables/artifacts.toml; rewrite/spec/tables/walls.toml [reveals]; rewrite/spec/conflicts/tables-repair.md"
+  },
+  {
+    "id": "AU-T2-10",
+    "outcome": "fixed",
+    "what_was_done": "Kept only the originals' examples: state.md#2.4's one example per table row (CAP-012, E-NET-001, SCR-004, AC-2, SP-007, reviews/2026-11-26-security-2.md) and BLUEPRINT.md#4.8's decision examples (finding.S-7.04, merge.S-7.04, blocked.S-7.04 restored); the 15 invented examples blanked; split rows carry no example; Finding row carries none, as in the original.",
+    "where": "rewrite/spec/tables/identifiers.toml"
+  },
+  {
+    "id": "AU-T2-11",
+    "outcome": "fixed",
+    "what_was_done": "Wrapped every named list as an array of what the original names: story-draft-data.units ($ref story-unit), intake-data.covers, route-data.stories/.readiness, sweep-data.findings ($ref finding)/.fixable, survey.done/.units, story-unit.bcs/.acs, wave-gate-data.stories/.fix_units, delivery-data.changed_files, checkpoint-result.decisions, repos-split-result.repos, holdout-evaluation.scores/.symptoms/.walled_findings, delta-data.cross_repo; status.decisions/.spikes/.others/.notes typed as arrays with the stated limits 12/8/3/5 as maxItems.",
+    "where": "rewrite/spec/schemas/{story-draft-data,intake-data,route-data,sweep-data,survey,story-unit,wave-gate-data,delivery-data,checkpoint-result,repos-split-result,holdout-evaluation,delta-data,status}.schema.json"
+  },
+  {
+    "id": "AU-T2-12",
+    "outcome": "fixed",
+    "what_was_done": "wave-gate-data now allOf-composes gate-result.schema.json and step-record allOf-composes step-result.schema.json, so the gate result's and step result's required fields are checked.",
+    "where": "rewrite/spec/schemas/wave-gate-data.schema.json; rewrite/spec/schemas/step-record.schema.json"
+  },
+  {
+    "id": "AU-T2-13",
+    "outcome": "fixed",
+    "what_was_done": "One key list: tables/config-keys.toml is the definition (key, type, default, owner, meaning); schemas/config.schema.json reduced to structure and types with a link to the table; config/holdout.md, config/commands.md, config/state.md, config/evidence.md and config/maintain.md trimmed to link the table; repo key join split into one row per key.",
+    "where": "rewrite/spec/tables/config-keys.toml; rewrite/spec/schemas/config.schema.json; rewrite/spec/config/*.md"
+  },
+  {
+    "id": "AU-T2-14",
+    "outcome": "fixed",
+    "what_was_done": "config.schema.json now closes hooks.rules (additionalProperties false) with one table per rule id of tables/rules.toml, closes every rule table, types strength/attribution/allow_pr_close/scope and the enum-bearing leaves per the table; top-level unknown-key refusal kept.",
+    "where": "rewrite/spec/schemas/config.schema.json"
+  },
+  {
+    "id": "AU-T2-15",
+    "outcome": "fixed",
+    "what_was_done": "delivery.protected_paths default now follows the blueprint: .github/**, .env*, CODEOWNERS and the files [release] names; both texts recorded in records-repair.md RR10.",
+    "where": "rewrite/spec/tables/config-keys.toml; rewrite/spec/conflicts/records-repair.md RR10"
+  },
+  {
+    "id": "AU-T2-16",
+    "outcome": "fixed",
+    "what_was_done": "Added VSDD_PORT, CLAUDE_PLUGIN_OPTION (per-secret export), CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR rows from the cited originals; left who empty where the originals say nothing, removing the invented Debug/Test caps.",
+    "where": "rewrite/spec/tables/environment.toml"
+  },
+  {
+    "id": "AU-T2-17",
+    "outcome": "fixed",
+    "what_was_done": "Left the unnamed fields out: evidence-record names no properties (prose facts kept in description/x-notes), caller-marker keeps only the four spelled keys with \"the time\" described not keyed, notes.schema.json drops the invented top-level notes wrapper.",
+    "where": "rewrite/spec/schemas/{evidence-record,caller-marker,notes}.schema.json"
+  },
+  {
+    "id": "AU-T2-18",
+    "outcome": "fixed",
+    "what_was_done": "Struck the truncated pointer sentence and the \"three spike rows\" error from the header; cells copied as written (periods removed where the original has none).",
+    "where": "rewrite/spec/tables/limits.toml"
+  },
+  {
+    "id": "AU-T2-19",
+    "outcome": "fixed",
+    "what_was_done": "Quoted the originals' meanings for paths.harness/.repo_config/.manifests, holdout.* (from pipeline.md#2.7), the state.* keys, caps.<kind>, hooks.log_retention_days; auto-allow scope default is now the blueprint's \"set at setup\"; attribution and allow_pr_close defaults both blank with the example values recorded in the meaning (RR4 updated); one key per row.",
+    "where": "rewrite/spec/tables/config-keys.toml; rewrite/spec/conflicts/records-repair.md RR4"
+  },
+  {
+    "id": "AU-T2-20",
+    "outcome": "fixed",
+    "what_was_done": "Added the cwd property to the event schema and completed the id description to name rule.would_block, per hooks.md#2.12 lines 1476-1477.",
+    "where": "rewrite/spec/schemas/event.schema.json"
+  },
+  {
+    "id": "AU-T2-21",
+    "outcome": "fixed",
+    "what_was_done": "events.toml rules cells now carry the wiring table's own prose (\"all gates, the advisor, auto-allow\" and friends) with the id decoding noted; timeout_seconds keeps the original \"platform budget of 1.5\" as its quoted cell; event-types runner.call drops the parenthetical the original does not state; rules.toml rewritten with the hooks.md#2.10 cells verbatim including the What-it-checks column, removing the coined tokens any-guarded, web-and-research and any-guarded-for-lock-liveness.",
+    "where": "rewrite/spec/tables/events.toml; rewrite/spec/tables/event-types.toml; rewrite/spec/tables/rules.toml"
+  },
+  {
+    "id": "AU-T2-22",
+    "outcome": "fixed",
+    "what_was_done": "closure-record verdict description quotes state.md#2.8's example fields; the additions paragraph now quotes the original sentences (plan waves; wave stories and gate rounds; verify.json checks per round and properties proven; flaky); baseline property added referring to baseline.schema.json with the state.md#2.8 field list.",
+    "where": "rewrite/spec/schemas/closure-record.schema.json"
+  },
+  {
+    "id": "AU-T2-23",
+    "outcome": "fixed",
+    "what_was_done": "Recorded the pipeline.md#2.10.8 versus BLUEPRINT.md#4.10 wording on a holdout claim's fields in tables-repair.md; the schema follows the blueprint per the precedence rule.",
+    "where": "rewrite/spec/schemas/claim.schema.json; rewrite/spec/conflicts/tables-repair.md"
+  },
+  {
+    "id": "AU-T2-24",
+    "outcome": "fixed",
+    "what_was_done": "decision-kinds notes now quote one source per cell (BLUEPRINT.md#4.11 for spec/release/blocked; the digest sentences of BLUEPRINT.md#5.2); spec-gap.opened_when takes the blueprint's text over pipeline.md#2.6, recorded in tables-repair.md.",
+    "where": "rewrite/spec/tables/decision-kinds.toml; rewrite/spec/conflicts/tables-repair.md"
+  },
+  {
+    "id": "AU-T2-25",
+    "outcome": "fixed",
+    "what_was_done": "Positional rows repeat the agent to keep the agents[n]/methods[n] pairing (ingest disposition, maintain risks); the discover research row lists market-intel with the alternative kept in the note.",
+    "where": "rewrite/spec/tables/step-methods.toml"
+  },
+  {
+    "id": "AU-T2-26",
+    "outcome": "fixed",
+    "what_was_done": "Dropped the [dependencies] frontmatter cell no original gives (noted in tables-repair.md); spike-ledger lifecycle now says the entry fields are the ledger fields of pipeline.md S6 as state.md#2.5 spells them instead of pointing at the spike-finding schema; path-classes writers restored verbatim ([[repo]] entries; the holdout-evaluations and runs sentences); command-families \"in no git family\" and the [callers] pointer replaced with [[table:walls]]; lint-checks L-METHOD cites [[table:step-methods]].",
+    "where": "rewrite/spec/tables/artifacts.toml; rewrite/spec/tables/path-classes.toml; rewrite/spec/tables/command-families.toml; rewrite/spec/tables/lint-checks.toml"
+  },
+  {
+    "id": "AU-P2-02",
+    "outcome": "fixed",
+    "what_was_done": "Same defect as T2-02; the full story row is built from state.md#2.5 line 565 in the hook row format and artifacts/story.md links the table row.",
+    "where": "rewrite/spec/tables/artifacts.toml [story]; rewrite/spec/artifacts/story.md"
+  },
+  {
+    "id": "AU-P2-10",
+    "outcome": "fixed",
+    "what_was_done": "Schema part of the finding: added cwd to schemas/event.schema.json and completed the id description (rule.would_block). The example line itself lives in the event-log topic, outside this pass's scope.",
+    "where": "rewrite/spec/schemas/event.schema.json"
+  },
+  {
+    "id": "AU-P2-12",
+    "outcome": "fixed",
+    "what_was_done": "Tables part of the finding: the truncated \"its sections 2.7 and 2\" pointer and the \"three spike rows\" note are struck from the limits header (see T2-18).",
+    "where": "rewrite/spec/tables/limits.toml"
+  },
+  {
+    "id": "AU-P2-19",
+    "outcome": "fixed",
+    "what_was_done": "tables/rules.toml rebuilt from hooks.md#2.10 with the original cells verbatim, including the What-it-checks column; coined tool tokens removed (T2-21).",
+    "where": "rewrite/spec/tables/rules.toml"
+  },
+  {
+    "id": "AU-P2-20",
+    "outcome": "fixed",
+    "what_was_done": "hooks.rules.auto-allow.scope default is now the blueprint's \"set at setup\"; vsdd init wording kept in the meaning.",
+    "where": "rewrite/spec/tables/config-keys.toml"
+  },
+  {
+    "id": "AU-P2-23",
+    "outcome": "fixed",
+    "what_was_done": "Same defect as T2-07/P2-23: one uniform row structure across tables/artifacts.toml, header documents the columns.",
+    "where": "rewrite/spec/tables/artifacts.toml"
+  },
+  {
+    "id": "AU-S2-03",
+    "outcome": "fixed",
+    "what_was_done": "Tables side of the three-key disagreement: auto-allow scope carries the blueprint wording; delivery.mode/ci stay \"detected\" with both texts recorded in RR2 and the example in topics/project-configuration.md; config.schema.json no longer enumerates a second key list (T2-13).",
+    "where": "rewrite/spec/tables/config-keys.toml; rewrite/spec/schemas/config.schema.json; rewrite/spec/conflicts/tables-repair.md"
+  },
+  {
+    "id": "AU-S2-09",
+    "outcome": "fixed",
+    "what_was_done": "Tables side: topics/spikes.md and topics/convergence.md now link the spike and threshold rows of tables/limits.toml and tables/config-keys.toml; event-types/event.schema lists stay equal with the table named as the documented list in the schema.",
+    "where": "rewrite/spec/topics/spikes.md; rewrite/spec/topics/convergence.md; rewrite/spec/schemas/event.schema.json"
+  },
+  {
+    "id": "AU-S2-11",
+    "outcome": "fixed",
+    "what_was_done": "Pointer cells in the tables replaced with links or struck: limits.toml header (T2-18), lint-checks L-METHOD, artifacts.toml pointer cells (agents-skills.md N-STATE-3/N-STATE-5, pipeline.md S11/2.6 removed), methods.toml history comment rewritten as design statement.",
+    "where": "rewrite/spec/tables/{limits,lint-checks,artifacts,methods}.toml"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "fixed",
+    "what_was_done": "Converter commentary removed from tables/walls.toml (header derivation note), tables/story-kinds.toml (artifacts.toml placement claim corrected to the spec's own layout) and tables/command-families.toml.",
+    "where": "rewrite/spec/tables/{walls,story-kinds,command-families}.toml"
+  },
+  {
+    "id": "AU-S2-17",
+    "outcome": "fixed",
+    "what_was_done": "story-kinds header now says the kinds and red gates are the rows of this table ([[table:story-kinds]]) instead of pointing at artifacts.toml.",
+    "where": "rewrite/spec/tables/story-kinds.toml"
+  },
+  {
+    "id": "AU-S2-16",
+    "outcome": "fixed",
+    "what_was_done": "Tables part: methods.toml [replaced-name] rows converted to agent/method arrays and its history framing replaced with a design statement; conventions.md 4.4 line corrected to link [[table:methods]].",
+    "where": "rewrite/spec/tables/methods.toml; rewrite/spec/conventions.md"
+  }
+]

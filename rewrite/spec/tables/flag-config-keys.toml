@@ -1,0 +1,188 @@
+# sources: decisions.md#D31
+# Built when the build widens past the thin slice (package F1). Not read by anything on the slice path.
+#
+# Every [flags] key, in the row shape of the configuration key table ([[table:config-keys]]). Package F1
+# merges these rows into that table, the configuration schema and the loader; until it does, the loader
+# rejects a [flags] section as it rejects any unknown key.
+#
+# `set_by` says who gives a key its value; the two tables of factory.toml that hold them are in
+# [[config:flags]].
+# - "person": written by a person in `[flags]`, and by nothing else. A proposal that carries the key is
+#   refused (F-CHOICE, [[table:flag-checks]]).
+# - "proposal": written by the architect in the `[flags]` table of the toolchain file
+#   ([[artifact:toolchain]]), approved by a `spec` decision ([[topic:flag-system-choice]]) and written by the
+#   survey into `[flags.approved]` as F-FILL says.
+# `override = true` marks a proposal key that a person may also write in `[flags]`. Which of the two tables
+# a check then reads is in [[config:flags]].
+#
+# How a pattern is written, where it is matched and how long a match may take: [[config:flags]], "Patterns".
+# No key holds the name of a flag system. The name is prose in the decision record; no program reads it.
+
+[[config_key]]
+key = "flags.enabled"
+set_by = "proposal"
+override = true
+type = "boolean"
+default = "unset"
+meaning = "Whether the product uses feature flags. A proposal says true with a flag system and false with `declined`; the one key F-FILL does not copy as written. A person's value in `[flags]` is the person's own answer. The states the two give a project are in config:flags."
+
+[[config_key]]
+key = "flags.require"
+set_by = "person"
+type = "string (marked | high-risk | existing | all)"
+default = "high-risk"
+meaning = "When a story must ship behind a flag. The four values are defined in config:flags."
+
+[[config_key]]
+key = "flags.interface"
+set_by = "proposal"
+override = true
+type = "array of globs"
+default = "[]"
+meaning = "The product files that are the one flag interface and its wiring to the flag source: the only files in which a bypass pattern may match. Each must be in the path class source."
+
+[[config_key]]
+key = "flags.read_patterns"
+set_by = "proposal"
+override = true
+type = "array of regular expressions"
+default = "[]"
+meaning = "Each matches one call that evaluates a flag through the interface. It has the named group `key`, which captures the flag key when the key is a literal at the call and is empty when it is not; it may capture the fallback value in the named group `default`."
+
+[[config_key]]
+key = "flags.bypass_patterns"
+set_by = "proposal"
+override = true
+type = "array of regular expressions"
+default = "[]"
+meaning = "Each matches a flag read, or a use of the flag source, that goes around the interface: a call to the source's own client library, or a read of an environment variable or a setting that the project's flag convention names. Never a pattern for configuration reads in general. It may capture the flag key in `key`."
+
+[[config_key]]
+key = "flags.test_patterns"
+set_by = "proposal"
+override = true
+type = "array of regular expressions"
+default = "[]"
+meaning = "Each matches a test setting a flag through the test double and captures the flag key in `key`."
+
+[[config_key]]
+key = "flags.definitions"
+set_by = "proposal"
+override = true
+type = "array of globs"
+default = "[]"
+meaning = "The product files that hold the flag definitions a person or the project's pipeline applies. Each must be in the path class source, so the builder of a story may write it."
+
+[[config_key]]
+key = "flags.definition_patterns"
+set_by = "proposal"
+override = true
+type = "array of regular expressions"
+default = "[]"
+meaning = "Each matches the whole of one flag's entry in a definitions file and captures its key in `key`; it may capture the value the entry serves by default in `value`. An empty list means one definitions file for each flag, whose stem is the key."
+
+[[config_key]]
+key = "flags.definitions_check"
+set_by = "proposal"
+override = true
+type = "string (command)"
+default = "empty"
+meaning = "A command that validates the definitions files in the flag system's own format. The green gate runs it when a story's diff changes one. Empty: the gate reports `definitions not validated`."
+
+[[config_key]]
+key = "flags.runbook"
+set_by = "proposal"
+override = true
+type = "string (path)"
+default = "empty"
+meaning = "The documentation file that holds the kill switch and the rollback steps. It must be in the path class docs. The headings it must carry are F-RUNBOOK's to say (table:flag-release-checks)."
+
+[[config_key]]
+key = "flags.key_env"
+set_by = "proposal"
+override = true
+type = "array of strings"
+default = "[]"
+meaning = "Names of the environment variables that hold the flag source's secret keys. Never the values, and never an identifier that a client build must carry and the flag service treats as public."
+
+[[config_key]]
+key = "flags.key_patterns"
+set_by = "proposal"
+override = true
+type = "array of regular expressions"
+default = "[]"
+meaning = "Each matches the shape of one of the flag source's secret keys, for the search of the lines a story adds. Empty where the keys have no shape a pattern can tell from other text."
+
+[[config_key]]
+key = "flags.override_env"
+set_by = "proposal"
+override = true
+type = "string"
+default = "empty"
+meaning = "The environment variable through which the product's wiring and the suite's setup accept flag values, as one JSON object of key to value. Its rule is the `offline` contract of topic:flag-system-choice. Who sets it, and to what, is F-KEY (table:flag-story-checks)."
+
+[[config_key]]
+key = "flags.kill_switch_seconds"
+set_by = "proposal"
+override = true
+type = "integer"
+default = "none; required when enabled is true"
+meaning = "How soon a change to a flag's value takes effect in a running product, without a restart. The test of the `kill_switch` contract asserts it; the pull request body and the release packet print it."
+
+[[config_key]]
+key = "flags.removal"
+set_by = "proposal"
+override = true
+type = "string (human | auto)"
+default = "human"
+meaning = "Whether the removal of a flag that maintenance proposes waits for a person. `auto` only where the decision record says the repository's definitions are authoritative and the project's pipeline applies them."
+
+[[config_key]]
+key = "flags.repo.<name>"
+set_by = "proposal"
+override = true
+type = "table"
+default = "none"
+meaning = "Hub layout only: a member repository whose language or layout differs gives its own values for `interface`, the four pattern lists, `definitions`, `definitions_check` and `runbook`. A person overrides them in that repository's `[[repo]]` entry, under `flags`."
+
+[[config_key]]
+key = "flags.detected"
+set_by = "proposal"
+type = "boolean"
+default = "none; required in a toolchain file written after an ingest"
+meaning = "Whether the analysis of existing code found a flag mechanism of any kind. Written by the architect from the per-module analyses."
+
+[[config_key]]
+key = "flags.declined"
+set_by = "proposal"
+type = "string"
+default = "none; required when the proposal says enabled = false"
+meaning = "The person's words for not using flags, or for not having the factory manage the flags the code already has, quoted. The spec packet prints it."
+
+[[config_key]]
+key = "flags.source"
+set_by = "proposal"
+type = "string (existing | named | researched | home-built)"
+default = "none; required when enabled is true"
+meaning = "How the flag system was chosen: the order of preference of topic:flag-system-choice. It is also the value a person types to confirm the choice."
+
+[[config_key]]
+key = "flags.decision"
+set_by = "proposal"
+type = "string (ADR-NNN)"
+default = "none; required when enabled is true"
+meaning = "The decision record that holds the choice and its reasons."
+
+[[config_key]]
+key = "flags.standard"
+set_by = "proposal"
+type = "string (openfeature | partial | none)"
+default = "none; required when enabled is true"
+meaning = "Whether the one interface is OpenFeature, the vendor-neutral standard that decision D31 names: in every language of the product, in some, or in none. `partial` and `none` need the reason for each language in the decision record."
+
+[[config_key]]
+key = "flags.contracts"
+set_by = "proposal"
+type = "table of contract ids, with the names fallback, startup, kill_switch and offline"
+default = "none; required when enabled is true"
+meaning = "The four contracts that state the flag system's own behaviour. What each must say is in topic:flag-system-choice."

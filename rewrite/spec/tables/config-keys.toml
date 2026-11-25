@@ -1,0 +1,685 @@
+# sources: state.md#2.12, BLUEPRINT.md#4.12, hooks.md#2.6, state.md#2.14
+# Every section and key of factory.toml with its type, default and owner; an unknown key is an error.
+# The annotated example that is the whole key list is in topic:project-configuration. Owners: the state
+# design owns schema, project, branches, commands, paths, state, caps, component, reference and repo; the
+# pipeline design owns delivery, convergence, holdout, mutation, limits, stops, evidence, notify, maintain,
+# release and discover; the pipeline and hooks designs own spikes; the hooks design owns hooks. A key
+# without a meaning has none in the originals.
+
+[[config_key]]
+key = "schema"
+type = "integer"
+default = "1"
+owner = "state"
+
+[[config_key]]
+key = "project.name"
+type = "string"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "project.languages"
+type = "array of strings"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "project.ui"
+type = "boolean"
+default = "false"
+owner = "state"
+
+[[config_key]]
+key = "project.layout"
+type = "string (single | hub)"
+default = "single"
+owner = "state"
+meaning = "single | hub"
+
+[[config_key]]
+key = "branches.integration"
+type = "string"
+default = "detected"
+owner = "state"
+meaning = "Stories merge here."
+
+[[config_key]]
+key = "branches.release"
+type = "string"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "branches.protected"
+type = "array of strings"
+default = "[\"main\"]"
+owner = "state"
+
+[[config_key]]
+key = "branches.story"
+type = "string"
+default = "story/{id}"
+owner = "state"
+meaning = "Branch pattern the hook runner maps back to stories and spikes."
+
+[[config_key]]
+key = "branches.spike"
+type = "string"
+default = "spike/{name}"
+owner = "state"
+meaning = "Branch pattern the hook runner maps back to stories and spikes."
+
+[[config_key]]
+key = "commands.build"
+type = "string (shell command)"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "commands.test"
+type = "string (shell command)"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "commands.test_report"
+type = "string (junit:<path>)"
+default = "detected"
+owner = "state"
+meaning = "junit:<path>. Required: the red gate needs per-test results."
+
+[[config_key]]
+key = "commands.lint"
+type = "string (shell command)"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "commands.format_check"
+type = "string (shell command)"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "commands.run"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+meaning = "How to start the product, for demos and hidden scenarios. It must take its port from {port} or $VSDD_PORT; vsdd init and vsdd doctor check that."
+
+[[config_key]]
+key = "commands.ui_check"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.docs_check"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+meaning = "The documentation check the green gate runs for a docs story."
+
+[[config_key]]
+key = "commands.mutation"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.scan"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.audit"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.bench"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.proofs"
+type = "string (shell command)"
+default = "empty"
+owner = "state"
+
+[[config_key]]
+key = "commands.env"
+type = "table of strings"
+default = "empty"
+owner = "state"
+meaning = "Environment for every configured command, for example a shared build cache."
+
+[[config_key]]
+key = "paths.tests"
+type = "array of globs"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "paths.harness"
+type = "array of globs"
+default = "detected"
+owner = "state"
+meaning = "proofs, fuzz targets, benchmarks, in-source proof files"
+
+[[config_key]]
+key = "paths.ci"
+type = "array of globs"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "paths.repo_config"
+type = "array of globs"
+default = "detected"
+owner = "state"
+meaning = "toolchain and repository configuration files"
+
+[[config_key]]
+key = "paths.manifests"
+type = "array of globs"
+default = "detected"
+owner = "state"
+meaning = "build manifests and lock files"
+
+[[config_key]]
+key = "paths.docs"
+type = "array of globs"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "paths.source"
+type = "array of globs"
+default = "detected"
+owner = "state"
+
+[[config_key]]
+key = "delivery.mode"
+type = "string (pr | local)"
+default = "detected"
+owner = "pipeline"
+meaning = "pr or local (no remote)."
+
+[[config_key]]
+key = "delivery.ci"
+type = "string (required | none)"
+default = "detected"
+owner = "pipeline"
+meaning = "required or none (the repository has no CI). With none, \"no checks\" counts as a pass and a CI chore story is scheduled."
+
+[[config_key]]
+key = "delivery.merge"
+type = "string (auto | human)"
+default = "auto"
+owner = "pipeline"
+
+[[config_key]]
+key = "delivery.merge_strategy"
+type = "string"
+default = "squash"
+owner = "pipeline"
+
+[[config_key]]
+key = "delivery.protected_paths"
+type = "array of globs"
+default = ".github/**, .env*, CODEOWNERS, and the files [release] names"
+owner = "pipeline"
+meaning = "Always wait for a person."
+
+[[config_key]]
+key = "delivery.dependency_changes"
+type = "string (human | auto)"
+default = "human"
+owner = "pipeline"
+meaning = "A new dependency, or an upgrade beyond dependencies.toml, needs a merge decision."
+
+[[config_key]]
+key = "delivery.ci_wait_minutes"
+type = "integer"
+default = "30"
+owner = "pipeline"
+meaning = "The total wait for CI, taken as one job in slices of nine minutes."
+
+[[config_key]]
+key = "convergence.passes"
+type = "integer"
+default = "3"
+owner = "pipeline"
+meaning = "Review passes at the story and spec perimeters."
+
+[[config_key]]
+key = "convergence.rounds"
+type = "integer"
+default = "3"
+owner = "pipeline"
+meaning = "Review rounds at the wave and release perimeters."
+
+[[config_key]]
+key = "limits.agents_per_run"
+type = "integer"
+default = "900"
+owner = "pipeline"
+meaning = "The platform stops at 1,000; a parent and its children share the platform's counter."
+
+[[config_key]]
+key = "limits.agents_per_story"
+type = "integer"
+default = "40"
+owner = "pipeline"
+meaning = "The budget each child story receives; each child story receives this as its own budget."
+
+[[config_key]]
+key = "limits.stories_per_wave_run"
+type = "integer"
+default = "24"
+owner = "pipeline"
+
+[[config_key]]
+key = "limits.step_attempts"
+type = "integer"
+default = "2"
+owner = "pipeline"
+
+[[config_key]]
+key = "limits.delivery_rounds"
+type = "integer"
+default = "3"
+owner = "pipeline"
+
+[[config_key]]
+key = "limits.gate_minutes"
+type = "integer"
+default = "60"
+owner = "pipeline"
+meaning = "The longest a gate job may run; waited in slices of nine minutes."
+
+[[config_key]]
+key = "limits.parallel_gates"
+type = "integer"
+default = "4"
+owner = "pipeline"
+meaning = "Jobs that run at once."
+
+[[config_key]]
+key = "limits.failed_runs_before_stuck"
+type = "integer"
+default = "2"
+owner = "pipeline"
+meaning = "Runs in which a unit failed without a human-decidable reason."
+
+[[config_key]]
+key = "spikes.per_step"
+type = "integer"
+default = "2"
+owner = "pipeline and hooks"
+
+[[config_key]]
+key = "spikes.per_run"
+type = "integer"
+default = "6"
+owner = "pipeline and hooks"
+
+[[config_key]]
+key = "spikes.per_day"
+type = "integer"
+default = "20"
+owner = "pipeline and hooks"
+meaning = "Enforced by vsdd spike open."
+
+[[config_key]]
+key = "spikes.minutes"
+type = "integer"
+default = "20"
+owner = "pipeline and hooks"
+meaning = "The time box; enforced by the hook runner."
+
+[[config_key]]
+key = "spikes.max_open"
+type = "integer"
+default = "3"
+owner = "pipeline and hooks"
+meaning = "Named spikes open at once; enforced by vsdd spike open --name."
+
+[[config_key]]
+key = "spikes.retain_days"
+type = "integer"
+default = "14"
+owner = "pipeline and hooks"
+meaning = "How long a finished spike's worktree is kept."
+
+[[config_key]]
+key = "holdout.mean_min"
+type = "number"
+default = "0.85"
+owner = "pipeline"
+meaning = "mean satisfaction at least this"
+
+[[config_key]]
+key = "holdout.must_pass_min"
+type = "number"
+default = "0.6"
+owner = "pipeline"
+meaning = "every must-pass scenario at least this"
+
+[[config_key]]
+key = "holdout.stddev_max"
+type = "number"
+default = "0.15"
+owner = "pipeline"
+meaning = "standard deviation below this"
+
+[[config_key]]
+key = "holdout.rotation"
+type = "number"
+default = "0.8"
+owner = "pipeline"
+meaning = "an 80 percent rotation chosen by the tool from a seed derived from the commit"
+
+[[config_key]]
+key = "holdout.batch"
+type = "integer"
+default = "12"
+owner = "pipeline"
+meaning = "Scenarios per evaluator step."
+
+[[config_key]]
+key = "mutation.kill_rate"
+type = "table (critical, high, medium, low)"
+default = "critical = 0.95, high = 0.90, medium = 0.80, low = 0.70"
+owner = "pipeline"
+meaning = "By module criticality."
+
+[[config_key]]
+key = "stops.plan"
+type = "string (auto | always)"
+default = "auto"
+owner = "pipeline"
+meaning = "When the plan decision opens."
+
+[[config_key]]
+key = "stops.plan_ceiling_agents"
+type = "integer"
+default = "600"
+owner = "pipeline"
+meaning = "With auto, the plan decision opens when the estimate passes this."
+
+[[config_key]]
+key = "evidence.wave_demo"
+type = "boolean"
+default = "false"
+owner = "pipeline"
+meaning = "A demo at the wave gate."
+
+[[config_key]]
+key = "evidence.final_demo"
+type = "boolean"
+default = "false"
+owner = "pipeline"
+meaning = "A demo in the release UI review."
+
+[[config_key]]
+key = "maintain.sweeps"
+type = "array of strings"
+default = "[]"
+owner = "pipeline"
+meaning = "Empty means every sweep that applies; or a list of sweep names."
+
+[[config_key]]
+key = "maintain.fixes_per_run"
+type = "integer"
+default = "10"
+owner = "pipeline"
+meaning = "Fix stories per maintain run."
+
+[[config_key]]
+key = "release.version_files"
+type = "array of tables"
+default = "[]"
+owner = "pipeline"
+meaning = "Detected by vsdd init; e.g. [{ path = \"Cargo.toml\", key = \"package.version\" }]"
+
+[[config_key]]
+key = "release.changelog"
+type = "string"
+default = "CHANGELOG.md"
+owner = "pipeline"
+meaning = "Detected by vsdd init."
+
+[[config_key]]
+key = "release.tag_format"
+type = "string"
+default = "v{version}"
+owner = "pipeline"
+meaning = "Detected by vsdd init."
+
+[[config_key]]
+key = "release.publish"
+type = "array of strings"
+default = "[]"
+owner = "pipeline"
+meaning = "Detected by vsdd init; commands, e.g. [\"cargo publish\"]"
+
+[[config_key]]
+key = "release.github_release"
+type = "boolean"
+default = "true"
+owner = "pipeline"
+meaning = "Detected by vsdd init."
+
+[[config_key]]
+key = "discover.source.name"
+type = "string"
+default = "none"
+owner = "pipeline"
+meaning = "Feedback and analytics pulled by vsdd discover collect."
+
+[[config_key]]
+key = "discover.source.command"
+type = "string"
+default = "none"
+owner = "pipeline"
+meaning = "Feedback and analytics pulled by vsdd discover collect."
+
+[[config_key]]
+key = "state.push"
+type = "boolean"
+default = "true (the default when the repository has a remote)"
+owner = "state"
+meaning = "State is pushed only by vsdd checkpoint."
+
+[[config_key]]
+key = "state.lock_stale_minutes"
+type = "integer"
+default = "20"
+owner = "state"
+meaning = "without a liveness mark for state.lock_stale_minutes (default 20), the lock is stale and the next survey takes it over"
+
+[[config_key]]
+key = "state.retain_runs_days"
+type = "integer"
+default = "30"
+owner = "state"
+meaning = "Run records are kept 30 days, or until the cycle closes."
+
+[[config_key]]
+key = "state.prune_closed_cycles"
+type = "boolean"
+default = "true"
+owner = "state"
+meaning = "Closing a cycle removes demo/<cycle>/ and holdout/evaluations/<cycle>/ from the tree and the cycle's runs and evidence from the local store; false keeps the detail."
+
+[[config_key]]
+key = "caps.<kind>"
+type = "integer"
+default = "none"
+owner = "state"
+meaning = "A project may raise a cap in [caps] to at most twice the default, and every raised cap is listed in vsdd status."
+
+[[config_key]]
+key = "caps.waived"
+type = "array of paths"
+default = "[]"
+owner = "state"
+meaning = "Files over their cap after an import."
+
+[[config_key]]
+key = "notify.channel"
+type = "string (none | github-issue | command)"
+default = "none"
+owner = "pipeline"
+
+[[config_key]]
+key = "notify.command"
+type = "string"
+default = "empty"
+owner = "pipeline"
+
+[[config_key]]
+key = "component.name"
+type = "string"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "component.paths"
+type = "array of globs"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "component.commands"
+type = "table of strings"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "reference.name"
+type = "string"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "reference.url"
+type = "string"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "repo.name"
+type = "string"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "repo.path"
+type = "string"
+default = "repos/<name>/"
+owner = "state"
+meaning = "Member repositories are cloned at the path of their entry."
+
+[[config_key]]
+key = "repo.url"
+type = "string"
+default = "none"
+owner = "state"
+
+[[config_key]]
+key = "repo.branches"
+type = "table"
+default = "none; same keys as the top level"
+owner = "state"
+
+[[config_key]]
+key = "repo.commands"
+type = "table"
+default = "none; same keys as the top level"
+owner = "state"
+
+[[config_key]]
+key = "repo.paths"
+type = "table"
+default = "none; same keys as the top level"
+owner = "state"
+
+[[config_key]]
+key = "repo.release"
+type = "table"
+default = "none; same keys as the top level"
+owner = "state"
+
+[[config_key]]
+key = "repo.delivery"
+type = "table"
+default = "none; same keys as the top level"
+owner = "state"
+
+[[config_key]]
+key = "hooks.main_session_wall"
+type = "boolean"
+default = "true"
+owner = "hooks"
+meaning = "Decision D6; false relaxes the main session's row only, and is announced."
+
+[[config_key]]
+key = "hooks.log_retention_days"
+type = "integer"
+default = "30"
+owner = "hooks"
+meaning = "Files older than log_retention_days (default 30) are deleted at session end."
+
+[[config_key]]
+key = "hooks.rules.auto-allow.scope"
+type = "string (off | core | extended)"
+default = "set at setup"
+owner = "hooks"
+meaning = "Decision D4: off | core | extended. vsdd init writes the answer setup collected, from --auto-allow; after that no vsdd command an agent can run changes it."
+
+[[config_key]]
+key = "hooks.rules.<rule>.strength"
+type = "string (block | advise | off)"
+default = "block"
+owner = "hooks"
+meaning = "advise turns every block from that rule into advice that begins \"would have blocked\"; off skips the rule. Locked rules ignore strength."
+
+[[config_key]]
+key = "hooks.rules.bash-git.attribution"
+type = "string"
+default = ""
+owner = "hooks"
+meaning = "Commit messages and pull request text; the example value is \"block\"."
+
+[[config_key]]
+key = "hooks.rules.bash-destructive.allow_pr_close"
+type = "boolean"
+default = ""
+owner = "hooks"
+meaning = "The example value is true; no original states a default (records-repair RR4)."
+
+[[config_key]]
+key = "hooks.rules.secrets.secret_globs"
+type = "array of globs"
+default = "[]"
+owner = "hooks"
+meaning = "Further files the secrets rule treats as secrets."
+
+[[config_key]]
+key = "hooks.rules.purity-advice.pure_paths"
+type = "array of globs"
+default = "[\"*/pure/**\", \"*/core/**\", \"*/kernel/**\", \"*_pure.rs\", \"*.pure.ts\"]"
+owner = "hooks"
+
+[[config_key]]
+key = "hooks.rules.purity-advice.side_effect_patterns"
+type = "array of regular expressions"
+default = "the list built into the rule"
+owner = "hooks"

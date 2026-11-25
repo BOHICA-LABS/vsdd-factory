@@ -1,0 +1,26 @@
+[
+  {
+    "id": "S4R-rules-C1-1",
+    "outcome": "not-fixed",
+    "what_was_done": "All thirteen measured expanded forms now block, and real git under sh and dash runs each, so that part is fixed. Making _impure always false fails test_substitutions_anywhere_are_not_plain. The part that says the plain forms must still pass is not met. The value of a free-text option is exempt only from _impure. Any substitution in that value still marks the segment opaque, and _segment then sends it to _opaque before the plain path runs. The position test then reads the message's own words as command text. So the standard heredoc commit message, git commit -m \"$(cat <<'EOF' ... EOF)\", is blocked opaque_git in a story worktree whenever the message contains a far verb or a guarded name. Measured blocks: 'feat: add branch selector', 'fix: retry the fetch on timeout', 'docs: describe the checkout step', and, with main guarded, 'fix: keep the main loop alive'. Real git commits each one on the story branch. Point (2) exempts such a value. The only test of this form uses the message 'subject'. A related case: any here-document anywhere in a command makes every segment opaque (_build_segment: opaque = heredoc). So in a story worktree, cat > notes.txt <<'EOF' ... EOF followed by git add notes.txt && git commit -m 'feat: add the branch selector' is blocked, while the same commit without the here-document passes.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_segment, _harmless_or_block, _chunks); next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_build_segment heredoc opacity)"
+  },
+  {
+    "id": "S4R-rules-C1-2",
+    "outcome": "not-fixed",
+    "what_was_done": "Every measured command now blocks: the --git-dir and GIT_DIR forms from a directory in no project, the export form, and the --work-tree forms. --git-dir=<root>/.git/worktrees/S-9.01 now passes. Each was run against real git under sh and dash, and the mutations are caught by test_judged_at_a_linked_worktrees_git_dir, test_exported_git_dir_poisons_the_rest and test_opaque_global_values_and_trees. One part of the problem remains: for a git-bearing segment that is not plain, the segment's own directory still decides whether it is judged. _harmless_or_block returns None when seg.where is in no factory project. Point (3) makes position harmless only inside one. Measured from a directory in no project, all with exit 0, and real git (sh and dash) commits on develop or pushes it: sh -c 'git -C <root> commit -m x', (cd <root> && git commit -m x), env -S 'git -C <root> commit -m x', timeout 10 git -C <root> commit -m x, git $(echo -C) <root> commit -m x, flock lk git -C <root> commit -m x, caffeinate -i git -C <root> commit -m x, echo $(git -C <root> push origin develop) and sh -c 'git -C <root> push origin develop'.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/rules/merge_guard.py (_harmless_or_block)"
+  },
+  {
+    "id": "S4R-rules-C2-2",
+    "outcome": "not-fixed",
+    "what_was_done": "timeout is not read. shell.py line 875 runs pieces.append(tokens[index].text) on a (kind, word) tuple, which raises AttributeError. parse() then degrades the whole command to one opaque segment at the call's cwd, so every cd in it is lost. Measured from the story worktree, both with exit 0, and real git under sh and dash commits on develop: cd <root> && timeout 10 git commit -m x, and cd <root> && timeout 5 true && git commit -m x. The second shows that a timeout anywhere in the command hides a plain git commit after a cd. The fault also hides writes from tests-first: from the main checkout, cd <wt> && timeout 10 sed -i ... tests/test_sample.py passes and changes the frozen test. The wrapper table's long-value prefixes are shared by every wrapper, so --chdir=, which was added for sudo, is skipped as an inert value for env too. GNU env --chdir=<root> git commit -m x passes from the worktree and commits on develop (measured with coreutils env). sudo --chdir=<root> also passes (not run: sudo needs a password). In sudo's grammar -R is --chroot and -D is --chdir, so the table pairs them wrongly. The tests do not see any of this. With timeout, or all five new wrappers, removed from _WRAPPER_PROGRAMS, test_merge_guard.py and test_shell.py still pass (46 passed). The timeout cases pass only through the crash path or the not-plain ruling.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_wrapper_options, _WRAPPER_LONG_VALUE_PREFIXES, _WRAPPER_VALUE_FLAGS)"
+  },
+  {
+    "id": "S4B-rules-2",
+    "outcome": "not-fixed",
+    "what_was_done": "The text part is fixed. A subshell's segment carries its inner words instead of '()', and restoring '()' fails test_opaque. test_shell.py and test_caller.py pass. The effective directory the proposed fix asked for is not done. The subshell segment always gets where_now, the outer directory, even when its own text holds a cd. merge-guard's position test then judges it there. Measured: (cd <root> && git commit -m x) from the story worktree exits 0, and real git under sh and dash commits on develop. tests-first has the same hole: from the main checkout, (cd <wt> && sed -i ... tests/test_sample.py) passes and changes the frozen test.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py (_parse, subshell segments)"
+  }
+]

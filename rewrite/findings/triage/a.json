@@ -1,0 +1,814 @@
+[
+ {
+  "id": "P3SEAM-01",
+  "files": [
+   "commands/feature-route.md",
+   "workflows/feature.md"
+  ],
+  "packages": [
+   "G5",
+   "W6"
+  ],
+  "on_slice_path": false,
+  "note": "Give the change analysis a defined record/kind the delta step writes and feature route, story-writer and the spec packet read."
+ },
+ {
+  "id": "P3SEAM-02",
+  "files": [
+   "records/step.md",
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "S2a",
+   "G3"
+  ],
+  "on_slice_path": true,
+  "note": "Define a step-name grammar (or step-kind field) so the verdict can find a unit's review passes, fixes and arbitration."
+ },
+ {
+  "id": "P3SEAM-03",
+  "files": [
+   "records/cycle.md",
+   "workflows/story.md"
+  ],
+  "packages": [
+   "S2a",
+   "W2"
+  ],
+  "on_slice_path": true,
+  "note": "Define which commit the cycle's base is, record it in cycle.json, and cut story branches from it."
+ },
+ {
+  "id": "P3SEAM-04",
+  "files": [
+   "commands/story-deliver.md",
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "G4a",
+   "H5"
+  ],
+  "on_slice_path": true,
+  "note": "Specify the local-mode merge (detached worktree plus ff-only of a clean main checkout, awaiting_merge when dirty) as one stated exception."
+ },
+ {
+  "id": "P3SEAM-05",
+  "files": [
+   "tables/walls.toml",
+   "tables/command-families.toml"
+  ],
+  "packages": [
+   "C2",
+   "H2"
+  ],
+  "on_slice_path": true,
+  "note": "Grant builders git-read for status/diff/log and make an absent commands key mean none, not every family."
+ },
+ {
+  "id": "P3SEAM-06",
+  "files": [
+   "config/hooks.md",
+   "tables/config-keys.toml"
+  ],
+  "packages": [
+   "S1"
+  ],
+  "on_slice_path": true,
+  "note": "Reconcile the closed hooks key list with the documented keys (log_retention_days, strength, secret_globs, purity patterns) so a B3 loader accepts them."
+ },
+ {
+  "id": "P3SEAM-07",
+  "files": [
+   "rules/step-results.md",
+   "topics/run-lock.md"
+  ],
+  "packages": [
+   "H7",
+   "S2b"
+  ],
+  "on_slice_path": true,
+  "note": "Define 'live run' for step-results and spec_locked so lock-less workflows (discover, maintain, spike) can store records and a crashed amendment unlocks."
+ },
+ {
+  "id": "P3SEAM-08",
+  "files": [
+   "tables/story-kinds.toml",
+   "artifacts/story.md"
+  ],
+  "packages": [
+   "C2"
+  ],
+  "on_slice_path": true,
+  "note": "Make the story-kind table the single source mapping kind to implement agent and method, and fix the @repo-setup default mismatch."
+ },
+ {
+  "id": "P3SEAM-09",
+  "files": [
+   "rules/auto-allow.md"
+  ],
+  "packages": [
+   "H6"
+  ],
+  "on_slice_path": false,
+  "note": "Narrow the core scope to the project's build and test commands per D4 instead of every configured command."
+ },
+ {
+  "id": "P3SEAM-10",
+  "files": [
+   "commands/checkpoint.md",
+   "topics/prelude-run-stories.md"
+  ],
+  "packages": [
+   "S3",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Align the checkpoint signature with the scripts' call (add --subject or drop it from story.js/wave.js)."
+ },
+ {
+  "id": "P3SEAM-11",
+  "files": [
+   "schemas/story-unit.schema.json",
+   "schemas/survey.schema.json",
+   "topics/story-script.md"
+  ],
+  "packages": [
+   "C1",
+   "W2"
+  ],
+  "on_slice_path": true,
+  "note": "Add review_rules to the story unit and rounds_used to the survey result so reviewer prompts and the wave cap see real values."
+ },
+ {
+  "id": "P3SEAM-12",
+  "files": [
+   "tables/limits.toml",
+   "topics/prelude-run-stories.md"
+  ],
+  "packages": [
+   "S1",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Define limits.gate_minutes and ci_minutes (or rename the survey's keys) before the unknown-limit-key check bites."
+ },
+ {
+  "id": "P3SEAM-13",
+  "files": [
+   "records/step.md",
+   "topics/story-script.md"
+  ],
+  "packages": [
+   "S2a",
+   "W2"
+  ],
+  "on_slice_path": true,
+  "note": "Namespace the two review loops' step records (delivery repair vs main loop) and define store_step overwrite/refuse behaviour."
+ },
+ {
+  "id": "P3SEAM-14",
+  "files": [
+   "topics/prelude-converge.md",
+   "agents/architect.md"
+  ],
+  "packages": [
+   "B4a",
+   "A2b"
+  ],
+  "on_slice_path": true,
+  "note": "Carry the builder's dispute notes through converge/arbitrate into the arbiter's packet instead of dropping them."
+ },
+ {
+  "id": "P3SEAM-15",
+  "files": [
+   "records/evidence.md",
+   "rules/tests-first.md",
+   "commands/gate-red.md"
+  ],
+  "packages": [
+   "S2a",
+   "H5",
+   "G2"
+  ],
+  "on_slice_path": true,
+  "note": "Make a re-freeze record carry the full frozen set (delta plus survivors) and state its gate name is red."
+ },
+ {
+  "id": "P3SEAM-16",
+  "files": [
+   "commands/gate-green.md"
+  ],
+  "packages": [
+   "G2"
+  ],
+  "on_slice_path": true,
+  "note": "Define the stub marker (string or convention) the green gate checks, toolchain-independently."
+ },
+ {
+  "id": "P3SEAM-17",
+  "files": [
+   "topics/agent-file.md"
+  ],
+  "packages": [
+   "A1"
+  ],
+  "on_slice_path": true,
+  "note": "Fix the agent-file standard so the key list includes omitClaudeMd (and spike-runner isolation) and the example matches the lint."
+ },
+ {
+  "id": "P3SEAM-18",
+  "files": [
+   "commands/spike-open.md",
+   "commands/spike-record.md",
+   "topics/prelude-run-spike.md"
+  ],
+  "packages": [
+   "S6",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Unify spike command forms (step with attempt, --id on record, runSpike's --step) across pipeline, state and the prelude."
+ },
+ {
+  "id": "P3SEAM-19",
+  "files": [
+   "commands/survey.md",
+   "workflows/feature.md"
+  ],
+  "packages": [
+   "S3",
+   "W6"
+  ],
+  "on_slice_path": true,
+  "note": "Add --amend, severity and intent to the feature survey's options so the route (amend vs queue, release-tag cut) is decidable."
+ },
+ {
+  "id": "P3SEAM-20",
+  "files": [
+   "topics/long-commands.md",
+   "topics/prelude-run-stories.md"
+  ],
+  "packages": [
+   "G1",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Confine --wait to job commands or teach feature route to accept it, so brief()'s appended --wait 540 is not a usage error."
+ },
+ {
+  "id": "P3SEAM-21",
+  "files": [
+   "tables/walls.toml"
+  ],
+  "packages": [
+   "C2"
+  ],
+  "on_slice_path": true,
+  "note": "Put --version in a group every caller holds (or exempt it) so smoke probe 6 passes gate-guard."
+ },
+ {
+  "id": "P3SEAM-22",
+  "files": [
+   "tables/walls.toml",
+   "rules/gate-guard.md"
+  ],
+  "packages": [
+   "C2",
+   "H6"
+  ],
+  "on_slice_path": true,
+  "note": "Split the measure group or add per-command caller rows so only the stated callers run gate wave --settle and gate plan --story."
+ },
+ {
+  "id": "P3SEAM-23",
+  "files": [
+   "rules/write-scopes.md"
+  ],
+  "packages": [
+   "H3"
+  ],
+  "on_slice_path": false,
+  "note": "State how write check 2 treats nested path classes so product-owner and architect can write brief, conventions and review-rules files."
+ },
+ {
+  "id": "P3SEAM-24",
+  "files": [
+   "topics/run-lock.md",
+   "topics/caller-identity.md"
+  ],
+  "packages": [
+   "S2b",
+   "H1",
+   "H3"
+  ],
+  "on_slice_path": true,
+  "note": "Redefine the lock-refresh fallback so main-session story steps (cwd at project root, reviewers shell-less) keep a live run's lock fresh. The refresh on a vsdd call, a step result and a Bash call in a story worktree is built (hook-runner-b). What is left is the read-only reviewer: when H3 wires Read and Grep, a Read or Grep in the locked run's story worktree, from a second session with an agent id, must refresh the lock, with a test (plan decision D2 of rewrite/plans/step-3/hook-runner-b.md)."
+ },
+ {
+  "id": "P3COV-01",
+  "files": [
+   "commands/story-deliver.md",
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "G4a",
+   "H5"
+  ],
+  "on_slice_path": true,
+  "note": "State one local-delivery rule (detached merge, ff-only clean checkout, awaiting_merge dirty) with a G4a fixture for both checkout states."
+ },
+ {
+  "id": "P3COV-02",
+  "files": [
+   "topics/caller-identity.md",
+   "records/caller-marker.md",
+   "topics/run-lock.md"
+  ],
+  "packages": [
+   "H1",
+   "S2b"
+  ],
+  "on_slice_path": true,
+  "note": "Define the caller's worktree from the target path or -C prefix (never payload cwd), key markers by session+argv hash, and let --run calls refresh the lock."
+ },
+ {
+  "id": "P3COV-03",
+  "files": [
+   "packaging/build-plan.md"
+  ],
+  "packages": [
+   "B8",
+   "C2",
+   "B6",
+   "S4"
+  ],
+  "on_slice_path": true,
+  "note": "Amend the slice order: run B8 probes 6/27-31/34 first, add C2, the roster part of B6 and S4 (or split H7) to layer 1."
+ },
+ {
+  "id": "P3COV-04",
+  "files": [
+   "tables/config-keys.toml",
+   "tables/limits.toml"
+  ],
+  "packages": [
+   "S1"
+  ],
+  "on_slice_path": true,
+  "note": "Add commands.fidelity/fuzz/coverage, a coverage threshold, [perf] regression_pct and a hub integration command so the measured checks are runnable; say who records the real service's behaviour."
+ },
+ {
+  "id": "P3COV-05",
+  "files": [
+   "artifacts/story.md",
+   "tables/story-kinds.toml",
+   "tables/methods.toml",
+   "topics/story-script.md"
+  ],
+  "packages": [
+   "C2",
+   "B6",
+   "W2"
+  ],
+  "on_slice_path": true,
+  "note": "Add a tests_method story key applied to the tests stage, make every method reachable (claude-md, release-notes, devops observability), and lint reachability."
+ },
+ {
+  "id": "P3COV-06",
+  "files": [
+   "config/notify.md",
+   "commands/checkpoint.md"
+  ],
+  "packages": [
+   "S1",
+   "S3"
+  ],
+  "on_slice_path": true,
+  "note": "Make the checkpoint run the configured notify channel (issue or command) when it opens a decision, and assign the work to S3."
+ },
+ {
+  "id": "P3COV-07",
+  "files": [
+   "topics/rule-model.md",
+   "rules/auto-allow.md"
+  ],
+  "packages": [
+   "H1",
+   "H6"
+  ],
+  "on_slice_path": true,
+  "note": "State the permission decision paired with a rewritten vsdd call (allow when auto-allow permits, ask otherwise) and fix item 7's static rules to match the prefixed command."
+ },
+ {
+  "id": "P3COV-08",
+  "files": [
+   "records/spike-admission.md",
+   "commands/spike-open.md"
+  ],
+  "packages": [
+   "H8",
+   "S6"
+  ],
+  "on_slice_path": false,
+  "note": "Order spike admission before the runner's first spike open: claim the oldest unclaimed session admission, or pair in a synchronous PreToolUse rule."
+ },
+ {
+  "id": "P3COV-09",
+  "files": [
+   "platform.md",
+   "skills/research.md",
+   "skills/retro.md"
+  ],
+  "packages": [
+   "B8",
+   "K3b"
+  ],
+  "on_slice_path": false,
+  "note": "Probe and record the four assumed platform facts (plugin-root substitution, final message, fork background, MCP tool lists) and set background: false on research/retro."
+ },
+ {
+  "id": "P3COV-10",
+  "files": [
+   "commands/checkpoint.md",
+   "topics/prelude-run-stories.md"
+  ],
+  "packages": [
+   "S3",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Drop --subject from the prelude's checkpoint calls (the run record knows its subject) or add it to the signature."
+ },
+ {
+  "id": "P3COV-11",
+  "files": [
+   "topics/seams-agents.md",
+   "topics/seams-hooks.md",
+   "topics/seams-pipeline.md",
+   "topics/digests.md"
+  ],
+  "packages": [
+   "S2a",
+   "W9"
+  ],
+  "on_slice_path": true,
+  "note": "Correct the seam mapping rows: staleness/vsdd-stale dropped (digest plus lock), ingest ends at decision spec, lessons are a retrospective report."
+ },
+ {
+  "id": "P3COV-12",
+  "files": [
+   "skills/setup.md",
+   "topics/tool-sets.md",
+   "commands/doctor.md"
+  ],
+  "packages": [
+   "K1",
+   "T1"
+  ],
+  "on_slice_path": false,
+  "note": "Add the storybook MCP registration step to setup (with a doctor check when project.ui) or drop the storybook lists from the four agents."
+ },
+ {
+  "id": "P3COV-13",
+  "files": [
+   "skills/setup.md",
+   "commands/doctor.md"
+  ],
+  "packages": [
+   "K1",
+   "T1"
+  ],
+  "on_slice_path": false,
+  "note": "State that a person creates and protects the remote (with a doctor line when delivery.mode stays local) or have setup offer to create it."
+ },
+ {
+  "id": "P3COV-14",
+  "files": [
+   "packaging/sample-project.md"
+  ],
+  "packages": [
+   "E1"
+  ],
+  "on_slice_path": false,
+  "note": "Pin the sample's commands to uv run --no-project --offline, no build-system, stdlib lint/format, and .venv in .gitignore; assert no network fetch."
+ },
+ {
+  "id": "P3OPS-01",
+  "files": [
+   "topics/run-lock.md",
+   "commands/lock-release.md",
+   "commands/survey.md"
+  ],
+  "packages": [
+   "S2b",
+   "S3"
+  ],
+  "on_slice_path": true,
+  "note": "Key liveness to run-attributed calls, allow same-session survey re-entry to take over, and define lock release semantics (own/stale/force)."
+ },
+ {
+  "id": "P3OPS-02",
+  "files": [
+   "commands/gate-green.md",
+   "rules/step-results.md",
+   "rules/tests-first.md"
+  ],
+  "packages": [
+   "G2",
+   "H7",
+   "H5"
+  ],
+  "on_slice_path": true,
+  "note": "Require a passing red record per red-gated kind, have step-results verify each gates[] entry against its evidence record, and inspect Bash writes in tests-first."
+ },
+ {
+  "id": "P3OPS-03",
+  "files": [
+   "commands/story-deliver.md",
+   "rules/merge-guard.md"
+  ],
+  "packages": [
+   "G4a",
+   "H5"
+  ],
+  "on_slice_path": true,
+  "note": "Define the local merge path (branch-checked-out worktree if clean, checkout_dirty otherwise, detached worktree when checked out nowhere) and amend the never-touch invariant wording."
+ },
+ {
+  "id": "P3OPS-04",
+  "files": [
+   "tables/command-families.toml",
+   "tables/walls.toml",
+   "commands/story-deliver.md"
+  ],
+  "packages": [
+   "H2",
+   "C2",
+   "G4a"
+  ],
+  "on_slice_path": true,
+  "note": "Narrow git-read to read-only subcommands, add a git-ref family no agent holds, list builder commands explicitly, and refuse delivery when the integration head is foreign."
+ },
+ {
+  "id": "P3OPS-05",
+  "files": [
+   "records/step.md",
+   "topics/verdicts.md",
+   "tables/roster.toml"
+  ],
+  "packages": [
+   "S2a",
+   "G3",
+   "B6"
+  ],
+  "on_slice_path": true,
+  "note": "Add method to the step identity so a pass counts only when its method is a review method owned by the stored agent type in the roster."
+ },
+ {
+  "id": "P3OPS-06",
+  "files": [
+   "topics/hook-failure.md",
+   "topics/hook-runner.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true,
+  "note": "Import rule modules inside the per-rule try, name the quarantine restart command in the block fix line, and surface repeated rule.error in status and briefing."
+ },
+ {
+  "id": "P3OPS-07",
+  "files": [
+   "commands/survey.md",
+   "records/run.md"
+  ],
+  "packages": [
+   "S3",
+   "S2a"
+  ],
+  "on_slice_path": true,
+  "note": "Have feature/wave/verify/maintain surveys re-record every undelivered story admitted to the open cycle in the new run, so resumed children pass their gates."
+ },
+ {
+  "id": "P3OPS-08",
+  "files": [
+   "topics/workflow-shape.md",
+   "commands/survey.md"
+  ],
+  "packages": [
+   "S3"
+  ],
+  "on_slice_path": true,
+  "note": "Extend the done test to earlier crashed runs' validated records and have the feature survey mark the amendment when no approved spec decision of its own exists."
+ },
+ {
+  "id": "P3OPS-09",
+  "files": [
+   "topics/prelude-converge.md",
+   "topics/story-script.md",
+   "topics/verdicts.md"
+  ],
+  "packages": [
+   "B4a",
+   "W2",
+   "G3"
+  ],
+  "on_slice_path": true,
+  "note": "After a cap run one guided fix plus pass (direct), apply settled waivers in the tool's verdict, and put the person's guidance in every brief."
+ },
+ {
+  "id": "P3OPS-10",
+  "files": [
+   "tables/routes.toml",
+   "topics/decisions.md"
+  ],
+  "packages": [
+   "S3",
+   "S4"
+  ],
+  "on_slice_path": true,
+  "note": "Add a stale-spec-decision route row: the next survey or checkpoint opens a new spec decision listing changed files, briefed as a state problem."
+ },
+ {
+  "id": "P3OPS-11",
+  "files": [
+   "tables/config-keys.toml",
+   "records/baseline.md"
+  ],
+  "packages": [
+   "S1",
+   "G7"
+  ],
+  "on_slice_path": true,
+  "note": "Add lint/format/scan report keys with a finding identity (tool, rule, path, line-text hash) so only new findings block; fall back to exit status otherwise."
+ },
+ {
+  "id": "P3OPS-12",
+  "files": [
+   "records/baseline.md",
+   "records/closure.md"
+  ],
+  "packages": [
+   "G7",
+   "S2a"
+  ],
+  "on_slice_path": true,
+  "note": "Record whether baseline identities were measured and re-measure on harness delivery, unify the readiness condition, and stop counting inherited tests a story fixed as inherited."
+ },
+ {
+  "id": "P3OPS-13",
+  "files": [
+   "topics/state-commits.md",
+   "commands/survey.md"
+  ],
+  "packages": [
+   "S2b",
+   "S3"
+  ],
+  "on_slice_path": true,
+  "note": "Fetch and fast-forward the state branch before survey preconditions, and add a fresh lease so two machines cannot run one wave."
+ },
+ {
+  "id": "P3OPS-14",
+  "files": [
+   "topics/decisions.md",
+   "tables/decision-kinds.toml"
+  ],
+  "packages": [
+   "S4"
+  ],
+  "on_slice_path": true,
+  "note": "Settling open-spike also writes the named-spike request; the unit stays blocked on that spike and spike close feeds the finding back."
+ },
+ {
+  "id": "P3OPS-15",
+  "files": [
+   "rules/auto-allow.md"
+  ],
+  "packages": [
+   "H6"
+  ],
+  "on_slice_path": false,
+  "note": "Approve configured commands only as one plain segment (no separators, substitutions, eval, xargs, redirects); mark opaque commands and never auto-allow them."
+ },
+ {
+  "id": "P3OPS-16",
+  "files": [
+   "rules/secrets.md"
+  ],
+  "packages": [
+   "H2"
+  ],
+  "on_slice_path": false,
+  "note": "Extend the default credential globs (git-credentials, cargo, pypirc, gem, kube, gcloud, azure, terraform, gnupg) and block gh auth --show-token and git credential helpers."
+ },
+ {
+  "id": "P3OPS-17",
+  "files": [
+   "topics/hook-launcher.md"
+  ],
+  "packages": [
+   "B2"
+  ],
+  "on_slice_path": true,
+  "note": "On uv rc 2, discriminate the three causes (no interpreter, unwritable cache, old uv) with one uv python find and uv --version, and print the matching fix."
+ },
+ {
+  "id": "P3OPS-18",
+  "files": [
+   "topics/hook-failure.md",
+   "platform.md"
+  ],
+  "packages": [
+   "H1",
+   "B8"
+  ],
+  "on_slice_path": true,
+  "note": "Probe hook timeouts (shell watchdog exiting 2 if needed), give the final-message check the gate deadline, and announce rule.timeout in the briefing."
+ },
+ {
+  "id": "P3OPS-19",
+  "files": [
+   "rules/session-briefing.md",
+   "records/driver-flag.md"
+  ],
+  "packages": [
+   "H9",
+   "S2b"
+  ],
+  "on_slice_path": true,
+  "note": "Print the driver instruction whenever driver.json names this session, with or without a live lock."
+ },
+ {
+  "id": "P3OPS-20",
+  "files": [
+   "topics/run-lock.md",
+   "platform.md"
+  ],
+  "packages": [
+   "S2b",
+   "B8"
+  ],
+  "on_slice_path": true,
+  "note": "Refresh the lock on StructuredOutput with step.run and vsdd --run calls, and probe whether workflows survive /clear before releasing on SessionEnd."
+ },
+ {
+  "id": "P3OPS-21",
+  "files": [
+   "rules/step-results.md",
+   "platform.md"
+  ],
+  "packages": [
+   "H7",
+   "B8"
+  ],
+  "on_slice_path": true,
+  "note": "Validate StructuredOutput against the step-result (and data) schema with schema.py, block invalid results once, and record the platform's validation ordering."
+ },
+ {
+  "id": "P3OPS-22",
+  "files": [
+   "workflows/wave.md",
+   "topics/prelude-converge.md"
+  ],
+  "packages": [
+   "W3",
+   "B4a"
+  ],
+  "on_slice_path": true,
+  "note": "Carry a fix story's disputed keys into the wave fix() as disputed so the arbiter can dismiss findings after a cap."
+ },
+ {
+  "id": "P3OPS-23",
+  "files": [
+   "topics/hooks-inert.md"
+  ],
+  "packages": [
+   "H1"
+  ],
+  "on_slice_path": true,
+  "note": "On SessionStart only, print one line when a remote factory-artifacts ref exists but the state is unmounted, extending D24's exception."
+ },
+ {
+  "id": "P3OPS-24",
+  "files": [
+   "commands/survey.md"
+  ],
+  "packages": [
+   "S3"
+  ],
+  "on_slice_path": true,
+  "note": "Queue the request as requests/CR-NNN.md and return queued before attempting the lock when another cycle is active and the request is not critical."
+ },
+ {
+  "id": "P3OPS-25",
+  "files": [
+   "rules/bash-destructive.md"
+  ],
+  "packages": [
+   "H2"
+  ],
+  "on_slice_path": false,
+  "note": "Allow recursive deletion only of build output in the caller's own worktree and reserve worktree removal for the tool, with a sibling-worktree case."
+ }
+]

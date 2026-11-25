@@ -1,0 +1,236 @@
+[
+ {
+  "id": "D31R-D-1",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "Nothing stops a flag from being wrapped around a change that turning the flag off cannot undo: a schema change or data migration, data written in a new format while the flag is on, a message sent or an outside call made. No duty (story-writer, implementer), no review item and no check names it. F-ITEMS' flag-off item asks whether new code is reachable with the flag off; it does not ask about effects made while the flag was on. The design also promises the opposite. The pull request's Rollback section says that after the flag is turned off 'the product behaves as it did before the change', and the release packet gives the kill switch as the way to roll a flag back. Take a flagged story whose on path writes a new stored format. Turning the flag off leaves the old code reading data it cannot parse. Its flag_off tests still pass at red and at green, because they run on fresh test data that the on path never touched.",
+  "proposed_resolution": "(1) Story-writer duty: split the change so the irreversible part (an additive, backward-compatible schema or format change) ships unflagged first and the flag guards only reversible behaviour; where that is impossible, the story names each irreversible effect in a new optional key, irreversible. (2) Add to the flag-off item of F-ITEMS: nothing behind the flag has an effect that turning it off cannot undo, or the story names it. (3) For such a story, the Rollback section and the release packet say that turning the flag off does not restore the earlier state, and say what does. They never print the blanket sentence. (4) Test-writer duty: for a story that changes stored data, write a test that turns the flag on, writes, turns it off and reads.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-2",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/flag-system-choice.md",
+  "problem": "The design treats every read alike and never asks where a flag is evaluated. In a browser or mobile client, the code behind the flag ships to every user and can be read. A value evaluated on the client can be changed by whoever runs the client. The server endpoints the new feature calls can be reached whatever the flag says. So clause 2b ('can merge without being exposed') does not hold for client-evaluated flags, and the flag-off item of F-ITEMS ('no new behaviour is reachable with the flag off') would be marked checked on a client-side if. OpenFeature itself separates the two cases: its glossary ties the static-context paradigm to client-side SDKs (mobile phones, single-page web apps) and the dynamic-context paradigm to server-side SDKs. Separately, flags.key_env treats every key as a secret. Some services issue a client-side identifier that is public by design and that a client build must contain (LaunchDarkly's documentation: 'The client-side ID does not need to be kept a secret'). If such an identifier is listed in key_env, F-KEY strips it from the build and refuses any diff that contains it.",
+  "proposed_resolution": "Add a decision-record heading 'Where flags are evaluated' (server, client or both, per component) and a record field evaluated (server or client). For a story behind a flag that is read on a client, the flag-off item adds three points: with the flag off, the server refuses every new endpoint and sends no new data; a client-side check is never the only guard; and the story states that the shipped client code is visible. The security-reviewer's flag-system item checks that a client-side override cannot turn on what the server does not allow. State in config/flags.md that key_env names secret keys only, so a public client identifier is configured elsewhere and a client build may carry it.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-3",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/feature-flags.md",
+  "problem": "Clause 6 says the factory does not create or change flags in the outside service. Two things enforce it: F-KEY removes the key variables from the commands the gates run, and F-ITEMS has the diff reviewed. An agent's own shell is covered by neither. If the person's session environment holds the service key (common when they run the product locally), every Bash command an agent runs inherits it. The secrets rule blocks printing secret-shaped variables, and it checks the web addresses and upload flags of curl, wget and http commands. It does not check request headers. It does not stop a DELETE request, which needs no upload flag. It does not cover a script in the product's language, a vendor command-line tool or a connected tool server. So 'never holds or reads its key' (sections 'Keys and secrets' and 'What the factory writes for an outside service') is a promise, not a check.",
+  "proposed_resolution": "Have the hook rule secrets treat the names in flags.key_env as secret variables. It blocks a Bash segment that references one ($NAME, ${NAME}). The session briefing and vsdd doctor warn, or refuse to start a run, while one of them is set in the session environment. Where the platform allows it, drop those names from the environment of agent steps. Then rewrite the two sections to say what is enforced and what is not measured (for example, a connected tool for the service), instead of 'never'.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-4",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-KEY's diff check searches the diff for a key's value only 'when the variable is set where the gate runs', yet the design says the factory never holds or reads the key. In the design's normal state, then, the check measures nothing. Its row does not say 'the gate reports', so it passes silently, which breaks the table's own rules: 'cannot measure' is a failure, and a limit that depends on the run is printed under metrics.flags.unmeasured. The fallback named in unmeasured, the configured scanner, runs only in the release baseline. A committed key therefore stays on the integration branch, and on any remote it was pushed to, for the rest of the cycle. Reading the variable's value also contradicts 'never ... reads its key' in topics/feature-flags.md.",
+  "proposed_resolution": "Add a key flags.key_patterns: regular expressions for the shape of the flag source's secret keys. The architect chooses them and the decision record states them, so the tool names no vendor. At green, F-KEY searches added lines for these patterns and runs the configured secret scanner on the story's diff when there is one. When no key variable is set, no key pattern is configured and no scanner is configured, the gate reports 'key check not measured' under metrics.flags.unmeasured, and the release packet lists it. Reword 'never reads its key' to say what is actually true.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-5",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "A removal is built before anyone asks the one question that decides it. The sweep turns a met removal condition into a cleanup story, which is written, tested, implemented and reviewed through the story workflow. Only after that does the merge decision ask whether the flag is on for everyone. If the answer is no, reject descopes the story, and 'the sweep proposes the removal again in the next run in which the condition still holds'. Both forms of condition hold for ever once they are met. The usual form makes this the normal case: after:<story or epic> is met when the work is done and its cycle has closed, which is when the flag ships off, not when it is on for everyone. So every maintain run rebuilds the same cleanup stories, spends maintain.fixes_per_run on them, and opens a merge decision the person rejects. That is the kind of false alarm that gets a check switched off. A separate gap: an after: condition that names a story which is later dropped is never met, so that temporary flag is never proposed for removal. F-RECORD checks only that the id exists.",
+  "proposed_resolution": "Ask first. The sweep's finding puts the question to the person before any story is built: either a merge-shaped approval on the record, or the cleanup story is written but not admitted until approved. A reject must carry a new remove_when date, which the checkpoint writes into the record, so the same removal is not proposed again before that date. Describe after: as 'the work is complete', not 'safe to remove'. Where the decision record says the repository's definitions are applied, propose a removal only after a delivered flag_change: enable story. Have F-RECORD and the sweep report as a fixable traceability finding an after: condition whose story is dropped, or all of whose epic's stories are dropped.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-6",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "tables/flag-duties.toml",
+  "problem": "A removal leaves dead code and fails its own gate. F-DEFINITION's removal check looks for reads only in files of class source, and for the key only in definitions files. It never looks at tests. It also cannot see the off path's old code once the read is gone, such as an unreachable else branch or an old function nobody calls. The flag's flag_off and flag_default tests from earlier stories sit in the tests class and assert the old behaviour with the flag off. Once the read is removed they fail, so the removal story's green gate fails unless someone deletes them, and the implementer may not edit tests (rules tests-first and write-scopes). No duty says to delete them. The test-writer's duty says the opposite: 'For a story that names a flag, write tests in three states'. That includes a removal story, which names the flag with flag_change: remove, while F-STATES applies only to a story with no flag_change. No review item covers a removal story.",
+  "proposed_resolution": "Give the test-writer a duty for a flag_change: remove story: delete the flag's off and default tests, keep its on tests with the flag setting taken out, and write the regression test. Limit the three-state duty to a story with flag and no flag_change. Extend F-DEFINITION's removal check to the tests class: no test may still set the key (this needs the test-double pattern of D31R-D-17). Add an F-ITEMS item, flag-removed:<key>, for the adversary: the off path's code is deleted, not only the read. Cover both in F4's harness scenario 'a removal that waits for a person'.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-7",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "artifacts/flag.md",
+  "problem": "Lifetime is a free choice with no check and no named reviewer. A flag that guards a release can be recorded as permanent. A permanent flag needs no remove_when, creates no deferred item and is never proposed for removal: this is the classic flag that lives for ever, and the design leaves the way open. The adversary in review-stories is named to check 'each exemption, each removal condition and each default', not lifetime. The reverse mistake also does harm. A kill switch recorded as temporary is proposed for removal, and the merge packet asks whether the flag is 'on for everyone'. A kill switch usually is, so the person is invited to remove the product's emergency stop.",
+  "proposed_resolution": "In F-RECORD: when the record's owning story ships behind the flag, the record is temporary unless it carries a one-line permanent_because. This holds always when flags.require asked for the flag. The plan gate lists permanent_because the way it lists flag_exempt, and the release packet prints it. Add lifetime to what the adversary checks in review-stories. The removal packet prints the record's lifetime, its title and why the flag exists, and asks 'is this a release flag that is now on for everyone?', so that a kill switch is recognised.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-8",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/flag-system-choice.md",
+  "problem": "Two gaps. (a) Nothing requires good behaviour at start-up or when the source is slow. The 'Defaults and failure' heading and the required contracts (the fallback when the source cannot be reached, and the kill switch) say what a read returns. They do not say whether the product starts at all while the source is down, or how long a read may wait. OpenFeature Requirement 1.1.2.4 says an SDK should offer a function that sets a provider and waits for it to initialise; that call blocks until the provider is ready or in error. The providers section of the specification sets no bound on initialisation. A product wired that way hangs at start-up while the source is unreachable. The flag_default tests set flags through an in-process test double, so they never exercise the real provider's start-up, timeout or failure. A kill switch that only takes effect at restart (a flag read once at start-up and kept) also passes every check. (b) The design says more than OpenFeature guarantees: 'the flag system returns it [the default] when the source fails'. OpenFeature defines a STALE provider status ('cached state is no longer valid and may not be up-to-date') and the resolution reasons STALE and CACHED. So after losing its source, a provider may keep answering from cached values instead of the default. The product-owner's contract 'every read returns its default when the flag source cannot be reached' is then false for the chosen system, or forces caching off.",
+  "proposed_resolution": "Make the 'Defaults and failure' heading answer four cases: never reached since start (the product starts within a stated time and serves defaults); lost after start (it serves the last known values or the defaults, whichever the system does); slow (the bound on one read); and a restart during an outage. Add two contracts that flags.contracts must hold: the product starts and serves defaults while the source is unreachable; and a change to a flag's value takes effect, without a restart, within the time the 'Kill switch' heading states. Require one contract test that points the real provider at an unreachable local address (no live service) and asserts the start-up time and the fallbacks. Reword the OpenFeature sentence to match what the specification says.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-9",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/feature-flags.md",
+  "problem": "The on state is tested only by the story's own flag_on tests. The rest of the suite always runs with no flag set, so existing behaviour is never checked with the flag on. Not at the story. Not when a story enables the flag: tests set flags through the test double, not through the definitions, so an enable story changes nothing any test sees. Not until a removal story makes the on path unconditional, and that happens after the person has confirmed that the flag is on for everyone in production. So if the on path breaks existing behaviour, production sees the regression before the factory's tests do. The wave and release scenarios, run with every live temporary flag on, catch only what a scenario happens to cover. The enable story also has no story kind. A kind with a red gate needs a failing test that a change to the definitions can make pass, and the suite cannot have one. A kind without a red gate tests nothing, and nothing validates the changed definitions file.",
+  "proposed_resolution": "Under the 'Tests and local runs' heading, require the test double to read flags.override_env when the suite starts. The green gate of a story behind a flag, and of an enable story, then runs the suite a second time with that flag on, leaving out the flag's off and default tests, and compares that run with the baseline as well. Give the enable story a kind in flag-lifecycle.md, one without a red gate whose green gate runs this on-state suite and the definitions validation of D31R-D-18.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-10",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "Reads the patterns cannot see go unreported, and some reads found later can never be recorded. A pattern finds a key only where the key is a literal at the read. New code is forced into that form, because F-USED fails a flag that nothing visibly reads. Existing code that reads flags through constants, enums or generated accessors is not. F-CHOICE's last refusal passes as soon as one literal read is found. F-FILL writes inherited records only for the keys it finds. The rest stay unrecorded and nothing reports how many there are: the check passes when it cannot measure, against clause 2a's 'a record of every flag'. F-FILL also writes inherited records only 'while the register is empty'. Once the first new record exists, a read already in the code but found later (after a person corrects the patterns, or when a member repository joins a hub) has no way to get a record, because the story-writer writes only origin: new records, which need an owning story. F-REGISTERED's whole-tree check in the wave, release and sweep jobs then fails, and nothing can clear it.",
+  "proposed_resolution": "Add flags.call_patterns: expressions that match any evaluation call through the interface, whatever its key argument. A call that matches a call pattern but no read pattern is an unmeasured read. At green it is refused on added lines. Across the whole tree it is counted and listed (file and line) under metrics.flags.unmeasured. F-CHOICE compares these calls with the reads the analysis cites. Let F-FILL record as inherited any key it finds that has no record and first appears in the history before the opt-in commit, not only while the register is empty.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-11",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "topics/flag-system-choice.md",
+  "problem": "The design does not handle existing code that has more than one flag mechanism. A common case is a vendor client in one place and hand-made switches elsewhere: environment variables, configuration booleans, a settings table. source = 'existing' assumes the analysis found one system. F-INTERFACE checks only added lines, and its row says bypasses already in the code are not seen. F-FILL records only the reads the read patterns match. So the second mechanism keeps working outside the interface, its flags are never recorded and nothing counts them. For existing code, 'one interface' and 'a record of every flag' (clause 2a) are not delivered, and nothing says so. OpenFeature offers a route the design does not use: its homepage lists 'Combine multiple solutions behind a single interface'.",
+  "proposed_resolution": "Have the codebase-analyzer list every distinct flag mechanism it finds. F-CHOICE requires the decision record to name each one and say what becomes of it: adopted as the system, put behind the interface as a second provider, or migrated by named stories. Run bypass_patterns over the whole tree in the flags check of the wave, release and sweep jobs, and report the number of bypasses already in the code in metrics.flags, vsdd report debt and the release packet, so that this debt is visible and can be seen shrinking.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-12",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-DEFINITION decides which flag a definitions change touches by finding the key's text on a changed line. In a nested format, a flag's value sits on a different line from its key. The flagd definitions format (flagd.dev) shows this: the key \"new-welcome-banner\" is on one line and \"defaultVariant\": \"false\" is several lines below. Two failures follow. A story that turns another flag on by changing its value line is not seen. And in JSON, adding an entry after the last one changes the previous entry's line (it gains a trailing comma), so the new flag's owning story is refused for touching a key it does not own. Both F-DEFINITION and F-USED match keys as substrings, so the key checkout is found inside checkout-v2. A key in a definitions file that has no record (a typo or an orphan) is never reported.",
+  "proposed_resolution": "Attribute changes to flags by entry, not by line. Either keep one definitions file per flag where the system accepts it (the file stem is the key, so a changed file means a changed flag), or add flags.definition_patterns, an expression whose match spans one flag's whole entry and captures key. Match keys on token boundaries. In the flags check of the wave, release and sweep jobs, refuse a key in a definitions file that has no record. Where the format is multi-line and neither option is configured, report 'definitions not attributed' instead of passing.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-13",
+  "origin": "decision D31, review (domain)",
+  "severity": "major",
+  "where": "tables/flag-config-keys.toml",
+  "problem": "F-INTERFACE will raise false alarms that cannot be cleared. The meaning of flags.bypass_patterns gives 'a raw read of an environment variable' as an example of a bypass. Such a pattern matches every configuration read in the product (a database address, a port), so any story that adds one fails its green gate. There is no way to mark a match as not a flag read. The implementer can only move the read into an interface file, which distorts the product, or stop, and the only real fix is a person editing approved configuration. Faced with that, people empty bypass_patterns. F-CHOICE refuses an empty list, so the remaining way out is flags.enabled = false.",
+  "proposed_resolution": "Change the example to a read that the project's flag convention identifies: an environment variable with the project's flag prefix, or a call to the flag source's own client library. Give F-INTERFACE an exemption that can be reviewed: an added line that carries a fixed marker comment with a reason. The gate lists such lines under metrics.flags and the adversary checks them in review-story-diff, so a false match costs a reason and a review instead of a stop.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-14",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-DEFAULT compares a captured fallback with the record's default only on the lines a story adds. Two existing reads with different fallbacks are never compared. Nor is a new read of an inherited flag: F-FILL writes no default, F-RECORD requires one only for origin: new, and the row does not say what happens when the record has no default. The flags check of the wave, release and sweep jobs does not run F-DEFAULT at all.",
+  "proposed_resolution": "Run F-DEFAULT over the whole tree in the flags check, and report every key whose captured fallbacks disagree with each other or with the record. For an inherited record, F-FILL writes the default when all captured fallbacks agree, and reports the key when they do not. Under the 'Interface' heading, recommend one typed accessor per flag that holds its default, so each default lives in one place.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-15",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "Flags that interact are never tested together, and the configuration a release actually ships is never evaluated end to end. Unit tests turn one flag on and leave the others at their defaults. The wave and release scenarios run with every live temporary flag on. Partial rollouts (flag A on, flag B off) are never tested. The hidden scenarios never run in the shipped configuration either, with the release's new flags off.",
+  "proposed_resolution": "When the diff of a story behind a flag adds a read of another live flag, or adds a read inside a function that already reads one, require a test that names both flags' states, and add a line about the interaction to the flag-off item. At release, run the scenarios that describe existing behaviour twice: once with the shipped defaults and once with every live temporary flag on.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-16",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "artifacts/flag.md",
+  "problem": "Only temporary boolean flags have a checked safe default (false). For a permanent flag, or a flag that is not boolean, nothing states which way it should fail or why, and the adversary 'checks each default' with no criterion. Example: a permanent flag payments-enabled whose default is true. During an incident an operator turns it off in the service. An instance that restarts while the source is unreachable comes up with the code default, true, and payments are back on. The kill switch is undone exactly when the source is down.",
+  "proposed_resolution": "Add a record field fails (open or closed) with a one-line reason, required on every permanent or non-boolean record, which the adversary checks in review-stories. Have the 'Kill switch' heading of the decision record say what a restart during an outage does to a flag that was turned off.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-17",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-STATES finds a test's state by substring: flag_on is inside flag_one, flag_off inside flag_offset and flag_default inside flag_defaults. A command-line tool's own tests about its command-line flags (for example test_flag_default_is_verbose) are counted as states, and a new one of them that is red at red fails the gate. The markers carry no key, so for a story behind two flags, or a removal story deleting one flag's tests, there is no way to tell which tests belong to which flag. A mistyped key where a test sets a flag makes an off test pass while testing nothing, and since reads are matched only in source files, nothing sees it.",
+  "proposed_resolution": "Match the markers as whole tokens that include the flag key in a fixed encoded form, so a test name ties a state to a key. Add flags.test_patterns, which match a test setting a flag through the test double. Refuse a test that sets a key with no record.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-18",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "topics/flag-system-choice.md",
+  "problem": "The definitions in the repository can drift from the service, and nothing reports it. The service can hold flags or values the repository does not have, and repository definitions can change without ever being applied. The factory can see neither, yet the release packet still lists the 'flags this release turns on in the repository's definitions'. No command validates a changed definitions file against the flag system's format.",
+  "proposed_resolution": "Under the 'Definitions and keys' heading, have the decision record state which side is authoritative and how drift is found. Where the pipeline applies definitions, the devops job includes a drift check (a dry run that fails on any difference). Where a person applies them, the release packet lists the definitions changes still to apply. Add an optional configured command that validates definitions, and run it at green whenever a definitions file changes.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-19",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "Tests can still reach the live service in two ways. One is a flag source that needs no key, which the row states. The other the row does not state: a product or test setup that loads its keys from a file itself, for example a .env file read at start-up, which removing variables from the environment does not affect. Neither is reported per run.",
+  "proposed_resolution": "Under the 'Tests and local runs' heading, require an offline switch: a variable the gates set for every test command, which makes the wiring use the in-memory provider and open no connection to the source. A contract test of the flag system asserts it. When the switch is not configured, the gate reports that the isolation of tests is not measured.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-20",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "A reviewer can account for the flag-off item by marking it not_checkable with a reason, which convergence accepts 'when another evidence route covers it'. No other route shows that new code is unreachable with the flag off, so the item can close without anyone looking, and the row's unmeasured value 'Nothing' overstates the check. The items also apply only in loop 1: commits added in a delivery repair are reviewed as changed files, without the item.",
+  "proposed_resolution": "Refuse not_checkable for the flag-off and flag-system items. Carry the flag-off item into every later review loop of a story behind a flag.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-21",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "topics/governed-delivery.md",
+  "problem": "Making every flag-removal story wait for a person adds a fourth thing that always waits, beside the three D15 lists. D15's third item, 'anything a project configures', already gives the rule a place without adding a fourth.",
+  "proposed_resolution": "Make it a [flags] setting (removal merges wait for a person; default true) that falls under D15's third item, and keep the design's reason in the setting's meaning. The designer's open question 1 already asks the user about this.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-22",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-checks.toml",
+  "problem": "F-CHOICE runs 'always in a project that has an ingest closure', including in every sweep's spec coherence check, and it refuses a toolchain file with no flags.detected. A project whose specification was approved before the F packages ship has a locked toolchain file without that key, so every sweep would fail spec coherence until an amendment. This matters if F1 to F4 are built after cutover (the designer's open question 2), or for a project brought in by import.",
+  "proposed_resolution": "Apply the refusal only to toolchain files covered by spec decisions settled after F1 ships. For older ones, report the missing key as a finding for the next amendment to fix.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-23",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "topics/flag-lifecycle.md",
+  "problem": "The old pull request template's rollback section had verification steps for after the rollback and an expected recovery time, and its checklist had 'Rollback procedure validated'. The new Rollback section has only the revert and the flag-off step, so part of that capability is not ported, although the user decided that every capability ports.",
+  "proposed_resolution": "Under Rollback, print the time the kill switch takes to take effect, from the decision record's 'Kill switch' heading, and the runbook's steps for verifying a rollback. Require the runbook to carry a verification heading beside 'Kill switch', and have F-RUNBOOK check it.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-24",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-config-keys.toml",
+  "problem": "flags.standard has one value per project, and only the presence of the heading 'Why the interface is not OpenFeature' is checked. Clause 5 applies per language: in a product with several languages, OpenFeature support can differ between them. No reviewer is named to check that a value of none is justified.",
+  "proposed_resolution": "Allow standard to be set per component and per member repository, beside the five path and pattern keys. Add to the architect's checked_by that the adversary verifies a none against a cited absence of an OpenFeature SDK for that language.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-25",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "artifacts/flag.md",
+  "problem": "'Flagged' already has a meaning in this design: stories carry flags such as security. workflows/story.md says 'the story is flagged security', and workflows/plan.md and workflows/wave.md list a story's 'flags'. D31 defines 'a flagged story' as one with a feature flag key, and a builder can confuse the two.",
+  "proposed_resolution": "Use 'a story behind a flag' for D31 throughout, or rename the existing usage, and define the term once in conventions.md.",
+  "on_slice_path": false
+ },
+ {
+  "id": "D31R-D-26",
+  "origin": "decision D31, review (domain)",
+  "severity": "minor",
+  "where": "tables/flag-config-keys.toml",
+  "problem": "Read patterns are 'matched against the whole text of a file, so a read may span lines', but F-REGISTERED, F-INTERFACE and F-DEFAULT run 'on added lines' without saying how a match over the whole file is tied to added lines. The regular-expression dialect is not stated, and the syntax of named groups differs between engines. A whole-file expression that backtracks heavily has no time bound.",
+  "proposed_resolution": "State that a match counts when its span overlaps an added line. Name the engine (the tool's own) and its named-group syntax in the key's meaning, with an example, and compile the patterns when the configuration loads. Bound the matching time per file, and report a timeout as 'cannot measure'.",
+  "on_slice_path": false
+ }
+]

@@ -1,0 +1,167 @@
+{
+ "logs": [],
+ "result": {
+  "probes": {
+   "claude_version": "2.1.332 (Claude Code), ~/.local/bin/claude, macOS 26.5.2 (Darwin 25.5.0, arm64), git 2.50.1",
+   "cost_note": "Session costs from --output-format json: leg A $0.1200, leg B $0.0578 (capped at 0.05), leg D $0.1724; about $0.35 total, plus negligible local commands. The shell wrote under $HOME as directed (scratch ~/.vsdd-probes/round-5.QkGwwK); no sandbox workaround was needed.",
+   "evidence_dir": "/Users/jmagady/dev2/vsdd-factory/rewrite/spike/probes-round-5",
+   "results": [
+    {
+     "evidence": "Session 4265e389-8597-4ead-b675-cfdb38acdbfa, exit 0, $0.12. Hook log A-part1.jsonl: UserPromptExpansion and PreToolUse/PostToolUse Workflow lines (hooks live), agent_type p5:worker on all step events. Run record leg-A/platform/wf_bb1971a5-1cd.json: workflowName one, status completed, agentCount 1. Run record result.bin_bare = \"BIN-MARKER-R5\" (bare name resolved: plugin bin/ on the step PATH). Sandbox-off honoured: the step's commit inside .worktrees/x wrote .git/worktrees/x/index.lock and succeeded (impossible with sandbox on, item 41).",
+     "leg": "A1",
+     "question": "Do a --plugin-dir plugin's hooks, workflows and bin/ load under --setting-sources project,local --strict-mcp-config?",
+     "result": "pass",
+     "what_follows": "No repeat without the flags was needed; first-run.md 3.5's isolation default (D8) is safe as written."
+    },
+    {
+     "evidence": "Same session: num_turns 1, permission_denials empty, run record script equals plugin/workflows/one.js byte for byte (verified in Python against the plugin file and the saved scriptPath copy), status completed. Prompt was the bare typed command /p5:one <scratch plugin dir>; no Skill call occurred, so the repeat-with-Skill contingency never arose. Typed text reached the script's args as one string.",
+     "leg": "A2",
+     "question": "Does the typed workflow command work with no skill in the default permission mode?",
+     "result": "pass",
+     "what_follows": "No design change: Skill stays out of first-run.md 3.5's list; the story command's entry route is proven."
+    },
+    {
+     "evidence": "permission_denials empty. PostToolUse lines: Read <plugin>/methods/probe.md (outside cwd) returned METHOD-MARKER-R5; Write .worktrees/x/leg5-write.md (WRITEMARKER-R5) and Edit .worktrees/x/notes.md TODO-5 to DONE-5 succeeded; compound Bash git -C .worktrees/x add -A && commit ran. Git: commit e2b67c6 \"leg5\" on story/x, both files' new text present, worktree status clean.",
+     "leg": "A3",
+     "question": "With bare tool names allowed, can the step Read <plugin>/methods/probe.md, Edit one file and Write another in .worktrees/x, and commit there with plain Bash?",
+     "result": "pass",
+     "what_follows": "No allow-rule addition needed in first-run.md 3.5; the bare tool list covers the story step's write scope."
+    },
+    {
+     "evidence": "All 16 p5:worker payloads in A-part1/A-part2.jsonl carry effort {\"level\": \"low\"} while the session ran --effort medium; main-session Workflow events carry no effort key. Settles item 26 (removed from platform.md's open list); also re-confirms items 36's agent_type on 2.1.332.",
+     "leg": "A4",
+     "question": "Does the step's hook payload carry the step's effort (low) or the session's (medium)?",
+     "result": "pass",
+     "what_follows": "STEP_EFFORT_PROVEN = True is earned for E/probe.py; tier_applied's effort leg can count."
+    },
+    {
+     "evidence": "Session 654e64c3-4863-4d4f-af29-556e11e815f9, B-result.json: exit 1, subtype error_max_budget_usd, is_error true, num_turns 1, result \"\", cost $0.0578, no denials. Run record leg-B/platform/wf_402584c1-f2f.json: status completed, agentCount 3, all agents done, whole return value {a:T1,b:T2,c:T3} present; journal records all three returns. The stop fell after the workflow completed, at the main loop's accounting. Filed as PR5-1.",
+     "leg": "B",
+     "question": "What does a --max-budget-usd stop (cap 0.05) leave in the middle of a workflow?",
+     "result": "pass",
+     "what_follows": "first-run.md 3.7's budget_stop diagnosis must read the run record, which may be completed with a usable result, instead of assuming a killed workflow (PR5-1)."
+    },
+    {
+     "evidence": "leg-C/LEG-C.md. Records at <claude home>/projects/<project path, every char outside A-Za-z0-9_- replaced by ->/<session id>/ (two worked examples inside). Shape identical in the kept round-4 folder (1cf1064b-..., workflow q9) and leg A: workflows/wf_*.json with script, scriptPath, status, result, agentCount, defaultModel, workflowProgress (workflow_phase entries then per-agent agentId, agentType, full model id claude-sonnet-5-5, state); saved workflows/scripts/<name>-<run>.js byte-equal to script; subagents/workflows/<wf>/agent-*.jsonl with tool_use entries, plus meta.json and journal.jsonl. Byte equality for a call by name verified for round-4 q9 and round-5 one (and three).",
+     "leg": "C",
+     "question": "Describe the platform's session folder; for a call by name, do script and the file at scriptPath equal the plugin's file byte for byte? Where is the folder found?",
+     "result": "pass",
+     "what_follows": "No change to first-run.md 3.3: it reads the folder shape as planned; the location rule is now a platform item (55)."
+    },
+    {
+     "evidence": "Session 9e2b33bb-77e5-492a-a52b-def85effd91b, r123 workflow, 8 agents, exit 0, $0.17. Item 36: payloads carry chk5:clerk/chk5:returner and stable agent_ids matching workflowProgress. Item 37: R2A grounded:false (undeclared) and R2B grounded:true (declared) reached the script; R2C (closed object) errored after the hook saw 5 attempts: StructuredOutput retry cap (5) exceeded, platform refusal \"must NOT have additional properties\". Item 38: R3A ran rewritten (PreToolUse sh ...RUN3A -> PostToolUse VSDD_CALLER=t42 sh ..., result CALLER=t42 ARGS=RUN3A) while R3CTRL, same session, drew \"This command requires approval\". Item 40: hook logged the empty-note result first; the agent recovered with note = the full wrapped message (289 chars) and output ZEBRA-31. Deviation noted in COMMANDS.md: R3B's rewrite rule was not rebuilt; item 38's StructuredOutput half rests on R2A/R2B here.",
+     "leg": "D",
+     "question": "Do round-4 items 36 to 38 and 40 still hold on the installed Claude Code version (rerun A of the check)?",
+     "result": "pass",
+     "what_follows": "The platform record's items 36-40 and 48 carry over to 2.1.332 (recorded in platform-proven-3.md's header); no first-run change."
+    }
+   ],
+   "scratch_dir": "/Users/jmagady/.vsdd-probes/round-5.QkGwwK",
+   "spec_files_changed": [
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/platform-proven-3.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/platform.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/topics/platform-proven-2.md",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spec/registry.d/probes.toml",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/sources/extra-probes-5.json",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/ledger.json",
+    "/Users/jmagady/dev2/vsdd-factory/rewrite/spike/probes-round-5/"
+   ],
+   "summary": "All seven legs ran and passed; nothing inconclusive. Leg A (one session, four questions): the p5 plugin's hooks, workflows and bin/ all loaded under --setting-sources project,local --strict-mcp-config with the sandbox-off --settings flag honoured (proven by a commit inside .git/worktrees/x); the typed workflow command /p5:one <dir> started the named workflow with no skill (num_turns 1, no denials, run record script byte-equal to the plugin's one.js, status completed); bare tool names admitted a Read outside the project, Write/Edit and a commit in .worktrees/x on story/x (commit e2b67c6, both marker files); and every step payload carried the agent file's effort (low) under a session at medium, settling item 26 and earning STEP_EFFORT_PROVEN=True. Leg B (0.05-dollar cap): the session exits 1 with subtype error_max_budget_usd, is_error true, empty result text, while the run record reads completed with the whole workflow result and no step left running - a shape the plans did not assume; filed as PR5-1 (minor). Leg C: session records live at ~/.claude/projects/<project path with every character outside A-Za-z0-9_- replaced by ->/<session id>/, shape identical between the kept round-4 folder and leg A, and for by-name calls script and the file at scriptPath equal the plugin file byte for byte in both rounds. Leg D: rerun A of the round-4 check re-held items 36, 37, 38 and 40 on 2.1.332 (agent_type/agent_id, rewrite into open and declared schemas, closed-schema failure after 5 logged attempts, allow+rewrite admitted with the silent-hook control refused in the same session, exit-2 block heard whole with the ZEBRA-31 token). Recorded: rewrite/spike/probes-round-5/ (per-leg folders with hook logs split to stay under 16 KB, result JSONs, run records, journals, the exact plugin copies, run scripts, COMMANDS.md, RESULTS.md); new platform items 50-55 in rewrite/spec/topics/platform-proven-3.md, registered in registry.d/probes.toml and indexed from platform.md, which also gained the round-5 pointers, a proven row 26 (open section removed), updated Headless-runs bullets, and PR5-1 in the findings paragraph, landing at 16381 bytes (under the 16384 limit); findings.py build re-run with PR5-1. spec_lint.py reports 0 problems; sections.py coverage reports 0 uncovered sections. next/, plugins/, crates/, rewrite/history/, rewrite/tools/, rewrite/plans/ untouched; no git state-changing commands run in the repository. Total probe cost about 0.35 USD."
+  },
+  "check": {
+   "verdict": "The gate passed in the primary form. Legs A1, A2 and A3 pass as ORDER-6 8.2 specifies: no repeat without the isolation flags was needed, and no repeat with Skill. The prober's session and my own rerun of leg A with the exact flags agree; my rerun was in /Users/jmagady/.vsdd-probes/round-5-check.Y3aUf7 with the calling session's CLAUDE_* variables cleared. I checked 7 results and the evidence supports 6 (A1, A2, A3, A4, C, D). Leg B is not supported as recorded: the stop never fell inside a workflow, because the 5-cent cap was crossed only by the main loop's answer after the workflow had ended, and the result file has no 'result' key at all, where the prober recorded an empty string. My rerun at a 2-cent cap answers B's real question: the platform stops background agents, the run record ends 'killed' with an 'error' key and result null, and the step that was running is left in 'progress' with its result lost. Errors in the record: main-session Workflow payloads do carry effort (the session's medium); 'the agent file's effort' was never tested; and a refused step call is not listed in the session's permission_denials. On that last point, leg D's R3CTRL and round 4's rerun A both show the refusal while permission_denials stays empty. My rerun with the agent file at xhigh, agent() at low and the session at medium gives low on every step payload: the effort the step was dispatched with wins. So STEP_EFFORT_PROVEN = True is earned. For the first run: the isolation default and the allowed-tools list stay as planned, and Skill stays out. These change: STEP_EFFORT_PROVEN becomes true; the budget_stop diagnosis must cover both shapes; denial detection must read the step transcripts; and the spec wording of items 37 and 52 to 55 needs the fixes listed. The report is in /Users/jmagady/dev2/vsdd-factory/rewrite/spike/probes-round-5/CHECK.md.",
+   "gate_passed": true,
+   "checked": 7,
+   "supported": 6,
+   "problems": [
+    {
+     "leg": "A3",
+     "problem": "The empty permission_denials is cited as evidence that no step call was refused, but a step's refusal is not listed there: leg D's R3CTRL Bash call was refused ('This command requires approval', is_error true in the step transcript) while D-result.json has permission_denials []; round 4's rerun A shows the same. A3 still passes on the PostToolUse lines (Read outside cwd, Write, Edit, compound git commit) and git (e2b67c6 on story/x). Item 52 should drop that citation and record the fact."
+    },
+    {
+     "leg": "A3",
+     "problem": "Item 52 says the first run's tool list 'covers the story step's write scope'. That goes past one Read, one Write, one Edit and one commit."
+    },
+    {
+     "leg": "A4",
+     "problem": "RESULTS.md, item 53 and extra-probes-5.json say main-session Workflow events carry no effort key. Hook log lines 2-3 carry effort {level: medium}, the session's; the same holds in my rerun and in leg D."
+    },
+    {
+     "leg": "A4",
+     "problem": "'The agent file's value' was never tested: worker.md and the agent() call both said low. My rerun (agent file xhigh, agent() low, session medium) gives low on all 14 step payloads, so the payload carries the dispatched effort, which wins over the agent file. Item 53 and platform.md row 26 have this wrong."
+    },
+    {
+     "leg": "B",
+     "problem": "The leg tested an easier case than its question. At the 0.05 cap the spend crossed the cap only with the main loop's second answer, written at 06:29:07.128 after the workflow notification at 06:29:07.034, so no step was running. PR5-1's 'instead of assuming a killed workflow' generalises from that one case. My 0.02-cap run shows a mid-workflow stop kills the workflow: stderr 'Budget limit reached ($0.05 of $0.02); stopping background agents.', record status killed, error 'Workflow aborted', result null, T1 left in progress with its StructuredOutput seen by the hook but never recorded, and a spend of $0.054 on a $0.02 cap."
+    },
+    {
+     "leg": "B",
+     "problem": "'result: \"\"' (empty text) is wrong: B-result.json has no result key at all. It has errors ['Reached maximum budget ($0.05)'] and terminal_reason budget_exhausted. Item 54 and PR5-1 repeat the error."
+    },
+    {
+     "leg": "C",
+     "problem": "The naming rule claims '_' survives. Only '/' and '.' were shown: no probed path, and no folder under ~/.claude/projects, has an underscore. LEG-C also says the journal has one 'launched' line per agent, when it has one per run, then a started and a result line per agent. It does not mention that step transcripts repeat some tool_use entries in api-request-blob records, or that a killed record adds an error key with result null."
+    },
+    {
+     "leg": "D",
+     "problem": "Item 37's closed-schema failure changed on 2.1.332. Round 4 saw four refusals, a 'subagent completed without calling StructuredOutput (after in-conversation nudge)' error and about 190 s; this round saw five attempts in about 10 s and the error 'StructuredOutput retry cap (5) exceeded'. platform-proven-3's header calls this 're-held, including the closed-schema failure', and item 37's text is not updated."
+    },
+    {
+     "leg": "D",
+     "problem": "Three deviations from round 4's rerun A go unrecorded in platform-proven-3.md. Leg D entered by the typed command, not the probecall skill. It ran under the isolation flags, the sandbox flag and the ceiling variable. And R3B's rewrite was not rebuilt, so item 38's StructuredOutput leg rests on R2A/R2B."
+    },
+    {
+     "leg": "B",
+     "problem": "PR5-1 contradicts itself: the problem says STEP_EFFORT_PROVEN 'can ship true', while the proposed resolution says 'no change is needed for ... STEP_EFFORT_PROVEN'. It ships false, so it must change."
+    }
+   ],
+   "consequences": [
+    {
+     "leg": "A1",
+     "plan_section": "first-run.md 3.5 (row --setting-sources/--strict-mcp-config), D8; ORDER.md section 7 (sentence after the command)",
+     "what_must_change": "The isolation default is unchanged: both flags stay on and the --user-settings fallback is not taken. The 'Rests on' cell becomes item 51 (2.1.332, default mode). D8's 'unproven' sentence becomes 'shown (item 51)', and D8 adds that the person's ~/.claude/CLAUDE.md still reaches the main session and every step under the flags. ORDER section 7's 'follow the probe answers' becomes: both flags on, no Skill."
+    },
+    {
+     "leg": "A2",
+     "plan_section": "first-run.md 3.5 (prompt row) and section 4 (W2 3.1 paragraph); story-workflow.md 3.1",
+     "what_must_change": "No change to the prompt or the tool list. The prompt row cites item 50 instead of 'Item 31, seen in auto mode only'. 'If the probe ... shows the typed command needs the Skill tool, Skill joins 3.5's list' is settled: Skill is not needed. story-workflow.md 3.1's 'where unproven, probed before the first run' cites items 50 to 52."
+    },
+    {
+     "leg": "A3",
+     "plan_section": "first-run.md 3.5 (--allowedTools row)",
+     "what_must_change": "No change to the list 'Workflow Agent Bash Read Write Edit Glob Grep'. The row cites item 52."
+    },
+    {
+     "leg": "A3",
+     "plan_section": "first-run.md 3.6 session_ended, 3.7 cause denied; ORDER.md section 7 table row denied",
+     "what_must_change": "A step's refused call does not appear in result.json permission_denials. session_ended adds: no step tool_result with is_error true and 'requires approval' in the step transcripts. The denied cause reads the step transcripts, plus any PreToolUse payload with no PostToolUse for its tool_use_id, to name the agent, the tool and the input. It no longer reads only result.json permission_denials."
+    },
+    {
+     "leg": "A4",
+     "plan_section": "E/probe.py (tests/e2e/probe.py); first-run.md D11 and 3.6 tier_applied (c); ORDER.md 8.2 row A4 and the section-8 E2 line",
+     "what_must_change": "Set STEP_EFFORT_PROVEN = True. D11's 'unproven (items 26, 48)' becomes: proven (item 53 and the check's rerun); the payload carries the effort the step was dispatched with, over both the session's and the agent file's. Leg (c)'s rule ('that tier's effort.level', which is the override's under cheap) is right as written and needs no change. --effort medium keeps its reason. PR5-1's 'no change for STEP_EFFORT_PROVEN' is corrected."
+    },
+    {
+     "leg": "B",
+     "plan_section": "first-run.md 3.7 cause budget_stop and 3.5 --max-budget-usd row; ORDER.md section 7 table row budget_stop and the caps table",
+     "what_must_change": "budget_stop becomes: 'The session reports error_max_budget_usd (exit 1, is_error true, no result key, errors naming the cap). Read the run record. It is completed with the whole result when the cap was passed after the workflow ended. It is killed, with error \"Workflow aborted\", result null and the running step left in progress, when the cap was passed during a step; stderr then says \"Budget limit reached ...; stopping background agents.\" Name that step; its result may be in the hook capture with no PostToolUse. Resume with --dir.' The driver reads result.get('result'). The caps are soft: in-flight calls are charged past the cap (2.7x a 2-cent cap here), so the session cap and refusal 8's total can be exceeded by one attempt's overshoot. The 3.5 row cites item 54, corrected."
+    },
+    {
+     "leg": "C",
+     "plan_section": "first-run.md 3.3 (records) and 3.6 holdout_wall",
+     "what_must_change": "No change to the fields read, or to finding the folder by <claude home>/projects/*/<session_id>/; no naming rule is needed, and a payload's transcript_path without .jsonl is exact. State two readings: workflowProgress starts with workflow_phase entries, and only workflow_agent entries are read; a killed record has result null and an error key. holdout_wall reads tool_use entries from type 'assistant' records, or dedupes them by id, since api-request-blob records repeat some."
+    },
+    {
+     "leg": "D",
+     "plan_section": "none in first-run.md or story-workflow.md; spec platform-proven-2.md item 37, platform-proven-3.md header",
+     "what_must_change": "No first-run change. The spec notes item 37's 2.1.332 failure (StructuredOutput retry cap 5, about 10 s) and leg D's deviations (typed-command entry, isolation and sandbox flags, R3B not rebuilt)."
+    }
+   ],
+   "reruns": [
+    "Leg A, whole session, exact ORDER-6 8.2 flags, fresh scratch /Users/jmagady/.vsdd-probes/round-5-check.Y3aUf7 (plugin c5 copied from the round-4 probe plugin with a whole-payload logging hook; worker.md effort xhigh, agent() effort low; one-commit project with .worktrees/x on story/x, no settings file; calling session's CLAUDE_* and custom-header variables cleared). Session fb028848-21c3-4b64-aaae-ad61c33ddbe6: rc 0, success, num_turns 1, no denials, $0.104. Run record completed with script == one.js byte for byte. BIN-CHECK-Q7 in PostToolUse stdout; Read outside cwd returned METHOD-CHECK-Z4; Write and Edit ran in .worktrees/x; commit a61f0a6 on story/x. All 14 step payloads effort low. The person's plugins and MCP tools were absent, but ~/.claude/CLAUDE.md was injected. A1, A2 and A3 pass; A4 shows the dispatched effort wins over the agent file.",
+    "Leg B at cap 0.05, same flags. Session aa3f5a35-12d0-4017-bb83-da71b1e1b029: rc 1, error_max_budget_usd, is_error true, num_turns 1, no result key, $0.065. Record completed with the whole result. The cap was crossed by the main loop's answer after the workflow ended, the same shape as round 5.",
+    "Leg B variant at cap 0.02, so the stop falls mid-workflow. Session 9e960d9f-36b4-4f79-b4fa-ccc2876a2626: rc 1, error_max_budget_usd, num_turns 2, no result key, $0.054. stderr: 'Budget limit reached ($0.05 of $0.02); stopping background agents.' Record wf_d0f5214c-a14 status killed, result null, error 'Workflow aborted'. T1 left in progress, with its StructuredOutput seen by the hook (PreToolUse, no PostToolUse); T2 and T3 never started."
+   ]
+  }
+ }
+}

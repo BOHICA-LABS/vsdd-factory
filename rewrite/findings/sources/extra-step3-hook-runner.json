@@ -1,0 +1,56 @@
+[
+  {
+    "id": "S3B-hook-runner-1",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "next/tests/hooks/_helpers.py (launch)",
+    "problem": "The shared launcher helper hardcodes input=\"{}\" as the hook payload, so no test of the real launcher can feed a meaningful payload through it; each new launcher-bound test (this unit added three) works around it with subprocess calls of its own.",
+    "proposed_resolution": "Give _helpers.launch a stdin_text parameter defaulting to \"{}\"; the three call sites in tests/hooks/test_caller.py, test_runner.py and test_rule_cases.py then collapse onto it. Owned by B2's file, so left to the catch-up or B2 unit.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-hook-runner-2",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "next/tools/check.py (nothing_generated_under_plugin)",
+    "problem": "The check fails whenever a stray __pycache__ exists under plugins/, and any bare python invocation by any builder recreates one (observed twice during step 3, from concurrent units' runs). The check then reports a tree fault that is really process hygiene.",
+    "proposed_resolution": "Kept the check (it is right about the committed tree) but made the two tools that import the plugin set sys.dont_write_bytecode = True (this unit did check.py and build.py); workflow builders should export PYTHONDONTWRITEBYTECODE=1 for their ad-hoc python runs.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3B-hook-runner-3",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py",
+    "problem": "A redirect written before its program (\"2>log cmd\") parses the first digit-hug as the program name; POSIX allows the leading-redirect form, which a rule would therefore see as program '2'. The common forms (program first, then redirects) parse correctly, and parse() never raises.",
+    "proposed_resolution": "Accept when the leading-redirect form shows up in a real recorded payload at E2; the fix is to let redirect ops before the first word initialise the redirect list instead of the argument list.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-hook-runner-4",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/emit.py, hooks/caller.py",
+    "problem": "If a rule whose row sets rewrites and the runner's own marker rewrite ever collide on one call, the rule's rewrite displaces the marker's (the marker rewrite is appended only when no rule produced one). At slice depth no rule ships, and step-results (H5/H7) writes its own marker-free rewrite, but the second part of H1 should decide the pairing explicitly.",
+    "proposed_resolution": "hook-runner-b: define the precedence (suggestion: the marker rewrite rides last and loses to a rule's rewrite only when that rule also records the marker key) and add a case to the probe table.",
+    "on_slice_path": false
+  },
+  {
+    "id": "S3B-hook-runner-5",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py (select), rewrite/spec/topics/rule-model.md (Selection)",
+    "problem": "The plan promises select(event, tool, entries=RULES) with RULES as the default; the built signature takes entries=None and resolves RULES at call time, because launcher-test injections rewrite the anchor and a default-arg binding would freeze the pre-injection tuple. Behaviour is identical for every caller that omits the argument.",
+    "proposed_resolution": "None; record the wording difference in the next spec pass that touches rule-model.md (Selection).",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3B-hook-runner-6",
+    "origin": "slice step 3, hook-runner, builder",
+    "severity": "minor",
+    "where": "rewrite/spec/topics/rule-model.md (the message format)",
+    "problem": "The four-line block message's Instead line is documented with the fix wrapped in backticks and a trailing full stop; the runner prints the fix text as given, no backticks, no trailing punctuation, and the fixture example of the rule.block event stores the unpunctuated text. Human-facing output differs cosmetically from the design's rendering.",
+    "proposed_resolution": "Either make emit render the fix as markdown (backticks) or drop the decoration from the spec example; one line in topics/rule-model.md at the next spec pass.",
+    "on_slice_path": false
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S3R-jobs-C2-1",
+    "origin": "slice step 3, jobs, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (start reads the record before the lock probes; _held_answer's settle-free branch)",
+    "problem": "New, from the S3R-jobs-C1-2 fix. start() reads the record, then probes the product lock. _held_answer then probes the settle lock and acts on the record it was handed. Suppose the first start call writes 'running' and releases its settle lock between that read and the settle probe. The second call then takes the 'starting' snapshot for a stale record. stop_products(subject) re-reads the record, finds it running and stops the healthy product the first call has just reported, and the second call starts another one. Before the fix, the second call waited for 'running' and returned the first answer (D14: a second start at the same commit returns the first). Probe in a scratch copy, in two parts. First, _held_answer given a 'starting' copy of a running record killed the product. Second, two concurrent env.start calls of one subject, with the read-to-probe window widened by a sleep, both returned 0 with different pids, and the first call's product was dead.",
+    "proposed_resolution": "Decide on a record read after the settle probe, not on the snapshot. A live start call writes 'running' before it releases the settle lock, so a record that still says 'starting' once the settle lock is found free is really stale. If it now says 'running', take the running branch: answer it at the same commit, or replace it at another commit. Add a test that hands _held_answer a 'starting' snapshot over a running product and asserts that the product survives and its answer is returned.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-jobs-C2-2",
+    "origin": "slice step 3, jobs, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach's admission check); next/plugins/vsdd-factory/py/vsdd/gates/env.py (_launch_locked's size check)",
+    "problem": "New, from the S3R-jobs-C1-3 fix. The admission bar is now RECORD_CAP - RECORD_HEADROOM (3,872 bytes), but both refusals still say that the cap was exceeded. For any size between the bar and the cap, the message states something untrue. attach raises 'the record would be 3873 bytes, over the 4000-byte cap'. env.start answers 'the product record would be N bytes, over the 4000-byte cap'. A person reading the refusal cannot tell why a 3,873-byte record was refused.",
+    "proposed_resolution": "Name the bar that was applied, for example 'the record would be 3873 bytes, over the 3872-byte limit (the 4000-byte cap less 128 bytes kept for later writes)'. Keep the cap in the text so test_start_refuses_an_oversize_product_record still matches. Add an assertion on the message in test_record_over_the_headroom_is_refused_before_anything_is_written.",
+    "on_slice_path": true
+  }
+]

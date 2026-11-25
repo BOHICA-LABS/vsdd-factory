@@ -1,0 +1,482 @@
+{
+ "triage": [
+  {
+   "part": "P3SEAM,P3COV,P3OPS",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/triage/a.json",
+   "triaged": 63,
+   "on_slice_path": 52,
+   "could_not_place": []
+  },
+  {
+   "part": "b",
+   "path": "rewrite/findings/triage/b.json",
+   "triaged": 46,
+   "on_slice_path": 41,
+   "could_not_place": []
+  },
+  {
+   "part": "c",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/triage/c.json",
+   "triaged": 55,
+   "on_slice_path": 53,
+   "could_not_place": []
+  },
+  {
+   "part": "d",
+   "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/triage/d.json",
+   "triaged": 74,
+   "on_slice_path": 62,
+   "could_not_place": []
+  }
+ ],
+ "tables": {
+  "summary": "Fixed all 26 findings of rewrite/spec/conflicts/audit-2-tables.md plus the tables/schemas parts of the other two audit reports: the roster's four dropped story call edges, the artifact registry rebuilt as one uniform row structure with the full 18-key story row from state.md#2.5 ( Killing the illustrative-excerpt blocker), the code-reviewer's wall now denies local, the ci_minutes prelude mapping restored as its own limits row, and the holdout block-message route copied into path-classes, which also returned to the original classes.toml layout ([<class>], [_product], computed classes as comment). Every array field the audit named is now typed as an array of what the originals name; wave-gate-data and step-record allOf-compose their base schemas; config-keys.toml is the single key list with the schema reduced to structure/types and closed rule tables; invented identifier examples, invented record key names (patch_id/time/notes wrapper), coined rule tokens and history pointers were removed; artifact kind files and the config/topic prose now link their tables instead of restating them. Disagreements are recorded in rewrite/spec/conflicts/tables-repair.md (and RR4/RR7/RR10 updates); spec-versus-built differences under next/ are recorded there and nothing under next/ was changed. Both checks pass. Outcomes file: /Users/jmagady/dev2/vsdd-factory/rewrite/findings/outcomes/tables.json (38 entries, all \"fixed\").",
+  "fixed": 38,
+  "not_fixed": [],
+  "lint": "python3 rewrite/tools/spec_lint.py: 0 problem(s) (registry counts unchanged: 47 schema, 21 table, 31 artifact, 22 config; all TOML/JSON parse; no file over 16 KB; no line over 400 chars)"
+ },
+ "amend": {
+  "summary": "All 41 slice-path blocker and major findings (P3 and SL1) are decided and applied to rewrite/spec/: 38 fixed, 3 left-for-builder, none rejected. About 90 spec files changed; nothing under next/, rewrite/history/, rewrite/tools/ or README was edited, and rewrite/spec/packages/ changed only through gen_packages.py.\n\nThe five subjects several reviewers raised:\n- Local delivery (commands/story-deliver.md, one place): the merge commit is made in the integration worktree, which is always detached; the branch is then moved by update-ref when checked out nowhere, or by `git merge --ff-only` in the checkout that holds it, the one stated exception to never touching the person's checkout. A refused fast-forward returns a new state, `checkout_dirty`, with nothing moved. Keeping the integration branch out of the person's checkout (P3REQ-10's proposal) was not taken: too high touch.\n- Verdict recomputation (topics/verdicts.md): the step identity carries `method`, and `loop` and `pass` on review, fix and arbitrate steps; step names include the loop so a re-review overwrites nothing; the file defines which records are passes and every input the tool rebuilds.\n- Red evidence and the merge guard: the green gate and delivery require a red record; step-results blocks a passing gate result with no matching evidence record; tests-first covers Bash writes; merge-guard blocks ref-moving commands for every caller; a closed git-read family plus a catch-all git-other; an absent `commands` key means none.\n- Gate behaviour (commands/gate-red.md, gate-green.md, topics/gates.md): test identity, base report, red versus error, exemptions, test file, stub marker VSDD-STUB, the ac<N> criterion map, and a clean-worktree rule.\n- The cycle's base (topics/worktrees.md): there is none; each story records the commit it was cut from as delivery.base in its closure.\n\nOne thing added: schema `implement-data` (registered in registry.d/amend.toml), needed because a script may read only required fields. No command, record, rule, agent or package was added; the build-order corrections are rules and a slice milestone in packaging/build-plan.md, because package briefs are generated from the blueprint in history.\n\nBuilt code under next/ that must now follow the design:\n- left-for-builder: launch.sh cli branch must pass vsdd's exit 1 through silently (SL1-03); events.py EVENT_SCHEMA must admit launcher-written lines, null session_id and whole-second ts (SL1-05); build.py must generate every S_* literal from schema files and C1 must add the survey, checkpoint-result, delivery-data, story-unit, wave-gate-data and implement-data files (SL1-06).\n- consequences of P3 fixes: step-result schema, fixtures and prelude step() gain `method`/`loop`/`pass`; judge() gains the `grounded !== false` test; converge() passes `pass` to arbitrate; relay() uses the empty-object fallback; S_SURVEY, S_CLOSE and S_DELIVERY require every field.\n\nOpen platform dependency: whether `updatedInput` is honoured on a StructuredOutput call (item 27's probe now covers it); the design states what happens either way. rewrite/STATE.md was not edited: its layer 2 package list should be corrected from packaging/build-plan.md.",
+  "resolutions": [
+   {
+    "id": "P3SEAM-02",
+    "outcome": "fixed",
+    "what_was_done": "The step identity now carries `method` (required) and, for review, fix and arbitrate steps, `loop` and `pass`; the tool reads those fields and never parses a step name. A review record is a done record with a pass whose method belongs to a reviewer-tier agent and whose stored agent type is that owner. The built step-result schema, its fixtures and the prelude's step() under next/ must follow.",
+    "where": "schemas/step-result.schema.json; topics/verdicts.md; topics/prelude-steps.md; topics/story-script.md; topics/wave-script.md; records/step.md"
+   },
+   {
+    "id": "P3SEAM-03",
+    "outcome": "fixed",
+    "what_was_done": "There is no cycle base. A story branch is cut from the head of the branch it will be delivered to, read when the branch is created (the integration branch, its remote head after a fetch in pr mode; hotfix/<version>, created at the release tag, in a hotfix cycle). The worktree library records it as delivery.base in the story's closure record, and the descent check, the red comparison and the green diff use that recorded commit. Recording it in the run record as well was not taken: the closure is tracked and is what a resumed run reads.",
+    "where": "topics/worktrees.md (owner); schemas/closure-record.schema.json; records/cycle.md; workflows/story.md, topics/story-admission.md, commands/gate-plan.md, workflows/feature.md (restatements replaced by links)"
+   },
+   {
+    "id": "P3SEAM-04",
+    "outcome": "fixed",
+    "what_was_done": "Local delivery is specified in one place: the merge commit is made in the integration worktree, which is always on a detached head; the branch is then moved with update-ref (old value checked) when it is checked out nowhere, or with `git -C <checkout> merge --ff-only` when it is checked out, which is the one stated exception to never touching the person's checkout. When git refuses the fast-forward, delivery returns the new state `checkout_dirty` with the one-line fix and nothing moves.",
+    "where": "commands/story-deliver.md (Local mode); topics/worktrees.md; topics/state-directory.md; rules/merge-guard.md; schemas/delivery-data.schema.json; commands/release.md"
+   },
+   {
+    "id": "P3SEAM-05",
+    "outcome": "fixed",
+    "what_was_done": "git-read is now a closed list of reading commands and a new catch-all family, git-other, holds everything else, so a command nobody listed is refused, not allowed. An absent `commands` key means none (stricter than the proposed git-read default); builders hold git-commit and git-read, the codebase-analyzer git-read, the spike-runner git-commit, git-read and git-other, the main session every family.",
+    "where": "tables/command-families.toml; tables/walls.toml"
+   },
+   {
+    "id": "P3SEAM-06",
+    "outcome": "fixed",
+    "what_was_done": "The [hooks] key list is closed and complete in the key table and the config schema: main_session_wall, log_retention_days, strength per rule, bash-git attribution, bash-destructive allow_pr_close, and three keys that had no home, placed under their own rules: hooks.rules.secrets.secret_globs and hooks.rules.purity-advice.pure_paths and side_effect_patterns. The example in the configuration topic shows log_retention_days and points at the table for the per-rule keys.",
+    "where": "tables/config-keys.toml; schemas/config.schema.json; config/hooks.md; topics/project-configuration.md; rules/secrets.md; rules/purity-advice.md"
+   },
+   {
+    "id": "P3COV-01",
+    "outcome": "fixed",
+    "what_was_done": "One local-delivery rule, as proposed except for the dirty case: detached merge in the integration worktree, then update-ref or a fast-forward of the checkout that holds the branch. A refused fast-forward returns `checkout_dirty` (blocked, no decision the first time, rerun after cleaning) instead of awaiting_merge, because a merge decision cannot clean a checkout and would cost the person a second command. `vsdd release` moves its branch the same way; the delivery tests cover the checkout clean, overlapping, non-overlapping, absent and moved.",
+    "where": "commands/story-deliver.md; commands/release.md; topics/worktrees.md; topics/state-directory.md"
+   },
+   {
+    "id": "P3COV-02",
+    "outcome": "fixed",
+    "what_was_done": "Rules never test the payload cwd alone: `where`, the call's effective directory (the target's directory, or the directory a cd, git -C or vsdd -C names), defines the caller's worktree. The lock is refreshed only by calls that belong to the run (a vsdd call with its --run, a StructuredOutput with its step.run, a call in its worktrees, a subagent call in the holder's session). If updatedInput is not honoured the marker is found by a hash of the call's arguments, oldest unread first, so item 29 no longer gates anything but the offered cut.",
+    "where": "topics/rule-model.md; topics/run-lock.md; topics/caller-identity.md; records/caller-marker.md; platform.md (items 27 to 29); rules/lifecycle-log.md; rules/auto-allow.md; topics/hook-platform-facts.md"
+   },
+   {
+    "id": "P3COV-03",
+    "outcome": "fixed",
+    "what_was_done": "The build plan now states the slice order: B8 for items 6, 10, 27 to 31 and 34 before H1 and S2b, C2 and B6 (roster and the slice's lints) before layer 2, S4 in the slice so H7 needs no split. No package was added; rewrite/STATE.md and the blueprint in history were not edited, so the orchestrator should copy the corrected list into STATE.md.",
+    "where": "packaging/build-plan.md"
+   },
+   {
+    "id": "P3COV-05",
+    "outcome": "fixed",
+    "what_was_done": "Added the story key `tests_method` (a test-writer method, used by story.js for the tests stage) so a UI story can name both ui-tests and ui-implementation. L-METHOD now requires every method to be reachable; claude-md, release-notes and observability are reachable through a docs or chore story's `method` key, and CLAUDE.md joins the default docs globs. No author type or release step was added and no method was dropped.",
+    "where": "tables/artifacts.toml; artifacts/story.md; schemas/story-unit.schema.json; tables/story-kinds.toml; tables/step-methods.toml; topics/story-script.md; workflows/story.md; tables/lint-checks.toml; topics/project-configuration.md"
+   },
+   {
+    "id": "P3OPS-01",
+    "outcome": "fixed",
+    "what_was_done": "Liveness is refreshed only by calls that belong to the run, never by the main session's own calls, so a run that stopped in an open session goes stale. A survey from the holder's own session for the same workflow and subject re-enters the run when it has no step record and otherwise ends it and takes over; `ended` in the run record defines a live run, and pipeline commands refuse one that is not. `vsdd lock release` frees the caller's own session's lock or a stale one; --force (person) any.",
+    "where": "topics/run-lock.md; commands/lock-release.md; commands/survey.md; records/run.md; schemas/run-record.schema.json; records/lock.md; tables/routes.toml"
+   },
+   {
+    "id": "P3OPS-02",
+    "outcome": "fixed",
+    "what_was_done": "The green gate fails with `no red record` and delivery refuses unless a passing red or re-freeze record exists for a kind with a red gate. step-results blocks a result whose passing gate entry has no matching evidence record (gate, subject, commit, passed). tests-first now also runs on Bash and holds redirect targets and shell write commands to the same two checks.",
+    "where": "commands/gate-green.md; commands/story-deliver.md; rules/step-results.md; rules/tests-first.md; tables/rules.toml; topics/rule-model.md"
+   },
+   {
+    "id": "P3OPS-03",
+    "outcome": "fixed",
+    "what_was_done": "Adopted `checkout_dirty` as the state for a checkout the merge would overwrite, but not merging in the person's checkout: the merge commit is always made in the tool's detached integration worktree, so a conflict never lands in the person's files, and their checkout only ever receives a fast-forward that git refuses atomically. The invariant wording is amended; init and doctor need no change because the checkout on the integration branch is the normal, supported case.",
+    "where": "commands/story-deliver.md; topics/state-directory.md; schemas/delivery-data.schema.json"
+   },
+   {
+    "id": "P3OPS-04",
+    "outcome": "fixed",
+    "what_was_done": "merge-guard now blocks, for every caller, commands that move, replace or delete the integration or release branch without a checkout (update-ref, symbolic-ref, branch -f/-m/-M/-c/-C/-d/-D, switch -C, checkout -B, fetch, pull and push refspecs). Those commands sit in the new git-other family, which no builder holds. The proposed integration_moved refusal was not taken: a person in local mode, and other people's merges in pr mode, move the branch legitimately; local delivery re-merges from the new head instead.",
+    "where": "rules/merge-guard.md; tables/command-families.toml; tables/walls.toml; tables/rules.toml; commands/story-deliver.md"
+   },
+   {
+    "id": "P3OPS-05",
+    "outcome": "fixed",
+    "what_was_done": "`method` is in the step identity and so in every step record; a pass counts only when its method belongs to a reviewer-tier agent in the methods table and the stored agent type is that owner. A conformance fixture has a builder echo a reviewer's method.",
+    "where": "schemas/step-result.schema.json; topics/verdicts.md; packaging/tests-conformance.md"
+   },
+   {
+    "id": "P3OPS-06",
+    "outcome": "fixed",
+    "what_was_done": "Each rule module is imported inside its own rule's try, so an import error is that rule's rule.error and the quarantine condition can be met. The rule_error block's fix line names the restart with VSDD_FACTORY_HOOKS_QUARANTINE=<rule>, and the briefing's state-problems line and vsdd status list rules with repeated rule.error. Copying block codes into a blocked packet was not taken: the briefing line already reaches the person.",
+    "where": "topics/rule-model.md; topics/hook-failure.md; topics/briefing.md"
+   },
+   {
+    "id": "P3REQ-10",
+    "outcome": "fixed",
+    "what_was_done": "Resolved by the local-delivery rule in story-deliver, not by the proposal. Keeping the integration branch out of the person's checkout was rejected: it makes a person leave their own branch in every project with no remote and merge by hand to see delivered work, which is high touch. The checkout on the integration branch is the supported case, so init, doctor and the sample need no special handling, and the slice fixture keeps the checkout on that branch.",
+    "where": "commands/story-deliver.md; packaging/sample-project.md"
+   },
+   {
+    "id": "P3BLD-01",
+    "outcome": "fixed",
+    "what_was_done": "The step identity carries method, loop and pass; story.js names review, fix and arbitrate steps with the loop and pass (review-<lens>-l<n>-p<k>), so a scoped re-review writes new records. verdicts.md now defines what the tool rebuilds: passes, items to account for, disputes, rulings, waivers, the cap and `used`, the order of loops across runs, and when a verdict covers a head; the conformance table gains a case per input.",
+    "where": "topics/verdicts.md; schemas/step-result.schema.json; schemas/step-record.schema.json; records/step.md; topics/story-script.md; topics/prelude-steps.md; topics/prelude-converge.md; packaging/tests-conformance.md"
+   },
+   {
+    "id": "P3BLD-02",
+    "outcome": "fixed",
+    "what_was_done": "The mechanism is specified once, as proposed in steps 1 to 3 (detached merge, ref moved from the old head only, fast-forward of a checkout that holds the branch as the one exception). Step 4 differs: a refused fast-forward returns `checkout_dirty`, not awaiting_merge, and git itself decides (it refuses only when a local change would be overwritten).",
+    "where": "commands/story-deliver.md; topics/worktrees.md; topics/state-directory.md"
+   },
+   {
+    "id": "P3BLD-03",
+    "outcome": "fixed",
+    "what_was_done": "judge() and its Python copy treat `grounded === false` as not hard, and on a step's second return step-results returns updatedInput with the mark so the script judges what the tool stored. Whether updatedInput is honoured on a StructuredOutput call is unproven: item 27's probe now covers it (B8 must run it), and where it is not honoured the design says the tool's verdict stands, the checkpoint records the stage from it and the next run continues from `reviewed`. Blocking a second time was not taken, because it can use up the platform's retries and lose the pass.",
+    "where": "rules/step-results.md; topics/verdicts.md; topics/prelude-converge.md; topics/rule-model.md; platform.md (item 27); packaging/tests-conformance.md"
+   },
+   {
+    "id": "P3BLD-04",
+    "outcome": "fixed",
+    "what_was_done": "The six gate inputs are defined: identity is classname::name; the base report is measured once per base commit in a temporary detached worktree and kept under local/evidence/_base; a red test is a <failure> or an <error> of a constant list of not-implemented types; exempt tests carry `wiring` or `green_by_design` and at least one new test must be red; a test's file is the file attribute or the classname mapped to a test file; the stub marker is VSDD-STUB; a test name carrying ac<N> covers AC-N and the red record keeps that map for gate demo.",
+    "where": "commands/gate-red.md; commands/gate-green.md; commands/gate-demo.md; records/evidence.md; schemas/evidence-record.schema.json; agents/test-writer.md"
+   },
+   {
+    "id": "P3BLD-05",
+    "outcome": "fixed",
+    "what_was_done": "red, green and demo measure only a clean worktree: with a modified tracked file or an untracked file that is not ignored (the JUnit report excepted) the gate returns passed false with `uncommitted changes`, names the files and writes no record. A passing record for the head is returned without measuring again; a failing one never is. `vsdd init` lists files its trial runs left untracked and not ignored.",
+    "where": "topics/gates.md; commands/gate-red.md; commands/gate-green.md; commands/init.md"
+   },
+   {
+    "id": "P3BLD-06",
+    "outcome": "fixed",
+    "what_was_done": "The run, cycle, closure, decision and evidence records now have typed schemas with required lists: the evidence record has sha, patch_id, passed, and for red `frozen` ({file, sha256}), `tests` and `criteria`; the run record has `stories`, `amendment` and `ended`; the closure has delivery.branch and delivery.base. The job record stays a prose record: only G1 reads and writes it.",
+    "where": "schemas/evidence-record.schema.json; schemas/run-record.schema.json; schemas/cycle-record.schema.json; schemas/closure-record.schema.json; schemas/decision-record.schema.json; records/evidence.md; records/run.md"
+   },
+   {
+    "id": "P3BLD-07",
+    "outcome": "fixed",
+    "what_was_done": "A tool command a script relays prints every field of its output schema on every exit, empty where it has nothing, so every field is required; the survey, checkpoint and delivery schemas are written as JSON with full required lists, and relay() falls back to the empty object of the schema it was given with ok false and error. The built prelude's S_SURVEY, S_CLOSE and S_DELIVERY required lists and its relay() fallback under next/ must follow.",
+    "where": "topics/result-schemas.md; schemas/survey.schema.json; schemas/checkpoint-result.schema.json; schemas/delivery-data.schema.json; schemas/story-unit.schema.json; topics/prelude-steps.md"
+   },
+   {
+    "id": "P3BLD-08",
+    "outcome": "fixed",
+    "what_was_done": "The story-ready fixture is defined as an overlay (factory.toml with commands and paths, cycle.json, an approved spec decision, a plan closure with W-01: [S-1.01], one contract, an epic and the story) built by tests/e2e/fixtures/load.py, which runs vsdd init, replaces the detected factory.toml, computes the digest and commits; --local removes the remote first. No package E0 was added: the plan says E1 is built in two parts and the first needs only B3 and S1.",
+    "where": "packaging/sample-project.md; packaging/build-plan.md"
+   },
+   {
+    "id": "P3BLD-09",
+    "outcome": "fixed",
+    "what_was_done": "The order is fixed by rules in the build plan, with no new package: B6 and C2 before layer 2, H1 and S2b after the B8 items that decide their code, S4 in the slice (so H7 is not split), and the sample, fixtures and loader ahead of the rest of E1. The slice is recorded there as the first milestone in six ordered steps. The package briefs are generated from the blueprint in history and could not be edited, so where a brief and a rule differ the plan says the rule holds.",
+    "where": "packaging/build-plan.md"
+   },
+   {
+    "id": "P3BLD-10",
+    "outcome": "fixed",
+    "what_was_done": "The plan states that a workflow needs the package of every agent its script names (W2 and W3 need A2b; W7 needs A2b and A6b; W11 and W12 need A6b). The roster keeps listing the whole design, so the prelude's tier tables are complete; until every package is built L-ROSTER enforces only `none extra`. The slice ships every agent file story.js names, each complete with only the methods the story script gives it.",
+    "where": "packaging/build-plan.md; tables/lint-checks.toml"
+   },
+   {
+    "id": "P3BLD-11",
+    "outcome": "fixed",
+    "what_was_done": "S3 is not split into two packages; the plan orders it in two parts (records, preconditions, route, worktrees, admission and cycles first; positions, re-measuring and the checkpoint mapping after G2 and G3), and the survey reaches gates through a gate registry in the evidence store, which removes the S3 and G5 cycle. The six story positions are defined from records and git.",
+    "where": "packaging/build-plan.md; topics/story-life.md; topics/evidence-lookup.md; workflows/story.md"
+   },
+   {
+    "id": "P3BLD-12",
+    "outcome": "fixed",
+    "what_was_done": "Ctx gains `where`, the effective directory of a call (the target's directory; for a Bash segment the directory of a cd, git -C or vsdd -C, else cwd), and `story`, `in_spike`, merge-guard, auto-allow and liveness use it. The two cases are stated: `cd <story worktree> && git commit` with the main checkout on the integration branch is allowed, and a bare `git commit` there is blocked.",
+    "where": "topics/rule-model.md; rules/merge-guard.md; rules/tests-first.md; rules/auto-allow.md; topics/run-lock.md"
+   },
+   {
+    "id": "P3BLD-13",
+    "outcome": "fixed",
+    "what_was_done": "The implement step has a data schema, implement-data, that requires test_defects. An implementer that finds a frozen test wrong returns blocked with the list; story.js then runs one test-writer step (test-defects, method test-fixes, ending with gate red --refreeze) and the implement step once more. A new schema was needed because a script may only read required fields; it is registered in registry.d/amend.toml.",
+    "where": "schemas/implement-data.schema.json; registry.d/amend.toml; topics/story-script.md; workflows/story.md; tables/step-methods.toml; agents/implementer.md; agents/test-writer.md"
+   },
+   {
+    "id": "SL1-01",
+    "outcome": "fixed",
+    "what_was_done": "The design now says what was built: the Playwright entry carries no option, because the pinned server refuses file: addresses by default; L-MCP rejects --allow-unrestricted-file-access; probe 33 confirms the default on the running server.",
+    "where": "packaging/plugin-manifest.md; topics/research-and-browser-tools.md; tables/lint-checks.toml; rules/read-walls.md; platform.md (item 33)"
+   },
+   {
+    "id": "SL1-02",
+    "outcome": "fixed",
+    "what_was_done": "The discriminator the launcher uses is now in the design: on uv exit 2 only, it runs `uv python find --no-python-downloads '>=3.11'` with a cache of its own; an interpreter found means uv is at fault (uv_unusable), none means the Python floor (py_floor).",
+    "where": "topics/hook-failure.md; topics/hook-launcher.md"
+   },
+   {
+    "id": "SL1-03",
+    "outcome": "left-for-builder",
+    "what_was_done": "The design now says neither entry execs uv, and gives the cli entry's exit mapping: 0 and 1 pass through silently, 2 runs the interpreter probe and adds the uv fix only when no Python is found, any other code is reported. The code is wrong on one point: in next/plugins/vsdd-factory/py/launch.sh the cli branch's `*)` case prints `the vsdd tool could not run (exit 1)` for vsdd's own negative answer; it needs a `1) exit 1 ;;` case before it, with a test.",
+    "where": "packaging/cli-entry.md; topics/hook-launcher.md"
+   },
+   {
+    "id": "SL1-04",
+    "outcome": "fixed",
+    "what_was_done": "The contents of next/.gitignore are specified as built: /.mcp.json with the negation !/plugins/vsdd-factory/.mcp.json, .claude/worktrees/, /.worktrees/, settings.local.json, caches and node_modules, with the reason the negation is needed during the rewrite.",
+    "where": "packaging/rewrite-layout.md"
+   },
+   {
+    "id": "SL1-05",
+    "outcome": "left-for-builder",
+    "what_was_done": "The design now says the launcher writes runner.launch_failed and runner.disabled itself, with v, ts in whole seconds, type, severity, session_id null, code and mode, into the same directory and honouring VSDD_EVENTS_DIR; the event schema admits a null session_id and both timestamp forms. The launcher matches. events.py does not: EVENT_SCHEMA in next/plugins/vsdd-factory/py/vsdd/events.py requires a non-empty string session_id and a millisecond timestamp, so the schema it prints rejects the launcher's lines; it must accept null and whole seconds for reading while the Python writer keeps writing its own strict form.",
+    "where": "topics/event-log.md; schemas/event.schema.json; topics/hook-launcher.md"
+   },
+   {
+    "id": "SL1-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "The design now states that every shape (step result, step data, tool outputs, records) is a schema file under <plugin>/schemas/ delivered by C1, and that every S_* literal in the prelude is generated from its file. The code does not do this yet: next/workflow-lib/prelude.js writes S_REVIEW, S_FIXES, S_RULINGS, S_HOLDOUT, S_SURVEY, S_CLOSE, S_DELIVERY and S_WAVE_GATE by hand, and next/plugins/vsdd-factory/schemas/ has no survey, checkpoint-result, delivery-data, story-unit, wave-gate-data or implement-data file. C1 must add those files and tools/build.py must generate the literals and fail --check on a hand-written one.",
+    "where": "topics/result-schemas.md; topics/prelude.md"
+   },
+   {
+    "id": "SL1-07",
+    "outcome": "fixed",
+    "what_was_done": "The reader's semantics are pinned as built: refused, not misread. On every input it accepts it equals PyYAML's YAML 1.1 safe_load, and every plain scalar YAML 1.1 would retype is refused with the line number. The differential test is extended to artifact frontmatter in the fixture overlays and hook case files and to a corpus of inputs that must be refused; the first of these is added to the built test when those fixtures exist.",
+    "where": "topics/hook-runner.md; packaging/tests-python.md"
+   },
+   {
+    "id": "SL1-08",
+    "outcome": "fixed",
+    "what_was_done": "enc() is specified as built: encodeURIComponent plus the five characters it leaves raw (! ' ( ) *). Universal test 11 passes a request with both quotes, a semicolon, parentheses, an asterisk and an exclamation mark and requires that none appears raw.",
+    "where": "topics/prelude.md; topics/workflow-arguments.md; packaging/tests-workflows.md"
+   },
+   {
+    "id": "SL1-09",
+    "outcome": "fixed",
+    "what_was_done": "The holdout finding's shape is settled as built: location is {\"path\": \"\"}, owner is product-owner, and holdoutFindings(unit, scores, opts) takes its thresholds from the survey's config.holdout (not limits) and its spec_ref and seed from a new `holdout` field (seed, contracts by scenario) in the output of gate wave and gate release, because only the tool can read a scenario.",
+    "where": "topics/holdout-findings.md; schemas/wave-gate-data.schema.json; schemas/survey.schema.json; topics/wave-script.md"
+   },
+   {
+    "id": "SL1-10",
+    "outcome": "fixed",
+    "what_was_done": "The harness table now lists what the builder implemented: log(), budget.total and remaining(), pipeline(items, ...stages) with stages receiving (prev, item, index), workflow() returning the child's value and throwing when it threw, agents counted and workflow() calls not; and the schema rule is corrected to `required` optional and a subset of properties.",
+    "where": "packaging/tests-workflows.md"
+   },
+   {
+    "id": "SL1-11",
+    "outcome": "fixed",
+    "what_was_done": "Universal tests 4, 5 and 7 now say that every stub returns as `step` the identity its prompt gave it and that the survey stub passes with the units the test supplies, which is what the built tests do; test 4 also asserts that the loops ran.",
+    "where": "packaging/tests-workflows.md"
+   },
+   {
+    "id": "SL1-12",
+    "outcome": "fixed",
+    "what_was_done": "The checkpoint output is typed: ok and error, plus status, progress, decisions and next exactly as the workflow-result schema types them, all required. The built S_CLOSE has the same types; its required list (ok, status, next) grows to all six when the literals are generated from the schema files.",
+    "where": "schemas/checkpoint-result.schema.json; topics/result-schemas.md"
+   }
+  ],
+  "lint": "python3 rewrite/tools/spec_lint.py: \"registry: 20 agent, 31 artifact, 62 command, 22 config, 4 doc, 74 package, 32 packaging, 15 record, 17 rule, 48 schema, 13 skill, 21 table, 86 topic, 12 workflow / 0 problem(s)\". One schema was added (implement-data, 47 to 48). Two files went over 16 KB during the work and were brought back under it without losing content: schemas/config.schema.json (reformatted compactly, 14.7 KB) and tables/artifacts.toml (comment alignment padding collapsed, parsed TOML identical, 16,321 bytes). gen_packages.py wrote 74 briefs; findings.py build reports 238 findings: 76 fixed, 3 left-for-builder, 159 open (2 blocker, 42 major, 115 minor; 94 open on the slice path).",
+  "coverage": "python3 rewrite/tools/sections.py coverage: \"sections: 240; cited by a spec file: 181; retired: 39; uncovered: 0 / text: 972 KB total; 786 KB cited; 185 KB retired\". Unchanged from before the work; no frontmatter sources were removed."
+ },
+ "verify": {
+  "path": "/Users/jmagady/dev2/vsdd-factory/rewrite/findings/verify-slice-amend.md",
+  "clean": false,
+  "summary": "I checked 79 entries: 38 from the tables repair and 41 from the slice amendment. 61 are sound. Not clean: 7 major problems remain from the entries, and 4 new major problems were caused or left by the fixes. None of them is on the slice's happy path (one story, local mode, no repair).\n\n- Both checks pass. spec_lint prints \"0 problem(s)\". sections coverage prints \"240 sections; 181 cited; 39 retired; 0 uncovered\".\n- Twelve table entries were only partly done: the tables were fixed but the prose copies they name were not. Every artifact file still restates its row (AU-T2-08). project-configuration.md still calls its example \"the one key list, with its default\", and that example disagrees with config-keys.toml (AU-S2-03 with T2-13, T2-15, P3SEAM-06). Pointers into the originals and second definitions of tables remain in prose. The scenario kind name was not settled.\n- New major problems from the amendment:\n  1. A rebase in pr mode makes the red record unreachable and changes the patch id against the fixed recorded base (VSA-01).\n  2. delivery-data's \"ok\" is false for ci_failed, conflict and review_stale, so story.js never repairs (VSA-02).\n  3. After a repair, the tool and the script account for different files in the later review loop (VSA-03).\n  4. Defining the caller's worktree by the effective directory \"in any rule\" empties own-worktree, the spike runner's only write grant (VSA-04).\n- The three left-for-builder entries (SL1-03, SL1-05, SL1-06) were correctly left. The code under next/ differs exactly as stated.\n- build-plan.md's slice list now adds B8, C2, B6, S4, B4b, the first part of E1, A2b and A5, so STATE.md is out of date.",
+  "checked": 79,
+  "confirmed": 61,
+  "remaining": [
+   {
+    "id": "VSA-01",
+    "severity": "major",
+    "problem": "Caused by P3SEAM-03 and P3OPS-02. Every measure now uses the fixed recorded base; patch_id is the diff from that base; delivery and green require a red record on a commit between the base and the head. story-deliver still rebases in pr mode and claims the patch id survives a clean rebase. After a rebase the red record's commit is not an ancestor of the head, so delivery refuses and green fails 'no red record'. The diff also includes stories merged meanwhile, so the patch id changes and every rebase goes review_stale.",
+    "where": "topics/worktrees.md (The base of a story branch); topics/evidence-lookup.md; commands/story-deliver.md (What it refuses, verdict binding); commands/gate-green.md; records/evidence.md",
+    "proposed_resolution": "On a rebase, delivery re-records delivery.base as the commit it rebased onto. The red lookup also accepts the latest red or re-freeze record whose frozen files' SHA-256 match the head and whose patch id equals the head's diff from the new base. State this once in worktrees.md and evidence-lookup.md. Add a G4a fixture: pr mode, integration moved, clean rebase, merged with no re-review."
+   },
+   {
+    "id": "VSA-02",
+    "severity": "major",
+    "problem": "delivery-data.schema.json, rewritten in this pass, says ok is 'False when the story was not merged and no person is being waited for', so ok is false for ci_failed, conflict and review_stale. story.js tests !d.ok first and returns blocked, so the delivery repair loop never runs.",
+    "where": "schemas/delivery-data.schema.json (ok); topics/story-script.md (delivery loop); commands/story-deliver.md",
+    "proposed_resolution": "Define ok as 'the command ran and reached a state': false only for refused, checkout_dirty and a command that could not run. List the ok value of each state in story-deliver.md."
+   },
+   {
+    "id": "VSA-03",
+    "severity": "major",
+    "problem": "Caused by P3BLD-01. In a later review loop, verdicts.md takes the items to account for as the files changed from the converged commit to the reviewed head. story.js passes d.changed_files, which delivery computed before the repair commits, and delivery-data never defines changed_files. After a ci_failed or conflict repair the tool's list holds files the reviewers were not asked about, so the tool's verdict is not converged while the script's is, and delivery refuses.",
+    "where": "topics/verdicts.md (Items to account for); topics/story-script.md (review(round + 1, d.reviewed_sha, 2, d.changed_files, 0)); schemas/delivery-data.schema.json",
+    "proposed_resolution": "Define changed_files as the files changed from reviewed_sha to the delivered head. After a repair, take the list from the gate green --since result (add changed_files to it). Use the same definition in the tool. Add a conformance fixture in which a repair touches a new file."
+   },
+   {
+    "id": "VSA-04",
+    "severity": "major",
+    "problem": "Caused by P3BLD-12 and P3COV-02. rule-model.md says 'the caller's worktree' and related phrases mean, in any rule, the worktree containing `where` (for a file tool, the target's own directory). Read that way, own-worktree, the spike runner's only write grant, covers any target, including story and integration worktrees. path-classes.toml and spike-bounds.md still define own-worktree by the caller's cwd, so the texts disagree.",
+    "where": "topics/rule-model.md (effective directory paragraph); tables/path-classes.toml (computed classes comment); rules/spike-bounds.md (Containment)",
+    "proposed_resolution": "Exclude own-worktree from the `where` sentence and define it once by the payload cwd or the open ledger entry's worktree, as spike-bounds does. Add a write-scopes case: a spike runner writing into a story worktree is blocked."
+   },
+   {
+    "id": "AU-S2-03 (with AU-T2-13, AU-T2-15, P3SEAM-06)",
+    "severity": "major",
+    "problem": "Two key lists still each claim to be the list. project-configuration.md says both that the one key list is the table and that 'The example below is the whole key list ... with its default. It is the one key list'. The config-keys.toml header points back to that example. The defaults differ: delivery.mode pr against detected, delivery.ci required against detected, protected_paths with a literal CHANGELOG.md against the blueprint default, auto-allow.scope off against 'set at setup', paths.docs fixed against detected. The example also omits the per-rule [hooks] keys although it claims every accepted key. This is the S1 loader's source, on the slice path.",
+    "where": "topics/project-configuration.md ('The whole key list, as an annotated example'); tables/config-keys.toml header",
+    "proposed_resolution": "Reword the topic: the block is an annotated example of a detected file, and the keys, types and defaults are [[table:config-keys]] only. Fix the table header. Mark the example values that are detected rather than defaults."
+   },
+   {
+    "id": "AU-T2-08",
+    "severity": "major",
+    "problem": "All 31 artifacts/*.md files still restate their row (path, frontmatter keys, writer, cap, lifecycle), although the outcome and tables-repair.md say they link instead. demo-evidence.md's lifecycle ('write-once. Removed with holdout/evaluations/<cycle>/...') already disagrees with the table row.",
+    "where": "rewrite/spec/artifacts/*.md",
+    "proposed_resolution": "Delete the restated bullets and keep only the prose that explains, linking the [[table:artifacts]] row."
+   },
+   {
+    "id": "AU-T2-09",
+    "severity": "major",
+    "problem": "The kind vocabulary was only recorded, not unified. The kind ids are holdout-scenario and project-conventions, while [reveals] says 'list scenario'. [reveals] is generated from the kinds at build time, so the generated table and the hand-written one disagree. The choice is put off until the build.",
+    "where": "tables/artifacts.toml; tables/walls.toml [reveals]; conflicts/tables-repair.md",
+    "proposed_resolution": "Choose one spelling now (for example the list kind `scenario`, or `list holdout-scenario` in [reveals]). Apply it to the kind ids, [reveals] and the author or list commands."
+   },
+   {
+    "id": "AU-P2-12 / AU-S2-11",
+    "severity": "major",
+    "problem": "Only the table part was done. Prose pointers into the originals remain: 'blueprint section 10, item N' (e2e-story-tier.md, plugin-manifest.md, proof-greenfield.md), 'open question 1 of the design' (verifier.md, codebase-analyzer.md, spike-runner.md, model-tiers.md), 'Section 2.15.' (import.md), 'BLUEPRINT.md#4.9' (cli-entry.md), 'pipeline.md guard G3' (rules/artifacts.md), and the other files the findings list.",
+    "where": "the files listed in AU-P2-12 and AU-S2-11",
+    "proposed_resolution": "Replace each pointer with its [[kind:id]] link ([[doc:platform]], [[doc:decisions]], [[topic:importer]] and so on) or copy the text."
+   },
+   {
+    "id": "AU-S2-09",
+    "severity": "major",
+    "problem": "Partly done. Still defined twice: the event types (x-documented-types in event.schema.json and event-types.toml), the tiers (conventions.md 114-116 and each agent file's tier line), GOVERNED (merge-guard.md), the exempt kinds (tests-first.md), the lock_stale default (run-lock.md), the spike reuse rule (artifacts.toml and spike-ledger-entry.md), and the pure_paths default (purity-advice.md). All copies currently agree.",
+    "where": "schemas/event.schema.json; conventions.md; agents/*.md; rules/merge-guard.md; rules/tests-first.md; topics/run-lock.md; artifacts/spike-ledger-entry.md; rules/purity-advice.md",
+    "proposed_resolution": "Keep each fact in its table and replace the prose copies with links. If the writer must validate the event schema, generate x-documented-types from event-types.toml at build time."
+   },
+   {
+    "id": "VSA-05",
+    "severity": "minor",
+    "problem": "gated() retries give several fix records with the same loop and pass (fix-implementer-l1-p1 and its -retry1). verdicts.md joins every fix record's resolutions, while the script uses only the last attempt, so the disputed sets diverge.",
+    "where": "topics/verdicts.md (fix record; Disputes and claims)",
+    "proposed_resolution": "Count, per fixer and pass, only the last done attempt (the one whose gate passed). Add a fixture."
+   },
+   {
+    "id": "VSA-06",
+    "severity": "minor",
+    "problem": "The covering rule requires each loop 'reviewed from the commit the one before it converged on', but no record stores the commit a review started from.",
+    "where": "topics/verdicts.md; schemas/step-result.schema.json",
+    "proposed_resolution": "Add `from` to the identity of review steps, or drop the condition and rely on the loop order."
+   },
+   {
+    "id": "VSA-07",
+    "severity": "minor",
+    "problem": "Grounding is re-applied at count time with no tree named. Against the current worktree, the findings of early passes stop grounding once later fixes land.",
+    "where": "rules/step-results.md item 5; topics/verdicts.md (Grounding)",
+    "proposed_resolution": "Ground against the record's reviewed_sha tree (git show), or trust the stored grounded mark."
+   },
+   {
+    "id": "VSA-08",
+    "severity": "minor",
+    "problem": "step-record composes step-result (head = the commit the step left) with the hook's head (the worktree head when stored): one key with two meanings.",
+    "where": "schemas/step-record.schema.json; rules/step-results.md; records/step.md",
+    "proposed_resolution": "Rename the hook's field (for example worktree_head) and update every place that uses it."
+   },
+   {
+    "id": "VSA-09",
+    "severity": "minor",
+    "problem": "story-deliver says the checkpoint treats checkout_dirty as a blocked step of kind other, but relay outputs are not stored as step records and nothing records the last delivery state for the checkpoint to read.",
+    "where": "commands/story-deliver.md; commands/checkpoint.md; topics/human-stops.md",
+    "proposed_resolution": "Name the record that keeps the last delivery state (the job record or delivery.state in the closure) and the checkpoint's mapping."
+   },
+   {
+    "id": "VSA-10",
+    "severity": "minor",
+    "problem": "In local delivery, a person who commits between the read and merge --ff-only makes git refuse, and step 4 reports that as checkout_dirty instead of going back to step 1. The local merge commit message (squash default) and the delivery lock path are not stated.",
+    "where": "commands/story-deliver.md (Local mode)",
+    "proposed_resolution": "After a refusal, re-read the branch: if it moved, go back to step 1; otherwise return checkout_dirty. Name the commit message and the lock file."
+   },
+   {
+    "id": "VSA-11",
+    "severity": "minor",
+    "problem": "step-results reads 'the evidence record the entry names', a path the agent supplied (tmp is writable), so a forged file could be matched.",
+    "where": "rules/step-results.md item 3",
+    "proposed_resolution": "Look the record up by subject, gate and sha in the evidence class; never follow the entry's path."
+   },
+   {
+    "id": "VSA-12",
+    "severity": "minor",
+    "problem": "'contains ac<N>' lets test_ac12 cover AC-1. The classname-to-file mapping fails for Python module.Class classnames, which the sample uses.",
+    "where": "commands/gate-red.md",
+    "proposed_resolution": "Require a non-digit after N. Use the longest classname prefix that names a test file, and have the sample runner write `file`."
+   },
+   {
+    "id": "VSA-13",
+    "severity": "minor",
+    "problem": "Conflict records contradict the amended tables: people-repair P-8 (no other call edges, the AU-T2-01 leftover); rules.md R2 and the hooks-repair derivation (an absent commands key means '*'); tables-repair.md ('patch_id gone', 'the two lists no longer disagree', the artifact files 'link'); records-repair.md has two different entries numbered RR10.",
+    "where": "conflicts/people-repair.md; conflicts/rules.md; conflicts/hooks-repair.md; conflicts/tables-repair.md; conflicts/records-repair.md",
+    "proposed_resolution": "Update the records to match the current tables and renumber the second RR10."
+   },
+   {
+    "id": "AU-S2-12",
+    "severity": "minor",
+    "problem": "Commentary pointing to conflicts/commands.md remains in env-stop, validate, cycle-close, defer-add, review-prepare, coverage and idea-register, and in three schema descriptions. env-stop and validate still give two syntaxes.",
+    "where": "commands/*.md listed; schemas/driver-flag, config-fingerprint, spike-admission",
+    "proposed_resolution": "State only the chosen syntax and move the commentary to the conflicts file."
+   },
+   {
+    "id": "AU-P2-10",
+    "severity": "minor",
+    "problem": "The example rule.block event line from hooks.md#2.12 is still in no spec file.",
+    "where": "topics/event-log.md",
+    "proposed_resolution": "Copy the example line into topic:event-log."
+   },
+   {
+    "id": "AU-T2-22",
+    "severity": "minor",
+    "problem": "The closure verdict description paraphrases ('head, ... rounds_used') instead of quoting state.md ('perimeter, commit, passes, outcome, and the counts...').",
+    "where": "schemas/closure-record.schema.json (verdict)",
+    "proposed_resolution": "Quote the state.md sentence; keep the added fields as properties."
+   },
+   {
+    "id": "VSA-14",
+    "severity": "minor",
+    "problem": "The 'every field of a relayed output is required' rule is not applied throughout: survey.rounds_used, several story-unit fields, and release-result (no types, no required list).",
+    "where": "schemas/survey.schema.json; schemas/story-unit.schema.json; schemas/release-result.schema.json",
+    "proposed_resolution": "Require every field, or state the exceptions."
+   },
+   {
+    "id": "VSA-15",
+    "severity": "minor",
+    "problem": "The story-ready overlay carries delivery.mode with no value; with --local it must be local and delivery.ci none.",
+    "where": "packaging/sample-project.md",
+    "proposed_resolution": "State the values the loader writes with and without --local."
+   },
+   {
+    "id": "VSA-16",
+    "severity": "minor",
+    "problem": "The closure record's 'Written by' list omits vsdd survey, which now writes delivery.branch and delivery.base through the worktree library.",
+    "where": "records/closure.md",
+    "proposed_resolution": "Add vsdd survey (through the worktree library)."
+   },
+   {
+    "id": "VSA-17",
+    "severity": "minor",
+    "problem": "P3COV-05's 'CLAUDE.md joins the default docs globs' holds only in the example; paths.docs defaults to detected, and detection is not said to include CLAUDE.md.",
+    "where": "topics/project-configuration.md (Detection by init); tables/config-keys.toml paths.docs",
+    "proposed_resolution": "Say that detection adds CLAUDE.md to paths.docs, or give the docs default."
+   },
+   {
+    "id": "VSA-18",
+    "severity": "minor",
+    "problem": "Left by P3SEAM-05: builders hold only git-commit and git-read, so after a conflict the repair step cannot bring the integration head into the story branch, and the automated repair can only fail.",
+    "where": "tables/walls.toml (builder rows); commands/story-deliver.md; topics/story-script.md (repair)",
+    "proposed_resolution": "Have the tool merge the integration head into the story branch before the repair step, or grant a scoped git-integrate inside story worktrees."
+   }
+  ]
+ }
+}

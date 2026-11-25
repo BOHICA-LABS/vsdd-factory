@@ -1,0 +1,14 @@
+[
+  {
+    "id": "P3REQ-06",
+    "outcome": "left-for-builder",
+    "what_was_done": "Not at slice depth, as the plan states: the survey's measurements become the same keyed detached jobs in S3's second part. The job layer they need is built now - attach takes no command-line input, is keyed by (command, subject, commit) and returns the pending answer to any caller, so the survey can re-attach unchanged; test_collected_result_is_not_served_again and test_same_command_twice_starts_one_job pin the behaviour it rests on (a result is served once, then the work runs again).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/jobs.py (attach); next/tests/unit/test_jobs.py::test_collected_result_is_not_served_again; S3's second part must build the survey's pending flow on this"
+  },
+  {
+    "id": "AU-S2-12",
+    "outcome": "left-for-builder",
+    "what_was_done": "The G1 code half is built with the one syntax (D13): the env stop handler takes no subject argument, and without a marker it stops everything only from a terminal, naming the one-segment form (test_stop_without_marker_needs_a_terminal is the loud-failure test). What closes the finding is the second part of this package, jobs-b, which adds test_cli_env_stop_rejects_subject at the command layer, and the orchestrator, who removes the two-syntax commentary from rewrite/spec/commands/env-stop.md (the plan reserves that spec edit for the orchestrator, so it was left as found).",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/env.py (stop); next/tests/unit/test_env.py::test_stop_without_marker_needs_a_terminal; jobs-b closes with the command-level test"
+  }
+]

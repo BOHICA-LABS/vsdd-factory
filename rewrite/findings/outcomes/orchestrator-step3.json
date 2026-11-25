@@ -1,0 +1,26 @@
+[
+ {
+  "id": "S3R-state-core-C2-1",
+  "outcome": "fixed",
+  "what_was_done": "The orchestrating session deleted the second copy of the five-line comment in _compile_registry; no behaviour changed. tests/unit/test_artifacts.py passes.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/state/artifacts.py"
+ },
+ {
+  "id": "S3B-hook-runner-5",
+  "outcome": "fixed",
+  "what_was_done": "Accepted as built: select, hooks_json and wiring take entries=None and resolve RULES at call time, which behaves the same for a caller that omits the argument and lets launcher tests inject rules. The step 4 rules plan uses the registry rows, not this default, so nothing built on the plan's wording.",
+  "where": "next/plugins/vsdd-factory/py/vsdd/hooks/registry.py"
+ },
+ {
+  "id": "S3B-hook-runner-2",
+  "outcome": "fixed",
+  "what_was_done": "The check is kept, because it is right about the tree that ships. tools/check.py, tools/build.py and tests/conftest.py set sys.dont_write_bytecode, and the build and fix workflow scripts tell every agent to run Python with -B and to delete a __pycache__ its own command made under next/plugins/.",
+  "where": "next/tools/check.py; next/tools/build.py; rewrite/workflows/slice-build-unit.js"
+ },
+ {
+  "id": "ORCH-3",
+  "outcome": "left-for-builder",
+  "what_was_done": "For package H6 when the auto-allow rule is built.",
+  "where": "rules/auto-allow.md"
+ }
+]

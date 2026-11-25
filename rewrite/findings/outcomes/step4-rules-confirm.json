@@ -1,0 +1,38 @@
+[
+  {
+    "id": "S4R-rules-2",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is right: _is_frozen measures each form against its own worktree root. But the test cannot fail. test_frozen_test_through_symlinked_parent drives an Edit, and ctx.target is already os.path.realpath of the literal path (model.py), so both forms are the same and the old single-root code never ran its failing branch. A scratch copy that restores the old code (root from the literal path, return False on ValueError) still passes the test. The bug only shows on Bash, where write_targets returns unresolved paths. A Bash variant ('echo x > tests/test_sample.py' with cwd set to the worktree through the symlinked alias, as the verifier) blocks red_test_frozen with the fix and fails against the old code.",
+    "where": "next/tests/hooks/test_tests_first.py"
+  },
+  {
+    "id": "S4R-rules-7",
+    "outcome": "not-fixed",
+    "what_was_done": "shell.py skips a wrapper word but not the wrapper's options, and matches the wrapper by its exact name. Measured on develop in the main checkout, all passing (exit 0): 'env -i git commit -m x', 'env -u FOO git commit -m x', 'nice -n 5 git commit -m x', 'command -p git commit -m x', 'time -p git commit -m x', '/usr/bin/env git commit -m x', 'nohup nice -n 1 git commit'. The parsed program is '-i', '-n', '-p' or '/usr/bin/env'. The same forms hide sed from write_targets: 'nice -n 5 sed -i ... src/a.py', 'env -i sed -i ...', '/usr/bin/env sed -i ...' and 'command -p sed -i ...' give no targets, so tests-first is skipped. The bare forms the finding measured are fixed and tested.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/shell.py"
+  },
+  {
+    "id": "S4R-rules-19",
+    "outcome": "not-fixed",
+    "what_was_done": "The behaviour is fixed. Measured in process: a touch of 40 source files in a story worktree after red spends one git subprocess (rev-parse HEAD) in 70 ms, the same as a touch of one file. But no test pins it. A scratch copy that disables the memo (known = None) passes all of test_tests_first.py and test_rule_tables.py (26 passed), so the per-path lookups could come back unnoticed.",
+    "where": "next/tests/hooks/test_tests_first.py"
+  },
+  {
+    "id": "S4R-rules-23",
+    "outcome": "not-fixed",
+    "what_was_done": "perl -M, touch -r and -d, and cp --target-directory are fixed and tested. perl's script operand still counts as written when the script is not given with -e: 'perl -i script.pl src/a.py' gives ['<w>/script.pl', '<w>/src/a.py'], and so does 'perl -pi script.pl ...'. -E, perl's other script option, is not a value option either: 'perl -pi -E 's/a/b/' src/a.py' and 'perl -i -pE ...' count 's/a/b/' as a written path. Also seen (not in the finding): touch -t's timestamp counts as a written path.",
+    "where": "next/plugins/vsdd-factory/py/vsdd/hooks/writes.py"
+  },
+  {
+    "id": "S4R-rules-25",
+    "outcome": "not-fixed",
+    "what_was_done": "The code is right: steps._under_holdout normalises dot segments and the rule imports it. But no test exercises either change. A scratch copy that drops the normpath survives test_step_results.py, test_state_steps.py and test_verdicts.py (44 passed). So does a copy that puts the rule's old private predicate back (path.startswith('.factory/holdout/')). No test anywhere names '.factory/./holdout/' or a bare 'holdout/' finding path, although the account says both are walled.",
+    "where": "next/tests/hooks/test_step_results.py"
+  },
+  {
+    "id": "S4R-rules-26",
+    "outcome": "not-fixed",
+    "what_was_done": "test_import_error_blocks now covers all three modules, with a nothing-stored check for step-results, and test_not_applied has the docs and spike cases. But test_block_texts_survive_the_wrapper uses a made-up frame ('The tool call was refused by a hook...'), not the framing platform item 40 records (topics/platform-proven-2.md: 'PreToolUse:<tool> hook error: [<the hook's command line>]: <message>', a blank line, then 'This hook comes from the <plugin>@<source> plugin.'). The account says it uses item 40's framing; it does not. The spike case also cannot fail: .worktrees/spike-probe is no story, so tests-first passes it whether or not spike_exempt works.",
+    "where": "next/tests/hooks/test_rules_fail_closed.py"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S4R-gates-C1-1",
+    "origin": "slice step 4, gates, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/py/vsdd/gates/gatelib.py",
+    "problem": "The S4R-gates-10 fix gives changed_files the default [] in _cached for every gate, not only green. So a cached red result (and a cached re-freeze) now carries changed_files: [], while a freshly measured red result has no such key. A probe showed it: a second `gate red` at the same head returned changed_files [], and the first did not. Plan gates.md 3.1 and the gate-result schema make changed_files a green field ('[] without --since').",
+    "proposed_resolution": "In _cached, pass changed_files only for green (for example changed_files=changed_files if gate == 'green' else None). In tests/unit/test_gate_red.py::test_passing_record_returned_without_measuring, assert that a cached red result has no changed_files key.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S4R-gates-C1-2",
+    "origin": "slice step 4, gates, confirmation",
+    "severity": "minor",
+    "where": "next/plugins/vsdd-factory/schemas/evidence-record.schema.json",
+    "problem": "The S4R-gates-11 fix makes the green evidence record carry diff_patch, the absolute path of the whole base-to-head patch. The shipped evidence-record schema does not list that property. The record is accepted only because the schema sets no additionalProperties, although plan gates.md 3.3 says the record's fields are the evidence-record schema's. The spec's own schema, rewrite/spec/schemas/evidence-record.schema.json, does list diff_patch ('Green and wave: path of the patch the gate wrote'). The shipped file belongs to the records package, not to the gates unit, so the fixer could not add it.",
+    "proposed_resolution": "The schema's owner (records) adds diff_patch to the shipped evidence-record schema: a string; for green, the absolute path of the whole base-to-head patch, also after --since. Add a valid fixture of a green record with the field.",
+    "on_slice_path": true
+  }
+]

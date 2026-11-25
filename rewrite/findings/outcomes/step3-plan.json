@@ -1,0 +1,14 @@
+[
+ {
+  "id": "P3COV-10",
+  "outcome": "left-for-builder",
+  "what_was_done": "The catch-up outcome was wrong to say every caller already omitted --subject: topics/story-script.md passes it. What is true: the toy dropped it. Decided while the step 3 plans were corrected (survey.md D1, review finding PL3-22): `vsdd checkpoint` accepts an optional --subject that must equal the run's, built by the survey unit of step 3, and W2 settles what the story script sends and makes topics/story-script.md and commands/checkpoint.md agree.",
+  "where": "rewrite/plans/step-3/survey.md D1; packages S3 and W2"
+ },
+ {
+  "id": "P3SEAM-10",
+  "outcome": "left-for-builder",
+  "what_was_done": "The catch-up outcome was wrong to say every caller already omitted --subject: topics/story-script.md passes it. What is true: the toy dropped it. Decided while the step 3 plans were corrected (survey.md D1, review finding PL3-22): `vsdd checkpoint` accepts an optional --subject that must equal the run's, built by the survey unit of step 3, and W2 settles what the story script sends and makes topics/story-script.md and commands/checkpoint.md agree.",
+  "where": "rewrite/plans/step-3/survey.md D1; packages S3 and W2"
+ }
+]

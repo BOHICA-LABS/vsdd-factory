@@ -1,0 +1,11 @@
+[
+  {
+    "id": "S4B-gates-1",
+    "origin": "slice step 4, gates, builder",
+    "severity": "minor",
+    "where": "next/tests/e2e/sample-project/tools/junit_runner.py (and any unittest-based runner)",
+    "problem": "unittest discovery collects TestCase classes only, so a module-level test function in a sample test file silently vanishes from the JUnit report: the base set under-counts and the red gate counts the test as new. Nothing warns, because the report parses and simply holds fewer cases.",
+    "proposed_resolution": "Either the sample's tests stay class-only (as today, and as the e2e loaders rely on) or the runner converts module-level test functions explicitly. Worth a sentence in the packaging test tiers when the sample grows.",
+    "on_slice_path": false
+  }
+]

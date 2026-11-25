@@ -1,0 +1,3 @@
+B hook ran: pwd=/private/tmp/pr4-q10.YhrECl/repoB gitdir=unset worktree=unset toplevel=/private/tmp/pr4-q10.YhrECl/repoB
+B tracked version: 1.0
+B untracked data.gen: raw

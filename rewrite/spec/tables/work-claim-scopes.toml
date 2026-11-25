@@ -1,0 +1,107 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M2). Not read by anything on the slice path.
+#
+# What can be claimed. A work claim is one file on the state branch ([[record:work-claim]]); how it is
+# made, seen, released and taken over is [[topic:team-claims]], and the checks are
+# [[table:work-claim-checks]].
+#
+# Which workflows take a claim. A workflow that takes the run lock takes a claim, and one that takes no
+# lock (`spike`, `discover`, a report-only `maintain`) takes no claim for its run. Opening a cycle takes
+# `open` whoever does it, `discover` included. The lock still keeps one clone to one run at a time
+# ([[topic:run-lock]]); the claim is what two clones see of each other. This paragraph is the one place
+# the rule is stated.
+#
+# Fields a program reads.
+# - `file`: the claim file, relative to `.factory/`. `<cycle>` is the cycle's directory, `_standing` for
+#   work outside a product cycle; `<id>` is a story id.
+# - `workflows`: the workflows whose survey takes the scope for its run. `when` narrows it in words.
+# - `held`: `unit` is from the claim until the story is delivered, descoped, released or taken over;
+#   `run` is from the survey to the checkpoint of one run; `act` is from the command that opens a cycle
+#   until the push, made by that command, that carries the new cycle record and removes the claim. If
+#   that push fails the claim stays, and the next sync publishes both; if the command ends before it has
+#   written the record, the next full sync removes the claim (T-RELEASE). Nothing else defines "held".
+# - `covers_paths`: globs, relative to `.factory/`, that only the holder may add, change or remove while
+#   the claim stands. `not_paths` are taken out of them.
+# - `covers_new`: globs of files only the holder may create; anyone may change them afterwards, which is
+#   how a decision is opened by the holder and settled by any person. `not_new` are taken out of them.
+# - `covers_branch`: the product branch only the holder pushes.
+# - `cycle_kinds`: for `open` scopes, the `kind` of the cycle record whose creation the scope covers.
+# T-CLAIM, T-HOLD and T-RELEASE read these fields and nothing else about what a scope covers. A decision's
+# settlement is covered by no claim: any person on any clone may settle any open decision.
+
+[[scope]]
+id = "story.<id>"
+file = "cycles/<cycle>/claims/story.<id>.json"
+workflows = ["story", "wave", "feature", "verify", "maintain", "multi"]
+when = """
+A standalone `story` takes its story. A workflow that runs child stories takes the free ones in the
+batch its first call of `runStories()` will start ([[topic:prelude-run-stories]]): the first N of the
+units that call would start, in the order the survey returns them. N is the smaller of
+`limits.stories_per_wave_run` and the number that fits the agent budget, which the survey works out with
+the formula and the reserve `runStories()` uses, counting its own `limits.step_attempts` agents as
+spent. The survey returns N to the script as the limit `stories_per_run`, so the script starts no story
+outside the batch, and a test runs both on a table of limits and unit lists and asserts that the
+stories the script starts are the ones claimed or already held. The free stories after those stay free
+for another clone. `vsdd gate plan --story` and `vsdd story new-fix` take the story they admit."""
+held = "unit"
+why = "A story in flight has work that tracked state does not hold: its branch, its worktree and its evidence. Another clone that started it would do the work twice"
+covers_paths = [
+  "cycles/<cycle>/units/story.<id>.json",
+  "cycles/<cycle>/red/<id>.json",
+  "demo/<cycle>/<id>/**",
+  "holdout/evaluations/<cycle>/story.<id>-*.json",
+]
+covers_new = ["cycles/<cycle>/decisions/*.<id>.json", "cycles/<cycle>/decisions/*.<id>.md"]
+covers_branch = "story/<id>"
+
+[[scope]]
+id = "cycle"
+file = "cycles/<cycle>/claims/cycle.json"
+workflows = ["spec", "plan", "feature", "wave", "verify", "release", "multi", "ingest", "maintain"]
+when = "Every run of these workflows, except a report-only `maintain`. The record names the workflow and its subject"
+held = "run"
+why = """
+These runs write the cycle's shared records, and everything they produce is in tracked state when their
+checkpoint ends, so the next run can be anybody's. One at a time in a cycle means one clone drives a
+wave and its gate, one writes the plan, one verifies, one releases. The pipeline's own preconditions
+already order these runs one after another within a cycle, so the claim takes no parallel work away
+([[topic:team-use]])"""
+covers_paths = ["cycles/<cycle>/cycle.json", "cycles/<cycle>/units/*.json", "holdout/evaluations/<cycle>/*.json"]
+not_paths = [
+  "cycles/<cycle>/units/story.*.json",
+  "cycles/<cycle>/units/spike*.json",
+  "cycles/<cycle>/units/discover*.json",
+  "holdout/evaluations/<cycle>/story.*.json",
+]
+covers_new = ["cycles/<cycle>/decisions/*.json", "cycles/<cycle>/decisions/*.md"]
+not_new = ["cycles/<cycle>/decisions/*.S-*", "cycles/<cycle>/decisions/brief*", "cycles/<cycle>/decisions/ideas*"]
+
+[[scope]]
+id = "spec"
+file = "cycles/_standing/claims/spec.json"
+workflows = ["spec", "feature", "ingest"]
+when = "The run that may write the specification: every `spec`, `feature` with `amend`, `ingest` with `as: project`, and `vsdd feature route` when the route is `standard`. The run also holds its cycle's `cycle` claim"
+held = "run"
+why = "The specification set is one for the whole project, whatever cycle is open. Two runs writing it would mint the same contract ids and overwrite each other's files"
+covers_paths = ["specs/**", "holdout/*.md"]
+not_paths = ["specs/product/brief.md"]
+
+[[scope]]
+id = "open"
+file = "cycles/_standing/claims/open.json"
+workflows = []
+when = "Whatever opens a cycle that is not a hotfix cycle: `vsdd checkpoint brief`, the `discover` assess checkpoint, the `feature` survey, `vsdd story new-fix --maintain`"
+held = "act"
+why = "Two clones that each open a cycle write two different directories, which git combines without complaint. The claim gives the two openings one path to collide on, so the second finds a cycle open and queues its request, as it does on one clone"
+covers_new = ["cycles/*/cycle.json"]
+cycle_kinds = ["product", "feature", "maintenance"]
+
+[[scope]]
+id = "open.hotfix"
+file = "cycles/_standing/claims/open.hotfix.json"
+workflows = []
+when = "The command that opens a hotfix cycle beside the main one ([[topic:hotfix-cycle]])"
+held = "act"
+why = "A critical fix may be opened while another cycle is open or being opened, so it must not wait for `open`; two clones must still not each open one"
+covers_new = ["cycles/*/cycle.json"]
+cycle_kinds = ["hotfix"]

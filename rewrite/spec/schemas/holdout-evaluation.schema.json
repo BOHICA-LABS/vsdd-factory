@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "holdout-evaluation.schema.json",
+  "type": "object",
+  "description": "Fields of a holdout evaluation file (state.md#2.5): JSON with commit, seed, scores, symptoms, and walled_findings (the full form of scenario-review findings and of any finding located under holdout/). scores and symptoms are the holdout data of the evaluator's step records",
+  "x-note": [
+    "(holdout-data.schema.json); the design gives no required list."
+  ],
+  "properties": {
+    "commit": {},
+    "seed": {},
+    "scores": {
+      "type": "array",
+      "description": "Scenario scores as the holdout-evaluator returned them; the score objects of holdout-data.schema.json.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": { "type": "string" },
+          "satisfaction": { "type": "number", "minimum": 0, "maximum": 1 },
+          "must_pass": { "type": "boolean" },
+          "ran": { "type": "boolean" }
+        }
+      }
+    },
+    "symptoms": {
+      "type": "array",
+      "description": "Symptoms as the holdout-evaluator returned them; the symptom objects of holdout-data.schema.json, with no location and no scenario text.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": { "type": "string" },
+          "observed": { "type": "string" },
+          "expected": { "type": "string" }
+        }
+      }
+    },
+    "walled_findings": {
+      "type": "array",
+      "description": "The full form of walled findings, stored only here and in the step records under runs.",
+      "items": { "$ref": "finding.schema.json" }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "baseline.schema.json",
+  "type": "object",
+  "description": "The baseline object inside the ingest or import closure record. state.md#2.8 states its contents in prose, not as a field list: the integration head it was measured on; any earlier release tag; the suite result with the identities of the tests that failed; the lint and format",
+  "x-note": [
+    "findings; the mutation score per module; the scanner findings in existing dependencies; the recovered or imported contract ids; and whether the project has a suite, a JUnit report and CI. BLUEPRINT.md#4.13 lists: the tests that failed then, lint, format and scanner findings,",
+    "mutation scores per module, and the recovered contract set. The design gives no key names, no types and no required list, so this schema names none."
+  ]
+}

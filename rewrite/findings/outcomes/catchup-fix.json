@@ -1,0 +1,134 @@
+[
+ {
+  "id": "AU-P2-12",
+  "outcome": "left-for-builder",
+  "what_was_done": "Reopened (CATCHUP-R10): the four files named in the earlier outcome were repaired, but stale pointers remain in topics/rule-testing.md, topics/risks-hooks.md, topics/information-walls.md, packaging/e2e-story-tier.md, topics/proof-greenfield.md and commands/status.md. Left for the packages that own them: the hook-rule topics to the H packages (H1-H9), packaging/e2e-story-tier.md to E2, and commands/status.md to S2c; each replaces the stale pointers with spec links the way the four repaired files were.",
+  "where": "rewrite/spec/topics/rule-testing.md; rewrite/spec/topics/risks-hooks.md; rewrite/spec/topics/information-walls.md; rewrite/spec/packaging/e2e-story-tier.md; rewrite/spec/topics/proof-greenfield.md; rewrite/spec/commands/status.md"
+ },
+ {
+  "id": "SL1-37",
+  "outcome": "fixed",
+  "what_was_done": "cli-entry.md's bin/vsdd snippet now reads root=$(CDPATH='' cd -- ...) which passes shellcheck's SC1007, and the L-SH row of tables/lint-checks.toml covers every shipped shell source: py/launch.sh, py/find-root.sh and bin/vsdd. The built check.py shell_lint already checks all three, so the table now states what runs.",
+  "where": "rewrite/spec/packaging/cli-entry.md; rewrite/spec/tables/lint-checks.toml; next/tools/check.py shell_lint"
+ },
+ {
+  "id": "AU-S2-07",
+  "outcome": "left-for-builder",
+  "what_was_done": "The instance in this unit's files is closed: the prelude constraints are in packaging/build-step.md alone and topics/prelude.md is a pointer at the built prelude that links to them. The remaining restatement pairs named by the finding (commands/import.md vs topics/importer.md; commands/init.md vs topics/project-configuration.md and state-directory.md; commands/survey.md and commands/checkpoint.md vs topics/workflow-shape.md; commands/explain.md vs topics/event-log.md; commands/retire.md vs topics/artifact-rules.md) belong to the packages that own those commands and topics.",
+  "where": "rewrite/spec/topics/prelude.md; rewrite/spec/packaging/build-step.md; the import, init, survey, checkpoint, explain and retire command packages for the rest"
+ },
+ {
+  "id": "P3OPS-09",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for the builders of the behaviour, with the finding's proposed resolution intact: the survey's direct answer (guidance and open keys) and the tool's verdict applying settled waivers belong to the survey and gate packages (G2 and the S-package); converge()'s one-guided-fix-after-cap and brief() carrying the person's guidance, with a universal test, belong to the story and wave workflow packages (W2, W3) once the survey shape exists. No toy exercises post-cap resumption, so nothing at slice depth waits on it.",
+  "where": "packages G2 (survey, tool verdict), W2/W3 (story, wave scripts); rewrite/spec/topics/prelude-converge.md"
+ },
+ {
+  "id": "P3BLD-24",
+  "outcome": "left-for-builder",
+  "what_was_done": "Ownership of the unowned build items is a briefs-and-registry edit owned by the packaging/registry steward, not by the builder of one package: give the [reveals] generator to B4a, make H7a depend on S3a, move scaffold/ and demo/ to A5 and design-system/ to A2a, and leave the stamped texts in B4a and agent lint in B6. Recorded here so the steward finds the proposed resolution with the finding.",
+  "where": "rewrite/spec/packages/A2a.md, A5.md, H7.md; rewrite/spec/packaging/build-step.md"
+ },
+ {
+  "id": "P3BLD-27",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for the tool and conformance packages: defining the tool's verdict as judge() in Python applied to the last pass, minus dismissals and waivers, drops the Python converge() port and about half the conformance fixtures. A design decision on the tool's internals that no built code at slice depth waits on.",
+  "where": "package G2 (tool verdict); the conformance-tier package"
+ },
+ {
+  "id": "P3COV-10",
+  "outcome": "fixed",
+  "what_was_done": "toy-build.js and toy-story.js pass `--outcome failed` only when the run failed; the earlier outcome wrongly recorded `--outcome <status>` (done, partial) as matching the signature, which admits [--outcome failed] alone. Pinned by checkpoint_calls_match_the_signature in tools/check.py over both toys.",
+  "where": "next/tests/workflows/toys/toy-build.js; next/tests/workflows/toys/toy-story.js; next/tools/check.py checkpoint_calls_match_the_signature"
+ },
+ {
+  "id": "P3OPS-22",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for the wave-workflow package: a fix story's result must carry the keys its fixer disputed, and the wave's fix() maps them to disputed, so the arbiter can dismiss one and D18's low-touch intent holds. Needs the fix-unit result shape of the fix-story packages; no toy models a wave fix round.",
+  "where": "package W3 (wave workflow); rewrite/spec/topics/prelude-converge.md notes map is ready for it"
+ },
+ {
+  "id": "P3REQ-11",
+  "outcome": "left-for-builder",
+  "what_was_done": "The design half is settled in this unit's file: topics/prelude-run-spike.md's runSpike() now omits --step when the step key is empty, and the comment says the person's spike workflow calls it that way so spike open reads the run record. Still owed by their owners: the spike workflow that calls it without a step key, and the hooks design's who-asked row gaining the run record as a third source.",
+  "where": "rewrite/spec/topics/prelude-run-spike.md; the spike-workflow package (S6) and the hooks rules package"
+ },
+ {
+  "id": "P3SEAM-10",
+  "outcome": "fixed",
+  "what_was_done": "The checkpoint call sites now match the signature: topics/story-script.md, topics/wave-script.md, workflows/story.md and workflows/wave.md carry no --subject, and the toys pass --outcome failed only on failure. The earlier outcome's claim that the script texts already agreed with commands/checkpoint.md was false (CATCHUP-R10). The new checkpoint_calls_match_the_signature check in tools/check.py grammar-checks every `vsdd checkpoint` in a spec file or toy body, and a re-added --subject fails it.",
+  "where": "rewrite/spec/topics/story-script.md; rewrite/spec/topics/wave-script.md; rewrite/spec/workflows/story.md; rewrite/spec/workflows/wave.md; next/tools/check.py checkpoint_calls_match_the_signature"
+ },
+ {
+  "id": "P3SEAM-14",
+  "outcome": "fixed",
+  "what_was_done": "converge() keeps the fixer's dispute notes by key and hands them to the arbiter: c.arbitrate(open, pass, notes), with notes a Map from finding key to the disputed resolution's note, built in the same pass that fills the disputed set, so the arbiter sees the dispute and D18's dismissal rule is enforceable. The scripts' arbitrate stubs put the notes inline in the arbitration prompt only (story-script.md); universal-test prelude-converge behaviour is pinned by a new test in which the arbitrate stub records the pass and the notes it received and the run converges on a not_defect ruling of a disputed finding.",
+  "where": "next/workflow-lib/prelude.js (converge); rewrite/spec/topics/prelude-converge.md; rewrite/spec/topics/story-script.md; next/tests/workflows/universal.test.mjs (the amended identity and arbitration test)"
+ },
+ {
+  "id": "P3SEAM-18",
+  "outcome": "left-for-builder",
+  "what_was_done": "The spec command files already carry the state.md#2.16 forms: commands/spike-open.md gives '--run <id> --step <workflow>/<subject>/<name>.<attempt>' inside a workflow and '--run <id>' for the person, and commands/spike-record.md keeps --id. runSpike's spec text now omits --step for an empty step key (see P3REQ-11). Owed by the spike-workflow package: calling it that way, which no built code exercises yet.",
+  "where": "rewrite/spec/commands/spike-open.md; rewrite/spec/commands/spike-record.md; rewrite/spec/topics/prelude-run-spike.md"
+ },
+ {
+  "id": "AU-P2-08",
+  "outcome": "fixed",
+  "what_was_done": "The duplicated prelude constraints are single-sourced: packaging/build-step.md is the one copy that states them (with the cap measured after the generated sub-blocks are stripped, as P3BLD-21 amended), and topics/prelude.md is a pointer at next/workflow-lib/prelude.js that links to build-step.md for the constraints, per README rule 7 now that B4a is built.",
+  "where": "rewrite/spec/topics/prelude.md; rewrite/spec/packaging/build-step.md"
+ },
+ {
+  "id": "P3SEAM-20",
+  "outcome": "fixed",
+  "what_was_done": "Settled the low-touch way the finding offers first: --wait <seconds> is a global option in topics/long-commands.md \u2014 every command accepts it and a command that is not a job ignores it \u2014 so brief()'s closing command can carry --wait 540 whatever the closing command is, and the architect's feature route is still written. The job-command section states the same for the non-job gates.",
+  "where": "rewrite/spec/topics/long-commands.md; next/workflow-lib/prelude.js brief() (unchanged, now as the design says)"
+ },
+ {
+  "id": "SL1-51",
+  "outcome": "fixed",
+  "what_was_done": "gated() keeps `stage: o.stage || name` on every attempt, and the pin is now behavioural: a universal test runs a gated step in workflow 'ingest' whose gate fails once; both attempts run on the OVERRIDE's builder tier (model sonnet), which only the stage passthrough explains \u2014 without it the retry resolves 'ingest/map-retry1' and falls back to the planner tier (fable). The former outcome cited a test that reads only the OVERRIDE table, which passes with the passthrough removed.",
+  "where": "next/workflow-lib/prelude.js gated(); next/tests/workflows/universal.test.mjs 'a retried gated step keeps its stage and its override tier'"
+ },
+ {
+  "id": "P3REQ-09",
+  "outcome": "left-for-builder",
+  "what_was_done": "Left for the owners of the walls and the spike ledger: a spike whose asker may read holdout is walled (ledger entry in the holdout-evaluations class, kept worktree denied to callers denied holdout, cached finding returned only to askers that may read holdout), with universal test 10 planting its marker in a spike question. Touches blueprint 6, the walls table, the spike ledger and the hook rules \u2014 none built at slice depth.",
+  "where": "packages H8/H9 (walls, hook rules), S6 (spike ledger); rewrite/spec/topics/walled-findings.md"
+ },
+ {
+  "id": "AU-S2-23",
+  "outcome": "fixed",
+  "what_was_done": "The B5 test-list passage is restored to the original's order and wording ('the three blocks are parsed with Node and run against a fake agent() through six story cases ... and three wave cases ... for twenty checks of the corrected behaviours'), with the B5 sentence back at the end and the history clauses ('Before the corrections', 'The corrected text was parsed with Node again', 'They have not been run on the platform') dropped.",
+  "where": "rewrite/spec/packaging/tests-workflows.md (The B5 test list)"
+ },
+ {
+  "id": "SL1-54",
+  "outcome": "fixed",
+  "what_was_done": "Closed with evidence: test '2 and 3' of the universal suite checks exact membership of the generated ROLE table parsed from the stamped prelude (roleHas(): JSON-parsed table, name in roles \u2014 the interim exact rule the finding asks for, not a substring regex), and now also grows into the real check once <plugin>/agents/ holds .md files (CATCHUP-R18). tests-workflows.md bullet 3 states the interim rule.",
+  "where": "next/tests/workflows/universal.test.mjs (2 and 3, roleHas); rewrite/spec/packaging/tests-workflows.md"
+ },
+ {
+  "id": "SL1-19",
+  "outcome": "fixed",
+  "what_was_done": "Closed with evidence: the built prelude carries no $ref (grep over prelude.js: 0) because the build's _strip_schema_node inlines each sibling ref when it generates the literal, and topics/result-schemas.md now says exactly that \u2014 the files compose with refs, the literals never carry one. The apparent contradiction the finding named is dissolved in the sentence the topic already had.",
+  "where": "next/tools/build.py (_strip_schema_node); next/workflow-lib/prelude.js; rewrite/spec/topics/result-schemas.md"
+ },
+ {
+  "id": "AU-T2-22",
+  "outcome": "fixed",
+  "what_was_done": "closure-record.schema.json's verdict description now quotes the state design's row verbatim ('perimeter, commit, passes, outcome, and the counts of advisory, dismissed and waived findings', state.md#2.8 convergence-record row) and notes that the schema types the counts as integers while the design's example writes waived as a list. The baseline property ($ref baseline.schema.json), the waves map and the x-notes on the wave and verify.json additions were already in place from the earlier repair.",
+  "where": "rewrite/spec/schemas/closure-record.schema.json (verdict, baseline, waves, x-notes)"
+ },
+ {
+  "id": "L2-catchup-1",
+  "outcome": "fixed",
+  "what_was_done": "The event-schema split is done properly: event.schema.json is shipped under next/plugins/vsdd-factory/schemas/ (in the checker's shipped set, with valid and invalid fixtures), py/vsdd/events.py loads it as EVENT_SCHEMA instead of carrying an inline copy, check.py verifies the writer's schema is the shipped file, the launcher-written line validates against it in the hook tests, the spec file rewrite/spec/schemas/event.schema.json is a pointer, and conflicts/tables-repair.md states the split truthfully. Still with the events command package: the 'vsdd events schema' print command, when the CLI surface is built.",
+  "where": "next/plugins/vsdd-factory/schemas/event.schema.json; next/plugins/vsdd-factory/py/vsdd/events.py; next/tools/check.py (event_schema_is_the_shipped_file); next/tests/hooks/test_launcher.py; next/tests/unit/fixtures/schemas/event/; rewrite/spec/schemas/event.schema.json; rewrite/spec/conflicts/tables-repair.md"
+ },
+ {
+  "id": "L2-catchup-2",
+  "outcome": "fixed",
+  "what_was_done": "Fixed in the helper rather than filed on: doneResult now parses and echoes the prompt's 'Return step = {...} unchanged.' identity exactly, as identityStub does, so loop and pass ride through and attempt is not pinned to 1; toy-build's converge review and fix steps carry loop and pass and names in the review-<lens>-l<n>-p<k> form, modelling the amended identity.",
+  "where": "next/tests/workflows/universal.test.mjs (doneResult); next/tests/workflows/toys/toy-build.js"
+ }
+]

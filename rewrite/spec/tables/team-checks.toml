@@ -1,0 +1,134 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M6; a row names its package where it differs).
+# Not read by anything on the slice path. The capability from end to end: [[topic:team-use]].
+#
+# The rules every team check follows, and the checks of joining, versions, what stays on one machine,
+# identity and order. The checks of the sync are [[table:sync-checks]], those of claims
+# [[table:work-claim-checks]], and those of delivery and hand commits [[table:team-delivery-checks]].
+#
+# `form` is what a check is in this design: a refusal of a command, a step of the sync, or a precondition
+# of the survey. No check is a gate name, a hook rule or a workflow of its own.
+#
+# Rules every row of the four tables follows.
+# - When a check runs. A check runs only while team use is on (`team.enabled`, [[config:team]]), except
+#   the ones named here. This list is the one place they are named; a row's `runs` cell says when it acts.
+#   T-JOIN and T-SOLO act while it is off: they are what tells a project with one clone that a second
+#   one has appeared. The checks of commits made by hand (T-NOTICE, T-BRANCH, T-ITEMS, T-GAP and T-NEVER)
+#   do not read the key at all: a teammate who commits by hand reaches the product through the remote
+#   whether or not a second clone runs the factory. When each of them acts follows from the branch it
+#   reads, and is stated in its own `runs` cell and nowhere else. T-DELIVERY runs in every delivery in
+#   `pr` mode, less its two refusals that read the claim and the mode: the host module, `queued`,
+#   adoption and `merged_by` are how `pr` mode works for one clone too. T-REMOTE's choice of remote and
+#   of refs holds for every fetch and push the tool makes; only its shallow-clone refusal waits for the
+#   key. T-ORDER is how the stores order records whatever the key says, so that records written before
+#   team use is turned on already carry their links. The `schema` refusal that T-VERSION names is the
+#   loader's own.
+# - A list of the paths that differ between two commits is read with rename detection off and each path
+#   whole: `git diff-tree -r --no-renames --name-status -z`. In git's everyday diff a claim released and
+#   another taken come out as one rename line ([[topic:team-git-facts]], fact 6). One function of
+#   package M1 makes the listing, and T-INCOMING, T-COMBINE, T-HOLD, T-LOCAL and T-NOTICE read through it.
+# - A branch is looked for on the remote with `git ls-remote --exit-code <remote> refs/heads/<branch>`,
+#   and the answer is the line whose ref name is exactly that one. Git matches the pattern at the end of
+#   a name, so a branch `keep/refs/heads/<branch>` is listed as well, with exit 0 ([[topic:team-git-facts]],
+#   fact 19). No such line means the branch is not there, which exit 2 says when no line is printed at
+#   all; any other failure is `unreachable`. A fetch cannot be asked instead: it fails alike for a branch
+#   that is gone and a remote that is. T-HISTORY and T-BRANCH look this way, through one function of
+#   package M1.
+# - "Cannot measure" is a failure. A fetch that fails is `unreachable`, never "nothing new". A claim file
+#   that does not parse is a claim held by somebody else. A git command that exits with an error where a
+#   yes or a no was asked (an ancestry test in a shallow clone) is neither. A clone with no record, or a
+#   git older than the floor, is refused. No check passes by default.
+# - Nothing is decided by a reason text that git prints. A push that did not report success is judged by
+#   fetching and comparing commits (T-PUSH).
+# - Nothing is decided by comparing a time written on one clone with a time read on another (T-ORDER).
+#   Times are shown to people, with the clone that wrote them, and decide nothing.
+# - Nothing a check reads names a Git host, a vendor or a remote. The remote is the one git gives for the
+#   branch (T-REMOTE). One part of the tool talks to a host, because git has no pull request: the host
+#   module of delivery, which opens, reads and merges one ([[command:story-deliver]]). No configuration
+#   key names it; the tool asks it whether it can serve the remote (T-SWITCH, T-DELIVERY). No claim,
+#   decision or record is read through it.
+# - No check reads who a person is in order to allow or refuse: a claim is about a clone holding work,
+#   never about a person's right to act (decision D33, clause 5).
+# - `unmeasured` is what a check cannot see even when it runs. That cell is the one place a limit is
+#   stated, and what it names is printed in `vsdd status` when it applies.
+# - "The sync" is `vsdd.state.sync` ([[command:sync]]). "The mount" is the worktree at `.factory/`.
+# - The preflight is one function of package M6. It runs the refusals of T-VERSION, T-REMOTE and T-WHO with
+#   one listing of the remote as its only network call and returns one line for each. The sync,
+#   `vsdd init` when it joins a team, `vsdd status` and `vsdd doctor` all call it, so they cannot disagree.
+# - The package that builds a check ships one case that must fail and one that must pass for every clause
+#   of `refuses`, and the proof runs each check on two clones ([[packaging:proof-team]]).
+
+[T-JOIN]
+form = "A step of `vsdd init`"
+runs = "When the state branch exists on a remote of this clone and not locally: the clone did not create the state"
+reads = "The remotes that hold the state branch; `--remote`; `factory.toml` on that branch, read from git without mounting; `--label`"
+refuses = """
+Choosing between remotes. When more than one remote holds the state branch and `--remote` names none, it
+mounts nothing and lists them; `setup` asks the person which one is the repository the team shares and
+passes it. The remote chosen becomes the state branch's upstream, which is all the sync reads afterwards.
+With `team.enabled = true` on that branch it runs the preflight, refuses what the preflight refuses, and
+otherwise mounts, writes the clone record with `how = "joined"` and asks nothing.
+With team use off there it refuses nothing: it mounts as it did before decision D33 and returns one
+`notice`, which `setup` shows: this state was written on another clone, and if both are going to run the
+factory, team use is turned on first on the clone that has the project. T-SOLO guards the first push."""
+unmeasured = "Whether the other clone is still in use. With team use off nothing can tell, so the notice is advice and T-SOLO is the check. A mount made by hand with git gets no notice and meets T-SOLO the same way"
+
+[T-VERSION]
+form = "A part of the preflight, a step of the sync, and a line of `vsdd status` and of the briefing"
+runs = "At every sync and survey"
+reads = "`git --version`; `schema` and `team.min_plugin` of the fetched `factory.toml`; this plugin's version; the `Plugin:` trailer of each commit that arrived"
+refuses = """
+Team use on a git older than 2.34: every sync refuses with both versions. The facts of
+[[topic:team-git-facts]] were run on that version, and the sync uses no command newer than it.
+Loading a `factory.toml` whose `schema` this plugin does not know, which the loader already does, so
+every command refuses. With `min_plugin` set and this plugin older: starting a run and pushing anything,
+with both versions in the message; state already fetched is left as it is. Every state commit the tool
+makes carries `Plugin: <version>` and `Clone: <id>`. When a commit that arrived was written by a newer
+version than this one and no floor is set, `vsdd status` and the briefing say so; that is a report, and
+what a file from that version does when this plugin cannot check it is T-INCOMING's."""
+unmeasured = "Whether two versions above the floor measure a gate alike. A change that makes them differ must raise `schema`"
+
+[T-LOCAL]
+built_by = "M1"
+form = "A step of the flush and of the sync"
+runs = "At every flush; at every sync before the push"
+reads = "The paths to be committed or pushed; the path-typed and glob-typed keys of `factory.toml`"
+refuses = """
+Committing or pushing any path under `.factory/local/`, whatever the ignore file says. Pushing a
+`factory.toml` in which a key typed as a path or a glob holds an absolute path or one that starts with
+`~`: the message names the key. No record under `local/` is ever copied into a tracked file, with one
+stated exception, the red record (T-HANDOFF in [[table:work-claim-checks]])."""
+unmeasured = "What a shell command string in `[commands]` or `notify.command` reaches on one machine and not on another"
+
+[T-WHO]
+built_by = "M3"
+form = "A part of the preflight; a refusal of the flush and of every claim; fields the tool writes"
+runs = "At every flush, claim, settlement and delivery"
+reads = "The identity git will stamp on a commit made here, asked of git itself: `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT` and the same for `GIT_COMMITTER_IDENT`; the clone record's `id` and `label`"
+refuses = """
+Committing state, claiming or publishing a settlement while git has no identity to give (the command
+exits with an error): the stand-in identity the flush uses on one clone is not used on a team, and the
+message names the two git settings. The identity is read that way, and not from the two configuration
+keys, because git takes it from the environment first: the name in a record and the author of its commit
+are then the same person.
+The tool writes that person and the clone where an act is recorded: `holder` in a claim, `settled_by_person`
+and `settled_on` in a decision record, `delivery.merged_by` in a story's closure, and the author with the
+trailers `Clone:` and `Run:` on every state commit, so who started a run is the author of its first state
+commit, which is its claim. It compares none of them with a list: any person may claim, settle, take
+over, merge and release."""
+unmeasured = "Whether the name and email are the person's own, and whether that person was entitled to act. The repository's own rules decide both (decision D33, clause 5)"
+
+[T-ORDER]
+built_by = "M3"
+form = "A rule of the stores, held by one test for each function that orders tracked records and by the proof's clock scenario"
+runs = "Wherever the design says latest, newer, before or after of two tracked records, with team use on or off"
+reads = "The link the later record stores. `follows`, in a decision whose id carries no subject, names the decision of its kind in the same cycle that was latest when it was opened. `spec`, in a `merge` decision, names the `spec` decision in force when it was opened"
+refuses = """
+Ordering two tracked records by `opened`, `settled`, `closed` or `at`. The latest decision of a kind is
+the one no other record follows; two such records are reported as a state problem and the route answers
+`human`. A decision whose id carries a subject (a story or a wave) stores no `follows`: two clones open
+such decisions at the same moment for different subjects, and no rule asks which of them is the latest.
+Open cycles are ordered by their kind and then their id, never by `opened`. Counts that today compare a
+run's times with a record's times are kept in the unit's closure record instead. The run lock's
+staleness, the wait for CI and retention by age use one clock, the clone's own, and are untouched."""
+unmeasured = "A comparison of stored times in code no test reaches. Each test gives two records times that contradict their links and asserts that the link wins, and the proof runs with one clone's clock three hours behind"

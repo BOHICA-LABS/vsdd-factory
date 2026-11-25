@@ -1,0 +1,20 @@
+[
+  {
+    "id": "S3R-records-C1-1",
+    "origin": "slice step 3, records, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/locks.py; next/plugins/vsdd-factory/py/vsdd/state/runs.py",
+    "problem": "The S3R-records-3 fix put run_end under flush.lock with the default 3 s wait. lock_release and run_begin call run_end while they hold lock.flock, so lock_release's wait no longer bounds the call. Plan records.md 3 says 'StoreBusy after wait, which bounds the whole call', and RESOLUTIONS PL3-8 sets wait=0.5 to fit H1's 1 s SessionEnd deadline. Probe: with another process holding flush.lock (as a flush does during its git commit), lock_release(session='sess-A', wait=0.5) took 3.00 s, then raised StoreBusy and released nothing. With several matching entries it waits 3 s each. A busy run_end mid-loop leaves the earlier runs ended while lock.json still names them. run_begin likewise holds lock.flock for up to 3 s per run_end, and during that time lock_seen (1 s wait) returns False.",
+    "proposed_resolution": "Give run_end a wait parameter. In lock_release, pass the time left from wait to each run_end and raise StoreBusy before writing anything once the budget is spent. Better still, write lock.json first and end the runs afterwards with the remaining budget, so a busy flush never leaves an entry pointing at a run it ended. Test: with flush.lock held by another process, lock_release(wait=0.5) returns or raises within about 0.6 s, and lock.json and the run records agree afterwards.",
+    "on_slice_path": true
+  },
+  {
+    "id": "S3R-records-C1-2",
+    "origin": "slice step 3, records, confirmation",
+    "severity": "major",
+    "where": "next/plugins/vsdd-factory/py/vsdd/state/gate_evidence.py",
+    "problem": "The fix round rewrote gate_evidence.py's imports to add write_via_tmp and dropped 'import shutil'. The copies of 18:36 to 18:57 have it; the current file does not. evidence_drop(project, subject), a promised interface (plan records.md 3, gate_evidence), now raises NameError: name 'shutil' is not defined whenever the subject has an evidence directory. Probe: evidence_write of a green record, then evidence_drop -> NameError. No test calls evidence_drop, and tools/check.py has no undefined-name check, so every check passes.",
+    "proposed_resolution": "Restore 'import shutil' in gate_evidence.py. Add a test: write evidence for a subject, call evidence_drop, and assert the directory is gone. A second call on the missing directory is a no-op.",
+    "on_slice_path": true
+  }
+]

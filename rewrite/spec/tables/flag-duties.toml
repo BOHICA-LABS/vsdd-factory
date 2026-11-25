@@ -1,0 +1,190 @@
+# sources: decisions.md#D31
+# Built when the build widens past the thin slice (package F4). Not read by anything on the slice path.
+# The capability from end to end: [[topic:feature-flags]].
+#
+# Each agent's flag duty, the method files that carry it, and what holds the agent to it: a check of
+# [[table:flag-checks]], [[table:flag-story-checks]] or [[table:flag-release-checks]], or a named reviewer
+# in a named method. A duty with neither is a defect of this table. No duty adds a method, a step or an
+# agent: each is a section headed `Feature flags` in an existing method file ([[topic:method-files]]). The
+# lint check L-FLAG, which package F4 adds to the lint suite ([[table:lint-checks]]), fails when a method
+# named here has no such section, when a method that has one is not named here, or when an agent named here
+# does not list the method.
+#
+# A reviewer's own duty is held by the verdict: its items must be marked checked before a story can be
+# delivered (F-ITEMS). This table is where the text of each item is. The clerk, the verifier, the
+# demo-recorder, the ux-designer, the researcher, the spike-runner, the code-reviewer, the ui-reviewer, the
+# holdout-evaluator and the scenario-reviewer have no flag duty: the product a demo, a UI review or a
+# scenario evaluation runs against is started with its flags set by the tool, not by the agent
+# ([[topic:flag-lifecycle]]).
+
+[[duty]]
+agent = "codebase-analyzer"
+methods = ["ingest-deepen"]
+duty = """
+In each module's analysis, list every flag mechanism the module uses, with file citations: a flag library
+or client, and hand-made switches such as environment variables, configuration booleans or a settings
+table that turn behaviour on and off. For each: the shape of a read and where definitions are kept. Say
+`none found` when that is the answer."""
+checked_by = "adversary, method `review-extraction`, which checks the claim against the code either way"
+
+[[duty]]
+agent = "architect"
+methods = ["architecture"]
+duty = """
+After an ingest, write `flags.detected` from the analyses. Propose a flag system only when the code has
+one, when the brief, a request or the person's guidance asks for flags, or when the project's state is
+`requested`; never on its own judgment, and never again after a decline until a person asks. Choose in the
+order of preference, never silently: write the decision record with every heading, the `[flags]` table of
+the toolchain file, and the system's library in `dependencies.toml`, and ask the product-owner for the four
+contracts through `feasibility` or `requests`. Leave an accepted choice alone."""
+checked_by = """
+F-CHOICE; F-APPROVE (a person types the source). Adversary, method `review-specs`, which checks: the stated
+source against the brief, the request or the analysis; the reasons and alternatives of a researched choice;
+the patterns against the reads the analysis cites, and that no bypass pattern matches configuration reads
+in general; a fate under "Existing flag reads" for every mechanism the analysis found; a `standard` other
+than `openfeature` against what "Interface" states about an SDK for each language; and `removal = "auto"`,
+and each key the table leaves empty, against "Definitions and keys\""""
+
+[[duty]]
+agent = "product-owner"
+methods = ["requirements", "spec-delta", "recover-contracts"]
+duty = """
+Write the four contracts that state the flag system's own behaviour ([[topic:flag-system-choice]]), or
+recover them from existing code and add what an existing system lacks as new contracts."""
+checked_by = """
+F-CHOICE (a contract under each of the four names); the plan gate's coverage of new contracts; adversary,
+method `review-specs`, which checks that each states the behaviour its name stands for"""
+
+[[duty]]
+agent = "story-writer"
+methods = ["decompose", "story"]
+duty = """
+While flags are on, apply `flags.require` to every story: name a flag and write its record, or write
+`flag_exempt` with the reason. Give the stories of one feature one flag, and put a story the setting does
+not require behind a flag when it merges before its feature is complete. A new flag is temporary unless
+the product keeps it, and then the record says why. For a story behind a flag, write criteria for both
+states: the new behaviour with the flag on, and a criterion containing the words `flag off` for the
+behaviour that stays when the flag is off or its source cannot be reached. Keep behind the flag nothing
+that turning it off cannot undo: plan that part as an earlier story with no flag, in a form the old code
+accepts, or name what remains in `flag_irreversible`. With the stories that build the flag system plan a
+`docs` story for the runbook and, after an ingest, the stories the record's heading "Existing flag reads"
+names. Order a story behind a flag after the interface, the runbook and its flag's owning story. For a
+request to turn a flag on or to remove one, name the flag and write `flag_change`. While flags are not on,
+name no flag and stop for none."""
+checked_by = """
+F-REQUIRE, F-RECORD, F-READY. Adversary, method `review-stories`, which checks each exemption, each
+lifetime and removal condition, each permanent flag's two reasons, each `flag_irreversible`, whether a
+story behind a flag has an effect it does not name, each `flag_change` against the request it answers, and
+the planned stories against "Existing flag reads\""""
+
+[[duty]]
+agent = "test-writer"
+methods = ["failing-tests", "regression-test", "equivalence-tests", "ui-tests", "e2e-tests", "test-fixes"]
+duty = """
+For a story behind a flag, write tests in three states and name each with its state token and a criterion
+(F-STATES): `on` sets the flag on and asserts the new behaviour; `off` sets it off and asserts the
+behaviour that exists today; `default` sets nothing, or makes the flag source fail, and asserts the same.
+Name an `off` or `default` test for the `flag off` criterion and for no other.
+Where the on path writes stored data, one `off` test turns the flag on, writes, turns it off and reads.
+Move an existing test that the on state breaks, and no other, by adding `__` and a token to its name
+(F-STATES): `old` where a criterion of a story behind the flag replaces everything it asserts; `pending`
+where it asserts behaviour the product must keep and the flag's stories do not provide yet. Change nothing
+else in it: leave its assertions as they are and set no flag in it. Split a test that the on state breaks
+only in part: the part it breaks is moved, and the rest keeps the name.
+Move a test in the tests stage where the criteria show the need, and in `test-fixes` when the implementer
+returns one that F-ON named. There, also give a moved test its own name back when F-ON reports that it
+passes with the flag on, and say why for each test left as it was. Delete or rename no other existing
+test.
+For a story that turns a flag on: one test that reads the repository's definitions and asserts that the
+flag's entry serves it on.
+For a story that removes a flag ([[artifact:flag]]), leave no test that sets the key: delete the tests of
+the behaviour that goes and the test of the flag's definition, and take the flag setting out of every
+other test. With `flag_change: remove` the tests that go are the flag's `off`, `default` and `old` tests;
+write the regression test that shows the behaviour that stays with no flag set. With
+`flag_change: withdraw` they are its `on` tests and every other test that turns the flag on; give each
+moved test its own name back, take the token out of the names of the `off` and `default` tests, and write
+no failing test (F-STATES).
+For the `startup` contract, one test runs the real source's client against a local address nothing listens
+on. Set a flag only through the test double the decision record names. Never reach the flag service."""
+checked_by = """
+F-STATES (the criterion an `off` or `default` test names; a moved test is an existing one, and an existing
+test leaves the suite only by a move; no `remove` while a test is `pending`; every moved test back after a
+withdrawal); F-ON (a moved test fails with the flag on, and none is `pending` when the flag is turned on);
+F-DEFINITION (a removal leaves no test that sets the key or is named for a state that goes); F-KEY; the
+items `flag-off`, `flag-removed` and `flag-system` of F-ITEMS"""
+
+[[duty]]
+agent = "implementer"
+methods = ["tdd", "port-translation", "fix-findings"]
+duty = """
+Read a flag only through the one interface, with the key as a literal and the record's default as the
+fallback. Put every new behaviour of a story behind a flag behind the read. In the flag's owning story
+write its definition, serving the default in every environment it defines; in a story that turns a flag
+on, change that flag's entry and nothing else. Where a bypass pattern matches a line that is not a flag
+read, mark it `VSDD-NOT-A-FLAG:` with the reason. Where the run of F-ON names a test, change the code
+only where the code is at fault: the story must keep, with the flag on, what the test asserts. Otherwise
+return `blocked` with the test under `test_defects` and the reason, so that the test-writer moves it or
+gives it its name back ([[workflow:story]]). In a story that removes a flag delete every read, the
+definition and the code that only the behaviour that goes reached. Never call the flag service, never
+write a key."""
+checked_by = """
+F-REGISTERED, F-INTERFACE, F-USED, F-DEFINITION, F-DEFAULT, F-KEY, F-ON; the items `flag-off`,
+`flag-removed` and `not-a-flag` of F-ITEMS"""
+
+[[duty]]
+agent = "devops"
+methods = ["ci"]
+duty = """
+Where the decision record says the project's pipeline applies flag definitions, build that job in a chore
+story: it reads its key from the pipeline's secret store, and it fails on a dry run that shows the service
+differs from the repository. It never applies definitions itself."""
+checked_by = """
+The `merge` decision every change to a protected path waits for ([[topic:governed-delivery]]); adversary,
+method `review-story-diff`"""
+
+[[duty]]
+agent = "adversary"
+methods = ["review-story-diff", "review-stories", "review-specs", "review-extraction"]
+duty = """
+In a story's diff, account for these items.
+`flag-off:<key>`: with the flag off or unset no new behaviour is reachable; where the flag is read in code
+that runs on a user's device, the server refuses the new behaviour too, and a check on the device is never
+the only guard; no read is hidden from the patterns; the owning story's definition serves the default in
+every environment it defines; nothing behind the flag has an effect that turning it off cannot undo, unless
+`flag_irreversible` names it; where the diff reads another flag, a test holds the new behaviour with that
+flag on and with it off; tests set flags only through the test double and none reaches the flag service;
+nothing creates or changes a flag in an outside service; each test the diff moves has its assertions
+unchanged, one moved as `old` asserts only behaviour that a criterion of a story behind the flag replaces,
+and the diff deletes, renames or weakens no other existing test. For a test the diff splits, the moved
+part and the part that keeps the name together hold every assertion of the original, unchanged, and the
+moved part holds only what the on state breaks; the part that keeps the name is not a weakened test.
+`flag-removed:<key>`: the code that only the behaviour that goes reached is deleted, not only the read; no
+test sets the key; the tests the diff deletes are those of the behaviour that goes and the test of the
+flag's definition; each test a withdrawal brings back or renames has its assertions unchanged, and the diff
+weakens no other test.
+`not-a-flag`: each marked line is not a flag read, and its reason holds.
+In stories, specifications and extraction: the checks the rows above assign to it."""
+checked_by = "F-ITEMS: the verdict stays open until each item is marked checked"
+
+[[duty]]
+agent = "security-reviewer"
+methods = ["security-review"]
+duty = """
+On a story that cites a contract in `flags.contracts`, account for the item `flag-system`: the fallback is
+returned when the source fails, and the product starts while the source cannot be reached; the suite's
+setup installs the test double for every test and takes its values from the override variable, and while
+that variable is set nothing connects to the flag source; a client cannot turn on, through the override or
+its own copy of the flag values, what the server does not allow; no key or secret of the flag source is in
+the diff; nothing creates or changes a flag in an outside service at build, test or start; the evaluation
+context sends the flag source no personal data the contracts do not allow."""
+checked_by = "F-ITEMS; F-READY makes such a story carry `security: true`, so the reviewer runs"
+
+[[duty]]
+agent = "technical-writer"
+methods = ["docs", "release-notes"]
+duty = """
+Keep the runbook at `flags.runbook`: the kill switch (how, how soon, and what a restart during an outage
+does to a flag that was turned off), how to verify a rollback, where definitions are applied and how a
+difference between the repository and the service is found. Write the rollout plan when a story asks for
+one. It describes; it operates nothing."""
+checked_by = "F-RUNBOOK; the documentation check of a `docs` story's green gate"

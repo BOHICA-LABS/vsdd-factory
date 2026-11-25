@@ -1,0 +1,43 @@
+# Every event log type: when it is written and its extra fields. Machine copy of the type table.
+# The line format is [[schema:event]]; the log itself is [[topic:event-log]].
+# Sources: hooks.md#2.12.
+
+[event-types]
+"session.start" = "session start (extra: source)"
+"session.end" = "session end (extra: reason)"
+"agent.start" = "a factory agent or workflow step starts (extra: agent_type, agent_id, cwd)"
+"agent.stop" = "a factory agent or workflow step stops (extra: agent_type, agent_id, cwd)"
+"rule.block" = "a rule returns Block (extra: id, rule, code, reason, fix, target or command)"
+"rule.advise" = "a rule returns Advise (extra: id, rule, code, reason, fix, target or command)"
+"rule.would_block" = "a rule would have blocked at advise strength (extra: id, rule, code, reason, fix, target or command)"
+"rule.error" = "a rule crashed (extra: rule, error, fail)"
+"rule.timeout" = "a rule ran out of time (extra: rule, error, fail)"
+"rewrite.discarded" = "a second Rewrite outcome in one call was dropped; only the first is sent (extra: rule, reason, detail)"
+"runner.launch_failed" = "the launcher could not start the runner (extra: code, mode, ms)"
+"runner.disabled" = "the emergency switch is set (extra: code, mode, ms)"
+"runner.slow" = "a call took over 300 ms (extra: code, mode, ms)"
+"runner.call" = "VSDD_FACTORY_HOOKS_DEBUG=1 logs every call with its duration, for diagnosis"
+"runner.liveness_error" = "a fault in the lock liveness duty (the refresh, or the release at session end); the call went on (extra: mode, error)"
+"lock.released" = "a run-lock entry was released at session end (extra: run, reason)"
+"config.invalid" = "configuration fault (extra: detail)"
+"config.changed" = "configuration change (extra: detail)"
+"policy.invalid" = "policy fault (extra: detail)"
+"decision.recorded" = "a person typed the decide command (extra: decision, choice)"
+"decision.refused" = "a person typed the decide command (extra: decision, choice)"
+"step.recorded" = "a workflow step's result was stored (extra: run, workflow, subject, name, attempt)"
+"step.rejected" = "a result was sent back for ungrounded findings (extra: run, workflow, subject, name, attempt)"
+"spike.start" = "a spike runner was first seen (extra: agent_id, worktree)"
+"spike.timeout" = "a spike runner's time box ended (extra: agent_id, worktree)"
+"spike.stop_unrecorded" = "a spike runner stopped without a finding (extra: agent_id, worktree)"
+"compaction.start" = "around a compaction (extra: trigger)"
+"compaction.done" = "around a compaction (extra: trigger)"
+"compaction.flush_failed" = "around a compaction (extra: trigger)"
+"commit.made" = "written by the tool, not by a hook: a gate measured a commit, with the head it measured (extra: head, branch, story, url)"
+"pr.created" = "written by the tool: vsdd story deliver opened a pull request (extra: head, branch, story, url)"
+"pr.merged" = "written by the tool: vsdd story deliver merged a pull request (extra: head, branch, story, url)"
+"web.call" = "a web tool call, or a web address in a shell command of an agent row (extra: host, tool)"
+
+# The tool writes its own events (gates run, evidence recorded, decisions opened) through the same
+# writer; their types belong to the tool's design.
+# Allowed calls are not logged one by one. Setting VSDD_FACTORY_HOOKS_DEBUG=1 logs every call as
+# runner.call with its duration, for diagnosis.

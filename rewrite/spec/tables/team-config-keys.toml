@@ -1,0 +1,25 @@
+# sources: decisions.md#D33
+# Built when the build widens past the thin slice (package M6). Not read by anything on the slice path.
+#
+# Every [team] key, in the row shape of the configuration key table ([[table:config-keys]]). Package M6
+# merges these rows into that table and the loader; until it does, the loader rejects a [team] section as
+# it rejects any unknown key. What the section is for, and what is shared and what belongs to one clone:
+# [[config:team]].
+#
+# `set_by` says who gives a key its value. Both keys are a person's: no tool call can write the file, and
+# code never fills either.
+# No key holds a person, a role, a machine, the name of a remote or the name of a Git host.
+
+[[config_key]]
+key = "team.enabled"
+set_by = "person"
+type = "boolean"
+default = "false"
+meaning = "True when more than one clone runs the factory on this repository. It turns on the sync at the start of every survey, the work claims and the checks of the four team tables that depend on it; which checks act while it is false is stated once, at the head of table:team-checks. False is a project with one clone."
+
+[[config_key]]
+key = "team.min_plugin"
+set_by = "person"
+type = "string (a plugin version, or empty)"
+default = "empty"
+meaning = "The oldest plugin version that may start a run or push state here. Empty sets no floor. A team raises it in one line when it upgrades together (T-VERSION in table:team-checks)."
