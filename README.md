@@ -63,7 +63,7 @@ The vsdd-factory plugin installs the complete VSDD pipeline into any Claude Code
 ### Install from the marketplace
 
 ```shell
-/plugin marketplace add drbothen/claude-mp
+/plugin marketplace add bohica-labs/claude-mp
 /plugin install vsdd-factory@claude-mp
 ```
 
@@ -71,7 +71,7 @@ The vsdd-factory plugin installs the complete VSDD pipeline into any Claude Code
 > `drbothen/vsdd-factory` through rc.6 but suffered from a silent
 > install bug (see [`docs/guide/plugin-marketplace-architecture.md`](docs/guide/plugin-marketplace-architecture.md)
 > for the full story). Run `/plugin marketplace remove vsdd-factory`
-> first, then add `drbothen/claude-mp` and install via the new
+> first, then add `bohica-labs/claude-mp` and install via the new
 > marketplace as shown above.
 
 ### Update to latest version

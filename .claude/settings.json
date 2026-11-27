@@ -1,5 +1,13 @@
 {
   "enabledPlugins": {
     "vsdd-factory@claude-mp": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-mp": {
+      "source": {
+        "source": "github",
+        "repo": "bohica-labs/claude-mp"
+      }
+    }
   }
 }

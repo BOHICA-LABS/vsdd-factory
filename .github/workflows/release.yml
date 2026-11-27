@@ -80,8 +80,9 @@ jobs:
       # CHANGELOG.md is the only file the operator's chore commit touches.
       #
       # Note: marketplace.json was removed from this repo in v1.0.0-rc.7
-      # — the marketplace lives at drbothen/claude-mp and points here via
-      # git-subdir + ref=main. claude-mp owns its own version field.
+      # — the marketplace lives at BOHICA-LABS/claude-mp and pins this plugin
+      # by release tag and commit (git-subdir; ref = the tag, sha = its commit).
+      # The catalog entry carries no version: the version is plugin.json here.
 
       - name: Validate CHANGELOG.md has the new version heading
         run: |
@@ -427,9 +428,10 @@ jobs:
           # the matching binaries.
           #
           # As of v1.0.0-rc.7 marketplace.json is no longer in this repo —
-          # the marketplace lives at drbothen/claude-mp and points here
-          # via git-subdir + ref=main. Bumping the marketplace's version
-          # field is a separate downstream concern (see claude-mp repo).
+          # the marketplace lives at BOHICA-LABS/claude-mp and pins this
+          # plugin by release tag and commit. The catalog reads the version
+          # from this plugin.json at the pinned commit, so this write is what
+          # names the release (the bump-marketplace job then moves the pin).
           version="${GITHUB_REF_NAME#v}"
           echo "Writing version $version into plugin.json"
           tmp=$(mktemp)
@@ -487,8 +489,8 @@ jobs:
         # Pre-rc.7 this was also necessary for marketplace.json freshness
         # — Claude Code reads marketplace.json from the marketplace repo's
         # default branch. Now that marketplace.json lives in the separate
-        # drbothen/claude-mp repo (pointed at this repo via git-subdir +
-        # ref=main), that concern is moot here. Sync continues for binary
+        # BOHICA-LABS/claude-mp repo (which pins this repo by release tag
+        # and commit), that concern is moot here. Sync continues for binary
         # bundle freshness on develop.
         #
         # This step is best-effort: it tries to push the merge directly
@@ -647,36 +649,31 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
 
   bump-marketplace:
-    # Auto-open a PR against drbothen/claude-mp bumping the vsdd-factory
-    # plugin entry's `version` field to match this newly-released tag.
+    # Opens a pull request on BOHICA-LABS/claude-mp that pins the vsdd-factory entry to this release:
+    #   source.ref = the release tag
+    #   source.sha = the commit the tag points at AFTER the commit-binaries job moved it
+    # The entry has no version field: Claude Code reads the version from plugin.json at that commit, which the
+    # commit-binaries job wrote from the tag name. tools/catalog-pin.py (in claude-mp) refuses to write the entry
+    # when plugin.json at the tag does not carry the tag's version, so a release whose plugin.json bump was
+    # skipped stops here with an error instead of reaching nobody.
     #
-    # Self-skips when the CLAUDE_MP_PAT secret is not configured. To
-    # enable: create a PAT (or fine-grained token) with `contents: write`
-    # + `pull-requests: write` scopes on drbothen/claude-mp and add it
-    # as a repository secret named CLAUDE_MP_PAT in this repo's settings.
+    # A release reaches users only after the pull request is merged; until then the catalog keeps the previous one.
     #
-    # The job opens a PR rather than committing directly so the operator
-    # has a quick review gate before the marketplace catalog updates.
-    name: Bump claude-mp marketplace version
+    # Self-skips when the CLAUDE_MP_PAT secret is not configured. The token needs "Contents: read and write" and
+    # "Pull requests: read and write" on BOHICA-LABS/claude-mp, and nothing else.
+    name: Pin claude-mp to this release
     needs: release
     runs-on: ubuntu-latest
     steps:
-      # GitHub Actions does NOT expose the `secrets` context in
-      # job-level `if:` conditions (only in step-level `if:`). So instead
-      # of `jobs.bump-marketplace.if: ${{ secrets.CLAUDE_MP_PAT != '' }}`,
-      # we gate every subsequent step on a flag set by this preflight
-      # step. When the secret is missing, the job runs but no work
-      # happens — same effective behavior as a job-level skip.
+      # GitHub Actions does not expose the `secrets` context in job-level `if:` conditions, so every later step
+      # is gated on a flag set here.
       - name: Preflight — check CLAUDE_MP_PAT secret
         id: preflight
         env:
           PAT: ${{ secrets.CLAUDE_MP_PAT }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "CLAUDE_MP_PAT secret is not configured. Skipping marketplace bump."
-            echo "To enable: create a PAT with contents:write + pull-requests:write"
-            echo "scopes on drbothen/claude-mp and add it as CLAUDE_MP_PAT in this"
-            echo "repo's Actions secrets."
+            echo "::warning::CLAUDE_MP_PAT is not configured; claude-mp was NOT pinned to $GITHUB_REF_NAME."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
@@ -686,22 +683,13 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
-          repository: drbothen/claude-mp
+          repository: BOHICA-LABS/claude-mp
           token: ${{ secrets.CLAUDE_MP_PAT }}
           ref: main
 
-      - name: Bump vsdd-factory version in marketplace.json
+      - name: Pin the vsdd-factory entry to the release tag and its commit
         if: steps.preflight.outputs.configured == 'true'
-        run: |
-          set -e
-          version="${GITHUB_REF_NAME#v}"
-          tmp=$(mktemp)
-          jq "(.plugins[] | select(.name == \"vsdd-factory\")).version = \"$version\"" \
-            .claude-plugin/marketplace.json > "$tmp"
-          mv "$tmp" .claude-plugin/marketplace.json
-          new_version=$(jq -r '.plugins[] | select(.name == "vsdd-factory") | .version' .claude-plugin/marketplace.json)
-          [ "$new_version" = "$version" ] || { echo "version write failed: got $new_version"; exit 1; }
-          echo "Bumped vsdd-factory to $version in claude-mp marketplace.json"
+        run: python3 tools/catalog-pin.py --name vsdd-factory --tag "$GITHUB_REF_NAME" --audience public --write
 
       - name: Open PR
         if: steps.preflight.outputs.configured == 'true'
@@ -709,38 +697,35 @@ jobs:
           GH_TOKEN: ${{ secrets.CLAUDE_MP_PAT }}
         run: |
           set -e
-          version="${GITHUB_REF_NAME#v}"
-          BRANCH="bump-vsdd-factory-${GITHUB_REF_NAME}"
+          BRANCH="pin-vsdd-factory-${GITHUB_REF_NAME}"
 
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # If the bump produced no diff (already at this version), exit
-          # cleanly. This handles re-runs of the release workflow.
+          # No diff = the catalog already pins this release (a re-run of the release workflow).
           if git diff --quiet .claude-plugin/marketplace.json; then
-            echo "No version change needed in claude-mp marketplace.json (already at $version)."
+            echo "claude-mp already pins vsdd-factory to $GITHUB_REF_NAME."
             exit 0
           fi
 
+          sha=$(jq -r '.plugins[] | select(.name == "vsdd-factory") | .source.sha' .claude-plugin/marketplace.json)
           git checkout -b "$BRANCH"
           git add .claude-plugin/marketplace.json
-          git commit -m "chore: bump vsdd-factory to $version"
+          git commit -m "vsdd-factory: pin to ${GITHUB_REF_NAME}"
           git push origin "$BRANCH"
 
           body_file=$(mktemp)
           {
-            printf 'Auto-generated by drbothen/vsdd-factory release.yml after %s shipped.\n\n' "$GITHUB_REF_NAME"
-            printf 'Bumps the vsdd-factory plugin entry version field so users running\n'
-            printf '`/plugin update vsdd-factory@claude-mp` resolve to the new release.\n\n'
-            printf 'Underlying source ref is `main`, so the install always pulls the\n'
-            printf 'tagged release SHA. This bump only updates the *displayed* version\n'
-            printf 'in the marketplace catalog.\n'
+            printf 'Opened by the vsdd-factory release workflow after %s shipped.\n\n' "$GITHUB_REF_NAME"
+            printf 'Moves the vsdd-factory entry to tag `%s`, commit `%s`.\n\n' "$GITHUB_REF_NAME" "$sha"
+            printf 'Users receive this release with their next update once this pull request is merged.\n'
+            printf 'Until then the catalog keeps the previous release.\n'
           } > "$body_file"
 
           gh pr create \
             --base main \
             --head "$BRANCH" \
-            --title "chore: bump vsdd-factory to $version" \
+            --title "vsdd-factory: pin to ${GITHUB_REF_NAME}" \
             --body-file "$body_file"
 
   sync-develop:
@@ -754,7 +739,7 @@ jobs:
     # Originally introduced in v1.0.0-rc.1 to keep develop's
     # marketplace.json in sync with main's after each tag. As of
     # v1.0.0-rc.7 marketplace.json no longer lives in this repo (moved
-    # to drbothen/claude-mp), so the marketplace-freshness rationale no
+    # to BOHICA-LABS/claude-mp), so the marketplace-freshness rationale no
     # longer applies. The job remains for git workflow consistency:
     # develop should always be a superset of main's content (binary
     # bundle commits, plugin.json version bumps), so feature branches

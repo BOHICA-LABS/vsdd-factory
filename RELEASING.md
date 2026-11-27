@@ -1,6 +1,6 @@
 # Releasing vsdd-factory
 
-Canonical procedure for cutting a `v1.0.0-rc.X` (or `v1.0.0`, `v1.0.x`) release of vsdd-factory and getting it onto the [drbothen/claude-mp](https://github.com/drbothen/claude-mp) marketplace where operators install it.
+Canonical procedure for cutting a `v1.0.0-rc.X` (or `v1.0.0`, `v1.0.x`) release of vsdd-factory and getting it onto the [BOHICA-LABS/claude-mp](https://github.com/BOHICA-LABS/claude-mp) marketplace where operators install it.
 
 This file is the **single source of truth**. The release skill (`/vsdd-factory:release`), the orchestrator agent, and any human operator all defer to this document. If you change the release procedure, change it here first.
 
@@ -19,7 +19,7 @@ gh pr merge <N> --merge --delete-branch     # NOT --squash
 git fetch origin main
 git tag -a v1.0.0-rc.X -m "v1.0.0-rc.X — <title>" origin/main
 git push origin v1.0.0-rc.X
-# Watch release.yml; verify drbothen/claude-mp PR opens; merge it.
+# Watch release.yml; verify BOHICA-LABS/claude-mp PR opens; merge it.
 ```
 
 If anything in that block confuses you, **read the rest of this document** before proceeding. The shortcuts are recoveries from a known-correct mental model, not a substitute for one.
@@ -36,7 +36,7 @@ The release pipeline (`.github/workflows/release.yml`) fires on tag push and:
 2. Builds dispatcher binaries on 5 platforms
 3. Bot checks out **`main`**, stages binaries, force-moves the tag to a new commit on `main`
 4. Creates the GitHub Release as prerelease
-5. Auto-opens a marketplace bump PR at `drbothen/claude-mp`
+5. Auto-opens a pull request at `BOHICA-LABS/claude-mp` that pins the catalog entry to the release tag and its commit
 
 The pipeline assumes the tag's commit is on `main` and that `main` already has every source-file change for the release. If `main` is behind `develop`, the tarball ships with stale source against fresh binaries — exactly what produced the [v1.0.0-rc.14 marketplace failure](CHANGELOG.md#v1.0.0-rc.14--release-ci-unblocker-supersedes-rc11rc13-2026-05-09) (operators saw `E-REG-001` fail-closed on every tool call).
 
@@ -193,17 +193,17 @@ The workflow runs 6 jobs in dependency order:
 2. `build-binaries` — 5-platform matrix (~10–50 min total wall-clock; darwin-x64 is the slowest).
 3. `commit-binaries` — bot bundles binaries into a chore commit on main, force-moves the tag.
 4. `release` — creates GitHub Release as prerelease.
-5. `bump-marketplace` — opens auto-PR at `drbothen/claude-mp` bumping the version field. Requires `CLAUDE_MP_PAT` secret.
+5. `bump-marketplace` — opens a pull request at `BOHICA-LABS/claude-mp` that moves the catalog pin (`ref` = the release tag, `sha` = its commit); the catalog's own checks run on it. Requires `CLAUDE_MP_PAT` secret.
 6. `sync-develop` — back-merges main → develop. Should be a clean no-op since `--merge` preserved ancestry. If it fails, see "Recovery" below.
 
 ### Step 8 — Verify the marketplace PR + merge it
 
 ```bash
-gh pr list --repo drbothen/claude-mp --state open
-# Look for "chore: bump vsdd-factory to <version>"
-gh pr view <N> --repo drbothen/claude-mp
-# Review the diff (single line in marketplace.json)
-gh pr merge <N> --repo drbothen/claude-mp --squash --delete-branch
+gh pr list --repo BOHICA-LABS/claude-mp --state open
+# Look for "vsdd-factory: pin to <tag>"
+gh pr view <N> --repo BOHICA-LABS/claude-mp
+# Review the diff (ref and sha of the vsdd-factory entry in marketplace.json)
+gh pr merge <N> --repo BOHICA-LABS/claude-mp --squash --delete-branch
 ```
 
 After merge, operators on `/plugin update vsdd-factory@claude-mp` resolve to the new version on their next plugin refresh.
@@ -252,7 +252,7 @@ Bot couldn't bundle a platform's binary. Check the `build-binaries` matrix outpu
 
 Job logs show "CLAUDE_MP_PAT secret is not configured. Skipping marketplace bump." Fix:
 
-1. Generate a fine-grained PAT with `contents: write` + `pull-requests: write` scoped to `drbothen/claude-mp`
+1. Generate a fine-grained PAT with `contents: write` + `pull-requests: write` scoped to `BOHICA-LABS/claude-mp`
 2. Add as `CLAUDE_MP_PAT` in [vsdd-factory secrets](https://github.com/drbothen/vsdd-factory/settings/secrets/actions)
 3. Re-run the workflow
 
