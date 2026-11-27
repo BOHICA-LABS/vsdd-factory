@@ -21,9 +21,9 @@
 # with the binaries.
 #
 # v1.0.0-rc.7: marketplace.json was removed from this repo entirely —
-# the marketplace lives at drbothen/claude-mp now and points here via
-# git-subdir + ref=main. claude-mp's marketplace.json version field is
-# updated separately (out-of-band) when this repo ships a new release.
+# the marketplace lives at BOHICA-LABS/claude-mp now and pins this plugin by
+# release tag and commit. Its entry carries no version field: the release
+# workflow opens a pull request there that moves the pin to the new tag.
 #
 # Usage:
 #   scripts/bump-version.sh 0.71.0
@@ -158,7 +158,7 @@ echo "  - Commit plugin.json + binaries atomically as github-actions[bot]"
 echo "  - Force-update the tag to point at the bot commit"
 echo "  - Create the GH (pre-)release"
 echo
-echo "After release ships, update drbothen/claude-mp marketplace.json version"
+echo "After release ships, merge the pin pull request the release workflow opens at BOHICA-LABS/claude-mp"
 echo "field to point at this new version (out-of-band; not handled here)."
 echo
 echo "Pro tip: write the real CHANGELOG entry under ## $NEW_VERSION BEFORE running"
